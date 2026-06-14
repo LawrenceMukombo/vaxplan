@@ -579,6 +579,12 @@ export const villages = pgTable("villages", {
   totalCatchmentPopulation: integer("total_catchment_population"),
   under5Population: integer("under5_population"),
 
+  // VGIE Spatial Intelligence fields
+  confidenceScore: decimal("confidence_score", { precision: 5, scale: 2 }),
+  detectionSource: varchar("detection_source", { length: 50 }),
+  isMappedInHmis: boolean("is_mapped_in_hmis").default(false),
+  lastVerified: timestamp("last_verified"),
+
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 }, (table) => [index("idx_villages_tenant").on(table.tenantId)]);
@@ -601,6 +607,47 @@ export const catchmentConflicts = pgTable("catchment_conflicts", {
   createdAt: timestamp("created_at").defaultNow(),
   resolvedAt: timestamp("resolved_at"),
 }, (table) => [index("idx_catchment_conflicts_tenant").on(table.tenantId)]);
+
+// ── VGIE Tracking Tables ──────────────────────────────────────────────────
+
+export const vgieSettlementFacilityLinks = pgTable("vgie_settlement_facility_links", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  villageId: integer("village_id").notNull().references(() => villages.id, { onDelete: "cascade" }),
+  facilityId: integer("facility_id").notNull().references(() => facilities.id, { onDelete: "cascade" }),
+  linkageType: varchar("linkage_type", { length: 50 }).notNull(), // primary, secondary, outreach
+  travelTimeMins: integer("travel_time_mins"),
+  transportMode: varchar("transport_mode", { length: 50 }),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const vgieRecommendations = pgTable("vgie_recommendations", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  entityType: varchar("entity_type", { length: 50 }).notNull(), // settlement, facility, session
+  entityId: integer("entity_id").notNull(),
+  recommendationType: varchar("recommendation_type", { length: 100 }).notNull(), // e.g. add_outreach, realign_catchment, assign_chw
+  priority: varchar("priority", { length: 20 }).notNull(), // high, medium, low
+  title: varchar("title", { length: 255 }).notNull(),
+  description: text("description"),
+  reasoning: jsonb("reasoning"), // JSON block explaining why the AI suggested this
+  status: varchar("status", { length: 50 }).notNull().default("pending"), // pending, accepted, rejected, implemented
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const vgieAlerts = pgTable("vgie_alerts", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  locationGeom: jsonb("location_geom"), // Point or Polygon GeoJSON
+  alertType: varchar("alert_type", { length: 100 }).notNull(), // flood, population_displacement, disease_outbreak
+  severity: varchar("severity", { length: 50 }).notNull(),
+  title: varchar("title", { length: 255 }).notNull(),
+  message: text("message"),
+  status: varchar("status", { length: 50 }).notNull().default("active"), // active, resolved
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
 
 // Per-facility list of villages that staff have explicitly removed from the
 // microplan catchment in Step 2 of the wizard. Persisted server-side (rather
@@ -2651,6 +2698,9 @@ export const FACILITY_AUTHOR_ROLES = [
   "provincial_coordinator",
   "national_admin",
   "gis_specialist",
+  "district_manager",
+  "facility_in_charge",
+  "facility_clerk"
 ] as const;
 
 // ─── Indicator Manual Schema ──────────────────────────────
@@ -2906,6 +2956,11 @@ export const insertHfcCommitteeMemberSchema = createInsertSchema(hfcCommitteeMem
   tenantId: true,
   createdAt: true,
   updatedAt: true,
+}).extend({
+  /* Original definition commented out to support empty strings pre-coercion for date:
+  committeeEstablishedDate: z.coerce.date().optional().nullable(),
+  */
+  committeeEstablishedDate: z.preprocess((val) => val === "" ? null : val, z.coerce.date().optional().nullable()),
 });
 export type InsertHfcCommitteeMember = z.infer<typeof insertHfcCommitteeMemberSchema>;
 export type HfcCommitteeMember = typeof hfcCommitteeMembers.$inferSelect;
@@ -3013,6 +3068,7 @@ export const insertColdChainEquipmentSchema = createInsertSchema(coldChainEquipm
   powerSource: z.enum([
     "solar", "electric", "gas", "kerosene", "battery", "solar_dc", "none",
   ]).optional().nullable(),
+  /* Original fields commented out to support empty string preprocessing:
   capacityLiters: z.coerce.number().positive().optional().nullable(),
   netStorageCapacityLiters: z.coerce.number().positive().optional().nullable(),
   temperatureMin: z.coerce.number().optional().nullable(),
@@ -3020,9 +3076,38 @@ export const insertColdChainEquipmentSchema = createInsertSchema(coldChainEquipm
   manufactureYear: z.coerce.number().int().min(1950).max(2100).optional().nullable(),
   purchaseCost: z.coerce.number().nonnegative().optional().nullable(),
   energyConsumptionKwhDay: z.coerce.number().nonnegative().optional().nullable(),
+  */
+  capacityLiters: z.preprocess((val) => val === "" ? null : val, z.coerce.number().positive().optional().nullable()),
+  netStorageCapacityLiters: z.preprocess((val) => val === "" ? null : val, z.coerce.number().positive().optional().nullable()),
+  temperatureMin: z.preprocess((val) => val === "" ? null : val, z.coerce.number().optional().nullable()),
+  temperatureMax: z.preprocess((val) => val === "" ? null : val, z.coerce.number().optional().nullable()),
+  manufactureYear: z.preprocess((val) => val === "" ? null : val, z.coerce.number().int().min(1950).max(2100).optional().nullable()),
+  purchaseCost: z.preprocess((val) => val === "" ? null : val, z.coerce.number().nonnegative().optional().nullable()),
+  energyConsumptionKwhDay: z.preprocess((val) => val === "" ? null : val, z.coerce.number().nonnegative().optional().nullable()),
   donorFunded: z.boolean().optional(),
   isActive: z.boolean().optional(),
 });
 
 export type ColdChainEquipment = typeof coldChainEquipment.$inferSelect;
 export type InsertColdChainEquipment = z.infer<typeof insertColdChainEquipmentSchema>;
+
+// VGIE Schemas & Types
+export const insertVgieSettlementFacilityLinkSchema = createInsertSchema(vgieSettlementFacilityLinks).omit({
+  createdAt: true,
+});
+export type VgieSettlementFacilityLink = typeof vgieSettlementFacilityLinks.$inferSelect;
+export type InsertVgieSettlementFacilityLink = z.infer<typeof insertVgieSettlementFacilityLinkSchema>;
+
+export const insertVgieRecommendationSchema = createInsertSchema(vgieRecommendations).omit({
+  createdAt: true,
+  updatedAt: true,
+});
+export type VgieRecommendation = typeof vgieRecommendations.$inferSelect;
+export type InsertVgieRecommendation = z.infer<typeof insertVgieRecommendationSchema>;
+
+export const insertVgieAlertSchema = createInsertSchema(vgieAlerts).omit({
+  createdAt: true,
+  updatedAt: true,
+});
+export type VgieAlert = typeof vgieAlerts.$inferSelect;
+export type InsertVgieAlert = z.infer<typeof insertVgieAlertSchema>;

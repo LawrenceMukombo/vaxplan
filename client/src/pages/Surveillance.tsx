@@ -39,6 +39,7 @@ import {
 } from "lucide-react";
 
 import { MapView } from "@/components/MapView";
+import { useAuth } from "@/hooks/useAuth";
 
 import {
 
@@ -159,6 +160,8 @@ function AfpRateStatus({ rate }: { rate: number }) {
 
 
 export default function Surveillance() {
+  const { user } = useAuth();
+  const isFacilityStaff = user?.role === "facility_clerk" || user?.role === "facility_in_charge" || user?.role === "facility_partner";
 
   const queryClient = useQueryClient();
 
@@ -1121,7 +1124,9 @@ export default function Surveillance() {
 
           <TabsTrigger value="map"       className="text-xs gap-1.5"><MapIcon   className="h-3.5 w-3.5" /> Spatial View</TabsTrigger>
 
-          <TabsTrigger value="config"    className="text-xs gap-1.5"><Settings2 className="h-3.5 w-3.5" /> Configuration</TabsTrigger>
+          {!isFacilityStaff && (
+            <TabsTrigger value="config"    className="text-xs gap-1.5"><Settings2 className="h-3.5 w-3.5" /> Configuration</TabsTrigger>
+          )}
 
         </TabsList>
 

@@ -64,7 +64,12 @@ const HisIntegrations = lazy(() => import("@/pages/HisIntegrations"));
 const MissedCommunities = lazy(() => import("@/pages/MissedCommunities"));
 const MicroplanWizard = lazy(() => import("@/pages/MicroplanWizard"));
 const MicroplanList = lazy(() => import("@/pages/MicroplanList"));
-const SettlementIntelligence = lazy(() => import("@/pages/SettlementIntelligence"));
+const VgieDashboard = lazy(() => import("@/pages/vgie/Dashboard"));
+const VgieMapView = lazy(() => import("@/pages/vgie/MapView"));
+const VgieSettlements = lazy(() => import("@/pages/vgie/Settlements"));
+const VgieSettlementDetail = lazy(() => import("@/pages/vgie/SettlementDetail"));
+const VgieRecommendations = lazy(() => import("@/pages/vgie/Recommendations"));
+const VgieAlerts = lazy(() => import("@/pages/vgie/Alerts"));
 const StandardsAlignment = lazy(() => import("@/pages/StandardsAlignment"));
 const DropoutRates = lazy(() => import("@/pages/DropoutRates"));
 const ZeroDoseVillages = lazy(() => import("@/pages/ZeroDoseVillages"));
@@ -211,6 +216,8 @@ function HelpGate() {
   );
 }
 
+// VgieGate removed: VGIE routes now render within the main AuthenticatedRouter shell.
+
 function AuthenticatedRouter() {
   const { data: tenant } = useQuery<any>({ queryKey: ["/api/me/tenant"], retry: false });
 
@@ -238,8 +245,11 @@ function AuthenticatedRouter() {
       <Route path="/map">
         {modules.map !== false ? <MapPage /> : <ModuleDisabled moduleName="Map View" />}
       </Route>
-      <Route path="/settlement-intelligence">
-        {modules.settlementIntel !== false ? <SettlementIntelligence /> : <ModuleDisabled moduleName="Settlement Intelligence" />}
+      <Route path="/settlements">
+        {modules.settlementIntel !== false ? <VgieSettlements /> : <ModuleDisabled moduleName="Settlements" />}
+      </Route>
+      <Route path="/settlements/:id">
+        {modules.settlementIntel !== false ? <VgieSettlementDetail /> : <ModuleDisabled moduleName="Settlements" />}
       </Route>
       <Route path="/facilities">
         {modules.facilities !== false ? <Facilities /> : <ModuleDisabled moduleName="Facilities" />}
@@ -366,6 +376,10 @@ function AuthenticatedRouter() {
       <Route path="/surveillance" component={Surveillance} />
       <Route path="/settings" component={Settings} />
       <Route path="/help" component={Help} />
+      
+      <Route path="/vgie/recommendations" component={VgieRecommendations} />
+      <Route path="/vgie/alerts" component={VgieAlerts} />
+
       <Route path="/sync/conflicts" component={lazy(() => import("@/pages/SyncConflicts"))} />
       <Route component={NotFound} />
     </Switch>

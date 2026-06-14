@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
 
-export type Basemap = "osm" | "satellite";
+export type Basemap = "osm" | "satellite" | "carto";
 
 const STORAGE_KEY = "vaxplan.basemap";
 
 function readStored(): Basemap | null {
   try {
     const v = localStorage.getItem(STORAGE_KEY);
-    return v === "osm" || v === "satellite" ? v : null;
+    return v === "osm" || v === "satellite" || v === "carto" ? v : null;
   } catch {
     return null;
   }
@@ -29,7 +29,7 @@ export function usePersistedBasemap(defaultValue: Basemap = "osm") {
   useEffect(() => {
     const onStorage = (e: StorageEvent) => {
       if (e.key !== STORAGE_KEY) return;
-      if (e.newValue === "osm" || e.newValue === "satellite") {
+      if (e.newValue === "osm" || e.newValue === "satellite" || e.newValue === "carto") {
         setBasemapState(e.newValue);
       }
     };

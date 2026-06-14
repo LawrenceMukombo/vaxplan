@@ -140,6 +140,7 @@ export const ROLE_PERMISSIONS: Record<string, Permission[]> = {
     "view_budget",
     "approve_budget",
     "view_reports",
+    "manage_users",
   ],
   provincial_coordinator: [
     "view_clients",

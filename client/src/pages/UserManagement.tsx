@@ -1279,7 +1279,12 @@ export default function UserManagement() {
     return Array.from(list);
   };
 
-  const activeRolesList = dbRoles ? dbRoles.map((r: any) => ({ value: r.code, label: r.name })) : ALL_ROLES;
+  const activeRolesList = (dbRoles ? dbRoles.map((r: any) => ({ value: r.code, label: r.name })) : ALL_ROLES).filter((r: any) => {
+    if (currentUser?.role === "district_manager") {
+      return ["facility_clerk", "facility_in_charge", "facility_partner", "district_partner"].includes(r.value);
+    }
+    return true;
+  });
 
   const geoMaps = useMemo(
     () => buildGeoMaps({ provinces, districts, villages: [], facilities }),

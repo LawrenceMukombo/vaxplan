@@ -46,6 +46,8 @@ import type { Facility, Village, SessionPlan, BudgetItem, ApprovalRequest, Popul
 import { deriveSessionLifecycle } from "@/lib/sessionStatus";
 import { summarizeFacilityAlerts, loadStockThreshold } from "@/lib/stockAlerts";
 import { Package } from "lucide-react";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import VgieDashboard from "@/pages/vgie/Dashboard";
 
 /* Original Code:
 interface StatsData {
@@ -1488,7 +1490,9 @@ export default function Dashboard() {
               {greeting}, {displayName}!
             </h1>
             <p className="text-muted-foreground text-sm">
-              Welcome back to VaxPlan GIS-Microplanning panel.
+              {user?.facilityId && facilities?.find(f => f.id === user.facilityId)?.name 
+                ? `Welcome back to ${facilities.find(f => f.id === user.facilityId)?.name}`
+                : "Welcome back to VaxPlan GIS-Microplanning panel."}
             </p>
           </div>
           <div className="flex items-center gap-2 bg-background/50 border backdrop-blur-md px-4 py-2 rounded-xl text-xs font-mono font-bold text-muted-foreground shadow-sm w-fit shrink-0">
@@ -1498,8 +1502,17 @@ export default function Dashboard() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {isLoading ? (
+      <Tabs defaultValue="overview" className="space-y-6 mt-6">
+        <TabsList className="w-full justify-start overflow-x-auto flex-nowrap shrink-0 border-b rounded-none bg-transparent p-0">
+          <TabsTrigger value="overview" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent shadow-none px-4 py-2">Overview & Operations</TabsTrigger>
+          <TabsTrigger value="immunization" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent shadow-none px-4 py-2">Immunization & Indicators</TabsTrigger>
+          <TabsTrigger value="supervision" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent shadow-none px-4 py-2">Supervision</TabsTrigger>
+          <TabsTrigger value="vgie" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent shadow-none px-4 py-2">VGIE Analytics</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="overview" className="space-y-6 focus-visible:outline-none">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {isLoading ? (
           <>
             {[1, 2, 3, 4].map((i) => (
               <Card key={i}>
@@ -1764,11 +1777,7 @@ export default function Dashboard() {
         </Card>
       )}
 
-      <ImmunizationIndicatorCards />
-
       {canViewSiteAnalytics(user) && <SiteActivityPanel />}
-
-      <SupervisionCoverageByDistrictCard />
 
       <div className="grid lg:grid-cols-3 gap-6">
         <Card className="lg:col-span-2">
@@ -2053,6 +2062,22 @@ export default function Dashboard() {
           </CardContent>
         </Card>
       </div>
+      </TabsContent>
+
+      <TabsContent value="immunization" className="space-y-6 focus-visible:outline-none">
+        <ImmunizationIndicatorCards />
+      </TabsContent>
+
+      <TabsContent value="supervision" className="space-y-6 focus-visible:outline-none">
+        <SupervisionCoverageByDistrictCard />
+      </TabsContent>
+
+      <TabsContent value="vgie" className="focus-visible:outline-none">
+        <div className="-mx-6 -mb-6 bg-slate-950">
+          <VgieDashboard />
+        </div>
+      </TabsContent>
+      </Tabs>
     </div>
   );
 }

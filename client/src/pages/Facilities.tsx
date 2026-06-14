@@ -159,6 +159,10 @@ export default function Facilities() {
   });
   const hasBoundaries = Array.isArray(boundaries) && boundaries.length > 0;
   const { user } = useAuth();
+  const isFacilityStaff = user?.role === "facility_clerk" || user?.role === "facility_in_charge";
+  const isDistrictStaff = user?.role === "district_manager";
+  const lockedFacDistrictId = (isDistrictStaff || isFacilityStaff) ? (user?.districtId ?? null) : null;
+  const lockedCommDistrictId = isDistrictStaff ? (user?.districtId ?? null) : null;
   const populationOverlay = usePopulationOverlay();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingFacility, setEditingFacility] = useState<Facility | null>(null);
@@ -269,6 +273,31 @@ export default function Facilities() {
     enabled: !!editingFacility?.id,
     queryFn: async () => {
       const res = await fetch(`/api/facilities/${editingFacility?.id}/staff`, { credentials: "include" });
+      if (!res.ok) return [];
+      return res.json();
+    }
+  });
+
+  // Query CHV profiles when editing a facility (used to list CHVs and link them to villages/communities)
+  /* Original facilityChvs query commented out to support viewing/saving CHVs when editing a community directly from the global community list (without editingFacility set):
+  const { data: facilityChvs, refetch: refetchFacilityChvs } = useQuery<any[]>({
+    queryKey: ["/api/facilities", editingFacility?.id, "chvs"],
+    enabled: !!editingFacility?.id,
+    queryFn: async () => {
+      const res = await fetch(`/api/facilities/${editingFacility?.id}/chvs`, { credentials: "include" });
+      if (!res.ok) return [];
+      return res.json();
+    }
+  });
+  */
+  const activeChvFacilityId = editingFacility?.id 
+    ? Number(editingFacility.id) 
+    : (editingCommunity?.assignedFacilityId ? Number(editingCommunity.assignedFacilityId) : undefined);
+  const { data: facilityChvs, refetch: refetchFacilityChvs } = useQuery<any[]>({
+    queryKey: ["/api/facilities", activeChvFacilityId, "chvs"],
+    enabled: !!activeChvFacilityId,
+    queryFn: async () => {
+      const res = await fetch(`/api/facilities/${activeChvFacilityId}/chvs`, { credentials: "include" });
       if (!res.ok) return [];
       return res.json();
     }
@@ -1086,13 +1115,13 @@ export default function Facilities() {
         name: "",
         hmisCode: "",
         facilityType: "health_center",
-        districtId: allDistricts?.[0]?.id || 1,
+        districtId: lockedFacDistrictId || allDistricts?.[0]?.id || 1,
         hasRefrigerator: false,
         hasPower: false,
         isActive: true,
       });
     }
-  }, [editingFacility, form, allDistricts]);
+  }, [editingFacility, form, allDistricts, lockedFacDistrictId]);
 
   const saveCatchmentMutation = useMutation({
     mutationFn: async ({
@@ -1880,10 +1909,6 @@ export default function Facilities() {
   // Role-lock the community location picker: facility staff are pinned to their
   // own facility; district staff are locked to their district; coordinators and
   // admins get the full searchable Province → District → Facility cascade.
-  const isFacilityStaff =
-    user?.role === "facility_clerk" || user?.role === "facility_in_charge";
-  const isDistrictStaff = user?.role === "district_manager";
-  const lockedCommDistrictId = isDistrictStaff ? (user?.districtId ?? null) : null;
 
   if (isLoading) {
     return (
@@ -2067,6 +2092,7 @@ export default function Facilities() {
                                     <Select
                                       onValueChange={(val) => field.onChange(parseInt(val))}
                                       value={field.value?.toString() || ""}
+                                      disabled={!!lockedFacDistrictId}
                                     >
                                       <FormControl>
                                         <SelectTrigger data-testid="select-district">
@@ -3219,7 +3245,15 @@ export default function Facilities() {
       </Tabs>
 
       {/* Add/Edit Community Dialog */}
-      <Dialog open={communityDialogOpen} onOpenChange={setCommunityDialogOpen}>
+      <Dialog open={communityDialogOpen} onOpenChange={(v) => {
+        if (!v) {
+          setCommunityDialogOpen(false);
+          setEditingCommunity(null);
+        } else {
+          setCommunityDialogOpen(true);
+        }
+      }}>
+        {/* Original Community Dialog Content commented out to maintain rule 1/2 of user_global config:
         <DialogContent className="max-w-3xl overflow-y-auto max-h-[90vh]">
           <DialogHeader>
             <DialogTitle>
@@ -3237,253 +3271,305 @@ export default function Facilities() {
                 data-testid="input-community-name"
               />
             </div>
-
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Location (Province → District → Facility) *</label>
-              <FacilityCascadePicker
-                value={newCommFacilityId ? parseInt(newCommFacilityId) : null}
-                onChange={(facId, fac) => {
-                  setNewCommFacilityId(facId ? String(facId) : "");
-                  if (fac && (fac as any).districtId) {
-                    setNewCommDistrictId(String((fac as any).districtId));
-                  }
-                }}
-                onDistrictChange={(distId) => {
-                  setNewCommDistrictId(distId ? String(distId) : "");
-                }}
-                disabled={isFacilityStaff}
-                lockDistrictId={lockedCommDistrictId}
-                required
-                testIdPrefix="community-picker"
-              />
-              {isFacilityStaff && (
-                <p className="text-xs text-muted-foreground">
-                  Pinned to your facility — communities you add belong to it.
-                </p>
-              )}
-              {isDistrictStaff && (
-                <p className="text-xs text-muted-foreground">
-                  Locked to your district — pick any facility within it.
-                </p>
-              )}
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Transport Mode</label>
-                <Select
-                  value={newCommTransportMode}
-                  onValueChange={setNewCommTransportMode}
-                >
-                  <SelectTrigger data-testid="select-community-transport">
-                    <SelectValue placeholder="Select Transport Mode" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="walking">Walking / Foot</SelectItem>
-                    <SelectItem value="road">Road / Vehicle</SelectItem>
-                    <SelectItem value="boat">Water / Boat</SelectItem>
-                    <SelectItem value="air">Air / Flight</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            <div className="flex items-center space-x-2 pt-2">
-              <Switch
-                id="htr-status"
-                checked={newCommHTR}
-                onCheckedChange={setNewCommHTR}
-                data-testid="switch-community-htr"
-              />
-              <label htmlFor="htr-status" className="text-sm font-medium leading-none cursor-pointer">
-                Hard to Reach (HTR) Community
-              </label>
-            </div>
-
-            {/* Spatial Location Mapping */}
-            <div className="space-y-4 pt-2 border-t">
-              <div className="flex items-center justify-between gap-4 flex-wrap">
-                <h3 className="text-sm font-semibold">Community Location Mapping</h3>
-                <div className="flex gap-2">
-                  <Button
-                    type="button"
-                    variant={commDrawMode === "pin" ? "default" : "outline"}
-                    size="sm"
-                    onClick={() => setCommDrawMode("pin")}
-                  >
-                    Drop Pin Mode
-                  </Button>
-                  <Button
-                    type="button"
-                    variant={commDrawMode === "polygon" ? "default" : "outline"}
-                    size="sm"
-                    onClick={() => setCommDrawMode("polygon")}
-                  >
-                    Draw Polygon Mode
-                  </Button>
-                  {(newCommLat || newCommLng || commPolygonPoints.length > 0) && (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => {
-                        setNewCommLat("");
-                        setNewCommLng("");
-                        setCommPolygonPoints([]);
-                      }}
-                      className="text-destructive hover:text-destructive/90"
-                    >
-                      Reset Coordinates
-                    </Button>
-                  )}
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">Latitude</label>
-                  <Input
-                    type="number"
-                    step="any"
-                    placeholder="e.g. -6.123456"
-                    value={newCommLat}
-                    onChange={(e) => setNewCommLat(e.target.value)}
-                    data-testid="input-community-latitude"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">Longitude</label>
-                  <Input
-                    type="number"
-                    step="any"
-                    placeholder="e.g. 145.123456"
-                    value={newCommLng}
-                    onChange={(e) => setNewCommLng(e.target.value)}
-                    data-testid="input-community-longitude"
-                  />
-                </div>
-              </div>
-
-              {(estimatedPopulation !== null || estimatingPop) && (
-                <div className="p-3 bg-primary/5 border border-primary/10 rounded-md flex justify-between items-center text-sm">
-                  <span className="font-medium text-muted-foreground flex items-center gap-1.5">
-                    Live Population Estimate
-                    {commDrawMode === "polygon" ? " (Entire Polygon)" : " (Point Grid Cell)"}:
-                  </span>
-                  <span className="font-bold text-primary text-base animate-in fade-in duration-200">
-                    {estimatingPop ? (
-                      <span className="text-xs font-normal text-muted-foreground animate-pulse">Calculating...</span>
-                    ) : (
-                      `${estimatedPopulation?.toLocaleString()} people`
-                    )}
-                  </span>
-                </div>
-              )}
-
-              <div className="h-[300px] w-full rounded-md border overflow-hidden relative">
-                <MapContainer
-                  center={commMapCenter}
-                  zoom={12}
-                  className="h-full w-full"
-                >
-                  <TileLayer
-                    attribution={OSM_TILE_ATTRIBUTION}
-                    url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                    maxNativeZoom={19}
-                    maxZoom={22}
-                  />
-                  <MapResizer />
-                  <CommMapEvents />
-                  
-                  {/* Facility Marker if selected */}
-                  {(() => {
-                    if (newCommFacilityId) {
-                      const fac = facilities?.find(f => f.id === parseInt(newCommFacilityId));
-                      if (fac && fac.latitude !== null && fac.longitude !== null) {
-                        return (
-                          <Marker 
-                            position={[parseFloat(fac.latitude.toString()), parseFloat(fac.longitude.toString())]} 
-                            icon={L.divIcon({
-                              className: 'custom-facility-icon',
-                              html: '<div style="background-color: #2563eb; width: 16px; height: 16px; border-radius: 50%; border: 3px solid #fff; box-shadow: 0 0 10px rgba(0,0,0,0.4);"></div>',
-                              iconSize: [16, 16],
-                              iconAnchor: [8, 8]
-                            })}
-                          />
-                        );
-                      }
-                    }
-                    return null;
-                  })()}
-
-                  {/* Selected/Centroid Community Marker */}
-                  {parseFloat(newCommLat) && parseFloat(newCommLng) && !isNaN(parseFloat(newCommLat)) && !isNaN(parseFloat(newCommLng)) && (
-                    <Marker 
-                      position={[parseFloat(newCommLat), parseFloat(newCommLng)]} 
-                      icon={L.divIcon({
-                        className: 'custom-community-icon',
-                        html: '<div style="background-color: #ef4444; width: 20px; height: 20px; border-radius: 50%; border: 3px solid #fff; box-shadow: 0 0 10px rgba(0,0,0,0.5);"></div>',
-                        iconSize: [20, 20],
-                        iconAnchor: [10, 10]
-                      })}
-                    />
-                  )}
-
-                  {/* Drawn Polygon vertices / Polygon line */}
-                  {commDrawMode === "polygon" && commPolygonPoints.length > 0 && (
-                    <>
-                      {commPolygonPoints.map((p, idx) => (
-                        <Marker
-                          key={idx}
-                          position={p}
-                          icon={L.divIcon({
-                            className: 'polygon-vertex-icon',
-                            html: '<div style="background-color: #3b82f6; width: 10px; height: 10px; border-radius: 50%; border: 1px solid #fff;"></div>',
-                            iconSize: [10, 10],
-                            iconAnchor: [5, 5]
-                          })}
-                        />
-                      ))}
-                      {commPolygonPoints.length > 1 && (
-                        <LeafletPolygon
-                          positions={commPolygonPoints}
-                          pathOptions={{ color: '#3b82f6', fillColor: '#3b82f6', fillOpacity: 0.15 }}
-                        />
-                      )}
-                    </>
-                  )}
-                </MapContainer>
-              </div>
-              <p className="text-xs text-muted-foreground italic">
-                {commDrawMode === "pin" 
-                  ? "Click on the map to drop a coordinate pin." 
-                  : "Click multiple points on the map to define a community polygon. The centroid coordinates are calculated and updated in real time."}
-              </p>
-            </div>
-
+            ...
             <div className="flex justify-end gap-2 pt-4 border-t">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setCommunityDialogOpen(false)}
-                data-testid="button-cancel-community"
-              >
-                Cancel
-              </Button>
-              <Button
-                type="button"
-                onClick={handleSaveCommunity}
-                disabled={createCommunityMutation.isPending || updateCommunityMutation.isPending}
-                data-testid="button-save-community"
-              >
-                {createCommunityMutation.isPending || updateCommunityMutation.isPending
-                  ? "Saving..."
-                  : editingCommunity
-                  ? "Update Community"
-                  : "Save Community"}
-              </Button>
+              <Button ...>Cancel</Button>
+              <Button ...>Save Community</Button>
             </div>
           </div>
+        </DialogContent>
+        */}
+        {/* Harmonized layout featuring tabs for community details and workers roster */}
+        <DialogContent className="max-w-3xl overflow-y-auto max-h-[90vh] p-0">
+          <DialogHeader className="p-6 pb-2">
+            <DialogTitle>
+              {editingCommunity ? "Edit Community" : "Add New Community"}
+            </DialogTitle>
+          </DialogHeader>
+
+          <Tabs defaultValue="details" className="w-full">
+            <div className="px-6 border-b flex items-center justify-between">
+              <TabsList className="bg-muted/50 p-1 border-0 rounded-none h-12">
+                <TabsTrigger value="details" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent h-full px-4">
+                  General Info
+                </TabsTrigger>
+                <TabsTrigger value="workers" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent h-full px-4" disabled={!editingCommunity}>
+                  Community Workers
+                </TabsTrigger>
+              </TabsList>
+            </div>
+
+            <TabsContent value="details" className="m-0 p-6 space-y-4">
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Community Name *</label>
+                  <Input
+                    placeholder="e.g. Village A"
+                    value={newCommName}
+                    onChange={(e) => setNewCommName(e.target.value)}
+                    data-testid="input-community-name"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Location (Province → District → Facility) *</label>
+                  <FacilityCascadePicker
+                    value={newCommFacilityId ? parseInt(newCommFacilityId) : null}
+                    onChange={(facId, fac) => {
+                      setNewCommFacilityId(facId ? String(facId) : "");
+                      if (fac && (fac as any).districtId) {
+                        setNewCommDistrictId(String((fac as any).districtId));
+                      }
+                    }}
+                    onDistrictChange={(distId) => {
+                      setNewCommDistrictId(distId ? String(distId) : "");
+                    }}
+                    disabled={isFacilityStaff}
+                    lockDistrictId={lockedCommDistrictId}
+                    required
+                    testIdPrefix="community-picker"
+                  />
+                  {isFacilityStaff && (
+                    <p className="text-xs text-muted-foreground">
+                      Pinned to your facility — communities you add belong to it.
+                    </p>
+                  )}
+                  {isDistrictStaff && (
+                    <p className="text-xs text-muted-foreground">
+                      Locked to your district — pick any facility within it.
+                    </p>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Transport Mode</label>
+                    <Select
+                      value={newCommTransportMode}
+                      onValueChange={setNewCommTransportMode}
+                    >
+                      <SelectTrigger data-testid="select-community-transport">
+                        <SelectValue placeholder="Select Transport Mode" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="walking">Walking / Foot</SelectItem>
+                        <SelectItem value="road">Road / Vehicle</SelectItem>
+                        <SelectItem value="boat">Water / Boat</SelectItem>
+                        <SelectItem value="air">Air / Flight</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                <div className="flex items-center space-x-2 pt-2">
+                  <Switch
+                    id="htr-status"
+                    checked={newCommHTR}
+                    onCheckedChange={setNewCommHTR}
+                    data-testid="switch-community-htr"
+                  />
+                  <label htmlFor="htr-status" className="text-sm font-medium leading-none cursor-pointer">
+                    Hard to Reach (HTR) Community
+                  </label>
+                </div>
+
+                {/* Spatial Location Mapping */}
+                <div className="space-y-4 pt-2 border-t">
+                  <div className="flex items-center justify-between gap-4 flex-wrap">
+                    <h3 className="text-sm font-semibold">Community Location Mapping</h3>
+                    <div className="flex gap-2">
+                      <Button
+                        type="button"
+                        variant={commDrawMode === "pin" ? "default" : "outline"}
+                        size="sm"
+                        onClick={() => setCommDrawMode("pin")}
+                      >
+                        Drop Pin Mode
+                      </Button>
+                      <Button
+                        type="button"
+                        variant={commDrawMode === "polygon" ? "default" : "outline"}
+                        size="sm"
+                        onClick={() => setCommDrawMode("polygon")}
+                      >
+                        Draw Polygon Mode
+                      </Button>
+                      {(newCommLat || newCommLng || commPolygonPoints.length > 0) && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            setNewCommLat("");
+                            setNewCommLng("");
+                            setCommPolygonPoints([]);
+                          }}
+                          className="text-destructive hover:text-destructive/90"
+                        >
+                          Reset Coordinates
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium">Latitude</label>
+                      <Input
+                        type="number"
+                        step="any"
+                        placeholder="e.g. -6.123456"
+                        value={newCommLat}
+                        onChange={(e) => setNewCommLat(e.target.value)}
+                        data-testid="input-community-latitude"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium">Longitude</label>
+                      <Input
+                        type="number"
+                        step="any"
+                        placeholder="e.g. 145.123456"
+                        value={newCommLng}
+                        onChange={(e) => setNewCommLng(e.target.value)}
+                        data-testid="input-community-longitude"
+                      />
+                    </div>
+                  </div>
+
+                  {(estimatedPopulation !== null || estimatingPop) && (
+                    <div className="p-3 bg-primary/5 border border-primary/10 rounded-md flex justify-between items-center text-sm">
+                      <span className="font-medium text-muted-foreground flex items-center gap-1.5">
+                        Live Population Estimate
+                        {commDrawMode === "polygon" ? " (Entire Polygon)" : " (Point Grid Cell)"}:
+                      </span>
+                      <span className="font-bold text-primary text-base animate-in fade-in duration-200">
+                        {estimatingPop ? (
+                          <span className="text-xs font-normal text-muted-foreground animate-pulse">Calculating...</span>
+                        ) : (
+                          `${estimatedPopulation?.toLocaleString()} people`
+                        )}
+                      </span>
+                    </div>
+                  )}
+
+                  <div className="h-[300px] w-full rounded-md border overflow-hidden relative">
+                    <MapContainer
+                      center={commMapCenter}
+                      zoom={12}
+                      className="h-full w-full"
+                    >
+                      <TileLayer
+                        attribution={OSM_TILE_ATTRIBUTION}
+                        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                        maxNativeZoom={19}
+                        maxZoom={22}
+                      />
+                      <MapResizer />
+                      <CommMapEvents />
+                      
+                      {/* Facility Marker if selected */}
+                      {(() => {
+                        if (newCommFacilityId) {
+                          const fac = facilities?.find(f => f.id === parseInt(newCommFacilityId));
+                          if (fac && fac.latitude !== null && fac.longitude !== null) {
+                            return (
+                              <Marker 
+                                position={[parseFloat(fac.latitude.toString()), parseFloat(fac.longitude.toString())]} 
+                                icon={L.divIcon({
+                                  className: 'custom-facility-icon',
+                                  html: '<div style="background-color: #2563eb; width: 16px; height: 16px; border-radius: 50%; border: 3px solid #fff; box-shadow: 0 0 10px rgba(0,0,0,0.4);"></div>',
+                                  iconSize: [16, 16],
+                                  iconAnchor: [8, 8]
+                                })}
+                              />
+                            );
+                          }
+                        }
+                        return null;
+                      })()}
+
+                      {/* Selected/Centroid Community Marker */}
+                      {parseFloat(newCommLat) && parseFloat(newCommLng) && !isNaN(parseFloat(newCommLat)) && !isNaN(parseFloat(newCommLng)) && (
+                        <Marker 
+                          position={[parseFloat(newCommLat), parseFloat(newCommLng)]} 
+                          icon={L.divIcon({
+                            className: 'custom-community-icon',
+                            html: '<div style="background-color: #ef4444; width: 20px; height: 20px; border-radius: 50%; border: 3px solid #fff; box-shadow: 0 0 10px rgba(0,0,0,0.5);"></div>',
+                            iconSize: [20, 20],
+                            iconAnchor: [10, 10]
+                          })}
+                        />
+                      )}
+
+                      {/* Drawn Polygon vertices / Polygon line */}
+                      {commDrawMode === "polygon" && commPolygonPoints.length > 0 && (
+                        <>
+                          {commPolygonPoints.map((p, idx) => (
+                            <Marker
+                              key={idx}
+                              position={p}
+                              icon={L.divIcon({
+                                className: 'polygon-vertex-icon',
+                                html: '<div style="background-color: #3b82f6; width: 10px; height: 10px; border-radius: 50%; border: 1px solid #fff;"></div>',
+                                iconSize: [10, 10],
+                                iconAnchor: [5, 5]
+                              })}
+                            />
+                          ))}
+                          {commPolygonPoints.length > 1 && (
+                            <LeafletPolygon
+                              positions={commPolygonPoints}
+                              pathOptions={{ color: '#3b82f6', fillColor: '#3b82f6', fillOpacity: 0.15 }}
+                            />
+                          )}
+                        </>
+                      )}
+                    </MapContainer>
+                  </div>
+                  <p className="text-xs text-muted-foreground italic">
+                    {commDrawMode === "pin" 
+                      ? "Click on the map to drop a coordinate pin." 
+                      : "Click multiple points on the map to define a community polygon. The centroid coordinates are calculated and updated in real time."}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-4 border-t">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setCommunityDialogOpen(false)}
+                  data-testid="button-cancel-community"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  onClick={handleSaveCommunity}
+                  disabled={createCommunityMutation.isPending || updateCommunityMutation.isPending}
+                  data-testid="button-save-community"
+                >
+                  {createCommunityMutation.isPending || updateCommunityMutation.isPending
+                    ? "Saving..."
+                    : editingCommunity
+                    ? "Update Community"
+                    : "Save Community"}
+                </Button>
+              </div>
+            </TabsContent>
+
+            <TabsContent value="workers" className="m-0 p-6">
+              {editingCommunity && (
+                <CommunityWorkerRosterManager
+                  facilityId={editingCommunity.assignedFacilityId || editingFacility?.id || 0}
+                  villageId={editingCommunity.id}
+                  chvs={facilityChvs || []}
+                  refetch={refetchFacilityChvs}
+                />
+              )}
+            </TabsContent>
+          </Tabs>
         </DialogContent>
       </Dialog>
 
@@ -4071,6 +4157,412 @@ function FacilityStaffRosterManager({
               </Button>
               <Button type="submit" disabled={submitting}>
                 {submitting ? "Saving…" : editingStaff ? "Update Member" : "Save Member"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CommunityWorkerRosterManager
+// Harmonized community health volunteers (CHVs) manager inside Community dialog
+// ─────────────────────────────────────────────────────────────────────────────
+const CHV_CAMPAIGN_ROLES = [
+  { value: "social_mobilizer", label: "Social Mobilizer" },
+  { value: "vaccinator", label: "Vaccinator" },
+  { value: "volunteer", label: "Volunteer" },
+  { value: "supervisor", label: "Supervisor" },
+  { value: "recorder", label: "Recorder" },
+  { value: "volunteer_vaccinator", label: "Volunteer Vaccinator" },
+];
+
+const CHV_EDUCATION = [
+  { value: "Primary", label: "Primary Education" },
+  { value: "Secondary", label: "Secondary Education" },
+  { value: "Certificate", label: "Certificate / Diploma" },
+  { value: "Diploma", label: "Diploma" },
+  { value: "Degree", label: "Degree" },
+];
+
+const CHV_TRAINING = [
+  { value: "trained", label: "Trained" },
+  { value: "untrained", label: "Untrained" },
+];
+
+const EMPTY_CHV_FORM = {
+  name: "",
+  gender: "female",
+  contactPhone: "",
+  age: "",
+  roleDescription: "",
+  educationLevel: "Secondary",
+  trainingStatus: "trained",
+  yearsOfService: "",
+  campaignRole: "social_mobilizer",
+  active: true,
+};
+
+function ChvRoleColor({ role }: { role: string }) {
+  const colors: Record<string, string> = {
+    vaccinator: "bg-blue-500/10 text-blue-600 border-blue-500/20",
+    volunteer_vaccinator: "bg-indigo-500/10 text-indigo-600 border-indigo-500/20",
+    recorder: "bg-violet-500/10 text-violet-600 border-violet-500/20",
+    supervisor: "bg-amber-500/10 text-amber-600 border-amber-500/20",
+    social_mobilizer: "bg-emerald-500/10 text-emerald-600 border-emerald-500/20",
+    volunteer: "bg-teal-500/10 text-teal-600 border-teal-500/20",
+  };
+  const cls = colors[role] || "bg-muted text-muted-foreground border-border";
+  return (
+    <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold capitalize ${cls}`}>
+      {role?.replace(/_/g, " ") || "CHV"}
+    </span>
+  );
+}
+
+function ChvInitials({ name, gender }: { name: string; gender: string }) {
+  const initials = name.split(" ").map(n => n[0]).join("").toUpperCase().slice(0, 2);
+  const grad = gender === "male" ? "from-blue-400 to-indigo-600" : "from-rose-400 to-pink-600";
+  return (
+    <div className={`h-9 w-9 rounded-full bg-gradient-to-br ${grad} text-white flex items-center justify-center text-xs font-bold shrink-0 shadow-sm`}>
+      {initials}
+    </div>
+  );
+}
+
+interface CommunityWorkerRosterManagerProps {
+  facilityId: number;
+  villageId: number;
+  chvs: any[];
+  refetch: () => void;
+}
+
+function CommunityWorkerRosterManager({
+  facilityId,
+  villageId,
+  chvs,
+  refetch,
+}: CommunityWorkerRosterManagerProps) {
+  const [editingChv, setEditingChv] = useState<any | null>(null);
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [formTab, setFormTab] = useState("basic");
+  const [submitting, setSubmitting] = useState(false);
+  const [form, setForm] = useState({ ...EMPTY_CHV_FORM });
+  const { toast } = useToast();
+
+  const setField = <K extends keyof typeof EMPTY_CHV_FORM>(key: K, val: any) =>
+    setForm(prev => ({ ...prev, [key]: val }));
+
+  const resetForm = () => {
+    setForm({ ...EMPTY_CHV_FORM });
+    setEditingChv(null);
+    setFormTab("basic");
+  };
+
+  const openNew = () => { resetForm(); setIsDialogOpen(true); };
+
+  const openEdit = (member: any) => {
+    setEditingChv(member);
+    setForm({
+      name: member.name || member.fullName || "",
+      gender: member.gender || "female",
+      contactPhone: member.contactPhone || "",
+      age: member.age?.toString() || "",
+      roleDescription: member.roleDescription || "",
+      educationLevel: member.educationLevel || "Secondary",
+      trainingStatus: member.trainingStatus || "trained",
+      yearsOfService: member.yearsOfService?.toString() || "",
+      campaignRole: member.campaignRole || "social_mobilizer",
+      active: member.active ?? member.isActive ?? true,
+    });
+    setFormTab("basic");
+    setIsDialogOpen(true);
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!facilityId) return;
+    if (!form.name.trim()) {
+      toast({ title: "Full name is required", variant: "destructive" });
+      return;
+    }
+
+    try {
+      setSubmitting(true);
+      const payload = {
+        name: form.name.trim(),
+        gender: form.gender,
+        contactPhone: form.contactPhone.trim() || null,
+        age: form.age ? parseInt(form.age) : null,
+        roleDescription: form.roleDescription.trim() || null,
+        educationLevel: form.educationLevel,
+        trainingStatus: form.trainingStatus,
+        yearsOfService: form.yearsOfService ? parseInt(form.yearsOfService) : null,
+        campaignRole: form.campaignRole,
+        villageId: villageId, // lock to current community/village
+        active: form.active,
+      };
+
+      if (editingChv) {
+        await apiRequest("PATCH", `/api/facilities/${facilityId}/chvs/${editingChv.id}`, payload);
+        toast({ title: "Community worker updated", description: `${form.name} has been updated.` });
+      } else {
+        await apiRequest("POST", `/api/facilities/${facilityId}/chvs`, payload);
+        toast({ title: "Community worker added", description: `${form.name} has been added.` });
+      }
+      await queryClient.invalidateQueries({
+        queryKey: ["/api/facilities", Number(facilityId), "chvs"]
+      });
+      refetch();
+      setIsDialogOpen(false);
+      resetForm();
+    } catch (error: any) {
+      toast({ title: "Save failed", description: error.message, variant: "destructive" });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleDelete = async (memberId: number, name: string) => {
+    if (!facilityId) return;
+    if (!confirm(`Remove ${name} from the roster? This cannot be undone.`)) return;
+    try {
+      await apiRequest("DELETE", `/api/facilities/${facilityId}/chvs/${memberId}`);
+      toast({ title: "Community worker removed" });
+      await queryClient.invalidateQueries({
+        queryKey: ["/api/facilities", Number(facilityId), "chvs"]
+      });
+      refetch();
+    } catch (error: any) {
+      toast({ title: "Delete failed", description: error.message, variant: "destructive" });
+    }
+  };
+
+  // Filter CHVs for this community/village
+  const villageChvs = chvs.filter(c => Number(c.villageId) === Number(villageId));
+  const activeCount = villageChvs.filter(c => c.active).length;
+  const mobilizerCount = villageChvs.filter(c => c.campaignRole === "social_mobilizer").length;
+
+  return (
+    <div className="space-y-4">
+      {/* Header with stats */}
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div className="flex items-center gap-3">
+          <h3 className="font-semibold text-base text-foreground">Community Workers</h3>
+          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <span className="rounded-full bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 px-2 py-0.5 font-medium">
+              {activeCount} Active
+            </span>
+            <span className="rounded-full bg-blue-500/10 text-blue-600 border border-blue-500/20 px-2 py-0.5 font-medium">
+              {mobilizerCount} Mobilizers
+            </span>
+            <span className="rounded-full bg-muted text-muted-foreground border px-2 py-0.5 font-medium">
+              {villageChvs.length} Total
+            </span>
+          </div>
+        </div>
+        <Button size="sm" onClick={openNew}>
+          <Plus className="mr-1 h-4 w-4" /> Add Community Worker
+        </Button>
+      </div>
+
+      {/* Roster table */}
+      <div className="border rounded-lg overflow-hidden bg-card">
+        <table className="w-full text-sm">
+          <thead className="bg-muted text-xs uppercase text-muted-foreground border-b border-border">
+            <tr>
+              <th className="p-3 text-left font-semibold">Name</th>
+              <th className="p-3 text-left font-semibold">Campaign Role</th>
+              <th className="p-3 text-left font-semibold hidden md:table-cell">Contact</th>
+              <th className="p-3 text-left font-semibold hidden lg:table-cell">Training</th>
+              <th className="p-3 text-left font-semibold hidden lg:table-cell">Years Service</th>
+              <th className="p-3 text-center font-semibold">Status</th>
+              <th className="p-3 text-right font-semibold">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {villageChvs.length > 0 ? (
+              villageChvs.map(member => (
+                <tr key={member.id} className="border-b border-border last:border-0 hover:bg-muted/5 transition-colors">
+                  <td className="p-3">
+                    <div className="flex items-center gap-2.5">
+                      <ChvInitials name={member.name || member.fullName || "?"} gender={member.gender || "female"} />
+                      <div className="min-w-0">
+                        <div className="font-medium text-foreground truncate">{member.name || member.fullName}</div>
+                        <div className="text-[10px] text-muted-foreground">{member.educationLevel || ""}</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td className="p-3"><ChvRoleColor role={member.campaignRole || member.siaRole} /></td>
+                  <td className="p-3 font-mono text-xs text-muted-foreground hidden md:table-cell">
+                    {member.contactPhone || "—"}
+                  </td>
+                  <td className="p-3 hidden lg:table-cell">
+                    <span className={`text-[10px] font-medium rounded px-1.5 py-0.5 ${
+                      member.trainingStatus === "trained" ? "bg-green-500/10 text-green-600" :
+                      "bg-red-500/10 text-red-600"
+                    }`}>
+                      {member.trainingStatus || "—"}
+                    </span>
+                  </td>
+                  <td className="p-3 font-mono text-xs text-muted-foreground hidden lg:table-cell text-center">
+                    {member.yearsOfService !== null && member.yearsOfService !== undefined ? member.yearsOfService : "—"}
+                  </td>
+                  <td className="p-3 text-center">
+                    <span className={`inline-flex h-2 w-2 rounded-full ${member.active ? "bg-emerald-500" : "bg-muted-foreground/30"}`} />
+                  </td>
+                  <td className="p-3 text-right">
+                    <div className="flex justify-end gap-1">
+                      <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => openEdit(member)}>
+                        <Pencil className="h-3.5 w-3.5 text-muted-foreground" />
+                      </Button>
+                      <Button size="icon" variant="ghost" className="h-8 w-8 text-destructive hover:text-destructive" onClick={() => handleDelete(member.id, member.name || member.fullName)}>
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  </td>
+                </tr>
+              ))
+            ) : (
+              <tr>
+                <td colSpan={7} className="p-10 text-center text-muted-foreground italic">
+                  No community workers registered for this village. Click "Add Community Worker" to populate.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Roster Dialog */}
+      <Dialog open={isDialogOpen} onOpenChange={v => { if (!v) { setIsDialogOpen(false); resetForm(); } else setIsDialogOpen(true); }}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{editingChv ? "Edit Community Worker" : "Add Community Worker"}</DialogTitle>
+            <DialogDescription>
+              {editingChv
+                ? "Update this community health volunteer's details."
+                : "Add a new community health volunteer to this community roster."}
+            </DialogDescription>
+          </DialogHeader>
+
+          <form onSubmit={handleSubmit} className="space-y-0">
+            {/* Roster tab navigation */}
+            <div className="flex gap-1 border-b mb-4 pb-0">
+              {[["basic","Basic Info"],["professional","Professional"],["campaign","Campaign"]].map(([tab, label]) => (
+                <button key={tab} type="button"
+                  onClick={() => setFormTab(tab)}
+                  className={`px-3 py-2 text-sm font-medium border-b-2 transition-colors ${
+                    formTab === tab ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            {/* Basic Info Tab */}
+            {formTab === "basic" && (
+              <div className="space-y-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="sm:col-span-2 space-y-1.5">
+                    <Label htmlFor="chv-name">Full Name *</Label>
+                    <Input id="chv-name" placeholder="e.g. Grace Mutale" value={form.name}
+                      onChange={e => setField("name", e.target.value)} disabled={submitting} />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="chv-gender">Gender</Label>
+                    <Select value={form.gender} onValueChange={v => setField("gender", v)} disabled={submitting}>
+                      <SelectTrigger id="chv-gender"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="female">Female</SelectItem>
+                        <SelectItem value="male">Male</SelectItem>
+                        <SelectItem value="other">Other / Prefer not to say</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="chv-phone">Contact Phone</Label>
+                    <Input id="chv-phone" placeholder="+260977123456" value={form.contactPhone}
+                      onChange={e => setField("contactPhone", e.target.value)} disabled={submitting} />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="chv-age">Age</Label>
+                    <Input id="chv-age" type="number" min="15" max="100" placeholder="30" value={form.age}
+                      onChange={e => setField("age", e.target.value)} disabled={submitting} />
+                  </div>
+                </div>
+                <div className="flex items-center gap-6 pt-2">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <Switch id="chv-active" checked={form.active} onCheckedChange={v => setField("active", v)} disabled={submitting} />
+                    <span className="text-sm">Active</span>
+                  </label>
+                </div>
+              </div>
+            )}
+
+            {/* Professional Tab */}
+            {formTab === "professional" && (
+              <div className="space-y-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="chv-education">Education Level</Label>
+                    <Select value={form.educationLevel} onValueChange={v => setField("educationLevel", v)} disabled={submitting}>
+                      <SelectTrigger id="chv-education"><SelectValue placeholder="Select…" /></SelectTrigger>
+                      <SelectContent>
+                        {CHV_EDUCATION.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="chv-training">Training Status</Label>
+                    <Select value={form.trainingStatus} onValueChange={v => setField("trainingStatus", v)} disabled={submitting}>
+                      <SelectTrigger id="chv-training"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {CHV_TRAINING.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="chv-yrsOfService">Years of Service</Label>
+                    <Input id="chv-yrsOfService" type="number" min="0" max="50" placeholder="3" value={form.yearsOfService}
+                      onChange={e => setField("yearsOfService", e.target.value)} disabled={submitting} />
+                  </div>
+                  <div className="sm:col-span-2 space-y-1.5">
+                    <Label htmlFor="chv-description">Routine Role / Job Description</Label>
+                    <Input id="chv-description" placeholder="Provides community mobilization and traces dropouts" value={form.roleDescription}
+                      onChange={e => setField("roleDescription", e.target.value)} disabled={submitting} />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Campaign Tab */}
+            {formTab === "campaign" && (
+              <div className="space-y-4">
+                <p className="text-sm text-muted-foreground">
+                  Campaign roles apply during SIA / supplemental immunisation activities.
+                </p>
+                <div className="space-y-1.5">
+                  <Label htmlFor="chv-campRole">Campaign Role</Label>
+                  <Select value={form.campaignRole} onValueChange={v => setField("campaignRole", v)} disabled={submitting}>
+                    <SelectTrigger id="chv-campRole"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {CHV_CAMPAIGN_ROLES.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            )}
+
+            <DialogFooter className="mt-6 flex justify-between items-center">
+              <Button type="button" variant="outline" onClick={() => { setIsDialogOpen(false); resetForm(); }} disabled={submitting}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={submitting}>
+                {submitting ? "Saving…" : editingChv ? "Update Worker" : "Save Worker"}
               </Button>
             </DialogFooter>
           </form>

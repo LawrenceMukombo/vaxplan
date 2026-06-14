@@ -21,6 +21,8 @@ import { sendEmail } from "./services/mailer";
 import { sendSms, sendWhatsApp, sendEmail as sendMessagingEmail, dispatchWithFallback } from "./services/messaging";
 import { dispatchNotification } from "./services/uce";
 import { surveillanceRouter } from "./routes/surveillance";
+import vgieRouter from "./routes/vgie";
+import { VgieService } from "./services/vgieService";
 import {
   FACILITY_AUTHOR_ROLES,
   insertFacilitySchema,
@@ -59,6 +61,8 @@ import {
   insertVaccineConfigSchema,
   insertClientSchema,
   insertClientVaccinationSchema,
+  vgieRecommendations,
+  vgieAlerts,
   insertSessionDayPlanSchema,
   insertStockTransactionSchema,
   insertMonthlyReportSchema,
@@ -3290,6 +3294,112 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/facilities/:id/historical-coverage", ...auth, async (req: any, res) => {
+    try {
+      const facilityId = parseInt(req.params.id);
+      if (isNaN(facilityId)) {
+        return res.status(400).json({ message: "Invalid facility id" });
+      }
+
+      const facility = await storage.getFacility(req.tenantId, facilityId);
+      if (!facility) {
+        return res.status(404).json({ message: "Facility not found" });
+      }
+      if (!(await userCanAccessGeo(req.dbUser!, req.tenantId, { facilityId }))) {
+        return res.status(403).json({ message: "Forbidden: no access to facility" });
+      }
+
+      const year = req.query.year ? parseInt(req.query.year as string, 10) : (new Date().getFullYear() - 1);
+      if (isNaN(year)) {
+        return res.status(400).json({ message: "Invalid year parameter" });
+      }
+
+      const popRecords = await db
+        .select()
+        .from(populationData)
+        .where(
+          and(
+            eq(populationData.tenantId, req.tenantId),
+            eq(populationData.facilityId, facilityId),
+            eq(populationData.year, year)
+          )
+        );
+
+      let targetInfants = 0;
+      let totalPopulation = 0;
+      let hasPopData = false;
+
+      if (popRecords.length > 0) {
+        for (const row of popRecords) {
+          totalPopulation += row.totalPopulation || 0;
+          targetInfants += row.under1Population || 0;
+        }
+        hasPopData = targetInfants > 0;
+      }
+
+      if (!hasPopData) {
+        const gridPop = facility.catchmentGridPopulation || 0;
+        targetInfants = Math.round(gridPop * 0.04);
+        totalPopulation = gridPop;
+      }
+
+      const { importedCoverage } = await import("@shared/schema");
+      const coverageRecords = await db
+        .select()
+        .from(importedCoverage)
+        .where(
+          and(
+            eq(importedCoverage.tenantId, req.tenantId),
+            eq(importedCoverage.facilityId, facilityId),
+            gte(importedCoverage.period, `${year}01`),
+            lte(importedCoverage.period, `${year}12`)
+          )
+        );
+
+      const dosesByAntigen: Record<string, number> = {
+        DTP1: 0,
+        DTP3: 0,
+        MCV1: 0,
+        MCV2: 0,
+      };
+
+      for (const rec of coverageRecords) {
+        const antigenUpper = rec.antigen.toUpperCase();
+        let key = antigenUpper;
+        if (antigenUpper.startsWith("DPT") || antigenUpper.startsWith("DTP")) {
+          if (antigenUpper.endsWith("1")) key = "DTP1";
+          else if (antigenUpper.endsWith("3")) key = "DTP3";
+        } else if (antigenUpper.startsWith("MCV") || antigenUpper.startsWith("MEASLES")) {
+          if (antigenUpper.endsWith("1")) key = "MCV1";
+          else if (antigenUpper.endsWith("2")) key = "MCV2";
+        }
+
+        if (dosesByAntigen[key] !== undefined) {
+          dosesByAntigen[key] += rec.dosesAdministered || 0;
+        } else {
+          dosesByAntigen[key] = rec.dosesAdministered || 0;
+        }
+      }
+
+      const coverageRates: Record<string, number> = {};
+      for (const [antigen, doses] of Object.entries(dosesByAntigen)) {
+        coverageRates[antigen] = targetInfants > 0 ? Math.round((doses / targetInfants) * 100) : 0;
+      }
+
+      res.json({
+        year,
+        targetInfants,
+        totalPopulation,
+        dosesByAntigen,
+        coverageRates,
+        hasHistoricalData: coverageRecords.length > 0,
+      });
+    } catch (err: any) {
+      console.error("GET /api/facilities/:id/historical-coverage failed:", err);
+      res.status(500).json({ message: "Failed to retrieve historical coverage" });
+    }
+  });
+
   app.get("/api/facilities/:id/community-routes", ...auth, async (req: any, res) => {
     try {
       const dbUser = req.dbUser!;
@@ -3482,9 +3592,19 @@ export async function registerRoutes(
         ...(Array.isArray(req.dbUser?.roles) ? (req.dbUser!.roles as string[]) : []),
       ].filter(Boolean) as string[];
       if (req.dbUser?.isPlatformAdmin !== true && !userRolesList.some((r) => allowed.includes(r))) {
-        return res.status(403).json({ message: "Your role can add communities but not facilities." });
+        return res.status(403).json({ message: "Your role cannot add facilities." });
       }
+      
       const data = insertFacilitySchema.parse(req.body);
+      
+      // Enforce district boundaries for district managers and facility staff
+      const isNational = userRolesList.some(r => ["national_admin", "gis_specialist", "provincial_coordinator"].includes(r));
+      if (req.dbUser?.isPlatformAdmin !== true && !isNational) {
+        if (req.dbUser?.districtId && Number(data.districtId) !== Number(req.dbUser.districtId)) {
+          return res.status(403).json({ message: "You can only create facilities in your assigned district." });
+        }
+      }
+
       const facility = await storage.createFacility(req.tenantId, data);
       await logAudit(req, "create", "facility", facility.id, null, facility);
       res.status(201).json(facility);
@@ -3498,8 +3618,28 @@ export async function registerRoutes(
     try {
       const entityId = parseInt(req.params.id);
       const oldFacility = await storage.getFacility(req.tenantId, entityId);
+      if (!oldFacility) return res.status(404).json({ message: "Facility not found" });
+
+      const userRolesList = [
+        req.dbUser?.role,
+        ...(Array.isArray(req.dbUser?.roles) ? (req.dbUser!.roles as string[]) : []),
+      ].filter(Boolean) as string[];
+      
+      const isNational = userRolesList.some(r => ["national_admin", "gis_specialist", "provincial_coordinator"].includes(r));
+      if (req.dbUser?.isPlatformAdmin !== true && !isNational) {
+        if (req.dbUser?.districtId) {
+          // Cannot edit facility outside their district
+          if (Number(oldFacility.districtId) !== Number(req.dbUser.districtId)) {
+            return res.status(403).json({ message: "You can only update facilities in your assigned district." });
+          }
+          // Cannot move facility to another district
+          if (req.body.districtId && Number(req.body.districtId) !== Number(req.dbUser.districtId)) {
+            return res.status(403).json({ message: "You cannot move a facility to another district." });
+          }
+        }
+      }
+
       const facility = await storage.updateFacility(req.tenantId, entityId, req.body);
-      if (!facility) return res.status(404).json({ message: "Facility not found" });
       await logAudit(req, "update", "facility", entityId, oldFacility, facility);
       res.json(facility);
     } catch (error) {
@@ -3512,6 +3652,20 @@ export async function registerRoutes(
     try {
       const entityId = parseInt(req.params.id);
       const oldFacility = await storage.getFacility(req.tenantId, entityId);
+      if (!oldFacility) return res.status(404).json({ message: "Facility not found" });
+
+      const userRolesList = [
+        req.dbUser?.role,
+        ...(Array.isArray(req.dbUser?.roles) ? (req.dbUser!.roles as string[]) : []),
+      ].filter(Boolean) as string[];
+      
+      const isNational = userRolesList.some(r => ["national_admin", "gis_specialist", "provincial_coordinator"].includes(r));
+      if (req.dbUser?.isPlatformAdmin !== true && !isNational) {
+        if (req.dbUser?.districtId && Number(oldFacility.districtId) !== Number(req.dbUser.districtId)) {
+          return res.status(403).json({ message: "You can only delete facilities in your assigned district." });
+        }
+      }
+
       const ok = await storage.deleteFacility(req.tenantId, entityId);
       if (!ok) return res.status(404).json({ message: "Facility not found" });
       await logAudit(req, "delete", "facility", entityId, oldFacility, null);
@@ -4061,6 +4215,7 @@ export async function registerRoutes(
         const rows = await db.select().from(chvProfiles)
           .where(and(eq(chvProfiles.tenantId, req.tenantId), eq(chvProfiles.facilityId, facilityId)))
           .orderBy(chvProfiles.fullName);
+        /* Original GET mapping commented out to maintain rule 1/2 of user_global config:
         const mapped = rows.map((r) => ({
           id: r.id,
           name: r.fullName,
@@ -4072,6 +4227,23 @@ export async function registerRoutes(
           villageId: r.assignedVillageId,
           active: r.isActive,
           communityUnit: "",
+        }));
+        */
+        // Harmonized mapping returned to client with contactPhone, age, and roleDescription
+        const mapped = rows.map((r) => ({
+          id: r.id,
+          name: r.fullName,
+          gender: r.gender,
+          yearsOfService: r.yearsOfService,
+          educationLevel: r.educationLevel,
+          trainingStatus: r.trainingReceived,
+          campaignRole: r.siaRole,
+          villageId: r.assignedVillageId,
+          active: r.isActive,
+          communityUnit: "",
+          contactPhone: r.contactPhone,
+          age: r.age,
+          roleDescription: r.roleDescription,
         }));
         res.json(mapped);
       }
@@ -4112,6 +4284,7 @@ export async function registerRoutes(
         const data = insertChvProfileSchema.parse({ ...mappedBody, facilityId });
         const [created] = await db.insert(chvProfiles).values({ ...data, tenantId: req.tenantId } as any).returning();
         await logAudit(req, "create", "chv_profile", created.id, null, created);
+        /* Original POST mapping commented out to maintain rule 1/2 of user_global config:
         const mappedCreated = {
           id: created.id,
           name: created.fullName,
@@ -4123,6 +4296,23 @@ export async function registerRoutes(
           villageId: created.assignedVillageId,
           active: created.isActive,
           communityUnit: "",
+        };
+        */
+        // Harmonized mapping returned to client on creation
+        const mappedCreated = {
+          id: created.id,
+          name: created.fullName,
+          gender: created.gender,
+          yearsOfService: created.yearsOfService,
+          educationLevel: created.educationLevel,
+          trainingStatus: created.trainingReceived,
+          campaignRole: created.siaRole,
+          villageId: created.assignedVillageId,
+          active: created.isActive,
+          communityUnit: "",
+          contactPhone: created.contactPhone,
+          age: created.age,
+          roleDescription: created.roleDescription,
         };
         res.status(201).json(mappedCreated);
       }
@@ -4155,6 +4345,8 @@ export async function registerRoutes(
           .where(and(eq(chvProfiles.id, chvId), eq(chvProfiles.tenantId, req.tenantId))).limit(1);
         if (!existing) return res.status(404).json({ message: "CHV not found" });
         const allowed: any = {};
+        
+        /* Original allowed patch assignments commented out to maintain rule 1/2 of user_global config:
         if (req.body.name !== undefined) allowed.fullName = req.body.name;
         if (req.body.gender !== undefined) allowed.gender = req.body.gender;
         if (req.body.educationLevel !== undefined) allowed.educationLevel = req.body.educationLevel;
@@ -4163,9 +4355,25 @@ export async function registerRoutes(
         if (req.body.campaignRole !== undefined) allowed.siaRole = req.body.campaignRole;
         if (req.body.villageId !== undefined) allowed.assignedVillageId = req.body.villageId ? Number(req.body.villageId) : null;
         if (req.body.active !== undefined) allowed.isActive = req.body.active;
+        */
+        // Enhanced allowed assignments supporting additional basic/professional fields
+        if (req.body.name !== undefined) allowed.fullName = req.body.name;
+        if (req.body.gender !== undefined) allowed.gender = req.body.gender;
+        if (req.body.educationLevel !== undefined) allowed.educationLevel = req.body.educationLevel;
+        if (req.body.trainingStatus !== undefined) allowed.trainingReceived = req.body.trainingStatus;
+        if (req.body.yearsOfService !== undefined) allowed.yearsOfService = req.body.yearsOfService ? Number(req.body.yearsOfService) : null;
+        if (req.body.campaignRole !== undefined) allowed.siaRole = req.body.campaignRole;
+        if (req.body.villageId !== undefined) allowed.assignedVillageId = req.body.villageId ? Number(req.body.villageId) : null;
+        if (req.body.active !== undefined) allowed.isActive = req.body.active;
+        if (req.body.contactPhone !== undefined) allowed.contactPhone = req.body.contactPhone || null;
+        if (req.body.age !== undefined) allowed.age = req.body.age ? Number(req.body.age) : null;
+        if (req.body.roleDescription !== undefined) allowed.roleDescription = req.body.roleDescription || null;
+        
         allowed.updatedAt = new Date();
         const [updated] = await db.update(chvProfiles).set(allowed).where(eq(chvProfiles.id, chvId)).returning();
         await logAudit(req, "update", "chv_profile", chvId, existing, updated);
+        
+        /* Original mappedUpdated commented out to maintain rule 1/2 of user_global config:
         const mappedUpdated = {
           id: updated.id,
           name: updated.fullName,
@@ -4177,6 +4385,23 @@ export async function registerRoutes(
           villageId: updated.assignedVillageId,
           active: updated.isActive,
           communityUnit: "",
+        };
+        */
+        // Harmonized update response returned to client
+        const mappedUpdated = {
+          id: updated.id,
+          name: updated.fullName,
+          gender: updated.gender,
+          yearsOfService: updated.yearsOfService,
+          educationLevel: updated.educationLevel,
+          trainingStatus: updated.trainingReceived,
+          campaignRole: updated.siaRole,
+          villageId: updated.assignedVillageId,
+          active: updated.isActive,
+          communityUnit: "",
+          contactPhone: updated.contactPhone,
+          age: updated.age,
+          roleDescription: updated.roleDescription,
         };
         res.json(mappedUpdated);
       }
@@ -6697,18 +6922,23 @@ export async function registerRoutes(
 
       const isNationalAdmin = dbUser.role === "national_admin" || (Array.isArray(dbUser.roles) && (dbUser.roles as string[]).includes("national_admin"));
 
+      const excludeVillages = req.query.excludeVillages === "true" || (isNationalAdmin && !filters.provinceId && !filters.districtId && !filters.villageId && !filters.facilityId);
+      filters.excludeVillages = excludeVillages;
+
       if (!isNationalAdmin) {
         if (dbUser.facilityId) {
-          filters.facilityId = dbUser.facilityId;
+          const allVillages = await storage.getVillages(req.tenantId);
+          const facilityVillageIds = new Set(allVillages.filter((v: any) => v.assignedFacilityId === dbUser.facilityId).map((v: any) => v.id));
+          
+          const allPop = await storage.getPopulationData(req.tenantId, { ...filters, facilityId: undefined });
+          const filtered = allPop.filter((p: any) => p.facilityId === dbUser.facilityId || (p.villageId && facilityVillageIds.has(p.villageId)));
+          return res.json(filtered);
         } else if (dbUser.districtId) {
           filters.districtId = dbUser.districtId;
         } else if (dbUser.provinceId) {
           filters.provinceId = dbUser.provinceId;
         }
       }
-
-      const excludeVillages = req.query.excludeVillages === "true" || (isNationalAdmin && !filters.provinceId && !filters.districtId && !filters.villageId && !filters.facilityId);
-      filters.excludeVillages = excludeVillages;
 
       res.json(await storage.getPopulationData(req.tenantId, filters));
     } catch (error) {
@@ -8601,16 +8831,22 @@ export async function registerRoutes(
       const servedVillageIds = new Set<number>(cvRows.map((r: any) => r.villageId).filter(Boolean));
 
       const scope = await getGeoScope(req.dbUser, req.tenantId);
-      const unserved = (vilList as any[]).filter((v) =>
-        v.latitude != null &&
-        v.longitude != null &&
-        !plannedVillageIds.has(v.id) &&
-        !servedVillageIds.has(v.id) &&
-        recordInGeoScope(scope, {
-          facilityId: v.assignedFacilityId,
-          districtId: v.districtId,
-        })
-      ).map((v) => ({
+      const unserved = (vilList as any[]).filter((v) => {
+        if (v.latitude == null || v.longitude == null) return false;
+        if (!recordInGeoScope(scope, { facilityId: v.assignedFacilityId, districtId: v.districtId })) return false;
+        
+        // VGIE distance-based logic: served if distance <= 5km
+        if (v.assignedFacilityId && v.distanceToFacility != null && Number(v.distanceToFacility) <= 5) {
+          return false;
+        }
+        
+        // Also filter out out-of-country data (Zambia bounds roughly [-18.5, 21.5] to [-8.0, 34.0])
+        const lat = Number(v.latitude);
+        const lng = Number(v.longitude);
+        if (lat < -18.5 || lat > -8.0 || lng < 21.5 || lng > 34.0) return false;
+
+        return true;
+      }).map((v) => ({
         id: v.id,
         name: v.name,
         districtId: v.districtId,
@@ -9640,8 +9876,8 @@ export async function registerRoutes(
         SELECT
           (SELECT COUNT(*)::int          FROM facilities      WHERE tenant_id = ${tenantId})                            AS "totalFacilities",
           (SELECT COUNT(*)::int          FROM facilities      WHERE tenant_id = ${tenantId} AND is_active = true)       AS "activeFacilities",
-          (SELECT COUNT(*)::int          FROM villages        WHERE tenant_id = ${tenantId})                            AS "totalVillages",
-          (SELECT COUNT(*)::int          FROM villages        WHERE tenant_id = ${tenantId} AND assigned_facility_id IS NOT NULL) AS "assignedVillages",
+          (SELECT COUNT(*)::int          FROM villages        WHERE tenant_id = ${tenantId} AND CAST(latitude AS numeric) BETWEEN -18.5 AND -8.0 AND CAST(longitude AS numeric) BETWEEN 21.5 AND 34.0) AS "totalVillages",
+          (SELECT COUNT(*)::int          FROM villages        WHERE tenant_id = ${tenantId} AND assigned_facility_id IS NOT NULL AND CAST(distance_to_facility AS numeric) <= 5 AND CAST(latitude AS numeric) BETWEEN -18.5 AND -8.0 AND CAST(longitude AS numeric) BETWEEN 21.5 AND 34.0) AS "assignedVillages",
           (SELECT COUNT(*)::int          FROM villages        WHERE tenant_id = ${tenantId} AND is_hard_to_reach = true) AS "htrVillages",
           (SELECT COUNT(*)::int          FROM session_plans   WHERE tenant_id = ${tenantId})                            AS "totalSessions",
           (SELECT COALESCE(SUM(total_population), 0)::bigint FROM population_data WHERE tenant_id = ${tenantId})       AS "totalPopulation",
@@ -17410,6 +17646,38 @@ Instructions:
     }
   );
   // ── End Wiki API ──────────────────────────────────────────────────────────
+  // ── VGIE Spatial Intelligence API ─────────────────────────────────────────
+
+  app.get("/api/vgie/recommendations", ...auth, async (req: any, res) => {
+    try {
+      const recommendations = await db.select().from(vgieRecommendations).where(eq(vgieRecommendations.tenantId, req.tenantId));
+      res.json(recommendations);
+    } catch (err: any) {
+      console.error("[vgie/recommendations]", err);
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.get("/api/vgie/alerts", ...auth, async (req: any, res) => {
+    try {
+      const alerts = await db.select().from(vgieAlerts).where(eq(vgieAlerts.tenantId, req.tenantId));
+      res.json(alerts);
+    } catch (err: any) {
+      console.error("[vgie/alerts]", err);
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.post("/api/vgie/analyze-catchment", ...auth, async (req: any, res) => {
+    try {
+      const recommendations = await VgieService.generateRecommendations(req.tenantId);
+      const alerts = await VgieService.detectCoverageGaps(req.tenantId);
+      res.json({ success: true, recommendationsCount: recommendations.length, alertsCount: alerts.length });
+    } catch (err: any) {
+      console.error("[vgie/analyze-catchment]", err);
+      res.status(500).json({ message: err.message });
+    }
+  });
 
   return httpServer;
 

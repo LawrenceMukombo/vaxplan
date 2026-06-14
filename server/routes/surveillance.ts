@@ -149,6 +149,20 @@ surveillanceRouter.get("/cases", async (req: any, res) => {
       .select()
       .from(surveillanceCases)
       .where(eq(surveillanceCases.tenantId, req.tenantId));
+
+    const dbUser = req.dbUser!;
+    const isFacilityStaff = dbUser.role === "facility_clerk" || dbUser.role === "facility_in_charge" || dbUser.role === "facility_partner";
+
+    if (isFacilityStaff && dbUser.facilityId) {
+      cases.forEach(c => {
+        if (c.facilityId !== dbUser.facilityId) {
+          c.patientName = "De-identified";
+          if ((c as any).caretakerName) (c as any).caretakerName = "De-identified";
+          if ((c as any).contactPhone) (c as any).contactPhone = "De-identified";
+        }
+      });
+    }
+
     res.json(cases);
   } catch (err: any) {
     res.status(500).json({ message: err.message });

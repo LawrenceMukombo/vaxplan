@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useAuth } from "@/hooks/useAuth";
 import { Check, ChevronsUpDown } from "lucide-react";
 import { cn, pluralize } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -72,6 +73,9 @@ export function FacilityCascadePicker({
   const { data: tenantInfo } = useQuery<any>({
     queryKey: ["/api/me/tenant"],
   });
+  
+  const { user } = useAuth();
+  const isFacilityStaff = user?.role === "facility_clerk" || user?.role === "facility_in_charge" || user?.role === "facility_partner";
 
   const { data: provinces } = useQuery<Province[]>({
     queryKey: ["/api/provinces", tenantInfo?.id],
@@ -128,7 +132,21 @@ export function FacilityCascadePicker({
     onDistrictChange?.(districtId);
   }, [districtId, onDistrictChange]);
 
-  const lockParents = lockDistrictId != null;
+  // For facility staff, lock to their own facility
+  useEffect(() => {
+    if (isFacilityStaff && user?.facilityId && facilities && districts) {
+      const fac = facilities.find((f) => Number(f.id) === Number(user.facilityId));
+      if (fac) {
+        const dist = districts.find((d) => Number(d.id) === Number((fac as any).districtId));
+        if (dist) {
+          setDistrictId(Number(dist.id));
+          setProvinceId(Number((dist as any).provinceId));
+        }
+      }
+    }
+  }, [isFacilityStaff, user?.facilityId, facilities, districts]);
+
+  const lockParents = lockDistrictId != null || isFacilityStaff;
 
   const sortedProvinces = useMemo(
     () =>
@@ -144,7 +162,7 @@ export function FacilityCascadePicker({
     return [...list].sort((a, b) => a.name.localeCompare(b.name));
   }, [districts, provinceId]);
   const filteredFacilities = useMemo(() => {
-    const list = districtId
+    let list = districtId
       ? (facilities ?? []).filter(
           (f) => Number((f as any).districtId) === Number(districtId),
         )
@@ -156,8 +174,12 @@ export function FacilityCascadePicker({
           return d && Number((d as any).provinceId) === Number(provinceId);
         })
       : facilities ?? [];
+      
+    if (isFacilityStaff && user?.facilityId) {
+      list = list.filter((f) => Number(f.id) === Number(user.facilityId));
+    }
     return [...list].sort((a, b) => a.name.localeCompare(b.name));
-  }, [facilities, districts, provinceId, districtId]);
+  }, [facilities, districts, provinceId, districtId, isFacilityStaff, user?.facilityId]);
 
   const selectedProvince = sortedProvinces.find(
     (p) => Number(p.id) === Number(provinceId),

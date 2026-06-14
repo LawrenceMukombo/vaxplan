@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, Printer, ArrowLeft, Calendar, ShieldCheck, MapPin, Syringe, ClipboardList, Wallet, FileText, Check, Square, Download } from "lucide-react";
+import { Loader2, Printer, ArrowLeft, Calendar, ShieldCheck, MapPin, Syringe, ClipboardList, Wallet, FileText, Check, Square, Download, Layers, Truck, MessageSquare } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import {
   Select,
@@ -99,6 +99,17 @@ export default function MicroplanPrintView() {
 
   const microplan = hydration?.microplan;
 
+  const isCampaign = useMemo(() => {
+    return microplan ? microplan.planType === "sia_campaign" : false;
+  }, [microplan]);
+
+  const coldChainReq = useMemo(() => {
+    return (microplan as any)?.staffing?.coldChain || { coldBoxes: "0", icePacks: "0", carriers: "0" };
+  }, [microplan]);
+
+  const reqColdBoxes = useMemo(() => parseInt(coldChainReq.coldBoxes || "0", 10), [coldChainReq]);
+  const reqCarriers = useMemo(() => parseInt(coldChainReq.carriers || "0", 10), [coldChainReq]);
+
   const facility = useMemo(() => {
     if (!microplan || !facilities) return null;
     return facilities.find((f) => f.id === microplan.facilityId) ?? null;
@@ -123,6 +134,46 @@ export default function MicroplanPrintView() {
       return res.json();
     },
   });
+
+  const { data: hfcMembers = [] } = useQuery<any[]>({
+    queryKey: [`/api/facilities/${facility?.id}/hfc-committee`, isCampaign],
+    enabled: !!facility?.id,
+    queryFn: async () => {
+      const url = `/api/facilities/${facility?.id}/hfc-committee` + (isCampaign ? "?planType=campaign" : "");
+      const res = await fetch(url, { credentials: "include" });
+      if (!res.ok) return [];
+      return res.json();
+    },
+  });
+
+  const { data: chvProfiles = [] } = useQuery<any[]>({
+    queryKey: [`/api/facilities/${facility?.id}/chvs`, isCampaign],
+    enabled: !!facility?.id,
+    queryFn: async () => {
+      const url = `/api/facilities/${facility?.id}/chvs` + (isCampaign ? "?planType=campaign" : "");
+      const res = await fetch(url, { credentials: "include" });
+      if (!res.ok) return [];
+      return res.json();
+    },
+  });
+
+  const { data: dbColdChain = [] } = useQuery<any[]>({
+    queryKey: [`/api/facilities/${facility?.id}/cold-chain`],
+    enabled: !!facility?.id,
+    queryFn: async () => {
+      const res = await fetch(`/api/facilities/${facility?.id}/cold-chain`, { credentials: "include" });
+      if (!res.ok) return [];
+      return res.json();
+    },
+  });
+
+  const availableColdBoxes = useMemo(() => {
+    return dbColdChain.filter((e) => e.equipmentType === "cold_box" && e.condition === "functional").length;
+  }, [dbColdChain]);
+
+  const availableCarriers = useMemo(() => {
+    return dbColdChain.filter((e) => e.equipmentType === "vaccine_carrier" && e.condition === "functional").length;
+  }, [dbColdChain]);
 
   const mapHeightClass = useMemo(() => {
     switch (printSize) {
@@ -267,8 +318,6 @@ export default function MicroplanPrintView() {
       </div>
     );
   }
-
-  const isCampaign = microplan.planType === "sia_campaign";
 
   const handlePrint = () => {
     window.print();
@@ -440,23 +489,73 @@ export default function MicroplanPrintView() {
         "Indicator/Item", "Required Number", "Available Number", "Shortfall / Surplus"
       ];
       const summaryRows = [
-        ["Vaccinators", hydration?.sessions?.length ? Math.ceil(hydration.sessions.length * 1.5) : 0, facility?.staffCount || 0, Math.max(0, (hydration?.sessions?.length ? Math.ceil(hydration.sessions.length * 1.5) : 0) - (facility?.staffCount || 0))],
+        ["Vaccinators", hydration?.sessions?.length ? Math.ceil(hydration.sessions.length * 1.5) : 0, staffProfile?.length || facility?.staffCount || 0, Math.max(0, (hydration?.sessions?.length ? Math.ceil(hydration.sessions.length * 1.5) : 0) - (staffProfile?.length || facility?.staffCount || 0))],
         ["Supervisors", Math.ceil((hydration?.sessions?.length || 0) / 3), 2, Math.max(0, Math.ceil((hydration?.sessions?.length || 0) / 3) - 2)],
-        ["Vaccine Carriers", hydration?.sessions?.length ? hydration.sessions.length * 2 : 0, 8, Math.max(0, (hydration?.sessions?.length ? hydration.sessions.length * 2 : 0) - 8)],
-        ["Cold Boxes", Math.ceil((hydration?.sessions?.length || 0) / 5), 2, Math.max(0, Math.ceil((hydration?.sessions?.length || 0) / 5) - 2)],
+        ["Vaccine Carriers", reqCarriers, availableCarriers, Math.max(0, reqCarriers - availableCarriers)],
+        ["Cold Boxes", reqColdBoxes, availableColdBoxes, Math.max(0, reqColdBoxes - availableColdBoxes)],
       ];
       const wsSummary = XLSX.utils.aoa_to_sheet([summaryHeaders, ...summaryRows]);
       XLSX.utils.book_append_sheet(wb, wsSummary, "4.0 Summary Teams Plan");
 
       // Sheet 5: Cold Chain
       const ccHeaders = [
-        "Facility / Hub", "RI Service Provided", "Is SIA Post", "Number of Teams", "OPV Doses Forecasted", "Vaccine Carriers Req", "Vaccine Carriers Avail", "Shortage"
+        "Facility / Hub", 
+        "RI Service Provided", 
+        "Is SIA Post", 
+        "Number of Teams", 
+        "OPV Doses Forecasted", 
+        "Vaccine Carriers Req", 
+        "Vaccine Carriers Avail", 
+        "Vaccine Carrier Shortage",
+        "Cold Boxes Req",
+        "Cold Boxes Avail",
+        "Cold Box Shortage"
       ];
-      const ccRows = [[
-        facility?.name || "—", "Yes", isCampaign ? "Yes" : "No", hydration?.sessions?.length || 0, targetPopulationTotal * 2,
-        (hydration?.sessions?.length || 0) * 2, 8, Math.max(0, ((hydration?.sessions?.length || 0) * 2) - 8)
-      ]];
-      const wsColdChain = XLSX.utils.aoa_to_sheet([ccHeaders, ...ccRows]);
+      
+      const carrierShortage = Math.max(0, reqCarriers - availableCarriers);
+      const coldBoxShortage = Math.max(0, reqColdBoxes - availableColdBoxes);
+      
+      const ccSummaryRow = [
+        facility?.name || "—", 
+        "Yes", 
+        isCampaign ? "Yes" : "No", 
+        hydration?.sessions?.length || 0, 
+        targetPopulationTotal * 2,
+        reqCarriers, 
+        availableCarriers, 
+        carrierShortage,
+        reqColdBoxes,
+        availableColdBoxes,
+        coldBoxShortage
+      ];
+
+      const ccInventoryHeaders = [
+        "", // blank column spacer
+        "Equipment Type", "Brand", "Model", "Serial Number", "Catalog Number", "Capacity (L)", "Power Source", "Condition", "Status"
+      ];
+      
+      const ccInventoryRows = (dbColdChain || []).map((e: any) => [
+        "", // spacer
+        e.equipmentType || "—",
+        e.brand || "—",
+        e.model || "—",
+        e.serialNumber || "—",
+        e.catalogNumber || "—",
+        e.capacityLiters || "—",
+        e.powerSource || "—",
+        e.condition || "—",
+        e.isActive ? "Active" : "Inactive"
+      ]);
+
+      const ccData = [
+        ccHeaders,
+        ccSummaryRow,
+        [],
+        ["FACILITY COLD CHAIN EQUIPMENT ROSTER"],
+        ccInventoryHeaders,
+        ...ccInventoryRows.length ? ccInventoryRows : [["", "No cold chain equipment registered in database.", "", "", "", "", "", "", "", ""]]
+      ];
+      const wsColdChain = XLSX.utils.aoa_to_sheet(ccData);
       XLSX.utils.book_append_sheet(wb, wsColdChain, "5.0 Cold Chain");
 
       // Sheet 6: ACSM Mapping
@@ -473,10 +572,29 @@ export default function MicroplanPrintView() {
       const acsmPlanHeaders = [
         "ACSM Activity Description", "Target Audience", "Scheduled Date", "Responsible Person / Focal", "Beneficiaries Estimated", "Completion Status"
       ];
-      const acsmPlanRows = (hydration?.mobilization || []).map(m => [
-        m.activityType, m.targetAudience || "—", m.scheduledDate ? new Date(m.scheduledDate).toLocaleDateString() : "—",
-        m.targetAudience || "—", m.estimatedAttendance || 0, m.status || "Planned"
-      ]);
+      const acsmPlanRows = (hydration?.mobilization || []).map(m => {
+        const desc = m.description || "";
+        const focalMatch = desc.match(/focal:\s*([^;]*?)\s*([\d+\-\s]*)?;/);
+        let focalPoint = "—";
+        if (focalMatch) {
+          const inner = focalMatch[0].replace(/^focal:\s*/, "").replace(/;$/, "");
+          const parts = inner.trim().split(/\s+/);
+          const last = parts[parts.length - 1] ?? "";
+          if (/^[\d+\-]+$/.test(last) && parts.length > 1) {
+            focalPoint = parts.slice(0, -1).join(" ");
+          } else {
+            focalPoint = inner.trim();
+          }
+        }
+        return [
+          m.activityType || "—",
+          m.targetAudience || "—",
+          m.scheduledDate ? new Date(m.scheduledDate).toLocaleDateString() : "—",
+          focalPoint,
+          m.estimatedAttendance || 0,
+          m.status || "Planned"
+        ];
+      });
       const wsAcsmPlan = XLSX.utils.aoa_to_sheet([acsmPlanHeaders, ...acsmPlanRows.length ? acsmPlanRows : [["—", "—", "—", "—", "—", "—"]]]);
       XLSX.utils.book_append_sheet(wb, wsAcsmPlan, "6.1 ACSM Plan");
 
@@ -504,21 +622,31 @@ export default function MicroplanPrintView() {
       const hfcHeaders = [
         "Committee Position", "Member Name", "Gender", "Phone Number", "Years of Service"
       ];
-      const hfcRows = [
-        ["Chairperson", "Community Chairperson", "Male", "—", "3 years"],
-        ["Secretary", "Facility Nurse In-Charge", "Female", "—", "2 years"],
-        ["Member", "Traditional Leader", "Male", "—", "5 years"],
-      ];
-      const wsHfc = XLSX.utils.aoa_to_sheet([hfcHeaders, ...hfcRows]);
+      const hfcRows = (hfcMembers || []).map((m: any) => [
+        m.isChairperson ? `${m.position} (Chairperson)` : m.position,
+        m.memberName,
+        m.gender || "—",
+        m.contactPhone || "—",
+        m.yearsOfService != null ? `${m.yearsOfService} years` : "—"
+      ]);
+      const wsHfc = XLSX.utils.aoa_to_sheet([hfcHeaders, ...hfcRows.length ? hfcRows : [["—", "No HFC members registered in database.", "—", "—", "—"]]]);
       XLSX.utils.book_append_sheet(wb, wsHfc, "9.0 HFC Board");
 
       // Sheet 10: Community Health Volunteers (CHV) Profile
       const chvHeaders = [
         "CHV Name", "Gender", "Residence Village", "Education Level", "Training Status", "Assigned SIA Role"
       ];
-      const chvRows = (staffProfile || []).filter((s: any) => s.position?.toLowerCase().includes("volunteer") || s.campaignRole?.toLowerCase().includes("volunteer") || s.campaignRole?.toLowerCase().includes("mobilizer")).map((s: any) => [
-        s.name, s.gender || "—", s.village || "Catchment", "High School", "Certified / Trained", s.campaignRole || "Volunteer Mobilizer"
-      ]);
+      const chvRows = (chvProfiles || []).map((c: any) => {
+        const vMatch = villages?.find((v) => v.id === c.villageId);
+        return [
+          c.name || "—",
+          c.gender || "—",
+          vMatch?.name || "Catchment",
+          c.educationLevel || "—",
+          c.trainingStatus || "—",
+          c.campaignRole || "—"
+        ];
+      });
       const wsChv = XLSX.utils.aoa_to_sheet([chvHeaders, ...chvRows.length ? chvRows : [["—", "—", "—", "—", "—", "—"]]]);
       XLSX.utils.book_append_sheet(wb, wsChv, "10.0 CHV Profile");
 
@@ -1017,6 +1145,79 @@ export default function MicroplanPrintView() {
           </div>
         </div>
 
+        {/* Section 5b: Cold Chain Sizing & Inventory */}
+        <div className="print-page-break space-y-3">
+          <h3 className="text-base font-bold border-b pb-1 text-slate-800 flex items-center gap-1.5">
+            <Layers className="h-5 w-5 text-primary" /> 4c. Cold Chain Capacity & Equipment Inventory
+          </h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 print:grid-cols-2">
+            <div className="border rounded-xl p-4 bg-slate-50/50 print:bg-white print:border-black space-y-2">
+              <h4 className="text-xs font-bold text-slate-700 uppercase mb-2 print:text-black">Required vs Available Sizing</h4>
+              <table className="w-full text-xs border border-collapse print-table">
+                <thead>
+                  <tr className="bg-slate-100 print:bg-slate-200">
+                    <th className="p-1.5 border font-semibold">Equipment Type</th>
+                    <th className="p-1.5 border font-semibold text-center">Required (wizard)</th>
+                    <th className="p-1.5 border font-semibold text-center">Available (inventory)</th>
+                    <th className="p-1.5 border font-semibold text-center">Shortage</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr className="border-b">
+                    <td className="p-1.5 border font-medium">Cold Boxes</td>
+                    <td className="p-1.5 border text-center font-mono">{reqColdBoxes}</td>
+                    <td className="p-1.5 border text-center font-mono">{availableColdBoxes}</td>
+                    <td className="p-1.5 border text-center font-mono font-bold text-red-600">
+                      {Math.max(0, reqColdBoxes - availableColdBoxes)}
+                    </td>
+                  </tr>
+                  <tr className="border-b">
+                    <td className="p-1.5 border font-medium">Vaccine Carriers</td>
+                    <td className="p-1.5 border text-center font-mono">{reqCarriers}</td>
+                    <td className="p-1.5 border text-center font-mono">{availableCarriers}</td>
+                    <td className="p-1.5 border text-center font-mono font-bold text-red-600">
+                      {Math.max(0, reqCarriers - availableCarriers)}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div className="border rounded-xl p-4 bg-slate-50/50 print:bg-white print:border-black space-y-2">
+              <h4 className="text-xs font-bold text-slate-700 uppercase mb-2 print:text-black">Active Facility Cold Chain Roster</h4>
+              <table className="w-full text-[10px] border border-collapse print-table">
+                <thead>
+                  <tr className="bg-slate-100 print:bg-slate-200">
+                    <th className="p-1.5 border font-semibold">Classification</th>
+                    <th className="p-1.5 border font-semibold">Brand / Model</th>
+                    <th className="p-1.5 border font-semibold">Condition</th>
+                    <th className="p-1.5 border font-semibold text-center">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {dbColdChain.length === 0 ? (
+                    <tr>
+                      <td colSpan={4} className="p-4 text-center text-muted-foreground">No cold chain equipment registered in database.</td>
+                    </tr>
+                  ) : (
+                    dbColdChain.map((e: any) => (
+                      <tr key={e.id} className="border-b hover:bg-slate-50/50">
+                        <td className="p-1.5 border capitalize">{e.equipmentType?.replace("_", " ") || "—"}</td>
+                        <td className="p-1.5 border">{e.brand || "—"} &middot; {e.model || "—"}</td>
+                        <td className="p-1.5 border capitalize">{e.condition || "—"}</td>
+                        <td className="p-1.5 border text-center">
+                          <Badge variant="outline" className={`text-[9px] px-1 py-0.2 ${e.isActive ? "bg-emerald-50 text-emerald-700 border-emerald-300" : "bg-slate-100 text-slate-600"}`}>
+                            {e.isActive ? "Active" : "Inactive"}
+                          </Badge>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
         {/* Section 6: Budget Allocation */}
         <div className="print-page-break space-y-3">
           <h3 className="text-base font-bold border-b pb-1 text-slate-800 flex items-center gap-1.5">
@@ -1064,6 +1265,122 @@ export default function MicroplanPrintView() {
           </table>
         </div>
 
+        {/* Section 6b: Transport & Logistics Plan */}
+        <div className="print-page-break space-y-3">
+          <h3 className="text-base font-bold border-b pb-1 text-slate-800 flex items-center gap-1.5">
+            <Truck className="h-5 w-5 text-primary" /> 5b. Transport & Logistics Plan
+          </h3>
+          <table className="w-full text-left text-xs border print-table border-collapse">
+            <thead>
+              <tr className="bg-slate-100 border-b print:bg-slate-200">
+                <th className="p-2 font-bold border">Session site / Destination</th>
+                <th className="p-2 font-bold border">Transport Mode</th>
+                <th className="p-2 font-bold border">Vehicle details</th>
+                <th className="p-2 font-bold border text-right">Distance (km)</th>
+                <th className="p-2 font-bold border text-right">Estimated Fuel (L)</th>
+                <th className="p-2 font-bold border text-center">Security Cleared</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(!hydration?.sessions || hydration.sessions.length === 0) ? (
+                <tr>
+                  <td colSpan={6} className="p-4 text-center text-muted-foreground">No transport details available.</td>
+                </tr>
+              ) : (
+                hydration.sessions.map((s) => {
+                  const dp = hydration.sessionDayPlans?.find((p) => p.sessionPlanId === s.id);
+                  const mode = dp?.transportType || "road";
+                  const distance = dp?.distanceKm != null ? `${dp.distanceKm} km` : "—";
+                  const fuel = dp?.fuelLiters != null ? `${dp.fuelLiters} L` : "—";
+                  const notes = dp?.executionNotes || "";
+                  const vehicleMatch = notes.match(/vehicle:([^;]+)/);
+                  const vehicle = vehicleMatch ? vehicleMatch[1].trim() : "—";
+                  const isCleared = /security_cleared/.test(notes);
+
+                  return (
+                    <tr key={s.id} className="border-b hover:bg-slate-50/50">
+                      <td className="p-2 border font-medium">{s.name}</td>
+                      <td className="p-2 border capitalize">{mode}</td>
+                      <td className="p-2 border">{vehicle}</td>
+                      <td className="p-2 border text-right font-mono">{distance}</td>
+                      <td className="p-2 border text-right font-mono">{fuel}</td>
+                      <td className="p-2 border text-center">
+                        {isCleared ? (
+                          <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-300 text-[10px]">Cleared</Badge>
+                        ) : (
+                          <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-300 text-[10px]">Pending</Badge>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Section 6c: Social Mobilization Plan */}
+        <div className="print-page-break space-y-3">
+          <h3 className="text-base font-bold border-b pb-1 text-slate-800 flex items-center gap-1.5">
+            <MessageSquare className="h-5 w-5 text-primary" /> 5c. Social Mobilization & Community Engagement
+          </h3>
+          <table className="w-full text-left text-xs border print-table border-collapse">
+            <thead>
+              <tr className="bg-slate-100 border-b print:bg-slate-200">
+                <th className="p-2 font-bold border">ACSM Activity Type</th>
+                <th className="p-2 font-bold border">Session / Location Details</th>
+                <th className="p-2 font-bold border">Focal Person</th>
+                <th className="p-2 font-bold border">Focal Phone</th>
+                <th className="p-2 font-bold border">IEC Materials Checklist</th>
+                <th className="p-2 font-bold border text-center">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(!hydration?.mobilization || hydration.mobilization.length === 0) ? (
+                <tr>
+                  <td colSpan={6} className="p-4 text-center text-muted-foreground">No community mobilization activities planned.</td>
+                </tr>
+              ) : (
+                hydration.mobilization.map((m) => {
+                  const desc = m.description || "";
+                  const focalMatch = desc.match(/focal:\s*([^;]*?)\s*([\d+\-\s]*)?;/);
+                  const iecMatch = desc.match(/IEC:\s*(.*)$/);
+                  let focalPoint = "—";
+                  let focalPhone = "—";
+                  if (focalMatch) {
+                    const inner = focalMatch[0].replace(/^focal:\s*/, "").replace(/;$/, "");
+                    const parts = inner.trim().split(/\s+/);
+                    const last = parts[parts.length - 1] ?? "";
+                    if (/^[\d+\-]+$/.test(last) && parts.length > 1) {
+                      focalPhone = last;
+                      focalPoint = parts.slice(0, -1).join(" ");
+                    } else {
+                      focalPoint = inner.trim();
+                    }
+                  }
+                  const iec = iecMatch ? iecMatch[1].trim() : "—";
+                  const trimmedDesc = desc.replace(/^.*?—\s*/, "");
+
+                  return (
+                    <tr key={m.id} className="border-b hover:bg-slate-50/50">
+                      <td className="p-2 border font-medium capitalize">{m.activityType?.replace("_", " ")}</td>
+                      <td className="p-2 border">{trimmedDesc || desc}</td>
+                      <td className="p-2 border">{focalPoint}</td>
+                      <td className="p-2 border font-mono">{focalPhone}</td>
+                      <td className="p-2 border">{iec}</td>
+                      <td className="p-2 border text-center capitalize">
+                        <Badge variant="outline" className={`text-[10px] ${m.status === "completed" ? "bg-emerald-50 text-emerald-700" : "bg-slate-50 text-slate-700"}`}>
+                          {m.status || "Planned"}
+                        </Badge>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+
         {/* Section 7: Supervision Plan */}
         <div className="print-page-break space-y-3">
           <h3 className="text-base font-bold border-b pb-1 text-slate-800 flex items-center gap-1.5">
@@ -1096,6 +1413,93 @@ export default function MicroplanPrintView() {
                     <td className="p-2 border">{v.followUp}</td>
                   </tr>
                 ))
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Section 7b: Health Facility Committee (HFC) Governance Board */}
+        <div className="print-page-break space-y-3">
+          <h3 className="text-base font-bold border-b pb-1 text-slate-800 flex items-center gap-1.5">
+            <UsersIcon className="h-5 w-5 text-primary" /> 6b. Health Facility Governance Board (HFC Committee)
+          </h3>
+          <table className="w-full text-left text-xs border print-table border-collapse">
+            <thead>
+              <tr className="bg-slate-100 border-b print:bg-slate-200">
+                <th className="p-2 font-bold border">Committee Position</th>
+                <th className="p-2 font-bold border">Member Name</th>
+                <th className="p-2 font-bold border">Gender</th>
+                <th className="p-2 font-bold border">Contact Phone Number</th>
+                <th className="p-2 font-bold border text-right">Years of Service</th>
+                <th className="p-2 font-bold border text-center">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {hfcMembers.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="p-4 text-center text-muted-foreground">No HFC governance board members registered in database.</td>
+                </tr>
+              ) : (
+                hfcMembers.map((m: any) => (
+                  <tr key={m.id} className="border-b hover:bg-slate-50/50">
+                    <td className="p-2 border font-medium capitalize">{m.isChairperson ? `${m.position} (Chairperson)` : m.position}</td>
+                    <td className="p-2 border">{m.memberName}</td>
+                    <td className="p-2 border capitalize">{m.gender || "—"}</td>
+                    <td className="p-2 border font-mono">{m.contactPhone || "—"}</td>
+                    <td className="p-2 border text-right font-mono">{m.yearsOfService != null ? `${m.yearsOfService} yrs` : "—"}</td>
+                    <td className="p-2 border text-center">
+                      <Badge variant="outline" className={`text-[10px] ${m.isActive === false ? "bg-slate-100 text-slate-600" : "bg-emerald-50 text-emerald-700"}`}>
+                        {m.isActive === false ? "Inactive" : "Active"}
+                      </Badge>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Section 7c: Community Health Volunteers (CHV) Profiles */}
+        <div className="print-page-break space-y-3">
+          <h3 className="text-base font-bold border-b pb-1 text-slate-800 flex items-center gap-1.5">
+            <UsersIcon className="h-5 w-5 text-primary" /> 6c. Community Health Volunteers (CHV) Roster
+          </h3>
+          <table className="w-full text-left text-xs border print-table border-collapse">
+            <thead>
+              <tr className="bg-slate-100 border-b print:bg-slate-200">
+                <th className="p-2 font-bold border">CHV Name</th>
+                <th className="p-2 font-bold border">Gender</th>
+                <th className="p-2 font-bold border">Residence Village</th>
+                <th className="p-2 font-bold border">Education Level</th>
+                <th className="p-2 font-bold border">Assigned Campaign/RI Role</th>
+                <th className="p-2 font-bold border">Training Status</th>
+                <th className="p-2 font-bold border text-center">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {chvProfiles.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="p-4 text-center text-muted-foreground">No community health volunteers registered in database.</td>
+                </tr>
+              ) : (
+                chvProfiles.map((c: any) => {
+                  const vMatch = villages?.find((v) => v.id === c.villageId);
+                  return (
+                    <tr key={c.id} className="border-b hover:bg-slate-50/50">
+                      <td className="p-2 border font-medium">{c.name}</td>
+                      <td className="p-2 border capitalize">{c.gender || "—"}</td>
+                      <td className="p-2 border">{vMatch?.name || "Catchment"}</td>
+                      <td className="p-2 border capitalize">{c.educationLevel || "—"}</td>
+                      <td className="p-2 border capitalize">{c.campaignRole || "—"}</td>
+                      <td className="p-2 border capitalize">{c.trainingStatus || "—"}</td>
+                      <td className="p-2 border text-center">
+                        <Badge variant="outline" className={`text-[10px] ${c.active === false ? "bg-slate-100 text-slate-600" : "bg-emerald-50 text-emerald-700"}`}>
+                          {c.active === false ? "Inactive" : "Active"}
+                        </Badge>
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>

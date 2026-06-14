@@ -48,6 +48,9 @@ import {
   Activity,
   Search,
   Home,
+  Building,
+  Hospital,
+  Bell,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { useQuery } from "@tanstack/react-query";
@@ -62,12 +65,11 @@ interface AppSidebarProps {
 
 const mainNavItems = [
   { title: "Dashboard", path: "/", icon: LayoutDashboard },
-  /* Commented out duplicate "Microplan Flow" to keep only "Routine Microplan" under Planning / "Microplan" under SIA:
-  { title: "Microplan Flow", path: "/flow", icon: Sparkles },
-  */
   { title: "Map View", path: "/map", icon: Map },
-  { title: "Settlement Intel", path: "/settlement-intelligence", icon: Globe },
-  { title: "Facilities", path: "/facilities", icon: Building2 },
+  { title: "Settlements", path: "/settlements", icon: Building },
+  { title: "Facilities", path: "/facilities", icon: Hospital },
+  { title: "Recommendations", path: "/vgie/recommendations", icon: ClipboardList },
+  { title: "Alerts", path: "/vgie/alerts", icon: Bell },
   { title: "Population Hub", path: "/population", icon: Users },
   { title: "Client Logbook", path: "/clients", icon: ClipboardList },
   { title: "Defaulter List", path: "/clients/defaulters", icon: AlertTriangle },
@@ -112,6 +114,8 @@ const siaNavItems = [
 const workflowNavItems = [
   { title: "Approvals", path: "/approvals", icon: CheckCircle },
 ];
+
+
 
 const adminNavItems = [
   { title: "User Management", path: "/admin/users", icon: Users },
@@ -223,8 +227,9 @@ export function AppSidebar({ user }: AppSidebarProps) {
   const canAccessApprovals = ["district_manager", "provincial_coordinator", "national_admin"].includes(user.role || "");
   const isNationalAdmin = user.role === "national_admin";
   const isPlatformAdmin = (user as any).isPlatformAdmin === true;
+  const isFacilityStaff = user.role === "facility_clerk" || user.role === "facility_in_charge" || user.role === "facility_partner";
   const canAccessHis = user.role === "national_admin" || user.role === "gis_specialist";
-  const canAccessAdmin = isNationalAdmin || user.role === "provincial_coordinator" || isPlatformAdmin;
+  const canAccessAdmin = isNationalAdmin || user.role === "provincial_coordinator" || user.role === "district_manager" || isPlatformAdmin;
   const canEditWiki = isNationalAdmin || user.role === "gis_specialist" || isPlatformAdmin;
   const canReconcile = user.role === "national_admin" || user.role === "district_manager";
   // Field Teams page is available to district_manager and above (not facility-level roles)
@@ -273,6 +278,7 @@ export function AppSidebar({ user }: AppSidebarProps) {
   const visibleSystemNavItems = systemNavItems
     .filter((item) => !(item as any).reconcileOnly || canReconcile)
     .filter((item) => {
+      if (item.path === "/api-reference" && isFacilityStaff) return false;
       if (item.path === "/supervision") return modules.supervision !== false;
       return true;
     });
@@ -373,6 +379,8 @@ export function AppSidebar({ user }: AppSidebarProps) {
             </SidebarMenu>
           </CollapsibleSection>
         )}
+
+
 
         {/* Analytics — visible to all authenticated roles (RBAC scoping happens server-side) */}
         <CollapsibleSection

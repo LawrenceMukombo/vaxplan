@@ -17,6 +17,8 @@ import {
 } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
+import MarkerClusterGroup from "react-leaflet-cluster";
+import { useTheme } from "next-themes";
 // georaster is dynamically imported inside the raster-loading effect below
 // to keep the ~500KB gzipped vendor chunk out of the initial map bundle.
 // GeoRasterLayer is also dynamically imported there.
@@ -70,7 +72,11 @@ import {
   Calendar,
   AlertTriangle,
   Plus,
+  Bell,
+  ClipboardList,
 } from "lucide-react";
+import { MapAlertsPanel } from "./MapAlertsPanel";
+import { MapRecommendationsPanel } from "./MapRecommendationsPanel";
 import type { Facility, Village, FacilityCatchment } from "@shared/schema";
 import { getMinScheduleDateInputValue } from "@shared/schedulingDates";
 import { deriveSessionLifecycle } from "@/lib/sessionStatus";
@@ -190,6 +196,28 @@ const getBoundaryStyle = (adminLevel: number, mode?: string) => {
   };
 };
 
+const createFacilityClusterIcon = function (cluster: any) {
+  const count = cluster.getChildCount();
+  const size = count > 100 ? 40 : count > 50 ? 34 : count > 10 ? 28 : 22;
+  return L.divIcon({
+    html: `<div style="width:${size}px;height:${size}px;background:rgba(59,130,246,0.85);border:2px solid rgba(147,197,253,0.6);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:${count > 99 ? 9 : 11}px;font-weight:700;color:#fff;box-shadow:0 2px 8px rgba(59,130,246,0.4);">${count}</div>`,
+    className: "",
+    iconSize: [size, size],
+    iconAnchor: [size / 2, size / 2],
+  });
+};
+
+const createVillageClusterIcon = function (cluster: any) {
+  const count = cluster.getChildCount();
+  const size = count > 100 ? 44 : count > 50 ? 38 : count > 20 ? 32 : 26;
+  return L.divIcon({
+    html: `<div style="width:${size}px;height:${size}px;background:rgba(16,185,129,0.85);border:2px solid rgba(255,255,255,0.4);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:${count > 99 ? 10 : 12}px;font-weight:700;color:#fff;box-shadow:0 2px 8px rgba(0,0,0,0.5);">${count}</div>`,
+    className: "",
+    iconSize: [size, size],
+    iconAnchor: [size / 2, size / 2],
+  });
+};
+
 /* Original Image/CDN Based Map Marker Icons:
 const facilityIcon = new L.Icon({
   iconUrl: "https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-blue.png",
@@ -269,8 +297,8 @@ interface MapControlsProps {
   onZoomIn: () => void;
   onZoomOut: () => void;
   onLocate: () => void;
-  basemap?: "osm" | "satellite";
-  onBasemapChange?: (basemap: "osm" | "satellite") => void;
+  basemap?: "osm" | "satellite" | "carto";
+  onBasemapChange?: (basemap: "osm" | "satellite" | "carto") => void;
 }
 
 function MapControls({ onZoomIn, onZoomOut, onLocate, basemap, onBasemapChange }: MapControlsProps) {
@@ -711,8 +739,8 @@ interface LayerPanelProps {
   onToggle: () => void;
   layers: MapOverlayLayers;
   onLayerToggle: (layer: keyof MapOverlayLayers) => void;
-  basemap: "osm" | "satellite";
-  onBasemapChange: (basemap: "osm" | "satellite") => void;
+  basemap: "osm" | "satellite" | "carto";
+  onBasemapChange: (basemap: "osm" | "satellite" | "carto") => void;
   boundaryList?: Array<{ id: string; adminLevel: number; levelName: string; isActive: boolean }>;
   countryCode?: string;
   adminLabels?: { level1: string; level2: string; level3: string; level4: string };
@@ -1777,6 +1805,7 @@ export function MapView({
   mode = "planning",
 }: MapViewProps) {
   const { user } = useAuth();
+  const { theme, systemTheme } = useTheme();
   const [, setLocation] = useLocation();
   const mapRef = useRef<L.Map>(null);
   const markerRefs = useRef<Record<number, L.Marker | null>>({});
@@ -1821,9 +1850,20 @@ export function MapView({
     density: number;
     areaPopulation: number;
     areaRadiusKm: number;
+    pop1k: number;
+    pop2k: number;
+    pop3k: number;
+    polygonName: string;
+    polygonType: string;
+    polygonPopulation: number;
     nearestFacility: { id: number; name: string; distance: number } | null;
     nearestPlan: { id: number; name: string; distance: number } | null;
-    nearestVillage?: { id: number; name: string; population: number; distance: number } | null;
+    nearestVillage: { id: number; name: string; population: number; distance: number; isHardToReach: boolean } | null;
+    nearbyFacilities: { id: number; name: string; distance: number }[];
+    nearbyPlans: { id: number; name: string; distance: number }[];
+    nearbyVillages: { id: number; name: string; population: number; distance: number; isHardToReach: boolean }[];
+    isHTR: boolean;
+    isLoadingPopulation?: boolean;
   } | null>(null);
 
   // Outreach Post Configuration States
@@ -2238,17 +2278,41 @@ export function MapView({
   const [panelVis, setPanelVis] = useState(() => {
     const mobile = typeof window !== "undefined" && window.innerWidth < 768;
     return {
-      layers: !mobile,
-      filters: !mobile,
-      facilities: !mobile,
-      checklist: !mobile,
+      layers: false,
+      filters: false,
+      facilities: false,
+      checklist: false,
       legend: !mobile,
       tools: !mobile,
+      alerts: false,
+      recommendations: false,
     };
   });
   type PanelKey = keyof typeof panelVis;
-  const togglePanel = (key: PanelKey) =>
-    setPanelVis((prev) => ({ ...prev, [key]: !prev[key] }));
+  const togglePanel = (key: PanelKey) => {
+    setPanelVis((prev) => {
+      const next = { ...prev, [key]: !prev[key] };
+      // Smart Auto-Collapse logic
+      if (next[key]) {
+        // Group 1: Left panels
+        if (['layers', 'filters'].includes(key)) {
+          ['layers', 'filters'].forEach((k) => {
+             if (k !== key) next[k as PanelKey] = false;
+          });
+        }
+        // Group 2: Right panels
+        if (['facilities', 'checklist', 'alerts', 'recommendations'].includes(key)) {
+          ['facilities', 'checklist', 'alerts', 'recommendations'].forEach((k) => {
+             if (k !== key) next[k as PanelKey] = false;
+          });
+        }
+      }
+      return next;
+    });
+  };
+
+  const [alertsExpanded, setAlertsExpanded] = useState(true);
+  const [recommendationsExpanded, setRecommendationsExpanded] = useState(true);
 
   // States to keep track of active zoom level and conditionally hide village markers
   const [currentZoom, setCurrentZoom] = useState(zoom);
@@ -3041,6 +3105,26 @@ export function MapView({
     });
   }, [villages, selectedProvinceId, selectedDistrictId, selectedLlgId, searchQuery, villageCategory, districtLookup, llgLookup]);
 
+  const filteredUnservedPlaces = useMemo(() => {
+    if (mode === "surveillance") return [];
+    return unservedPlaces.filter((p: any) => {
+      if (selectedProvinceId !== "all") {
+        if (districtLookup.size === 0) return true;
+        const dist = districtLookup.get(Number(p.districtId));
+        if (!dist || Number(dist.provinceId) !== Number(selectedProvinceId)) return false;
+      }
+      if (selectedDistrictId !== "all" && Number(p.districtId) !== Number(selectedDistrictId)) return false;
+      if (searchQuery.trim()) {
+        const query = searchQuery.toLowerCase().trim();
+        const matchesName = p.name?.toLowerCase().includes(query);
+        if (!matchesName) return false;
+      }
+      if (villageCategory === "htr" && !p.isHardToReach) return false;
+      if (villageCategory === "standard" && p.isHardToReach) return false;
+      return true;
+    });
+  }, [unservedPlaces, selectedProvinceId, selectedDistrictId, searchQuery, villageCategory, districtLookup, mode]);
+
   // Updated Code: Relocated and upgraded to bypass zoom gating completely if the total number of filtered villages is small (< 500),
   // preventing hidden elements on initial load for low-count country datasets (Zambia, SSD, etc.) while still protecting performance on massive ones.
   const showVillageMarkers = useMemo(() => {
@@ -3122,10 +3206,10 @@ export function MapView({
       else sessionPlanned++;
       if (lc.isOverdue) sessionOverdue++;
     }
-    const unserved = (unservedPlaces as any[]).length;
+    const unserved = filteredUnservedPlaces.length;
 
     return { planned, missingStandard, missingHtr, total, coverage, sessionPlanned, sessionInProgress, sessionCompleted, sessionOverdue, unserved };
-  }, [filteredVillages, plannedVillageIds, sessionMapPins, unservedPlaces]);
+  }, [filteredVillages, plannedVillageIds, sessionMapPins, filteredUnservedPlaces]);
 
   /* Original visibleVillagesFiltered logic commented out to preserve backward compatibility and adhere to coding rules:
   const visibleVillagesFiltered = useMemo(() => {
@@ -4201,6 +4285,223 @@ export function MapView({
   }, [sessionPolygonPoints, newSessionType, villageSpatialIndex, georasterRef.current]);
 
   // Measurement & Catchment Drawing handlers
+  const calculateEnrichedContext = (lat: number, lng: number, density: number, clickedFeature?: any) => {
+    // 1. Get raster-based point populations at 1km, 2km, 3km
+    const pop1k = calculateRadiusPopulation(lat, lng, 1);
+    const pop2k = calculateRadiusPopulation(lat, lng, 2);
+    const pop3k = calculateRadiusPopulation(lat, lng, 3);
+
+    // 2. Identify the active administrative boundary clicked and estimate its population
+    let polygonName = "";
+    let polygonType = "";
+    let polygonPopulation = 0;
+
+    let matchedFeature = clickedFeature;
+    let matchedBoundaryInfo: any = null;
+
+    if (!matchedFeature && boundaryList && boundaryGeoJSONs) {
+      // Find containing polygon by ray casting
+      for (const b of boundaryList) {
+        const geojson = boundaryGeoJSONs[b.id];
+        if (!geojson || !geojson.features) continue;
+        for (const feature of geojson.features) {
+          if (feature.geometry) {
+            let inside = false;
+            if (feature.geometry.type === "Polygon") {
+              const ring = feature.geometry.coordinates[0].map((c: number[]) => L.latLng(c[1], c[0]));
+              inside = isPointInPolygon(lat, lng, ring);
+            } else if (feature.geometry.type === "MultiPolygon") {
+              for (const polyCoords of feature.geometry.coordinates) {
+                const ring = polyCoords[0].map((c: number[]) => L.latLng(c[1], c[0]));
+                if (isPointInPolygon(lat, lng, ring)) {
+                  inside = true;
+                  break;
+                }
+              }
+            }
+            if (inside) {
+              matchedFeature = feature;
+              matchedBoundaryInfo = b;
+              break;
+            }
+          }
+        }
+        if (matchedFeature) break;
+      }
+    }
+
+    if (matchedFeature) {
+      polygonName = matchedFeature.properties?.name ||
+        matchedFeature.properties?.NAME ||
+        matchedFeature.properties?.shapeName ||
+        matchedFeature.properties?.NAME_1 ||
+        matchedFeature.properties?.NAME_2 ||
+        matchedFeature.properties?.NAME_3 ||
+        "";
+      polygonType = matchedBoundaryInfo?.levelName || "Boundary";
+
+      // Calculate population inside this boundary
+      const sparse = getRasterSparse();
+      if (sparse) {
+        let minLat = Infinity, maxLat = -Infinity;
+        let minLng = Infinity, maxLng = -Infinity;
+        const coordinates = matchedFeature.geometry.type === "Polygon"
+          ? [matchedFeature.geometry.coordinates]
+          : matchedFeature.geometry.coordinates;
+
+        for (const poly of coordinates) {
+          for (const ring of poly) {
+            for (const pt of ring) {
+              if (pt[1] < minLat) minLat = pt[1];
+              if (pt[1] > maxLat) maxLat = pt[1];
+              if (pt[0] < minLng) minLng = pt[0];
+              if (pt[0] > maxLng) maxLng = pt[0];
+            }
+          }
+        }
+
+        const bbox = { minX: minLng, minY: minLat, maxX: maxLng, maxY: maxLat };
+        const candidates = sparse.tree.search(bbox);
+        const cells = sparse.cells;
+        
+        for (let i = 0; i < candidates.length; i++) {
+          const idx = candidates[i].idx * 3;
+          const cellLng = cells[idx];
+          const cellLat = cells[idx + 1];
+          const rawVal = cells[idx + 2];
+          
+          let inside = false;
+          if (matchedFeature.geometry.type === "Polygon") {
+            const ring = matchedFeature.geometry.coordinates[0].map((c: number[]) => L.latLng(c[1], c[0]));
+            inside = isPointInPolygon(cellLat, cellLng, ring);
+          } else if (matchedFeature.geometry.type === "MultiPolygon") {
+            for (const polyCoords of matchedFeature.geometry.coordinates) {
+              const ring = polyCoords[0].map((c: number[]) => L.latLng(c[1], c[0]));
+              if (isPointInPolygon(cellLat, cellLng, ring)) {
+                inside = true;
+                break;
+              }
+            }
+          }
+          if (inside) {
+            polygonPopulation += rawVal;
+          }
+        }
+      }
+    }
+
+    // 3. Find nearest health facilities (up to 3, within 15km)
+    const facilitiesWithDist = facilities
+      .map((f) => {
+        if (!f.latitude || !f.longitude) return null;
+        const dist = distance([lng, lat], [Number(f.longitude), Number(f.latitude)], { units: "kilometers" });
+        return { facility: f, distance: dist };
+      })
+      .filter((x): x is { facility: any; distance: number } => x !== null)
+      .sort((a, b) => a.distance - b.distance);
+    
+    const nearestFacility = facilitiesWithDist[0] || null;
+    const nearbyFacilities = facilitiesWithDist.slice(0, 3);
+
+    // 4. Find nearest planned sessions (up to 3, within 10km)
+    const plansWithDist = activeSessionPlans
+      .map((plan: any) => {
+        let planLat = 0;
+        let planLng = 0;
+        let count = 0;
+        
+        const linkedVillageIds = sessionVillages
+          ?.filter((sv: any) => sv.sessionId === plan.id)
+          ?.map((sv: any) => sv.villageId) || [];
+          
+        villages.forEach((v) => {
+          if (linkedVillageIds.includes(v.id) && v.latitude && v.longitude) {
+            planLat += Number(v.latitude);
+            planLng += Number(v.longitude);
+            count++;
+          }
+        });
+        
+        if (count > 0) {
+          const avgLat = planLat / count;
+          const avgLng = planLng / count;
+          const dist = distance([lng, lat], [avgLng, avgLat], { units: "kilometers" });
+          return { plan, distance: dist };
+        }
+        return null;
+      })
+      .filter((x): x is { plan: any; distance: number } => x !== null)
+      .sort((a, b) => a.distance - b.distance);
+      
+    const nearestPlan = plansWithDist[0] || null;
+    const nearbyPlans = plansWithDist.slice(0, 3);
+
+    // 5. Find nearest database villages/communities (up to 3, within 10km)
+    const villagesWithDist = villages
+      .map((v) => {
+        if (!v.latitude || !v.longitude) return null;
+        const dist = distance([lng, lat], [Number(v.longitude), Number(v.latitude)], { units: "kilometers" });
+        return { village: v, distance: dist };
+      })
+      .filter((x): x is { village: any; distance: number } => x !== null)
+      .sort((a, b) => a.distance - b.distance);
+
+    const nearestVillage = villagesWithDist[0] || null;
+    const nearbyVillages = villagesWithDist.slice(0, 3);
+
+    const isPointHTR = (nearestVillage?.village.isHardToReach) || (nearestFacility && nearestFacility.distance > 5.0);
+
+    return {
+      lat: parseFloat(lat.toFixed(6)),
+      lng: parseFloat(lng.toFixed(6)),
+      density,
+      areaRadiusKm: 1,
+      areaPopulation: Math.round(pop1k),
+      pop1k: Math.round(pop1k),
+      pop2k: Math.round(pop2k),
+      pop3k: Math.round(pop3k),
+      polygonName,
+      polygonType,
+      polygonPopulation: Math.round(polygonPopulation),
+      nearestFacility: nearestFacility ? {
+        id: nearestFacility.facility.id,
+        name: nearestFacility.facility.name,
+        distance: parseFloat(nearestFacility.distance.toFixed(2))
+      } : null,
+      nearestPlan: nearestPlan ? {
+        id: nearestPlan.plan.id,
+        name: nearestPlan.plan.name,
+        distance: parseFloat(nearestPlan.distance.toFixed(2))
+      } : null,
+      nearestVillage: nearestVillage ? {
+        id: nearestVillage.village.id,
+        name: nearestVillage.village.name,
+        population: nearestVillage.village.population || 0,
+        distance: parseFloat(nearestVillage.distance.toFixed(2)),
+        isHardToReach: nearestVillage.village.isHardToReach || false
+      } : null,
+      nearbyFacilities: nearbyFacilities.map(nf => ({
+        id: nf.facility.id,
+        name: nf.facility.name,
+        distance: parseFloat(nf.distance.toFixed(2))
+      })),
+      nearbyPlans: nearbyPlans.map(np => ({
+        id: np.plan.id,
+        name: np.plan.name,
+        distance: parseFloat(np.distance.toFixed(2))
+      })),
+      nearbyVillages: nearbyVillages.map(nv => ({
+        id: nv.village.id,
+        name: nv.village.name,
+        population: nv.village.population || 0,
+        distance: parseFloat(nv.distance.toFixed(2)),
+        isHardToReach: nv.village.isHardToReach || false
+      })),
+      isHTR: !!isPointHTR,
+    };
+  };
+
+  // Measurement & Catchment Drawing handlers
   const handleMapClick = (e: L.LeafletMouseEvent) => {
     if (isPickingFromMap && pickingOutreachForVillage) {
       setOutreachLatInput(String(e.latlng.lat));
@@ -4240,101 +4541,62 @@ export function MapView({
         }
       }
 
-      // Find nearest Health Facility using Turf.js distance
-      let nearestFacility: Facility | null = null;
-      let minFacilityDist = Infinity;
-      facilities.forEach((f) => {
-        if (f.latitude && f.longitude) {
-          const dist = distance([lng, lat], [Number(f.longitude), Number(f.latitude)], { units: "kilometers" });
-          if (dist < minFacilityDist) {
-            minFacilityDist = dist;
-            nearestFacility = f;
-          }
-        }
-      });
-
-      // Find nearest Planned Session
-      let nearestPlan: any = null;
-      let minPlanDist = Infinity;
-      activeSessionPlans.forEach((plan: any) => {
-        // Average coordinates from linked villages
-        let planLat = 0;
-        let planLng = 0;
-        let count = 0;
-        
-        const linkedVillageIds = sessionVillages
-          ?.filter((sv: any) => sv.sessionId === plan.id)
-          ?.map((sv: any) => sv.villageId) || [];
-          
-        villages.forEach((v) => {
-          if (linkedVillageIds.includes(v.id) && v.latitude && v.longitude) {
-            planLat += Number(v.latitude);
-            planLng += Number(v.longitude);
-            count++;
-          }
-        });
-        
-        if (count > 0) {
-          const avgLat = planLat / count;
-          const avgLng = planLng / count;
-          const dist = distance([lng, lat], [avgLng, avgLat], { units: "kilometers" });
-          if (dist < minPlanDist) {
-            minPlanDist = dist;
-            nearestPlan = plan;
-          }
-        }
-      });
-
-      // Find nearest database Village using Turf.js distance
-      let nearestVillage: Village | null = null;
-      let minVillageDist = Infinity;
-      villages.forEach((v) => {
-        if (v.latitude && v.longitude) {
-          const dist = distance([lng, lat], [Number(v.longitude), Number(v.latitude)], { units: "kilometers" });
-          if (dist < minVillageDist) {
-            minVillageDist = dist;
-            nearestVillage = v;
-          }
-        }
-      });
-
-      // Convert the gridded density into a real headcount within a 1km radius
-      const areaRadiusKm = 1;
-      const areaPopulation = calculateRadiusPopulation(lat, lng, areaRadiusKm);
-
-      setMapClickDetails({
-        lat: parseFloat(lat.toFixed(6)),
-        lng: parseFloat(lng.toFixed(6)),
-        density,
-        areaPopulation,
-        areaRadiusKm,
-        nearestFacility: nearestFacility ? {
-          id: (nearestFacility as any).id,
-          name: (nearestFacility as any).name,
-          distance: parseFloat(minFacilityDist.toFixed(2))
-        } : null,
-        nearestPlan: nearestPlan ? {
-          id: nearestPlan.id,
-          name: nearestPlan.name,
-          distance: parseFloat(minPlanDist.toFixed(2))
-        } : null,
-        nearestVillage: nearestVillage ? {
-          id: (nearestVillage as any).id,
-          name: (nearestVillage as any).name,
-          population: (nearestVillage as any).population || 0,
-          distance: parseFloat(minVillageDist.toFixed(2))
-        } : null,
-      });
+      const enriched = calculateEnrichedContext(lat, lng, density, undefined);
+      setMapClickDetails(enriched);
 
       // Pre-select facility and default name
-      if (nearestFacility) {
-        setSelectedParentFacilityId((nearestFacility as any).id);
-        setNewSessionName(`Outreach Session Plan - ${(nearestFacility as any).name}`);
+      if (enriched.nearestFacility) {
+        setSelectedParentFacilityId(enriched.nearestFacility.id);
+        setNewSessionName(`Outreach Session Plan - ${enriched.nearestFacility.name}`);
       } else {
         setNewSessionName(`Outreach Session Plan`);
       }
 
       setClickDialogOpen(true);
+
+      // Asynchronous Fallback for radial population
+      if (density === 0) {
+        setMapClickDetails(prev => prev ? { ...prev, isLoadingPopulation: true } : prev);
+        
+        Promise.all([
+          fetch(`/api/population/worldpop-point?lat=${lat}&lng=${lng}&radiusKm=1`).then(r => r.json()).catch(() => ({ gridPop: 0 })),
+          fetch(`/api/population/worldpop-point?lat=${lat}&lng=${lng}&radiusKm=2`).then(r => r.json()).catch(() => ({ gridPop: 0 })),
+          fetch(`/api/population/worldpop-point?lat=${lat}&lng=${lng}&radiusKm=3`).then(r => r.json()).catch(() => ({ gridPop: 0 }))
+        ]).then(([r1, r2, r3]) => {
+          setMapClickDetails(prev => prev ? {
+            ...prev,
+            pop1k: r1.gridPop || 0,
+            pop2k: r2.gridPop || 0,
+            pop3k: r3.gridPop || 0,
+            isLoadingPopulation: false
+          } : prev);
+        }).catch(err => {
+          console.error("Async pop fetch failed", err);
+          setMapClickDetails(prev => prev ? { ...prev, isLoadingPopulation: false } : prev);
+        });
+      }
+
+      // Asynchronous Fallback for polygon population
+      if (enriched.polygonName && enriched.polygonPopulation === 0 && false) {
+        setMapClickDetails(prev => prev ? { ...prev, isLoadingPopulation: true } : prev);
+        fetch('/api/population/estimate-polygon', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ boundary: undefined })
+        })
+        .then(r => r.json())
+        .then(data => {
+          setMapClickDetails(prev => prev ? {
+            ...prev,
+            polygonPopulation: data.total || 0,
+            isLoadingPopulation: false
+          } : prev);
+        })
+        .catch(err => {
+          console.error("Async polygon pop fetch failed", err);
+          setMapClickDetails(prev => prev ? { ...prev, isLoadingPopulation: false } : prev);
+        });
+      }
     }
   };
 
@@ -4548,8 +4810,18 @@ export function MapView({
         ref={mapRef}
         zoomControl={false}
         maxZoom={22}
+        maxBounds={[[-18.5, 21.5], [-8.0, 34.0]]}
       >
-        {basemap === "osm" ? (
+        {basemap === "carto" ? (
+          <TileLayer
+            attribution='&copy; <a href="https://carto.com/attributions">CARTO</a>'
+            url={
+              (theme === "dark" || (theme === "system" && systemTheme === "dark"))
+                ? "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+                : "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
+            }
+          />
+        ) : basemap === "osm" ? (
           <TileLayer
             attribution={OSM_TILE_ATTRIBUTION}
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
@@ -5172,10 +5444,128 @@ export function MapView({
                     });
                     */
 
-                    // Updated Code: Listen to clicks to store coordinate before opening popup
+                    // Updated Code: Listen to clicks to store coordinate, compute gridded population/nearest HF, and update popup content dynamically before opening
+                    /* Original click handler commented out to support calculating and displaying gridded population, nearest HF, and coordinates inside the boundary popup:
                     layer.on({
                       click: (e: any) => {
                         currentLatLng = e.latlng;
+                      },
+                      mouseover: (e) => {
+                        const l = e.target;
+                        l.setStyle({
+                          color: "#3b82f6", // Royal blue highlight stroke
+                          weight: 3,
+                          fillColor: "#3b82f6", // Royal blue highlight fill
+                          fillOpacity: 0.2,
+                        });
+                      },
+                      mouseout: (e) => {
+                        const l = e.target;
+                        l.setStyle(getBoundaryStyle(b.adminLevel, mode)); // Restores exact level style dynamically
+                      },
+                    });
+                    */
+                    layer.on({
+                      click: (e: any) => {
+                        currentLatLng = e.latlng;
+
+                        const lat = e.latlng.lat;
+                        const lng = e.latlng.lng;
+
+                        let density = 0;
+                        if (georasterRef.current) {
+                          const gr = georasterRef.current;
+                          const col = Math.floor(((lng - gr.xmin) / (gr.xmax - gr.xmin)) * gr.width);
+                          const row = Math.floor(((gr.ymax - lat) / (gr.ymax - gr.ymin)) * gr.height);
+
+                          if (row >= 0 && row < gr.height && col >= 0 && col < gr.width) {
+                            const rawVal = gr.values[0][row][col];
+                            if (rawVal !== undefined && !isNaN(rawVal) && rawVal !== gr.noDataValue && rawVal > 0) {
+                              density = parseFloat(rawVal.toFixed(2));
+                            }
+                          }
+                        }
+
+                        const ctx = calculateEnrichedContext(lat, lng, density, feature);
+
+                        let infoDiv = container.querySelector(".boundary-popup-info");
+                        if (!infoDiv) {
+                          infoDiv = document.createElement("div");
+                          infoDiv.className = "boundary-popup-info border-t border-border/60 pt-2 mt-2 space-y-2 text-[10px]";
+                          container.insertBefore(infoDiv, buttonsDiv);
+                        }
+
+                        infoDiv.innerHTML = `
+                          <div class="space-y-2 text-[11px] leading-snug">
+                            <div class="bg-primary/5 border border-primary/10 rounded p-1.5 space-y-0.5">
+                              <div class="flex justify-between items-center text-[9px] text-muted-foreground">
+                                <span>📍 CLICK COORDINATES</span>
+                                <span class="font-mono">${lat.toFixed(5)}, ${lng.toFixed(5)}</span>
+                              </div>
+                              ${ctx.polygonName ? `
+                              <div class="text-[10px] font-bold text-primary flex justify-between items-center gap-1.5 mt-0.5">
+                                <span class="truncate">🗺️ ${ctx.polygonName}</span>
+                                ${ctx.polygonPopulation ? `<span class="text-emerald-600 font-bold shrink-0">≈ ${ctx.polygonPopulation.toLocaleString()} pop</span>` : ""}
+                              </div>
+                              ` : ""}
+                            </div>
+                            
+                            <div class="space-y-1">
+                              <span class="font-bold text-[9px] text-muted-foreground uppercase block">Aggressive Gridded Population</span>
+                              <div class="grid grid-cols-3 gap-1 text-center font-mono text-[10px]">
+                                <div class="bg-muted p-1 rounded">
+                                  <span class="text-[8px] text-muted-foreground block">1km</span>
+                                  <strong class="text-xs text-foreground">${ctx.pop1k.toLocaleString()}</strong>
+                                </div>
+                                <div class="bg-muted p-1 rounded">
+                                  <span class="text-[8px] text-muted-foreground block">2km</span>
+                                  <strong class="text-xs text-foreground">${ctx.pop2k.toLocaleString()}</strong>
+                                </div>
+                                <div class="bg-muted p-1 rounded">
+                                  <span class="text-[8px] text-muted-foreground block">3km</span>
+                                  <strong class="text-xs text-foreground">${ctx.pop3k.toLocaleString()}</strong>
+                                </div>
+                              </div>
+                            </div>
+
+                            <div class="space-y-1">
+                              <span class="font-bold text-[9px] text-muted-foreground uppercase block">Catchment Proximity</span>
+                              <div class="space-y-1 text-[10px]">
+                                <div class="flex justify-between items-center bg-muted/40 p-1 rounded px-1.5">
+                                  <span class="text-muted-foreground truncate max-w-[150px]">🏥 HF: ${ctx.nearestFacility?.name || "None"}</span>
+                                  <span class="font-mono font-bold shrink-0">${ctx.nearestFacility ? `${ctx.nearestFacility.distance}km` : "—"}</span>
+                                </div>
+                                <div class="flex justify-between items-center bg-muted/40 p-1 rounded px-1.5">
+                                  <span class="text-muted-foreground truncate max-w-[150px]">📅 Session: ${ctx.nearestPlan?.name || "None"}</span>
+                                  <span class="font-mono font-bold shrink-0">${ctx.nearestPlan ? `${ctx.nearestPlan.distance}km` : "—"}</span>
+                                </div>
+                              </div>
+                            </div>
+
+                            <div class="space-y-1">
+                              <span class="font-bold text-[9px] text-muted-foreground uppercase block">Nearby Communities</span>
+                              <div class="space-y-1 max-h-[70px] overflow-y-auto">
+                                ${ctx.nearbyVillages.length > 0 ? ctx.nearbyVillages.map(nv => `
+                                  <div class="flex justify-between items-center text-[10px] border-b border-border/40 pb-0.5 last:border-0">
+                                    <span class="truncate max-w-[110px] ${nv.isHardToReach ? 'text-amber-600 font-medium' : 'text-foreground'}">
+                                      🏡 ${nv.name} ${nv.isHardToReach ? '⚠️' : ''}
+                                    </span>
+                                    <span class="text-muted-foreground font-mono shrink-0">${nv.population} pop (${nv.distance}km)</span>
+                                  </div>
+                                `).join("") : `<p class="text-[9px] italic text-muted-foreground">No villages within 10km</p>`}
+                              </div>
+                            </div>
+
+                            ${ctx.isHTR ? `
+                            <div class="bg-amber-500/10 border border-amber-500/20 text-amber-700 rounded p-1.5 text-[9px] flex items-start gap-1 font-medium">
+                              <span>⚠️</span>
+                              <span>Hard-to-Reach (HTR) designated zone.</span>
+                            </div>
+                            ` : ""}
+                          </div>
+                        `;
+
+                        layer.setPopupContent(container);
                       },
                       mouseover: (e) => {
                         const l = e.target;
@@ -5443,10 +5833,11 @@ export function MapView({
             );
           })}
 
-        {layers.facilities &&
-          visibleFacilities
-            .filter((f) => f.latitude && f.longitude)
-            .map((facility) => (
+        {layers.facilities && (
+          <MarkerClusterGroup chunkedLoading maxClusterRadius={50} iconCreateFunction={createFacilityClusterIcon}>
+            {visibleFacilities
+              .filter((f) => f.latitude && f.longitude)
+              .map((facility) => (
               /* Original Code commented out for backward-compatibility:
               <Marker
                 key={`facility-${facility.id}`}
@@ -5662,6 +6053,8 @@ export function MapView({
                 </Popup>
               </Marker>
             ))}
+          </MarkerClusterGroup>
+        )}
 
         {/*
         // Original Code: Rendering thousands of villages without zoom-based pruning
@@ -5673,18 +6066,19 @@ export function MapView({
         {/* Updated Code: Village markers use visibleVillagesFiltered which already applies bounds-based
             pruning unconditionally. Removed the showVillageMarkers zoom-gate from the render condition
             so the toggle responds immediately when enabled, regardless of zoom level. */}
-        {layers.villages &&
-          (() => {
-            if (showVillageMarkers) return visibleVillagesFiltered;
-            if (selectedFacilityId && communityRoutes && communityRoutes.length > 0) {
-              const routedVillageIds = new Set(communityRoutes.map((r: any) => r.villageId));
-              return villages.filter((v) => routedVillageIds.has(v.id));
-            }
-            return [];
-          })()
-            .filter((v) => v.latitude && v.longitude)
-            .map((village) => (
-              <Marker
+        {layers.villages && (
+          <MarkerClusterGroup chunkedLoading maxClusterRadius={40} iconCreateFunction={createVillageClusterIcon}>
+            {(() => {
+              if (showVillageMarkers) return visibleVillagesFiltered;
+              if (selectedFacilityId && communityRoutes && communityRoutes.length > 0) {
+                const routedVillageIds = new Set(communityRoutes.map((r: any) => r.villageId));
+                return villages.filter((v) => routedVillageIds.has(v.id));
+              }
+              return [];
+            })()
+              .filter((v) => v.latitude && v.longitude)
+              .map((village) => (
+                <Marker
                 key={`village-${village.id}`}
                 position={[Number(village.latitude), Number(village.longitude)]}
                 icon={
@@ -5952,8 +6346,9 @@ export function MapView({
                   </div>
                 </Popup>
               </Marker>
-            ))
-          }
+            ))}
+          </MarkerClusterGroup>
+        )}
 
         {/* Render outreach posts and connecting dashed lines for villages that have them */}
         {layers.villages &&
@@ -6103,7 +6498,7 @@ export function MapView({
           })}
 
         {/* Task #47: Unserved populated places — red hatched ring marker. */}
-        {mode === "planning" && !hiddenCategories.has("unserved") && unservedPlaces
+        {mode === "planning" && !hiddenCategories.has("unserved") && filteredUnservedPlaces
           .filter((p: any) => p.latitude != null && p.longitude != null)
           .map((p: any) => (
             <CircleMarker
@@ -6504,6 +6899,8 @@ export function MapView({
           data-testid="map-panel-dock"
         >
           {[
+            { key: "alerts" as PanelKey, icon: Bell, label: "Alerts", show: mode === "planning" },
+            { key: "recommendations" as PanelKey, icon: ClipboardList, label: "Recommendations", show: mode === "planning" },
             { key: "layers" as PanelKey, icon: Layers, label: "Layers", show: true },
             { key: "filters" as PanelKey, icon: Filter, label: "Filters", show: mode === "planning" && showFacilityList },
             { key: "facilities" as PanelKey, icon: Building2, label: "Facilities", show: mode === "planning" && showFacilityList },
@@ -7382,6 +7779,42 @@ export function MapView({
         </div>
       )}
 
+      {/* Floating Alerts Panel */}
+      {!isPrinting && mode === "planning" && panelVis.alerts && (
+        <MapAlertsPanel
+          isOpen={alertsExpanded}
+          onToggleExpanded={() => setAlertsExpanded(!alertsExpanded)}
+          onClose={() => togglePanel("alerts")}
+          positionClass={
+            showFacilityList && panelVis.facilities
+              ? panelVis.checklist && activeSessionPlans.length > 0
+                ? "right-[650px]"
+                : "right-[350px]"
+              : panelVis.checklist && activeSessionPlans.length > 0
+              ? "right-[310px]"
+              : "right-4"
+          }
+        />
+      )}
+
+      {/* Floating Recommendations Panel */}
+      {!isPrinting && mode === "planning" && panelVis.recommendations && (
+        <MapRecommendationsPanel
+          isOpen={recommendationsExpanded}
+          onToggleExpanded={() => setRecommendationsExpanded(!recommendationsExpanded)}
+          onClose={() => togglePanel("recommendations")}
+          positionClass={
+            showFacilityList && panelVis.facilities
+              ? panelVis.alerts
+                ? panelVis.checklist && activeSessionPlans.length > 0 ? "right-[990px]" : "right-[690px]"
+                : panelVis.checklist && activeSessionPlans.length > 0 ? "right-[650px]" : "right-[350px]"
+              : panelVis.alerts
+              ? panelVis.checklist && activeSessionPlans.length > 0 ? "right-[650px]" : "right-[340px]"
+              : panelVis.checklist && activeSessionPlans.length > 0 ? "right-[310px]" : "right-4"
+          }
+        />
+      )}
+
       {/* Floating Facility List Panel */}
       {showFacilityList && panelVis.facilities && !isPrinting && (
         <div 
@@ -8195,84 +8628,139 @@ export function MapView({
 
           {mapClickDetails && (
             <div className="space-y-4 py-2 text-xs">
-              {/* Coordinates & Population density */}
-              <div className="grid grid-cols-2 gap-3 p-3 bg-muted/40 rounded-xl border border-muted">
+              {/* Coordinates & HTR warning */}
+              <div className="flex justify-between items-center p-3 bg-muted/40 rounded-xl border border-muted">
                 <div>
                   <span className="text-muted-foreground block text-[10px] uppercase font-bold tracking-wider">Coordinates</span>
                   <span className="font-semibold text-foreground font-mono">{mapClickDetails.lat}, {mapClickDetails.lng}</span>
                 </div>
-                <div>
-                  <span className="text-muted-foreground block text-[10px] uppercase font-bold tracking-wider">Estimated Population</span>
-                  <span className="font-semibold text-foreground flex items-center gap-1">
-                    <span className="inline-block w-2 h-2 rounded-full bg-red-500 animate-pulse"></span>
-                    ≈ {(mapClickDetails.areaPopulation ?? 0).toLocaleString()} people
-                  </span>
-                  <span className="text-[9px] text-muted-foreground block mt-0.5">within {mapClickDetails.areaRadiusKm ?? 1} km of this point</span>
+                {mapClickDetails.isHTR && (
+                  <Badge variant="outline" className="bg-amber-500/10 text-amber-600 border-amber-500/20 text-[10px] font-semibold flex items-center gap-1">
+                    <AlertTriangle className="h-3 w-3" /> HTR Zone
+                  </Badge>
+                )}
+              </div>
+
+              {/* Active Admin Area & Census population */}
+              {mapClickDetails.polygonName && (
+                <div className="p-3 bg-primary/5 border border-primary/10 rounded-xl space-y-1">
+                  <span className="text-muted-foreground block text-[10px] uppercase font-bold tracking-wider">Active Boundary Context</span>
+                  <div className="flex justify-between items-center">
+                    <span className="font-semibold text-primary">🗺️ {mapClickDetails.polygonType}: {mapClickDetails.polygonName}</span>
+                    {mapClickDetails.isLoadingPopulation ? (
+                      <Badge className="bg-amber-500 hover:bg-amber-600 text-white font-semibold animate-pulse">
+                        Calculating...
+                      </Badge>
+                    ) : mapClickDetails.polygonPopulation > 0 ? (
+                      <Badge className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold">
+                        ≈ {mapClickDetails.polygonPopulation.toLocaleString()} total pop
+                      </Badge>
+                    ) : null}
+                  </div>
+                </div>
+              )}
+
+              {/* Aggressive Gridded Population Estimates */}
+              <div className="space-y-2">
+                <span className="font-bold text-[10px] text-muted-foreground uppercase block tracking-wider">Aggressive Gridded Population</span>
+                <div className="grid grid-cols-3 gap-2 text-center font-mono">
+                  <div className="bg-muted/60 p-2.5 rounded-xl border border-muted flex flex-col justify-between">
+                    <span className="text-[9px] text-muted-foreground uppercase font-bold block mb-1">1km Radius</span>
+                    {mapClickDetails.isLoadingPopulation ? (
+                      <strong className="text-sm text-amber-500 animate-pulse">Loading...</strong>
+                    ) : (
+                      <strong className="text-sm text-foreground">≈ {mapClickDetails.pop1k.toLocaleString()}</strong>
+                    )}
+                    <span className="text-[8px] text-muted-foreground block mt-0.5">people</span>
+                  </div>
+                  <div className="bg-muted/60 p-2.5 rounded-xl border border-muted flex flex-col justify-between">
+                    <span className="text-[9px] text-muted-foreground uppercase font-bold block mb-1">2km Radius</span>
+                    {mapClickDetails.isLoadingPopulation ? (
+                      <strong className="text-sm text-amber-500 animate-pulse">Loading...</strong>
+                    ) : (
+                      <strong className="text-sm text-foreground">≈ {mapClickDetails.pop2k.toLocaleString()}</strong>
+                    )}
+                    <span className="text-[8px] text-muted-foreground block mt-0.5">people</span>
+                  </div>
+                  <div className="bg-muted/60 p-2.5 rounded-xl border border-muted flex flex-col justify-between">
+                    <span className="text-[9px] text-muted-foreground uppercase font-bold block mb-1">3km Radius</span>
+                    {mapClickDetails.isLoadingPopulation ? (
+                      <strong className="text-sm text-amber-500 animate-pulse">Loading...</strong>
+                    ) : (
+                      <strong className="text-sm text-foreground">≈ {mapClickDetails.pop3k.toLocaleString()}</strong>
+                    )}
+                    <span className="text-[8px] text-muted-foreground block mt-0.5">people</span>
+                  </div>
                 </div>
               </div>
 
-              {/* Multi-Source Coordinate reference consensus */}
-              <div className="space-y-2.5">
-                <h4 className="font-bold text-[10px] uppercase tracking-wider text-muted-foreground text-primary">Multi-Source Point Consensus</h4>
-                <div className="grid grid-cols-2 gap-3 text-[10px]">
-                  <div className="p-2.5 bg-background border border-border/80 rounded-xl flex flex-col justify-between">
-                    <span className="text-muted-foreground block text-[9px] uppercase font-bold tracking-wider mb-1">WorldPop Raster</span>
-                    <strong className="text-xs text-foreground font-mono">≈ {(mapClickDetails.areaPopulation ?? 0).toLocaleString()} people</strong>
-                    <span className="text-[8px] text-muted-foreground block mt-0.5">within {mapClickDetails.areaRadiusKm ?? 1} km</span>
-                  </div>
-                  <div className="p-2.5 bg-background border border-border/80 rounded-xl flex flex-col justify-between">
-                    <span className="text-muted-foreground block text-[9px] uppercase font-bold tracking-wider mb-1">Local Registry Census</span>
-                    {mapClickDetails.nearestVillage && mapClickDetails.nearestVillage.distance < 1.5 ? (
-                      <div>
-                        <strong className="text-xs text-foreground font-mono">{mapClickDetails.nearestVillage.population} people</strong>
-                        <span className="text-[8px] text-muted-foreground block truncate mt-0.5">"{mapClickDetails.nearestVillage.name}" ({mapClickDetails.nearestVillage.distance}km)</span>
+              {/* Staging & Outreach Proximity checking */}
+              <div className="space-y-2">
+                <span className="font-bold text-[10px] text-muted-foreground uppercase block tracking-wider text-primary">Proximity Analysis</span>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {/* Nearest facilities list */}
+                  <div className="p-2.5 bg-background border border-border/80 rounded-xl space-y-1.5">
+                    <span className="text-muted-foreground block text-[9px] uppercase font-bold tracking-wider border-b pb-0.5">🏥 Nearby Facilities</span>
+                    {mapClickDetails.nearbyFacilities.length > 0 ? (
+                      <div className="space-y-1">
+                        {mapClickDetails.nearbyFacilities.map((nf, idx) => (
+                          <div key={idx} className="flex justify-between items-center text-[10px] last:border-0">
+                            <span className="truncate max-w-[120px] font-medium text-foreground">{nf.name}</span>
+                            <span className="font-mono text-muted-foreground text-[9px]">{nf.distance}km</span>
+                          </div>
+                        ))}
                       </div>
                     ) : (
-                      <span className="text-muted-foreground block font-medium">No nearby village (&gt;1.5km)</span>
+                      <p className="text-[9px] italic text-muted-foreground">None within 15km</p>
+                    )}
+                  </div>
+
+                  {/* Nearest planned sessions list */}
+                  <div className="p-2.5 bg-background border border-border/80 rounded-xl space-y-1.5">
+                    <span className="text-muted-foreground block text-[9px] uppercase font-bold tracking-wider border-b pb-0.5">📅 Nearby Session Plans</span>
+                    {mapClickDetails.nearbyPlans.length > 0 ? (
+                      <div className="space-y-1">
+                        {mapClickDetails.nearbyPlans.map((np, idx) => (
+                          <div key={idx} className="flex justify-between items-center text-[10px] last:border-0">
+                            <span className="truncate max-w-[120px] font-medium text-foreground">{np.name}</span>
+                            <span className="font-mono text-muted-foreground text-[9px]">{np.distance}km</span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-[9px] italic text-muted-foreground">None within 10km</p>
                     )}
                   </div>
                 </div>
               </div>
 
-              {/* Nearest Staging Bases proximity checking */}
-              <div className="space-y-2.5">
-                <h4 className="font-bold text-[10px] uppercase tracking-wider text-muted-foreground">Proximity Analysis</h4>
-                
-                {/* Nearest facility */}
-                <div className="flex items-center justify-between p-2.5 bg-background border border-border/80 rounded-xl hover:border-primary/45 transition-colors">
-                  <div className="flex items-center gap-2">
-                    <Building2 className="h-4 w-4 text-primary" />
-                    <div>
-                      <div className="font-semibold">{mapClickDetails.nearestFacility?.name || "None"}</div>
-                      <div className="text-[9px] text-muted-foreground">Nearest Staging Health Facility</div>
-                    </div>
-                  </div>
-                  <Badge variant="outline" className="text-[10px]">
-                    {mapClickDetails.nearestFacility ? `${mapClickDetails.nearestFacility.distance} km` : "N/A"}
-                  </Badge>
-                </div>
-
-                {/* Nearest planned session */}
-                <div className="flex items-center justify-between p-2.5 bg-background border border-border/80 rounded-xl hover:border-primary/45 transition-colors">
-                  <div className="flex items-center gap-2">
-                    <Calendar className="h-4 w-4 text-amber-500" />
-                    <div>
-                      <div className="font-semibold">{mapClickDetails.nearestPlan?.name || "None"}</div>
-                      <div className="text-[9px] text-muted-foreground">Nearest Planned Outreach Session</div>
-                    </div>
-                  </div>
-                  <Badge variant="outline" className="text-[10px]">
-                    {mapClickDetails.nearestPlan ? `${mapClickDetails.nearestPlan.distance} km` : "N/A"}
-                  </Badge>
+              {/* Nearby Communities list */}
+              <div className="space-y-2">
+                <span className="font-bold text-[10px] text-muted-foreground uppercase block tracking-wider">Nearby Communities</span>
+                <div className="p-2.5 bg-background border border-border/80 rounded-xl space-y-1">
+                  {mapClickDetails.nearbyVillages.length > 0 ? (
+                    mapClickDetails.nearbyVillages.map((nv, idx) => (
+                      <div key={idx} className="flex justify-between items-center text-[11px] border-b border-border/40 pb-1 last:border-0 last:pb-0">
+                        <span className={`truncate max-w-[160px] font-medium ${nv.isHardToReach ? "text-amber-600 font-semibold" : "text-foreground"}`}>
+                          🏡 {nv.name} {nv.isHardToReach && "⚠️"}
+                        </span>
+                        <span className="text-muted-foreground font-mono text-[10px] shrink-0">
+                          {nv.population.toLocaleString()} pop ({nv.distance} km)
+                        </span>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="text-[9px] italic text-muted-foreground">No villages within 10km</p>
+                  )}
                 </div>
               </div>
 
               {/* Alert Warning if highly isolated */}
-              {mapClickDetails.density >= 5 && (!mapClickDetails.nearestFacility || mapClickDetails.nearestFacility.distance > 5) && (
+              {mapClickDetails.isHTR && (
                 <div className="p-3 bg-amber-50 border border-amber-200 text-amber-800 rounded-xl flex gap-2 leading-relaxed text-[11px] font-medium">
                   <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
                   <div>
-                    <strong>Marginalized Area Alert:</strong> This cluster is located over 5km away from the closest health facility and has no overlapping session coverage. Immediate dispatch is highly recommended.
+                    <strong>Isolated / Hard-to-Reach Area:</strong> This cluster is located over 5km away from the closest health facility or contains hard-to-reach settlements. Immediate outreach scheduling is recommended.
                   </div>
                 </div>
               )}

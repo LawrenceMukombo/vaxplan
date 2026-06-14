@@ -555,6 +555,18 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
     enabled: !!facilityId,
   });
 
+  const { data: dbPopulation } = useQuery<any[]>({
+    queryKey: ["/api/population", facilityId, year],
+    enabled: !microplanId && !!facilityId && !!year,
+    queryFn: async () => {
+      const r = await fetch(`/api/population?facilityId=${facilityId}&year=${year}`, { credentials: "include" });
+      if (!r.ok) return [];
+      return r.json();
+    }
+  });
+
+  // Note: dbPopulation useEffect moved below communities state declaration to resolve TS2448/TS2454
+
   useEffect(() => {
     if (microplan) {
       if (microplan.facilityId) setFacilityId(microplan.facilityId);
@@ -901,8 +913,13 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
 
   useEffect(() => {
     const stash = (microplan as any)?.staffing;
-    if (stash && typeof stash === "object" && !Array.isArray(stash) && stash.coverageReview) {
-      setCoverage((prev) => ({ ...prev, ...stash.coverageReview }));
+    if (stash && typeof stash === "object" && !Array.isArray(stash)) {
+      if (stash.coverageReview) {
+        setCoverage((prev) => ({ ...prev, ...stash.coverageReview }));
+      }
+      if (stash.coldChain) {
+        setColdChain((prev) => ({ ...prev, ...stash.coldChain }));
+      }
     }
   }, [microplan]);
 
@@ -944,6 +961,25 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
     surveyPop?: string;        // NSO / HMIS / Survey / Census (manual entry)
   };
   const [communities, setCommunities] = useState<CommunityRow[]>([]);
+
+  useEffect(() => {
+    if (microplanId || !dbPopulation || !dbPopulation.length || !communities.length) return;
+    const allZero = communities.every(c => c.targetPopulation === "0" || !c.targetPopulation);
+    if (!allZero) return;
+
+    setCommunities(prev =>
+      prev.map(c => {
+        const hit = dbPopulation.find(p => p.villageId === c.villageId);
+        if (!hit) return c;
+        return {
+          ...c,
+          targetPopulation: String(hit.totalPopulation ?? c.targetPopulation),
+          under5Population: hit.under5Population != null ? String(hit.under5Population) : c.under5Population,
+          totalCatchmentPopulation: hit.totalPopulation != null ? String(hit.totalPopulation) : c.totalCatchmentPopulation,
+        };
+      })
+    );
+  }, [microplanId, dbPopulation, communities.length]);
   // Initial seed from facility villages (only when there are no saved
   // communities to hydrate). Population merge happens in a later effect.
   useEffect(() => {
@@ -2423,6 +2459,17 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
           }
         }
       } else if (step === 6) {
+        // Persist cold chain requirements to microplans.staffing first
+        try {
+          const prev = (microplan as any)?.staffing ?? {};
+          const prevObj = prev && typeof prev === "object" && !Array.isArray(prev) ? prev : {};
+          await patchMicroplan(mpId, {
+            staffing: { ...prevObj, coldChain },
+          });
+        } catch (e) {
+          console.warn("[Step6] Could not persist cold chain to microplan:", e);
+        }
+
         // Bulk upsert vaccine requirements in a single request.
         const nextVaccines = [...vaccines];
         const indexByClientId = new Map<string, number>();
@@ -3269,6 +3316,8 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
 
               {active === 1 && (
                 <Step1
+                  facilityId={facilityId}
+                  year={year}
                   coverage={coverage}
                   setCoverage={setCoverage}
                   planType={planType}
@@ -3286,6 +3335,7 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
               )}
               {active === 2 && (
                 <Step2
+                  targetInfants={parseFloat(coverage.targetInfants || "0")}
                   communities={communities}
                   setCommunities={setCommunities}
                   onDelete={deleteCommunity}
@@ -3371,6 +3421,8 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
                   }
                   onClearError={() => setErrorFocus(null)}
                   facilityId={facilityId}
+                  targetInfants={parseFloat(coverage.targetInfants || "0")}
+                  communities={communities}
                 />
               )}
               {active === 7 && (
@@ -3649,6 +3701,8 @@ function NumberField({
 }
 
 function Step1({
+  facilityId,
+  year,
   coverage,
   setCoverage,
   planType,
@@ -3663,6 +3717,8 @@ function Step1({
   campaignScopeDetails,
   setCampaignScopeDetails,
 }: {
+  facilityId: number | null;
+  year: number;
   coverage: any;
   setCoverage: (v: any) => void;
   planType: "routine" | "campaign";
@@ -3677,6 +3733,61 @@ function Step1({
   campaignScopeDetails: { provinceIds: number[]; districtIds: number[]; facilityIds: number[] };
   setCampaignScopeDetails: (v: { provinceIds: number[]; districtIds: number[]; facilityIds: number[] }) => void;
 }) {
+  const [loadingHistory, setLoadingHistory] = useState(false);
+  const [historicalData, setHistoricalData] = useState<any>(null);
+  const [hasFetchedHistory, setHasFetchedHistory] = useState(false);
+  const [historyStatus, setHistoryStatus] = useState<"none" | "filled" | "error">("none");
+
+  useEffect(() => {
+    if (!facilityId) {
+      setHistoricalData(null);
+      setHistoryStatus("none");
+      return;
+    }
+    const isCoverageEmpty = !coverage.targetInfants && !coverage.dtp1Doses && !coverage.dtp3Doses && !coverage.mcv1Doses && !coverage.mcv2Doses;
+
+    async function loadHistory() {
+      setLoadingHistory(true);
+      try {
+        const queryYear = year - 1;
+        const res = await fetch(`/api/facilities/${facilityId}/historical-coverage?year=${queryYear}`, { credentials: "include" });
+        if (res.ok) {
+          const data = await res.json();
+          setHistoricalData(data);
+          if (data.hasHistoricalData || data.targetInfants > 0) {
+            setHistoryStatus("filled");
+            if (isCoverageEmpty) {
+              setCoverage({
+                ...coverage,
+                targetInfants: String(data.targetInfants || ""),
+                dtp1Doses: String(data.dosesByAntigen?.DTP1 || ""),
+                dtp3Doses: String(data.dosesByAntigen?.DTP3 || ""),
+                mcv1Doses: String(data.dosesByAntigen?.MCV1 || ""),
+                mcv2Doses: String(data.dosesByAntigen?.MCV2 || ""),
+                dtp1: String(data.coverageRates?.DTP1 || "0"),
+                dtp3: String(data.coverageRates?.DTP3 || "0"),
+                mcv1: String(data.coverageRates?.MCV1 || "0"),
+                mcv2: String(data.coverageRates?.MCV2 || "0"),
+              });
+            }
+          } else {
+            setHistoryStatus("none");
+          }
+        } else {
+          setHistoryStatus("error");
+        }
+      } catch (err) {
+        console.error("Error fetching historical coverage:", err);
+        setHistoryStatus("error");
+      } finally {
+        setLoadingHistory(false);
+        setHasFetchedHistory(true);
+      }
+    }
+
+    loadHistory();
+  }, [facilityId, year]);
+
   const dtp1 = parseFloat(coverage.dtp1 || "0");
   const dtp3 = parseFloat(coverage.dtp3 || "0");
   const mcv1 = parseFloat(coverage.mcv1 || "0");
@@ -3740,6 +3851,16 @@ function Step1({
 
   return (
     <div className="space-y-3">
+      {historyStatus === "filled" && (
+        <div className="p-3 bg-blue-50 dark:bg-blue-950/30 text-blue-800 dark:text-blue-300 rounded border border-blue-200 dark:border-blue-800 text-xs flex items-center gap-2">
+          <span>ℹ️ Historical coverage data for last year ({year - 1}) has been auto-filled (target: {historicalData?.targetInfants} infants). You may review and override these values.</span>
+        </div>
+      )}
+      {historyStatus === "none" && hasFetchedHistory && (
+        <div className="p-3 bg-amber-50 dark:bg-amber-950/30 text-amber-800 dark:text-amber-300 rounded border border-amber-200 dark:border-amber-800 text-xs flex items-center gap-2">
+          <span>⚠️ No historical coverage found for this facility in the database. Please enter baseline numbers manually.</span>
+        </div>
+      )}
       {/* Plan type chooser — same template, two flavours. Locked when the
           user entered via /microplans/routine or /microplans/campaigns. */}
       <div className="rounded-md border bg-muted/30 p-3 space-y-3">
@@ -4111,6 +4232,7 @@ function Step2({
   errorRowId,
   errorMessage,
   onClearError,
+  targetInfants = 0,
 }: {
   communities: any[];
   setCommunities: (v: any[]) => void;
@@ -4123,7 +4245,11 @@ function Step2({
   errorRowId?: string;
   errorMessage?: string;
   onClearError?: () => void;
+  targetInfants?: number;
 }) {
+  const sumCommunityUnder1 = communities.reduce((acc, c) => acc + Math.round(parseFloat(c.targetPopulation || "0") * 0.04), 0);
+  const diffPercent = targetInfants > 0 ? Math.abs(sumCommunityUnder1 - targetInfants) / targetInfants : 0;
+  const showMismatchWarning = targetInfants > 0 && diffPercent > 0.10;
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
   const errorRowRef = useRef<HTMLInputElement | null>(null);
 
@@ -4566,6 +4692,11 @@ function Step2({
 
   return (
     <div className="space-y-4">
+      {showMismatchWarning && (
+        <div className="p-3 bg-amber-50 dark:bg-amber-950/30 text-amber-800 dark:text-amber-300 rounded border border-amber-200 dark:border-amber-800 text-xs flex items-center gap-2">
+          <span>⚠️ Sum of community under-1 targets ({sumCommunityUnder1} infants) differs from facility target infants in Step 1 ({targetInfants} infants) by more than 10%. Please verify targets.</span>
+        </div>
+      )}
       <div className="grid grid-cols-1 xl:grid-cols-4 gap-4">
         {/* Map + Table — 3 columns */}
         <div className="xl:col-span-3 space-y-4">
@@ -7109,6 +7240,165 @@ function Step5({ staffing, setStaffing, facilityId }: { staffing: any[]; setStaf
   );
 }
 
+// Reusable inline AddColdChainDialog component inside the wizard to easily register equipment on the fly
+function AddColdChainDialog({ facilityId, onAdded }: { facilityId: number | null; onAdded?: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [equipmentType, setEquipmentType] = useState("cold_box");
+  const [brand, setBrand] = useState("");
+  const [model, setModel] = useState("");
+  const [serialNumber, setSerialNumber] = useState("");
+  const [capacityLiters, setCapacityLiters] = useState("");
+  const [condition, setCondition] = useState("functional");
+  const [submitting, setSubmitting] = useState(false);
+  const { toast } = useToast();
+
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!facilityId) return;
+
+    try {
+      setSubmitting(true);
+      await apiRequest("POST", `/api/facilities/${facilityId}/cold-chain`, {
+        equipmentType,
+        brand: brand.trim() || null,
+        model: model.trim() || null,
+        serialNumber: serialNumber.trim() || null,
+        capacityLiters: capacityLiters ? parseFloat(capacityLiters) : null,
+        condition,
+        isActive: true,
+      });
+
+      await queryClient.invalidateQueries({ queryKey: ["/api/facilities", facilityId, "cold-chain"] });
+
+      toast({
+        title: "Equipment Registered",
+        description: `Successfully added ${equipmentType.replace("_", " ")} to the facility inventory.`,
+      });
+      setOpen(false);
+      setBrand("");
+      setModel("");
+      setSerialNumber("");
+      setCapacityLiters("");
+      if (onAdded) onAdded();
+    } catch (error: any) {
+      toast({
+        title: "Failed to add equipment",
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  if (!facilityId) return null;
+
+  return (
+    <>
+      <Button size="sm" variant="outline" onClick={() => setOpen(true)} type="button">
+        <Plus className="mr-1 h-4 w-4" /> Add Equipment
+      </Button>
+
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="sm:max-w-[425px]">
+          <form onSubmit={handleSave} className="space-y-4">
+            <DialogHeader>
+              <DialogTitle>Register Cold Chain Equipment</DialogTitle>
+              <DialogDescription>
+                Add cold boxes, vaccine carriers, or refrigerators to this facility's active inventory.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-3">
+              <div className="space-y-1">
+                <Label htmlFor="equip-type">Equipment Type</Label>
+                <Select value={equipmentType} onValueChange={setEquipmentType} disabled={submitting}>
+                  <SelectTrigger id="equip-type">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="cold_box">Cold Box</SelectItem>
+                    <SelectItem value="vaccine_carrier">Vaccine Carrier</SelectItem>
+                    <SelectItem value="refrigerator">Refrigerator</SelectItem>
+                    <SelectItem value="freezer">Freezer</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-1">
+                <Label htmlFor="equip-brand">Brand</Label>
+                <Input
+                  id="equip-brand"
+                  placeholder="e.g. Apex, Dometic"
+                  value={brand}
+                  onChange={(e) => setBrand(e.target.value)}
+                  disabled={submitting}
+                />
+              </div>
+
+              <div className="space-y-1">
+                <Label htmlFor="equip-model">Model</Label>
+                <Input
+                  id="equip-model"
+                  placeholder="e.g. CFX 35"
+                  value={model}
+                  onChange={(e) => setModel(e.target.value)}
+                  disabled={submitting}
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1">
+                  <Label htmlFor="equip-serial">Serial Number</Label>
+                  <Input
+                    id="equip-serial"
+                    placeholder="S/N"
+                    value={serialNumber}
+                    onChange={(e) => setSerialNumber(e.target.value)}
+                    disabled={submitting}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="equip-capacity">Capacity (Liters)</Label>
+                  <Input
+                    id="equip-capacity"
+                    type="number"
+                    step="0.1"
+                    placeholder="e.g. 20"
+                    value={capacityLiters}
+                    onChange={(e) => setCapacityLiters(e.target.value)}
+                    disabled={submitting}
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <Label htmlFor="equip-condition">Condition</Label>
+                <Select value={condition} onValueChange={setCondition} disabled={submitting}>
+                  <SelectTrigger id="equip-condition">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="functional">Functional</SelectItem>
+                    <SelectItem value="needs_repair">Needs Repair</SelectItem>
+                    <SelectItem value="non_functional">Non-Functional</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <DialogFooter>
+              <Button type="submit" disabled={submitting}>
+                {submitting ? "Saving..." : "Save Equipment"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
 function Step6({
   vaccines,
   setVaccines,
@@ -7118,6 +7408,8 @@ function Step6({
   errorMessage,
   onClearError,
   facilityId,
+  targetInfants = 0,
+  communities = [],
 }: {
   vaccines: any[];
   setVaccines: (v: any[]) => void;
@@ -7127,6 +7419,8 @@ function Step6({
   errorMessage?: string;
   onClearError?: () => void;
   facilityId: number | null;
+  targetInfants?: number;
+  communities?: any[];
 }) {
   const errorRowRef = useRef<HTMLInputElement | null>(null);
   const { toast } = useToast();
@@ -7150,12 +7444,6 @@ function Step6({
     if (errorRowId && `vr-${i}` === errorRowId) onClearError?.();
   };
 
-  // Original query block for facility
-  // const { data: facility } = useQuery<any>({
-  //   queryKey: ["/api/facilities", facilityId],
-  //   enabled: !!facilityId,
-  // });
-  // Updated code to fetch facility, tenant, province, and district metadata
   const { data: facility } = useQuery<any>({
     queryKey: ["/api/facilities", facilityId],
     enabled: !!facilityId,
@@ -7189,6 +7477,60 @@ function Step6({
       return res.json();
     }
   });
+
+  const { data: dbColdChain = [], refetch: refetchDbColdChain } = useQuery<any[]>({
+    queryKey: ["/api/facilities", facilityId, "cold-chain"],
+    enabled: !!facilityId,
+    queryFn: async () => {
+      const res = await fetch(`/api/facilities/${facilityId}/cold-chain`, { credentials: "include" });
+      if (!res.ok) return [];
+      return res.json();
+    }
+  });
+
+  const availableColdBoxes = dbColdChain.filter(
+    (e) => e.equipmentType === "cold_box" && e.condition === "functional"
+  ).length;
+
+  const availableCarriers = dbColdChain.filter(
+    (e) => e.equipmentType === "vaccine_carrier" && e.condition === "functional"
+  ).length;
+
+  const reqColdBoxes = parseInt(coldChain.coldBoxes || "0", 10);
+  const reqCarriers = parseInt(coldChain.carriers || "0", 10);
+
+  const coldBoxWarning = reqColdBoxes > availableColdBoxes;
+  const carrierWarning = reqCarriers > availableCarriers;
+
+  const sumCommunityUnder1 = communities.reduce((acc, c) => acc + Math.round(parseFloat(c.targetPopulation || "0") * 0.04), 0);
+
+  // Sync vaccine targets on hydration if empty
+  useEffect(() => {
+    const defaultTgt = targetInfants > 0 ? targetInfants : sumCommunityUnder1;
+    if (defaultTgt > 0) {
+      const allZeroOrEmpty = vaccines.every(v => v.target === "0" || !v.target || v.target === "");
+      if (allZeroOrEmpty) {
+        setVaccines(vaccines.map(v => ({ ...v, target: String(defaultTgt) })));
+      }
+    }
+  }, [targetInfants, sumCommunityUnder1]);
+
+  const handleSyncTargets = () => {
+    const defaultTgt = targetInfants > 0 ? targetInfants : sumCommunityUnder1;
+    if (defaultTgt > 0) {
+      setVaccines(vaccines.map(v => ({ ...v, target: String(defaultTgt) })));
+      toast({
+        title: "Targets Synced",
+        description: `Synced routine vaccine targets to ${defaultTgt} (from Step 1/2).`,
+      });
+    } else {
+      toast({
+        title: "Sync Failed",
+        description: "No target infants entered in Step 1 or Step 2 catchment population.",
+        variant: "destructive",
+      });
+    }
+  };
 
   const stockMap = new Map<string, number>();
   if (stockBalance && Array.isArray(stockBalance.stock)) {
@@ -7274,60 +7616,108 @@ function Step6({
         </div>
       )}
 
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead className="border-b text-left text-xs uppercase text-muted-foreground">
-            <tr>
-              <th className="p-2">Antigen</th>
-              <th className="p-2">Target pop.</th>
-              <th className="p-2">Doses/child</th>
-              <th className="p-2">Wastage %</th>
-              <th className="p-2">Doses w/ wastage</th>
-              <th className="p-2">Vials (10/vial)</th>
-            </tr>
-          </thead>
-          <tbody>
-            {vaccines.map((v, i) => {
-              const tgt = parseInt(v.target || "0", 10);
-              const w = parseFloat(v.wastage || "0");
-              const dosesReq = tgt * v.doses;
-              const total = Math.ceil(dosesReq * (1 + w / 100));
-              const vials = Math.ceil(total / 10);
-              const isError = errorRowId != null && `vr-${i}` === errorRowId;
-              return (
-                <tr key={v.name} className={`border-b ${isError ? "ring-1 ring-destructive" : ""}`}>
-                  <td className="p-2 font-medium">{v.name}</td>
-                  <td className="p-1">
-                    <Input
-                      ref={isError ? errorRowRef : undefined}
-                      type="number"
-                      className={isError ? "border-destructive ring-1 ring-destructive" : undefined}
-                      value={v.target}
-                      onChange={(e) => upd(i, { target: e.target.value })}
-                    />
-                    {isError && errorMessage && (
-                      <p
-                        className="mt-1 text-xs text-destructive"
-                        data-testid="vaccine-row-error"
-                      >
-                        {errorMessage}
-                      </p>
-                    )}
-                  </td>
-                  <td className="p-2 text-center">{v.doses}</td>
-                  <td className="p-1"><Input type="number" value={v.wastage} onChange={(e) => upd(i, { wastage: e.target.value })} /></td>
-                  <td className="p-2">{total.toLocaleString()}</td>
-                  <td className="p-2">{vials.toLocaleString()}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-semibold">Routine Vaccines Target Requirements</h3>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="text-xs h-7"
+            onClick={handleSyncTargets}
+          >
+            ⚡ Sync Targets with Step 1/2 ({targetInfants > 0 ? targetInfants : sumCommunityUnder1} infants)
+          </Button>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="border-b text-left text-xs uppercase text-muted-foreground">
+              <tr>
+                <th className="p-2">Antigen</th>
+                <th className="p-2">Target pop.</th>
+                <th className="p-2">Doses/child</th>
+                <th className="p-2">Wastage %</th>
+                <th className="p-2">Doses w/ wastage</th>
+                <th className="p-2">Vials (10/vial)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {vaccines.map((v, i) => {
+                const tgt = parseInt(v.target || "0", 10);
+                const w = parseFloat(v.wastage || "0");
+                const dosesReq = tgt * v.doses;
+                const total = Math.ceil(dosesReq * (1 + w / 100));
+                const vials = Math.ceil(total / 10);
+                const isError = errorRowId != null && `vr-${i}` === errorRowId;
+                return (
+                  <tr key={v.name} className={`border-b ${isError ? "ring-1 ring-destructive" : ""}`}>
+                    <td className="p-2 font-medium">{v.name}</td>
+                    <td className="p-1">
+                      <Input
+                        ref={isError ? errorRowRef : undefined}
+                        type="number"
+                        className={isError ? "border-destructive ring-1 ring-destructive" : undefined}
+                        value={v.target}
+                        onChange={(e) => upd(i, { target: e.target.value })}
+                      />
+                      {isError && errorMessage && (
+                        <p
+                          className="mt-1 text-xs text-destructive"
+                          data-testid="vaccine-row-error"
+                        >
+                          {errorMessage}
+                        </p>
+                      )}
+                    </td>
+                    <td className="p-2 text-center">{v.doses}</td>
+                    <td className="p-1"><Input type="number" value={v.wastage} onChange={(e) => upd(i, { wastage: e.target.value })} /></td>
+                    <td className="p-2">{total.toLocaleString()}</td>
+                    <td className="p-2">{vials.toLocaleString()}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       </div>
-      <div className="grid grid-cols-3 gap-3 rounded-md border bg-muted/30 p-3">
-        <NumberField label="Cold boxes" value={coldChain.coldBoxes} onChange={(v) => setColdChain({ ...coldChain, coldBoxes: v })} />
-        <NumberField label="Ice packs" value={coldChain.icePacks} onChange={(v) => setColdChain({ ...coldChain, icePacks: v })} />
-        <NumberField label="Carriers / session" value={coldChain.carriers} onChange={(v) => setColdChain({ ...coldChain, carriers: v })} />
+      
+      <div className="rounded-md border bg-muted/30 p-3 space-y-4">
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+            Required Logistics & Cold Chain Sizing
+          </span>
+          <AddColdChainDialog facilityId={facilityId} onAdded={refetchDbColdChain} />
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="space-y-1">
+            <NumberField label="Cold boxes required" value={coldChain.coldBoxes} onChange={(v) => setColdChain({ ...coldChain, coldBoxes: v })} />
+            <div className="text-xs text-muted-foreground flex flex-col gap-0.5 mt-1">
+              <span>Inventory: <strong>{availableColdBoxes}</strong> functional cold boxes.</span>
+              {coldBoxWarning && (
+                <span className="text-destructive font-medium">
+                  ⚠️ Required cold boxes exceed inventory ({availableColdBoxes} available).
+                </span>
+              )}
+            </div>
+          </div>
+          <div className="space-y-1">
+            <NumberField label="Ice packs required" value={coldChain.icePacks} onChange={(v) => setColdChain({ ...coldChain, icePacks: v })} />
+            <div className="text-xs text-muted-foreground mt-1">
+              <span>Inventory: Standard sets matching cold boxes.</span>
+            </div>
+          </div>
+          <div className="space-y-1">
+            <NumberField label="Carriers required" value={coldChain.carriers} onChange={(v) => setColdChain({ ...coldChain, carriers: v })} />
+            <div className="text-xs text-muted-foreground flex flex-col gap-0.5 mt-1">
+              <span>Inventory: <strong>{availableCarriers}</strong> functional carriers.</span>
+              {carrierWarning && (
+                <span className="text-destructive font-medium">
+                  ⚠️ Required carriers exceed inventory ({availableCarriers} available).
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
       </div>
 
       <Dialog open={requisitionOpen} onOpenChange={setRequisitionOpen}>
