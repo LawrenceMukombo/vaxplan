@@ -6,6 +6,11 @@ export const redisConnection = new IORedis(process.env.REDIS_URL || 'redis://loc
   maxRetriesPerRequest: null,
 });
 
+redisConnection.on('error', (err) => {
+  // Log connection errors without crashing the process
+  console.warn(`[Redis] Connection warning: ${err.message || err}`);
+});
+
 // Main queue for processing outbound communications
 export const communicationQueue = new Queue('communication-queue', {
   connection: redisConnection as any,

@@ -4978,6 +4978,9 @@ var init_queue = __esm({
     redisConnection = new import_ioredis.default(process.env.REDIS_URL || "redis://localhost:6379", {
       maxRetriesPerRequest: null
     });
+    redisConnection.on("error", (err) => {
+      console.warn(`[Redis] Connection warning: ${err.message || err}`);
+    });
     communicationQueue = new import_bullmq.Queue("communication-queue", {
       connection: redisConnection,
       defaultJobOptions: {
@@ -29250,16 +29253,23 @@ var init_index = __esm({
         const { setupVite } = await import("./vite");
         await setupVite(httpServer, app);
       }
-      const port = parseInt(process.env.PORT || "5000", 10);
-      httpServer.listen(
-        {
-          port,
-          host: "0.0.0.0"
-        },
-        () => {
-          log(`serving on port ${port}`);
-        }
-      );
+      const portVal = process.env.PORT || "5000";
+      const port = /^\d+$/.test(portVal) ? parseInt(portVal, 10) : portVal;
+      if (typeof port === "number") {
+        httpServer.listen(
+          {
+            port,
+            host: "0.0.0.0"
+          },
+          () => {
+            log(`serving on port ${port}`);
+          }
+        );
+      } else {
+        httpServer.listen(port, () => {
+          log(`serving on socket/pipe ${port}`);
+        });
+      }
     })();
   }
 });
