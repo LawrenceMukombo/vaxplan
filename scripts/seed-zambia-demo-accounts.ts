@@ -127,7 +127,7 @@ async function run() {
            $9, true, $10::jsonb,
            NOW(), NOW()
          )
-         ON CONFLICT (email) DO UPDATE SET
+         ON CONFLICT (tenant_id, email) DO UPDATE SET
            tenant_id        = EXCLUDED.tenant_id,
            first_name       = EXCLUDED.first_name,
            last_name        = EXCLUDED.last_name,
