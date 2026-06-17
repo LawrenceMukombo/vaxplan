@@ -4602,6 +4602,56 @@ function Step2({
     );
   };
 
+  const [inlineLoadingIndex, setInlineLoadingIndex] = useState<number | null>(null);
+
+  const handleInlineFetch = async (index: number) => {
+    const c = communities[index];
+    if (!c) return;
+    const lat = parseFloat(c.latitude);
+    const lng = parseFloat(c.longitude);
+    if (isNaN(lat) || isNaN(lng)) return;
+
+    setInlineLoadingIndex(index);
+    try {
+      const result = await estimateCatchmentPopulation({
+        lat,
+        lng,
+        radiusKm: 2,
+        villageId: c.villageId,
+      });
+
+      if (result.status === "ok") {
+        const gridPop = String(result.total);
+        const surveyVal = parseInt(c.surveyPop || "0", 10);
+        const gridVal = result.total;
+        const targetPop = String(Math.max(gridVal, surveyVal));
+        update(index, {
+          gridPop,
+          targetPopulation: targetPop,
+          source: "worldpop",
+        });
+        toast({
+          title: "Grid estimate applied",
+          description: `Grid Pop set to ${gridVal.toLocaleString()} from WorldPop (2 km radius). Target = ${parseInt(targetPop).toLocaleString()}.`,
+        });
+      } else {
+        toast({
+          title: "Estimation failed",
+          description: result.status === "nodata" ? "No population data available for this area." : (result as any).message || "No population data available.",
+          variant: "destructive",
+        });
+      }
+    } catch (e: any) {
+      toast({
+        title: "Estimation error",
+        description: e?.message ?? String(e),
+        variant: "destructive",
+      });
+    } finally {
+      setInlineLoadingIndex(null);
+    }
+  };
+
   const openEstimate = (index: number) => {
     runEstimate(index, 2);
   };
@@ -5028,28 +5078,36 @@ function Step2({
                       {/* Grid Pop — WorldPop/gridded estimate */}
                       <td className="p-1">
                         <div className="flex items-center gap-1">
-                          <span className={`text-xs font-mono px-2 py-1 rounded min-w-[52px] text-center ${
-                            c.gridPop && c.gridPop !== "0"
-                              ? "bg-blue-500/10 text-blue-700 dark:text-blue-300 border border-blue-500/20"
-                              : "text-muted-foreground"
-                          }`}>
-                            {c.gridPop && c.gridPop !== "0" ? Number(c.gridPop).toLocaleString() : "—"}
-                          </span>
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="ghost"
-                            className="h-6 px-1.5 text-[10px]"
-                            disabled={!hasCoords}
-                            title={hasCoords ? "Estimate grid population from WorldPop" : "Drop a pin first"}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              openEstimate(i);
-                            }}
-                            data-testid={`button-estimate-from-map-${i}`}
-                          >
-                            Fetch
-                          </Button>
+                          {inlineLoadingIndex === i ? (
+                            <span className="flex items-center gap-1 text-[10px] text-muted-foreground font-mono px-2 py-1 bg-muted rounded">
+                              <Loader2 className="h-3 w-3 animate-spin" /> Fetching…
+                            </span>
+                          ) : (
+                            <>
+                              <span className={`text-xs font-mono px-2 py-1 rounded min-w-[52px] text-center ${
+                                c.gridPop && c.gridPop !== "0"
+                                  ? "bg-blue-500/10 text-blue-700 dark:text-blue-300 border border-blue-500/20"
+                                  : "text-muted-foreground"
+                              }`}>
+                                {c.gridPop && c.gridPop !== "0" ? Number(c.gridPop).toLocaleString() : "—"}
+                              </span>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="ghost"
+                                className="h-6 px-1.5 text-[10px]"
+                                disabled={!hasCoords}
+                                title={hasCoords ? "Estimate grid population from WorldPop" : "Drop a pin first"}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleInlineFetch(i);
+                                }}
+                                data-testid={`button-estimate-from-map-${i}`}
+                              >
+                                Fetch
+                              </Button>
+                            </>
+                          )}
                         </div>
                       </td>
                       {/* Survey Pop — NSO / HMIS / Census manual entry */}
