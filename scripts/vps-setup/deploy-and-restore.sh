@@ -83,20 +83,28 @@ sleep 5
 
 # ── 6. Health check ──────────────────────────────────────────────────────────────
 echo ""
-echo "🔍 6. Running health check..."
-HTTP=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:5005/api/public/tenants 2>/dev/null || echo "000")
-if [ "$HTTP" = "200" ]; then
-  echo "✅ Health check: HTTP $HTTP — VaxPlan is live and operational!"
-else
-  # Fallback to check port 5005 if production port differs
+echo "🔍 6. Running health check (polling port 5005 for up to 30 seconds)..."
+SUCCESS=0
+for i in {1..6}; do
   HTTP=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:5005/api/public/tenants 2>/dev/null || echo "000")
   if [ "$HTTP" = "200" ]; then
     echo "✅ Health check: HTTP $HTTP (port 5005) — VaxPlan is live and operational!"
-  else
-    echo "❌ Health check failed. PM2 status:"
-    pm2 status
-    exit 1
+    SUCCESS=1
+    break
   fi
+  echo "      [Attempt $i/6] App not ready yet (HTTP $HTTP). Sleeping 5s..."
+  sleep 5
+done
+
+if [ "$SUCCESS" -ne 1 ]; then
+  echo "❌ Health check failed after 30 seconds. PM2 status:"
+  pm2 status
+  echo "📄 Printing last 30 lines of pm2 logs for debugging:"
+  pm2 logs vaxplan --lines 30 --no-daemon &
+  PID_LOGS=$!
+  sleep 3
+  kill $PID_LOGS 2>/dev/null || true
+  exit 1
 fi
 
 echo ""
