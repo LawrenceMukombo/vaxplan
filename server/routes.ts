@@ -1206,6 +1206,10 @@ export async function registerRoutes(
   app.use(tenantContext);
   app.use(loadDbUser);
 
+  // --- VGIE & SURVEILLANCE ROUTERS ---
+  app.use("/api/vgie", auth, vgieRouter);
+  app.use("/api/surveillance", surveillanceRouter);
+
   // --- USER ACCESS MANAGEMENT ENDPOINTS ---
   /* Original Code commented out for backward-compatibility:
   app.get("/api/users", isAuthenticated, requireTenant, requirePermission("manage_users"), async (req: any, res) => {
