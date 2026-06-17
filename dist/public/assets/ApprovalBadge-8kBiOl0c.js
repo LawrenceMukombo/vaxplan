@@ -1,0 +1,6 @@
+import{bv as o,bQ as r,bO as c,bN as s,bH as i,j as a,X as d,bo as b}from"./index-CgaPt8go.js";/**
+ * @license lucide-react v0.453.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */const g=o("FilePen",[["path",{d:"M12.5 22H18a2 2 0 0 0 2-2V7l-5-5H6a2 2 0 0 0-2 2v9.5",key:"1couwa"}],["path",{d:"M14 2v4a2 2 0 0 0 2 2h4",key:"tnqrlb"}],["path",{d:"M13.378 15.626a1 1 0 1 0-3.004-3.004l-5.01 5.012a2 2 0 0 0-.506.854l-.837 2.87a.5.5 0 0 0 .62.62l2.87-.837a2 2 0 0 0 .854-.506z",key:"1y4qbx"}]]),m={draft:{label:"Draft",icon:g,variant:"secondary",className:"bg-muted text-muted-foreground"},pending:{label:"Pending",icon:i,variant:"outline",className:"border-yellow-500 text-yellow-600 dark:text-yellow-400"},approved:{label:"Approved",icon:s,variant:"outline",className:"border-green-500 text-green-600 dark:text-green-400"},rejected:{label:"Rejected",icon:c,variant:"destructive",className:""},locked:{label:"Locked",icon:r,variant:"secondary",className:"bg-muted text-muted-foreground"}};function p({status:t,className:n}){const e=m[t],l=e.icon;return a.jsxs(d,{variant:e.variant,className:b("gap-1",e.className,n),children:[a.jsx(l,{className:"h-3 w-3"}),e.label]})}export{p as A};
