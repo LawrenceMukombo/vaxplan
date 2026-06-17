@@ -58,6 +58,7 @@ import { DataTable } from "@/components/DataTable";
 import { usePersistedBasemap, BasemapTileLayer, BasemapSwitcher } from "@/components/map/BasemapToggle";
 import { canApproveSessionPlan } from "@/lib/permissions";
 import { FacilityCascadePicker } from "@/components/FacilityCascadePicker";
+import { SubmissionConfirmation } from "@/components/SubmissionConfirmation";
 import { intersect as turfIntersect, polygon as turfPolygon, multiPolygon as turfMultiPolygon } from "@turf/turf";
 import { DeleteConfirmDialog } from "@/components/DeleteConfirmDialog";
 import {
@@ -365,6 +366,7 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
   const [active, setActive] = useState(1);
   const [returnToSummary, setReturnToSummary] = useState(false);
   const [microplanId, setMicroplanId] = useState<number | null>(null);
+  const [showConfirmation, setShowConfirmation] = useState(false);
 
   // ─── Plan type (routine vs SIA campaign) ──────────────────────────────
   // The wizard is the same template for both flows; only the planType and
@@ -2867,7 +2869,9 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
       });
       queryClient.invalidateQueries({ queryKey: ["/api/microplans"] });
       queryClient.invalidateQueries({ queryKey: ["/api/approvals"] });
-      setActive(12);
+      // Commented out to prevent backward jump
+      // setActive(12);
+      setShowConfirmation(true);
     } catch (e: any) {
       toast({
         title: "Submit failed",
@@ -3280,7 +3284,23 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
 
         {/* Step content */}
         <div className="flex flex-1 flex-col overflow-hidden">
-          <Card className="flex flex-1 flex-col overflow-hidden">
+          {active === 13 && showConfirmation && status !== "draft" ? (
+            <SubmissionConfirmation
+              microplan={microplan ?? null}
+              submittedByName={
+                user
+                  ? `${user.firstName || ""} ${user.lastName || ""}`.trim() +
+                    ` (${user.role ? user.role.replace(/_/g, " ") : "staff"})`
+                  : "Facility Officer"
+              }
+              nextApprovalStep="District Review"
+              responsibleRole="District Health Officer / Team"
+              facilityLabel={facilityLabel}
+              onViewDetails={() => setShowConfirmation(false)}
+              onClose={() => setLocation(planType === "campaign" ? "/microplans/campaigns" : "/microplans/routine")}
+            />
+          ) : (
+            <Card className="flex flex-1 flex-col overflow-hidden">
             <CardHeader className="border-b">
               <div className="flex items-center justify-between gap-2">
                 <CardTitle className="text-base">
@@ -3643,6 +3663,7 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
               </div>
             </div>
           </Card>
+          )}
         </div>
       </div>
       {/* Saved-microplans list removed to be rendered on its own dedicated page */}
