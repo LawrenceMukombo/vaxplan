@@ -221,6 +221,7 @@ async function getOfflineData(url: string): Promise<any> {
   throw new Error(`Offline query mapping not found for URL: ${url}`);
 }
 
+/* Original Code commented out for backward-compatibility and strict traceability:
 // ─── Offline Database Mutation Router ───────────────────────────────────────
 async function writeToIndexedDB(method: string, url: string, data: any): Promise<void> {
   const cleanUrl = url.startsWith("/") ? url : `/${url}`;
@@ -245,12 +246,6 @@ async function writeToIndexedDB(method: string, url: string, data: any): Promise
       table = offlineDb.clients;
     }
   } 
-  /* Original Code: Only mapped sessionPlans/sessions
-  else if (resource === "sessionPlans" || resource === "sessions") {
-    table = offlineDb.sessionPlans;
-  }
-  */
-  // Updated Code: Mapped both sessionPlans/sessions and session-day-plans/sessionDayPlans to their respective Dexie tables
   else if (resource === "sessionPlans" || resource === "sessions") {
     table = offlineDb.sessionPlans;
   } else if (resource === "session-day-plans" || resource === "sessionDayPlans") {
@@ -306,6 +301,200 @@ async function handleOfflineMutation(method: string, url: string, data: any): Pr
   const tenantId = tenantRow?.value || "1";
   const segments = pathname.split("/").filter(Boolean);
   const resource = segments[1];
+
+  let itemData = { ...data };
+  if (method === "POST" && !itemData.id) {
+    if (resource === "clients") {
+      itemData.id = crypto.randomUUID();
+    } else {
+      itemData.id = Math.floor(Date.now() + Math.random() * 1000);
+    }
+    itemData.tenantId = tenantId;
+    itemData._localOnly = true;
+  }
+
+  await writeToIndexedDB(method, url, itemData);
+
+  await enqueueOutbox({
+    tenantId,
+    entityType: resource,
+    method: method as any,
+    url: cleanUrl,
+    body: JSON.stringify(itemData),
+    localId: itemData.id ? String(itemData.id) : undefined,
+  });
+
+  // Dynamic status refresh in background
+  setTimeout(() => {
+    import("./syncEngine").then(({ syncEngine }) => {
+      syncEngine.refreshPendingCount(tenantId);
+    });
+  }, 100);
+
+  return itemData;
+}
+*/
+
+// ─── Offline Database Mutation Router ───────────────────────────────────────
+async function writeToIndexedDB(method: string, url: string, data: any): Promise<void> {
+  const cleanUrl = url.startsWith("/") ? url : `/${url}`;
+  const [pathname] = cleanUrl.split("?");
+  const segments = pathname.split("/").filter(Boolean);
+  
+  if (segments[0] !== "api") return;
+  const resource = segments[1];
+  const idStr = segments[2];
+  const isBulk = segments[segments.length - 1] === "bulk";
+
+  let table: any = null;
+  if (resource === "regions") table = offlineDb.regions;
+  else if (resource === "provinces") table = offlineDb.provinces;
+  else if (resource === "districts") table = offlineDb.districts;
+  else if (resource === "llgs") table = offlineDb.llgs;
+  else if (resource === "facilities") table = offlineDb.facilities;
+  else if (resource === "villages") table = offlineDb.villages;
+  else if (resource === "clients") {
+    if (segments[3] === "vaccinations") {
+      table = offlineDb.clientVaccinations;
+    } else {
+      table = offlineDb.clients;
+    }
+  } 
+  else if (resource === "sessionPlans" || resource === "sessions") {
+    if (segments[2] === "days" || segments[2] === "day-plans") {
+      table = offlineDb.sessionDayPlans;
+    } else {
+      table = offlineDb.sessionPlans;
+    }
+  } else if (resource === "session-day-plans" || resource === "sessionDayPlans") {
+    table = offlineDb.sessionDayPlans;
+  }
+  else if (resource === "budgetItems" || resource === "budget-items") {
+    table = offlineDb.budgetItems;
+  } else if (resource === "mobilization") {
+    table = offlineDb.mobilizationActivities;
+  } else if (resource === "stock") {
+    if (segments[2] === "transaction") {
+      table = offlineDb.stockTransactions;
+    }
+  } else if (resource === "monthly-reports") {
+    table = offlineDb.monthlyReports;
+  } else if (resource === "population") {
+    table = offlineDb.populationData;
+  } else if (resource === "vaccines") {
+    if (segments[2] === "config") {
+      table = offlineDb.vaccineConfigs;
+    }
+  }
+
+  if (!table) return;
+
+  if (method === "POST" && isBulk) {
+    if (data && Array.isArray(data.results)) {
+      for (const result of data.results) {
+        if (result.ok && result.data) {
+          await table.put({ ...result.data, _syncedAt: Date.now() });
+        }
+      }
+    }
+    return;
+  }
+
+  const id = idStr ? (isNaN(Number(idStr)) ? idStr : Number(idStr)) : data?.id;
+
+  if (method === "POST") {
+    await table.put({ ...data, _syncedAt: Date.now() });
+  } else if (method === "PUT" || method === "PATCH") {
+    if (id !== undefined) {
+      const existing = await table.get(id);
+      await table.put({ ...existing, ...data, _syncedAt: Date.now() });
+    }
+  } else if (method === "DELETE") {
+    if (id !== undefined) {
+      await table.delete(id);
+    }
+  }
+}
+
+async function handleOfflineMutation(method: string, url: string, data: any): Promise<any> {
+  const cleanUrl = url.startsWith("/") ? url : `/${url}`;
+  const [pathname] = cleanUrl.split("?");
+
+  if (pathname === "/api/me/switch-tenant") {
+    const targetId = String(data.tenantId);
+    await offlineDb.syncMeta.put({ key: "tenantId", value: targetId });
+    return { success: true };
+  }
+
+  const tenantRow = await offlineDb.syncMeta.get("tenantId");
+  const tenantId = tenantRow?.value || "1";
+  const segments = pathname.split("/").filter(Boolean);
+  const resource = segments[1];
+  const isBulk = segments[segments.length - 1] === "bulk";
+
+  if (method === "POST" && isBulk) {
+    const items = Array.isArray(data?.items) ? data.items : [];
+    const results = [];
+    
+    let table: any = null;
+    if (resource === "population") table = offlineDb.populationData;
+    else if (resource === "sessionPlans" || resource === "sessions") {
+      if (segments[2] === "days" || segments[2] === "day-plans") {
+        table = offlineDb.sessionDayPlans;
+      } else {
+        table = offlineDb.sessionPlans;
+      }
+    } else if (resource === "session-day-plans" || resource === "sessionDayPlans") {
+      table = offlineDb.sessionDayPlans;
+    } else if (resource === "budgetItems" || resource === "budget-items") {
+      table = offlineDb.budgetItems;
+    } else if (resource === "mobilization") {
+      table = offlineDb.mobilizationActivities;
+    }
+
+    for (const item of items) {
+      const itemData = { ...item };
+      if (!itemData.id) {
+        if (resource === "clients") {
+          itemData.id = crypto.randomUUID();
+        } else {
+          itemData.id = Math.floor(Date.now() + Math.random() * 1000);
+        }
+      }
+      itemData.tenantId = tenantId;
+      itemData._localOnly = true;
+
+      if (table) {
+        await table.put({ ...itemData, _syncedAt: Date.now() });
+      }
+
+      results.push({
+        clientId: item.clientId,
+        ok: true,
+        id: itemData.id,
+        data: itemData
+      });
+    }
+
+    const bulkResponse = { results };
+
+    await enqueueOutbox({
+      tenantId,
+      entityType: resource,
+      method: method as any,
+      url: cleanUrl,
+      body: JSON.stringify({ items: results.map(r => r.data) }),
+      localId: "bulk",
+    });
+
+    setTimeout(() => {
+      import("./syncEngine").then(({ syncEngine }) => {
+        syncEngine.refreshPendingCount(tenantId);
+      });
+    }, 100);
+
+    return bulkResponse;
+  }
 
   let itemData = { ...data };
   if (method === "POST" && !itemData.id) {

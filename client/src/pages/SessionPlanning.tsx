@@ -610,7 +610,7 @@ export default function SessionPlanning({
   useEffect(() => {
     if (!unservedPrefill || !isDetailMode || !isCreator) return;
     if (autoPrefillRanRef.current) return;
-    if (!lockedParentForPrefill) return;
+    if (!lockedParentForPrefill || lockedParentForPrefill.status !== "draft") return;
     autoPrefillRanRef.current = true;
     const prefix =
       unservedPrefill.kind === "defaulter"
@@ -637,7 +637,7 @@ export default function SessionPlanning({
   useEffect(() => {
     if (!scheduledDatePrefill || !isDetailMode || !isCreator) return;
     if (datePrefillRanRef.current) return;
-    if (!lockedParentForPrefill) return;
+    if (!lockedParentForPrefill || lockedParentForPrefill.status !== "draft") return;
     datePrefillRanRef.current = true;
     form.setValue("scheduledDate", scheduledDatePrefill as any);
     if (!unservedPrefill) {
@@ -796,7 +796,8 @@ export default function SessionPlanning({
   const [editVillagesLoaded, setEditVillagesLoaded] = useState(false);
   const [addVillagePick, setAddVillagePick] = useState<string>("");
 
-  const isLocked = editingPlan?.approvalStatus === "approved" || editingPlan?.approvalStatus === "locked";
+  const editingPlanParent = editingPlan ? (allMicroplans ?? []).find(m => m.id === editingPlan.microplanId) : null;
+  const isLocked = editingPlan?.approvalStatus === "approved" || editingPlan?.approvalStatus === "locked" || (editingPlanParent ? editingPlanParent.status !== "draft" : false);
 
   const updateMutation = useMutation({
     mutationFn: async ({ id, data }: { id: number; data: any }) => {
@@ -1606,7 +1607,7 @@ export default function SessionPlanning({
   // DETAIL MODE: scoped to a single microplan. Sessions are listed and created here.
   const lockedParent = microplansOfRouteType.find((m) => m.id === lockedMicroplanId)
     ?? (allMicroplans ?? []).find((m) => m.id === lockedMicroplanId);
-  const parentIsLocked = lockedParent?.status === "locked";
+  const parentIsLocked = lockedParent ? lockedParent.status !== "draft" : false;
   const backHref = planTypeFilter === "campaign" ? "/microplans/campaigns" : "/microplans/routine";
 
   return (

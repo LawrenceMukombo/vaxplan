@@ -4,7 +4,7 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { OSM_TILE_ATTRIBUTION, ESRI_IMAGERY_ATTRIBUTION } from "@/data/dataSources";
+
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -55,7 +55,7 @@ import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/component
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import { DataTable } from "@/components/DataTable";
-import { usePersistedBasemap } from "@/hooks/usePersistedBasemap";
+import { usePersistedBasemap, BasemapTileLayer, BasemapSwitcher } from "@/components/map/BasemapToggle";
 import { canApproveSessionPlan } from "@/lib/permissions";
 import { FacilityCascadePicker } from "@/components/FacilityCascadePicker";
 import { intersect as turfIntersect, polygon as turfPolygon, multiPolygon as turfMultiPolygon } from "@turf/turf";
@@ -1742,15 +1742,31 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
     if (!row) return;
     if (row.id) {
       try {
+        /* Original Code commented out for backward-compatibility and strict traceability (Graceful 404 handling):
+        await apiRequest("DELETE", `/api/population/${row.id}`);
+        queryClient.invalidateQueries({ queryKey: ["/api/population"] });
+        */
         await apiRequest("DELETE", `/api/population/${row.id}`);
         queryClient.invalidateQueries({ queryKey: ["/api/population"] });
       } catch (e: any) {
+        /* Original Code commented out for backward-compatibility (Surfacing 404 error was blocking UI state filter):
         toast({
           title: "Could not delete community",
           description: e?.message ?? String(e),
           variant: "destructive",
         });
         return;
+        */
+        if (e?.message?.includes("404")) {
+          console.warn("Community already deleted on server (404). Proceeding with local state update.");
+        } else {
+          toast({
+            title: "Could not delete community",
+            description: e?.message ?? String(e),
+            variant: "destructive",
+          });
+          return;
+        }
       }
     }
     setCommunities(communities.filter((_, i) => i !== index));
@@ -1776,15 +1792,31 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
     if (!row) return;
     if (row.id) {
       try {
+        /* Original Code commented out for backward-compatibility and strict traceability (Graceful 404 handling):
+        await apiRequest("DELETE", `/api/mobilization/${row.id}`);
+        queryClient.invalidateQueries({ queryKey: ["/api/mobilization"] });
+        */
         await apiRequest("DELETE", `/api/mobilization/${row.id}`);
         queryClient.invalidateQueries({ queryKey: ["/api/mobilization"] });
       } catch (e: any) {
+        /* Original Code commented out for backward-compatibility (Surfacing 404 error was blocking UI state filter):
         toast({
           title: "Could not delete mobilization row",
           description: e?.message ?? String(e),
           variant: "destructive",
         });
         return;
+        */
+        if (e?.message?.includes("404")) {
+          console.warn("Mobilization row already deleted on server (404). Proceeding with local state update.");
+        } else {
+          toast({
+            title: "Could not delete mobilization row",
+            description: e?.message ?? String(e),
+            variant: "destructive",
+          });
+          return;
+        }
       }
     }
     setMobilization(mobilization.filter((_, i) => i !== index));
@@ -1795,15 +1827,31 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
     if (!row) return;
     if (row.id) {
       try {
+        /* Original Code commented out for backward-compatibility and strict traceability (Graceful 404 handling):
+        await apiRequest("DELETE", `/api/budget-items/${row.id}`);
+        queryClient.invalidateQueries({ queryKey: ["/api/budget-items"] });
+        */
         await apiRequest("DELETE", `/api/budget-items/${row.id}`);
         queryClient.invalidateQueries({ queryKey: ["/api/budget-items"] });
       } catch (e: any) {
+        /* Original Code commented out for backward-compatibility (Surfacing 404 error was blocking UI state filter):
         toast({
           title: "Could not delete budget line",
           description: e?.message ?? String(e),
           variant: "destructive",
         });
         return;
+        */
+        if (e?.message?.includes("404")) {
+          console.warn("Budget line already deleted on server (404). Proceeding with local state update.");
+        } else {
+          toast({
+            title: "Could not delete budget line",
+            description: e?.message ?? String(e),
+            variant: "destructive",
+          });
+          return;
+        }
       }
     }
     setBudget(budget.filter((_, i) => i !== index));
@@ -1814,15 +1862,31 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
     if (!row) return;
     if (row.id) {
       try {
+        /* Original Code commented out for backward-compatibility and strict traceability (Graceful 404 handling):
+        await apiRequest("DELETE", `/api/supervision-visits/${row.id}`);
+        queryClient.invalidateQueries({ queryKey: ["/api/supervision-visits"] });
+        */
         await apiRequest("DELETE", `/api/supervision-visits/${row.id}`);
         queryClient.invalidateQueries({ queryKey: ["/api/supervision-visits"] });
       } catch (e: any) {
+        /* Original Code commented out for backward-compatibility (Surfacing 404 error was blocking UI state filter):
         toast({
           title: "Could not delete supervision visit",
           description: e?.message ?? String(e),
           variant: "destructive",
         });
         return;
+        */
+        if (e?.message?.includes("404")) {
+          console.warn("Supervision visit already deleted on server (404). Proceeding with local state update.");
+        } else {
+          toast({
+            title: "Could not delete supervision visit",
+            description: e?.message ?? String(e),
+            variant: "destructive",
+          });
+          return;
+        }
       }
     }
     setSupervision(supervision.filter((_, i) => i !== index));
@@ -2819,6 +2883,7 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
   // ─── Render ────────────────────────────────────────────────────────────
   const stepDef = STEPS.find((s) => s.id === active)!;
   const status = microplan?.status ?? "draft";
+  const isReadOnly = status !== "draft";
   const facilityLabel = facility?.name ?? "No facility selected";
   // Facility staff (clerk + in-charge) author and submit microplans; higher
   // roles act as reviewers/approvers. national_admin is included so platform
@@ -3314,7 +3379,8 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
                 </div>
               )}
 
-              {active === 1 && (
+              <fieldset disabled={isReadOnly} className="contents space-y-4">
+                {active === 1 && (
                 <Step1
                   facilityId={facilityId}
                   year={year}
@@ -3343,6 +3409,7 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
                   microplan={microplan}
                   excludedVillages={excludedFacilityVillages}
                   excludedDetails={excludedDetails}
+                  readOnly={isReadOnly}
                   onRestoreVillage={(v) => {
                     setCommunities([
                       ...communities,
@@ -3502,6 +3569,7 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
               {active === 14 && (
                 <Step12 microplanId={microplanId} facilityId={facilityId} />
               )}
+              </fieldset>
             </CardContent>
 
             {/* Footer */}
@@ -3542,7 +3610,7 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
                 <Button
                   variant="outline"
                   onClick={saveDraft}
-                  disabled={busy || !facilityId}
+                  disabled={busy || !facilityId || isReadOnly}
                   data-testid="button-save-draft"
                 >
                   <Save className="mr-1 h-4 w-4" /> Save Draft
@@ -3550,7 +3618,7 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
                 {active === 13 ? (
                   <Button
                     onClick={handleSubmit}
-                    disabled={!canSubmit || busy || !microplanId || validationErrors.length > 0}
+                    disabled={!canSubmit || busy || !microplanId || validationErrors.length > 0 || isReadOnly}
                     data-testid="button-submit"
                   >
                     {busy ? (
@@ -4233,6 +4301,7 @@ function Step2({
   errorMessage,
   onClearError,
   targetInfants = 0,
+  readOnly,
 }: {
   communities: any[];
   setCommunities: (v: any[]) => void;
@@ -4246,6 +4315,7 @@ function Step2({
   errorMessage?: string;
   onClearError?: () => void;
   targetInfants?: number;
+  readOnly?: boolean;
 }) {
   const sumCommunityUnder1 = communities.reduce((acc, c) => acc + Math.round(parseFloat(c.targetPopulation || "0") * 0.04), 0);
   const diffPercent = targetInfants > 0 ? Math.abs(sumCommunityUnder1 - targetInfants) / targetInfants : 0;
@@ -4712,6 +4782,7 @@ function Step2({
                 variant={drawMode === "facility" ? "default" : "outline"}
                 onClick={() => setDrawMode(drawMode === "facility" ? "none" : "facility")}
                 title="Draw facility catchment polygon on map"
+                disabled={readOnly}
               >
                 <svg className="mr-1 h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><polygon points="3,12 9,3 21,3 21,21 3,21" /><circle cx="3" cy="12" r="1.5" fill="currentColor" /><circle cx="9" cy="3" r="1.5" fill="currentColor" /><circle cx="21" cy="3" r="1.5" fill="currentColor" /><circle cx="21" cy="21" r="1.5" fill="currentColor" /><circle cx="3" cy="21" r="1.5" fill="currentColor" /></svg>
                 {drawMode === "facility" ? "Stop Drawing" : "Draw Catchment"}
@@ -4721,6 +4792,7 @@ function Step2({
                 variant="outline"
                 onClick={openBulkEstimate}
                 disabled={
+                  readOnly ||
                   communities.filter(
                     (c) =>
                       c.latitude &&
@@ -4734,7 +4806,7 @@ function Step2({
               >
                 <MapIcon className="mr-1 h-4 w-4" /> Estimate all from map
               </Button>
-              <Button size="sm" variant="outline" onClick={() => add()} data-testid="button-add-community">
+              <Button size="sm" variant="outline" onClick={() => add()} data-testid="button-add-community" disabled={readOnly}>
                 <Plus className="mr-1 h-4 w-4" /> Add community
               </Button>
             </div>
@@ -4785,6 +4857,7 @@ function Step2({
                   }
                 : null
             }
+            readOnly={readOnly}
           />
 
           {excludedVillages.length > 0 && (
@@ -4859,6 +4932,7 @@ function Step2({
             <table className="w-full text-sm">
               <thead className="border-b text-left text-xs uppercase text-muted-foreground">
                 <tr>
+                  {/* Original code:
                   <th className="p-2 w-8">#</th>
                   <th className="p-2">Name</th>
                   <th className="p-2">Type</th>
@@ -4869,6 +4943,17 @@ function Step2({
                   <th className="p-2">Strategy</th>
                   <th className="p-2">Coordinates</th>
                   <th className="p-2"></th>
+                  */}
+                  <th className="p-2 w-8">#</th>
+                  <th className="p-2 min-w-[150px] md:min-w-[200px]">Name</th>
+                  <th className="p-2 w-28">Type</th>
+                  <th className="p-2" title="WorldPop / gridded raster population estimate">Grid Pop 🌐</th>
+                  <th className="p-2" title="NSO / HMIS / Survey / Census population (manual entry)">Survey/HMIS/NSO Pop 📋</th>
+                  <th className="p-2">Target Pop</th>
+                  <th className="p-2 w-28">Source</th>
+                  <th className="p-2 w-28">Strategy</th>
+                  <th className="p-2 min-w-[150px]">Coordinates</th>
+                  <th className="p-2 w-8"></th>
                 </tr>
               </thead>
               <tbody>
@@ -4890,15 +4975,27 @@ function Step2({
                         {i + 1}
                       </td>
                       <td className="p-1">
+                        {/* Original code:
                         <Input
+                          value={c.name}
+                          onChange={(e) => update(i, { name: e.target.value })}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                        */}
+                        <Input
+                          className="min-w-[150px] md:min-w-[200px]"
                           value={c.name}
                           onChange={(e) => update(i, { name: e.target.value })}
                           onClick={(e) => e.stopPropagation()}
                         />
                       </td>
                       <td className="p-1">
+                        {/* Original code:
                         <Select value={c.type} onValueChange={(v) => update(i, { type: v })}>
                           <SelectTrigger onClick={(e) => e.stopPropagation()}><SelectValue /></SelectTrigger>
+                        */}
+                        <Select value={c.type} onValueChange={(v) => update(i, { type: v })}>
+                          <SelectTrigger className="w-28" onClick={(e) => e.stopPropagation()}><SelectValue /></SelectTrigger>
                           <SelectContent>
                             <SelectItem value="village">Village</SelectItem>
                             <SelectItem value="hamlet">Hamlet</SelectItem>
@@ -4962,8 +5059,12 @@ function Step2({
                         />
                       </td>
                       <td className="p-1">
+                        {/* Original code:
                         <Select value={c.source} onValueChange={(v) => update(i, { source: v })}>
                           <SelectTrigger onClick={(e) => e.stopPropagation()}><SelectValue /></SelectTrigger>
+                        */}
+                        <Select value={c.source} onValueChange={(v) => update(i, { source: v })}>
+                          <SelectTrigger className="w-28" onClick={(e) => e.stopPropagation()}><SelectValue /></SelectTrigger>
                           <SelectContent>
                             <SelectItem value="nso">NSO</SelectItem>
                             <SelectItem value="hmis">HMIS</SelectItem>
@@ -4974,8 +5075,12 @@ function Step2({
                         </Select>
                       </td>
                       <td className="p-1">
+                        {/* Original code:
                         <Select value={c.strategy} onValueChange={(v) => update(i, { strategy: v })}>
                           <SelectTrigger onClick={(e) => e.stopPropagation()}><SelectValue /></SelectTrigger>
+                        */}
+                        <Select value={c.strategy} onValueChange={(v) => update(i, { strategy: v })}>
+                          <SelectTrigger className="w-28" onClick={(e) => e.stopPropagation()}><SelectValue /></SelectTrigger>
                           <SelectContent>
                             <SelectItem value="static">Fixed</SelectItem>
                             <SelectItem value="outreach">Outreach</SelectItem>
@@ -5075,7 +5180,7 @@ function Step2({
                     setFlaggingUncovered(false);
                   }
                 }}
-                disabled={flaggingUncovered}
+                disabled={flaggingUncovered || readOnly}
               >
                 {flaggingUncovered ? <><Loader2 className="mr-1 h-3 w-3 animate-spin" />Flagging…</> : "Flag to District"}
               </Button>
@@ -5154,6 +5259,7 @@ function Step2({
                                 setSelectedIdx(communities.length);
                                 toast({ title: "Added", description: `"${c.name}" added to plan.` });
                               }}
+                              disabled={readOnly}
                             >
                               + Add
                             </Button>
@@ -5235,6 +5341,7 @@ function Step2({
                           setSelectedIdx(communities.length);
                           toast({ title: "Settlement Added", description: `Added "${s.name}" to community list.` });
                         }}
+                        disabled={readOnly}
                       >
                         + Add as Community
                       </Button>
@@ -5824,6 +5931,7 @@ function Step2Map({
   gapGeojson,
   showGaps,
   facilityPolygon,
+  readOnly,
 }: {
   facility: Facility | null;
   communities: any[];
@@ -5850,6 +5958,7 @@ function Step2Map({
   gapGeojson?: any;
   showGaps?: boolean;
   facilityPolygon?: any;
+  readOnly?: boolean;
 }) {
   // Lazy-load Leaflet so the wizard's earlier steps don't pay the bundle cost.
   const [leaflet, setLeaflet] = useState<any>(null);
@@ -5927,11 +6036,38 @@ function Step2Map({
 
   const { MapContainer, TileLayer, WMSTileLayer, Marker, Popup, Circle: LCircle, Rectangle: LRectangle, Tooltip: LTooltip, useMapEvents, useMap, Polygon: LPolygon, GeoJSON: LGeoJSON, Polyline: LPolyline } = leaflet.rl;
 
+  /* Original Code commented out to prevent Leaflet infinite tile crashes:
   function Recenter({ center }: { center: [number, number] }) {
     const map = useMap();
     useEffect(() => {
       map.setView(center, map.getZoom());
     }, [center[0], center[1]]);
+    return null;
+  }
+  */
+  // Updated Code: Uses refs to track value-based coordinate updates and validates against NaN.
+  // This prevents infinite render loop cascades and Leaflet's "Attempted to load an infinite number of tiles" error.
+  function Recenter({ center }: { center: [number, number] }) {
+    const map = useMap();
+    const [lat, lng] = center || [NaN, NaN];
+    const prevCenterRef = useRef<[number, number]>([lat, lng]);
+
+    useEffect(() => {
+      const prevCenter = prevCenterRef.current;
+      const centerChanged = prevCenter[0] !== lat || prevCenter[1] !== lng;
+
+      if (centerChanged) {
+        if (
+          typeof lat === "number" &&
+          typeof lng === "number" &&
+          !isNaN(lat) &&
+          !isNaN(lng)
+        ) {
+          map.setView([lat, lng], map.getZoom());
+          prevCenterRef.current = [lat, lng];
+        }
+      }
+    }, [map, lat, lng]);
     return null;
   }
 
@@ -6099,6 +6235,7 @@ function Step2Map({
           });
           return;
         }
+        if (readOnly) return;
         if (drawMode === "facility") {
           const pt: [number, number] = [e.latlng.lat, e.latlng.lng];
           setDrawVertices((prev) => {
@@ -6171,20 +6308,9 @@ function Step2Map({
         infoMode ? "[&_.leaflet-container]:cursor-help" : ""
       }`}
     >
+      <BasemapSwitcher basemap={basemap} onChange={setBasemap} />
       <MapContainer center={center} zoom={11} className="h-full w-full z-0" zoomControl={false}>
-        {basemap === "osm" ? (
-          <TileLayer
-            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-            attribution={OSM_TILE_ATTRIBUTION}
-          />
-        ) : (
-          <TileLayer
-            url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
-            attribution={ESRI_IMAGERY_ATTRIBUTION}
-            maxNativeZoom={17}
-            maxZoom={22}
-          />
-        )}
+        <BasemapTileLayer basemap={basemap} />
         {showPopulation && !populationUnavailable && (
           <WMSTileLayer
             url="https://ogc.worldpop.org/geoserver/wpGlobal/ows"
@@ -6448,7 +6574,7 @@ function Step2Map({
               key={c.rowId}
               position={[lat, lng]}
               icon={icon}
-              draggable={true}
+              draggable={!readOnly}
               eventHandlers={{
                 dragend: (e: any) => {
                   const ll = e.target.getLatLng();

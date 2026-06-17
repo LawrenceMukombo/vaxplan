@@ -1,5 +1,11 @@
+/* Original Code:
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
+import {
+*/
+import { useMemo, useEffect } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { useAuth } from "@/hooks/useAuth";
 import {
   Select,
   SelectContent,
@@ -86,6 +92,7 @@ export function GeoCascadeFilter({
   testIdPrefix = "geo",
   strictCascade = true,
 }: GeoCascadeFilterProps) {
+  /* Original Code:
   // Tenant context — used as a cache scope so switching countries refetches.
   const { data: tenantInfo } = useQuery<any>({
     queryKey: ["/api/me/tenant"],
@@ -127,7 +134,91 @@ export function GeoCascadeFilter({
     () => [...regions].sort((a, b) => a.name.localeCompare(b.name)),
     [regions],
   );
+  */
+  const { user } = useAuth();
+  
+  // Resolve user role scoping
+  const userRole = user?.role;
+  const isPlatformAdmin = user?.isPlatformAdmin === true;
+  const isNationalAdmin = userRole === "national_admin" || (Array.isArray(user?.roles) && user.roles.includes("national_admin"));
+  const isGisSpecialist = userRole === "gis_specialist" || (Array.isArray(user?.roles) && user.roles.includes("gis_specialist"));
+  const hasAdminBypass = isPlatformAdmin || isNationalAdmin || isGisSpecialist;
 
+  const isFacilityUser = !hasAdminBypass && (userRole === "facility_clerk" || userRole === "facility_in_charge" || (Array.isArray(user?.roles) && (user.roles.includes("facility_clerk") || user.roles.includes("facility_in_charge"))));
+  const isDistrictUser = !hasAdminBypass && (userRole === "district_manager" || (Array.isArray(user?.roles) && user.roles.includes("district_manager")));
+  const isProvinceUser = !hasAdminBypass && (userRole === "provincial_coordinator" || (Array.isArray(user?.roles) && user.roles.includes("provincial_coordinator")));
+
+  // Tenant context — used as a cache scope so switching countries refetches.
+  const { data: tenantInfo } = useQuery<any>({
+    queryKey: ["/api/me/tenant"],
+  });
+
+  const { data: fetchedRegions } = useQuery<Region[]>({
+    queryKey: ["/api/regions", tenantInfo?.id],
+    queryFn: () => fetchJson<Region[]>("/api/regions"),
+    enabled: showRegion && providedRegions === undefined && !!tenantInfo?.id,
+  });
+
+  const { data: fetchedProvinces } = useQuery<Province[]>({
+    queryKey: ["/api/provinces", tenantInfo?.id],
+    queryFn: () => fetchJson<Province[]>("/api/provinces"),
+    enabled: providedProvinces === undefined && !!tenantInfo?.id,
+  });
+
+  const { data: fetchedDistricts } = useQuery<District[]>({
+    queryKey: ["/api/districts", tenantInfo?.id],
+    queryFn: () => fetchJson<District[]>("/api/districts"),
+    enabled: providedDistricts === undefined && !!tenantInfo?.id,
+  });
+
+  const { data: fetchedFacilities } = useQuery<Facility[]>({
+    queryKey: ["/api/facilities", tenantInfo?.id],
+    queryFn: () => fetchJson<Facility[]>("/api/facilities"),
+    enabled:
+      showFacility &&
+      providedFacilities === undefined &&
+      !!tenantInfo?.id,
+  });
+
+  const provinces = providedProvinces ?? fetchedProvinces ?? [];
+  const districts = providedDistricts ?? fetchedDistricts ?? [];
+  const facilities = providedFacilities ?? fetchedFacilities ?? [];
+  const regions = providedRegions ?? fetchedRegions ?? [];
+
+  // Enforce preselection via useEffect
+  useEffect(() => {
+    if (!user) return;
+
+    if (isFacilityUser) {
+      if (user.provinceId && provinceId !== user.provinceId) {
+        onProvinceChange(user.provinceId);
+      }
+      if (user.districtId && districtId !== user.districtId) {
+        onDistrictChange(user.districtId);
+      }
+      if (showFacility && onFacilityChange && user.facilityId && facilityId !== user.facilityId) {
+        onFacilityChange(user.facilityId);
+      }
+    } else if (isDistrictUser) {
+      if (user.provinceId && provinceId !== user.provinceId) {
+        onProvinceChange(user.provinceId);
+      }
+      if (user.districtId && districtId !== user.districtId) {
+        onDistrictChange(user.districtId);
+      }
+    } else if (isProvinceUser) {
+      if (user.provinceId && provinceId !== user.provinceId) {
+        onProvinceChange(user.provinceId);
+      }
+    }
+  }, [user, provinceId, districtId, facilityId, isFacilityUser, isDistrictUser, isProvinceUser, showFacility]);
+
+  const sortedRegions = useMemo(
+    () => [...regions].sort((a, b) => a.name.localeCompare(b.name)),
+    [regions],
+  );
+
+  /* Original Code:
   const sortedProvinces = useMemo(() => {
     const list = showRegion && regionId
       ? provinces.filter((p) => Number((p as any).regionId) === Number(regionId))
@@ -175,6 +266,73 @@ export function GeoCascadeFilter({
     onProvinceChange(null);
     onDistrictChange(null);
     if (showFacility && onFacilityChange) onFacilityChange(null);
+  };
+  */
+
+  const sortedProvinces = useMemo(() => {
+    let list = provinces;
+    if (isProvinceUser || isDistrictUser || isFacilityUser) {
+      if (user?.provinceId) {
+        list = list.filter((p) => Number(p.id) === Number(user.provinceId));
+      }
+    }
+    if (showRegion && regionId) {
+      list = list.filter((p) => Number((p as any).regionId) === Number(regionId));
+    }
+    return [...list].sort((a, b) => a.name.localeCompare(b.name));
+  }, [provinces, regionId, showRegion, isProvinceUser, isDistrictUser, isFacilityUser, user?.provinceId]);
+
+  const filteredDistricts = useMemo(() => {
+    let list = districts;
+    if (isDistrictUser || isFacilityUser) {
+      if (user?.districtId) {
+        list = list.filter((d) => Number(d.id) === Number(user.districtId));
+      }
+    } else if (provinceId) {
+      list = list.filter((d) => Number((d as any).provinceId) === Number(provinceId));
+    }
+    return [...list].sort((a, b) => a.name.localeCompare(b.name));
+  }, [districts, provinceId, isDistrictUser, isFacilityUser, user?.districtId]);
+
+  const filteredFacilities = useMemo(() => {
+    if (!showFacility) return [];
+    let list = facilities;
+    
+    if (isFacilityUser) {
+      if (user?.facilityId) {
+        list = list.filter((f) => Number(f.id) === Number(user.facilityId));
+      }
+    } else if (districtId) {
+      list = list.filter(
+        (f) => Number((f as any).districtId) === Number(districtId),
+      );
+    } else if (provinceId) {
+      list = list.filter((f) => {
+        const d = districts.find(
+          (dd) => Number(dd.id) === Number((f as any).districtId),
+        );
+        return d && Number((d as any).provinceId) === Number(provinceId);
+      });
+    }
+    return [...list].sort((a, b) => a.name.localeCompare(b.name));
+  }, [facilities, districts, provinceId, districtId, showFacility, isFacilityUser, user?.facilityId]);
+
+  // Lock status considering user-role scopes
+  const provinceLocked = isProvinceUser || isDistrictUser || isFacilityUser;
+  const districtLocked = isDistrictUser || isFacilityUser || (strictCascade && !provinceId);
+  const facilityLocked = isFacilityUser || (strictCascade && (!provinceId || !districtId));
+
+  const hasSelection =
+    (showRegion && regionId && !provinceLocked) ||
+    (provinceId !== null && !provinceLocked) ||
+    (districtId !== null && !districtLocked) ||
+    (showFacility && facilityId && !facilityLocked);
+
+  const clearAll = () => {
+    if (showRegion && onRegionChange) onRegionChange(null);
+    if (!provinceLocked) onProvinceChange(null);
+    if (!districtLocked) onDistrictChange(null);
+    if (showFacility && onFacilityChange && !facilityLocked) onFacilityChange(null);
   };
 
   const handleRegion = (val: string) => {
@@ -239,6 +397,7 @@ export function GeoCascadeFilter({
       )}
 
       {/* Province — always enabled; it's the top of the cascade */}
+      {/* Original Code:
       <div className="min-w-[180px] flex-1 max-w-[240px]">
         <label className="text-xs font-medium text-muted-foreground mb-1 block">
           {provinceLabel}
@@ -248,6 +407,33 @@ export function GeoCascadeFilter({
           onValueChange={handleProvince}
         >
           <SelectTrigger data-testid={`${testIdPrefix}-select-province`}>
+            <SelectValue placeholder={`All ${provinceLabel}s`} />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All {provinceLabel}s</SelectItem>
+            {sortedProvinces.map((p) => (
+              <SelectItem key={p.id} value={p.id.toString()}>
+                {p.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      */}
+      <div className="min-w-[180px] flex-1 max-w-[240px]">
+        <label className={`text-xs font-medium mb-1 flex items-center gap-1 ${provinceLocked ? "text-muted-foreground/50" : "text-muted-foreground"}`}>
+          {provinceLabel}
+          {provinceLocked && <Lock className="h-2.5 w-2.5 opacity-60" />}
+        </label>
+        <Select
+          value={provinceId?.toString() ?? "all"}
+          onValueChange={handleProvince}
+          disabled={provinceLocked || sortedProvinces.length === 0}
+        >
+          <SelectTrigger
+            data-testid={`${testIdPrefix}-select-province`}
+            className={provinceLocked ? "opacity-50 cursor-not-allowed" : ""}
+          >
             <SelectValue placeholder={`All ${provinceLabel}s`} />
           </SelectTrigger>
           <SelectContent>

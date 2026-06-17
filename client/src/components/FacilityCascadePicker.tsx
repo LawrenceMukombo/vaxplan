@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/useAuth";
-import { Check, ChevronsUpDown } from "lucide-react";
+import { Check, ChevronsUpDown, Lock } from "lucide-react";
 import { cn, pluralize } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -74,8 +74,25 @@ export function FacilityCascadePicker({
     queryKey: ["/api/me/tenant"],
   });
   
+  /* Original Code:
   const { user } = useAuth();
   const isFacilityStaff = user?.role === "facility_clerk" || user?.role === "facility_in_charge" || user?.role === "facility_partner";
+  */
+  const { user } = useAuth();
+  
+  // Resolve user role scoping
+  const userRole = user?.role;
+  const isPlatformAdmin = user?.isPlatformAdmin === true;
+  const isNationalAdmin = userRole === "national_admin" || (Array.isArray(user?.roles) && user.roles.includes("national_admin"));
+  const isGisSpecialist = userRole === "gis_specialist" || (Array.isArray(user?.roles) && user.roles.includes("gis_specialist"));
+  const hasAdminBypass = isPlatformAdmin || isNationalAdmin || isGisSpecialist;
+
+  const isFacilityUser = !hasAdminBypass && (userRole === "facility_clerk" || userRole === "facility_in_charge" || (Array.isArray(user?.roles) && (user.roles.includes("facility_clerk") || user.roles.includes("facility_in_charge"))));
+  const isDistrictUser = !hasAdminBypass && (userRole === "district_manager" || (Array.isArray(user?.roles) && user.roles.includes("district_manager")));
+  const isProvinceUser = !hasAdminBypass && (userRole === "provincial_coordinator" || (Array.isArray(user?.roles) && user.roles.includes("provincial_coordinator")));
+
+  // Backward compatibility with legacy flag
+  const isFacilityStaff = isFacilityUser;
 
   const { data: provinces } = useQuery<Province[]>({
     queryKey: ["/api/provinces", tenantInfo?.id],
@@ -114,6 +131,22 @@ export function FacilityCascadePicker({
     }
   }, [value, facilities, districts]);
 
+  // Derive province/district from the controlled facility value, so when
+  // a parent passes in a facilityId we still show the correct cascade.
+  useEffect(() => {
+    if (!value || !facilities || !districts) return;
+    const fac = facilities.find((f) => Number(f.id) === Number(value));
+    if (!fac) return;
+    const dist = districts.find(
+      (d) => Number(d.id) === Number((fac as any).districtId),
+    );
+    if (dist) {
+      setDistrictId(Number(dist.id));
+      setProvinceId(Number((dist as any).provinceId));
+    }
+  }, [value, facilities, districts]);
+
+  /* Original Code:
   // When a district lock is supplied (district staff), pin the cascade to that
   // district and derive its province so the Province/District selectors show
   // the correct context while staying disabled.
@@ -180,6 +213,101 @@ export function FacilityCascadePicker({
     }
     return [...list].sort((a, b) => a.name.localeCompare(b.name));
   }, [facilities, districts, provinceId, districtId, isFacilityStaff, user?.facilityId]);
+  */
+
+  // Prefill & lock values based on user role scope
+  useEffect(() => {
+    if (!user || !facilities || !districts) return;
+
+    if (isFacilityUser) {
+      const targetFacId = Number(user.facilityId);
+      if (targetFacId) {
+        const fac = facilities.find((f) => Number(f.id) === targetFacId);
+        if (fac) {
+          const dist = districts.find((d) => Number(d.id) === Number((fac as any).districtId));
+          if (dist) {
+            setProvinceId(Number((dist as any).provinceId));
+            setDistrictId(Number(dist.id));
+          }
+          if (Number(value) !== targetFacId) {
+            onChange(targetFacId, fac);
+          }
+        }
+      }
+    } else if (isDistrictUser || lockDistrictId !== null) {
+      const targetDistId = lockDistrictId ? Number(lockDistrictId) : Number(user.districtId);
+      if (targetDistId) {
+        const dist = districts.find((d) => Number(d.id) === targetDistId);
+        if (dist) {
+          setProvinceId(Number((dist as any).provinceId));
+          setDistrictId(targetDistId);
+        }
+      }
+    } else if (isProvinceUser) {
+      const targetProvId = Number(user.provinceId);
+      if (targetProvId) {
+        setProvinceId(targetProvId);
+      }
+    }
+  }, [user, value, facilities, districts, isFacilityUser, isDistrictUser, isProvinceUser, lockDistrictId]);
+
+  // Surface the resolved district to the parent (so a community can capture its
+  // district even before a facility is chosen).
+  useEffect(() => {
+    onDistrictChange?.(districtId);
+  }, [districtId, onDistrictChange]);
+
+  const lockParents = lockDistrictId != null || isFacilityStaff;
+
+  // Locks considering user-role scopes
+  const provinceLocked = isProvinceUser || isDistrictUser || isFacilityUser || lockParents;
+  const districtLocked = isDistrictUser || isFacilityUser || lockParents || !provinceId;
+  const facilityLocked = isFacilityUser;
+
+  const sortedProvinces = useMemo(() => {
+    let list = provinces ?? [];
+    if (isProvinceUser || isDistrictUser || isFacilityUser) {
+      if (user?.provinceId) {
+        list = list.filter((p) => Number(p.id) === Number(user.provinceId));
+      }
+    }
+    return [...list].sort((a, b) => a.name.localeCompare(b.name));
+  }, [provinces, isProvinceUser, isDistrictUser, isFacilityUser, user?.provinceId]);
+
+  const filteredDistricts = useMemo(() => {
+    let list = districts ?? [];
+    if (isDistrictUser || isFacilityUser) {
+      if (user?.districtId) {
+        list = list.filter((d) => Number(d.id) === Number(user.districtId));
+      }
+    } else if (provinceId) {
+      list = list.filter(
+        (d) => Number((d as any).provinceId) === Number(provinceId),
+      );
+    }
+    return [...list].sort((a, b) => a.name.localeCompare(b.name));
+  }, [districts, provinceId, isDistrictUser, isFacilityUser, user?.districtId]);
+
+  const filteredFacilities = useMemo(() => {
+    let list = facilities ?? [];
+    if (isFacilityUser) {
+      if (user?.facilityId) {
+        list = list.filter((f) => Number(f.id) === Number(user.facilityId));
+      }
+    } else if (districtId) {
+      list = list.filter(
+        (f) => Number((f as any).districtId) === Number(districtId),
+      );
+    } else if (provinceId) {
+      list = list.filter((f) => {
+        const d = (districts ?? []).find(
+          (dd) => Number(dd.id) === Number((f as any).districtId),
+        );
+        return d && Number((d as any).provinceId) === Number(provinceId);
+      });
+    }
+    return [...list].sort((a, b) => a.name.localeCompare(b.name));
+  }, [facilities, districts, provinceId, districtId, isFacilityUser, user?.facilityId]);
 
   const selectedProvince = sortedProvinces.find(
     (p) => Number(p.id) === Number(provinceId),
@@ -201,7 +329,10 @@ export function FacilityCascadePicker({
       {/* Province */}
       <div className="space-y-1">
         {showLabels && (
-          <Label className="text-xs">{provinceLabel}</Label>
+          <Label className="text-xs flex items-center gap-1">
+            {provinceLabel}
+            {provinceLocked && <Lock className="h-2.5 w-2.5 opacity-60" />}
+          </Label>
         )}
         <Popover open={provOpen} onOpenChange={setProvOpen} modal>
           <PopoverTrigger asChild>
@@ -209,7 +340,7 @@ export function FacilityCascadePicker({
               type="button"
               variant="outline"
               role="combobox"
-              disabled={disabled || lockParents || sortedProvinces.length === 0}
+              disabled={disabled || provinceLocked || sortedProvinces.length === 0}
               className="w-full justify-between font-normal"
               data-testid={`${testIdPrefix}-province`}
             >
@@ -268,7 +399,10 @@ export function FacilityCascadePicker({
       {/* District */}
       <div className="space-y-1">
         {showLabels && (
-          <Label className="text-xs">{districtLabel}</Label>
+          <Label className="text-xs flex items-center gap-1">
+            {districtLabel}
+            {districtLocked && <Lock className="h-2.5 w-2.5 opacity-60" />}
+          </Label>
         )}
         <Popover open={distOpen} onOpenChange={setDistOpen} modal>
           <PopoverTrigger asChild>
@@ -276,7 +410,7 @@ export function FacilityCascadePicker({
               type="button"
               variant="outline"
               role="combobox"
-              disabled={disabled || lockParents || !provinceId || filteredDistricts.length === 0}
+              disabled={disabled || districtLocked || !provinceId || filteredDistricts.length === 0}
               className="w-full justify-between font-normal"
               data-testid={`${testIdPrefix}-district`}
             >
@@ -335,9 +469,12 @@ export function FacilityCascadePicker({
       {/* Facility */}
       <div className="space-y-1">
         {showLabels && (
-          <Label className="text-xs">
-            {facilityLabel}
-            {required ? " *" : ""}
+          <Label className="text-xs flex items-center gap-1">
+            <span>
+              {facilityLabel}
+              {required ? " *" : ""}
+            </span>
+            {facilityLocked && <Lock className="h-2.5 w-2.5 opacity-60" />}
           </Label>
         )}
         <Popover open={facOpen} onOpenChange={setFacOpen} modal>
@@ -347,7 +484,7 @@ export function FacilityCascadePicker({
               variant="outline"
               role="combobox"
               disabled={
-                disabled || !districtId || filteredFacilities.length === 0
+                disabled || facilityLocked || !districtId || filteredFacilities.length === 0
               }
               className="w-full justify-between font-normal"
               data-testid={`${testIdPrefix}-facility`}

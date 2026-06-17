@@ -24,6 +24,32 @@ async function main() {
     logLevel: "info",
   });
 
+  console.log("[build] Bundling migrations with esbuild → dist/migrate.cjs");
+  await esbuildBuild({
+    entryPoints: [path.join(projectRoot, "scripts/migrate.ts")],
+    bundle: true,
+    platform: "node",
+    target: "node20",
+    format: "cjs",
+    outfile: path.join(projectRoot, "dist/migrate.cjs"),
+    sourcemap: true,
+    packages: "external",
+    logLevel: "info",
+  });
+
+  console.log("[build] Bundling railway-bootstrap with esbuild → dist/railway-bootstrap.cjs");
+  await esbuildBuild({
+    entryPoints: [path.join(projectRoot, "scripts/railway-bootstrap.ts")],
+    bundle: true,
+    platform: "node",
+    target: "node20",
+    format: "cjs",
+    outfile: path.join(projectRoot, "dist/railway-bootstrap.cjs"),
+    sourcemap: true,
+    packages: "external",
+    logLevel: "info",
+  });
+
   console.log("[build] Done.");
 }
 

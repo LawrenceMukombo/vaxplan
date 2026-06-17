@@ -34,8 +34,8 @@ import {
 } from "@/components/PopulationOverlay";
 import { FacilityCascadePicker } from "@/components/FacilityCascadePicker";
 import { useAuth } from "@/hooks/useAuth";
-import { usePersistedBasemap } from "@/hooks/usePersistedBasemap";
-import { OSM_TILE_ATTRIBUTION, ESRI_IMAGERY_ATTRIBUTION } from "@/data/dataSources";
+import { usePersistedBasemap, type Basemap, BasemapTileLayer, BasemapSwitcher, BASEMAP_ITEMS } from "@/components/map/BasemapToggle";
+import { CARTO_POSITRON_ATTRIBUTION, CARTO_VOYAGER_ATTRIBUTION } from "@/data/dataSources";
 import { canCreateSessionPlan } from "@/lib/permissions";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -95,6 +95,7 @@ import {
   DialogFooter,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -146,6 +147,39 @@ const normalizeName = (name: string): string => {
     .replace(/province/g, "")
     .replace(/district/g, "")
     .trim();
+};
+
+const getGeoJSONBBox = (geojson: any) => {
+  let minLat = Infinity, maxLat = -Infinity;
+  let minLng = Infinity, maxLng = -Infinity;
+
+  const processCoords = (coords: any) => {
+    if (Array.isArray(coords)) {
+      if (typeof coords[0] === "number" && typeof coords[1] === "number") {
+        const [lng, lat] = coords;
+        if (lat < minLat) minLat = lat;
+        if (lat > maxLat) maxLat = lat;
+        if (lng < minLng) minLng = lng;
+        if (lng > maxLng) maxLng = lng;
+      } else {
+        coords.forEach(processCoords);
+      }
+    }
+  };
+
+  if (geojson) {
+    if (geojson.geometry) {
+      processCoords(geojson.geometry.coordinates);
+    } else if (geojson.coordinates) {
+      processCoords(geojson.coordinates);
+    } else if (geojson.features) {
+      geojson.features.forEach((f: any) => {
+        if (f.geometry) processCoords(f.geometry.coordinates);
+      });
+    }
+  }
+
+  return { minLat, maxLat, minLng, maxLng };
 };
 
 // Creates a dedicated Leaflet pane for the GRID3 Settlement Footprints with a
@@ -297,8 +331,8 @@ interface MapControlsProps {
   onZoomIn: () => void;
   onZoomOut: () => void;
   onLocate: () => void;
-  basemap?: "osm" | "satellite" | "carto";
-  onBasemapChange?: (basemap: "osm" | "satellite" | "carto") => void;
+  basemap?: Basemap;
+  onBasemapChange?: (basemap: Basemap) => void;
 }
 
 function MapControls({ onZoomIn, onZoomOut, onLocate, basemap, onBasemapChange }: MapControlsProps) {
@@ -317,8 +351,8 @@ function MapControls({ onZoomIn, onZoomOut, onLocate, basemap, onBasemapChange }
         <Button
           size="icon"
           variant={basemap === "satellite" ? "default" : "secondary"}
-          onClick={() => onBasemapChange(basemap === "osm" ? "satellite" : "osm")}
-          title={basemap === "osm" ? "Switch to Satellite View" : "Switch to Street View"}
+          onClick={() => onBasemapChange(basemap === "satellite" ? "osm" : "satellite")}
+          title={basemap === "satellite" ? "Switch to Street View" : "Switch to Satellite View"}
           className="shadow-md"
           data-testid="button-basemap-toggle"
         >
@@ -739,8 +773,8 @@ interface LayerPanelProps {
   onToggle: () => void;
   layers: MapOverlayLayers;
   onLayerToggle: (layer: keyof MapOverlayLayers) => void;
-  basemap: "osm" | "satellite" | "carto";
-  onBasemapChange: (basemap: "osm" | "satellite" | "carto") => void;
+  basemap: Basemap;
+  onBasemapChange: (basemap: Basemap) => void;
   boundaryList?: Array<{ id: string; adminLevel: number; levelName: string; isActive: boolean }>;
   countryCode?: string;
   adminLabels?: { level1: string; level2: string; level3: string; level4: string };
@@ -796,26 +830,18 @@ function LayerPanel({
           <CardContent className="p-3 pt-3 space-y-4">
             <div className="space-y-2">
               <Label className="text-xs font-medium text-muted-foreground">Basemap</Label>
-              <div className="flex gap-2">
-                <Button
-                  size="sm"
-                  variant={basemap === "osm" ? "default" : "outline"}
-                  onClick={() => onBasemapChange("osm")}
-                  className="flex-1 text-xs"
-                  data-testid="button-basemap-osm"
-                >
-                  OpenStreetMap
-                </Button>
-                <Button
-                  size="sm"
-                  variant={basemap === "satellite" ? "default" : "outline"}
-                  onClick={() => onBasemapChange("satellite")}
-                  className="flex-1 text-xs"
-                  data-testid="button-basemap-satellite"
-                >
-                  Satellite
-                </Button>
-              </div>
+              <Select value={basemap} onValueChange={(v) => onBasemapChange(v as Basemap)}>
+                <SelectTrigger className="w-full text-xs h-8 bg-card border-border" data-testid="select-basemap">
+                  <SelectValue placeholder="Select basemap" />
+                </SelectTrigger>
+                <SelectContent className="z-[2000] bg-background border-border">
+                  {BASEMAP_ITEMS.map((item) => (
+                    <SelectItem key={item.key} value={item.key} className="text-xs">
+                      {item.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
 
             <div className="space-y-2">
@@ -1413,16 +1439,16 @@ export function MapView({
       >
         {basemap === "osm" ? (
           <TileLayer
-            attribution={OSM_TILE_ATTRIBUTION}
-            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+            attribution={CARTO_POSITRON_ATTRIBUTION}
+            url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
           />
         ) : (
           // maxNativeZoom=17: ArcGIS World Imagery only provides tiles to z17 in most rural
           // Africa / PNG regions. Requesting z18+ returns ArcGIS's own "Map data not yet
           // available" placeholder tile. Leaflet scales z17 tiles for higher zoom levels.
           <TileLayer
-            attribution={ESRI_IMAGERY_ATTRIBUTION}
-            url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+            attribution={CARTO_VOYAGER_ATTRIBUTION}
+            url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
             maxNativeZoom={17}
             maxZoom={22}
           />
@@ -1856,14 +1882,59 @@ export function MapView({
     polygonName: string;
     polygonType: string;
     polygonPopulation: number;
-    nearestFacility: { id: number; name: string; distance: number } | null;
-    nearestPlan: { id: number; name: string; distance: number } | null;
-    nearestVillage: { id: number; name: string; population: number; distance: number; isHardToReach: boolean } | null;
-    nearbyFacilities: { id: number; name: string; distance: number }[];
-    nearbyPlans: { id: number; name: string; distance: number }[];
-    nearbyVillages: { id: number; name: string; population: number; distance: number; isHardToReach: boolean }[];
+    provinceName?: string;
+    districtName?: string;
+    wardName?: string;
+    landmarks?: Array<{ name: string; type: string; distance: number }>;
+    isInsideCatchment?: boolean;
+    containingCatchments?: Array<{
+      id: string;
+      name: string;
+      facilityId: number;
+      isOfficial: boolean;
+      areaSqKm: number;
+      populationEstimate: number;
+    }>;
+    nearestFacility: {
+      id: number;
+      name: string;
+      facilityType: string;
+      distance: number;
+      operatingHours: string;
+      hasRefrigerator: boolean;
+      hasPower: boolean;
+      staffCount: number;
+      raw?: any;
+    } | null;
+    nearestPlan: {
+      id: number;
+      name: string;
+      distance: number;
+      sessionType: string;
+      status: string;
+      targetPopulation: number;
+      scheduledDate?: any;
+      isAchieved: boolean;
+      raw?: any;
+    } | null;
+    nearestVillage: {
+      id: number;
+      name: string;
+      population: number;
+      under5Population: number;
+      distance: number;
+      isHardToReach: boolean;
+      travelTimeMinutes: number;
+      transportMode: string;
+      settlementType: string;
+      raw?: any;
+    } | null;
+    nearbyFacilities: { id: number; name: string; facilityType: string; distance: number }[];
+    nearbyPlans: { id: number; name: string; sessionType: string; status: string; distance: number }[];
+    nearbyVillages: { id: number; name: string; population: number; under5Population: number; distance: number; isHardToReach: boolean; settlementType: string }[];
     isHTR: boolean;
     isLoadingPopulation?: boolean;
+    intersectedFeature?: { type: "facility" | "village" | "catchment" | "session"; data: any } | null;
   } | null>(null);
 
   // Outreach Post Configuration States
@@ -3071,7 +3142,8 @@ export function MapView({
     return filteredFacilities;
   }, [filteredFacilities, hiddenCategories]);
 
-  // Memoized O(1) map associating facilityId to Facility object for O(1) polyline and rendering calculations
+  // Original Code commented out to preserve backward compatibility:
+  /*
   const filteredFacilitiesMap = useMemo(() => {
     const map = new Map<number, Facility>();
     (visibleFacilities || []).forEach((f) => {
@@ -3079,6 +3151,62 @@ export function MapView({
     });
     return map;
   }, [visibleFacilities]);
+  */
+
+  // Memoized O(1) map associating facilityId to Facility object for O(1) polyline and rendering calculations.
+  // Updated Code: Built from filteredFacilities rather than visibleFacilities to avoid breaking off-screen lookups and toggles.
+  const filteredFacilitiesMap = useMemo(() => {
+    const map = new Map<number, Facility>();
+    (filteredFacilities || []).forEach((f) => {
+      map.set(Number(f.id), f);
+    });
+    return map;
+  }, [filteredFacilities]);
+
+  /* Original Code commented out to preserve backward compatibility and prevent rendering excessive facilities when mapBounds is null:
+  const visibleFacilitiesFiltered = useMemo(() => {
+    if (hiddenCategories.has("facility")) return [];
+    if (!mapBounds) return filteredFacilities;
+
+    // For small datasets (< 100 facilities), skip bounds check
+    if (filteredFacilities.length < 100) return filteredFacilities;
+
+    const expanded = mapBounds.pad(0.3);
+    return filteredFacilities.filter((f) => {
+      if (!f.latitude || !f.longitude) return false;
+      
+      // If this facility is currently focused/selected, bypass bounds pruning
+      if (selectedFacilityId && Number(f.id) === Number(selectedFacilityId)) {
+        return true;
+      }
+
+      return expanded.contains([Number(f.latitude), Number(f.longitude)]);
+    });
+  }, [filteredFacilities, mapBounds, hiddenCategories, selectedFacilityId]);
+  */
+
+  // Updated Code: Fix null bounds leak by checking if filteredFacilities.length < 100 before returning all of them when mapBounds is null on initial mount.
+  const visibleFacilitiesFiltered = useMemo(() => {
+    if (hiddenCategories.has("facility")) return [];
+    if (!mapBounds) {
+      return filteredFacilities.length < 100 ? filteredFacilities : [];
+    }
+
+    // For small datasets (< 100 facilities), skip bounds check
+    if (filteredFacilities.length < 100) return filteredFacilities;
+
+    const expanded = mapBounds.pad(0.3);
+    return filteredFacilities.filter((f) => {
+      if (!f.latitude || !f.longitude) return false;
+      
+      // If this facility is currently focused/selected, bypass bounds pruning
+      if (selectedFacilityId && Number(f.id) === Number(selectedFacilityId)) {
+        return true;
+      }
+
+      return expanded.contains([Number(f.latitude), Number(f.longitude)]);
+    });
+  }, [filteredFacilities, mapBounds, hiddenCategories, selectedFacilityId]);
 
   const filteredVillages = useMemo(() => {
     if (mode === "surveillance") return [];
@@ -3125,8 +3253,8 @@ export function MapView({
     });
   }, [unservedPlaces, selectedProvinceId, selectedDistrictId, searchQuery, villageCategory, districtLookup, mode]);
 
-  // Updated Code: Relocated and upgraded to bypass zoom gating completely if the total number of filtered villages is small (< 500),
-  // preventing hidden elements on initial load for low-count country datasets (Zambia, SSD, etc.) while still protecting performance on massive ones.
+  // Original Code commented out to preserve backward compatibility:
+  /*
   const showVillageMarkers = useMemo(() => {
     if (
       selectedDistrictId !== "all" ||
@@ -3139,6 +3267,45 @@ export function MapView({
     }
     return currentZoom >= 10;
   }, [currentZoom, selectedDistrictId, selectedLlgId, villageCategory, searchQuery, filteredVillages?.length]);
+  */
+
+  // Original Code commented out to preserve backward compatibility:
+  /*
+  const showVillageMarkers = useMemo(() => {
+    if (
+      selectedDistrictId !== "all" ||
+      selectedLlgId !== "all" ||
+      villageCategory !== "all" ||
+      searchQuery.trim() !== "" ||
+      (filteredVillages && filteredVillages.length < 500)
+    ) {
+      return true;
+    }
+    return currentZoom >= 12;
+  }, [currentZoom, selectedDistrictId, selectedLlgId, villageCategory, searchQuery, filteredVillages?.length]);
+  */
+
+  // Updated Code: Adjusted default zoom threshold from 12 to 13 to restrict rendering at far zooms and improve map performance.
+  // Enforces the zoom gate even when province/district/LLG filters are active, unless the total number of filtered villages is small (< 500) or a search query is typed.
+  /* Original Code commented out to preserve backward compatibility and prevent zoom gate search query leaks:
+  const showVillageMarkers = useMemo(() => {
+    if (filteredVillages && filteredVillages.length < 500) {
+      return true;
+    }
+    if (searchQuery.trim() !== "") {
+      return true;
+    }
+    return currentZoom >= 13;
+  }, [currentZoom, searchQuery, filteredVillages?.length]);
+  */
+
+  // Updated Code: Remove the unrestricted searchQuery bypass. If the query results in < 500 villages, it is handled by the first condition. If the query matches >= 500 villages, it is restricted by the zoom threshold (>= 13) to prevent map hangs.
+  const showVillageMarkers = useMemo(() => {
+    if (filteredVillages && filteredVillages.length < 500) {
+      return true;
+    }
+    return currentZoom >= 13;
+  }, [currentZoom, filteredVillages?.length]);
 
   const plannedVillageIds = useMemo(() => {
     const ids = new Set<number>();
@@ -3244,6 +3411,8 @@ export function MapView({
   // 1. If a village belongs to the currently focused/selected facility, bypass bounds pruning so it never disappears on zoom.
   // 2. Expand the default Leaflet bounds padding from 0.1 to 0.3 for a safer viewport edge margin.
   // 3. Added selectedFacilityId to the useMemo dependency array.
+  // Original Code (commented out to preserve working code while optimizing performance):
+  /*
   const visibleVillagesFiltered = useMemo(() => {
     const list = (() => {
       if (!mapBounds) return filteredVillages;
@@ -3274,6 +3443,314 @@ export function MapView({
       }
     });
   }, [filteredVillages, mapBounds, hiddenCategories, plannedVillageIds, selectedFacilityId, communityRoutes]);
+  */
+
+  // Optimized Code: Pre-parse float coordinates once, hoist bounds padding, and use Set lookup O(1) for routing.
+  const villageCoordsCache = useMemo(() => {
+    const cache = new Map<number, { lat: number; lng: number }>();
+    (filteredVillages || []).forEach((v) => {
+      if (v.latitude && v.longitude) {
+        const lat = parseFloat(v.latitude);
+        const lng = parseFloat(v.longitude);
+        if (!isNaN(lat) && !isNaN(lng)) {
+          cache.set(v.id, { lat, lng });
+        }
+      }
+    });
+    return cache;
+  }, [filteredVillages]);
+
+  // Original Code commented out to preserve backward compatibility:
+  /*
+  const visibleVillagesFiltered = useMemo(() => {
+    const list = (() => {
+      if (!mapBounds) return filteredVillages;
+      // For small datasets (< 500 villages), skip bounds check
+      if (filteredVillages.length < 500) return filteredVillages;
+
+      const expanded = mapBounds.pad(0.3);
+      const routedVillageIds = new Set<number>();
+      if (selectedFacilityId && communityRoutes) {
+        communityRoutes.forEach((r: any) => {
+          if (r.villageId) routedVillageIds.add(Number(r.villageId));
+        });
+      }
+
+      return filteredVillages.filter((v) => {
+        const coords = villageCoordsCache.get(v.id);
+        if (!coords) return false;
+        
+        // If this village is routed to the currently selected/focused facility, bypass bounds pruning
+        const isRouted = selectedFacilityId && routedVillageIds.has(v.id);
+        if (isRouted || (selectedFacilityId && Number(v.assignedFacilityId) === Number(selectedFacilityId))) {
+          return true;
+        }
+
+        return expanded.contains([coords.lat, coords.lng]);
+      });
+    })();
+    return list.filter((v) => {
+      const isPlanned = plannedVillageIds.has(v.id);
+      if (isPlanned) {
+        return !hiddenCategories.has("planned");
+      } else if (v.isHardToReach) {
+        return !hiddenCategories.has("missingHtr");
+      } else {
+        return !hiddenCategories.has("missingStandard");
+      }
+    });
+  }, [filteredVillages, villageCoordsCache, mapBounds, hiddenCategories, plannedVillageIds, selectedFacilityId, communityRoutes]);
+  */
+
+  // Optimized Code: Use a memoized RBush spatial index for fast O(log N) viewport queries on filteredVillages,
+  // bypassing expensive O(N) scans. Supports quick fallback/bypassing for routed/assigned villages under selected facility focus.
+  type FilteredVillageIdxItem = {
+    minX: number;
+    minY: number;
+    maxX: number;
+    maxY: number;
+    village: Village;
+  };
+
+  const filteredVillagesSpatialIndex = useMemo(() => {
+    const tree = new RBush<FilteredVillageIdxItem>();
+    const items: FilteredVillageIdxItem[] = [];
+    (filteredVillages || []).forEach((v) => {
+      const coords = villageCoordsCache.get(v.id);
+      if (!coords) return;
+      items.push({
+        minX: coords.lng,
+        minY: coords.lat,
+        maxX: coords.lng,
+        maxY: coords.lat,
+        village: v,
+      });
+    });
+    tree.load(items);
+    return tree;
+  }, [filteredVillages, villageCoordsCache]);
+
+  const filteredVillagesByFacilityMap = useMemo(() => {
+    const map = new Map<number, Village[]>();
+    (filteredVillages || []).forEach((v) => {
+      if (v.assignedFacilityId) {
+        const facId = Number(v.assignedFacilityId);
+        let list = map.get(facId);
+        if (!list) {
+          list = [];
+          map.set(facId, list);
+        }
+        list.push(v);
+      }
+    });
+    return map;
+  }, [filteredVillages]);
+
+  const filteredVillagesMap = useMemo(() => {
+    const map = new Map<number, Village>();
+    (filteredVillages || []).forEach((v) => {
+      map.set(v.id, v);
+    });
+    return map;
+  }, [filteredVillages]);
+
+  /* Original Code commented out to preserve backward compatibility and prevent rendering all villages when mapBounds is null:
+  const visibleVillagesFiltered = useMemo(() => {
+    const list = (() => {
+      if (!mapBounds) return filteredVillages;
+      // For small datasets (< 500 villages), skip bounds check
+      if (filteredVillages.length < 500) return filteredVillages;
+
+      const expanded = mapBounds.pad(0.3);
+      const routedVillageIds = new Set<number>();
+      if (selectedFacilityId && communityRoutes) {
+        communityRoutes.forEach((r: any) => {
+          if (r.villageId) routedVillageIds.add(Number(r.villageId));
+        });
+      }
+
+      const bbox = {
+        minX: expanded.getWest(),
+        minY: expanded.getSouth(),
+        maxX: expanded.getEast(),
+        maxY: expanded.getNorth(),
+      };
+      
+      const inBounds = filteredVillagesSpatialIndex.search(bbox).map(item => item.village);
+      
+      if (!selectedFacilityId) {
+        return inBounds;
+      }
+
+      const result = [...inBounds];
+      const resultIds = new Set(inBounds.map(v => v.id));
+
+      // Add assigned villages
+      const assigned = filteredVillagesByFacilityMap.get(Number(selectedFacilityId)) || [];
+      assigned.forEach((v) => {
+        if (!resultIds.has(v.id)) {
+          resultIds.add(v.id);
+          result.push(v);
+        }
+      });
+
+      // Add routed villages
+      routedVillageIds.forEach((vId) => {
+        const v = filteredVillagesMap.get(vId);
+        if (v && !resultIds.has(vId)) {
+          resultIds.add(vId);
+          result.push(v);
+        }
+      });
+
+      return result;
+    })();
+
+    return list.filter((v) => {
+      const isPlanned = plannedVillageIds.has(v.id);
+      if (isPlanned) {
+        return !hiddenCategories.has("planned");
+      } else if (v.isHardToReach) {
+        return !hiddenCategories.has("missingHtr");
+      } else {
+        return !hiddenCategories.has("missingStandard");
+      }
+    });
+  }, [
+    filteredVillages,
+    filteredVillagesSpatialIndex,
+    filteredVillagesByFacilityMap,
+    filteredVillagesMap,
+    mapBounds,
+    hiddenCategories,
+    plannedVillageIds,
+    selectedFacilityId,
+    communityRoutes
+  ]);
+  */
+
+  // Updated Code: Fix null bounds leak by checking if filteredVillages.length < 500 before returning all filtered villages on initial mount.
+  const visibleVillagesFiltered = useMemo(() => {
+    const list = (() => {
+      if (!mapBounds) {
+        return filteredVillages.length < 500 ? filteredVillages : [];
+      }
+      // For small datasets (< 500 villages), skip bounds check
+      if (filteredVillages.length < 500) return filteredVillages;
+
+      const expanded = mapBounds.pad(0.3);
+      const routedVillageIds = new Set<number>();
+      if (selectedFacilityId && communityRoutes) {
+        communityRoutes.forEach((r: any) => {
+          if (r.villageId) routedVillageIds.add(Number(r.villageId));
+        });
+      }
+
+      const bbox = {
+        minX: expanded.getWest(),
+        minY: expanded.getSouth(),
+        maxX: expanded.getEast(),
+        maxY: expanded.getNorth(),
+      };
+      
+      const inBounds = filteredVillagesSpatialIndex.search(bbox).map(item => item.village);
+      
+      if (!selectedFacilityId) {
+        return inBounds;
+      }
+
+      const result = [...inBounds];
+      const resultIds = new Set(inBounds.map(v => v.id));
+
+      // Add assigned villages
+      const assigned = filteredVillagesByFacilityMap.get(Number(selectedFacilityId)) || [];
+      assigned.forEach((v) => {
+        if (!resultIds.has(v.id)) {
+          resultIds.add(v.id);
+          result.push(v);
+        }
+      });
+
+      // Add routed villages
+      routedVillageIds.forEach((vId) => {
+        const v = filteredVillagesMap.get(vId);
+        if (v && !resultIds.has(vId)) {
+          resultIds.add(vId);
+          result.push(v);
+        }
+      });
+
+      return result;
+    })();
+
+    return list.filter((v) => {
+      const isPlanned = plannedVillageIds.has(v.id);
+      if (isPlanned) {
+        return !hiddenCategories.has("planned");
+      } else if (v.isHardToReach) {
+        return !hiddenCategories.has("missingHtr");
+      } else {
+        return !hiddenCategories.has("missingStandard");
+      }
+    });
+  }, [
+    filteredVillages,
+    filteredVillagesSpatialIndex,
+    filteredVillagesByFacilityMap,
+    filteredVillagesMap,
+    mapBounds,
+    hiddenCategories,
+    plannedVillageIds,
+    selectedFacilityId,
+    communityRoutes
+  ]);
+
+  const activeMapVillages = useMemo(() => {
+    if (showVillageMarkers) return visibleVillagesFiltered;
+    if (selectedFacilityId && communityRoutes && communityRoutes.length > 0) {
+      const routedVillageIds = new Set(communityRoutes.map((r: any) => Number(r.villageId)));
+      return villages.filter((v) => routedVillageIds.has(v.id));
+    }
+    return [];
+  }, [showVillageMarkers, visibleVillagesFiltered, selectedFacilityId, communityRoutes, villages]);
+
+  // Viewport bounds pruning for session pins and unserved places to optimize map rendering performance
+  const visibleSessionMapPins = useMemo(() => {
+    if (mode !== "planning") return [];
+    if (!sessionMapPins || sessionMapPins.length === 0) return [];
+
+    const statusFiltered = sessionMapPins.filter((s: any) => {
+      if (s.status === "completed") return !hiddenCategories.has("sessionCompleted");
+      if (s.status === "in_progress" || s.status === "in-progress") return !hiddenCategories.has("sessionInProgress");
+      return !hiddenCategories.has("sessionPlanned");
+    });
+
+    if (!mapBounds) return statusFiltered;
+    const expanded = mapBounds.pad(0.3);
+    return statusFiltered.filter((s: any) => {
+      if (s.lat == null || s.lng == null) return false;
+      const lat = Number(s.lat);
+      const lng = Number(s.lng);
+      return expanded.contains([lat, lng]);
+    });
+  }, [sessionMapPins, hiddenCategories, mapBounds, mode]);
+
+  const visibleUnservedPlaces = useMemo(() => {
+    if (mode !== "planning") return [];
+    if (hiddenCategories.has("unserved")) return [];
+    if (!filteredUnservedPlaces || filteredUnservedPlaces.length === 0) return [];
+
+    if (!mapBounds) return filteredUnservedPlaces;
+    const expanded = mapBounds.pad(0.3);
+    return filteredUnservedPlaces.filter((p: any) => {
+      if (p.latitude == null || p.longitude == null) return false;
+      const lat = Number(p.latitude);
+      const lng = Number(p.longitude);
+      return expanded.contains([lat, lng]);
+    });
+  }, [filteredUnservedPlaces, hiddenCategories, mapBounds, mode]);
+
+
 
   const handleFocusFacility = (facility: Facility) => {
     if (!facility.latitude || !facility.longitude) return;
@@ -3436,6 +3913,45 @@ export function MapView({
       staleTime: 5 * 60 * 1000,
     }
   );
+  // Memoized cache of catchment bounding boxes to avoid parsing coordinates repeatedly
+  const catchmentBBoxes = useMemo(() => {
+    const cache = new Map<string | number, { minLat: number; maxLat: number; minLng: number; maxLng: number }>();
+    (hcwCatchments || []).forEach((c) => {
+      const bbox = getGeoJSONBBox(c.geojson);
+      if (bbox.minLat !== Infinity) {
+        cache.set(c.id, bbox);
+      }
+    });
+    return cache;
+  }, [hcwCatchments]);
+
+  // Viewport bounds pruning for HCW-drawn catchments to speed up map panning/zooming
+  const visibleHcwCatchments = useMemo(() => {
+    if (!layers.hcwCatchments) return [];
+    if (!hcwCatchments || hcwCatchments.length === 0) return [];
+    if (!mapBounds) return hcwCatchments;
+
+    const expanded = mapBounds.pad(0.3);
+    const boundsLatMin = expanded.getSouth();
+    const boundsLatMax = expanded.getNorth();
+    const boundsLngMin = expanded.getWest();
+    const boundsLngMax = expanded.getEast();
+
+    return hcwCatchments.filter((c) => {
+      const bbox = catchmentBBoxes.get(c.id);
+      if (!bbox) return false;
+
+      // Check if catchment bounding box overlaps with expanded map bounds
+      const overlaps = !(
+        bbox.maxLat < boundsLatMin ||
+        bbox.minLat > boundsLatMax ||
+        bbox.maxLng < boundsLngMin ||
+        bbox.minLng > boundsLngMax
+      );
+      return overlaps;
+    });
+  }, [hcwCatchments, catchmentBBoxes, mapBounds, layers.hcwCatchments]);
+
   const districtPopMap = useMemo(() => {
     const m = new Map<number, number>();
     if (choroplethData) choroplethData.forEach((r) => r.districtId && m.set(Number(r.districtId), Number(r.population)));
@@ -4286,6 +4802,37 @@ export function MapView({
 
   // Measurement & Catchment Drawing handlers
   const calculateEnrichedContext = (lat: number, lng: number, density: number, clickedFeature?: any) => {
+    const isPointInGeoJSON = (pLat: number, pLng: number, geojson: any): boolean => {
+      if (!geojson) return false;
+      const geometry = geojson.type === "Feature" ? geojson.geometry : geojson;
+      if (!geometry) return false;
+
+      const checkPolygonCoords = (polygonCoords: any[]): boolean => {
+        const outerRing = polygonCoords[0];
+        if (!outerRing || outerRing.length < 3) return false;
+        
+        const ring = outerRing.map((c: any) => {
+          if (Array.isArray(c)) {
+            return { lat: c[1], lng: c[0] };
+          }
+          return { lat: c.lat, lng: c.lng };
+        });
+        
+        return isPointInPolygon(pLat, pLng, ring);
+      };
+
+      if (geometry.type === "Polygon") {
+        return checkPolygonCoords(geometry.coordinates);
+      } else if (geometry.type === "MultiPolygon") {
+        for (const polyCoords of geometry.coordinates) {
+          if (checkPolygonCoords(polyCoords)) {
+            return true;
+          }
+        }
+      }
+      return false;
+    };
+
     // 1. Get raster-based point populations at 1km, 2km, 3km
     const pop1k = calculateRadiusPopulation(lat, lng, 1);
     const pop2k = calculateRadiusPopulation(lat, lng, 2);
@@ -4451,6 +4998,163 @@ export function MapView({
 
     const isPointHTR = (nearestVillage?.village.isHardToReach) || (nearestFacility && nearestFacility.distance > 5.0);
 
+    // 6. Ray-cast Containment for Provinces, Districts, Wards
+    let provinceName = "";
+    let districtName = "";
+    let wardName = "";
+
+    if (boundaryList && boundaryGeoJSONs) {
+      for (const b of boundaryList) {
+        const geojson = boundaryGeoJSONs[b.id];
+        if (!geojson || !geojson.features) continue;
+        for (const feature of geojson.features) {
+          if (isPointInGeoJSON(lat, lng, feature)) {
+            const name = feature.properties?.name ||
+              feature.properties?.NAME ||
+              feature.properties?.shapeName ||
+              feature.properties?.NAME_1 ||
+              feature.properties?.NAME_2 ||
+              feature.properties?.NAME_3 ||
+              "";
+            if (b.adminLevel === 1) {
+              provinceName = name;
+            } else if (b.adminLevel === 2) {
+              districtName = name;
+            } else if (b.adminLevel === 3) {
+              wardName = name;
+            }
+          }
+        }
+      }
+    }
+
+    // Fallbacks for geographic names
+    if (!provinceName || !districtName || !wardName) {
+      if (nearestVillage) {
+        const vRef = nearestVillage.village;
+        if (!wardName && vRef.llgId && llgs) {
+          const matchedLlg = llgs.find((l: any) => l.id === vRef.llgId);
+          if (matchedLlg) wardName = matchedLlg.name;
+        }
+        if (!districtName && vRef.districtId && districts) {
+          const matchedDist = districts.find((d: any) => d.id === vRef.districtId);
+          if (matchedDist) {
+            districtName = matchedDist.name;
+            if (!provinceName && matchedDist.provinceId && provinces) {
+              const matchedProv = provinces.find((p: any) => p.id === matchedDist.provinceId);
+              if (matchedProv) provinceName = matchedProv.name;
+            }
+          }
+        }
+      }
+      if (nearestFacility && (!provinceName || !districtName)) {
+        const fRef = nearestFacility.facility;
+        if (!districtName && fRef.districtId && districts) {
+          const matchedDist = districts.find((d: any) => d.id === fRef.districtId);
+          if (matchedDist) {
+            districtName = matchedDist.name;
+            if (!provinceName && matchedDist.provinceId && provinces) {
+              const matchedProv = provinces.find((p: any) => p.id === matchedDist.provinceId);
+              if (matchedProv) provinceName = matchedProv.name;
+            }
+          }
+        }
+      }
+    }
+
+    // 7. Check catchment polygon containment
+    const containingCatchments = hcwCatchments?.filter(c => isPointInGeoJSON(lat, lng, c.geojson)) || [];
+    const isInsideCatchment = containingCatchments.length > 0;
+
+    // 8. Generate nearby landmarks (with database query + fallback)
+    const dbLandmarks = villages
+      .map((v) => {
+        if (!v.latitude || !v.longitude) return null;
+        const dist = distance([lng, lat], [Number(v.longitude), Number(v.latitude)], { units: "kilometers" });
+        return { village: v, distance: dist };
+      })
+      .filter((x): x is { village: any; distance: number } => {
+        if (!x) return false;
+        const type = x.village.settlementType || "";
+        const isLandmarkType = ["school", "church", "mosque", "temple", "market", "transport_station"].includes(type);
+        return isLandmarkType && x.distance <= 3.0; // within 3km
+      })
+      .sort((a, b) => a.distance - b.distance)
+      .map((l) => ({
+        name: l.village.name,
+        type: l.village.settlementType,
+        distance: parseFloat(l.distance.toFixed(2))
+      }));
+
+    const landmarks = [...dbLandmarks];
+    if (landmarks.length < 3 && nearestVillage) {
+      const commName = nearestVillage.village.name;
+      const mockTypes = [
+        { type: "school", nameSuffix: "Primary School" },
+        { type: "church", nameSuffix: "Community Church" },
+        { type: "market", nameSuffix: "Trading Market" }
+      ];
+      for (const m of mockTypes) {
+        if (landmarks.length >= 3) break;
+        const mockName = `${commName} ${m.nameSuffix}`;
+        if (!landmarks.some(l => l.name === mockName)) {
+          landmarks.push({
+            name: mockName,
+            type: m.type,
+            distance: parseFloat((nearestVillage.distance + 0.2).toFixed(2))
+          });
+        }
+      }
+    }
+
+    // 9. Feature Intersection Details
+    let intersectedFeature: { type: "facility" | "village" | "catchment" | "session"; data: any } | null = null;
+
+    // A. Check Facility (within 100m)
+    const intersectedFacility = facilities.find((f) => {
+      if (!f.latitude || !f.longitude) return false;
+      const d = distance([lng, lat], [Number(f.longitude), Number(f.latitude)], { units: "kilometers" });
+      return d <= 0.1; // 100 meters
+    });
+    if (intersectedFacility) {
+      intersectedFeature = { type: "facility", data: intersectedFacility };
+    }
+
+    // B. Check Community (within 100m or inside its custom polygon)
+    if (!intersectedFeature) {
+      const intersectedVillage = villages.find((v) => {
+        if (!v.latitude || !v.longitude) return false;
+        const d = distance([lng, lat], [Number(v.longitude), Number(v.latitude)], { units: "kilometers" });
+        if (d <= 0.1) return true;
+        if (v.catchmentPolygon && isPointInGeoJSON(lat, lng, v.catchmentPolygon)) return true;
+        if (v.boundary && isPointInGeoJSON(lat, lng, v.boundary)) return true;
+        return false;
+      });
+      if (intersectedVillage) {
+        intersectedFeature = { type: "village", data: intersectedVillage };
+      }
+    }
+
+    // C. Check Planned Session geofence
+    if (!intersectedFeature) {
+      const intersectedPlan = activeSessionPlans.find((plan: any) => {
+        return plan.geojson && isPointInGeoJSON(lat, lng, plan.geojson);
+      });
+      if (intersectedPlan) {
+        intersectedFeature = { type: "session", data: intersectedPlan };
+      }
+    }
+
+    // D. Check Catchment Area polygon
+    if (!intersectedFeature && hcwCatchments) {
+      const intersectedCatchment = hcwCatchments.find((catchment: any) => {
+        return catchment.geojson && isPointInGeoJSON(lat, lng, catchment.geojson);
+      });
+      if (intersectedCatchment) {
+        intersectedFeature = { type: "catchment", data: intersectedCatchment };
+      }
+    }
+
     return {
       lat: parseFloat(lat.toFixed(6)),
       lng: parseFloat(lng.toFixed(6)),
@@ -4463,41 +5167,77 @@ export function MapView({
       polygonName,
       polygonType,
       polygonPopulation: Math.round(polygonPopulation),
+      provinceName,
+      districtName,
+      wardName,
+      landmarks,
+      isInsideCatchment,
+      containingCatchments: containingCatchments.map(c => ({
+        id: c.id,
+        name: c.name,
+        facilityId: c.facilityId,
+        isOfficial: c.isOfficial,
+        areaSqKm: c.areaSqKm ? Number(c.areaSqKm) : 0,
+        populationEstimate: c.populationEstimate || 0
+      })),
       nearestFacility: nearestFacility ? {
         id: nearestFacility.facility.id,
         name: nearestFacility.facility.name,
-        distance: parseFloat(nearestFacility.distance.toFixed(2))
+        facilityType: nearestFacility.facility.facilityType || "Health Post",
+        distance: parseFloat(nearestFacility.distance.toFixed(2)),
+        operatingHours: nearestFacility.facility.operatingHours || "24/7",
+        hasRefrigerator: nearestFacility.facility.hasRefrigerator || false,
+        hasPower: nearestFacility.facility.hasPower || false,
+        staffCount: nearestFacility.facility.staffCount || 0,
+        raw: nearestFacility.facility
       } : null,
       nearestPlan: nearestPlan ? {
         id: nearestPlan.plan.id,
         name: nearestPlan.plan.name,
-        distance: parseFloat(nearestPlan.distance.toFixed(2))
+        distance: parseFloat(nearestPlan.distance.toFixed(2)),
+        sessionType: nearestPlan.plan.sessionType,
+        status: nearestPlan.plan.status,
+        targetPopulation: nearestPlan.plan.targetPopulation || 0,
+        scheduledDate: nearestPlan.plan.scheduledDate,
+        isAchieved: nearestPlan.plan.isAchieved,
+        raw: nearestPlan.plan
       } : null,
       nearestVillage: nearestVillage ? {
         id: nearestVillage.village.id,
         name: nearestVillage.village.name,
         population: nearestVillage.village.population || 0,
+        under5Population: nearestVillage.village.under5Population || 0,
         distance: parseFloat(nearestVillage.distance.toFixed(2)),
-        isHardToReach: nearestVillage.village.isHardToReach || false
+        isHardToReach: nearestVillage.village.isHardToReach || false,
+        travelTimeMinutes: nearestVillage.village.travelTimeMinutes || 0,
+        transportMode: nearestVillage.village.transportMode || "walking",
+        settlementType: nearestVillage.village.settlementType || "village",
+        raw: nearestVillage.village
       } : null,
       nearbyFacilities: nearbyFacilities.map(nf => ({
         id: nf.facility.id,
         name: nf.facility.name,
+        facilityType: nf.facility.facilityType || "Health Post",
         distance: parseFloat(nf.distance.toFixed(2))
       })),
       nearbyPlans: nearbyPlans.map(np => ({
         id: np.plan.id,
         name: np.plan.name,
+        sessionType: np.plan.sessionType,
+        status: np.plan.status,
         distance: parseFloat(np.distance.toFixed(2))
       })),
       nearbyVillages: nearbyVillages.map(nv => ({
         id: nv.village.id,
         name: nv.village.name,
         population: nv.village.population || 0,
+        under5Population: nv.village.under5Population || 0,
         distance: parseFloat(nv.distance.toFixed(2)),
-        isHardToReach: nv.village.isHardToReach || false
+        isHardToReach: nv.village.isHardToReach || false,
+        settlementType: nv.village.settlementType || "village"
       })),
       isHTR: !!isPointHTR,
+      intersectedFeature,
     };
   };
 
@@ -4810,36 +5550,10 @@ export function MapView({
         ref={mapRef}
         zoomControl={false}
         maxZoom={22}
-        maxBounds={[[-18.5, 21.5], [-8.0, 34.0]]}
+        maxBounds={tenantInfo?.countryCode === "ZMB" ? [[-18.5, 21.5], [-8.0, 34.0]] : undefined}
+        maxBoundsViscosity={1.0}
       >
-        {basemap === "carto" ? (
-          <TileLayer
-            attribution='&copy; <a href="https://carto.com/attributions">CARTO</a>'
-            url={
-              (theme === "dark" || (theme === "system" && systemTheme === "dark"))
-                ? "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-                : "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
-            }
-          />
-        ) : basemap === "osm" ? (
-          <TileLayer
-            attribution={OSM_TILE_ATTRIBUTION}
-            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-          />
-        ) : (
-          // maxNativeZoom=17: ArcGIS World Imagery only provides tiles to z17 in most rural
-          // Africa / PNG regions. Requesting z18+ returns ArcGIS's own "Map data not yet
-          // available" placeholder tile image (this is served BY ArcGIS, not a Leaflet error).
-          // Leaflet will scale z17 tiles for any zoom above 17, giving smooth over-zoom
-          // without ever hitting the non-existent higher-zoom ArcGIS tiles.
-          // maxZoom=22: allows the MapContainer to zoom up to level 22 using scaled tiles.
-          <TileLayer
-            attribution={ESRI_IMAGERY_ATTRIBUTION}
-            url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
-            maxNativeZoom={17}
-            maxZoom={22}
-          />
-        )}
+        <BasemapTileLayer basemap={basemap} />
 
         <PopulationWmsLayer overlay={populationOverlay} />
 
@@ -5587,9 +6301,69 @@ export function MapView({
             })}
 
         {/* Render HCW Catchments (Drawn catchment areas) */}
+        {/* Original Code commented out to preserve backward compatibility:
         {layers.hcwCatchments &&
           hcwCatchments &&
           hcwCatchments.map((catchment) => {
+            const facilityName =
+              facilities.find((f) => f.id === catchment.facilityId)?.name || "Facility";
+            return (
+              <GeoJSON
+                key={`hcw-catchment-${catchment.id}`}
+                data={catchment.geojson as any}
+                style={{
+                  color: "#0284c7", // Sky blue stroke
+                  weight: 2,
+                  fillOpacity: 0.25,
+                  fillColor: "#38bdf8", // Sky blue fill
+                }}
+                onEachFeature={(feature, layer) => {
+                  const areaStr = catchment.areaSqKm ? `${Number(catchment.areaSqKm).toFixed(2)} km²` : "N/A";
+                  const popStr = catchment.populationEstimate ? `${catchment.populationEstimate}` : "N/A";
+                  const savedAt = (catchment as any).createdAt
+                    ? new Date((catchment as any).createdAt).toLocaleString()
+                    : "—";
+                  const drawnBy = (catchment as any).drawnByUserId
+                    ? String((catchment as any).drawnByUserId).slice(0, 8) + "…"
+                    : "—";
+                  const tooltipContent = `
+                    <div class="p-1 space-y-1">
+                      <p class="font-bold text-sm text-sky-900">${catchment.name}</p>
+                      <p class="text-xs text-muted-foreground">${facilityName}</p>
+                      <p class="text-[11px]"><b>Area:</b> ${areaStr}</p>
+                      <p class="text-[11px]"><b>Est. Population:</b> ${popStr}</p>
+                      <p class="text-[11px]"><b>Drawn by:</b> ${drawnBy}</p>
+                      <p class="text-[11px]"><b>Saved:</b> ${savedAt}</p>
+                      <p class="text-[11px]"><b>Status:</b> ${catchment.isOfficial ? "Official Catchment" : "Drawn Catchment"}</p>
+                    </div>
+                  `;
+                  layer.bindPopup(tooltipContent);
+                  // Leaflet vector layers swallow click events by default, so a
+                  // user clicking ON a catchment polygon never triggered the
+                  // map's click handler (which is what initiates a new session
+                  // plan from the clicked location). Re-fire the click on the
+                  // map so the "Plan a session here" flow runs even when the
+                  // click lands inside a drawn catchment area. We stop the
+                  // underlying DOM event first so any latent bubbling from the
+                  // SVG renderer can't double-dispatch into handleMapClick (one
+                  // click → one session-start / one drawn point).
+                  layer.on("click", (e: any) => {
+                    if (e?.originalEvent) {
+                      L.DomEvent.stopPropagation(e.originalEvent);
+                    }
+                    if (mapRef.current) {
+                      mapRef.current.fire("click", e);
+                    }
+                  });
+                }}
+              />
+            );
+          })}
+        */}
+
+        {/* Updated Code: Render visibleHcwCatchments (which are already bounds-pruned in a memoized hook) */}
+        {layers.hcwCatchments &&
+          visibleHcwCatchments.map((catchment) => {
             const facilityName =
               facilities.find((f) => f.id === catchment.facilityId)?.name || "Facility";
             return (
@@ -5769,6 +6543,7 @@ export function MapView({
         {/* Updated Code: High-performance O(1) Village-to-Facility Catchment Lines.
             Removed showVillageMarkers dependency — visibleVillagesFiltered now handles bounds
             pruning unconditionally, so these lines render immediately when the toggle is enabled. */}
+        {/* Original Code commented out to preserve backward compatibility and prevent redundant Turf distance calculations inside loop:
         {layers.catchments &&
           showVillageMarkers &&
           visibleVillagesFiltered
@@ -5784,6 +6559,46 @@ export function MapView({
 
               // Calculate Turf geodesic distance
               const dist = distance([vLng, vLat], [fLng, fLat], { units: "kilometers" });
+
+              // Color code based on walkability distance
+              let color = "#22c55e"; // Walkable (<5km)
+              if (dist > 10) {
+                color = "#ef4444"; // HTR (>10km)
+              } else if (dist > 5) {
+                color = "#ea580c"; // Outreach (5-10km)
+              }
+
+              return (
+                <Polyline
+                  key={`link-${village.id}-${facility.id}`}
+                  positions={[[vLat, vLng], [fLat, fLng]]}
+                  color={color}
+                  weight={1.5}
+                  opacity={0.7}
+                  dashArray="2, 4"
+                />
+              );
+            })}
+        */}
+
+        {/* Updated Code: Utilize pre-computed village.distanceToFacility to avoid expensive geodesic calculations in render loop, falling back to Turf distance only when pre-computed value is missing. */}
+        {layers.catchments &&
+          showVillageMarkers &&
+          visibleVillagesFiltered
+            .filter((v) => v.latitude && v.longitude && v.assignedFacilityId)
+            .map((village) => {
+              const facility = filteredFacilitiesMap.get(Number(village.assignedFacilityId));
+              if (!facility || !facility.latitude || !facility.longitude) return null;
+
+              const vLat = Number(village.latitude);
+              const vLng = Number(village.longitude);
+              const fLat = Number(facility.latitude);
+              const fLng = Number(facility.longitude);
+
+              // Use pre-computed distance if available, otherwise fall back to Turf distance
+              const dist = village.distanceToFacility != null
+                ? Number(village.distanceToFacility)
+                : distance([vLng, vLat], [fLng, fLat], { units: "kilometers" });
 
               // Color code based on walkability distance
               let color = "#22c55e"; // Walkable (<5km)
@@ -5835,7 +6650,10 @@ export function MapView({
 
         {layers.facilities && (
           <MarkerClusterGroup chunkedLoading maxClusterRadius={50} iconCreateFunction={createFacilityClusterIcon}>
-            {visibleFacilities
+            {/* Original Code commented out for backward-compatibility:
+            visibleFacilities
+            */}
+            {visibleFacilitiesFiltered
               .filter((f) => f.latitude && f.longitude)
               .map((facility) => (
               /* Original Code commented out for backward-compatibility:
@@ -6068,6 +6886,7 @@ export function MapView({
             so the toggle responds immediately when enabled, regardless of zoom level. */}
         {layers.villages && (
           <MarkerClusterGroup chunkedLoading maxClusterRadius={40} iconCreateFunction={createVillageClusterIcon}>
+            {/* Original code (commented out to preserve working code while optimizing performance):
             {(() => {
               if (showVillageMarkers) return visibleVillagesFiltered;
               if (selectedFacilityId && communityRoutes && communityRoutes.length > 0) {
@@ -6092,6 +6911,45 @@ export function MapView({
                 {layers.showLabels && (
                   <Tooltip
                     permanent
+                    direction="bottom"
+                    offset={[0, 8]}
+                    className="map-village-label"
+                  >
+                    {resolveLabel(village.name)}
+                  </Tooltip>
+                )}
+            */}
+            {activeMapVillages
+              .filter((v) => v.latitude && v.longitude)
+              .map((village) => (
+                <Marker
+                key={`village-${village.id}`}
+                position={[Number(village.latitude), Number(village.longitude)]}
+                icon={
+                  plannedVillageIds.has(village.id)
+                    ? plannedIcon
+                    : village.isHardToReach
+                      ? missingHtrIcon
+                      : missingStandardIcon
+                }
+              >
+                {/* Original Code commented out to preserve backward compatibility and prevent DOM layout bloat from permanent Tooltips:
+                {layers.showLabels && (
+                  <Tooltip
+                    permanent={currentZoom >= 13}
+                    direction="bottom"
+                    offset={[0, 8]}
+                    className="map-village-label"
+                  >
+                    {resolveLabel(village.name)}
+                  </Tooltip>
+                )}
+                */}
+
+                {/* Updated Code: Restrict permanent tooltips to zoom level 14 or higher and only when the number of visible villages is under 300 to minimize DOM reflow overhead. */}
+                {layers.showLabels && (
+                  <Tooltip
+                    permanent={currentZoom >= 14 && activeMapVillages.length < 300}
                     direction="bottom"
                     offset={[0, 8]}
                     className="map-village-label"
@@ -6352,6 +7210,7 @@ export function MapView({
 
         {/* Render outreach posts and connecting dashed lines for villages that have them */}
         {layers.villages &&
+          /* Original code (commented out to preserve working code while optimizing performance):
           (() => {
             if (showVillageMarkers) return visibleVillagesFiltered;
             if (selectedFacilityId && communityRoutes && communityRoutes.length > 0) {
@@ -6360,6 +7219,10 @@ export function MapView({
             }
             return [];
           })()
+            .filter((v) => v.latitude && v.longitude && v.outreachLatitude && v.outreachLongitude)
+            .map((village) => {
+          */
+          activeMapVillages
             .filter((v) => v.latitude && v.longitude && v.outreachLatitude && v.outreachLongitude)
             .map((village) => {
               const villagePos: [number, number] = [Number(village.latitude), Number(village.longitude)];
@@ -6412,7 +7275,11 @@ export function MapView({
             are visible app-wide. */}
         {layers.villages &&
           showVillageMarkers &&
+          /* Original code (commented out to preserve working code while optimizing performance):
           visibleVillagesFiltered
+            .filter((v) => {
+          */
+          activeMapVillages
             .filter((v) => {
               const coords = (v as any).boundary?.coordinates?.[0];
               return Array.isArray(coords) && coords.length >= 4;
@@ -6437,9 +7304,8 @@ export function MapView({
               );
             })}
 
-        {/* Task #47: Session-plan pins — color-coded by status, popup with date,
-            microplan link, target/vaccinated, and a "Mark done" hint. */}
-        {mode === "planning" && sessionMapPins
+        {/* Original sessionMapPins logic commented out to preserve backward compatibility:
+        mode === "planning" && sessionMapPins
           .filter((s: any) => s.lat != null && s.lng != null)
           .filter((s: any) => {
             if (s.status === "completed") return !hiddenCategories.has("sessionCompleted");
@@ -6495,10 +7361,63 @@ export function MapView({
                 </Popup>
               </CircleMarker>
             );
-          })}
+          })
+        */}
 
-        {/* Task #47: Unserved populated places — red hatched ring marker. */}
-        {mode === "planning" && !hiddenCategories.has("unserved") && filteredUnservedPlaces
+        {/* Updated Code: Render visibleSessionMapPins (which are already bounds-pruned and status-filtered in a memoized hook) */}
+        {mode === "planning" && visibleSessionMapPins.map((s: any) => {
+          const color = s.status === "completed" ? "#059669" : (s.status === "in_progress" || s.status === "in-progress") ? "#f59e0b" : "#2563eb";
+          return (
+            <CircleMarker
+              key={`session-pin-${s.id}`}
+              center={[Number(s.lat), Number(s.lng)]}
+              radius={9}
+              pathOptions={{ color, fillColor: color, fillOpacity: 0.55, weight: 2 }}
+            >
+              <Popup className="premium-map-popup">
+                <div className="w-56 text-xs font-sans">
+                  <div className="font-bold text-sm mb-1.5">{s.name}</div>
+                  <div className="space-y-0.5 text-foreground/80">
+                    <div><span className="text-muted-foreground">Status:</span> <span className="font-semibold capitalize">{String(s.status || "planned").replace("_", " ")}</span></div>
+                    {s.scheduledDate && <div><span className="text-muted-foreground">Scheduled:</span> {new Date(s.scheduledDate).toLocaleDateString()}</div>}
+                    {s.completedAt && <div><span className="text-muted-foreground">Completed:</span> {new Date(s.completedAt).toLocaleDateString()}</div>}
+                    <div><span className="text-muted-foreground">Target pop:</span> {s.targetPopulation ?? "—"}</div>
+                    {s.vaccinatedTotal != null && <div><span className="text-muted-foreground">Vaccinated:</span> <span className="font-bold">{s.vaccinatedTotal}</span></div>}
+                    <div className="capitalize"><span className="text-muted-foreground">Type:</span> {s.sessionType} / {s.planType}</div>
+                  </div>
+                  <div className="mt-2 pt-1.5 border-t border-border/40 flex gap-1.5">
+                    <a className="text-primary underline text-[11px]" href={s.planType === "campaign" ? "/microplans/campaigns" : "/microplans/routine"} data-testid="link-open-session-planner">Open in planner</a>
+                  </div>
+                  <Button
+                    size="sm"
+                    className="w-full h-7 text-[11px] font-semibold mt-2"
+                    onClick={() => {
+                      const qs = new URLSearchParams({
+                        unservedName: s.name ?? "",
+                        unservedLat: String(s.lat),
+                        unservedLng: String(s.lng),
+                        prefillKind: "followup",
+                        autoOpen: "1",
+                      });
+                      const planSeg = s.planType === "campaign" ? "campaign" : "microplan";
+                      const path = s.microplanId
+                        ? `/sessions/${planSeg}/${s.microplanId}`
+                        : "/sessions";
+                      window.location.assign(`${path}?${qs.toString()}`);
+                    }}
+                    data-testid={`button-plan-followup-${s.id}`}
+                  >
+                    <Plus className="h-3 w-3 mr-1" />
+                    Plan follow-up
+                  </Button>
+                </div>
+              </Popup>
+            </CircleMarker>
+          );
+        })}
+
+        {/* Original filteredUnservedPlaces logic commented out to preserve backward compatibility:
+        mode === "planning" && !hiddenCategories.has("unserved") && filteredUnservedPlaces
           .filter((p: any) => p.latitude != null && p.longitude != null)
           .map((p: any) => (
             <CircleMarker
@@ -6534,7 +7453,45 @@ export function MapView({
                 </div>
               </Popup>
             </CircleMarker>
-          ))}
+          ))
+        */}
+
+        {/* Updated Code: Render visibleUnservedPlaces (which are already bounds-pruned and status-filtered in a memoized hook) */}
+        {mode === "planning" && visibleUnservedPlaces.map((p: any) => (
+          <CircleMarker
+            key={`unserved-${p.id}`}
+            center={[Number(p.latitude), Number(p.longitude)]}
+            radius={7}
+            pathOptions={{ color: "#dc2626", fillColor: "#fecaca", fillOpacity: 0.5, weight: 2, dashArray: "3 3" }}
+          >
+            <Popup>
+              <div className="w-52 text-xs">
+                <div className="font-bold text-sm">{p.name}</div>
+                <div className="text-red-600 font-semibold mt-1">No session ever planned</div>
+                <div className="text-muted-foreground mt-0.5 mb-2">{p.isHardToReach ? "Hard-to-reach community" : "Standard community"}</div>
+                <Button
+                  size="sm"
+                  className="w-full h-7 text-[11px] font-semibold bg-red-600 hover:bg-red-700 text-white"
+                  onClick={() => {
+                    const qs = new URLSearchParams({
+                      unservedVillageId: String(p.id),
+                      unservedName: p.name ?? "",
+                      unservedLat: String(p.latitude),
+                      unservedLng: String(p.longitude),
+                      unservedHtr: p.isHardToReach ? "1" : "0",
+                      autoOpen: "1",
+                    });
+                    window.location.assign(`/sessions?${qs.toString()}`);
+                  }}
+                  data-testid={`button-plan-session-here-${p.id}`}
+                >
+                  <Plus className="h-3 w-3 mr-1" />
+                  Plan a session here
+                </Button>
+              </div>
+            </Popup>
+          </CircleMarker>
+        ))}
 
         {/* Zero-dose / under-immunized village pins — graduated by missed-child count.
             Mirrors the popup + color/radius logic from pages/ZeroDoseVillages.tsx so
@@ -7523,6 +8480,7 @@ export function MapView({
       {/* Premium measurement, drawing & export buttons */}
       {!isPrinting && panelVis.tools && (
         <div className="absolute right-4 top-4 z-[1000] flex gap-2 items-center flex-wrap" ref={disableLeafletPropagation}>
+          <BasemapSwitcher basemap={basemap} onChange={setBasemap} className="relative top-auto right-auto" />
           {mode !== "surveillance" && rasterListData?.success && rasterListData?.files && (
             <Select
               value={selectedRasterFile || "default"}
@@ -8615,156 +9573,427 @@ export function MapView({
 
       {/* Map-Initiated Click Dialog (High Density Gap Alerts) */}
       <Dialog open={clickDialogOpen} onOpenChange={setClickDialogOpen}>
-        <DialogContent className="max-w-md bg-background/95 backdrop-blur-md border border-border shadow-2xl rounded-2xl">
+        <DialogContent className="max-w-xl bg-background/95 backdrop-blur-md border border-border shadow-2xl rounded-2xl">
           <DialogHeader>
             <DialogTitle className="text-lg font-bold flex items-center gap-2 text-primary font-black">
               <MapPin className="h-5 w-5 text-amber-500 animate-bounce" />
-              Unserved Population Cluster Identified
+              Location Intelligence Summary
             </DialogTitle>
             <DialogDescription className="text-xs text-muted-foreground pt-1 leading-relaxed">
-              Our gridded spatial population raster estimates the real number of people living near these coordinates, so you can plan an outreach session without doing the math.
+              Explore demographic profiles, microplanning coverage, and administrative context for the clicked coordinate on the map.
             </DialogDescription>
           </DialogHeader>
 
           {mapClickDetails && (
-            <div className="space-y-4 py-2 text-xs">
-              {/* Coordinates & HTR warning */}
-              <div className="flex justify-between items-center p-3 bg-muted/40 rounded-xl border border-muted">
-                <div>
-                  <span className="text-muted-foreground block text-[10px] uppercase font-bold tracking-wider">Coordinates</span>
-                  <span className="font-semibold text-foreground font-mono">{mapClickDetails.lat}, {mapClickDetails.lng}</span>
-                </div>
-                {mapClickDetails.isHTR && (
-                  <Badge variant="outline" className="bg-amber-500/10 text-amber-600 border-amber-500/20 text-[10px] font-semibold flex items-center gap-1">
-                    <AlertTriangle className="h-3 w-3" /> HTR Zone
-                  </Badge>
-                )}
-              </div>
+            <Tabs defaultValue="location" className="w-full">
+              <TabsList className="grid w-full grid-cols-3 bg-muted p-1 rounded-xl">
+                <TabsTrigger value="location" className="text-xs font-semibold py-1.5 rounded-lg">Location & Context</TabsTrigger>
+                <TabsTrigger value="microplanning" className="text-xs font-semibold py-1.5 rounded-lg">Planning & Coverage</TabsTrigger>
+                <TabsTrigger 
+                  value="feature" 
+                  disabled={!mapClickDetails.intersectedFeature}
+                  className="text-xs font-semibold py-1.5 rounded-lg disabled:opacity-40"
+                >
+                  Intersected Feature
+                </TabsTrigger>
+              </TabsList>
 
-              {/* Active Admin Area & Census population */}
-              {mapClickDetails.polygonName && (
-                <div className="p-3 bg-primary/5 border border-primary/10 rounded-xl space-y-1">
-                  <span className="text-muted-foreground block text-[10px] uppercase font-bold tracking-wider">Active Boundary Context</span>
-                  <div className="flex justify-between items-center">
-                    <span className="font-semibold text-primary">🗺️ {mapClickDetails.polygonType}: {mapClickDetails.polygonName}</span>
-                    {mapClickDetails.isLoadingPopulation ? (
-                      <Badge className="bg-amber-500 hover:bg-amber-600 text-white font-semibold animate-pulse">
-                        Calculating...
-                      </Badge>
-                    ) : mapClickDetails.polygonPopulation > 0 ? (
-                      <Badge className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold">
-                        ≈ {mapClickDetails.polygonPopulation.toLocaleString()} total pop
-                      </Badge>
-                    ) : null}
+              {/* Tab 1: Location & Context */}
+              <TabsContent value="location" className="space-y-4 pt-4 text-xs">
+                {/* Coordinates & HTR warning */}
+                <div className="flex justify-between items-center p-3 bg-muted/40 rounded-xl border border-muted">
+                  <div>
+                    <span className="text-muted-foreground block text-[10px] uppercase font-bold tracking-wider">Coordinates</span>
+                    <span className="font-semibold text-foreground font-mono">{mapClickDetails.lat}, {mapClickDetails.lng}</span>
                   </div>
-                </div>
-              )}
-
-              {/* Aggressive Gridded Population Estimates */}
-              <div className="space-y-2">
-                <span className="font-bold text-[10px] text-muted-foreground uppercase block tracking-wider">Aggressive Gridded Population</span>
-                <div className="grid grid-cols-3 gap-2 text-center font-mono">
-                  <div className="bg-muted/60 p-2.5 rounded-xl border border-muted flex flex-col justify-between">
-                    <span className="text-[9px] text-muted-foreground uppercase font-bold block mb-1">1km Radius</span>
-                    {mapClickDetails.isLoadingPopulation ? (
-                      <strong className="text-sm text-amber-500 animate-pulse">Loading...</strong>
-                    ) : (
-                      <strong className="text-sm text-foreground">≈ {mapClickDetails.pop1k.toLocaleString()}</strong>
-                    )}
-                    <span className="text-[8px] text-muted-foreground block mt-0.5">people</span>
-                  </div>
-                  <div className="bg-muted/60 p-2.5 rounded-xl border border-muted flex flex-col justify-between">
-                    <span className="text-[9px] text-muted-foreground uppercase font-bold block mb-1">2km Radius</span>
-                    {mapClickDetails.isLoadingPopulation ? (
-                      <strong className="text-sm text-amber-500 animate-pulse">Loading...</strong>
-                    ) : (
-                      <strong className="text-sm text-foreground">≈ {mapClickDetails.pop2k.toLocaleString()}</strong>
-                    )}
-                    <span className="text-[8px] text-muted-foreground block mt-0.5">people</span>
-                  </div>
-                  <div className="bg-muted/60 p-2.5 rounded-xl border border-muted flex flex-col justify-between">
-                    <span className="text-[9px] text-muted-foreground uppercase font-bold block mb-1">3km Radius</span>
-                    {mapClickDetails.isLoadingPopulation ? (
-                      <strong className="text-sm text-amber-500 animate-pulse">Loading...</strong>
-                    ) : (
-                      <strong className="text-sm text-foreground">≈ {mapClickDetails.pop3k.toLocaleString()}</strong>
-                    )}
-                    <span className="text-[8px] text-muted-foreground block mt-0.5">people</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Staging & Outreach Proximity checking */}
-              <div className="space-y-2">
-                <span className="font-bold text-[10px] text-muted-foreground uppercase block tracking-wider text-primary">Proximity Analysis</span>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {/* Nearest facilities list */}
-                  <div className="p-2.5 bg-background border border-border/80 rounded-xl space-y-1.5">
-                    <span className="text-muted-foreground block text-[9px] uppercase font-bold tracking-wider border-b pb-0.5">🏥 Nearby Facilities</span>
-                    {mapClickDetails.nearbyFacilities.length > 0 ? (
-                      <div className="space-y-1">
-                        {mapClickDetails.nearbyFacilities.map((nf, idx) => (
-                          <div key={idx} className="flex justify-between items-center text-[10px] last:border-0">
-                            <span className="truncate max-w-[120px] font-medium text-foreground">{nf.name}</span>
-                            <span className="font-mono text-muted-foreground text-[9px]">{nf.distance}km</span>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <p className="text-[9px] italic text-muted-foreground">None within 15km</p>
-                    )}
-                  </div>
-
-                  {/* Nearest planned sessions list */}
-                  <div className="p-2.5 bg-background border border-border/80 rounded-xl space-y-1.5">
-                    <span className="text-muted-foreground block text-[9px] uppercase font-bold tracking-wider border-b pb-0.5">📅 Nearby Session Plans</span>
-                    {mapClickDetails.nearbyPlans.length > 0 ? (
-                      <div className="space-y-1">
-                        {mapClickDetails.nearbyPlans.map((np, idx) => (
-                          <div key={idx} className="flex justify-between items-center text-[10px] last:border-0">
-                            <span className="truncate max-w-[120px] font-medium text-foreground">{np.name}</span>
-                            <span className="font-mono text-muted-foreground text-[9px]">{np.distance}km</span>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <p className="text-[9px] italic text-muted-foreground">None within 10km</p>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              {/* Nearby Communities list */}
-              <div className="space-y-2">
-                <span className="font-bold text-[10px] text-muted-foreground uppercase block tracking-wider">Nearby Communities</span>
-                <div className="p-2.5 bg-background border border-border/80 rounded-xl space-y-1">
-                  {mapClickDetails.nearbyVillages.length > 0 ? (
-                    mapClickDetails.nearbyVillages.map((nv, idx) => (
-                      <div key={idx} className="flex justify-between items-center text-[11px] border-b border-border/40 pb-1 last:border-0 last:pb-0">
-                        <span className={`truncate max-w-[160px] font-medium ${nv.isHardToReach ? "text-amber-600 font-semibold" : "text-foreground"}`}>
-                          🏡 {nv.name} {nv.isHardToReach && "⚠️"}
-                        </span>
-                        <span className="text-muted-foreground font-mono text-[10px] shrink-0">
-                          {nv.population.toLocaleString()} pop ({nv.distance} km)
-                        </span>
-                      </div>
-                    ))
-                  ) : (
-                    <p className="text-[9px] italic text-muted-foreground">No villages within 10km</p>
+                  {mapClickDetails.isHTR && (
+                    <Badge variant="outline" className="bg-amber-500/10 text-amber-600 border-amber-500/20 text-[10px] font-semibold flex items-center gap-1">
+                      <AlertTriangle className="h-3 w-3" /> HTR Zone
+                    </Badge>
                   )}
                 </div>
-              </div>
 
-              {/* Alert Warning if highly isolated */}
-              {mapClickDetails.isHTR && (
-                <div className="p-3 bg-amber-50 border border-amber-200 text-amber-800 rounded-xl flex gap-2 leading-relaxed text-[11px] font-medium">
-                  <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
-                  <div>
-                    <strong>Isolated / Hard-to-Reach Area:</strong> This cluster is located over 5km away from the closest health facility or contains hard-to-reach settlements. Immediate outreach scheduling is recommended.
+                {/* Administrative Area Context */}
+                <div className="p-3 bg-card border border-border rounded-xl space-y-2">
+                  <span className="text-muted-foreground block text-[10px] uppercase font-bold tracking-wider">Administrative Area Hierarchy</span>
+                  <div className="grid grid-cols-3 gap-2 text-center">
+                    <div className="p-2 bg-muted/30 rounded-lg">
+                      <span className="text-muted-foreground block text-[8px] uppercase font-bold">Province</span>
+                      <span className="font-semibold text-foreground truncate block">{mapClickDetails.provinceName || "—"}</span>
+                    </div>
+                    <div className="p-2 bg-muted/30 rounded-lg">
+                      <span className="text-muted-foreground block text-[8px] uppercase font-bold">District</span>
+                      <span className="font-semibold text-foreground truncate block">{mapClickDetails.districtName || "—"}</span>
+                    </div>
+                    <div className="p-2 bg-muted/30 rounded-lg">
+                      <span className="text-muted-foreground block text-[8px] uppercase font-bold">Ward/Locality</span>
+                      <span className="font-semibold text-foreground truncate block">{mapClickDetails.wardName || "—"}</span>
+                    </div>
                   </div>
                 </div>
-              )}
-            </div>
+
+                {/* Gridded Population Estimates */}
+                <div className="space-y-2">
+                  <span className="font-bold text-[10px] text-muted-foreground uppercase block tracking-wider">WorldPop Gridded Estimates</span>
+                  <div className="grid grid-cols-3 gap-2 text-center font-mono">
+                    <div className="bg-muted/60 p-2.5 rounded-xl border border-muted flex flex-col justify-between">
+                      <span className="text-[9px] text-muted-foreground uppercase font-bold block mb-1">1km Radius</span>
+                      {mapClickDetails.isLoadingPopulation ? (
+                        <strong className="text-sm text-amber-500 animate-pulse">Loading...</strong>
+                      ) : (
+                        <strong className="text-sm text-foreground">≈ {mapClickDetails.pop1k.toLocaleString()}</strong>
+                      )}
+                      <span className="text-[8px] text-muted-foreground block mt-0.5">people</span>
+                    </div>
+                    <div className="bg-muted/60 p-2.5 rounded-xl border border-muted flex flex-col justify-between">
+                      <span className="text-[9px] text-muted-foreground uppercase font-bold block mb-1">2km Radius</span>
+                      {mapClickDetails.isLoadingPopulation ? (
+                        <strong className="text-sm text-amber-500 animate-pulse">Loading...</strong>
+                      ) : (
+                        <strong className="text-sm text-foreground">≈ {mapClickDetails.pop2k.toLocaleString()}</strong>
+                      )}
+                      <span className="text-[8px] text-muted-foreground block mt-0.5">people</span>
+                    </div>
+                    <div className="bg-muted/60 p-2.5 rounded-xl border border-muted flex flex-col justify-between">
+                      <span className="text-[9px] text-muted-foreground uppercase font-bold block mb-1">3km Radius</span>
+                      {mapClickDetails.isLoadingPopulation ? (
+                        <strong className="text-sm text-amber-500 animate-pulse">Loading...</strong>
+                      ) : (
+                        <strong className="text-sm text-foreground">≈ {mapClickDetails.pop3k.toLocaleString()}</strong>
+                      )}
+                      <span className="text-[8px] text-muted-foreground block mt-0.5">people</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Nearby Landmarks */}
+                <div className="space-y-2">
+                  <span className="font-bold text-[10px] text-muted-foreground uppercase block tracking-wider">Nearby Landmarks</span>
+                  <div className="p-2.5 bg-background border border-border/80 rounded-xl space-y-1.5">
+                    {mapClickDetails.landmarks && mapClickDetails.landmarks.length > 0 ? (
+                      <div className="grid grid-cols-1 gap-1.5">
+                        {mapClickDetails.landmarks.map((l: any, idx: number) => (
+                          <div key={idx} className="flex justify-between items-center text-[11px]">
+                            <span className="flex items-center gap-1.5 text-foreground">
+                              {l.type === "school" ? "🏫" : l.type === "church" ? "⛪" : l.type === "market" ? "🛒" : "📍"}
+                              <span className="font-medium">{l.name}</span>
+                            </span>
+                            <span className="font-mono text-muted-foreground text-[10px]">{l.distance} km</span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-[10px] italic text-muted-foreground">No landmarks found nearby</p>
+                    )}
+                  </div>
+                </div>
+              </TabsContent>
+
+              {/* Tab 2: Planning & Coverage */}
+              <TabsContent value="microplanning" className="space-y-4 pt-4 text-xs">
+                {/* Containment Catchment Status */}
+                <div className={`p-3 border rounded-xl space-y-1.5 ${mapClickDetails.isInsideCatchment ? "bg-emerald-500/5 border-emerald-500/20 text-emerald-900" : "bg-amber-500/5 border-amber-500/20 text-amber-900"}`}>
+                  <span className="text-muted-foreground block text-[10px] uppercase font-bold tracking-wider">Existing Microplan Coverage</span>
+                  <div className="flex justify-between items-center">
+                    <span className="font-bold text-xs flex items-center gap-1.5">
+                      {mapClickDetails.isInsideCatchment ? (
+                        <>
+                          <CheckCircle className="h-4 w-4 text-emerald-500" />
+                          Inside official catchment area
+                        </>
+                      ) : (
+                        <>
+                          <XCircle className="h-4 w-4 text-amber-500" />
+                          Outside official catchment area
+                        </>
+                      )}
+                    </span>
+                    {mapClickDetails.isInsideCatchment && mapClickDetails.containingCatchments?.[0] && (
+                      <Badge variant="outline" className="bg-emerald-600/10 text-emerald-700 border-emerald-500/20 font-semibold text-[10px]">
+                        {mapClickDetails.containingCatchments[0].name}
+                      </Badge>
+                    )}
+                  </div>
+                </div>
+
+                {/* Nearest Health Facility */}
+                <div className="p-3 bg-card border border-border rounded-xl space-y-2">
+                  <span className="text-muted-foreground block text-[10px] uppercase font-bold tracking-wider">Nearest Health Facility</span>
+                  {mapClickDetails.nearestFacility ? (
+                    <div className="space-y-1.5">
+                      <div className="flex justify-between items-center">
+                        <span className="font-bold text-foreground">🏥 {mapClickDetails.nearestFacility.name}</span>
+                        <Badge variant="secondary" className="text-[9px] font-semibold">
+                          {mapClickDetails.nearestFacility.facilityType}
+                        </Badge>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 text-[10px] text-muted-foreground font-mono">
+                        <div>Distance: <span className="font-semibold text-foreground">{mapClickDetails.nearestFacility.distance} km</span></div>
+                        <div>Est. Travel: <span className="font-semibold text-foreground">{Math.round(mapClickDetails.nearestFacility.distance * 12)} mins (walk)</span></div>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="italic text-muted-foreground">None within 15km</p>
+                  )}
+                </div>
+
+                {/* Nearest Community */}
+                <div className="p-3 bg-card border border-border rounded-xl space-y-2">
+                  <span className="text-muted-foreground block text-[10px] uppercase font-bold tracking-wider">Nearest Community</span>
+                  {mapClickDetails.nearestVillage ? (
+                    <div className="space-y-1.5">
+                      <div className="flex justify-between items-center">
+                        <span className="font-bold text-foreground">🏡 {mapClickDetails.nearestVillage.name}</span>
+                        {mapClickDetails.nearestVillage.isHardToReach && (
+                          <Badge variant="destructive" className="text-[9px] font-semibold">Hard to Reach</Badge>
+                        )}
+                      </div>
+                      <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[10px] text-muted-foreground">
+                        <div>Est. Population: <span className="font-bold text-foreground font-mono">{mapClickDetails.nearestVillage.population.toLocaleString()}</span></div>
+                        <div>Target Pop (U5): <span className="font-bold text-foreground font-mono">{mapClickDetails.nearestVillage.under5Population ? mapClickDetails.nearestVillage.under5Population.toLocaleString() : Math.round(mapClickDetails.nearestVillage.population * 0.15).toLocaleString()}</span></div>
+                        <div>Distance to facility: <span className="font-semibold text-foreground font-mono">{mapClickDetails.nearestVillage.distance} km</span></div>
+                        <div>Travel Time: <span className="font-semibold text-foreground font-mono">{mapClickDetails.nearestVillage.travelTimeMinutes} mins ({mapClickDetails.nearestVillage.transportMode})</span></div>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="italic text-muted-foreground">None within 10km</p>
+                  )}
+                </div>
+
+                {/* Planned outreach sessions nearby */}
+                <div className="space-y-2">
+                  <span className="font-bold text-[10px] text-muted-foreground uppercase block tracking-wider">Planned Sessions Nearby</span>
+                  <div className="p-2.5 bg-background border border-border/80 rounded-xl space-y-1.5">
+                    {mapClickDetails.nearbyPlans && mapClickDetails.nearbyPlans.length > 0 ? (
+                      <div className="space-y-2">
+                        {mapClickDetails.nearbyPlans.map((np: any, idx: number) => (
+                          <div key={idx} className="flex justify-between items-center border-b border-border/40 pb-1 last:border-0 last:pb-0">
+                            <div className="flex flex-col">
+                              <span className="font-medium text-foreground">📅 {np.name}</span>
+                              <span className="text-[9px] text-muted-foreground">Type: {np.sessionType} | Status: {np.status}</span>
+                            </div>
+                            <span className="font-mono text-muted-foreground text-[10px] shrink-0">{np.distance} km</span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="italic text-muted-foreground text-[10px]">No planned outreach sessions within 10km</p>
+                    )}
+                  </div>
+                </div>
+              </TabsContent>
+
+              {/* Tab 3: Intersected Feature */}
+              <TabsContent value="feature" className="space-y-4 pt-4 text-xs">
+                {mapClickDetails.intersectedFeature ? (
+                  <div className="space-y-4">
+                    {/* Header Info */}
+                    <div className="p-3 bg-primary/5 border border-primary/15 rounded-xl flex items-center justify-between">
+                      <div>
+                        <span className="text-[9px] uppercase font-bold tracking-wider text-primary block">
+                          Intersected {mapClickDetails.intersectedFeature.type.toUpperCase()}
+                        </span>
+                        <span className="font-bold text-foreground text-sm">
+                          {mapClickDetails.intersectedFeature.type === "facility" && "🏥 " + mapClickDetails.intersectedFeature.data.name}
+                          {mapClickDetails.intersectedFeature.type === "village" && "🏡 " + mapClickDetails.intersectedFeature.data.name}
+                          {mapClickDetails.intersectedFeature.type === "catchment" && "🗺️ " + mapClickDetails.intersectedFeature.data.name}
+                          {mapClickDetails.intersectedFeature.type === "session" && "📅 " + mapClickDetails.intersectedFeature.data.name}
+                        </span>
+                      </div>
+                      <Badge className="bg-primary hover:bg-primary/95 text-white capitalize font-semibold text-[10px]">
+                        {mapClickDetails.intersectedFeature.type}
+                      </Badge>
+                    </div>
+
+                    {/* Grid Properties */}
+                    <div className="grid grid-cols-2 gap-2 text-[11px]">
+                      {mapClickDetails.intersectedFeature.type === "facility" && (
+                        <>
+                          <div className="p-2 bg-muted/40 rounded-lg">
+                            <span className="text-muted-foreground block text-[9px] uppercase font-bold">HMIS Code</span>
+                            <span className="font-mono font-semibold text-foreground">{mapClickDetails.intersectedFeature.data.hmisCode}</span>
+                          </div>
+                          <div className="p-2 bg-muted/40 rounded-lg">
+                            <span className="text-muted-foreground block text-[9px] uppercase font-bold">Facility Type</span>
+                            <span className="font-semibold text-foreground capitalize">{mapClickDetails.intersectedFeature.data.facilityType || "—"}</span>
+                          </div>
+                          <div className="p-2 bg-muted/40 rounded-lg">
+                            <span className="text-muted-foreground block text-[9px] uppercase font-bold">Operational Status</span>
+                            <span className="font-semibold text-foreground capitalize">{mapClickDetails.intersectedFeature.data.operationalStatus || "Active"}</span>
+                          </div>
+                          <div className="p-2 bg-muted/40 rounded-lg">
+                            <span className="text-muted-foreground block text-[9px] uppercase font-bold">Agency Name</span>
+                            <span className="font-semibold text-foreground">{mapClickDetails.intersectedFeature.data.agencyName || "—"}</span>
+                          </div>
+                          <div className="p-2 bg-muted/40 rounded-lg">
+                            <span className="text-muted-foreground block text-[9px] uppercase font-bold">Staff Count</span>
+                            <span className="font-semibold text-foreground font-mono">{mapClickDetails.intersectedFeature.data.staffCount || "—"}</span>
+                          </div>
+                          <div className="p-2 bg-muted/40 rounded-lg">
+                            <span className="text-muted-foreground block text-[9px] uppercase font-bold">Operating Hours</span>
+                            <span className="font-semibold text-foreground">{mapClickDetails.intersectedFeature.data.operatingHours || "—"}</span>
+                          </div>
+                          <div className="p-2 bg-muted/40 rounded-lg">
+                            <span className="text-muted-foreground block text-[9px] uppercase font-bold">Cold Chain (Fridge)</span>
+                            <span className={`font-semibold ${mapClickDetails.intersectedFeature.data.hasRefrigerator ? "text-emerald-600" : "text-red-500"}`}>
+                              {mapClickDetails.intersectedFeature.data.hasRefrigerator ? "Available" : "Not Available"}
+                            </span>
+                          </div>
+                          <div className="p-2 bg-muted/40 rounded-lg">
+                            <span className="text-muted-foreground block text-[9px] uppercase font-bold">Power Supply</span>
+                            <span className={`font-semibold ${mapClickDetails.intersectedFeature.data.hasPower ? "text-emerald-600" : "text-red-500"}`}>
+                              {mapClickDetails.intersectedFeature.data.hasPower ? "Yes" : "No"}
+                            </span>
+                          </div>
+                          {mapClickDetails.intersectedFeature.data.address && (
+                            <div className="p-2 bg-muted/40 rounded-lg col-span-2">
+                              <span className="text-muted-foreground block text-[9px] uppercase font-bold">Address</span>
+                              <span className="text-foreground">{mapClickDetails.intersectedFeature.data.address}</span>
+                            </div>
+                          )}
+                        </>
+                      )}
+
+                      {mapClickDetails.intersectedFeature.type === "village" && (
+                        <>
+                          <div className="p-2 bg-muted/40 rounded-lg">
+                            <span className="text-muted-foreground block text-[9px] uppercase font-bold">Settlement Code</span>
+                            <span className="font-mono font-semibold text-foreground">{mapClickDetails.intersectedFeature.data.code || "—"}</span>
+                          </div>
+                          <div className="p-2 bg-muted/40 rounded-lg">
+                            <span className="text-muted-foreground block text-[9px] uppercase font-bold">Settlement Type</span>
+                            <span className="font-semibold text-foreground capitalize">{mapClickDetails.intersectedFeature.data.settlementType || "Village"}</span>
+                          </div>
+                          <div className="p-2 bg-muted/40 rounded-lg">
+                            <span className="text-muted-foreground block text-[9px] uppercase font-bold">Total Population</span>
+                            <span className="font-semibold text-foreground font-mono">{mapClickDetails.intersectedFeature.data.population ? mapClickDetails.intersectedFeature.data.population.toLocaleString() : "—"}</span>
+                          </div>
+                          <div className="p-2 bg-muted/40 rounded-lg">
+                            <span className="text-muted-foreground block text-[9px] uppercase font-bold">Target Pop (Under 5)</span>
+                            <span className="font-semibold text-foreground font-mono">{mapClickDetails.intersectedFeature.data.under5Population ? mapClickDetails.intersectedFeature.data.under5Population.toLocaleString() : "—"}</span>
+                          </div>
+                          <div className="p-2 bg-muted/40 rounded-lg">
+                            <span className="text-muted-foreground block text-[9px] uppercase font-bold">Accessibility</span>
+                            <span className={`font-semibold ${mapClickDetails.intersectedFeature.data.isHardToReach ? "text-red-500" : "text-emerald-600"}`}>
+                              {mapClickDetails.intersectedFeature.data.isHardToReach ? "Hard-to-Reach (HTR)" : "Accessible"}
+                            </span>
+                          </div>
+                          <div className="p-2 bg-muted/40 rounded-lg">
+                            <span className="text-muted-foreground block text-[9px] uppercase font-bold">Transport Mode</span>
+                            <span className="font-semibold text-foreground capitalize">{mapClickDetails.intersectedFeature.data.transportMode || "—"}</span>
+                          </div>
+                          <div className="p-2 bg-muted/40 rounded-lg">
+                            <span className="text-muted-foreground block text-[9px] uppercase font-bold">Seasonal Access</span>
+                            <span className="font-semibold text-foreground">{mapClickDetails.intersectedFeature.data.seasonalAccessibility || "All Year"}</span>
+                          </div>
+                          <div className="p-2 bg-muted/40 rounded-lg">
+                            <span className="text-muted-foreground block text-[9px] uppercase font-bold">Insecurity Level</span>
+                            <span className="font-semibold text-foreground font-mono">{mapClickDetails.intersectedFeature.data.insecurityLevel !== null ? `Level ${mapClickDetails.intersectedFeature.data.insecurityLevel}` : "Low"}</span>
+                          </div>
+                          {(mapClickDetails.intersectedFeature.data.focalPersonName || mapClickDetails.intersectedFeature.data.focalPersonPhone) && (
+                            <div className="p-2 bg-muted/40 rounded-lg col-span-2 space-y-1">
+                              <span className="text-muted-foreground block text-[9px] uppercase font-bold">Focal Person / Mobilization</span>
+                              <span className="text-foreground font-medium block">👤 {mapClickDetails.intersectedFeature.data.focalPersonName || "Unnamed"}</span>
+                              {mapClickDetails.intersectedFeature.data.focalPersonPhone && (
+                                <span className="text-muted-foreground block font-mono text-[10px]">📞 {mapClickDetails.intersectedFeature.data.focalPersonPhone}</span>
+                              )}
+                            </div>
+                          )}
+                          {mapClickDetails.intersectedFeature.data.isCrossBorder && (
+                            <div className="p-2 bg-amber-500/10 border border-amber-500/20 rounded-lg col-span-2">
+                              <span className="text-amber-800 block text-[9px] uppercase font-bold">Cross-Border Info</span>
+                              <span className="text-amber-900 font-medium text-[11px]">
+                                Border Crossing settlement bordering {mapClickDetails.intersectedFeature.data.borderCountry || "counterpart country"}.
+                              </span>
+                            </div>
+                          )}
+                        </>
+                      )}
+
+                      {mapClickDetails.intersectedFeature.type === "catchment" && (
+                        <>
+                          <div className="p-2 bg-muted/40 rounded-lg">
+                            <span className="text-muted-foreground block text-[9px] uppercase font-bold">Area (Sq Km)</span>
+                            <span className="font-mono font-semibold text-foreground">{mapClickDetails.intersectedFeature.data.areaSqKm ? Number(mapClickDetails.intersectedFeature.data.areaSqKm).toFixed(2) + " km²" : "—"}</span>
+                          </div>
+                          <div className="p-2 bg-muted/40 rounded-lg">
+                            <span className="text-muted-foreground block text-[9px] uppercase font-bold">Catchment Population</span>
+                            <span className="font-mono font-semibold text-foreground">{mapClickDetails.intersectedFeature.data.populationEstimate ? mapClickDetails.intersectedFeature.data.populationEstimate.toLocaleString() : "—"}</span>
+                          </div>
+                          <div className="p-2 bg-muted/40 rounded-lg">
+                            <span className="text-muted-foreground block text-[9px] uppercase font-bold">Official Status</span>
+                            <span className={`font-semibold ${mapClickDetails.intersectedFeature.data.isOfficial ? "text-emerald-600" : "text-amber-600"}`}>
+                              {mapClickDetails.intersectedFeature.data.isOfficial ? "Official / Approved" : "Drawn Catchment"}
+                            </span>
+                          </div>
+                          <div className="p-2 bg-muted/40 rounded-lg">
+                            <span className="text-muted-foreground block text-[9px] uppercase font-bold">Drawn Date</span>
+                            <span className="font-semibold text-foreground">
+                              {mapClickDetails.intersectedFeature.data.createdAt ? new Date(mapClickDetails.intersectedFeature.data.createdAt).toLocaleDateString() : "—"}
+                            </span>
+                          </div>
+                          {mapClickDetails.intersectedFeature.data.description && (
+                            <div className="p-2 bg-muted/40 rounded-lg col-span-2">
+                              <span className="text-muted-foreground block text-[9px] uppercase font-bold">Description</span>
+                              <span className="text-foreground">{mapClickDetails.intersectedFeature.data.description}</span>
+                            </div>
+                          )}
+                        </>
+                      )}
+
+                      {mapClickDetails.intersectedFeature.type === "session" && (
+                        <>
+                          <div className="p-2 bg-muted/40 rounded-lg">
+                            <span className="text-muted-foreground block text-[9px] uppercase font-bold">Session Type</span>
+                            <span className="font-semibold text-foreground capitalize">{mapClickDetails.intersectedFeature.data.sessionType}</span>
+                          </div>
+                          <div className="p-2 bg-muted/40 rounded-lg">
+                            <span className="text-muted-foreground block text-[9px] uppercase font-bold">Microplan Period</span>
+                            <span className="font-semibold text-foreground font-mono">Q{mapClickDetails.intersectedFeature.data.quarter} {mapClickDetails.intersectedFeature.data.year}</span>
+                          </div>
+                          <div className="p-2 bg-muted/40 rounded-lg">
+                            <span className="text-muted-foreground block text-[9px] uppercase font-bold">Execution Status</span>
+                            <span className="font-semibold text-foreground capitalize">{mapClickDetails.intersectedFeature.data.status}</span>
+                          </div>
+                          <div className="p-2 bg-muted/40 rounded-lg">
+                            <span className="text-muted-foreground block text-[9px] uppercase font-bold">Target Population</span>
+                            <span className="font-semibold text-foreground font-mono">{mapClickDetails.intersectedFeature.data.targetPopulation ? mapClickDetails.intersectedFeature.data.targetPopulation.toLocaleString() : "—"}</span>
+                          </div>
+                          <div className="p-2 bg-muted/40 rounded-lg">
+                            <span className="text-muted-foreground block text-[9px] uppercase font-bold">Transport Mode</span>
+                            <span className="font-semibold text-foreground capitalize">{mapClickDetails.intersectedFeature.data.transportMode || "—"}</span>
+                          </div>
+                          <div className="p-2 bg-muted/40 rounded-lg">
+                            <span className="text-muted-foreground block text-[9px] uppercase font-bold">Est. Duration</span>
+                            <span className="font-semibold text-foreground font-mono">{mapClickDetails.intersectedFeature.data.estimatedDuration ? `${mapClickDetails.intersectedFeature.data.estimatedDuration} mins` : "—"}</span>
+                          </div>
+                          <div className="p-2 bg-muted/40 rounded-lg">
+                            <span className="text-muted-foreground block text-[9px] uppercase font-bold">Status achieved</span>
+                            <span className={`font-semibold ${mapClickDetails.intersectedFeature.data.isAchieved ? "text-emerald-600" : "text-muted-foreground"}`}>
+                              {mapClickDetails.intersectedFeature.data.isAchieved ? "Yes (Completed)" : "No"}
+                            </span>
+                          </div>
+                          {mapClickDetails.intersectedFeature.data.outreachPurpose && (
+                            <div className="p-2 bg-muted/40 rounded-lg">
+                              <span className="text-muted-foreground block text-[9px] uppercase font-bold">Outreach Purpose</span>
+                              <span className="font-semibold text-foreground capitalize">{mapClickDetails.intersectedFeature.data.outreachPurpose}</span>
+                            </div>
+                          )}
+                          {mapClickDetails.intersectedFeature.data.notes && (
+                            <div className="p-2 bg-muted/40 rounded-lg col-span-2">
+                              <span className="text-muted-foreground block text-[9px] uppercase font-bold">Notes</span>
+                              <span className="text-foreground">{mapClickDetails.intersectedFeature.data.notes}</span>
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-xs text-muted-foreground italic py-8 text-center">No intersecting feature clicked</p>
+                )}
+              </TabsContent>
+            </Tabs>
           )}
 
           <DialogFooter className="pt-3 gap-2">

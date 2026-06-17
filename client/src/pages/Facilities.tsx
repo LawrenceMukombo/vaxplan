@@ -7,7 +7,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { MapContainer, TileLayer, Marker, Polygon as LeafletPolygon, Polyline, Popup, useMapEvents } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import { OSM_TILE_ATTRIBUTION } from "@/data/dataSources";
+import { CARTO_POSITRON_ATTRIBUTION } from "@/data/dataSources";
+import { usePersistedBasemap, BasemapTileLayer } from "@/components/map/BasemapToggle";
 import { createOutlinePinIcon } from "@/lib/mapIcons";
 import {
   usePopulationOverlay,
@@ -148,6 +149,7 @@ function MapResizer() {
 export default function Facilities() {
   const { toast } = useToast();
   const [, setLocation] = useLocation();
+  const [basemap] = usePersistedBasemap("positron");
 
   // Whether the current tenant has any administrative boundary maps seeded.
   // Used to gate the "Extract Communities from Map" action — without
@@ -2288,12 +2290,16 @@ export default function Facilities() {
                               zoom={12}
                               className="w-full h-full"
                             >
+                              {/* Commented out original static TileLayer and replaced with dynamic BasemapTileLayer */}
+                              {/*
                               <TileLayer
-                                attribution={OSM_TILE_ATTRIBUTION}
-                                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                                attribution={CARTO_POSITRON_ATTRIBUTION}
+                                url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
                                 maxNativeZoom={19}
                                 maxZoom={22}
                               />
+                              */}
+                              <BasemapTileLayer basemap={basemap} />
                               <PopulationWmsLayer overlay={populationOverlay} />
                               <MapResizer />
                               <FacilityMapEvents />
@@ -2566,12 +2572,16 @@ export default function Facilities() {
                             zoom={12}
                             className="w-full h-full"
                           >
+                            {/* Commented out original static TileLayer and replaced with dynamic BasemapTileLayer */}
+                            {/*
                             <TileLayer
-                              attribution={OSM_TILE_ATTRIBUTION}
-                              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                              attribution={CARTO_POSITRON_ATTRIBUTION}
+                              url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
                               maxNativeZoom={19}
                               maxZoom={22}
                             />
+                            */}
+                            <BasemapTileLayer basemap={basemap} />
                             <MapResizer />
 
                             {/* Network Routes from Facility to Communities */}
@@ -2920,12 +2930,16 @@ export default function Facilities() {
                         zoom={12}
                         className="w-full h-full"
                       >
+                        {/* Commented out original static TileLayer and replaced with dynamic BasemapTileLayer */}
+                        {/*
                         <TileLayer
-                          attribution={OSM_TILE_ATTRIBUTION}
-                          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                          attribution={CARTO_POSITRON_ATTRIBUTION}
+                          url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
                           maxNativeZoom={19}
                           maxZoom={22}
                         />
+                        */}
+                        <BasemapTileLayer basemap={basemap} />
                         <PopulationWmsLayer overlay={populationOverlay} />
                         <MapResizer />
                         
@@ -3459,12 +3473,16 @@ export default function Facilities() {
                       zoom={12}
                       className="h-full w-full"
                     >
+                      {/* Commented out original static TileLayer and replaced with dynamic BasemapTileLayer */}
+                      {/*
                       <TileLayer
-                        attribution={OSM_TILE_ATTRIBUTION}
-                        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                        attribution={CARTO_POSITRON_ATTRIBUTION}
+                        url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
                         maxNativeZoom={19}
                         maxZoom={22}
                       />
+                      */}
+                      <BasemapTileLayer basemap={basemap} />
                       <MapResizer />
                       <CommMapEvents />
                       

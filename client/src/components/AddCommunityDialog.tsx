@@ -30,7 +30,8 @@ import type { Facility, Llg } from "@shared/schema";
 import { MapContainer, TileLayer, Marker, useMapEvents } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import { OSM_TILE_ATTRIBUTION } from "@/data/dataSources";
+import { CARTO_POSITRON_ATTRIBUTION } from "@/data/dataSources";
+import { usePersistedBasemap, BasemapTileLayer } from "@/components/map/BasemapToggle";
 
 // Fix standard Leaflet default marker icon displacement/missing asset issues
 delete (L.Icon.Default.prototype as any)._getIconUrl;
@@ -55,6 +56,7 @@ export function AddCommunityDialog({
 }: AddCommunityDialogProps) {
   const { toast } = useToast();
   const { user } = useAuth();
+  const [basemap] = usePersistedBasemap("positron");
 
   // Role-based scoping for WHERE a community can be added (task #261):
   // - Facility staff are pinned & locked to their own facility.
@@ -333,12 +335,16 @@ export function AddCommunityDialog({
                   zoom={11}
                   className="h-full w-full z-10"
                 >
+                  {/* Commented out original static TileLayer and replaced with dynamic BasemapTileLayer */}
+                  {/*
                   <TileLayer
-                    url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                    attribution={OSM_TILE_ATTRIBUTION}
+                    url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
+                    attribution={CARTO_POSITRON_ATTRIBUTION}
                     maxNativeZoom={19}
                     maxZoom={22}
                   />
+                  */}
+                  <BasemapTileLayer basemap={basemap} />
                   <MapEvents />
                   {latVal !== null && lngVal !== null && !isNaN(latVal) && !isNaN(lngVal) && (
                     <Marker position={[latVal, lngVal]} />

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { Link } from "wouter";
+import { useQuery } from "@tanstack/react-query";
 import {
   MapPin, Layers, X, ChevronRight, Hospital, Building2, Users, Clock,
   Ruler, Bike, Car, AlertTriangle, Sparkles, Crosshair, Map, Mountain,
@@ -14,6 +15,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
+import { usePersistedBasemap, type Basemap, BasemapTileLayer, BASEMAP_ITEMS, BASEMAP_CONFIGS } from "@/components/map/BasemapToggle";
 
 /* ─── Types ───────────────────────────────────────────────────────────── */
 
@@ -44,14 +46,14 @@ type FacilityItem = {
 
 /* ─── Basemaps ────────────────────────────────────────────────────────── */
 
+/* Commented out original local BASEMAPS to support dynamic multi-basemaps via the shared switcher
 const BASEMAPS = {
-  light:     { label: "Light",     icon: Sun,       url: "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",     attr: "© OpenStreetMap © CARTO" },
-  dark:      { label: "Dark",      icon: Map,       url: "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",      attr: "© OpenStreetMap © CARTO" },
-  street:    { label: "Streets",   icon: Mountain,  url: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",                     attr: "© OpenStreetMap contributors" },
-  satellite: { label: "Satellite", icon: Satellite, url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", attr: "© Esri" },
+  positron: { label: "Positron", icon: Map,       url: "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",     attr: "© OpenStreetMap © CARTO" },
+  voyager:  { label: "Voyager",  icon: Satellite, url: "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png", attr: "© OpenStreetMap © CARTO" },
 } as const;
 
 type BasemapKey = keyof typeof BASEMAPS;
+*/
 
 /* ─── Legend ──────────────────────────────────────────────────────────── */
 
@@ -493,7 +495,7 @@ export default function MapView() {
   });
   const [selectedId, setSelectedId]         = useState<number | null>(null);
   const [selectedFacilityId, setSelectedFacilityId] = useState<number | null>(null);
-  const [basemap, setBasemap]               = useState<BasemapKey>("light");
+  const [basemap, setBasemap]               = usePersistedBasemap("positron");
   const [zoomLevel, setZoomLevel]           = useState(7);
   const [LeafletMap, setLeafletMap]         = useState<any>(null);
   const [clusterAvailable, setClusterAvailable] = useState(false);
@@ -558,8 +560,20 @@ export default function MapView() {
     }
   }, [settlements, districtFilter]);
 
+  const { data: tenantInfo } = useQuery<any>({
+    queryKey: ["/api/me/tenant"],
+  });
+
+  /* Original Code commented out to support dynamic multi-country centers/zooms:
   const ZAMBIA_CENTER: [number, number] = [-13.5, 28.5];
   const ZAMBIA_ZOOM = 6;
+  */
+  const countryCenter = useMemo((): [number, number] => {
+    if (tenantInfo?.countryCode === "ZMB") return [-13.5, 28.5];
+    if (tenantInfo?.countryCode === "SSD") return [6.877, 31.307];
+    return [-6.314993, 143.95555]; // PNG / Default
+  }, [tenantInfo]);
+  const countryZoom = 6;
 
   /* Province list from facilities */
   const provinces = Array.from(
@@ -835,6 +849,7 @@ export default function MapView() {
               <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide mb-1.5 flex items-center gap-1">
                 <Map className="w-3 h-3" /> Basemap
               </p>
+              {/* Commented out original grid layout
               <div className="grid grid-cols-2 gap-1">
                 {(Object.entries(BASEMAPS) as [BasemapKey, typeof BASEMAPS[BasemapKey]][]).map(([key, bm]) => {
                   const Icon = bm.icon;
@@ -854,6 +869,21 @@ export default function MapView() {
                   );
                 })}
               </div>
+              */}
+              <Select value={basemap} onValueChange={(v) => setBasemap(v as Basemap)}>
+                <SelectTrigger className="w-full h-8 text-xs bg-slate-800 border-slate-700 text-slate-300">
+                  <SelectValue placeholder="Select basemap" />
+                </SelectTrigger>
+                <SelectContent className="bg-slate-900 border-slate-700">
+                  {BASEMAP_ITEMS.map((item) => (
+                    <SelectItem key={item.key} value={item.key} className="text-xs text-slate-300">
+                      <span className="flex items-center gap-2">
+                        {item.label}
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
 
             {/* Divider */}
@@ -1174,9 +1204,9 @@ export default function MapView() {
             facilities={visibleFacilities}
             catchmentFacilities={catchmentFacilities}
             catchmentRadiusKm={catchmentRadiusKm}
-            center={ZAMBIA_CENTER}
-            defaultZoom={ZAMBIA_ZOOM}
-            basemap={BASEMAPS[basemap]}
+            center={countryCenter}
+            defaultZoom={countryZoom}
+            basemap={basemap}
             showCatchment={showCatchment}
             showClusters={showClusters && clusterAvailable}
             clusterAvailable={clusterAvailable}
@@ -1195,6 +1225,7 @@ export default function MapView() {
             districtGeoJson={showDistricts ? districtGeoJson : null}
             onBoundaryProvince={handleBoundaryProvince}
             onBoundaryDistrict={handleBoundaryDistrict}
+            countryCode={tenantInfo?.countryCode}
           />
         ) : (
           <div className="w-full h-full flex items-center justify-center bg-slate-950">
@@ -1217,6 +1248,7 @@ function MapComponent({
   colorByRisk, colorByOutreach, onSelect, selectedId, highlightedSettlementIds, selectedFacilityId,
   onSelectFacility, facilityFlyTarget, onZoom, focusBounds,
   countryGeoJson, provinceGeoJson, districtGeoJson, onBoundaryProvince, onBoundaryDistrict,
+  countryCode,
 }: {
   L: any; RL: any;
   settlements: SettlementItem[];
@@ -1225,7 +1257,9 @@ function MapComponent({
   catchmentRadiusKm: number;
   center: [number, number];
   defaultZoom: number;
-  basemap: { url: string; attr: string };
+  // Commented out original basemap type to support type Basemap string
+  // basemap: { url: string; attr: string };
+  basemap: Basemap;
   showCatchment: boolean;
   showClusters: boolean;
   clusterAvailable: boolean;
@@ -1244,6 +1278,7 @@ function MapComponent({
   districtGeoJson: any;
   onBoundaryProvince: (name: string) => void;
   onBoundaryDistrict: (name: string) => void;
+  countryCode?: string;
 }) {
   const { MapContainer, TileLayer, CircleMarker, Tooltip, Circle, useMap, useMapEvents, GeoJSON } = RL;
 
@@ -1353,9 +1388,26 @@ function MapComponent({
       zoom={defaultZoom}
       style={{ height: "100%", width: "100%", background: "#0f172a" }}
       zoomControl={false}
+      /* Original Code commented out to support dynamic max bounds:
       maxBounds={[[-18.5, 21.5], [-8.0, 34.0]]}
+      */
+      maxBounds={countryCode === "ZMB" ? [[-18.5, 21.5], [-8.0, 34.0]] : undefined}
+      maxBoundsViscosity={1.0}
     >
-      <TileLayer url={basemap.url} attribution={basemap.attr} maxZoom={19} />
+      {/* Commented out original static TileLayer and replaced with configuration-driven dynamic loading matching RL context */}
+      {/* <TileLayer url={basemap.url} attribution={basemap.attr} maxZoom={19} /> */}
+      {(() => {
+        const config = BASEMAP_CONFIGS[basemap] || BASEMAP_CONFIGS.positron;
+        return (
+          <TileLayer
+            key={basemap}
+            url={config.url}
+            attribution={config.attribution}
+            maxNativeZoom={config.maxNativeZoom}
+            maxZoom={config.maxZoom || 19}
+          />
+        );
+      })()}
 
       <InvalidateOnMount />
       <EventHandler />

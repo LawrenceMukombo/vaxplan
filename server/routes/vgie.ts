@@ -25,11 +25,7 @@ router.get("/dashboard/summary", async (req: any, res) => {
       totalCatchmentPopulation: villages.totalCatchmentPopulation,
       createdAt: villages.createdAt,
     }).from(villages).where(
-      and(
-        eq(villages.tenantId, req.tenantId),
-        sql`CAST(latitude AS numeric) BETWEEN -18.5 AND -8.0`,
-        sql`CAST(longitude AS numeric) BETWEEN 21.5 AND 34.0`
-      )
+      eq(villages.tenantId, req.tenantId)
     );
 
     const totalSettlements = allVillages.length;

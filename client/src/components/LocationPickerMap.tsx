@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 import { MapContainer, TileLayer, Marker, useMap, useMapEvents } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import { OSM_TILE_ATTRIBUTION } from "@/data/dataSources";
+import { CARTO_POSITRON_ATTRIBUTION, CARTO_VOYAGER_ATTRIBUTION } from "@/data/dataSources";
+import { usePersistedBasemap, BasemapTileLayer } from "@/components/map/BasemapToggle";
 import { Button } from "@/components/ui/button";
 import { Crosshair, Loader2, MapPin } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
@@ -74,6 +75,7 @@ interface Props {
 export default function LocationPickerMap({ value, onChange, defaultCenter, height = 220 }: Props) {
   const { toast } = useToast();
   const [locating, setLocating] = useState(false);
+  const [basemap] = usePersistedBasemap("positron");
   const [flyCenter, setFlyCenter] = useState<[number, number] | null>(null);
 
   // Facility coordinates can arrive after this mounts (async load). When there
@@ -113,12 +115,16 @@ export default function LocationPickerMap({ value, onChange, defaultCenter, heig
     <div className="space-y-2">
       <div className="rounded-lg overflow-hidden border" style={{ height }}>
         <MapContainer center={start} zoom={startZoom} style={{ height: "100%", width: "100%" }} scrollWheelZoom>
+          {/* Commented out original static TileLayer and replaced with dynamic BasemapTileLayer */}
+          {/*
           <TileLayer
-            attribution={OSM_TILE_ATTRIBUTION}
-            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+            attribution={CARTO_POSITRON_ATTRIBUTION}
+            url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
             maxNativeZoom={19}
             maxZoom={22}
           />
+          */}
+          <BasemapTileLayer basemap={basemap} />
           <InvalidateSize />
           <ClickToPlace onPick={(lat, lng) => onChange({ lat, lng })} />
           <FlyTo center={flyCenter} />

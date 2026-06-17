@@ -28,7 +28,8 @@ import {
 } from "recharts";
 import { MapContainer, TileLayer, CircleMarker, Popup } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
-import { OSM_TILE_ATTRIBUTION } from "@/data/dataSources";
+import { CARTO_POSITRON_ATTRIBUTION, CARTO_VOYAGER_ATTRIBUTION } from "@/data/dataSources";
+import { usePersistedBasemap, BasemapTileLayer } from "@/components/map/BasemapToggle";
 
 interface OnlineUser {
   userId: string | null;
@@ -174,6 +175,7 @@ function KpiCard({
 }
 
 export function SiteActivityPanel() {
+  const [basemap] = usePersistedBasemap("positron");
   const { data, isLoading } = useQuery<TrafficAnalytics>({
     queryKey: ["/api/analytics/summary"],
     refetchInterval: 30000,
@@ -324,12 +326,16 @@ export function SiteActivityPanel() {
                     scrollWheelZoom={false}
                     style={{ height: "100%", width: "100%" }}
                   >
+                    {/* Commented out original static TileLayer and replaced with dynamic BasemapTileLayer */}
+                    {/*
                     <TileLayer
-                      attribution={OSM_TILE_ATTRIBUTION}
-                      url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                      attribution={CARTO_POSITRON_ATTRIBUTION}
+                      url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
                       maxNativeZoom={19}
                       maxZoom={22}
                     />
+                    */}
+                    <BasemapTileLayer basemap={basemap} />
                     {mapped.map((u, i) => (
                       <CircleMarker
                         key={u.userId ?? `pin-${i}`}

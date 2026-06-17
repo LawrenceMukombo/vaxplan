@@ -4,8 +4,9 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { MapContainer, TileLayer, Marker, Polygon as LeafletPolygon, useMapEvents } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import { OSM_TILE_ATTRIBUTION } from "@/data/dataSources";
+import { CARTO_POSITRON_ATTRIBUTION } from "@/data/dataSources";
 import { Label } from "@/components/ui/label";
+import { usePersistedBasemap, BasemapTileLayer } from "@/components/map/BasemapToggle";
 import {
   applyDefaultLeafletPinIcon,
   createFilledPinIcon,
@@ -159,6 +160,7 @@ export default function SessionDayPlans() {
   const populationOverlay = usePopulationOverlay();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingPlan, setEditingPlan] = useState<SessionDayPlan | null>(null);
+  const [basemap] = usePersistedBasemap("positron");
 
   // Execution Outcome Logging States
   const [outcomeDialogOpen, setOutcomeDialogOpen] = useState(false);
@@ -1596,12 +1598,16 @@ export default function SessionDayPlans() {
                         zoom={13}
                         className="h-full w-full"
                       >
+                        {/* Commented out original static TileLayer and replaced with dynamic BasemapTileLayer */}
+                        {/*
                         <TileLayer
-                          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                          attribution={OSM_TILE_ATTRIBUTION}
+                          url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
+                          attribution={CARTO_POSITRON_ATTRIBUTION}
                           maxNativeZoom={19}
                           maxZoom={22}
                         />
+                        */}
+                        <BasemapTileLayer basemap={basemap} />
                         <PopulationWmsLayer overlay={populationOverlay} />
                         <QuickAddMapEvents />
                         {newVillageLat && newVillageLng && drawMode === "pin" && (

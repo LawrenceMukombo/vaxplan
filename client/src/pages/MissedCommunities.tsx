@@ -66,7 +66,11 @@ export default function MissedCommunities() {
   const [districtId, setDistrictId] = useState<number | null>(null);
   const [facilityId, setFacilityId] = useState<number | null>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set());
-  const [basemap, setBasemap] = usePersistedBasemap("osm");
+  const [basemap, setBasemap] = usePersistedBasemap("positron");
+
+  const { data: tenantInfo } = useQuery<any>({
+    queryKey: ["/api/me/tenant"],
+  });
 
   const { data, isLoading, refetch, isFetching } = useQuery<{ count: number; results: MissedRow[] }>({
     queryKey: ["/api/missed-communities", antigen, period, districtId],
@@ -87,9 +91,16 @@ export default function MissedCommunities() {
   );
 
   const mapped = rows.filter((r) => r.latitude != null && r.longitude != null);
+
+  const defaultCenter = useMemo(() => {
+    if (tenantInfo?.countryCode === "ZMB") return [-13.133897, 27.849332] as [number, number];
+    if (tenantInfo?.countryCode === "SSD") return [6.877, 31.307] as [number, number];
+    return [-6.314993, 143.95555] as [number, number];
+  }, [tenantInfo]);
+
   const mapCenter: [number, number] = mapped.length
     ? [mapped[0].latitude!, mapped[0].longitude!]
-    : [-6.314993, 143.95555]; // PNG fallback
+    : defaultCenter;
 
   const toggleSelect = (vid: number) => {
     setSelected((prev) => {
@@ -230,7 +241,14 @@ export default function MissedCommunities() {
                 </div>
               ) : (
                 <>
-                  <MapContainer center={mapCenter} zoom={6} className="h-full w-full" scrollWheelZoom>
+                  <MapContainer
+                    center={mapCenter}
+                    zoom={6}
+                    className="h-full w-full"
+                    scrollWheelZoom
+                    maxBounds={tenantInfo?.countryCode === "ZMB" ? [[-18.5, 21.5], [-8.0, 34.0]] : undefined}
+                    maxBoundsViscosity={1.0}
+                  >
                     <BasemapTileLayer basemap={basemap} />
                     {mapped.map((v) => (
                     <CircleMarker

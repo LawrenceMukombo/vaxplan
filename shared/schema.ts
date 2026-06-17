@@ -2694,6 +2694,7 @@ export type InsertCatchmentConflict = z.infer<typeof insertCatchmentConflictSche
 // are the only ones permitted to author a facility, enforced both in the UI and
 // on the server (POST /api/facilities returns 403 for everyone else). Shared so
 // the client and server agree (never import server/* into the client — task #261).
+/* Original Code commented out to restrict facility creation:
 export const FACILITY_AUTHOR_ROLES = [
   "provincial_coordinator",
   "national_admin",
@@ -2701,6 +2702,13 @@ export const FACILITY_AUTHOR_ROLES = [
   "district_manager",
   "facility_in_charge",
   "facility_clerk"
+] as const;
+*/
+export const FACILITY_AUTHOR_ROLES = [
+  "provincial_coordinator",
+  "national_admin",
+  "gis_specialist",
+  "district_manager"
 ] as const;
 
 // ─── Indicator Manual Schema ──────────────────────────────

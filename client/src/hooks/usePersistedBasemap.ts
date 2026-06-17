@@ -1,19 +1,42 @@
 import { useCallback, useEffect, useState } from "react";
 
-export type Basemap = "osm" | "satellite" | "carto";
+export type Basemap =
+  | "positron"
+  | "voyager"
+  | "osm"
+  | "satellite"
+  | "carto"
+  | "terrain"
+  | "humanitarian"
+  | "dark"
+  | "light"
+  | "boundary";
 
 const STORAGE_KEY = "vaxplan.basemap";
+
+const VALID_BASEMAPS = [
+  "positron",
+  "voyager",
+  "osm",
+  "satellite",
+  "carto",
+  "terrain",
+  "humanitarian",
+  "dark",
+  "light",
+  "boundary",
+];
 
 function readStored(): Basemap | null {
   try {
     const v = localStorage.getItem(STORAGE_KEY);
-    return v === "osm" || v === "satellite" || v === "carto" ? v : null;
+    return v && VALID_BASEMAPS.includes(v) ? (v as Basemap) : null;
   } catch {
     return null;
   }
 }
 
-export function usePersistedBasemap(defaultValue: Basemap = "osm") {
+export function usePersistedBasemap(defaultValue: Basemap = "positron") {
   const [basemap, setBasemapState] = useState<Basemap>(
     () => readStored() ?? defaultValue,
   );
@@ -29,8 +52,8 @@ export function usePersistedBasemap(defaultValue: Basemap = "osm") {
   useEffect(() => {
     const onStorage = (e: StorageEvent) => {
       if (e.key !== STORAGE_KEY) return;
-      if (e.newValue === "osm" || e.newValue === "satellite" || e.newValue === "carto") {
-        setBasemapState(e.newValue);
+      if (e.newValue && VALID_BASEMAPS.includes(e.newValue)) {
+        setBasemapState(e.newValue as Basemap);
       }
     };
     window.addEventListener("storage", onStorage);

@@ -454,7 +454,7 @@ function AuthenticatedLayout() {
 
 function App() {
   // Task #276 — the basemap attribution credit on every Leaflet map ends with a
-  // "Data sources" link (see OSM_TILE_ATTRIBUTION / ESRI_IMAGERY_ATTRIBUTION).
+  // "Data sources" link (see CARTO_POSITRON_ATTRIBUTION / CARTO_VOYAGER_ATTRIBUTION).
   // Leaflet renders attribution as raw HTML outside React, so a delegated click
   // handler intercepts that link and routes within the SPA instead of doing a
   // full page reload (better for the offline build). The anchor's plain href

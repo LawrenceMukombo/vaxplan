@@ -107,7 +107,7 @@ export default function SessionsHub() {
 
   const districtToProvince = useMemo(() => {
     const m = new Map<number, number>();
-    for (const d of districtsList) m.set(d.id, d.provinceId);
+    for (const d of (districtsList as any[])) m.set(d.id, (d as any).provinceId);
     return m;
   }, [districtsList]);
 

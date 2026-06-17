@@ -463,11 +463,17 @@ export function AppSidebar({ user }: AppSidebarProps) {
                   if ((item as any).wikiAdminOnly) {
                     return canEditWiki;
                   }
-                  // User Management, Access Requests + Manage Staff are visible to any admin
-                  // (national_admin or provincial_coordinator). The deeper
-                  // tenant/boundary configuration tools stay national-only.
+                  /* Original gating logic commented out to restrict user management access:
                   if (item.path === "/admin/users" || item.path === "/admin/signups" || item.path === "/admin/staff") {
                     return true;
+                  }
+                  return isNationalAdmin;
+                  */
+                  if (item.path === "/admin/staff") {
+                    return true;
+                  }
+                  if (item.path === "/admin/users" || item.path === "/admin/signups") {
+                    return isNationalAdmin || isPlatformAdmin;
                   }
                   return isNationalAdmin;
                 })

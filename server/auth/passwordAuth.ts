@@ -245,10 +245,10 @@ export function registerPasswordAuthRoutes(app: Express) {
       // the `roles[]` array — mirrors hasPermission's `hasNationalAdminRole`, so
       // an admin whose status lives only in the array isn't wrongly rejected.
       const callerRoles: string[] = Array.isArray(caller.roles) ? (caller.roles as string[]) : [];
-      const callerRole = caller.role as string | undefined;
+      const callerRoleStr = String(caller.role || "");
       const isNationalAdminRole =
-        callerRole === "national_admin" ||
-        callerRole === "national_program_manager" ||
+        callerRoleStr === "national_admin" ||
+        callerRoleStr === "national_program_manager" ||
         callerRoles.includes("national_admin") ||
         callerRoles.includes("national_program_manager");
 

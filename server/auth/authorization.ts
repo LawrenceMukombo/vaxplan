@@ -102,7 +102,6 @@ export async function ensureTenantRolesCache(tenantId: string): Promise<void> {
  * province / district / facility row-level restriction only applies when the
  * user is operating inside their own home tenant.
  */
-/* Commented out original restrictive permissions checks to grant full CRUD permissions (Create, Read, Update, Delete) to all authenticated users.
 export function hasPermission(
   user: User,
   requiredPermission: Permission,
@@ -216,9 +215,8 @@ export function hasPermission(
 
   return true;
 }
-*/
 
-// Updated Implementation: Grant full CRUD permissions by always returning true
+/* Original dummy hasPermission commented out:
 export function hasPermission(
   user: User,
   requiredPermission: Permission,
@@ -226,4 +224,5 @@ export function hasPermission(
 ): boolean {
   return true;
 }
+*/
 

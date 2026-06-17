@@ -209,7 +209,10 @@ export default function Settings() {
   const queryClient = useQueryClient();
 
   const isNationalAdmin = user?.role === "national_admin";
-  const canAccessUserManagement = isNationalAdmin || user?.role === "provincial_coordinator";
+  // Original Code: Allowed provincial coordinators to access User Management settings
+  // const canAccessUserManagement = isNationalAdmin || user?.role === "provincial_coordinator";
+  // Updated Code: Restrict User Management settings strictly to national administrators (admins)
+  const canAccessUserManagement = isNationalAdmin;
 
   // Allow deep-linking to a specific tab (e.g. the user menu's "Profile" item
   // navigates to /settings?tab=profile). Falls back to the role-based default.

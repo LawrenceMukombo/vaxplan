@@ -1,4 +1,7 @@
+/* Original Code commented out to add useRef:
 import { useState, useMemo, useCallback, useEffect } from "react";
+*/
+import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -8,6 +11,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { MapContainer, TileLayer, CircleMarker, Tooltip, useMap, useMapEvents } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
+import { usePersistedBasemap, BasemapTileLayer } from "@/components/map/BasemapToggle";
 import {
   Select,
   SelectContent,
@@ -91,12 +95,77 @@ const TAB_CONFIG: TabConfig[] = [
 const CURRENT_YEAR = new Date().getFullYear();
 const YEARS = Array.from({ length: 10 }, (_, i) => CURRENT_YEAR - i);
 
+/* Original Code commented out to adhere to global rules and prevent leaflet tile crash:
 // Helper component to update map viewport dynamically on filter updates
 function MapUpdater({ center, zoom }: { center: [number, number]; zoom: number }) {
   const map = useMap();
   useEffect(() => {
     map.setView(center, zoom);
   }, [center, zoom, map]);
+  return null;
+}
+*/
+
+/* Previous attempt commented out to add value-based ref comparison to prevent infinite loop:
+// Helper component to update map viewport dynamically on filter updates
+// Updated to prevent Leaflet from failing with "Attempted to load an infinite number of tiles" by validating coordinates and zoom.
+function MapUpdater({ center, zoom }: { center: [number, number]; zoom: number }) {
+  const map = useMap();
+  useEffect(() => {
+    if (
+      center &&
+      Array.isArray(center) &&
+      center.length === 2 &&
+      typeof center[0] === "number" &&
+      typeof center[1] === "number" &&
+      !isNaN(center[0]) &&
+      !isNaN(center[1]) &&
+      typeof zoom === "number" &&
+      !isNaN(zoom) &&
+      isFinite(zoom)
+    ) {
+      map.setView(center, zoom);
+    }
+  }, [center, zoom, map]);
+  return null;
+}
+*/
+
+// Helper component to update map viewport dynamically on filter updates
+// Uses refs to track value-based changes of coordinates and zoom. This prevents infinite render loop cascades
+// and Leaflet's "Attempted to load an infinite number of tiles" error when parent state changes trigger re-renders.
+function MapUpdater({ center, zoom }: { center: [number, number]; zoom: number }) {
+  const map = useMap();
+  const [lat, lng] = center || [NaN, NaN];
+  
+  const prevCenterRef = useRef<[number, number]>([lat, lng]);
+  const prevZoomRef = useRef<number>(zoom);
+
+  useEffect(() => {
+    const prevCenter = prevCenterRef.current;
+    const prevZoom = prevZoomRef.current;
+
+    // Compare values instead of array references to avoid rendering cascades
+    const centerPropsChanged = prevCenter[0] !== lat || prevCenter[1] !== lng;
+    const zoomPropsChanged = prevZoom !== zoom;
+
+    if (centerPropsChanged || zoomPropsChanged) {
+      if (
+        typeof lat === "number" &&
+        typeof lng === "number" &&
+        !isNaN(lat) &&
+        !isNaN(lng) &&
+        typeof zoom === "number" &&
+        !isNaN(zoom) &&
+        isFinite(zoom)
+      ) {
+        map.setView([lat, lng], zoom);
+        prevCenterRef.current = [lat, lng];
+        prevZoomRef.current = zoom;
+      }
+    }
+  }, [map, lat, lng, zoom]);
+
   return null;
 }
 
@@ -110,6 +179,7 @@ function MapEventsHandler({ onMapClick }: { onMapClick: () => void }) {
   return null;
 }
 
+/* Original Code commented out to adhere to global rules:
 // Helper to extract coordinates safely from jsonb coordinates
 const getAdminCoordinates = (adminRecord: any): [number, number] | null => {
   if (!adminRecord || !adminRecord.coordinates) return null;
@@ -137,10 +207,45 @@ const getAdminCoordinates = (adminRecord: any): [number, number] | null => {
   }
   return null;
 };
+*/
+
+// Helper to extract coordinates safely from jsonb coordinates.
+// Refactored to explicitly validate against NaN to prevent Leaflet infinite tile crashes.
+const getAdminCoordinates = (adminRecord: any): [number, number] | null => {
+  if (!adminRecord || !adminRecord.coordinates) return null;
+  try {
+    const coords = typeof adminRecord.coordinates === "string" 
+      ? JSON.parse(adminRecord.coordinates) 
+      : adminRecord.coordinates;
+    
+    if (Array.isArray(coords) && coords.length === 2) {
+      const [c1, c2] = coords;
+      if (typeof c1 === "number" && typeof c2 === "number" && !isNaN(c1) && !isNaN(c2)) {
+        if (Math.abs(c1) < Math.abs(c2)) {
+          return [c1, c2];
+        } else {
+          return [c2, c1];
+        }
+      }
+    }
+    if (coords.type === "Point" && Array.isArray(coords.coordinates)) {
+      const [lng, lat] = coords.coordinates;
+      const nLat = Number(lat);
+      const nLng = Number(lng);
+      if (!isNaN(nLat) && !isNaN(nLng)) {
+        return [nLat, nLng];
+      }
+    }
+  } catch (e) {
+    // Ignore parse errors
+  }
+  return null;
+};
 
 export default function Population() {
   const { user } = useAuth();
   const { toast } = useToast();
+  const [basemap] = usePersistedBasemap("positron");
   
   const [activeTab, setActiveTab] = useState<PopulationSource | "comparison">("nso");
   // Note: existing selectedProvince/selectedDistrict filters above are unified with the shared GeoCascadeFilter contract (Province → District) plus a Year filter unique to Population.
@@ -1080,10 +1185,14 @@ export default function Population() {
                 scrollWheelZoom={true}
                 className="h-full w-full"
               >
+                {/* Commented out original static TileLayer and replaced with dynamic BasemapTileLayer */}
+                {/*
                 <TileLayer
-                  attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-                  url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                  attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+                  url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
                 />
+                */}
+                <BasemapTileLayer basemap={basemap} />
                 <MapUpdater center={mapCenter} zoom={mapZoom} />
                 <MapEventsHandler onMapClick={handleResetFilters} />
                 {heatmapPoints.map((point, index) => {

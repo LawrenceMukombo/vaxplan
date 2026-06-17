@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Loader2, Printer, ArrowLeft, Calendar, ShieldCheck, MapPin, Syringe, ClipboardList, Wallet, FileText, Check, Square, Download, Layers, Truck, MessageSquare } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { usePersistedBasemap, BASEMAP_CONFIGS } from "@/components/map/BasemapToggle";
 import {
   Select,
   SelectContent,
@@ -46,6 +47,7 @@ export default function MicroplanPrintView() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
   const [printSize, setPrintSize] = useState<"A4" | "A3" | "A2" | "A1" | "A0">("A4");
+  const [basemap] = usePersistedBasemap("positron");
 
   const [leaflet, setLeaflet] = useState<any>(null);
 
@@ -671,10 +673,25 @@ export default function MicroplanPrintView() {
     return (
       <div className={`${mapHeightClass} print-map-container w-full border rounded-lg overflow-hidden relative print:border-black`}>
         <MapContainer center={mapCenter} zoom={11} className="h-full w-full z-0" zoomControl={false}>
+          {/* Commented out original static TileLayer and replaced with dynamic loading matching the user's preferred print/screen basemap */}
+          {/*
           <TileLayer
-            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+            url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
           />
+          */}
+          {(() => {
+            const config = BASEMAP_CONFIGS[basemap] || BASEMAP_CONFIGS.positron;
+            return (
+              <TileLayer
+                key={basemap}
+                url={config.url}
+                attribution={config.attribution}
+                maxNativeZoom={config.maxNativeZoom}
+                maxZoom={config.maxZoom || 19}
+              />
+            );
+          })()}
           {/* Facility pin */}
           <Marker position={mapCenter}>
             <Popup>

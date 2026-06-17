@@ -1,43 +1,106 @@
 import { TileLayer } from "react-leaflet";
-import { Map as MapIcon, Satellite } from "lucide-react";
+import { Map, Sun, Compass, Satellite, Mountain, Globe, Moon, Layers } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { usePersistedBasemap, type Basemap } from "@/hooks/usePersistedBasemap";
 import {
-  OSM_TILE_ATTRIBUTION,
-  ESRI_IMAGERY_ATTRIBUTION,
+  CARTO_POSITRON_ATTRIBUTION,
+  CARTO_VOYAGER_ATTRIBUTION,
 } from "@/data/dataSources";
+import { Button } from "@/components/ui/button";
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "@/components/ui/dropdown-menu";
 
 export { usePersistedBasemap };
 export type { Basemap };
 
+export const BASEMAP_CONFIGS: Record<
+  Basemap,
+  { name: string; url: string; attribution: string; maxNativeZoom?: number; maxZoom?: number }
+> = {
+  osm: {
+    name: "OpenStreetMap",
+    url: "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+  },
+  positron: {
+    name: "CARTO Positron",
+    url: "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
+    attribution: CARTO_POSITRON_ATTRIBUTION,
+  },
+  voyager: {
+    name: "CARTO Voyager",
+    url: "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",
+    attribution: CARTO_VOYAGER_ATTRIBUTION,
+    maxNativeZoom: 17,
+    maxZoom: 22,
+  },
+  satellite: {
+    name: "Satellite Imagery",
+    url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    attribution: "Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community",
+    maxNativeZoom: 17,
+    maxZoom: 22,
+  },
+  carto: {
+    name: "CARTO Voyager",
+    url: "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",
+    attribution: CARTO_VOYAGER_ATTRIBUTION,
+    maxNativeZoom: 17,
+    maxZoom: 22,
+  },
+  terrain: {
+    name: "Terrain Map",
+    url: "https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png",
+    attribution: "Map data: &copy; <a href='https://www.openstreetmap.org/copyright'>OpenStreetMap</a> contributors, <a href='http://viewfinderpanoramas.org'>SRTM</a> | Map style: &copy; <a href='https://opentopomap.org'>OpenTopoMap</a> (<a href='https://creativecommons.org/licenses/by-sa/3.0/'>CC-BY-SA</a>)",
+  },
+  humanitarian: {
+    name: "Humanitarian Map",
+    url: "https://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png",
+    attribution: "&copy; <a href='https://www.openstreetmap.org/copyright'>OpenStreetMap</a> contributors, Tiles style by <a href='https://www.hotosm.org/'>Humanitarian OpenStreetMap Team</a> hosted by <a href='https://openstreetmap.fr/'>OSM France</a>",
+  },
+  dark: {
+    name: "Dark Mode Map",
+    url: "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+  },
+  light: {
+    name: "Light Mode Map",
+    url: "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
+    attribution: CARTO_POSITRON_ATTRIBUTION,
+  },
+  boundary: {
+    name: "Administrative Boundaries",
+    url: "https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png",
+    attribution: CARTO_POSITRON_ATTRIBUTION,
+  },
+};
+
+export const BASEMAP_ITEMS = [
+  { key: "osm", label: "OpenStreetMap", icon: Map },
+  { key: "positron", label: "CARTO Positron (Light)", icon: Sun },
+  { key: "voyager", label: "CARTO Voyager (Color)", icon: Compass },
+  { key: "satellite", label: "Satellite Imagery", icon: Satellite },
+  { key: "terrain", label: "Terrain Map", icon: Mountain },
+  { key: "humanitarian", label: "Humanitarian Map", icon: Globe },
+  { key: "dark", label: "Dark Mode Map", icon: Moon },
+  { key: "boundary", label: "Administrative Boundaries", icon: Globe },
+] as const;
+
 export function BasemapTileLayer({ basemap }: { basemap: Basemap }) {
-  if (basemap === "satellite") {
-    return (
-      // maxNativeZoom=17: ArcGIS World Imagery only provides tiles to z17 in most rural
-      // Africa / PNG regions. Requesting z18+ returns ArcGIS's own "Map data not yet
-      // available" placeholder tile image (this is served BY ArcGIS, not a Leaflet error).
-      // Leaflet scales z17 tiles for any zoom above 17 — smooth over-zoom, no error tiles.
-      // maxZoom=22: allows the map to zoom up to level 22 using scaled tiles.
-      <TileLayer
-        attribution={ESRI_IMAGERY_ATTRIBUTION}
-        url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
-        maxNativeZoom={17}
-        maxZoom={22}
-      />
-    );
-  }
+  const config = BASEMAP_CONFIGS[basemap] || BASEMAP_CONFIGS.positron;
   return (
     <TileLayer
-      attribution={OSM_TILE_ATTRIBUTION}
-      url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+      key={basemap}
+      attribution={config.attribution}
+      url={config.url}
+      maxNativeZoom={config.maxNativeZoom}
+      maxZoom={config.maxZoom}
     />
   );
 }
 
 /**
- * Floating basemap switcher control. Render INSIDE a relatively-positioned
- * map wrapper (the same div that contains <MapContainer />) — it positions
- * itself top-right above the Leaflet zoom controls.
+ * Floating basemap switcher control using a dropdown menu.
+ * Render INSIDE a relatively-positioned map wrapper (the same div that contains <MapContainer />)
  */
 export function BasemapSwitcher({
   basemap,
@@ -48,46 +111,53 @@ export function BasemapSwitcher({
   onChange: (b: Basemap) => void;
   className?: string;
 }) {
+  const current = BASEMAP_ITEMS.find((i) => i.key === basemap) || BASEMAP_ITEMS[1];
+  const Icon = current.icon;
+
   return (
     <div
-      className={cn(
-        "absolute top-3 right-3 z-[1000] flex rounded-md overflow-hidden shadow-md border border-border bg-card",
-        className,
-      )}
+      className={cn("absolute top-3 right-3 z-[1000]", className)}
       role="group"
       aria-label="Basemap"
       data-testid="basemap-switcher"
     >
-      <button
-        type="button"
-        onClick={() => onChange("osm")}
-        aria-pressed={basemap === "osm"}
-        className={cn(
-          "flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium transition-colors",
-          basemap === "osm"
-            ? "bg-primary text-primary-foreground"
-            : "bg-card hover:bg-secondary text-foreground",
-        )}
-        data-testid="basemap-osm"
-      >
-        <MapIcon className="h-3.5 w-3.5" />
-        Map
-      </button>
-      <button
-        type="button"
-        onClick={() => onChange("satellite")}
-        aria-pressed={basemap === "satellite"}
-        className={cn(
-          "flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium border-l border-border transition-colors",
-          basemap === "satellite"
-            ? "bg-primary text-primary-foreground"
-            : "bg-card hover:bg-secondary text-foreground",
-        )}
-        data-testid="basemap-satellite"
-      >
-        <Satellite className="h-3.5 w-3.5" />
-        Satellite
-      </button>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            variant="outline"
+            size="sm"
+            className="bg-card hover:bg-secondary text-foreground flex items-center gap-1.5 shadow-md border-border h-8 font-semibold text-xs"
+          >
+            <Layers className="h-3.5 w-3.5 text-primary" />
+            <span>Basemap: {current.label}</span>
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent
+          align="end"
+          className="w-56 bg-background/95 backdrop-blur-md border border-border rounded-xl shadow-xl z-[1001]"
+        >
+          {BASEMAP_ITEMS.map((item) => {
+            const ItemIcon = item.icon;
+            const active = basemap === item.key;
+            return (
+              <DropdownMenuItem
+                key={item.key}
+                onClick={() => onChange(item.key as Basemap)}
+                className={cn(
+                  "flex items-center gap-2 px-2.5 py-1.5 text-xs rounded-lg transition-colors cursor-pointer",
+                  active
+                    ? "bg-primary text-primary-foreground font-semibold"
+                    : "hover:bg-muted text-foreground"
+                )}
+                data-testid={`basemap-${item.key}`}
+              >
+                <ItemIcon className="h-3.5 w-3.5 shrink-0" />
+                <span>{item.label}</span>
+              </DropdownMenuItem>
+            );
+          })}
+        </DropdownMenuContent>
+      </DropdownMenu>
     </div>
   );
 }

@@ -2110,9 +2110,7 @@ var init_schema = __esm({
       "provincial_coordinator",
       "national_admin",
       "gis_specialist",
-      "district_manager",
-      "facility_in_charge",
-      "facility_clerk"
+      "district_manager"
     ];
     indicatorManual = (0, import_pg_core.pgTable)(
       "indicator_manual",
@@ -4033,8 +4031,7 @@ var init_permissions = __esm({
         "view_mobilization",
         "view_budget",
         "approve_budget",
-        "view_reports",
-        "manage_users"
+        "view_reports"
       ],
       provincial_coordinator: [
         "view_clients",
@@ -4044,8 +4041,7 @@ var init_permissions = __esm({
         "view_mobilization",
         "view_budget",
         "approve_budget",
-        "view_reports",
-        "manage_users"
+        "view_reports"
       ],
       gis_specialist: [
         "view_clients",
@@ -4144,6 +4140,64 @@ async function ensureTenantRolesCache(tenantId) {
   }
 }
 function hasPermission(user, requiredPermission, context) {
+  if (user.isPlatformAdmin === true) {
+    return true;
+  }
+  const roles = Array.isArray(user.roles) ? user.roles : [];
+  const hasNationalAdminRole = user.role === "national_admin" || roles.includes("national_admin");
+  if (hasNationalAdminRole) {
+    return true;
+  }
+  const activeRoles = roles.length > 0 ? roles : [user.role];
+  const permissionsSet = /* @__PURE__ */ new Set();
+  const cachedRoles = user.tenantId ? tenantRolesCache.get(user.tenantId) : null;
+  activeRoles.forEach((roleName) => {
+    const rolePerms = cachedRoles && cachedRoles[roleName] || ROLE_PERMISSIONS[roleName] || [];
+    rolePerms.forEach((p) => permissionsSet.add(p));
+  });
+  const userOverrides = Array.isArray(user.permissions) ? user.permissions : [];
+  userOverrides.forEach((p) => permissionsSet.add(p));
+  if (!permissionsSet.has(requiredPermission)) {
+    return false;
+  }
+  const isVisitingOtherTenant = !!context?.activeTenantId && !!user.tenantId && context.activeTenantId !== user.tenantId;
+  if (!isVisitingOtherTenant && context && (context.provinceId || context.districtId || context.facilityId)) {
+    const scope = user.dataAccessScope || {
+      provinces: [],
+      districts: [],
+      facilities: []
+    };
+    const hasExplicitScope = Array.isArray(scope.provinces) && scope.provinces.length > 0 || Array.isArray(scope.districts) && scope.districts.length > 0 || Array.isArray(scope.facilities) && scope.facilities.length > 0;
+    if (hasExplicitScope) {
+      let isAllowed = false;
+      if (context.facilityId && Array.isArray(scope.facilities) && scope.facilities.includes(Number(context.facilityId))) {
+        isAllowed = true;
+      }
+      if (context.districtId && Array.isArray(scope.districts) && scope.districts.includes(Number(context.districtId))) {
+        isAllowed = true;
+      }
+      if (context.provinceId && Array.isArray(scope.provinces) && scope.provinces.includes(Number(context.provinceId))) {
+        isAllowed = true;
+      }
+      if (!isAllowed) {
+        return false;
+      }
+    } else {
+      let isLegacyAllowed = false;
+      if (context.facilityId && user.facilityId && Number(user.facilityId) === Number(context.facilityId)) {
+        isLegacyAllowed = true;
+      }
+      if (context.districtId && user.districtId && Number(user.districtId) === Number(context.districtId)) {
+        isLegacyAllowed = true;
+      }
+      if (context.provinceId && user.provinceId && Number(user.provinceId) === Number(context.provinceId)) {
+        isLegacyAllowed = true;
+      }
+      if (!isLegacyAllowed) {
+        return false;
+      }
+    }
+  }
   return true;
 }
 var tenantRolesCache;
@@ -4654,8 +4708,8 @@ function registerPasswordAuthRoutes(app2) {
       const isSelf = target.id === caller.id;
       const isPlatformAdmin = !!caller.isPlatformAdmin;
       const callerRoles = Array.isArray(caller.roles) ? caller.roles : [];
-      const callerRole = caller.role;
-      const isNationalAdminRole = callerRole === "national_admin" || callerRole === "national_program_manager" || callerRoles.includes("national_admin") || callerRoles.includes("national_program_manager");
+      const callerRoleStr = String(caller.role || "");
+      const isNationalAdminRole = callerRoleStr === "national_admin" || callerRoleStr === "national_program_manager" || callerRoles.includes("national_admin") || callerRoles.includes("national_program_manager");
       const operatingTenantId = req.tenantId ?? caller.tenantId ?? req.session?.tenantId ?? null;
       const isAuthorizedNationalAdmin = isNationalAdminRole && !!operatingTenantId && target.tenantId === operatingTenantId;
       if (!isSelf && !isPlatformAdmin && !isAuthorizedNationalAdmin) {
@@ -9536,6 +9590,10 @@ var routes_exports = {};
 __export(routes_exports, {
   computeCheckDigit: () => computeCheckDigit,
   getInitials: () => getInitials,
+  initOutsideVillagesCache: () => initOutsideVillagesCache,
+  isLocationOutsideZambia: () => isLocationOutsideZambia,
+  loadZambiaGeoJSON: () => loadZambiaGeoJSON,
+  outsideVillageIds: () => outsideVillageIds,
   registerRoutes: () => registerRoutes,
   seedQuarterlySupervisionVisits: () => seedQuarterlySupervisionVisits,
   sendApprovalSmsForMicroplan: () => sendApprovalSmsForMicroplan,
@@ -9743,6 +9801,37 @@ function recordInGeoScope(scope, geo) {
   if (provinceId != null && scope.provinceIds.has(Number(provinceId))) return true;
   return false;
 }
+async function userHasAccessToUser(viewer, target, tenantId) {
+  if (viewer.isPlatformAdmin === true) return true;
+  const seesWholeTenant = viewer.role === "national_admin" || viewer.role === "gis_specialist" || Array.isArray(viewer.roles) && viewer.roles.some(
+    (r) => r === "national_admin" || r === "gis_specialist"
+  );
+  if (seesWholeTenant) return true;
+  const scope = await getGeoScope(viewer, tenantId);
+  if (target.isPlatformAdmin) return false;
+  if (target.role === "national_admin" || target.role === "gis_specialist") return false;
+  if (Array.isArray(target.roles) && target.roles.some((r) => r === "national_admin" || r === "gis_specialist")) return false;
+  const targetGeo = {
+    facilityId: target.facilityId,
+    districtId: target.districtId,
+    provinceId: target.provinceId
+  };
+  if (recordInGeoScope(scope, targetGeo)) return true;
+  const tScope = target.dataAccessScope || {};
+  const tFacs = Array.isArray(tScope.facilities) ? tScope.facilities.map(Number) : [];
+  const tDists = Array.isArray(tScope.districts) ? tScope.districts.map(Number) : [];
+  const tProvs = Array.isArray(tScope.provinces) ? tScope.provinces.map(Number) : [];
+  for (const fid of tFacs) {
+    if (scope.facilityIds.has(fid)) return true;
+  }
+  for (const did of tDists) {
+    if (scope.districtIds.has(did)) return true;
+  }
+  for (const pid of tProvs) {
+    if (scope.provinceIds.has(pid)) return true;
+  }
+  return false;
+}
 function requirePermission(permission, getGeographicContext) {
   return async (req, res, next) => {
     try {
@@ -9773,6 +9862,26 @@ function requirePermission(permission, getGeographicContext) {
     } catch (error) {
       console.error("Authorization middleware error:", error);
       res.status(500).json({ message: "Internal server error during authorization" });
+    }
+  };
+}
+function requireGeoAccess(getGeoContext) {
+  return async (req, res, next) => {
+    try {
+      const dbUser = req.dbUser ?? await storage.getUser(getCurrentUserId(req));
+      if (!dbUser) {
+        return res.status(403).json({ message: "Forbidden: User context not resolved" });
+      }
+      req.dbUser = dbUser;
+      const geo = await getGeoContext(req);
+      const allowed = await userCanAccessGeo(dbUser, req.tenantId, geo);
+      if (!allowed) {
+        return res.status(403).json({ message: "Forbidden: Restricted geographic scope" });
+      }
+      next();
+    } catch (err) {
+      console.error("requireGeoAccess middleware error:", err);
+      res.status(500).json({ message: "Internal server error during geographic validation" });
     }
   };
 }
@@ -9966,7 +10075,50 @@ async function sendApprovalSmsForMicroplan(tenantId, microplanId) {
     console.error("Failed to send approval SMS for microplan:", err);
   }
 }
+function loadZambiaGeoJSON() {
+  if (zambiaGeoJSON) return zambiaGeoJSON;
+  try {
+    const abs = (0, import_path4.join)(process.cwd(), "data/zambia/zmb_constituencies.geojson");
+    zambiaGeoJSON = JSON.parse((0, import_fs5.readFileSync)(abs, "utf8"));
+  } catch (err) {
+    console.error("Failed to load Zambia constituencies GeoJSON:", err);
+  }
+  return zambiaGeoJSON;
+}
+function isLocationOutsideZambia(lat, lng) {
+  const geojson = loadZambiaGeoJSON();
+  if (!geojson) return false;
+  const pt = (0, import_turf.point)([lng, lat]);
+  for (const feature of geojson.features) {
+    if ((0, import_turf.booleanPointInPolygon)(pt, feature)) {
+      return false;
+    }
+  }
+  return true;
+}
+async function initOutsideVillagesCache() {
+  try {
+    outsideVillageIds.clear();
+    const res = await db.execute(import_drizzle_orm15.sql`SELECT id, latitude, longitude FROM villages WHERE latitude IS NOT NULL AND longitude IS NOT NULL`);
+    const allVillages = res.rows || res;
+    console.log(`[GeoCache] Initializing outside-Zambia cache check for ${allVillages.length} villages...`);
+    let count = 0;
+    for (const v of allVillages) {
+      const lat = Number(v.latitude);
+      const lng = Number(v.longitude);
+      if (isNaN(lat) || isNaN(lng)) continue;
+      if (isLocationOutsideZambia(lat, lng)) {
+        outsideVillageIds.add(Number(v.id));
+        count++;
+      }
+    }
+    console.log(`[GeoCache] Outside-Zambia cache initialized: found ${count} villages outside Zambia polygons.`);
+  } catch (err) {
+    console.error("[GeoCache] Failed to initialize outside-Zambia cache:", err);
+  }
+}
 async function registerRoutes(httpServer2, app2) {
+  await initOutsideVillagesCache();
   await setupAuth(app2);
   registerSsoRoutes(app2);
   registerPasswordAuthRoutes(app2);
@@ -10100,7 +10252,34 @@ async function registerRoutes(httpServer2, app2) {
   app2.get("/api/users", isAuthenticated, requireTenant, requirePermission("manage_users"), async (req, res) => {
     try {
       const list = await storage.listUsers(req.tenantId);
-      res.json(list);
+      const scope = await getGeoScope(req.dbUser, req.tenantId);
+      if (scope.all) {
+        return res.json(list);
+      }
+      const filtered = list.filter((u) => {
+        if (u.isPlatformAdmin) return false;
+        const targetGeo = {
+          facilityId: u.facilityId,
+          districtId: u.districtId,
+          provinceId: u.provinceId
+        };
+        if (recordInGeoScope(scope, targetGeo)) return true;
+        const tScope = u.dataAccessScope || {};
+        const tFacs = Array.isArray(tScope.facilities) ? tScope.facilities.map(Number) : [];
+        const tDists = Array.isArray(tScope.districts) ? tScope.districts.map(Number) : [];
+        const tProvs = Array.isArray(tScope.provinces) ? tScope.provinces.map(Number) : [];
+        for (const fid of tFacs) {
+          if (scope.facilityIds.has(fid)) return true;
+        }
+        for (const did of tDists) {
+          if (scope.districtIds.has(did)) return true;
+        }
+        for (const pid of tProvs) {
+          if (scope.provinceIds.has(pid)) return true;
+        }
+        return false;
+      });
+      res.json(filtered);
     } catch (err) {
       console.error("GET /api/users failed:", err);
       res.status(500).json({ message: "Failed to list users" });
@@ -10117,6 +10296,31 @@ async function registerRoutes(httpServer2, app2) {
       }
       if (!dataAccessScope || typeof dataAccessScope !== "object") {
         return res.status(400).json({ message: "dataAccessScope must be a geographic scope object" });
+      }
+      const targetUser = await storage.getUser(req.params.id);
+      if (!targetUser || targetUser.tenantId !== req.tenantId) {
+        return res.status(404).json({ message: "User not found" });
+      }
+      if (!await userHasAccessToUser(req.dbUser, targetUser, req.tenantId)) {
+        return res.status(403).json({ message: "Forbidden: no management access to this user context" });
+      }
+      const tFacs = Array.isArray(dataAccessScope.facilities) ? dataAccessScope.facilities.map(Number) : [];
+      const tDists = Array.isArray(dataAccessScope.districts) ? dataAccessScope.districts.map(Number) : [];
+      const tProvs = Array.isArray(dataAccessScope.provinces) ? dataAccessScope.provinces.map(Number) : [];
+      for (const fid of tFacs) {
+        if (!await userCanAccessGeo(req.dbUser, req.tenantId, { facilityId: fid })) {
+          return res.status(403).json({ message: "Forbidden: target facility scope is outside your access scope" });
+        }
+      }
+      for (const did of tDists) {
+        if (!await userCanAccessGeo(req.dbUser, req.tenantId, { districtId: did })) {
+          return res.status(403).json({ message: "Forbidden: target district scope is outside your access scope" });
+        }
+      }
+      for (const pid of tProvs) {
+        if (!await userCanAccessGeo(req.dbUser, req.tenantId, { provinceId: pid })) {
+          return res.status(403).json({ message: "Forbidden: target province scope is outside your access scope" });
+        }
       }
       const updatedUser = await storage.updateUserRolesAndPermissions(
         req.tenantId,
@@ -10150,6 +10354,35 @@ async function registerRoutes(httpServer2, app2) {
       if (existing) {
         return res.status(400).json({ message: "A user with this email address already exists" });
       }
+      if (provinceId && !await userCanAccessGeo(req.dbUser, req.tenantId, { provinceId: Number(provinceId) })) {
+        return res.status(403).json({ message: "Forbidden: assigned province is outside your scope" });
+      }
+      if (districtId && !await userCanAccessGeo(req.dbUser, req.tenantId, { districtId: Number(districtId) })) {
+        return res.status(403).json({ message: "Forbidden: assigned district is outside your scope" });
+      }
+      if (facilityId && !await userCanAccessGeo(req.dbUser, req.tenantId, { facilityId: Number(facilityId) })) {
+        return res.status(403).json({ message: "Forbidden: assigned facility is outside your scope" });
+      }
+      if (dataAccessScope) {
+        const tFacs = Array.isArray(dataAccessScope.facilities) ? dataAccessScope.facilities.map(Number) : [];
+        const tDists = Array.isArray(dataAccessScope.districts) ? dataAccessScope.districts.map(Number) : [];
+        const tProvs = Array.isArray(dataAccessScope.provinces) ? dataAccessScope.provinces.map(Number) : [];
+        for (const fid of tFacs) {
+          if (!await userCanAccessGeo(req.dbUser, req.tenantId, { facilityId: fid })) {
+            return res.status(403).json({ message: "Forbidden: explicit facility scope is outside your scope" });
+          }
+        }
+        for (const did of tDists) {
+          if (!await userCanAccessGeo(req.dbUser, req.tenantId, { districtId: did })) {
+            return res.status(403).json({ message: "Forbidden: explicit district scope is outside your scope" });
+          }
+        }
+        for (const pid of tProvs) {
+          if (!await userCanAccessGeo(req.dbUser, req.tenantId, { provinceId: pid })) {
+            return res.status(403).json({ message: "Forbidden: explicit province scope is outside your scope" });
+          }
+        }
+      }
       const user = await storage.createUser(req.tenantId, {
         email,
         firstName,
@@ -10174,6 +10407,38 @@ async function registerRoutes(httpServer2, app2) {
       const oldUser = await storage.getUser(req.params.id);
       if (!oldUser || oldUser.tenantId !== req.tenantId) {
         return res.status(404).json({ message: "User not found" });
+      }
+      if (!await userHasAccessToUser(req.dbUser, oldUser, req.tenantId)) {
+        return res.status(403).json({ message: "Forbidden: no access to this user context" });
+      }
+      if (provinceId && !await userCanAccessGeo(req.dbUser, req.tenantId, { provinceId: Number(provinceId) })) {
+        return res.status(403).json({ message: "Forbidden: assigned province is outside your scope" });
+      }
+      if (districtId && !await userCanAccessGeo(req.dbUser, req.tenantId, { districtId: Number(districtId) })) {
+        return res.status(403).json({ message: "Forbidden: assigned district is outside your scope" });
+      }
+      if (facilityId && !await userCanAccessGeo(req.dbUser, req.tenantId, { facilityId: Number(facilityId) })) {
+        return res.status(403).json({ message: "Forbidden: assigned facility is outside your scope" });
+      }
+      if (dataAccessScope) {
+        const tFacs = Array.isArray(dataAccessScope.facilities) ? dataAccessScope.facilities.map(Number) : [];
+        const tDists = Array.isArray(dataAccessScope.districts) ? dataAccessScope.districts.map(Number) : [];
+        const tProvs = Array.isArray(dataAccessScope.provinces) ? dataAccessScope.provinces.map(Number) : [];
+        for (const fid of tFacs) {
+          if (!await userCanAccessGeo(req.dbUser, req.tenantId, { facilityId: fid })) {
+            return res.status(403).json({ message: "Forbidden: explicit facility scope is outside your scope" });
+          }
+        }
+        for (const did of tDists) {
+          if (!await userCanAccessGeo(req.dbUser, req.tenantId, { districtId: did })) {
+            return res.status(403).json({ message: "Forbidden: explicit district scope is outside your scope" });
+          }
+        }
+        for (const pid of tProvs) {
+          if (!await userCanAccessGeo(req.dbUser, req.tenantId, { provinceId: pid })) {
+            return res.status(403).json({ message: "Forbidden: explicit province scope is outside your scope" });
+          }
+        }
       }
       const updated = await storage.updateUser(req.tenantId, req.params.id, {
         firstName,
@@ -10200,6 +10465,9 @@ async function registerRoutes(httpServer2, app2) {
       const oldUser = await storage.getUser(req.params.id);
       if (!oldUser || oldUser.tenantId !== req.tenantId) {
         return res.status(404).json({ message: "User not found" });
+      }
+      if (!await userHasAccessToUser(req.dbUser, oldUser, req.tenantId)) {
+        return res.status(403).json({ message: "Forbidden: no access to this user context" });
       }
       await storage.deleteUser(req.tenantId, req.params.id);
       await logAudit(req, "delete_user", "users", req.params.id, oldUser, null);
@@ -11717,6 +11985,10 @@ async function registerRoutes(httpServer2, app2) {
   });
   app2.post("/api/provinces", ...auth, async (req, res) => {
     try {
+      const { isScopedRole } = resolveRoleScopeIds(req.dbUser);
+      if (isScopedRole) {
+        return res.status(403).json({ message: "Forbidden: no access to create province" });
+      }
       const data = insertProvinceSchema.parse(req.body);
       const province = await storage.createProvince(req.tenantId, data);
       await logAudit(req, "create", "province", province.id, null, province);
@@ -11731,6 +12003,9 @@ async function registerRoutes(httpServer2, app2) {
       const entityId = parseInt(req.params.id);
       const oldProvince = await storage.getProvince(req.tenantId, entityId);
       if (!oldProvince) return res.status(404).json({ message: "Province not found" });
+      if (!await userCanAccessGeo(req.dbUser, req.tenantId, { provinceId: entityId })) {
+        return res.status(403).json({ message: "Forbidden: no access to province" });
+      }
       const province = await storage.updateProvince(req.tenantId, entityId, req.body);
       if (!province) return res.status(404).json({ message: "Province not found" });
       await logAudit(req, "update", "province", entityId, oldProvince, province);
@@ -11768,6 +12043,9 @@ async function registerRoutes(httpServer2, app2) {
   app2.post("/api/districts", ...auth, async (req, res) => {
     try {
       const data = insertDistrictSchema.parse(req.body);
+      if (!await userCanAccessGeo(req.dbUser, req.tenantId, { provinceId: data.provinceId })) {
+        return res.status(403).json({ message: "Forbidden: no access to province" });
+      }
       const district = await storage.createDistrict(req.tenantId, data);
       await logAudit(req, "create", "district", district.id, null, district);
       res.status(201).json(district);
@@ -11781,6 +12059,12 @@ async function registerRoutes(httpServer2, app2) {
       const entityId = parseInt(req.params.id);
       const oldDistrict = await storage.getDistrict(req.tenantId, entityId);
       if (!oldDistrict) return res.status(404).json({ message: "District not found" });
+      if (!await userCanAccessGeo(req.dbUser, req.tenantId, { districtId: entityId })) {
+        return res.status(403).json({ message: "Forbidden: no access to district" });
+      }
+      if (req.body.provinceId && !await userCanAccessGeo(req.dbUser, req.tenantId, { provinceId: req.body.provinceId })) {
+        return res.status(403).json({ message: "Forbidden: no access to province" });
+      }
       const district = await storage.updateDistrict(req.tenantId, entityId, req.body);
       if (!district) return res.status(404).json({ message: "District not found" });
       await logAudit(req, "update", "district", entityId, oldDistrict, district);
@@ -12076,10 +12360,22 @@ async function registerRoutes(httpServer2, app2) {
         return res.status(403).json({ message: "Your role cannot add facilities." });
       }
       const data = insertFacilitySchema.parse(req.body);
-      const isNational = userRolesList.some((r) => ["national_admin", "gis_specialist", "provincial_coordinator"].includes(r));
-      if (req.dbUser?.isPlatformAdmin !== true && !isNational) {
-        if (req.dbUser?.districtId && Number(data.districtId) !== Number(req.dbUser.districtId)) {
-          return res.status(403).json({ message: "You can only create facilities in your assigned district." });
+      const userRole = req.dbUser?.role;
+      const userRoles2 = Array.isArray(req.dbUser?.roles) ? req.dbUser.roles : [];
+      const isPlatformAdmin = req.dbUser?.isPlatformAdmin === true;
+      const isNationalAdmin = userRole === "national_admin" || userRoles2.includes("national_admin");
+      const isGisSpecialist = userRole === "gis_specialist" || userRoles2.includes("gis_specialist");
+      const hasAdminBypass = isPlatformAdmin || isNationalAdmin || isGisSpecialist;
+      if (!hasAdminBypass) {
+        const userDistrictId = req.dbUser?.districtId ? Number(req.dbUser.districtId) : null;
+        if (userDistrictId) {
+          if (Number(data.districtId) !== userDistrictId) {
+            return res.status(403).json({ message: "You can only create facilities in your assigned district." });
+          }
+        } else {
+          if (!await userCanAccessGeo(req.dbUser, req.tenantId, { districtId: Number(data.districtId) })) {
+            return res.status(403).json({ message: "You can only create facilities in your assigned district." });
+          }
         }
       }
       const facility = await storage.createFacility(req.tenantId, data);
@@ -12095,20 +12391,11 @@ async function registerRoutes(httpServer2, app2) {
       const entityId = parseInt(req.params.id);
       const oldFacility = await storage.getFacility(req.tenantId, entityId);
       if (!oldFacility) return res.status(404).json({ message: "Facility not found" });
-      const userRolesList = [
-        req.dbUser?.role,
-        ...Array.isArray(req.dbUser?.roles) ? req.dbUser.roles : []
-      ].filter(Boolean);
-      const isNational = userRolesList.some((r) => ["national_admin", "gis_specialist", "provincial_coordinator"].includes(r));
-      if (req.dbUser?.isPlatformAdmin !== true && !isNational) {
-        if (req.dbUser?.districtId) {
-          if (Number(oldFacility.districtId) !== Number(req.dbUser.districtId)) {
-            return res.status(403).json({ message: "You can only update facilities in your assigned district." });
-          }
-          if (req.body.districtId && Number(req.body.districtId) !== Number(req.dbUser.districtId)) {
-            return res.status(403).json({ message: "You cannot move a facility to another district." });
-          }
-        }
+      if (!await userCanAccessGeo(req.dbUser, req.tenantId, { facilityId: entityId })) {
+        return res.status(403).json({ message: "Forbidden: no access to this facility." });
+      }
+      if (req.body.districtId && !await userCanAccessGeo(req.dbUser, req.tenantId, { districtId: Number(req.body.districtId) })) {
+        return res.status(403).json({ message: "Forbidden: no access to move facility to target district." });
       }
       const facility = await storage.updateFacility(req.tenantId, entityId, req.body);
       await logAudit(req, "update", "facility", entityId, oldFacility, facility);
@@ -12123,15 +12410,8 @@ async function registerRoutes(httpServer2, app2) {
       const entityId = parseInt(req.params.id);
       const oldFacility = await storage.getFacility(req.tenantId, entityId);
       if (!oldFacility) return res.status(404).json({ message: "Facility not found" });
-      const userRolesList = [
-        req.dbUser?.role,
-        ...Array.isArray(req.dbUser?.roles) ? req.dbUser.roles : []
-      ].filter(Boolean);
-      const isNational = userRolesList.some((r) => ["national_admin", "gis_specialist", "provincial_coordinator"].includes(r));
-      if (req.dbUser?.isPlatformAdmin !== true && !isNational) {
-        if (req.dbUser?.districtId && Number(oldFacility.districtId) !== Number(req.dbUser.districtId)) {
-          return res.status(403).json({ message: "You can only delete facilities in your assigned district." });
-        }
+      if (!await userCanAccessGeo(req.dbUser, req.tenantId, { facilityId: entityId })) {
+        return res.status(403).json({ message: "Forbidden: no access to delete this facility." });
       }
       const ok = await storage.deleteFacility(req.tenantId, entityId);
       if (!ok) return res.status(404).json({ message: "Facility not found" });
@@ -12266,7 +12546,7 @@ async function registerRoutes(httpServer2, app2) {
       res.status(500).json({ message: "Failed to list staff: " + error.message });
     }
   });
-  app2.get("/api/facilities/:facilityId/staff", ...auth, async (req, res) => {
+  app2.get("/api/facilities/:facilityId/staff", ...auth, requireGeoAccess((req) => ({ facilityId: parseInt(req.params.facilityId) })), async (req, res) => {
     try {
       const facilityId = parseInt(req.params.facilityId);
       if (isNaN(facilityId)) {
@@ -12284,7 +12564,7 @@ async function registerRoutes(httpServer2, app2) {
       res.status(500).json({ message: "Failed to list facility staff: " + error.message });
     }
   });
-  app2.post("/api/facilities/:facilityId/staff", ...auth, async (req, res) => {
+  app2.post("/api/facilities/:facilityId/staff", ...auth, requireGeoAccess((req) => ({ facilityId: parseInt(req.params.facilityId) })), async (req, res) => {
     try {
       const facilityId = parseInt(req.params.facilityId);
       if (isNaN(facilityId)) {
@@ -12319,7 +12599,7 @@ async function registerRoutes(httpServer2, app2) {
       res.status(400).json({ message: "Invalid staff data: " + error.message });
     }
   });
-  app2.patch("/api/facilities/:facilityId/staff/:staffId", ...auth, async (req, res) => {
+  app2.patch("/api/facilities/:facilityId/staff/:staffId", ...auth, requireGeoAccess((req) => ({ facilityId: parseInt(req.params.facilityId) })), async (req, res) => {
     try {
       const staffId = parseInt(req.params.staffId);
       const facilityId = parseInt(req.params.facilityId);
@@ -12388,7 +12668,7 @@ async function registerRoutes(httpServer2, app2) {
       res.status(400).json({ message: "Failed to update staff: " + error.message });
     }
   });
-  app2.delete("/api/facilities/:facilityId/staff/:staffId", ...auth, async (req, res) => {
+  app2.delete("/api/facilities/:facilityId/staff/:staffId", ...auth, requireGeoAccess((req) => ({ facilityId: parseInt(req.params.facilityId) })), async (req, res) => {
     try {
       const staffId = parseInt(req.params.staffId);
       const facilityId = parseInt(req.params.facilityId);
@@ -12405,7 +12685,7 @@ async function registerRoutes(httpServer2, app2) {
       res.status(500).json({ message: "Failed to delete staff: " + error.message });
     }
   });
-  app2.post("/api/facilities/:facilityId/staff/bulk", ...auth, async (req, res) => {
+  app2.post("/api/facilities/:facilityId/staff/bulk", ...auth, requireGeoAccess((req) => ({ facilityId: parseInt(req.params.facilityId) })), async (req, res) => {
     try {
       const facilityId = parseInt(req.params.facilityId, 10);
       if (isNaN(facilityId)) return res.status(400).json({ message: "Invalid facility id" });
@@ -12472,7 +12752,7 @@ async function registerRoutes(httpServer2, app2) {
       res.status(500).json({ message: err?.message || "Bulk save failed" });
     }
   });
-  app2.get("/api/facilities/:facilityId/hfc-committee", ...auth, async (req, res) => {
+  app2.get("/api/facilities/:facilityId/hfc-committee", ...auth, requireGeoAccess((req) => ({ facilityId: parseInt(req.params.facilityId) })), async (req, res) => {
     try {
       const facilityId = parseInt(req.params.facilityId);
       if (isNaN(facilityId)) return res.status(400).json({ message: "Invalid facilityId" });
@@ -12488,7 +12768,7 @@ async function registerRoutes(httpServer2, app2) {
       res.status(500).json({ message: "Failed to list HFC Committee: " + error.message });
     }
   });
-  app2.post("/api/facilities/:facilityId/hfc-committee", ...auth, async (req, res) => {
+  app2.post("/api/facilities/:facilityId/hfc-committee", ...auth, requireGeoAccess((req) => ({ facilityId: parseInt(req.params.facilityId) })), async (req, res) => {
     try {
       const facilityId = parseInt(req.params.facilityId);
       if (isNaN(facilityId)) return res.status(400).json({ message: "Invalid facilityId" });
@@ -12512,7 +12792,7 @@ async function registerRoutes(httpServer2, app2) {
       res.status(400).json({ message: "Invalid HFC Committee data: " + error.message });
     }
   });
-  app2.patch("/api/facilities/:facilityId/hfc-committee/:memberId", ...auth, async (req, res) => {
+  app2.patch("/api/facilities/:facilityId/hfc-committee/:memberId", ...auth, requireGeoAccess((req) => ({ facilityId: parseInt(req.params.facilityId) })), async (req, res) => {
     try {
       const memberId = parseInt(req.params.memberId);
       const facilityId = parseInt(req.params.facilityId);
@@ -12540,7 +12820,7 @@ async function registerRoutes(httpServer2, app2) {
       res.status(400).json({ message: "Failed to update HFC Committee member: " + error.message });
     }
   });
-  app2.delete("/api/facilities/:facilityId/hfc-committee/:memberId", ...auth, async (req, res) => {
+  app2.delete("/api/facilities/:facilityId/hfc-committee/:memberId", ...auth, requireGeoAccess((req) => ({ facilityId: parseInt(req.params.facilityId) })), async (req, res) => {
     try {
       const memberId = parseInt(req.params.memberId);
       const facilityId = parseInt(req.params.facilityId);
@@ -12561,7 +12841,7 @@ async function registerRoutes(httpServer2, app2) {
       res.status(500).json({ message: "Failed to delete HFC Committee member: " + error.message });
     }
   });
-  app2.get("/api/facilities/:facilityId/chvs", ...auth, async (req, res) => {
+  app2.get("/api/facilities/:facilityId/chvs", ...auth, requireGeoAccess((req) => ({ facilityId: parseInt(req.params.facilityId) })), async (req, res) => {
     try {
       const facilityId = parseInt(req.params.facilityId);
       if (isNaN(facilityId)) return res.status(400).json({ message: "Invalid facilityId" });
@@ -12592,7 +12872,7 @@ async function registerRoutes(httpServer2, app2) {
       res.status(500).json({ message: "Failed to list CHVs: " + error.message });
     }
   });
-  app2.post("/api/facilities/:facilityId/chvs", ...auth, async (req, res) => {
+  app2.post("/api/facilities/:facilityId/chvs", ...auth, requireGeoAccess((req) => ({ facilityId: parseInt(req.params.facilityId) })), async (req, res) => {
     try {
       const facilityId = parseInt(req.params.facilityId);
       if (isNaN(facilityId)) return res.status(400).json({ message: "Invalid facilityId" });
@@ -12644,7 +12924,7 @@ async function registerRoutes(httpServer2, app2) {
       res.status(400).json({ message: "Invalid CHV data: " + error.message });
     }
   });
-  app2.patch("/api/facilities/:facilityId/chvs/:chvId", ...auth, async (req, res) => {
+  app2.patch("/api/facilities/:facilityId/chvs/:chvId", ...auth, requireGeoAccess((req) => ({ facilityId: parseInt(req.params.facilityId) })), async (req, res) => {
     try {
       const chvId = parseInt(req.params.chvId);
       const facilityId = parseInt(req.params.facilityId);
@@ -12695,7 +12975,7 @@ async function registerRoutes(httpServer2, app2) {
       res.status(400).json({ message: "Failed to update CHV: " + error.message });
     }
   });
-  app2.delete("/api/facilities/:facilityId/chvs/:chvId", ...auth, async (req, res) => {
+  app2.delete("/api/facilities/:facilityId/chvs/:chvId", ...auth, requireGeoAccess((req) => ({ facilityId: parseInt(req.params.facilityId) })), async (req, res) => {
     try {
       const chvId = parseInt(req.params.chvId);
       const facilityId = parseInt(req.params.facilityId);
@@ -12716,7 +12996,7 @@ async function registerRoutes(httpServer2, app2) {
       res.status(500).json({ message: "Failed to delete CHV: " + error.message });
     }
   });
-  app2.post("/api/facilities/:facilityId/chvs/bulk", ...auth, async (req, res) => {
+  app2.post("/api/facilities/:facilityId/chvs/bulk", ...auth, requireGeoAccess((req) => ({ facilityId: parseInt(req.params.facilityId) })), async (req, res) => {
     try {
       const facilityId = parseInt(req.params.facilityId, 10);
       if (isNaN(facilityId)) return res.status(400).json({ message: "Invalid facility id" });
@@ -12785,7 +13065,7 @@ async function registerRoutes(httpServer2, app2) {
       res.status(500).json({ message: err?.message || "Bulk save failed" });
     }
   });
-  app2.get("/api/facilities/:id/cold-chain", ...auth, async (req, res) => {
+  app2.get("/api/facilities/:id/cold-chain", ...auth, requireGeoAccess((req) => ({ facilityId: parseInt(req.params.id) })), async (req, res) => {
     try {
       const facilityId = parseInt(req.params.id);
       if (isNaN(facilityId)) return res.status(400).json({ message: "Invalid facility id" });
@@ -12802,7 +13082,7 @@ async function registerRoutes(httpServer2, app2) {
       res.status(500).json({ message: "Failed to list cold chain equipment: " + err.message });
     }
   });
-  app2.post("/api/facilities/:id/cold-chain", ...auth, async (req, res) => {
+  app2.post("/api/facilities/:id/cold-chain", ...auth, requireGeoAccess((req) => ({ facilityId: parseInt(req.params.id) })), async (req, res) => {
     try {
       const facilityId = parseInt(req.params.id);
       if (isNaN(facilityId)) return res.status(400).json({ message: "Invalid facility id" });
@@ -12820,7 +13100,7 @@ async function registerRoutes(httpServer2, app2) {
       res.status(400).json({ message: "Invalid equipment data: " + err.message });
     }
   });
-  app2.patch("/api/facilities/:id/cold-chain/:equipId", ...auth, async (req, res) => {
+  app2.patch("/api/facilities/:id/cold-chain/:equipId", ...auth, requireGeoAccess((req) => ({ facilityId: parseInt(req.params.id) })), async (req, res) => {
     try {
       const facilityId = parseInt(req.params.id);
       const equipId = parseInt(req.params.equipId);
@@ -12869,7 +13149,7 @@ async function registerRoutes(httpServer2, app2) {
       res.status(400).json({ message: "Failed to update equipment: " + err.message });
     }
   });
-  app2.delete("/api/facilities/:id/cold-chain/:equipId", ...auth, async (req, res) => {
+  app2.delete("/api/facilities/:id/cold-chain/:equipId", ...auth, requireGeoAccess((req) => ({ facilityId: parseInt(req.params.id) })), async (req, res) => {
     try {
       const facilityId = parseInt(req.params.id);
       const equipId = parseInt(req.params.equipId);
@@ -12884,7 +13164,7 @@ async function registerRoutes(httpServer2, app2) {
       res.status(500).json({ message: "Failed to delete equipment: " + err.message });
     }
   });
-  app2.post("/api/facilities/:id/cold-chain/import", ...auth, async (req, res) => {
+  app2.post("/api/facilities/:id/cold-chain/import", ...auth, requireGeoAccess((req) => ({ facilityId: parseInt(req.params.id) })), async (req, res) => {
     try {
       const facilityId = parseInt(req.params.id);
       if (isNaN(facilityId)) return res.status(400).json({ message: "Invalid facility id" });
@@ -12907,7 +13187,7 @@ async function registerRoutes(httpServer2, app2) {
       res.status(400).json({ message: "Import failed: " + err.message });
     }
   });
-  app2.get("/api/facilities/:id/cold-chain/export", ...auth, async (req, res) => {
+  app2.get("/api/facilities/:id/cold-chain/export", ...auth, requireGeoAccess((req) => ({ facilityId: parseInt(req.params.id) })), async (req, res) => {
     try {
       const facilityId = parseInt(req.params.id);
       if (isNaN(facilityId)) return res.status(400).json({ message: "Invalid facility id" });
@@ -13321,12 +13601,13 @@ async function registerRoutes(httpServer2, app2) {
         latitude: villages.latitude,
         longitude: villages.longitude
       }).from(villages).where((0, import_drizzle_orm15.eq)(villages.tenantId, req.tenantId));
-      const result = scope.all ? rows : rows.filter(
+      let result = scope.all ? rows : rows.filter(
         (v) => recordInGeoScope(scope, {
           districtId: v.districtId,
           facilityId: v.assignedFacilityId
         })
       );
+      result = result.filter((v) => !outsideVillageIds.has(Number(v.id)));
       setCacheHeaders(res, 600);
       res.json(result);
     } catch (error) {
@@ -13342,12 +13623,13 @@ async function registerRoutes(httpServer2, app2) {
       res.set("Cache-Control", "private, max-age=300, stale-while-revalidate=60");
       const scope = await getGeoScope(dbUser, req.tenantId);
       const all = await storage.getVillages(req.tenantId, districtId, facilityId);
-      const result = scope.all ? all : all.filter(
+      let result = scope.all ? all : all.filter(
         (v) => recordInGeoScope(scope, {
           districtId: v.districtId,
           facilityId: v.assignedFacilityId
         })
       );
+      result = result.filter((v) => !outsideVillageIds.has(Number(v.id)));
       setCacheHeaders(res, 600);
       res.json(result);
     } catch (error) {
@@ -13511,6 +13793,13 @@ async function registerRoutes(httpServer2, app2) {
       }
       const data = insertVillageSchema.parse(body);
       const village = await storage.createVillage(req.tenantId, data);
+      if (village.latitude != null && village.longitude != null) {
+        const latVal = Number(village.latitude);
+        const lngVal = Number(village.longitude);
+        if (!isNaN(latVal) && !isNaN(lngVal) && isLocationOutsideZambia(latVal, lngVal)) {
+          outsideVillageIds.add(Number(village.id));
+        }
+      }
       await logAudit(req, "create", "village", village.id, null, village);
       await estimateAndSaveVillagePopulation(req.tenantId, village.id);
       const enrichedVillage = await storage.getVillage(req.tenantId, village.id);
@@ -13817,6 +14106,7 @@ async function registerRoutes(httpServer2, app2) {
           createdCount++;
         }
       }
+      await initOutsideVillagesCache();
       await logAudit(req, "import_csv_villages", "village", null, null, { createdCount, updatedCount });
       res.json({
         success: true,
@@ -13895,6 +14185,20 @@ async function registerRoutes(httpServer2, app2) {
         }
       }
       const village = await storage.updateVillage(req.tenantId, entityId, body);
+      if (!village) {
+        return res.status(404).json({ message: "Village not found" });
+      }
+      if (village.latitude != null && village.longitude != null) {
+        const latVal2 = Number(village.latitude);
+        const lngVal2 = Number(village.longitude);
+        if (!isNaN(latVal2) && !isNaN(lngVal2) && isLocationOutsideZambia(latVal2, lngVal2)) {
+          outsideVillageIds.add(Number(village.id));
+        } else {
+          outsideVillageIds.delete(Number(village.id));
+        }
+      } else {
+        outsideVillageIds.delete(Number(village.id));
+      }
       await logAudit(req, "update", "village", entityId, oldVillage, village);
       await estimateAndSaveVillagePopulation(req.tenantId, entityId);
       const enrichedVillage = await storage.getVillage(req.tenantId, entityId);
@@ -13989,8 +14293,17 @@ Note from the requester: ${conflict.note}` : ""}`,
     try {
       const entityId = parseInt(req.params.id);
       const oldVillage = await storage.getVillage(req.tenantId, entityId);
+      if (!oldVillage) return res.status(404).json({ message: "Village not found" });
+      const canDelete = await userCanAccessGeo(req.dbUser, req.tenantId, {
+        facilityId: oldVillage.assignedFacilityId ?? null,
+        districtId: oldVillage.districtId ?? null
+      });
+      if (!canDelete) {
+        return res.status(403).json({ message: "Forbidden: no access to delete this village" });
+      }
       const ok = await storage.deleteVillage(req.tenantId, entityId);
       if (!ok) return res.status(404).json({ message: "Village not found" });
+      outsideVillageIds.delete(entityId);
       await logAudit(req, "delete", "village", entityId, oldVillage, null);
       res.status(204).send();
     } catch (error) {
@@ -14094,13 +14407,22 @@ Note from the requester: ${conflict.note}` : ""}`,
   app2.get("/api/resources/geotiff", ...auth, async (req, res) => {
     try {
       let resourcesDir = (0, import_path4.join)(process.cwd(), "Resources");
-      if (!(0, import_fs5.existsSync)(resourcesDir)) {
-        const parentDir = (0, import_path4.join)(process.cwd(), "..", "Resources");
-        if ((0, import_fs5.existsSync)(parentDir)) {
-          resourcesDir = parentDir;
-        } else {
-          return res.status(404).json({ message: "Resources directory not found in server root or parent directory." });
+      const hasTif = (dir) => {
+        if (!(0, import_fs5.existsSync)(dir)) return false;
+        try {
+          return (0, import_fs5.readdirSync)(dir).some((f) => f.endsWith(".tif") || f.endsWith(".tiff"));
+        } catch {
+          return false;
         }
+      };
+      if (!hasTif(resourcesDir)) {
+        const parentDir = (0, import_path4.join)(process.cwd(), "..", "Resources");
+        if (hasTif(parentDir)) {
+          resourcesDir = parentDir;
+        }
+      }
+      if (!(0, import_fs5.existsSync)(resourcesDir)) {
+        return res.status(404).json({ message: "Resources directory not found in server root or parent directory." });
       }
       const reqFile = req.query.file;
       let geotiffFile = "";
@@ -14179,9 +14501,19 @@ Note from the requester: ${conflict.note}` : ""}`,
   app2.get("/api/resources/geotiff/list", ...auth, async (req, res) => {
     try {
       let resourcesDir = (0, import_path4.join)(process.cwd(), "Resources");
-      if (!(0, import_fs5.existsSync)(resourcesDir)) {
+      const hasTifList = (dir) => {
+        if (!(0, import_fs5.existsSync)(dir)) return false;
+        try {
+          return (0, import_fs5.readdirSync)(dir).some((f) => f.endsWith(".tif") || f.endsWith(".tiff"));
+        } catch {
+          return false;
+        }
+      };
+      if (!hasTifList(resourcesDir)) {
         const parentDir = (0, import_path4.join)(process.cwd(), "..", "Resources");
-        if ((0, import_fs5.existsSync)(parentDir)) resourcesDir = parentDir;
+        if (hasTifList(parentDir)) {
+          resourcesDir = parentDir;
+        }
       }
       if (!(0, import_fs5.existsSync)(resourcesDir)) {
         return res.status(404).json({ success: false, message: "Resources directory not found." });
@@ -14255,13 +14587,22 @@ Note from the requester: ${conflict.note}` : ""}`,
         return res.status(400).json({ success: false, message: "Invalid GeoTIFF file. Must have .tif or .tiff extension." });
       }
       let resourcesDir = (0, import_path4.join)(process.cwd(), "Resources");
-      if (!(0, import_fs5.existsSync)(resourcesDir)) {
-        const parentDir = (0, import_path4.join)(process.cwd(), "..", "Resources");
-        if ((0, import_fs5.existsSync)(parentDir)) {
-          resourcesDir = parentDir;
-        } else {
-          return res.status(404).json({ success: false, message: "Resources directory not found." });
+      const hasTifUpload = (dir) => {
+        if (!(0, import_fs5.existsSync)(dir)) return false;
+        try {
+          return (0, import_fs5.readdirSync)(dir).some((f) => f.endsWith(".tif") || f.endsWith(".tiff"));
+        } catch {
+          return false;
         }
+      };
+      if (!hasTifUpload(resourcesDir)) {
+        const parentDir = (0, import_path4.join)(process.cwd(), "..", "Resources");
+        if (hasTifUpload(parentDir)) {
+          resourcesDir = parentDir;
+        }
+      }
+      if (!(0, import_fs5.existsSync)(resourcesDir)) {
+        return res.status(404).json({ success: false, message: "Resources directory not found." });
       }
       const filePath = (0, import_path4.join)(resourcesDir, fileName);
       const writeStream = (0, import_fs5.createWriteStream)(filePath);
@@ -14578,12 +14919,21 @@ Note from the requester: ${conflict.note}` : ""}`,
       const fLng = parseFloat(String(facilityRow[0].longitude));
       let coveredVillageIds = [];
       if (microplanId) {
-        const popRows = await pool.query(
-          `SELECT DISTINCT village_id FROM population_data
-           WHERE tenant_id = $1 AND microplan_id = $2 AND village_id IS NOT NULL`,
-          [req.tenantId, microplanId]
-        );
-        coveredVillageIds = popRows.rows.map((r) => r.village_id);
+        const planRows = await db.select({
+          facilityId: microplans.facilityId,
+          year: microplans.year
+        }).from(microplans).where((0, import_drizzle_orm15.and)((0, import_drizzle_orm15.eq)(microplans.id, microplanId), (0, import_drizzle_orm15.eq)(microplans.tenantId, req.tenantId))).limit(1);
+        if (planRows.length > 0) {
+          const plan = planRows[0];
+          const targetFacilityId = plan.facilityId || facilityId;
+          const targetYear = plan.year;
+          const popRows = await pool.query(
+            `SELECT DISTINCT village_id FROM population_data
+             WHERE tenant_id = $1 AND facility_id = $2 AND year = $3 AND village_id IS NOT NULL`,
+            [req.tenantId, targetFacilityId, targetYear]
+          );
+          coveredVillageIds = popRows.rows.map((r) => r.village_id);
+        }
       }
       const villagesInCatchment = await pool.query(
         `SELECT v.id, v.name, v.settlement_type, v.latitude, v.longitude,
@@ -14606,6 +14956,8 @@ Note from the requester: ${conflict.note}` : ""}`,
            AND v.longitude IS NOT NULL
            AND v.latitude::text != ''
            AND v.longitude::text != ''
+           AND v.latitude::text ~ '^-?[0-9]+(\\.[0-9]+)?$'
+           AND v.longitude::text ~ '^-?[0-9]+(\\.[0-9]+)?$'
            AND ST_DWithin(
              ST_SetSRID(ST_MakePoint($2, $3), 4326)::geography,
              ST_SetSRID(ST_MakePoint(v.longitude::double precision, v.latitude::double precision), 4326)::geography,
@@ -14949,6 +15301,9 @@ Note from the requester: ${conflict.note}` : ""}`,
   app2.post("/api/microplans", ...auth, async (req, res) => {
     try {
       const data = insertMicroplanSchema.parse(req.body);
+      if (data.facilityId && !await userCanAccessGeo(req.dbUser, req.tenantId, { facilityId: Number(data.facilityId) })) {
+        return res.status(403).json({ message: "Forbidden: no access to this facility." });
+      }
       const plan = await storage.createMicroplan(req.tenantId, data);
       await logAudit(req, "create", "microplan", plan.id, null, plan);
       res.status(201).json(plan);
@@ -14962,6 +15317,17 @@ Note from the requester: ${conflict.note}` : ""}`,
       const planId = parseInt(req.params.id);
       const oldPlan = await storage.getMicroplan(req.tenantId, planId);
       if (!oldPlan) return res.status(404).json({ message: "Master microplan not found" });
+      if (oldPlan.facilityId && !await userCanAccessGeo(req.dbUser, req.tenantId, { facilityId: Number(oldPlan.facilityId) })) {
+        return res.status(403).json({ message: "Forbidden: no access to this facility's microplan." });
+      }
+      if (req.body.facilityId && !await userCanAccessGeo(req.dbUser, req.tenantId, { facilityId: Number(req.body.facilityId) })) {
+        return res.status(403).json({ message: "Forbidden: no access to target facility." });
+      }
+      if (oldPlan.status === "pending" || oldPlan.status === "locked") {
+        return res.status(403).json({
+          message: `Forbidden: Microplans in "${oldPlan.status}" status are read-only.`
+        });
+      }
       if (oldPlan.status === "approved" || oldPlan.status === "auto_approved") {
         const isDistManager = req.dbUser.role === "district_manager" || Array.isArray(req.dbUser.roles) && req.dbUser.roles.includes("district_manager");
         const isAdmin = req.dbUser.role === "national_admin" || req.dbUser.isPlatformAdmin;
@@ -15136,6 +15502,46 @@ Note from the requester: ${conflict.note}` : ""}`,
       res.status(500).json({ message: "Failed to fetch session" });
     }
   });
+  async function checkMicroplanEditableForFacility(tenantId, facilityId, year, quarter) {
+    try {
+      const rows = await db.select({ id: microplans.id, name: microplans.name, status: microplans.status }).from(microplans).where(
+        (0, import_drizzle_orm15.and)(
+          (0, import_drizzle_orm15.eq)(microplans.tenantId, tenantId),
+          (0, import_drizzle_orm15.eq)(microplans.facilityId, facilityId),
+          (0, import_drizzle_orm15.eq)(microplans.year, year),
+          (0, import_drizzle_orm15.eq)(microplans.quarter, quarter)
+        )
+      ).limit(1);
+      if (rows.length > 0) {
+        const parent = rows[0];
+        if (parent.status !== "draft") {
+          return {
+            editable: false,
+            message: `Parent microplan "${parent.name}" is not in draft status (${parent.status}); editing is locked.`
+          };
+        }
+      }
+      return { editable: true };
+    } catch (error) {
+      console.error("checkMicroplanEditableForFacility error:", error);
+      return { editable: true };
+    }
+  }
+  async function isFacilityMicroplanLocked(tenantId, facilityId) {
+    try {
+      const rows = await db.select({ id: microplans.id }).from(microplans).where(
+        (0, import_drizzle_orm15.and)(
+          (0, import_drizzle_orm15.eq)(microplans.tenantId, tenantId),
+          (0, import_drizzle_orm15.eq)(microplans.facilityId, facilityId),
+          (0, import_drizzle_orm15.ne)(microplans.status, "draft")
+        )
+      ).limit(1);
+      return rows.length > 0;
+    } catch (error) {
+      console.error("isFacilityMicroplanLocked error:", error);
+      return false;
+    }
+  }
   async function validateParentMicroplan(tenantId, microplanId, expectedPlanType) {
     if (!microplanId || !Number.isFinite(Number(microplanId))) {
       return { ok: false, status: 400, message: "microplanId is required: a session must belong to a parent microplan." };
@@ -15144,8 +15550,8 @@ Note from the requester: ${conflict.note}` : ""}`,
     if (!parent) {
       return { ok: false, status: 400, message: `Parent microplan ${microplanId} not found in this tenant.` };
     }
-    if (parent.status === "locked") {
-      return { ok: false, status: 400, message: `Parent microplan "${parent.name}" is locked; its sessions cannot be modified.` };
+    if (parent.status !== "draft") {
+      return { ok: false, status: 400, message: `Parent microplan "${parent.name}" is in "${parent.status}" status and is read-only; its sessions cannot be modified.` };
     }
     const parentSessionPlanType = parent.planType === "sia_campaign" ? "campaign" : "routine";
     if (expectedPlanType && expectedPlanType !== parentSessionPlanType) {
@@ -15193,8 +15599,7 @@ Note from the requester: ${conflict.note}` : ""}`,
       if (!parentCheck.ok) {
         return res.status(parentCheck.status).json({ message: parentCheck.message });
       }
-      const geoContext = await getFacilityHierarchy(data.facilityId, req.tenantId);
-      if (!hasPermission(dbUser, "manage_session_plans", geoContext)) {
+      if (!await userCanAccessGeo(req.dbUser, req.tenantId, { facilityId: data.facilityId })) {
         return res.status(403).json({
           message: "Forbidden: You do not have permission to manage session plans for this geographic scope."
         });
@@ -15300,8 +15705,7 @@ Note from the requester: ${conflict.note}` : ""}`,
       const entityId = parseInt(req.params.id);
       const oldSession = await storage.getSessionPlan(req.tenantId, entityId);
       if (!oldSession) return res.status(404).json({ message: "Session not found" });
-      const geoContext = await getFacilityHierarchy(oldSession.facilityId, req.tenantId);
-      if (!hasPermission(dbUser, "manage_session_plans", geoContext)) {
+      if (!await userCanAccessGeo(req.dbUser, req.tenantId, { facilityId: oldSession.facilityId })) {
         return res.status(403).json({
           message: "Forbidden: You do not have permission to manage session plans for this geographic scope."
         });
@@ -15462,8 +15866,7 @@ Note from the requester: ${conflict.note}` : ""}`,
       const entityId = parseInt(req.params.id);
       const oldSession = await storage.getSessionPlan(req.tenantId, entityId);
       if (!oldSession) return res.status(404).json({ message: "Session not found" });
-      const geoContext = await getFacilityHierarchy(oldSession.facilityId, req.tenantId);
-      if (!hasPermission(dbUser, "manage_session_plans", geoContext)) {
+      if (!await userCanAccessGeo(req.dbUser, req.tenantId, { facilityId: oldSession.facilityId })) {
         return res.status(403).json({
           message: "Forbidden: You do not have permission to manage session plans for this geographic scope."
         });
@@ -15864,9 +16267,7 @@ Note from the requester: ${conflict.note}` : ""}`,
         if (v.assignedFacilityId && v.distanceToFacility != null && Number(v.distanceToFacility) <= 5) {
           return false;
         }
-        const lat = Number(v.latitude);
-        const lng = Number(v.longitude);
-        if (lat < -18.5 || lat > -8 || lng < 21.5 || lng > 34) return false;
+        if (outsideVillageIds.has(Number(v.id))) return false;
         return true;
       }).map((v) => ({
         id: v.id,
@@ -15901,6 +16302,13 @@ Note from the requester: ${conflict.note}` : ""}`,
   app2.post("/api/budget-items", ...auth, async (req, res) => {
     try {
       const data = insertBudgetItemSchema.parse(req.body);
+      if (data.facilityId && !await userCanAccessGeo(req.dbUser, req.tenantId, { facilityId: Number(data.facilityId) })) {
+        return res.status(403).json({ message: "Forbidden: no access to this facility." });
+      }
+      const editableCheck = await checkMicroplanEditableForFacility(req.tenantId, data.facilityId, data.year, data.quarter);
+      if (!editableCheck.editable) {
+        return res.status(400).json({ message: editableCheck.message });
+      }
       const item = await storage.createBudgetItem(req.tenantId, data);
       await logAudit(req, "create", "budget_item", item.id, null, item);
       res.status(201).json(item);
@@ -15913,6 +16321,18 @@ Note from the requester: ${conflict.note}` : ""}`,
     try {
       const entityId = parseInt(req.params.id);
       const body = { ...req.body };
+      const [oldItem] = await db.select().from(budgetItems).where((0, import_drizzle_orm15.and)((0, import_drizzle_orm15.eq)(budgetItems.id, entityId), (0, import_drizzle_orm15.eq)(budgetItems.tenantId, req.tenantId))).limit(1);
+      if (!oldItem) return res.status(404).json({ message: "Budget item not found" });
+      if (oldItem.facilityId && !await userCanAccessGeo(req.dbUser, req.tenantId, { facilityId: Number(oldItem.facilityId) })) {
+        return res.status(403).json({ message: "Forbidden: no access to this budget item." });
+      }
+      if (body.facilityId && !await userCanAccessGeo(req.dbUser, req.tenantId, { facilityId: Number(body.facilityId) })) {
+        return res.status(403).json({ message: "Forbidden: no access to target facility." });
+      }
+      const editableCheck = await checkMicroplanEditableForFacility(req.tenantId, oldItem.facilityId, oldItem.year, oldItem.quarter);
+      if (!editableCheck.editable) {
+        return res.status(400).json({ message: editableCheck.message });
+      }
       if (body.fundingSource !== void 0) {
         if (body.fundingSource === "other") {
           const v = (body.fundingSourceOther ?? "").toString().trim();
@@ -15988,6 +16408,15 @@ Note from the requester: ${conflict.note}` : ""}`,
   app2.delete("/api/budget-items/:id", ...auth, async (req, res) => {
     try {
       const entityId = parseInt(req.params.id);
+      const [oldItem] = await db.select().from(budgetItems).where((0, import_drizzle_orm15.and)((0, import_drizzle_orm15.eq)(budgetItems.id, entityId), (0, import_drizzle_orm15.eq)(budgetItems.tenantId, req.tenantId))).limit(1);
+      if (!oldItem) return res.status(404).json({ message: "Budget item not found" });
+      if (oldItem.facilityId && !await userCanAccessGeo(req.dbUser, req.tenantId, { facilityId: Number(oldItem.facilityId) })) {
+        return res.status(403).json({ message: "Forbidden: no access to this budget item." });
+      }
+      const editableCheck = await checkMicroplanEditableForFacility(req.tenantId, oldItem.facilityId, oldItem.year, oldItem.quarter);
+      if (!editableCheck.editable) {
+        return res.status(400).json({ message: editableCheck.message });
+      }
       const ok = await storage.deleteBudgetItem(req.tenantId, entityId);
       if (!ok) return res.status(404).json({ message: "Budget item not found" });
       await logAudit(req, "delete", "budget_item", entityId, null, null);
@@ -16009,6 +16438,13 @@ Note from the requester: ${conflict.note}` : ""}`,
   app2.post("/api/vaccine-requirements", ...auth, async (req, res) => {
     try {
       const data = insertVaccineRequirementSchema.parse(req.body);
+      if (data.facilityId && !await userCanAccessGeo(req.dbUser, req.tenantId, { facilityId: Number(data.facilityId) })) {
+        return res.status(403).json({ message: "Forbidden: no access to this facility." });
+      }
+      const editableCheck = await checkMicroplanEditableForFacility(req.tenantId, data.facilityId, data.year, data.quarter);
+      if (!editableCheck.editable) {
+        return res.status(400).json({ message: editableCheck.message });
+      }
       const created = await storage.createVaccineRequirement(req.tenantId, data);
       await logAudit(req, "create", "vaccine_requirement", created.id, null, created);
       res.status(201).json(created);
@@ -16020,6 +16456,18 @@ Note from the requester: ${conflict.note}` : ""}`,
   app2.patch("/api/vaccine-requirements/:id", ...auth, async (req, res) => {
     try {
       const entityId = parseInt(req.params.id);
+      const [oldReq] = await db.select().from(vaccineRequirements).where((0, import_drizzle_orm15.and)((0, import_drizzle_orm15.eq)(vaccineRequirements.id, entityId), (0, import_drizzle_orm15.eq)(vaccineRequirements.tenantId, req.tenantId))).limit(1);
+      if (!oldReq) return res.status(404).json({ message: "Vaccine requirement not found" });
+      if (oldReq.facilityId && !await userCanAccessGeo(req.dbUser, req.tenantId, { facilityId: Number(oldReq.facilityId) })) {
+        return res.status(403).json({ message: "Forbidden: no access to this vaccine requirement." });
+      }
+      if (req.body.facilityId && !await userCanAccessGeo(req.dbUser, req.tenantId, { facilityId: Number(req.body.facilityId) })) {
+        return res.status(403).json({ message: "Forbidden: no access to target facility." });
+      }
+      const editableCheck = await checkMicroplanEditableForFacility(req.tenantId, oldReq.facilityId, oldReq.year, oldReq.quarter);
+      if (!editableCheck.editable) {
+        return res.status(400).json({ message: editableCheck.message });
+      }
       const updated = await storage.updateVaccineRequirement(req.tenantId, entityId, req.body);
       if (!updated) return res.status(404).json({ message: "Vaccine requirement not found" });
       await logAudit(req, "update", "vaccine_requirement", entityId, null, updated);
@@ -16134,6 +16582,16 @@ Note from the requester: ${conflict.note}` : ""}`,
   app2.post("/api/mobilization", ...auth, async (req, res) => {
     try {
       const data = insertMobilizationActivitySchema.parse(req.body);
+      if (data.facilityId && !await userCanAccessGeo(req.dbUser, req.tenantId, { facilityId: Number(data.facilityId) })) {
+        return res.status(403).json({ message: "Forbidden: no access to this facility." });
+      }
+      const date = data.scheduledDate ? new Date(data.scheduledDate) : /* @__PURE__ */ new Date();
+      const year = date.getFullYear();
+      const quarter = Math.ceil((date.getMonth() + 1) / 3);
+      const editableCheck = await checkMicroplanEditableForFacility(req.tenantId, data.facilityId, year, quarter);
+      if (!editableCheck.editable) {
+        return res.status(400).json({ message: editableCheck.message });
+      }
       const activity = await storage.createMobilizationActivity(req.tenantId, data);
       await logAudit(req, "create", "mobilization_activity", activity.id, null, activity);
       res.status(201).json(activity);
@@ -16145,6 +16603,31 @@ Note from the requester: ${conflict.note}` : ""}`,
   app2.patch("/api/mobilization/:id", ...auth, async (req, res) => {
     try {
       const entityId = parseInt(req.params.id);
+      const [oldAct] = await db.select().from(mobilizationActivities).where((0, import_drizzle_orm15.and)((0, import_drizzle_orm15.eq)(mobilizationActivities.id, entityId), (0, import_drizzle_orm15.eq)(mobilizationActivities.tenantId, req.tenantId))).limit(1);
+      if (!oldAct) return res.status(404).json({ message: "Mobilization activity not found" });
+      if (oldAct.facilityId && !await userCanAccessGeo(req.dbUser, req.tenantId, { facilityId: Number(oldAct.facilityId) })) {
+        return res.status(403).json({ message: "Forbidden: no access to this mobilization activity." });
+      }
+      if (req.body.facilityId && !await userCanAccessGeo(req.dbUser, req.tenantId, { facilityId: Number(req.body.facilityId) })) {
+        return res.status(403).json({ message: "Forbidden: no access to target facility." });
+      }
+      const date = oldAct.scheduledDate ? new Date(oldAct.scheduledDate) : /* @__PURE__ */ new Date();
+      const year = date.getFullYear();
+      const quarter = Math.ceil((date.getMonth() + 1) / 3);
+      const editableCheck = await checkMicroplanEditableForFacility(req.tenantId, oldAct.facilityId, year, quarter);
+      if (!editableCheck.editable) {
+        return res.status(400).json({ message: editableCheck.message });
+      }
+      if (req.body.scheduledDate) {
+        const newDate = new Date(req.body.scheduledDate);
+        const newYear = newDate.getFullYear();
+        const newQuarter = Math.ceil((newDate.getMonth() + 1) / 3);
+        const facilityId = req.body.facilityId ? Number(req.body.facilityId) : oldAct.facilityId;
+        const newEditableCheck = await checkMicroplanEditableForFacility(req.tenantId, facilityId, newYear, newQuarter);
+        if (!newEditableCheck.editable) {
+          return res.status(400).json({ message: newEditableCheck.message });
+        }
+      }
       const activity = await storage.updateMobilizationActivity(req.tenantId, entityId, req.body);
       if (!activity) return res.status(404).json({ message: "Mobilization activity not found" });
       await logAudit(req, "update", "mobilization_activity", entityId, null, activity);
@@ -16157,6 +16640,18 @@ Note from the requester: ${conflict.note}` : ""}`,
   app2.delete("/api/mobilization/:id", ...auth, async (req, res) => {
     try {
       const entityId = parseInt(req.params.id);
+      const [oldAct] = await db.select().from(mobilizationActivities).where((0, import_drizzle_orm15.and)((0, import_drizzle_orm15.eq)(mobilizationActivities.id, entityId), (0, import_drizzle_orm15.eq)(mobilizationActivities.tenantId, req.tenantId))).limit(1);
+      if (!oldAct) return res.status(404).json({ message: "Mobilization activity not found" });
+      if (oldAct.facilityId && !await userCanAccessGeo(req.dbUser, req.tenantId, { facilityId: Number(oldAct.facilityId) })) {
+        return res.status(403).json({ message: "Forbidden: no access to this mobilization activity." });
+      }
+      const date = oldAct.scheduledDate ? new Date(oldAct.scheduledDate) : /* @__PURE__ */ new Date();
+      const year = date.getFullYear();
+      const quarter = Math.ceil((date.getMonth() + 1) / 3);
+      const editableCheck = await checkMicroplanEditableForFacility(req.tenantId, oldAct.facilityId, year, quarter);
+      if (!editableCheck.editable) {
+        return res.status(400).json({ message: editableCheck.message });
+      }
       const ok = await storage.deleteMobilizationActivity(req.tenantId, entityId);
       if (!ok) return res.status(404).json({ message: "Mobilization activity not found" });
       await logAudit(req, "delete", "mobilization_activity", entityId, null, null);
@@ -16207,6 +16702,9 @@ Note from the requester: ${conflict.note}` : ""}`,
       if (data.facilityId) {
         const f = await storage.getFacility(req.tenantId, data.facilityId);
         if (!f) return res.status(400).json({ message: "Facility does not belong to this tenant" });
+        if (!await userCanAccessGeo(req.dbUser, req.tenantId, { facilityId: Number(data.facilityId) })) {
+          return res.status(403).json({ message: "Forbidden: no access to this facility." });
+        }
       }
       if (data.microplanId) {
         const m = await storage.getMicroplan(req.tenantId, data.microplanId);
@@ -16236,6 +16734,13 @@ Note from the requester: ${conflict.note}` : ""}`,
       if (body.conductedDate && typeof body.conductedDate === "string") body.conductedDate = new Date(body.conductedDate);
       if (body.nextVisitDate && typeof body.nextVisitDate === "string") body.nextVisitDate = new Date(body.nextVisitDate);
       const old = await storage.getSupervisionVisit(req.tenantId, id);
+      if (!old) return res.status(404).json({ message: "Supervision visit not found" });
+      if (old.facilityId && !await userCanAccessGeo(req.dbUser, req.tenantId, { facilityId: Number(old.facilityId) })) {
+        return res.status(403).json({ message: "Forbidden: no access to this supervision visit." });
+      }
+      if (body.facilityId && !await userCanAccessGeo(req.dbUser, req.tenantId, { facilityId: Number(body.facilityId) })) {
+        return res.status(403).json({ message: "Forbidden: no access to target facility." });
+      }
       if (body.facilityId) {
         const f = await storage.getFacility(req.tenantId, body.facilityId);
         if (!f) return res.status(400).json({ message: "Facility does not belong to this tenant" });
@@ -16265,6 +16770,10 @@ Note from the requester: ${conflict.note}` : ""}`,
     try {
       const id = parseInt(req.params.id);
       const old = await storage.getSupervisionVisit(req.tenantId, id);
+      if (!old) return res.status(404).json({ message: "Supervision visit not found" });
+      if (old.facilityId && !await userCanAccessGeo(req.dbUser, req.tenantId, { facilityId: Number(old.facilityId) })) {
+        return res.status(403).json({ message: "Forbidden: no access to this supervision visit." });
+      }
       const ok = await storage.deleteSupervisionVisit(req.tenantId, id);
       if (!ok) return res.status(404).json({ message: "Supervision visit not found" });
       await logAudit(req, "delete", "supervision_visit", id, old, null);
@@ -16639,8 +17148,8 @@ Note from the requester: ${conflict.note}` : ""}`,
         SELECT
           (SELECT COUNT(*)::int          FROM facilities      WHERE tenant_id = ${tenantId})                            AS "totalFacilities",
           (SELECT COUNT(*)::int          FROM facilities      WHERE tenant_id = ${tenantId} AND is_active = true)       AS "activeFacilities",
-          (SELECT COUNT(*)::int          FROM villages        WHERE tenant_id = ${tenantId} AND CAST(latitude AS numeric) BETWEEN -18.5 AND -8.0 AND CAST(longitude AS numeric) BETWEEN 21.5 AND 34.0) AS "totalVillages",
-          (SELECT COUNT(*)::int          FROM villages        WHERE tenant_id = ${tenantId} AND assigned_facility_id IS NOT NULL AND CAST(distance_to_facility AS numeric) <= 5 AND CAST(latitude AS numeric) BETWEEN -18.5 AND -8.0 AND CAST(longitude AS numeric) BETWEEN 21.5 AND 34.0) AS "assignedVillages",
+          (SELECT COUNT(*)::int          FROM villages        WHERE tenant_id = ${tenantId})                            AS "totalVillages",
+          (SELECT COUNT(*)::int          FROM villages        WHERE tenant_id = ${tenantId} AND assigned_facility_id IS NOT NULL AND CAST(distance_to_facility AS numeric) <= 5) AS "assignedVillages",
           (SELECT COUNT(*)::int          FROM villages        WHERE tenant_id = ${tenantId} AND is_hard_to_reach = true) AS "htrVillages",
           (SELECT COUNT(*)::int          FROM session_plans   WHERE tenant_id = ${tenantId})                            AS "totalSessions",
           (SELECT COALESCE(SUM(total_population), 0)::bigint FROM population_data WHERE tenant_id = ${tenantId})       AS "totalPopulation",
@@ -17404,8 +17913,7 @@ Note from the requester: ${conflict.note}` : ""}`,
         }
       }
       const parsed = insertClientSchema.parse(req.body);
-      const geoContext = await getFacilityHierarchy(parsed.facilityId, req.tenantId);
-      if (!hasPermission(dbUser, "create_client", geoContext)) {
+      if (!await userCanAccessGeo(dbUser, req.tenantId, { facilityId: Number(parsed.facilityId) })) {
         return res.status(403).json({
           message: "Forbidden: You do not have permission to register clients for this geographic scope."
         });
@@ -17495,11 +18003,17 @@ Note from the requester: ${conflict.note}` : ""}`,
       res.status(500).json({ message: "Failed to create client record" });
     }
   });
-  app2.patch("/api/clients/:id", isAuthenticated, requireTenant, async (req, res) => {
+  app2.patch("/api/clients/:id", isAuthenticated, requireTenant, requireDbUser, async (req, res) => {
     try {
       let parsed = insertClientSchema.partial().parse(req.body);
       const existingClient = await storage.getClient(req.tenantId, req.params.id);
       if (!existingClient) return res.status(404).json({ message: "Client not found" });
+      if (existingClient.facilityId && !await userCanAccessGeo(req.dbUser, req.tenantId, { facilityId: Number(existingClient.facilityId) })) {
+        return res.status(403).json({ message: "Forbidden: no access to this client's geographic scope." });
+      }
+      if (parsed.facilityId && !await userCanAccessGeo(req.dbUser, req.tenantId, { facilityId: Number(parsed.facilityId) })) {
+        return res.status(403).json({ message: "Forbidden: no access to target facility scope." });
+      }
       const isCrossBorder = parsed.isCrossBorder !== void 0 ? parsed.isCrossBorder : existingClient.isCrossBorder;
       const facilityId = parsed.facilityId !== void 0 ? parsed.facilityId : existingClient.facilityId;
       let villageId = parsed.villageId !== void 0 ? parsed.villageId : existingClient.villageId;
@@ -17591,8 +18105,13 @@ Note from the requester: ${conflict.note}` : ""}`,
       res.status(500).json({ message: "Failed to update client record" });
     }
   });
-  app2.delete("/api/clients/:id", isAuthenticated, requireTenant, async (req, res) => {
+  app2.delete("/api/clients/:id", isAuthenticated, requireTenant, requireDbUser, async (req, res) => {
     try {
+      const client3 = await storage.getClient(req.tenantId, req.params.id);
+      if (!client3) return res.status(404).json({ message: "Client not found" });
+      if (client3.facilityId && !await userCanAccessGeo(req.dbUser, req.tenantId, { facilityId: Number(client3.facilityId) })) {
+        return res.status(403).json({ message: "Forbidden: no access to this client's geographic scope." });
+      }
       const deleted = await storage.deleteClient(req.tenantId, req.params.id);
       if (!deleted) return res.status(404).json({ message: "Client not found" });
       await logAudit(req, "delete_client", "client", null, null, { id: req.params.id });
@@ -17658,45 +18177,237 @@ Note from the requester: ${conflict.note}` : ""}`,
       const filename = `EPI_Certified_Booklet_${client3.name.replace(/\s+/g, "_")}.pdf`;
       res.setHeader("Content-Type", "application/pdf");
       res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
-      const mockPdfContent = `%PDF-1.4
-%\xE2\xE3\xCF\xD3
-1 0 obj
-<< /Type /Catalog /Pages 2 0 R >>
-endobj
-2 0 obj
-<< /Type /Pages /Kids [3 0 R] /Count 1 >>
-endobj
-3 0 obj
-<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << >> >>
-endobj
-4 0 obj
-<< /Length 120 >>
-stream
-BT
-/F1 12 Tf
-72 712 Td
-(Ministry of Health Certified Digital Immunization Booklet) Tj
-0 -20 Td
-(Patient Name: ${client3.name}) Tj
-0 -20 Td
-(Patient ID: ${client3.id}) Tj
-ET
-endstream
-endobj
-xref
-0 5
-0000000000 65535 f
-0000000015 00000 n
-0000000068 00000 n
-0000000127 00000 n
-0000000227 00000 n
-trailer
-<< /Size 5 /Root 1 0 R >>
-startxref
-397
-%%EOF
+      const tenant = await storage.getTenant(req.tenantId);
+      const facility = client3.facilityId ? await storage.getFacility(req.tenantId, client3.facilityId) : null;
+      const village = client3.villageId ? await storage.getVillage(req.tenantId, client3.villageId) : null;
+      const clientVaccinations2 = await storage.getClientVaccinations(req.tenantId, client3.id);
+      const BRAND = {
+        primary: "#1e40af",
+        // dark blue
+        secondary: "#0284c7",
+        // sky blue
+        success: "#10b981",
+        // emerald green
+        danger: "#ef4444",
+        // rose red
+        warning: "#f59e0b",
+        // amber
+        text: "#1e293b",
+        // slate-800
+        muted: "#64748b",
+        // slate-500
+        bgLight: "#f8fafc",
+        // slate-50
+        border: "#e2e8f0",
+        // slate-200
+        white: "#ffffff"
+      };
+      const doc = new import_pdfkit.default({ size: "A4", margin: 40 });
+      doc.pipe(res);
+      doc.rect(40, 40, 515, 8).fill(BRAND.primary);
+      let republicName = "REPUBLIC OF SOUTH SUDAN";
+      if (tenant?.code === "ZMB" || tenant?.name?.toLowerCase().includes("zambia")) {
+        republicName = "REPUBLIC OF ZAMBIA";
+      } else if (tenant?.code === "PNG" || tenant?.name?.toLowerCase().includes("papua")) {
+        republicName = "INDEPENDENT STATE OF PAPUA NEW GUINEA";
+      } else if (tenant) {
+        republicName = `REPUBLIC OF ${tenant.name.toUpperCase()}`;
+      }
+      doc.fillColor(BRAND.muted).fontSize(10).font("Helvetica-Bold").text(republicName, 40, 60, { align: "left" });
+      doc.fillColor(BRAND.text).fontSize(14).font("Helvetica-Bold").text("MINISTRY OF HEALTH", 40, 75);
+      doc.fillColor(BRAND.primary).fontSize(11).font("Helvetica-Bold").text("Certified E-Health Immunization Booklet", 40, 95);
+      const qrBoxX = 435;
+      const qrBoxY = 60;
+      doc.roundedRect(qrBoxX, qrBoxY, 120, 50, 6).fillColor(BRAND.bgLight).strokeColor(BRAND.border).lineWidth(1).fillAndStroke();
+      doc.fillColor(BRAND.success).fontSize(8).font("Helvetica-Bold").text("EPI CERTIFIED", qrBoxX + 10, qrBoxY + 12);
+      doc.fillColor(BRAND.muted).fontSize(7).font("Helvetica").text("Digital Verification QR", qrBoxX + 10, qrBoxY + 24);
+      doc.fillColor(BRAND.muted).fontSize(6).text("Scan on front card", qrBoxX + 10, qrBoxY + 34);
+      doc.moveTo(40, 115).lineTo(555, 115).strokeColor(BRAND.border).lineWidth(1).stroke();
+      doc.roundedRect(40, 125, 515, 30, 4).fillColor(BRAND.bgLight).strokeColor(BRAND.primary).lineWidth(0.5).fillAndStroke();
+      doc.fillColor(BRAND.primary).fontSize(8).font("Helvetica-Bold").text("UNIQUE CLIENT ID (E-Health Registry)", 50, 131);
+      doc.fillColor(BRAND.primary).fontSize(12).font("Helvetica-Bold").text(client3.clientId || client3.id.substring(0, 12).toUpperCase(), 50, 142);
+      const colWidth = 245;
+      const cardY = 165;
+      const cardHeight = 220;
+      doc.roundedRect(40, cardY, colWidth, cardHeight, 8).fillColor(BRAND.white).strokeColor(BRAND.border).lineWidth(1).fillAndStroke();
+      doc.fillColor(BRAND.primary).fontSize(9).font("Helvetica-Bold").text("CHILD DEMOGRAPHICS", 50, cardY + 12);
+      let curY = cardY + 30;
+      const renderField = (label, value, fontBold = false) => {
+        doc.fillColor(BRAND.muted).fontSize(8).font("Helvetica").text(label, 50, curY);
+        doc.fillColor(BRAND.text).fontSize(9).font(fontBold ? "Helvetica-Bold" : "Helvetica").text(value, 50, curY + 10);
+        curY += 28;
+      };
+      renderField("Child Full Name", client3.name, true);
+      renderField("Date of Birth", new Date(client3.dateOfBirth).toLocaleDateString(), false);
+      renderField("Gender / Sex", client3.gender ? client3.gender.toUpperCase() : "N/A", false);
+      renderField("Mother / Guardian Name", client3.parentName || "Not registered", false);
+      renderField("Guardian Contact Phone", client3.contactPhone || "None", false);
+      doc.roundedRect(310, cardY, colWidth, cardHeight, 8).fillColor(BRAND.white).strokeColor(BRAND.border).lineWidth(1).fillAndStroke();
+      doc.fillColor(BRAND.primary).fontSize(9).font("Helvetica-Bold").text("GEOGRAPHIC ACCESS SCOPE", 320, cardY + 12);
+      curY = cardY + 30;
+      const renderRightField = (label, value) => {
+        doc.fillColor(BRAND.muted).fontSize(8).font("Helvetica").text(label, 320, curY);
+        doc.fillColor(BRAND.text).fontSize(9).font("Helvetica-Bold").text(value, 320, curY + 10, { width: colWidth - 20 });
+        curY += 28;
+      };
+      const villageName = village ? village.name : "N/A";
+      const facilityName = facility ? facility.name : "N/A";
+      if (!client3.isCrossBorder) {
+        renderRightField("Village Catchment", villageName);
+        renderRightField("Registered Clinic", facilityName);
+        renderRightField("Catchment Status", client3.catchmentStatus ? client3.catchmentStatus.toUpperCase() : "CATCHMENT");
+      } else {
+        renderRightField("Cross-Border Registry", "FOREIGN RESIDENT");
+        renderRightField("Country of Origin", client3.countryOfOrigin || "N/A");
+        renderRightField("Border Point of Entry", client3.borderPointOfEntry || "N/A");
+        renderRightField("Foreign Residence", client3.foreignResidence || "N/A");
+      }
+      const advisoryY = 395;
+      const hasFlags = client3.isRefusal || Array.isArray(client3.contraindications) && client3.contraindications.length > 0;
+      if (hasFlags) {
+        doc.roundedRect(40, advisoryY, 515, 60, 8).fillColor("#fef2f2").strokeColor(BRAND.danger).lineWidth(1).fillAndStroke();
+        doc.fillColor(BRAND.danger).fontSize(9).font("Helvetica-Bold").text("CLINICAL RISK FLAGS & ADVISORIES", 50, advisoryY + 10);
+        let flagText = "";
+        if (client3.isRefusal) {
+          flagText += `\u2022 Guardian Refused Vaccines: ${client3.refusalReason || "No reason given"}
 `;
-      res.send(Buffer.from(mockPdfContent, "utf-8"));
+        }
+        if (Array.isArray(client3.contraindications) && client3.contraindications.length > 0) {
+          flagText += `\u2022 Contraindications: ${client3.contraindications.join(", ")}`;
+        }
+        doc.fillColor(BRAND.danger).fontSize(8).font("Helvetica").text(flagText, 50, advisoryY + 24, { width: 495, lineGap: 2 });
+      } else {
+        doc.roundedRect(40, advisoryY, 515, 60, 8).fillColor("#ecfdf5").strokeColor(BRAND.success).lineWidth(1).fillAndStroke();
+        doc.fillColor(BRAND.success).fontSize(9).font("Helvetica-Bold").text("CLINICAL ADVISORY & IMMUNIZATION STATUS", 50, advisoryY + 10);
+        doc.fillColor(BRAND.text).fontSize(8).font("Helvetica").text("This child has no recorded contraindications or refusal flags. Clinician instruction: Please continue administering the vaccine routine as scheduled below. Stamp and date the immunization grid on Page 2 after each dose is successfully administered.", 50, advisoryY + 24, { width: 495, lineGap: 1.5 });
+      }
+      doc.fillColor(BRAND.muted).fontSize(7).font("Helvetica").text(`Registry Sync Date: ${(/* @__PURE__ */ new Date()).toLocaleDateString()}  \u2022  System ID: ${client3.id}  \u2022  VaxPlan Platform v1.4.0`, 40, 770, { align: "center", width: 515 });
+      doc.addPage();
+      doc.rect(40, 40, 515, 8).fill(BRAND.primary);
+      doc.fillColor(BRAND.muted).fontSize(10).font("Helvetica-Bold").text("IMMUNIZATION SCHEDULE & RECORD GRID", 40, 60);
+      doc.fillColor(BRAND.text).fontSize(14).font("Helvetica-Bold").text("Official Dose Administration Register", 40, 75);
+      doc.fillColor(BRAND.muted).fontSize(8).font("Helvetica").text("Client:", 400, 60, { align: "right", width: 155 });
+      doc.fillColor(BRAND.primary).fontSize(9).font("Helvetica-Bold").text(client3.name, 400, 70, { align: "right", width: 155 });
+      doc.fillColor(BRAND.muted).fontSize(8).font("Courier-Bold").text(`ID: ${client3.clientId || client3.id.substring(0, 12).toUpperCase()}`, 400, 82, { align: "right", width: 155 });
+      doc.moveTo(40, 100).lineTo(555, 100).strokeColor(BRAND.border).lineWidth(1).stroke();
+      const tableY = 115;
+      doc.rect(40, tableY, 515, 20).fill(BRAND.primary);
+      const colX = {
+        dose: 45,
+        target: 195,
+        status: 275,
+        date: 345,
+        batch: 475
+      };
+      doc.fillColor(BRAND.white).fontSize(8).font("Helvetica-Bold");
+      doc.text("Antigen Dose", colX.dose, tableY + 6);
+      doc.text("Target", colX.target, tableY + 6);
+      doc.text("Status", colX.status, tableY + 6);
+      doc.text("Date Given / Facility", colX.date, tableY + 6);
+      doc.text("Batch / VVM", colX.batch, tableY + 6);
+      let rowY = tableY + 20;
+      const rowHeight = 22;
+      const VACCINE_SCHEDULE = [
+        { group: "At Birth", name: "BCG", weeks: 0, code: "BCG" },
+        { group: "At Birth", name: "OPV 0", weeks: 0, code: "OPV_0" },
+        { group: "6 Weeks", name: "OPV 1", weeks: 6, code: "OPV_1" },
+        { group: "6 Weeks", name: "Rotavirus 1", weeks: 6, code: "ROTA_1" },
+        { group: "6 Weeks", name: "Pentavalent 1", weeks: 6, code: "PENTA_1" },
+        { group: "6 Weeks", name: "PCV 1", weeks: 6, code: "PCV_1" },
+        { group: "10 Weeks", name: "OPV 2", weeks: 10, code: "OPV_2" },
+        { group: "10 Weeks", name: "Rotavirus 2", weeks: 10, code: "ROTA_2" },
+        { group: "10 Weeks", name: "Pentavalent 2", weeks: 10, code: "PENTA_2" },
+        { group: "10 Weeks", name: "PCV 2", weeks: 10, code: "PCV_2" },
+        { group: "14 Weeks", name: "OPV 3", weeks: 14, code: "OPV_3" },
+        { group: "14 Weeks", name: "Rotavirus 3", weeks: 14, code: "ROTA_3" },
+        { group: "14 Weeks", name: "Pentavalent 3", weeks: 14, code: "PENTA_3" },
+        { group: "14 Weeks", name: "PCV 3", weeks: 14, code: "PCV_3" },
+        { group: "14 Weeks", name: "IPV 1", weeks: 14, code: "IPV_1" },
+        { group: "9 Months", name: "Measles-Rubella 1", weeks: 39, code: "MR_1" },
+        { group: "9 Months", name: "IPV 2", weeks: 39, code: "IPV_2" },
+        { group: "18 Months", name: "Measles-Rubella 2", weeks: 78, code: "MR_2" }
+      ];
+      const isVaccineMissed = (code, ageDays) => {
+        const ageWeeks = ageDays / 7;
+        if (code === "OPV_0") return ageDays > 28;
+        if (code === "ROTA_1") return ageWeeks > 15;
+        if (code === "ROTA_2" || code === "ROTA_3") return ageWeeks > 24;
+        if (code === "MR_2") return ageDays > 730;
+        return ageDays > 365;
+      };
+      const findVaccination = (code, name) => {
+        return clientVaccinations2.find(
+          (v) => v.vaccineName && v.vaccineName.toLowerCase() === name.toLowerCase() || v.vaccineName && v.vaccineName.toLowerCase() === code.toLowerCase() || v.vaccineName && v.vaccineName.replace(/[-_\s]+/g, "").toLowerCase() === name.replace(/[-_\s]+/g, "").toLowerCase() || v.vaccineName && v.vaccineName.replace(/[-_\s]+/g, "").toLowerCase() === code.replace(/[-_\s]+/g, "").toLowerCase()
+        );
+      };
+      VACCINE_SCHEDULE.forEach((dose, idx) => {
+        if (idx % 2 === 1) {
+          doc.rect(40, rowY, 515, rowHeight).fill(BRAND.bgLight);
+        }
+        doc.moveTo(40, rowY + rowHeight).lineTo(555, rowY + rowHeight).strokeColor(BRAND.border).lineWidth(0.5).stroke();
+        const matchingVac = findVaccination(dose.code, dose.name);
+        let status = "PENDING";
+        let statusColor = BRAND.muted;
+        let dateText = "-";
+        let batchText = "-";
+        if (matchingVac) {
+          status = "GIVEN";
+          statusColor = BRAND.success;
+          dateText = new Date(matchingVac.administeredDate).toLocaleDateString();
+          if (facility) {
+            dateText += ` (${facility.name})`;
+          }
+          batchText = `#${matchingVac.batchNumber || "N/A"}`;
+          if (matchingVac.vvmStatus !== null && matchingVac.vvmStatus !== void 0) {
+            batchText += ` (VVM: ${matchingVac.vvmStatus})`;
+          }
+        } else {
+          const dob = new Date(client3.dateOfBirth);
+          const dueDate = new Date(dob.getTime() + dose.weeks * 7 * 24 * 60 * 60 * 1e3);
+          const today = /* @__PURE__ */ new Date();
+          today.setHours(0, 0, 0, 0);
+          const ageDays = (today.getTime() - dob.getTime()) / (24 * 60 * 60 * 1e3);
+          if (today >= dueDate) {
+            if (isVaccineMissed(dose.code, ageDays)) {
+              status = "MISSED";
+              statusColor = BRAND.danger;
+            } else {
+              const weeksOverdue = Math.floor((today.getTime() - dueDate.getTime()) / (7 * 24 * 60 * 60 * 1e3));
+              if (weeksOverdue < 4) {
+                status = "DUE";
+                statusColor = BRAND.warning;
+              } else {
+                status = "OVERDUE";
+                statusColor = BRAND.danger;
+              }
+            }
+            dateText = `Due: ${dueDate.toLocaleDateString()}`;
+          } else {
+            status = "PENDING";
+            statusColor = BRAND.muted;
+            dateText = `Due: ${dueDate.toLocaleDateString()}`;
+          }
+        }
+        doc.fillColor(BRAND.text).fontSize(8).font("Helvetica-Bold").text(dose.name, colX.dose, rowY + 6);
+        doc.fillColor(BRAND.muted).fontSize(7).font("Helvetica").text(dose.group, colX.target, rowY + 7);
+        doc.save();
+        doc.fillColor(statusColor).fontSize(7).font("Helvetica-Bold").text(status, colX.status, rowY + 7);
+        doc.restore();
+        doc.fillColor(BRAND.text).fontSize(7.5).font("Helvetica").text(dateText, colX.date, rowY + 7, { width: 125, height: 14, ellipsis: true });
+        doc.fillColor(BRAND.muted).fontSize(7.5).font("Courier").text(batchText, colX.batch, rowY + 7, { width: 75, height: 14, ellipsis: true });
+        rowY += rowHeight;
+      });
+      const sigY = 540;
+      doc.moveTo(40, sigY).lineTo(555, sigY).strokeColor(BRAND.border).lineWidth(1).stroke();
+      doc.fillColor(BRAND.primary).fontSize(9).font("Helvetica-Bold").text("CLINICIAN CERTIFICATION SIGN-OFF", 40, sigY + 15);
+      doc.fillColor(BRAND.muted).fontSize(8).font("Helvetica");
+      doc.text("Clinician Name: _______________________", 40, sigY + 35);
+      doc.text("Signature & Stamp: _______________________", 40, sigY + 55);
+      doc.text("Date Signed: _______________________", 320, sigY + 35);
+      doc.text("Facility Location: _______________________", 320, sigY + 55);
+      doc.fillColor(BRAND.success).fontSize(7).font("Helvetica-Bold").text("MINISTRY OF HEALTH OFFICIAL IMMUNIZATION REGISTER", 40, sigY + 95, { align: "center", width: 515 });
+      doc.fillColor(BRAND.muted).fontSize(7).font("Helvetica").text(`Document Ref: ${client3.id.toUpperCase()}  \u2022  Certified Record Booklet  \u2022  Page 2 of 2`, 40, 770, { align: "center", width: 515 });
+      doc.end();
     } catch (err) {
       console.error("GET /api/clients/:id/booklet/download failed:", err);
       res.status(500).json({ message: "Failed to download digital booklet" });
@@ -18014,8 +18725,13 @@ startxref
       res.status(500).json({ message: "Failed to fetch client vaccinations" });
     }
   });
-  app2.post("/api/clients/:id/vaccinate", isAuthenticated, requireTenant, async (req, res) => {
+  app2.post("/api/clients/:id/vaccinate", isAuthenticated, requireTenant, requireDbUser, async (req, res) => {
     try {
+      const client3 = await storage.getClient(req.tenantId, req.params.id);
+      if (!client3) return res.status(404).json({ message: "Client not found" });
+      if (client3.facilityId && !await userCanAccessGeo(req.dbUser, req.tenantId, { facilityId: Number(client3.facilityId) })) {
+        return res.status(403).json({ message: "Forbidden: no access to this client's geographic scope." });
+      }
       const schema = insertClientVaccinationSchema.omit({ clientId: true });
       const parsed = schema.parse(req.body);
       const vaccination = await storage.createClientVaccination(req.tenantId, {
@@ -18038,8 +18754,13 @@ startxref
       res.status(500).json({ message: "Failed to log administered vaccine dose" });
     }
   });
-  app2.post("/api/clients/:id/vaccinate-batch", isAuthenticated, requireTenant, async (req, res) => {
+  app2.post("/api/clients/:id/vaccinate-batch", isAuthenticated, requireTenant, requireDbUser, async (req, res) => {
     try {
+      const client3 = await storage.getClient(req.tenantId, req.params.id);
+      if (!client3) return res.status(404).json({ message: "Client not found" });
+      if (client3.facilityId && !await userCanAccessGeo(req.dbUser, req.tenantId, { facilityId: Number(client3.facilityId) })) {
+        return res.status(403).json({ message: "Forbidden: no access to this client's geographic scope." });
+      }
       const schema = import_zod3.z.array(insertClientVaccinationSchema.omit({ clientId: true }));
       const parsed = schema.parse(req.body);
       const results = await db.transaction(async (tx) => {
@@ -18125,6 +18846,10 @@ startxref
       if (isNaN(sessionPlanId)) return res.status(400).json({ message: "Invalid session plan ID" });
       const session3 = await storage.getSessionPlan(req.tenantId, sessionPlanId);
       if (!session3) return res.status(404).json({ message: "Session plan not found" });
+      const parentCheck = await validateParentMicroplan(req.tenantId, session3.microplanId);
+      if (!parentCheck.ok) {
+        return res.status(parentCheck.status).json({ message: parentCheck.message });
+      }
       const schema = insertSessionDayPlanSchema.omit({ sessionPlanId: true });
       const parsed = schema.parse(req.body);
       const dateVal = await validatePlanningLeadTimeAndNoConflict(
@@ -18152,23 +18877,25 @@ startxref
     try {
       const id = parseInt(req.params.id);
       if (isNaN(id)) return res.status(400).json({ message: "Invalid day plan ID" });
+      const [dayPlan] = await db.select({ sessionPlanId: sessionDayPlans.sessionPlanId }).from(sessionDayPlans).where((0, import_drizzle_orm15.eq)(sessionDayPlans.id, id)).limit(1);
+      if (!dayPlan) return res.status(404).json({ message: "Session day plan not found" });
+      const session3 = await storage.getSessionPlan(req.tenantId, dayPlan.sessionPlanId);
+      if (!session3) return res.status(404).json({ message: "Session plan not found" });
+      const parentCheck = await validateParentMicroplan(req.tenantId, session3.microplanId);
+      if (!parentCheck.ok) {
+        return res.status(parentCheck.status).json({ message: parentCheck.message });
+      }
       const parsed = insertSessionDayPlanSchema.partial().parse(req.body);
       if (parsed.sessionDate) {
-        const dayPlan = await db.select({ sessionPlanId: sessionDayPlans.sessionPlanId }).from(sessionDayPlans).where((0, import_drizzle_orm15.eq)(sessionDayPlans.id, id)).limit(1);
-        if (dayPlan.length > 0) {
-          const session3 = await storage.getSessionPlan(req.tenantId, dayPlan[0].sessionPlanId);
-          if (session3) {
-            const dateVal = await validatePlanningLeadTimeAndNoConflict(
-              req.tenantId,
-              session3.facilityId,
-              parsed.sessionDate,
-              void 0,
-              id
-            );
-            if (!dateVal.isValid) {
-              return res.status(400).json({ message: dateVal.message });
-            }
-          }
+        const dateVal = await validatePlanningLeadTimeAndNoConflict(
+          req.tenantId,
+          session3.facilityId,
+          parsed.sessionDate,
+          void 0,
+          id
+        );
+        if (!dateVal.isValid) {
+          return res.status(400).json({ message: dateVal.message });
         }
       }
       const updated = await storage.updateSessionDayPlan(req.tenantId, id, parsed);
@@ -18187,6 +18914,13 @@ startxref
       const id = parseInt(req.params.id);
       if (isNaN(id)) return res.status(400).json({ message: "Invalid day plan ID" });
       const [dayRow] = await db.select({ sessionPlanId: sessionDayPlans.sessionPlanId, dayNumber: sessionDayPlans.dayNumber }).from(sessionDayPlans).where((0, import_drizzle_orm15.and)((0, import_drizzle_orm15.eq)(sessionDayPlans.id, id), (0, import_drizzle_orm15.eq)(sessionDayPlans.tenantId, req.tenantId)));
+      if (!dayRow) return res.status(404).json({ message: "Session day plan not found" });
+      const session3 = await storage.getSessionPlan(req.tenantId, dayRow.sessionPlanId);
+      if (!session3) return res.status(404).json({ message: "Session plan not found" });
+      const parentCheck = await validateParentMicroplan(req.tenantId, session3.microplanId);
+      if (!parentCheck.ok) {
+        return res.status(parentCheck.status).json({ message: parentCheck.message });
+      }
       const deleted = await storage.deleteSessionDayPlan(req.tenantId, id);
       if (!deleted) return res.status(404).json({ message: "Session day plan not found" });
       let prunedPersonnelLines = 0;
@@ -20462,6 +21196,15 @@ startxref
               results.push({ clientId, ok: false, error: "Session not found" });
               continue;
             }
+            let parentCheck = parentCache.get(old.microplanId);
+            if (!parentCheck) {
+              parentCheck = await validateParentMicroplan(req.tenantId, old.microplanId);
+              parentCache.set(old.microplanId, parentCheck);
+            }
+            if (!parentCheck.ok) {
+              results.push({ clientId, ok: false, error: parentCheck.message });
+              continue;
+            }
             let geo = geoCache.get(old.facilityId);
             if (!geo) {
               geo = await getFacilityHierarchy(old.facilityId, req.tenantId);
@@ -20583,6 +21326,25 @@ startxref
           }
           if (id != null) {
             const parsedBody = insertSessionDayPlanSchema.partial().parse(body);
+            const [dayPlan] = await db.select({ sessionPlanId: sessionDayPlans.sessionPlanId }).from(sessionDayPlans).where((0, import_drizzle_orm15.eq)(sessionDayPlans.id, Number(id))).limit(1);
+            if (!dayPlan) {
+              results.push({ clientId, ok: false, error: "Day plan not found" });
+              continue;
+            }
+            let session3 = sessionCache.get(dayPlan.sessionPlanId);
+            if (session3 === void 0) {
+              session3 = await storage.getSessionPlan(req.tenantId, dayPlan.sessionPlanId);
+              sessionCache.set(dayPlan.sessionPlanId, session3);
+            }
+            if (!session3) {
+              results.push({ clientId, ok: false, error: "Session plan not found" });
+              continue;
+            }
+            const parentCheck = await validateParentMicroplan(req.tenantId, session3.microplanId);
+            if (!parentCheck.ok) {
+              results.push({ clientId, ok: false, error: parentCheck.message });
+              continue;
+            }
             const updated = await storage.updateSessionDayPlan(req.tenantId, Number(id), parsedBody);
             if (!updated) {
               results.push({ clientId, ok: false, error: "Day plan not found" });
@@ -20603,6 +21365,11 @@ startxref
             }
             if (!session3) {
               results.push({ clientId, ok: false, error: "Session plan not found" });
+              continue;
+            }
+            const parentCheck = await validateParentMicroplan(req.tenantId, session3.microplanId);
+            if (!parentCheck.ok) {
+              results.push({ clientId, ok: false, error: parentCheck.message });
               continue;
             }
             const schema = insertSessionDayPlanSchema.omit({ sessionPlanId: true });
@@ -20706,6 +21473,24 @@ startxref
           const id = body.id;
           delete body.id;
           if (id != null) {
+            const [oldReq] = await db.select().from(vaccineRequirements).where((0, import_drizzle_orm15.and)((0, import_drizzle_orm15.eq)(vaccineRequirements.id, Number(id)), (0, import_drizzle_orm15.eq)(vaccineRequirements.tenantId, req.tenantId))).limit(1);
+            if (!oldReq) {
+              results.push({ clientId, ok: false, error: "Vaccine requirement not found" });
+              continue;
+            }
+            if (oldReq.facilityId && !await userCanAccessGeo(req.dbUser, req.tenantId, { facilityId: Number(oldReq.facilityId) })) {
+              results.push({ clientId, ok: false, error: "Forbidden: no access to this vaccine requirement." });
+              continue;
+            }
+            if (body.facilityId && !await userCanAccessGeo(req.dbUser, req.tenantId, { facilityId: Number(body.facilityId) })) {
+              results.push({ clientId, ok: false, error: "Forbidden: no access to target facility." });
+              continue;
+            }
+            const editableCheck = await checkMicroplanEditableForFacility(req.tenantId, oldReq.facilityId, oldReq.year, oldReq.quarter);
+            if (!editableCheck.editable) {
+              results.push({ clientId, ok: false, error: editableCheck.message });
+              continue;
+            }
             const updated = await storage.updateVaccineRequirement(req.tenantId, Number(id), body);
             if (!updated) {
               results.push({ clientId, ok: false, error: "Vaccine requirement not found" });
@@ -20715,6 +21500,15 @@ startxref
             results.push({ clientId, ok: true, id: updated.id, data: updated });
           } else {
             const data = insertVaccineRequirementSchema.parse(body);
+            if (data.facilityId && !await userCanAccessGeo(req.dbUser, req.tenantId, { facilityId: Number(data.facilityId) })) {
+              results.push({ clientId, ok: false, error: "Forbidden: no access to target facility." });
+              continue;
+            }
+            const editableCheck = await checkMicroplanEditableForFacility(req.tenantId, data.facilityId, data.year, data.quarter);
+            if (!editableCheck.editable) {
+              results.push({ clientId, ok: false, error: editableCheck.message });
+              continue;
+            }
             const created = await storage.createVaccineRequirement(req.tenantId, data);
             await logAudit(req, "create", "vaccine_requirement", created.id, null, created);
             results.push({ clientId, ok: true, id: created.id, data: created });
@@ -20742,6 +21536,38 @@ startxref
           const id = body.id;
           delete body.id;
           if (id != null) {
+            const [oldAct] = await db.select().from(mobilizationActivities).where((0, import_drizzle_orm15.and)((0, import_drizzle_orm15.eq)(mobilizationActivities.id, Number(id)), (0, import_drizzle_orm15.eq)(mobilizationActivities.tenantId, req.tenantId))).limit(1);
+            if (!oldAct) {
+              results.push({ clientId, ok: false, error: "Mobilization activity not found" });
+              continue;
+            }
+            if (oldAct.facilityId && !await userCanAccessGeo(req.dbUser, req.tenantId, { facilityId: Number(oldAct.facilityId) })) {
+              results.push({ clientId, ok: false, error: "Forbidden: no access to this mobilization activity." });
+              continue;
+            }
+            if (body.facilityId && !await userCanAccessGeo(req.dbUser, req.tenantId, { facilityId: Number(body.facilityId) })) {
+              results.push({ clientId, ok: false, error: "Forbidden: no access to target facility." });
+              continue;
+            }
+            const date = oldAct.scheduledDate ? new Date(oldAct.scheduledDate) : /* @__PURE__ */ new Date();
+            const year = date.getFullYear();
+            const quarter = Math.ceil((date.getMonth() + 1) / 3);
+            const editableCheck = await checkMicroplanEditableForFacility(req.tenantId, oldAct.facilityId, year, quarter);
+            if (!editableCheck.editable) {
+              results.push({ clientId, ok: false, error: editableCheck.message });
+              continue;
+            }
+            if (body.scheduledDate) {
+              const newDate = new Date(body.scheduledDate);
+              const newYear = newDate.getFullYear();
+              const newQuarter = Math.ceil((newDate.getMonth() + 1) / 3);
+              const facilityId = body.facilityId ? Number(body.facilityId) : oldAct.facilityId;
+              const newEditableCheck = await checkMicroplanEditableForFacility(req.tenantId, facilityId, newYear, newQuarter);
+              if (!newEditableCheck.editable) {
+                results.push({ clientId, ok: false, error: newEditableCheck.message });
+                continue;
+              }
+            }
             const updated = await storage.updateMobilizationActivity(req.tenantId, Number(id), body);
             if (!updated) {
               results.push({ clientId, ok: false, error: "Mobilization activity not found" });
@@ -20751,6 +21577,18 @@ startxref
             results.push({ clientId, ok: true, id: updated.id, data: updated });
           } else {
             const data = insertMobilizationActivitySchema.parse(body);
+            if (data.facilityId && !await userCanAccessGeo(req.dbUser, req.tenantId, { facilityId: Number(data.facilityId) })) {
+              results.push({ clientId, ok: false, error: "Forbidden: no access to target facility." });
+              continue;
+            }
+            const date = data.scheduledDate ? new Date(data.scheduledDate) : /* @__PURE__ */ new Date();
+            const year = date.getFullYear();
+            const quarter = Math.ceil((date.getMonth() + 1) / 3);
+            const editableCheck = await checkMicroplanEditableForFacility(req.tenantId, data.facilityId, year, quarter);
+            if (!editableCheck.editable) {
+              results.push({ clientId, ok: false, error: editableCheck.message });
+              continue;
+            }
             const created = await storage.createMobilizationActivity(req.tenantId, data);
             await logAudit(req, "create", "mobilization_activity", created.id, null, created);
             results.push({ clientId, ok: true, id: created.id, data: created });
@@ -20787,6 +21625,24 @@ startxref
             body.fundingSourceOther = null;
           }
           if (id != null) {
+            const [oldItem] = await db.select().from(budgetItems).where((0, import_drizzle_orm15.and)((0, import_drizzle_orm15.eq)(budgetItems.id, Number(id)), (0, import_drizzle_orm15.eq)(budgetItems.tenantId, req.tenantId))).limit(1);
+            if (!oldItem) {
+              results.push({ clientId, ok: false, error: "Budget item not found" });
+              continue;
+            }
+            if (oldItem.facilityId && !await userCanAccessGeo(req.dbUser, req.tenantId, { facilityId: Number(oldItem.facilityId) })) {
+              results.push({ clientId, ok: false, error: "Forbidden: no access to this budget item." });
+              continue;
+            }
+            if (body.facilityId && !await userCanAccessGeo(req.dbUser, req.tenantId, { facilityId: Number(body.facilityId) })) {
+              results.push({ clientId, ok: false, error: "Forbidden: no access to target facility." });
+              continue;
+            }
+            const editableCheck = await checkMicroplanEditableForFacility(req.tenantId, oldItem.facilityId, oldItem.year, oldItem.quarter);
+            if (!editableCheck.editable) {
+              results.push({ clientId, ok: false, error: editableCheck.message });
+              continue;
+            }
             const updated = await storage.updateBudgetItem(req.tenantId, Number(id), body);
             if (!updated) {
               results.push({ clientId, ok: false, error: "Budget item not found" });
@@ -20796,6 +21652,15 @@ startxref
             results.push({ clientId, ok: true, id: updated.id, data: updated });
           } else {
             const data = insertBudgetItemSchema.parse(body);
+            if (data.facilityId && !await userCanAccessGeo(req.dbUser, req.tenantId, { facilityId: Number(data.facilityId) })) {
+              results.push({ clientId, ok: false, error: "Forbidden: no access to target facility." });
+              continue;
+            }
+            const editableCheck = await checkMicroplanEditableForFacility(req.tenantId, data.facilityId, data.year, data.quarter);
+            if (!editableCheck.editable) {
+              results.push({ clientId, ok: false, error: editableCheck.message });
+              continue;
+            }
             const created = await storage.createBudgetItem(req.tenantId, data);
             await logAudit(req, "create", "budget_item", created.id, null, created);
             results.push({ clientId, ok: true, id: created.id, data: created });
@@ -20845,6 +21710,18 @@ startxref
               continue;
             }
             const old = await storage.getSupervisionVisit(req.tenantId, Number(id));
+            if (!old) {
+              results.push({ clientId, ok: false, error: "Supervision visit not found" });
+              continue;
+            }
+            if (old.facilityId && !await userCanAccessGeo(req.dbUser, req.tenantId, { facilityId: Number(old.facilityId) })) {
+              results.push({ clientId, ok: false, error: "Forbidden: no access to this supervision visit." });
+              continue;
+            }
+            if (body.facilityId && !await userCanAccessGeo(req.dbUser, req.tenantId, { facilityId: Number(body.facilityId) })) {
+              results.push({ clientId, ok: false, error: "Forbidden: no access to target facility." });
+              continue;
+            }
             const updated = await storage.updateSupervisionVisit(req.tenantId, Number(id), body);
             if (!updated) {
               results.push({ clientId, ok: false, error: "Supervision visit not found" });
@@ -20860,6 +21737,10 @@ startxref
             }
             if (data.microplanId && !await checkMicroplan(data.microplanId)) {
               results.push({ clientId, ok: false, error: "Microplan does not belong to this tenant" });
+              continue;
+            }
+            if (data.facilityId && !await userCanAccessGeo(req.dbUser, req.tenantId, { facilityId: Number(data.facilityId) })) {
+              results.push({ clientId, ok: false, error: "Forbidden: no access to target facility." });
               continue;
             }
             const created = await storage.createSupervisionVisit(req.tenantId, data);
@@ -22175,6 +23056,12 @@ This response is powered by the local VaxPlan database query engine. You can que
     try {
       const facilityId = parseInt(req.params.id, 10);
       if (isNaN(facilityId)) return res.status(400).json({ message: "Invalid facility id" });
+      const locked = await isFacilityMicroplanLocked(req.tenantId, facilityId);
+      if (locked) {
+        return res.status(400).json({
+          message: "Facility's catchment area editing is locked because there is a submitted microplan."
+        });
+      }
       const { geojson, gridPopulation } = req.body;
       if (!geojson || typeof geojson !== "object") return res.status(400).json({ message: "geojson polygon required" });
       const [updated] = await db.update(facilities).set({
@@ -22193,6 +23080,16 @@ This response is powered by the local VaxPlan database query engine. You can que
     try {
       const villageId = parseInt(req.params.id, 10);
       if (isNaN(villageId)) return res.status(400).json({ message: "Invalid village id" });
+      const [village] = await db.select({ facilityId: villages.assignedFacilityId }).from(villages).where((0, import_drizzle_orm15.and)((0, import_drizzle_orm15.eq)(villages.id, villageId), (0, import_drizzle_orm15.eq)(villages.tenantId, req.tenantId))).limit(1);
+      if (!village) return res.status(404).json({ message: "Village not found" });
+      if (village.facilityId) {
+        const locked = await isFacilityMicroplanLocked(req.tenantId, village.facilityId);
+        if (locked) {
+          return res.status(400).json({
+            message: "Village's community area editing is locked because there is a submitted microplan for the parent facility."
+          });
+        }
+      }
       const { geojson, griddedPopulation, polygonColor, populationSourceLabel } = req.body;
       if (!geojson || typeof geojson !== "object") return res.status(400).json({ message: "geojson polygon required" });
       const [updated] = await db.update(villages).set({
@@ -22584,11 +23481,12 @@ This response is powered by the local VaxPlan database query engine. You can que
   });
   return httpServer2;
 }
-var import_express, import_child_process, import_crypto, import_fs4, import_zod3, import_fs5, import_path4, import_drizzle_orm15, import_turf, _geoScopeCache, GEO_SCOPE_TTL_MS, auth, DEFAULT_SUPERVISION_CHECKLIST;
+var import_express, import_pdfkit, import_child_process, import_crypto, import_fs4, import_zod3, import_fs5, import_path4, import_drizzle_orm15, import_turf, _geoScopeCache, GEO_SCOPE_TTL_MS, auth, DEFAULT_SUPERVISION_CHECKLIST, outsideVillageIds, zambiaGeoJSON;
 var init_routes = __esm({
   "server/routes.ts"() {
     "use strict";
     import_express = __toESM(require("express"), 1);
+    import_pdfkit = __toESM(require("pdfkit"), 1);
     init_storage();
     init_auth();
     init_authorization();
@@ -22646,6 +23544,8 @@ var init_routes = __esm({
       { key: "staff_trained", label: "All vaccinators trained on current schedule", response: "" },
       { key: "community_engagement", label: "Recent community sensitisation activity logged", response: "" }
     ];
+    outsideVillageIds = /* @__PURE__ */ new Set();
+    zambiaGeoJSON = null;
   }
 });
 

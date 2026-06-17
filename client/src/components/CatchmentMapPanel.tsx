@@ -19,6 +19,7 @@ import {
   MapContainer, TileLayer, Polygon, Marker, Popup, useMap,
 } from "react-leaflet";
 import L from "leaflet";
+import { usePersistedBasemap, BasemapTileLayer, BasemapSwitcher } from "@/components/map/BasemapToggle";
 import * as turf from "@turf/turf";
 import type {
   Feature as GeoJSONFeature,
@@ -74,10 +75,12 @@ interface Props {
 }
 
 // ─── Tile layers ──────────────────────────────────────────────────────────────
+/* Commented out original tile layers configuration for dynamic/persisted basemaps
 const TILES = {
-  osm: { url: "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", attr: "© OpenStreetMap contributors" },
-  satellite: { url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", attr: "© Esri World Imagery" },
+  positron: { url: "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", attr: "© OpenStreetMap contributors © CARTO" },
+  voyager: { url: "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png", attr: "© OpenStreetMap contributors © CARTO" },
 };
+*/
 
 // ─── Convert [lat,lng] coords array to GeoJSON Polygon ring ──────────────────
 function toGeoRing(coords: [number, number][]): [number, number][] {
@@ -250,7 +253,9 @@ export function CatchmentMapPanel({
   const [selectedCommunity, setSelectedCommunity] = useState<string>("");
   const [saving, setSaving] = useState(false);
   const [loadingPop, setLoadingPop] = useState(false);
-  const [tileLayer, setTileLayer] = useState<"osm" | "satellite">("osm");
+  // Original local tileLayer state commented out for persisted basemaps
+  // const [tileLayer, setTileLayer] = useState<"positron" | "voyager">("positron");
+  const [basemap, setBasemap] = usePersistedBasemap("positron");
   const [fitCoords, setFitCoords] = useState<[number, number][] | null>(null);
   const [extracting, setExtracting] = useState(false);
   const [extractResult, setExtractResult] = useState<ExtractResult | null>(null);
@@ -533,10 +538,12 @@ export function CatchmentMapPanel({
 
         <div className="h-4 w-px bg-border mx-1" />
 
-        <button type="button" onClick={() => setTileLayer((t) => t === "osm" ? "satellite" : "osm")}
+        {/* Commented out original local toggle button in favor of floating BasemapSwitcher
+        <button type="button" onClick={() => setTileLayer((t) => t === "positron" ? "voyager" : "positron")}
           className="rounded-md border px-2.5 py-1 text-xs hover:bg-muted">
-          {tileLayer === "osm" ? "🛰 Satellite" : "🗺 OSM"}
+          {tileLayer === "positron" ? "🛰 Voyager" : "🗺 Positron"}
         </button>
+        */}
         <button type="button" disabled={!catchment || extracting} onClick={extractCommunities}
           className="rounded-md border border-sky-300 bg-sky-50 px-2.5 py-1 text-xs font-medium text-sky-700 hover:bg-sky-100 disabled:opacity-50">
           {extracting ? "⏳ Extracting…" : "🔍 Extract Communities"}
@@ -568,7 +575,10 @@ export function CatchmentMapPanel({
       {/* ── Map ── */}
       <div className="relative h-[500px] w-full overflow-hidden rounded-xl border shadow-sm">
         <MapContainer center={center} zoom={13} style={{ height: "100%", width: "100%" }} doubleClickZoom={false}>
+          {/* Commented out original static TileLayer in favor of dynamic BasemapTileLayer
           <TileLayer url={TILES[tileLayer].url} attribution={TILES[tileLayer].attr} maxNativeZoom={19} maxZoom={22} />
+          */}
+          <BasemapTileLayer basemap={basemap} />
 
           {/* HF Catchment polygon */}
           {catchment && (
@@ -636,6 +646,7 @@ export function CatchmentMapPanel({
           <FitToPolygon coords={fitCoords} />
           <GeolocateButton />
         </MapContainer>
+        <BasemapSwitcher basemap={basemap} onChange={setBasemap} />
 
         {/* Map overlay controls (outside map, uses regular absolute positioning) */}
         <div className="absolute top-2 left-2 z-[1000] flex flex-col gap-1">

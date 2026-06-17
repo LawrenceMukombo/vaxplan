@@ -129,7 +129,8 @@ import { Switch } from "@/components/ui/switch";
 import { MapContainer, TileLayer, Marker, useMap, useMapEvents } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import { OSM_TILE_ATTRIBUTION } from "@/data/dataSources";
+import { CARTO_POSITRON_ATTRIBUTION } from "@/data/dataSources";
+import { usePersistedBasemap, BasemapTileLayer } from "@/components/map/BasemapToggle";
 import {
   applyDefaultLeafletPinIcon,
   createFilledPinIcon,
@@ -802,6 +803,7 @@ export default function ClientLogbook() {
   const { toast } = useToast();
   const { user } = useAuth();
   const { info: versionInfo } = useAppUpdate();
+  const [basemap] = usePersistedBasemap("positron");
   const messagingSenderNumber = versionInfo?.messagingSenderNumber || "+260963328807";
 
   // Tenant context — used for terminology / map defaults. Cross-tenant write
@@ -3953,12 +3955,16 @@ export default function ClientLogbook() {
                       zoom={13}
                       style={{ height: "100%", width: "100%" }}
                     >
+                      {/* Commented out original static TileLayer and replaced with dynamic BasemapTileLayer */}
+                      {/*
                       <TileLayer
-                        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                        attribution={OSM_TILE_ATTRIBUTION}
+                        url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
+                        attribution={CARTO_POSITRON_ATTRIBUTION}
                         maxNativeZoom={19}
                         maxZoom={22}
                       />
+                      */}
+                      <BasemapTileLayer basemap={basemap} />
                       <ChangeMapView center={mapCenter} />
                       <MapEvents onClick={handleMapClick} />
                       {watchLat && watchLng && !isNaN(parseFloat(watchLat)) && !isNaN(parseFloat(watchLng)) && (
@@ -4087,7 +4093,7 @@ export default function ClientLogbook() {
                           <td className="p-3">
                             <Input
                               placeholder="Batch No."
-                              value={row.batchNumber}
+                              value={row.batchNumber || ""}
                               disabled={isDisabled || !row.checked}
                               onChange={(e) => {
                                 setGridRows(prev => prev.map((r, i) => i === idx ? { ...r, batchNumber: e.target.value } : r));
@@ -4098,7 +4104,7 @@ export default function ClientLogbook() {
                           <td className="p-3">
                             <Input
                               type="date"
-                              value={row.expiryDate}
+                              value={row.expiryDate || ""}
                               disabled={isDisabled || !row.checked}
                               onChange={(e) => {
                                 setGridRows(prev => prev.map((r, i) => i === idx ? { ...r, expiryDate: e.target.value } : r));
@@ -4108,7 +4114,7 @@ export default function ClientLogbook() {
                           </td>
                           <td className="p-3">
                             <Select
-                              value={row.vvmStatus || undefined}
+                              value={row.vvmStatus || ""}
                               disabled={isDisabled || !row.checked}
                               onValueChange={(val) => {
                                 setGridRows(prev => prev.map((r, i) => i === idx ? { ...r, vvmStatus: val } : r));

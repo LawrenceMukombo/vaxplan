@@ -89,7 +89,7 @@ export default function ZeroDoseVillages() {
   const [facilityId, setFacilityId] = useState<number | null>(null);
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<Set<number>>(new Set());
-  const [basemap, setBasemap] = usePersistedBasemap("osm");
+  const [basemap, setBasemap] = usePersistedBasemap("positron");
 
   const [antigen, setAntigen] = useState<string>(defaultAntigenFor("zero"));
   const [antigenTouched, setAntigenTouched] = useState(false);
@@ -102,6 +102,10 @@ export default function ZeroDoseVillages() {
   useEffect(() => {
     if (!antigenTouched) setAntigen(defaultAntigenFor(mode));
   }, [mode, antigenTouched]);
+
+  const { data: tenantInfo } = useQuery<any>({
+    queryKey: ["/api/me/tenant"],
+  });
 
   const { data, isLoading } = useQuery<ZeroDoseSummary>({
     queryKey: ["/api/indicators/zero-dose"],
@@ -129,9 +133,16 @@ export default function ZeroDoseVillages() {
   }, [rows, mode, districtId, facilityId, search]);
 
   const mapped = filtered.filter((v) => v.latitude != null && v.longitude != null);
+
+  const defaultCenter = useMemo(() => {
+    if (tenantInfo?.countryCode === "ZMB") return [-13.133897, 27.849332] as [number, number];
+    if (tenantInfo?.countryCode === "SSD") return [6.877, 31.307] as [number, number];
+    return [-6.314993, 143.95555] as [number, number];
+  }, [tenantInfo]);
+
   const mapCenter: [number, number] = mapped.length
     ? [mapped[0].latitude!, mapped[0].longitude!]
-    : [-6.314993, 143.95555];
+    : defaultCenter;
 
   const accentText = mode === "zero" ? "text-rose-600" : "text-amber-600";
   const accentBorder = mode === "zero" ? "border-rose-200" : "border-amber-200";
@@ -311,6 +322,8 @@ export default function ZeroDoseVillages() {
                   zoom={6}
                   className="h-full w-full"
                   scrollWheelZoom
+                  maxBounds={tenantInfo?.countryCode === "ZMB" ? [[-18.5, 21.5], [-8.0, 34.0]] : undefined}
+                  maxBoundsViscosity={1.0}
                 >
                   <BasemapTileLayer basemap={basemap} />
                   {mapped.map((v) => {

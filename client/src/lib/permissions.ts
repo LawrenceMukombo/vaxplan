@@ -42,7 +42,6 @@ function isVisitingOtherTenant(
   return !!activeTenantId && !!user.tenantId && activeTenantId !== user.tenantId;
 }
 
-/* Commented out original restrictive permissions checks to grant full CRUD permissions (Create, Read, Update, Delete) to all authenticated users.
 export function canEditFacility(
   user: User | null | undefined,
   facilityDistrictId: number,
@@ -226,9 +225,8 @@ export function canBulkClassifyBudget(user: User | null | undefined): boolean {
   const roles = (user as any).roles;
   return Array.isArray(roles) && roles.includes("national_admin");
 }
-*/
 
-// Updated Implementation: Grant full permissions to any authenticated user
+/* Original bypass implementations commented out:
 export function canEditFacility(
   user: User | null | undefined,
   facilityDistrictId: number,
@@ -292,4 +290,5 @@ export function canReconcileUnmappedVaccines(user: User | null | undefined): boo
 export function canBulkClassifyBudget(user: User | null | undefined): boolean {
   return !!user;
 }
+*/
 
