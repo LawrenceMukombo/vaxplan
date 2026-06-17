@@ -19,7 +19,7 @@ graph TD
 
 ## Step 1: Pushing Changes from Localhost (Windows)
 
-All changes are committed and deployed using the `fix-line-endings` branch.
+All changes are committed and deployed using the `main` branch.
 
 1. **Rebuild the production assets locally**:
    ```powershell
@@ -29,7 +29,7 @@ All changes are committed and deployed using the `fix-line-endings` branch.
    ```powershell
    git add .
    git commit -m "chore: standardise configuration and update build"
-   git push origin fix-line-endings
+   git push origin main
    ```
 
 *(Alternatively, you can run `npm run deploy:local` which automates compiling and pushing built files to git).*
@@ -48,8 +48,8 @@ cd /var/www/vaxplan
 
 # Fetch branch, reset local state, and deploy
 git fetch origin
-git checkout fix-line-endings
-git reset --hard origin/fix-line-endings
+git checkout main
+git reset --hard origin/main
 
 # Runs pg_dump backup, installs prod dependencies, runs migrations, and restarts PM2
 bash scripts/deploy-vps.sh
@@ -74,7 +74,7 @@ To copy your entire local development database from your local machine to the VP
    # In your Hostinger VPS Terminal
    cd /var/www/vaxplan
    git fetch origin
-   git reset --hard origin/fix-line-endings
+   git reset --hard origin/main
    
    # Unzips, creates a backup of the current state, imports the local dump, and starts PM2
    bash scripts/vps-setup/deploy-and-restore.sh
@@ -86,7 +86,7 @@ To deploy new code, create a backup, sync the database schemas, and seed operati
 # In your Hostinger VPS Terminal
 cd /var/www/vaxplan
 git fetch origin
-git reset --hard origin/fix-line-endings
+git reset --hard origin/main
 
 # Backs up, pulls, builds, runs migrations, seeds, and restarts PM2
 bash scripts/vps-setup/deploy-and-upsert.sh
