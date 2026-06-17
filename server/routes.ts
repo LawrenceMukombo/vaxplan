@@ -19078,7 +19078,11 @@ Instructions:
   );
   // ── End Wiki API ──────────────────────────────────────────────────────────
   // ── VGIE Spatial Intelligence API ─────────────────────────────────────────
+  // NOTE: All VGIE routes are now handled by the dedicated vgieRouter mounted
+  // at app.use("/api/vgie", auth, vgieRouter) near line 1210. The legacy
+  // inline routes below have been commented out to avoid conflicts.
 
+  /* Original Code — legacy VGIE inline routes (superseded by vgieRouter):
   app.get("/api/vgie/recommendations", ...auth, async (req: any, res) => {
     try {
       const recommendations = await db.select().from(vgieRecommendations).where(eq(vgieRecommendations.tenantId, req.tenantId));
@@ -19109,6 +19113,7 @@ Instructions:
       res.status(500).json({ message: err.message });
     }
   });
+  */
 
   return httpServer;
 
