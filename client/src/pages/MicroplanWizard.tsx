@@ -6039,12 +6039,47 @@ function Step2Map({
   facilityPolygon?: any;
   readOnly?: boolean;
 }) {
+  const facilityLat = facility?.latitude != null ? parseFloat(String(facility.latitude)) : null;
+  const facilityLng = facility?.longitude != null ? parseFloat(String(facility.longitude)) : null;
+
   // Lazy-load Leaflet so the wizard's earlier steps don't pay the bundle cost.
   const [leaflet, setLeaflet] = useState<any>(null);
   const [showPopulation, setShowPopulation] = useState(false);
   // WorldPop proxy is now live — server-side route tries WOPR → Stats API → local DB.
   const [populationUnavailable, setPopulationUnavailable] = useState(false);
+  const [localGridCells, setLocalGridCells] = useState<any[] | null>(null);
+  const [loadingLocalGrid, setLoadingLocalGrid] = useState(false);
   const [infoMode, setInfoMode] = useState(false);
+
+  useEffect(() => {
+    if (showPopulation && !localGridCells && !loadingLocalGrid && facilityLat != null && facilityLng != null) {
+      setLoadingLocalGrid(true);
+      fetch("/api/population/estimate-polygon", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          latitude: facilityLat,
+          longitude: facilityLng,
+          radiusKm: 10, // Fetch local grids in a 10km radius around the facility
+        }),
+      })
+        .then((res) => {
+          if (!res.ok) throw new Error("Failed to fetch local grids");
+          return res.json();
+        })
+        .then((data) => {
+          if (data && Array.isArray(data.cells)) {
+            setLocalGridCells(data.cells);
+          }
+        })
+        .catch((err) => {
+          console.warn("[Step2Map] Failed to load offline population grids:", err);
+        })
+        .finally(() => {
+          setLoadingLocalGrid(false);
+        });
+    }
+  }, [showPopulation, localGridCells, loadingLocalGrid, facilityLat, facilityLng]);
   // Polygon draw vertices (for facility catchment drawing)
   const [drawVertices, setDrawVertices] = useState<[number, number][]>([]);
   const [infoPopup, setInfoPopup] = useState<
@@ -6079,8 +6114,7 @@ function Step2Map({
     };
   }, []);
 
-  const facilityLat = facility?.latitude != null ? parseFloat(String(facility.latitude)) : null;
-  const facilityLng = facility?.longitude != null ? parseFloat(String(facility.longitude)) : null;
+  // facilityLat and facilityLng moved to the top of Step2Map to prevent block-scoped variable usage before declaration.
 
   const center = useMemo<[number, number]>(() => {
     if (facilityLat != null && facilityLng != null && !isNaN(facilityLat) && !isNaN(facilityLng)) {
@@ -6390,7 +6424,7 @@ function Step2Map({
       <BasemapSwitcher basemap={basemap} onChange={setBasemap} />
       <MapContainer center={center} zoom={11} className="h-full w-full z-0" zoomControl={false}>
         <BasemapTileLayer basemap={basemap} />
-        {showPopulation && !populationUnavailable && (
+        {showPopulation && (
           <WMSTileLayer
             url="https://ogc.worldpop.org/geoserver/wpGlobal/ows"
             layers="wpGlobal:ppp_2020_1km_Aggregated"
@@ -6403,17 +6437,52 @@ function Step2Map({
               tileerror: () => {
                 if (popErrorToastedRef.current) return;
                 popErrorToastedRef.current = true;
-                setPopulationUnavailable(true);
-                setShowPopulation(false);
                 toast({
-                  title: "Population layer unavailable",
-                  description: "Couldn't load WorldPop tiles. The layer may be offline.",
-                  variant: "destructive",
+                  title: "Offline population grids active",
+                  description: "Could not load live WorldPop tiles. Displaying local database grids instead.",
                 });
               },
             }}
           />
         )}
+        {showPopulation && localGridCells && localGridCells.length > 0 && (() => {
+          const ramp = ["#ffffcc", "#ffeda0", "#fed976", "#feb24c", "#fd8d3c", "#fc4e2a", "#e31a1c", "#b10026"];
+          const thresholds = [5, 15, 30, 75, 150, 300, 600];
+          const colorFor = (v: number) => {
+            for (let i = 0; i < thresholds.length; i++) {
+              if (v < thresholds[i]) return ramp[i];
+            }
+            return ramp[ramp.length - 1];
+          };
+          return localGridCells.map((c, i) => {
+            const bounds: [[number, number], [number, number]] = [
+              [c.lat - c.latStepDeg / 2, c.lng - c.lngStepDeg / 2],
+              [c.lat + c.latStepDeg / 2, c.lng + c.lngStepDeg / 2],
+            ];
+            const val = c.value || 0;
+            const fillColor = colorFor(val);
+            return (
+              <LRectangle
+                key={`grid-cell-${i}`}
+                bounds={bounds}
+                pathOptions={{
+                  color: "#d97706",
+                  weight: 0.5,
+                  opacity: 0.3,
+                  fillColor,
+                  fillOpacity: val > 0 ? 0.45 : 0.05,
+                }}
+              >
+                <LTooltip direction="top" sticky>
+                  <div className="text-xs">
+                    <strong>{Math.round(val).toLocaleString()}</strong> people/km²
+                    <div className="text-[10px] text-muted-foreground">Local Population Grid</div>
+                  </div>
+                </LTooltip>
+              </LRectangle>
+            );
+          });
+        })()}
         <MapRefCatcher />
         <ClickCatcher />
         <Recenter center={center} />
@@ -6792,6 +6861,25 @@ function Step2Map({
           </button>
         </div>
       </div>
+      {showPopulation && (
+        <div
+          className="absolute bottom-4 left-4 z-[400] rounded-lg bg-background/90 px-2.5 py-1.5 text-[10px] shadow border border-border"
+          data-testid="legend-population"
+        >
+          <div className="mb-1 font-semibold text-foreground">Population density</div>
+          <div
+            className="h-2 w-32 rounded"
+            style={{
+              background:
+                "linear-gradient(to right, #ffffcc, #ffeda0, #fed976, #feb24c, #fd8d3c, #fc4e2a, #e31a1c, #b10026)",
+            }}
+          />
+          <div className="mt-0.5 flex justify-between text-muted-foreground font-semibold">
+            <span>Low</span>
+            <span>High</span>
+          </div>
+        </div>
+      )}
       {(() => {
         const cells = catchmentPreview?.cells ?? [];
         const hasCells = cells.length > 0;
