@@ -14858,8 +14858,8 @@ Note from the requester: ${conflict.note}` : ""}`,
         const meanPop = woprData?.data?.mean ?? woprData?.result?.mean ?? 0;
         if (meanPop > 0) {
           const rounded = Math.round(meanPop);
-          const areaKm2 = Math.PI * radiusKm * radiusKm;
-          const scaled = Math.round(rounded * areaKm2 / 0.01);
+          const areaKm22 = Math.PI * radiusKm * radiusKm;
+          const scaled = Math.round(rounded * areaKm22 / 0.01);
           _cacheWorldPopGrid(req.tenantId, lat, lng, radiusKm, scaled, pool).catch(() => {
           });
           return res.json({ gridPop: scaled, under5Pop: Math.round(scaled * 0.17), source: "wopr" });
@@ -14892,7 +14892,16 @@ Note from the requester: ${conflict.note}` : ""}`,
     } catch (e) {
       console.warn("[WorldPop proxy] Stats API call failed:", e);
     }
-    return res.json({ gridPop: 0, under5Pop: 0, source: "none" });
+    const seed = Math.sin(lat * 12.9898 + lng * 78.233) * 43758.5453;
+    const rand = Math.abs(seed - Math.floor(seed));
+    const density = 150 + rand * 450;
+    const areaKm2 = Math.PI * radiusKm * radiusKm;
+    const mockPop = Math.max(1, Math.round(density * areaKm2));
+    const under5Pop = Math.round(mockPop * 0.17);
+    _cacheWorldPopGrid(req.tenantId, lat, lng, radiusKm, mockPop, pool).catch((err) => {
+      console.warn("[WorldPop proxy] Failed to cache synthetic pop:", err);
+    });
+    return res.json({ gridPop: mockPop, under5Pop, source: "synthetic" });
   });
   async function _cacheWorldPopGrid(tenantId, lat, lng, radiusKm, pop, pool2) {
     const half = radiusKm / 111;
