@@ -158,9 +158,14 @@ export async function estimateCatchmentPopulation(opts: {
     cells.push({ lat, lng, latStepDeg, lngStepDeg, status: "nodata" });
   }
 
+  /* Original Code commented out to allow local server fetches even if browser is technically offline:
   const offline =
     !WORLDPOP_LIVE_LOOKUPS_ENABLED ||
     (typeof navigator !== "undefined" && navigator.onLine === false);
+  */
+  // Modified: Do not restrict calls based on navigator.onLine, as the app serves its own
+  // local DB-backed proxy endpoints which remain fully accessible offline.
+  const offline = !WORLDPOP_LIVE_LOOKUPS_ENABLED;
   const signal = opts.signal ?? new AbortController().signal;
   const queue: number[] = cells.map((_, i) => i);
   let done = 0;
