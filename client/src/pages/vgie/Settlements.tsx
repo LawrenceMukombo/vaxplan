@@ -69,14 +69,14 @@ export default function Settlements() {
     else { setSortKey(key); setSortDir("desc"); }
   };
 
-  const thClass = "px-4 py-3 text-xs font-medium text-slate-500 uppercase tracking-wider cursor-pointer select-none hover:text-slate-300 transition-colors whitespace-nowrap";
+  const thClass = "px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wider cursor-pointer select-none hover:text-foreground transition-colors whitespace-nowrap";
 
   return (
     <div className="p-6 space-y-5">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-lg font-semibold text-slate-100">Settlements</h2>
-          <p className="text-sm text-slate-500">{sorted.length} settlements found</p>
+          <h2 className="text-lg font-semibold text-foreground">Settlements</h2>
+          <p className="text-sm text-muted-foreground">{sorted.length} settlements found</p>
         </div>
       </div>
 
@@ -138,7 +138,7 @@ export default function Settlements() {
       </div>
 
       {/* Table */}
-      <Card className="bg-slate-900 border-slate-800">
+      <Card className="bg-card border-border">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
@@ -152,8 +152,8 @@ export default function Settlements() {
                 <th className={`${thClass} text-right`} onClick={() => handleSort("population")}>
                   Population <SortIcon col="population" sortKey={sortKey} sortDir={sortDir} />
                 </th>
-                <th className="px-4 py-3 text-xs font-medium text-slate-500 uppercase tracking-wider text-center">Status</th>
-                <th className="px-4 py-3 text-xs font-medium text-slate-500 uppercase tracking-wider text-center">Risk</th>
+                <th className="px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wider text-center">Status</th>
+                <th className="px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wider text-center">Risk</th>
                 <th className={`${thClass} text-right`} onClick={() => handleSort("riskScore")}>
                   Risk Score <SortIcon col="riskScore" sortKey={sortKey} sortDir={sortDir} />
                 </th>

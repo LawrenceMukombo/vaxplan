@@ -22,16 +22,16 @@ export function Header() {
   const title = Object.entries(titles).find(([k]) => k === "/" ? location === "/" : location.startsWith(k))?.[1] ?? "VGIE";
 
   return (
-    <header className="h-14 bg-slate-900 border-b border-slate-800 flex items-center justify-between px-6 shrink-0">
+    <header className="h-14 bg-card border-b border-border flex items-center justify-between px-6 shrink-0">
       <div>
-        <h1 className="text-base font-semibold text-slate-100">{title}</h1>
-        <p className="text-xs text-slate-500">Zambia · Lusaka / Kafue / Chilanga</p>
+        <h1 className="text-base font-semibold text-foreground">{title}</h1>
+        <p className="text-xs text-muted-foreground">Zambia · Lusaka / Kafue / Chilanga</p>
       </div>
       <div className="flex items-center gap-2">
         <Button
           variant="ghost"
           size="sm"
-          className="text-slate-400 hover:text-slate-100 hover:bg-slate-800"
+          className="text-muted-foreground hover:text-foreground"
           onClick={() => queryClient.invalidateQueries()}
         >
           <RefreshCw className="w-4 h-4" />
@@ -40,7 +40,7 @@ export function Header() {
           <Button
             variant="ghost"
             size="sm"
-            className="text-slate-400 hover:text-slate-100 hover:bg-slate-800"
+            className="text-muted-foreground hover:text-foreground"
           >
             <Bell className="w-4 h-4" />
           </Button>

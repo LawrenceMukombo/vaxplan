@@ -99,8 +99,8 @@ export default function Recommendations() {
     <div className="p-6 space-y-5">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h2 className="text-lg font-semibold text-slate-100">Recommendations</h2>
-          <p className="text-sm text-slate-500">{recs?.length ?? 0} results · {highPriorityCount} high priority</p>
+          <h2 className="text-lg font-semibold text-foreground">Recommendations</h2>
+          <p className="text-sm text-muted-foreground">{recs?.length ?? 0} results · {highPriorityCount} high priority</p>
         </div>
         <div className="flex items-center gap-2">
           <Button

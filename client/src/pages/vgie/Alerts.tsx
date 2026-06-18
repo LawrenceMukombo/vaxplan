@@ -74,7 +74,7 @@ export default function Alerts() {
     <div className="p-6 space-y-5">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h2 className="text-lg font-semibold text-slate-100">Alerts & Notifications</h2>
+          <h2 className="text-lg font-semibold text-foreground">Alerts & Notifications</h2>
           <div className="flex items-center gap-3 mt-1">
             {criticalCount > 0 && (
               <span className="text-xs text-red-400 flex items-center gap-1">
