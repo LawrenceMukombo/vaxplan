@@ -77,7 +77,11 @@ export default function Recommendations() {
   const handleAIGenerate = async () => {
     setAiGenerating(true);
     try {
-      const res = await fetch("/api/vgie/recommendations/ai-generate", { method: "POST" });
+      const res = await fetch("/api/vgie/recommendations/ai-generate", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+      });
       const text = await res.text();
       let result: any;
       try {
