@@ -77,12 +77,20 @@ export default function Recommendations() {
   const handleAIGenerate = async () => {
     setAiGenerating(true);
     try {
-      const res = await fetch("/api/ai/recommendations/generate", { method: "POST" });
-      const result = await res.json();
-      if (!res.ok) throw new Error(result.error ?? "AI failed");
+      const res = await fetch("/api/vgie/recommendations/ai-generate", { method: "POST" });
+      const text = await res.text();
+      let result: any;
+      try {
+        result = JSON.parse(text);
+      } catch {
+        throw new Error("Server returned an unexpected response. Please try again.");
+      }
+      if (!res.ok) throw new Error(result.error ?? "AI generation failed");
       toast({
-        title: `AI generated ${result.generated} recommendations`,
-        description: "LLM-powered analysis complete. Review and accept below.",
+        title: `Generated ${result.generated} recommendations`,
+        description: result.generated > 0
+          ? "AI-powered analysis complete. Review and accept below."
+          : `${result.skipped ?? 0} settlements already had pending recommendations.`,
       });
       queryClient.invalidateQueries({ queryKey: ["/api/recommendations"] });
     } catch (err: any) {

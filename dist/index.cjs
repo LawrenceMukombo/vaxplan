@@ -6279,6 +6279,124 @@ var init_vgie = __esm({
         res.status(500).json({ error: "Failed to log outreach session" });
       }
     });
+    router.post("/recommendations/ai-generate", async (req, res) => {
+      try {
+        const unservedVillages = await db.select({
+          id: villages.id,
+          name: villages.name,
+          highRisk: villages.highRisk,
+          isHardToReach: villages.isHardToReach,
+          distanceToFacility: villages.distanceToFacility,
+          under5Population: villages.under5Population,
+          griddedPopulation: villages.griddedPopulation
+        }).from(villages).where(
+          (0, import_drizzle_orm9.and)(
+            (0, import_drizzle_orm9.eq)(villages.tenantId, req.tenantId),
+            import_drizzle_orm9.sql`${villages.assignedFacilityId} IS NULL`
+          )
+        ).limit(50);
+        if (unservedVillages.length === 0) {
+          return res.json({ generated: 0, skipped: 0, message: "No unserved settlements found" });
+        }
+        const existingRecs = await db.select({ entityId: vgieRecommendations.entityId }).from(vgieRecommendations).where(
+          (0, import_drizzle_orm9.and)(
+            (0, import_drizzle_orm9.eq)(vgieRecommendations.tenantId, req.tenantId),
+            (0, import_drizzle_orm9.eq)(vgieRecommendations.entityType, "settlement"),
+            (0, import_drizzle_orm9.eq)(vgieRecommendations.status, "pending")
+          )
+        );
+        const existingEntityIds = new Set(existingRecs.map((r) => r.entityId));
+        const toProcess = unservedVillages.filter((v) => !existingEntityIds.has(v.id));
+        const skipped = unservedVillages.length - toProcess.length;
+        if (toProcess.length === 0) {
+          return res.json({ generated: 0, skipped });
+        }
+        const toInsert = [];
+        const apiKey = process.env.GEMINI_API_KEY;
+        if (apiKey) {
+          for (const v of toProcess) {
+            const prompt = `You are a public health vaccination planning expert. Generate a concise, actionable vaccination outreach recommendation for the following unserved settlement.
+
+Settlement: ${v.name}
+Population (under 5): ${v.under5Population ?? v.griddedPopulation ?? "unknown"}
+High risk: ${v.highRisk ? "Yes" : "No"}
+Hard to reach: ${v.isHardToReach ? "Yes" : "No"}
+Distance to nearest facility (km): ${v.distanceToFacility ?? "unknown"}
+
+Return a JSON object with these exact fields (no markdown, no explanation, raw JSON only):
+{
+  "recommendationType": "short action title (max 60 chars)",
+  "priority": "high" or "medium" or "low",
+  "description": "2-3 sentence actionable recommendation"
+}`;
+            try {
+              const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+              const geminiRes = await fetch(geminiUrl, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  contents: [{ parts: [{ text: prompt }] }],
+                  generationConfig: { temperature: 0.3, maxOutputTokens: 256 }
+                })
+              });
+              if (!geminiRes.ok) {
+                throw new Error(`Gemini API error: ${geminiRes.status}`);
+              }
+              const geminiData = await geminiRes.json();
+              const rawText = geminiData?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+              const jsonText = rawText.replace(/```json?\s*/gi, "").replace(/```\s*/g, "").trim();
+              const parsed = JSON.parse(jsonText);
+              toInsert.push({
+                tenantId: req.tenantId,
+                entityType: "settlement",
+                entityId: v.id,
+                recommendationType: String(parsed.recommendationType ?? "Establish outreach session").slice(0, 100),
+                priority: ["high", "medium", "low"].includes(parsed.priority) ? parsed.priority : "medium",
+                title: `AI: ${String(parsed.recommendationType ?? v.name).slice(0, 100)}`,
+                description: String(parsed.description ?? ""),
+                status: "pending"
+              });
+            } catch (aiErr) {
+              console.warn(`[VGIE AI] Gemini failed for ${v.name}, using rule-based fallback:`, aiErr);
+              const priority = v.highRisk ? "high" : v.isHardToReach ? "medium" : "low";
+              const recType = v.highRisk ? "Establish emergency outreach session" : v.isHardToReach ? "Plan quarterly outreach visit" : "Add regular outreach visit";
+              toInsert.push({
+                tenantId: req.tenantId,
+                entityType: "settlement",
+                entityId: v.id,
+                recommendationType: recType,
+                priority,
+                title: `${recType}: ${v.name}`,
+                description: `Settlement "${v.name}" has no assigned health facility. ${v.under5Population ?? v.griddedPopulation ?? "Unknown"} children under 5. ${v.highRisk ? "HIGH RISK: Immediate action required." : "Recommendation generated by rule-based analysis."}`,
+                status: "pending"
+              });
+            }
+          }
+        } else {
+          for (const v of toProcess) {
+            const priority = v.highRisk ? "high" : v.isHardToReach ? "medium" : "low";
+            const recType = v.highRisk ? "Establish emergency outreach session" : v.isHardToReach ? "Plan quarterly outreach visit" : "Add regular outreach visit";
+            toInsert.push({
+              tenantId: req.tenantId,
+              entityType: "settlement",
+              entityId: v.id,
+              recommendationType: recType,
+              priority,
+              title: `${recType}: ${v.name}`,
+              description: `Settlement "${v.name}" has no assigned health facility. ${v.under5Population ?? v.griddedPopulation ?? "Unknown"} children under 5. ${v.highRisk ? "HIGH RISK: Immediate action required." : "Recommendation generated by rule-based analysis."}`,
+              status: "pending"
+            });
+          }
+        }
+        if (toInsert.length > 0) {
+          await db.insert(vgieRecommendations).values(toInsert);
+        }
+        res.json({ generated: toInsert.length, skipped });
+      } catch (err) {
+        console.error("VGIE AI recommendations error:", err);
+        res.status(500).json({ error: "Failed to generate AI recommendations" });
+      }
+    });
     vgie_default = router;
   }
 });
