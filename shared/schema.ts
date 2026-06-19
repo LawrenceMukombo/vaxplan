@@ -3461,6 +3461,8 @@ export const catalogueVaccines = pgTable("catalogue_vaccines", {
   approvalStatus: approvalStatusEnum("approval_status").default("draft").notNull(),
   effectiveStartDate: timestamp("effective_start_date").defaultNow(),
   effectiveEndDate: timestamp("effective_end_date"),
+  createdBy: varchar("created_by").references(() => users.id, { onDelete: "set null" }),
+  updatedBy: varchar("updated_by").references(() => users.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 }, (table) => ({
@@ -3488,6 +3490,8 @@ export const catalogueScheduleDoses = pgTable("catalogue_schedule_doses", {
   active: boolean("active").default(true).notNull(),
   effectiveStartDate: timestamp("effective_start_date").defaultNow(),
   approvalStatus: approvalStatusEnum("approval_status").default("draft").notNull(),
+  createdBy: varchar("created_by").references(() => users.id, { onDelete: "set null" }),
+  updatedBy: varchar("updated_by").references(() => users.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at").defaultNow(),
 }, (table) => ({
   tenantIdx: index("idx_catalogue_doses_tenant").on(table.tenantId),
@@ -3516,6 +3520,8 @@ export const catalogueCommodities = pgTable("catalogue_commodities", {
   reorderLevel: integer("reorder_level").default(0),
   modules: jsonb("modules").default({}).notNull(),
   active: boolean("active").default(true).notNull(),
+  createdBy: varchar("created_by").references(() => users.id, { onDelete: "set null" }),
+  updatedBy: varchar("updated_by").references(() => users.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at").defaultNow(),
 }, (table) => ({
   tenantIdx: index("idx_catalogue_commodities_tenant").on(table.tenantId),

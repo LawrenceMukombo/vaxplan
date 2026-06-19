@@ -796,11 +796,27 @@ export default function StockLedger() {
               <span>Compile Monthly Report</span>
             </Button>
 
-            <Button onClick={() => setTxnDialogOpen(true)} className="gap-1 shadow-lg shadow-primary/20">
-              <Plus className="h-4 w-4" />
-              <span>Stock Card Action</span>
-            </Button>
-          </div>
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span>
+                    <Button
+                      onClick={() => setTxnDialogOpen(true)}
+                      disabled={!selectedFacilityId}
+                      className="gap-1 shadow-lg shadow-primary/20"
+                    >
+                      <Plus className="h-4 w-4" />
+                      <span>Stock Card Action</span>
+                    </Button>
+                  </span>
+                </TooltipTrigger>
+                {!selectedFacilityId && (
+                  <TooltipContent side="bottom" className="text-xs max-w-xs">
+                    Select a specific facility from the location filters above to record a stock transaction.
+                  </TooltipContent>
+                )}
+              </Tooltip>
+            </TooltipProvider>          </div>
         </div>
 
         {/* Geo cascade filter (Province → District → Facility — each level independently narrows table rows) */}

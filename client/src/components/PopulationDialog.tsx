@@ -83,6 +83,8 @@ export function PopulationDialog({
 }: PopulationDialogProps) {
   const { toast } = useToast();
   const isEditing = !!editData;
+  // ISS-06: Lock the form when the record has been approved or locked.
+  const isReadOnly = editData?.approvalStatus === "approved" || editData?.approvalStatus === "locked";
 
   const [locationType, setLocationType] = useState<string>("province");
   const [autoCalculate, setAutoCalculate] = useState<boolean>(true);
@@ -398,15 +400,18 @@ export function PopulationDialog({
             {isEditing ? "Edit Population Record" : "Add Population Record"}
           </DialogTitle>
           <DialogDescription>
-            {isEditing
-              ? "Update the population data for this location."
-              : "Enter population data for a location."}
-          </DialogDescription>
+              {isReadOnly
+                ? "This record is approved and locked. No changes can be made."
+                : isEditing
+                ? "Update the population data for this location."
+                : "Enter population data for a location."}
+            </DialogDescription>
         </DialogHeader>
 
         <Form {...form}>
-          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+              <fieldset disabled={isReadOnly} className="contents">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <FormField
                 control={form.control}
                 name="source"
@@ -836,12 +841,15 @@ export function PopulationDialog({
                 disabled={isPending}
                 data-testid="button-cancel"
               >
-                Cancel
+                {isReadOnly ? "Close" : "Cancel"}
               </Button>
-              <Button type="submit" disabled={isPending} data-testid="button-save">
-                {isPending ? "Saving..." : isEditing ? "Update" : "Create"}
-              </Button>
+              {!isReadOnly && (
+                <Button type="submit" disabled={isPending} data-testid="button-save">
+                  {isPending ? "Saving..." : isEditing ? "Update" : "Create"}
+                </Button>
+              )}
             </DialogFooter>
+            </fieldset>
           </form>
         </Form>
       </DialogContent>

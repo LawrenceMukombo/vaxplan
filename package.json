@@ -6,7 +6,8 @@
     "scripts": {
         "dev": "tsx --env-file=.env server/index.ts",
         "build": "tsx script/build.ts",
-        "build:full": "tsx script/build.ts && npm run db:push",
+        "build:full": "tsx script/build.ts",
+        "build:full:unsafe": "tsx script/build.ts && npm run db:push",
         "start": "node dist/railway-bootstrap.cjs && NODE_ENV=production node dist/index.cjs",
         "check": "tsc",
         "deploy:local": "npm run build && git add dist/ && git commit -m \"deploy: update production build\" && git push origin fix-line-endings",

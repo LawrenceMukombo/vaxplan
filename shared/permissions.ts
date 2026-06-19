@@ -17,7 +17,8 @@ export type Permission =
   | "view_reports"
   | "manage_reports"
   | "manage_boundaries"
-  | "manage_users";
+  | "manage_users"
+  | "manage_catalogue";
 
 /* Original Code:
 export const ROLE_PERMISSIONS: Record<string, Permission[]> = {
@@ -304,6 +305,7 @@ export const ROLE_PERMISSIONS: Record<string, Permission[]> = {
     "manage_reports",
     "manage_boundaries",
     "manage_users",
+    "manage_catalogue",
   ],
   facility_partner: [
     "view_clients",

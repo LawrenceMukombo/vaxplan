@@ -97,6 +97,15 @@ import {
   insertFacilityStaffSchema,
   notifications,
   users,
+  stockTransactions,
+  catalogueVaccines,
+  catalogueScheduleDoses,
+  catalogueCommodities,
+  catalogueWastageThresholds,
+  insertCatalogueVaccineSchema,
+  insertCatalogueScheduleDoseSchema,
+  insertCatalogueCommoditySchema,
+  insertCatalogueWastageThresholdSchema,
 } from "@shared/schema";
 import { expandVaccineSchedule, canonicalizePerAntigen, normalizeStockVaccineName } from "@shared/vaccineSchedule";
 import { isAtLeastDaysAhead, DEFAULT_LEAD_TIME_DAYS } from "@shared/schedulingDates";
@@ -13734,8 +13743,28 @@ export async function registerRoutes(
       };
 
       const parsed = insertStockTransactionSchema.parse(payload);
+
+      // ISS-02: Enforce geographic scope — the caller must have access to the target facility.
+      if (parsed.facilityId && !(await userCanAccessGeo(req.dbUser, req.tenantId, { facilityId: Number(parsed.facilityId) }))) {
+        return res.status(403).json({ message: "Forbidden: no access to this facility's stock." });
+      }
+
+      // ISS-01: If productId supplied, look up and snapshot vaccineName from the catalogue.
+      let vaccineNameSnapshot = parsed.vaccineName;
+      if (parsed.productId) {
+        const [catalogueRow] = await db
+          .select({ name: catalogueVaccines.name })
+          .from(catalogueVaccines)
+          .where(and(eq(catalogueVaccines.id, parsed.productId), eq(catalogueVaccines.tenantId, req.tenantId)));
+        if (!catalogueRow) {
+          return res.status(400).json({ message: "Invalid productId: catalogue product not found." });
+        }
+        vaccineNameSnapshot = catalogueRow.name;
+      }
+
       const transaction = await storage.createStockTransaction(req.tenantId, {
         ...parsed,
+        vaccineName: vaccineNameSnapshot,
         recordedByUserId: req.user?.id ?? req.user?.claims?.sub ?? null,
       });
       await logAudit(req, "create_stock_transaction", "stock_transaction", transaction.id, null, {
@@ -13774,6 +13803,12 @@ export async function registerRoutes(
       if (parsed.sourceFacilityId === parsed.destFacilityId) {
         return res.status(400).json({ message: "Source and destination facilities must differ" });
       }
+
+      // ISS-02: Enforce geographic scope — caller must have access to the source facility.
+      if (!(await userCanAccessGeo(req.dbUser, req.tenantId, { facilityId: parsed.sourceFacilityId }))) {
+        return res.status(403).json({ message: "Forbidden: no access to source facility's stock." });
+      }
+
       const sourceName = parsed.sourceFacilityName ?? `Facility ${parsed.sourceFacilityId}`;
       const destName = parsed.destFacilityName ?? `Facility ${parsed.destFacilityId}`;
       const reason = parsed.reason ?? "Suggested transfer (batch near expiry)";
@@ -13818,6 +13853,17 @@ export async function registerRoutes(
     try {
       const id = parseInt(req.params.id);
       if (isNaN(id)) return res.status(400).json({ message: "Invalid transaction ID" });
+
+      // ISS-02: Fetch the transaction first to verify geo scope before deleting.
+      const [txn] = await db
+        .select({ facilityId: stockTransactions.facilityId })
+        .from(stockTransactions)
+        .where(and(eq(stockTransactions.id, id), eq(stockTransactions.tenantId, req.tenantId)));
+      if (!txn) return res.status(404).json({ message: "Stock transaction entry not found" });
+      if (!(await userCanAccessGeo(req.dbUser, req.tenantId, { facilityId: txn.facilityId }))) {
+        return res.status(403).json({ message: "Forbidden: no access to this facility's stock." });
+      }
+
       const deleted = await storage.deleteStockTransaction(req.tenantId, id);
       if (!deleted) return res.status(404).json({ message: "Stock transaction entry not found" });
       await logAudit(req, "delete_stock_transaction", "stock_transaction", id);
@@ -13903,7 +13949,14 @@ export async function registerRoutes(
   // POST /api/monthly-reports — Submit a compiled monthly facility report
   app.post("/api/monthly-reports", isAuthenticated, requireTenant, async (req: any, res) => {
     try {
+      const dbUser = req.dbUser!;
       const parsed = insertMonthlyReportSchema.parse(req.body);
+
+      // ISS-02: Enforce geographic scope — the caller must have access to the facility.
+      if (parsed.facilityId && !(await userCanAccessGeo(dbUser, req.tenantId, { facilityId: Number(parsed.facilityId) }))) {
+        return res.status(403).json({ message: "Forbidden: no access to this facility." });
+      }
+
       const report = await storage.createMonthlyReport(req.tenantId, {
         ...parsed,
         submittedById: req.user?.id ?? req.user?.claims?.sub ?? null,
@@ -19631,6 +19684,356 @@ Instructions:
     }
   });
   */
+
+  // ── Country Immunization Catalogue API ────────────────────────────────────
+  // Provides CRUD for vaccine products, schedule doses, commodities, and
+  // wastage thresholds that drive the stock ledger and logistics forecasting.
+  // All mutations require manage_catalogue permission.
+
+  // GET /api/catalogue/vaccines
+  app.get("/api/catalogue/vaccines", ...auth, async (req: any, res) => {
+    try {
+      const rows = await db
+        .select()
+        .from(catalogueVaccines)
+        .where(eq(catalogueVaccines.tenantId, req.tenantId))
+        .orderBy(catalogueVaccines.name);
+      res.json(rows);
+    } catch (err: any) {
+      console.error("GET /api/catalogue/vaccines failed:", err);
+      res.status(500).json({ message: "Failed to fetch catalogue vaccines" });
+    }
+  });
+
+  // POST /api/catalogue/vaccines
+  app.post("/api/catalogue/vaccines", ...auth, requirePermission("manage_catalogue"), async (req: any, res) => {
+    try {
+      const userId = req.user?.id ?? req.user?.claims?.sub ?? null;
+      const parsed = insertCatalogueVaccineSchema.omit({ id: true } as any).parse(req.body);
+      const [row] = await db
+        .insert(catalogueVaccines)
+        .values({ ...parsed, tenantId: req.tenantId, createdBy: userId, updatedBy: userId } as any)
+        .returning();
+      await logAudit(req, "create_catalogue_vaccine", "catalogue_vaccine", row.id, null, row);
+      res.status(201).json(row);
+    } catch (err: any) {
+      if (err?.name === "ZodError") return res.status(400).json({ message: "Invalid payload", errors: err.errors });
+      console.error("POST /api/catalogue/vaccines failed:", err);
+      res.status(500).json({ message: "Failed to create catalogue vaccine" });
+    }
+  });
+
+  // PATCH /api/catalogue/vaccines/:id
+  app.patch("/api/catalogue/vaccines/:id", ...auth, requirePermission("manage_catalogue"), async (req: any, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      if (isNaN(id)) return res.status(400).json({ message: "Invalid ID" });
+      const userId = req.user?.id ?? req.user?.claims?.sub ?? null;
+      const { id: _id, tenantId: _t, createdBy: _c, createdAt: _ca, ...safe } = req.body;
+      const [row] = await db
+        .update(catalogueVaccines)
+        .set({ ...safe, updatedBy: userId, updatedAt: new Date() })
+        .where(and(eq(catalogueVaccines.id, id), eq(catalogueVaccines.tenantId, req.tenantId)))
+        .returning();
+      if (!row) return res.status(404).json({ message: "Catalogue vaccine not found" });
+      await logAudit(req, "update_catalogue_vaccine", "catalogue_vaccine", id, null, row);
+      res.json(row);
+    } catch (err: any) {
+      console.error("PATCH /api/catalogue/vaccines/:id failed:", err);
+      res.status(500).json({ message: "Failed to update catalogue vaccine" });
+    }
+  });
+
+  // DELETE /api/catalogue/vaccines/:id
+  app.delete("/api/catalogue/vaccines/:id", ...auth, requirePermission("manage_catalogue"), async (req: any, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      if (isNaN(id)) return res.status(400).json({ message: "Invalid ID" });
+      const result = await db
+        .delete(catalogueVaccines)
+        .where(and(eq(catalogueVaccines.id, id), eq(catalogueVaccines.tenantId, req.tenantId)));
+      if ((result.rowCount ?? 0) === 0) return res.status(404).json({ message: "Catalogue vaccine not found" });
+      await logAudit(req, "delete_catalogue_vaccine", "catalogue_vaccine", id);
+      res.json({ success: true });
+    } catch (err: any) {
+      console.error("DELETE /api/catalogue/vaccines/:id failed:", err);
+      res.status(500).json({ message: "Failed to delete catalogue vaccine" });
+    }
+  });
+
+  // GET /api/catalogue/schedules
+  app.get("/api/catalogue/schedules", ...auth, async (req: any, res) => {
+    try {
+      const rows = await db
+        .select()
+        .from(catalogueScheduleDoses)
+        .where(eq(catalogueScheduleDoses.tenantId, req.tenantId))
+        .orderBy(catalogueScheduleDoses.name);
+      res.json(rows);
+    } catch (err: any) {
+      console.error("GET /api/catalogue/schedules failed:", err);
+      res.status(500).json({ message: "Failed to fetch schedule doses" });
+    }
+  });
+
+  // POST /api/catalogue/schedules
+  app.post("/api/catalogue/schedules", ...auth, requirePermission("manage_catalogue"), async (req: any, res) => {
+    try {
+      const userId = req.user?.id ?? req.user?.claims?.sub ?? null;
+      const parsed = insertCatalogueScheduleDoseSchema.omit({ id: true } as any).parse(req.body);
+      const [row] = await db
+        .insert(catalogueScheduleDoses)
+        .values({ ...parsed, tenantId: req.tenantId, createdBy: userId, updatedBy: userId } as any)
+        .returning();
+      await logAudit(req, "create_catalogue_schedule_dose", "catalogue_schedule_dose", row.id, null, row);
+      res.status(201).json(row);
+    } catch (err: any) {
+      if (err?.name === "ZodError") return res.status(400).json({ message: "Invalid payload", errors: err.errors });
+      console.error("POST /api/catalogue/schedules failed:", err);
+      res.status(500).json({ message: "Failed to create schedule dose" });
+    }
+  });
+
+  // PATCH /api/catalogue/schedules/:id
+  app.patch("/api/catalogue/schedules/:id", ...auth, requirePermission("manage_catalogue"), async (req: any, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      if (isNaN(id)) return res.status(400).json({ message: "Invalid ID" });
+      const userId = req.user?.id ?? req.user?.claims?.sub ?? null;
+      const { id: _id, tenantId: _t, createdBy: _c, createdAt: _ca, ...safe } = req.body;
+      const [row] = await db
+        .update(catalogueScheduleDoses)
+        .set({ ...safe, updatedBy: userId })
+        .where(and(eq(catalogueScheduleDoses.id, id), eq(catalogueScheduleDoses.tenantId, req.tenantId)))
+        .returning();
+      if (!row) return res.status(404).json({ message: "Schedule dose not found" });
+      await logAudit(req, "update_catalogue_schedule_dose", "catalogue_schedule_dose", id, null, row);
+      res.json(row);
+    } catch (err: any) {
+      console.error("PATCH /api/catalogue/schedules/:id failed:", err);
+      res.status(500).json({ message: "Failed to update schedule dose" });
+    }
+  });
+
+  // DELETE /api/catalogue/schedules/:id
+  app.delete("/api/catalogue/schedules/:id", ...auth, requirePermission("manage_catalogue"), async (req: any, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      if (isNaN(id)) return res.status(400).json({ message: "Invalid ID" });
+      const result = await db
+        .delete(catalogueScheduleDoses)
+        .where(and(eq(catalogueScheduleDoses.id, id), eq(catalogueScheduleDoses.tenantId, req.tenantId)));
+      if ((result.rowCount ?? 0) === 0) return res.status(404).json({ message: "Schedule dose not found" });
+      await logAudit(req, "delete_catalogue_schedule_dose", "catalogue_schedule_dose", id);
+      res.json({ success: true });
+    } catch (err: any) {
+      console.error("DELETE /api/catalogue/schedules/:id failed:", err);
+      res.status(500).json({ message: "Failed to delete schedule dose" });
+    }
+  });
+
+  // GET /api/catalogue/commodities
+  app.get("/api/catalogue/commodities", ...auth, async (req: any, res) => {
+    try {
+      const rows = await db
+        .select()
+        .from(catalogueCommodities)
+        .where(eq(catalogueCommodities.tenantId, req.tenantId))
+        .orderBy(catalogueCommodities.name);
+      res.json(rows);
+    } catch (err: any) {
+      console.error("GET /api/catalogue/commodities failed:", err);
+      res.status(500).json({ message: "Failed to fetch commodities" });
+    }
+  });
+
+  // POST /api/catalogue/commodities
+  app.post("/api/catalogue/commodities", ...auth, requirePermission("manage_catalogue"), async (req: any, res) => {
+    try {
+      const userId = req.user?.id ?? req.user?.claims?.sub ?? null;
+      const parsed = insertCatalogueCommoditySchema.omit({ id: true } as any).parse(req.body);
+      const [row] = await db
+        .insert(catalogueCommodities)
+        .values({ ...parsed, tenantId: req.tenantId, createdBy: userId, updatedBy: userId } as any)
+        .returning();
+      await logAudit(req, "create_catalogue_commodity", "catalogue_commodity", row.id, null, row);
+      res.status(201).json(row);
+    } catch (err: any) {
+      if (err?.name === "ZodError") return res.status(400).json({ message: "Invalid payload", errors: err.errors });
+      console.error("POST /api/catalogue/commodities failed:", err);
+      res.status(500).json({ message: "Failed to create commodity" });
+    }
+  });
+
+  // PATCH /api/catalogue/commodities/:id
+  app.patch("/api/catalogue/commodities/:id", ...auth, requirePermission("manage_catalogue"), async (req: any, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      if (isNaN(id)) return res.status(400).json({ message: "Invalid ID" });
+      const userId = req.user?.id ?? req.user?.claims?.sub ?? null;
+      const { id: _id, tenantId: _t, createdBy: _c, createdAt: _ca, ...safe } = req.body;
+      const [row] = await db
+        .update(catalogueCommodities)
+        .set({ ...safe, updatedBy: userId })
+        .where(and(eq(catalogueCommodities.id, id), eq(catalogueCommodities.tenantId, req.tenantId)))
+        .returning();
+      if (!row) return res.status(404).json({ message: "Commodity not found" });
+      await logAudit(req, "update_catalogue_commodity", "catalogue_commodity", id, null, row);
+      res.json(row);
+    } catch (err: any) {
+      console.error("PATCH /api/catalogue/commodities/:id failed:", err);
+      res.status(500).json({ message: "Failed to update commodity" });
+    }
+  });
+
+  // DELETE /api/catalogue/commodities/:id
+  app.delete("/api/catalogue/commodities/:id", ...auth, requirePermission("manage_catalogue"), async (req: any, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      if (isNaN(id)) return res.status(400).json({ message: "Invalid ID" });
+      const result = await db
+        .delete(catalogueCommodities)
+        .where(and(eq(catalogueCommodities.id, id), eq(catalogueCommodities.tenantId, req.tenantId)));
+      if ((result.rowCount ?? 0) === 0) return res.status(404).json({ message: "Commodity not found" });
+      await logAudit(req, "delete_catalogue_commodity", "catalogue_commodity", id);
+      res.json({ success: true });
+    } catch (err: any) {
+      console.error("DELETE /api/catalogue/commodities/:id failed:", err);
+      res.status(500).json({ message: "Failed to delete commodity" });
+    }
+  });
+
+  // GET /api/catalogue/wastage-thresholds
+  app.get("/api/catalogue/wastage-thresholds", ...auth, async (req: any, res) => {
+    try {
+      const rows = await db
+        .select()
+        .from(catalogueWastageThresholds)
+        .where(eq(catalogueWastageThresholds.tenantId, req.tenantId))
+        .orderBy(catalogueWastageThresholds.vaccineId);
+      res.json(rows);
+    } catch (err: any) {
+      console.error("GET /api/catalogue/wastage-thresholds failed:", err);
+      res.status(500).json({ message: "Failed to fetch wastage thresholds" });
+    }
+  });
+
+  // POST /api/catalogue/wastage-thresholds
+  app.post("/api/catalogue/wastage-thresholds", ...auth, requirePermission("manage_catalogue"), async (req: any, res) => {
+    try {
+      const parsed = insertCatalogueWastageThresholdSchema.omit({ id: true } as any).parse(req.body);
+      const [row] = await db
+        .insert(catalogueWastageThresholds)
+        .values({ ...parsed, tenantId: req.tenantId } as any)
+        .returning();
+      await logAudit(req, "create_catalogue_wastage_threshold", "catalogue_wastage_threshold", row.id, null, row);
+      res.status(201).json(row);
+    } catch (err: any) {
+      if (err?.name === "ZodError") return res.status(400).json({ message: "Invalid payload", errors: err.errors });
+      console.error("POST /api/catalogue/wastage-thresholds failed:", err);
+      res.status(500).json({ message: "Failed to create wastage threshold" });
+    }
+  });
+
+  // PATCH /api/catalogue/wastage-thresholds/:id
+  app.patch("/api/catalogue/wastage-thresholds/:id", ...auth, requirePermission("manage_catalogue"), async (req: any, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      if (isNaN(id)) return res.status(400).json({ message: "Invalid ID" });
+      const { id: _id, tenantId: _t, createdAt: _ca, ...safe } = req.body;
+      const [row] = await db
+        .update(catalogueWastageThresholds)
+        .set(safe)
+        .where(and(eq(catalogueWastageThresholds.id, id), eq(catalogueWastageThresholds.tenantId, req.tenantId)))
+        .returning();
+      if (!row) return res.status(404).json({ message: "Wastage threshold not found" });
+      await logAudit(req, "update_catalogue_wastage_threshold", "catalogue_wastage_threshold", id, null, row);
+      res.json(row);
+    } catch (err: any) {
+      console.error("PATCH /api/catalogue/wastage-thresholds/:id failed:", err);
+      res.status(500).json({ message: "Failed to update wastage threshold" });
+    }
+  });
+
+  // DELETE /api/catalogue/wastage-thresholds/:id
+  app.delete("/api/catalogue/wastage-thresholds/:id", ...auth, requirePermission("manage_catalogue"), async (req: any, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      if (isNaN(id)) return res.status(400).json({ message: "Invalid ID" });
+      const result = await db
+        .delete(catalogueWastageThresholds)
+        .where(and(eq(catalogueWastageThresholds.id, id), eq(catalogueWastageThresholds.tenantId, req.tenantId)));
+      if ((result.rowCount ?? 0) === 0) return res.status(404).json({ message: "Wastage threshold not found" });
+      await logAudit(req, "delete_catalogue_wastage_threshold", "catalogue_wastage_threshold", id);
+      res.json({ success: true });
+    } catch (err: any) {
+      console.error("DELETE /api/catalogue/wastage-thresholds/:id failed:", err);
+      res.status(500).json({ message: "Failed to delete wastage threshold" });
+    }
+  });
+
+  // POST /api/catalogue/seed — Load WHO default immunization products into the tenant's catalogue
+  app.post("/api/catalogue/seed", ...auth, requirePermission("manage_catalogue"), async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId as string;
+      const userId = req.user?.id ?? req.user?.claims?.sub ?? null;
+
+      const WHO_VACCINES = [
+        { productId: "vaccine_product_bcg", name: "BCG", antigenName: "BCG", dosesPerVial: 20, requiresDiluent: true, requiresInjectionDevice: true },
+        { productId: "vaccine_product_opv", name: "bOPV", antigenName: "Oral Polio", dosesPerVial: 20, requiresDiluent: false, requiresInjectionDevice: false },
+        { productId: "vaccine_product_ipv", name: "IPV", antigenName: "Inactivated Polio", dosesPerVial: 5, requiresDiluent: false, requiresInjectionDevice: true },
+        { productId: "vaccine_product_penta", name: "PENTA", antigenName: "Penta (DTP-HepB-Hib)", dosesPerVial: 10, requiresDiluent: false, requiresInjectionDevice: true },
+        { productId: "vaccine_product_pcv", name: "PCV10", antigenName: "Pneumococcal", dosesPerVial: 1, requiresDiluent: false, requiresInjectionDevice: true },
+        { productId: "vaccine_product_rota", name: "ROTA", antigenName: "Rotavirus", dosesPerVial: 1, requiresDiluent: false, requiresInjectionDevice: false },
+        { productId: "vaccine_product_measles_rubella", name: "MR", antigenName: "Measles-Rubella", dosesPerVial: 10, requiresDiluent: true, requiresInjectionDevice: true },
+        { productId: "vaccine_product_td", name: "Td", antigenName: "Tetanus-Diphtheria", dosesPerVial: 10, requiresDiluent: false, requiresInjectionDevice: true },
+        { productId: "vaccine_product_vitamin_a", name: "Vitamin A", antigenName: "Vitamin A", category: "Supplement", dosesPerVial: 1, requiresDiluent: false, requiresInjectionDevice: false },
+        { productId: "vaccine_product_hpv", name: "HPV", antigenName: "Human Papillomavirus", dosesPerVial: 1, requiresDiluent: false, requiresInjectionDevice: true },
+      ];
+
+      const inserted: any[] = [];
+      for (const v of WHO_VACCINES) {
+        try {
+          const [row] = await db
+            .insert(catalogueVaccines)
+            .values({
+              tenantId,
+              productId: v.productId,
+              name: v.name,
+              antigenName: v.antigenName,
+              category: (v as any).category ?? "Vaccine",
+              dosesPerVial: v.dosesPerVial,
+              requiresDiluent: v.requiresDiluent,
+              requiresInjectionDevice: v.requiresInjectionDevice,
+              approvalStatus: "approved" as any,
+              active: true,
+              stockManaged: true,
+              forecastable: true,
+              requisitionable: true,
+              requiresSafetyBox: v.requiresInjectionDevice,
+              routineUse: true,
+              campaignUse: false,
+              outbreakUse: false,
+              modules: {},
+              createdBy: userId,
+              updatedBy: userId,
+            } as any)
+            .onConflictDoNothing()
+            .returning();
+          if (row) inserted.push(row);
+        } catch (e: any) {
+          // Skip duplicates or FK errors silently — seed is idempotent
+        }
+      }
+
+      await logAudit(req, "seed_catalogue", "catalogue_vaccine", null, null, { count: inserted.length });
+      res.json({ success: true, inserted: inserted.length });
+    } catch (err: any) {
+      console.error("POST /api/catalogue/seed failed:", err);
+      res.status(500).json({ message: "Failed to seed catalogue" });
+    }
+  });
+  // ── End Country Immunization Catalogue API ─────────────────────────────────
 
   return httpServer;
 

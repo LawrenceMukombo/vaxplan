@@ -1597,6 +1597,23 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
   // captured `busy` value. Set in lockstep with setBusy at every save site.
   const busyRef = useRef(false);
 
+  // ISS-03: Warn the user before navigating away with unsaved changes.
+  // We only show this for draft plans (non-read-only) to avoid confusion.
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      const currentSnap = snapshotForStep(active);
+      const lastSnap = savedSnapshots.current[active];
+      const isDirty = lastSnap !== undefined && currentSnap !== lastSnap;
+      const currentStatus = microplan?.status ?? "draft";
+      if (isDirty && currentStatus === "draft") {
+        e.preventDefault();
+        e.returnValue = "";
+      }
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  });
+
   // Serialise only the user-editable data for a step (no server ids / saved
   // flags) so the snapshot is stable across a save round-trip and only real
   // edits mark the step dirty.
