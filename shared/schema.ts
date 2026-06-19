@@ -14,6 +14,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
+import { normalizeStockVaccineName } from "./vaccineSchedule";
 
 // ============================================================================
 // MULTITENANT CONTROL PLANE
@@ -164,12 +165,25 @@ export const userRoleEnum = pgEnum("user_role", [
   "national_manager",
 ]);
 
+/* Original approvalStatusEnum commented out to add under_review, returned, archived, and superseded statuses:
 export const approvalStatusEnum = pgEnum("approval_status", [
   "draft",
   "pending",
   "approved",
   "rejected",
   "locked",
+]);
+*/
+export const approvalStatusEnum = pgEnum("approval_status", [
+  "draft",
+  "pending",
+  "approved",
+  "rejected",
+  "locked",
+  "under_review",
+  "returned",
+  "archived",
+  "superseded",
 ]);
 
 export const sessionTypeEnum = pgEnum("session_type", [
@@ -2419,6 +2433,7 @@ export const insertSessionDayPlanSchema = createInsertSchema(sessionDayPlans).om
 export const insertStockTransactionSchema = createInsertSchema(stockTransactions).omit({
   createdAt: true,
 }).extend({
+  vaccineName: z.string().transform(normalizeStockVaccineName),
   expiryDate: z.coerce.date(),
   transactionDate: z.coerce.date().optional(),
 });
@@ -3119,3 +3134,292 @@ export const insertVgieAlertSchema = createInsertSchema(vgieAlerts).omit({
 });
 export type VgieAlert = typeof vgieAlerts.$inferSelect;
 export type InsertVgieAlert = z.infer<typeof insertVgieAlertSchema>;
+
+// ============================================================================
+// RESEARCH & PILOTS HUB SCHEMAS
+// ============================================================================
+
+export const researchDocuments = pgTable("research_documents", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  tenantId: varchar("tenant_id").notNull(),
+  title: varchar("title", { length: 255 }).notNull(),
+  slug: varchar("slug", { length: 255 }).notNull(),
+  abstract: text("abstract"),
+  documentType: varchar("document_type", { length: 100 }).notNull(),
+  authors: varchar("authors", { length: 255 }),
+  organizations: varchar("organizations", { length: 255 }),
+  publicationDate: varchar("publication_date", { length: 20 }),
+  year: integer("year"),
+  version: varchar("version", { length: 50 }).default("1.0.0"),
+  country: varchar("country", { length: 100 }),
+  region: varchar("region", { length: 100 }),
+  language: varchar("language", { length: 50 }).default("en"),
+  tags: jsonb("tags").default(sql`'[]'::jsonb`),
+  status: varchar("status", { length: 50 }).default("Draft").notNull(),
+  visibility: varchar("visibility", { length: 50 }).default("Public").notNull(),
+  fileUrl: varchar("file_url", { length: 512 }),
+  fileName: varchar("file_name", { length: 255 }),
+  fileType: varchar("file_type", { length: 100 }),
+  fileSize: integer("file_size"),
+  thumbnailUrl: varchar("thumbnail_url", { length: 512 }),
+  citationText: text("citation_text"),
+  doi: varchar("doi", { length: 100 }),
+  license: varchar("license", { length: 100 }).default("CC BY 4.0"),
+  isFeatured: boolean("is_featured").default(false).notNull(),
+  downloadCount: integer("download_count").default(0).notNull(),
+  createdByUserId: varchar("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  updatedByUserId: varchar("updated_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  publishedByUserId: varchar("published_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  publishedAt: timestamp("published_at"),
+  archivedAt: timestamp("archived_at"),
+}, (table) => [
+  index("idx_research_doc_tenant").on(table.tenantId),
+  index("idx_research_doc_status").on(table.status),
+]);
+
+export const pilotActivities = pgTable("pilot_activities", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  tenantId: varchar("tenant_id").notNull(),
+  title: varchar("title", { length: 255 }).notNull(),
+  slug: varchar("slug", { length: 255 }).notNull(),
+  summary: text("summary"),
+  country: varchar("country", { length: 100 }).notNull(),
+  province: varchar("province", { length: 100 }),
+  district: varchar("district", { length: 100 }),
+  facility: varchar("facility", { length: 255 }),
+  communities: text("communities"),
+  latitude: decimal("latitude", { precision: 9, scale: 6 }),
+  longitude: decimal("longitude", { precision: 9, scale: 6 }),
+  startDate: varchar("start_date", { length: 20 }),
+  endDate: varchar("end_date", { length: 20 }),
+  status: varchar("status", { length: 50 }).default("Planned").notNull(),
+  pilotType: varchar("pilot_type", { length: 100 }),
+  partners: varchar("partners", { length: 255 }),
+  ministryFocalPoint: varchar("ministry_focal_point", { length: 255 }),
+  technicalLead: varchar("technical_lead", { length: 255 }),
+  objectives: text("objectives"),
+  researchQuestions: text("research_questions"),
+  methodology: text("methodology"),
+  indicators: jsonb("indicators").default(sql`'[]'::jsonb`),
+  baselineFindings: text("baseline_findings"),
+  achievements: text("achievements"),
+  challenges: text("challenges"),
+  lessonsLearned: text("lessons_learned"),
+  recommendations: text("recommendations"),
+  ethicsStatus: varchar("ethics_status", { length: 100 }),
+  visibility: varchar("visibility", { length: 50 }).default("Public").notNull(),
+  isFeatured: boolean("is_featured").default(false).notNull(),
+  createdByUserId: varchar("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  updatedByUserId: varchar("updated_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  publishedAt: timestamp("published_at"),
+}, (table) => [
+  index("idx_pilot_act_tenant").on(table.tenantId),
+  index("idx_pilot_act_status").on(table.status),
+]);
+
+export const pilotUpdates = pgTable("pilot_updates", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  pilotId: integer("pilot_id").notNull().references(() => pilotActivities.id, { onDelete: "cascade" }),
+  title: varchar("title", { length: 255 }).notNull(),
+  updateDate: varchar("update_date", { length: 20 }).notNull(),
+  updateType: varchar("update_type", { length: 100 }),
+  description: text("description"),
+  achievements: text("achievements"),
+  challenges: text("challenges"),
+  nextSteps: text("next_steps"),
+  attachments: jsonb("attachments").default(sql`'[]'::jsonb`),
+  createdByUserId: varchar("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => [
+  index("idx_pilot_upd_pilot").on(table.pilotId),
+]);
+
+export const implementationLessons = pgTable("implementation_lessons", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  tenantId: varchar("tenant_id").notNull(),
+  title: varchar("title", { length: 255 }).notNull(),
+  slug: varchar("slug", { length: 255 }).notNull(),
+  category: varchar("category", { length: 100 }).notNull(),
+  context: text("context"),
+  whatWasTested: text("what_was_tested"),
+  whatWorked: text("what_worked"),
+  whatDidNotWork: text("what_did_not_work"),
+  recommendation: text("recommendation"),
+  pilotId: integer("pilot_id").references(() => pilotActivities.id, { onDelete: "set null" }),
+  documentId: integer("document_id").references(() => researchDocuments.id, { onDelete: "set null" }),
+  tags: jsonb("tags").default(sql`'[]'::jsonb`),
+  status: varchar("status", { length: 50 }).default("Published").notNull(),
+  visibility: varchar("visibility", { length: 50 }).default("Public").notNull(),
+  author: varchar("author", { length: 255 }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => [
+  index("idx_impl_lesson_tenant").on(table.tenantId),
+  index("idx_impl_lesson_category").on(table.category),
+]);
+
+export const downloadAssets = pgTable("download_assets", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  tenantId: varchar("tenant_id").notNull(),
+  title: varchar("title", { length: 255 }).notNull(),
+  slug: varchar("slug", { length: 255 }).notNull(),
+  description: text("description"),
+  category: varchar("category", { length: 100 }).notNull(),
+  recommendedAudience: varchar("recommended_audience", { length: 255 }),
+  fileUrl: varchar("file_url", { length: 512 }),
+  fileName: varchar("file_name", { length: 255 }),
+  fileType: varchar("file_type", { length: 100 }),
+  fileSize: integer("file_size"),
+  version: varchar("version", { length: 50 }).default("1.0.0"),
+  status: varchar("status", { length: 50 }).default("Published").notNull(),
+  visibility: varchar("visibility", { length: 50 }).default("Public").notNull(),
+  downloadCount: integer("download_count").default(0).notNull(),
+  createdByUserId: varchar("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  updatedByUserId: varchar("updated_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => [
+  index("idx_download_asset_tenant").on(table.tenantId),
+]);
+
+export const researchInterestSubmissions = pgTable("research_interest_submissions", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  tenantId: varchar("tenant_id").notNull(),
+  fullName: varchar("full_name", { length: 255 }).notNull(),
+  organization: varchar("organization", { length: 255 }),
+  role: varchar("role", { length: 255 }),
+  email: varchar("email", { length: 255 }).notNull(),
+  country: varchar("country", { length: 100 }),
+  areaOfInterest: varchar("area_of_interest", { length: 255 }),
+  message: text("message"),
+  consent: boolean("consent").default(false).notNull(),
+  status: varchar("status", { length: 50 }).default("pending").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => [
+  index("idx_res_interest_tenant").on(table.tenantId),
+]);
+
+export const researchDownloadEvents = pgTable("research_download_events", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  documentId: integer("document_id").references(() => researchDocuments.id, { onDelete: "cascade" }),
+  assetId: integer("asset_id").references(() => downloadAssets.id, { onDelete: "cascade" }),
+  userId: varchar("user_id").references(() => users.id, { onDelete: "set null" }),
+  ipHash: varchar("ip_hash", { length: 64 }),
+  userAgent: text("user_agent"),
+  downloadedAt: timestamp("downloaded_at").defaultNow().notNull(),
+});
+
+// Relations
+export const researchDocumentsRelations = relations(researchDocuments, ({ one, many }) => ({
+  createdBy: one(users, { fields: [researchDocuments.createdByUserId], references: [users.id] }),
+  lessons: many(implementationLessons),
+}));
+
+export const pilotActivitiesRelations = relations(pilotActivities, ({ one, many }) => ({
+  createdBy: one(users, { fields: [pilotActivities.createdByUserId], references: [users.id] }),
+  updates: many(pilotUpdates),
+  lessons: many(implementationLessons),
+}));
+
+export const pilotUpdatesRelations = relations(pilotUpdates, ({ one }) => ({
+  pilot: one(pilotActivities, { fields: [pilotUpdates.pilotId], references: [pilotActivities.id] }),
+  createdBy: one(users, { fields: [pilotUpdates.createdByUserId], references: [users.id] }),
+}));
+
+export const implementationLessonsRelations = relations(implementationLessons, ({ one }) => ({
+  pilot: one(pilotActivities, { fields: [implementationLessons.pilotId], references: [pilotActivities.id] }),
+  document: one(researchDocuments, { fields: [implementationLessons.documentId], references: [researchDocuments.id] }),
+}));
+
+export const downloadAssetsRelations = relations(downloadAssets, ({ one }) => ({
+  createdBy: one(users, { fields: [downloadAssets.createdByUserId], references: [users.id] }),
+}));
+
+export const researchDownloadEventsRelations = relations(researchDownloadEvents, ({ one }) => ({
+  document: one(researchDocuments, { fields: [researchDownloadEvents.documentId], references: [researchDocuments.id] }),
+  asset: one(downloadAssets, { fields: [researchDownloadEvents.assetId], references: [downloadAssets.id] }),
+}));
+
+// Zod validation schemas
+// Commented out original schemas to satisfy rule that requires commenting out original code.
+// The slug field is notNull in the DB and generated on the backend if omitted. Making it optional in Zod prevents validation errors.
+/*
+export const insertResearchDocumentSchema = createInsertSchema(researchDocuments).omit({
+  createdAt: true,
+  updatedAt: true,
+});
+*/
+export const insertResearchDocumentSchema = createInsertSchema(researchDocuments).omit({
+  createdAt: true,
+  updatedAt: true,
+}).extend({
+  slug: z.string().optional(),
+});
+export type ResearchDocument = typeof researchDocuments.$inferSelect;
+export type InsertResearchDocument = z.infer<typeof insertResearchDocumentSchema>;
+
+/*
+export const insertPilotActivitySchema = createInsertSchema(pilotActivities).omit({
+  createdAt: true,
+  updatedAt: true,
+});
+*/
+export const insertPilotActivitySchema = createInsertSchema(pilotActivities).omit({
+  createdAt: true,
+  updatedAt: true,
+}).extend({
+  slug: z.string().optional(),
+});
+export type PilotActivity = typeof pilotActivities.$inferSelect;
+export type InsertPilotActivity = z.infer<typeof insertPilotActivitySchema>;
+
+export const insertPilotUpdateSchema = createInsertSchema(pilotUpdates).omit({
+  createdAt: true,
+  updatedAt: true,
+});
+export type PilotUpdate = typeof pilotUpdates.$inferSelect;
+export type InsertPilotUpdate = z.infer<typeof insertPilotUpdateSchema>;
+
+/*
+export const insertImplementationLessonSchema = createInsertSchema(implementationLessons).omit({
+  createdAt: true,
+  updatedAt: true,
+});
+*/
+export const insertImplementationLessonSchema = createInsertSchema(implementationLessons).omit({
+  createdAt: true,
+  updatedAt: true,
+}).extend({
+  slug: z.string().optional(),
+});
+export type ImplementationLesson = typeof implementationLessons.$inferSelect;
+export type InsertImplementationLesson = z.infer<typeof insertImplementationLessonSchema>;
+
+/*
+export const insertDownloadAssetSchema = createInsertSchema(downloadAssets).omit({
+  createdAt: true,
+  updatedAt: true,
+});
+*/
+export const insertDownloadAssetSchema = createInsertSchema(downloadAssets).omit({
+  createdAt: true,
+  updatedAt: true,
+}).extend({
+  slug: z.string().optional(),
+});
+export type DownloadAsset = typeof downloadAssets.$inferSelect;
+export type InsertDownloadAsset = z.infer<typeof insertDownloadAssetSchema>;
+
+export const insertResearchInterestSubmissionSchema = createInsertSchema(researchInterestSubmissions).omit({
+  createdAt: true,
+  updatedAt: true,
+});
+export type ResearchInterestSubmission = typeof researchInterestSubmissions.$inferSelect;
+export type InsertResearchInterestSubmission = z.infer<typeof insertResearchInterestSubmissionSchema>;
+

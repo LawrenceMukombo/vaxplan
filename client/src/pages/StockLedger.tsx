@@ -67,6 +67,7 @@ import {
   type ClientVaccination,
 } from "@shared/schema";
 import { z } from "zod";
+import { normalizeStockVaccineName } from "@shared/vaccineSchedule";
 import { format } from "date-fns";
 import { useAuth } from "@/hooks/useAuth";
 import { offlineDb, enqueueOutbox } from "@/lib/offlineDb";
@@ -425,22 +426,26 @@ export default function StockLedger() {
     const soh: Record<string, number> = {};
     if (!transactions) return soh;
 
-    // Initialize with active configs
+    // Initialize with active configs using normalized names
     if (vaccineConfigs) {
       vaccineConfigs.forEach(c => {
-        if (c.isActive) soh[c.name] = 0;
+        if (c.isActive) {
+          const norm = normalizeStockVaccineName(c.name);
+          soh[norm] = 0;
+        }
       });
     }
 
     transactions.forEach((tx) => {
       const type = tx.transactionType;
       const doses = tx.quantityDoses;
-      if (!soh[tx.vaccineName]) soh[tx.vaccineName] = 0;
+      const normName = normalizeStockVaccineName(tx.vaccineName);
+      if (!soh[normName]) soh[normName] = 0;
 
       if (type === "receipt" || type === "adjustment") {
-        soh[tx.vaccineName] += doses;
+        soh[normName] += doses;
       } else if (type === "issue" || type === "loss") {
-        soh[tx.vaccineName] -= doses;
+        soh[normName] -= doses;
       }
     });
 
@@ -626,15 +631,28 @@ export default function StockLedger() {
       const compiledStk: Record<string, any> = {};
       
       if (vaccineConfigs) {
-        vaccineConfigs.forEach(vc => {
+        // Unique normalized vaccine product names
+        const uniqueProductNames = Array.from(new Set(
+          vaccineConfigs.filter(c => c.isActive).map(c => normalizeStockVaccineName(c.name))
+        ));
+
+        uniqueProductNames.forEach(vcName => {
           // Aggregate ledger transactions for this month/year
           let received = 0;
-          let administered = compiledImms[vc.name] || 0; // matching logbook admin
+          
+          // sum administered count of all dose-level client vaccinations mapping to this vaccine product
+          let administered = 0;
+          Object.entries(compiledImms).forEach(([immName, count]) => {
+            if (normalizeStockVaccineName(immName) === vcName) {
+              administered += count;
+            }
+          });
+          
           let wasted = 0;
 
           if (transactions) {
             transactions.forEach(tx => {
-              if (tx.vaccineName !== vc.name) return;
+              if (normalizeStockVaccineName(tx.vaccineName) !== vcName) return;
               const date = new Date(tx.transactionDate);
               const txInPeriod = date.getMonth() + 1 === reportPeriod.month && date.getFullYear() === reportPeriod.year;
 
@@ -645,8 +663,8 @@ export default function StockLedger() {
             });
           }
 
-          // Dynamic math
-          const opening = stockOnHand[vc.name] ? Math.max(0, stockOnHand[vc.name] - received + administered + wasted) : 0;
+          // Dynamic math using normalized product name
+          const opening = stockOnHand[vcName] ? Math.max(0, stockOnHand[vcName] - received + administered + wasted) : 0;
           const closing = Math.max(0, opening + received - administered - wasted);
           const totalReceived = received;
           const totalWasted = wasted;
@@ -654,7 +672,7 @@ export default function StockLedger() {
           const denominator = administered + totalWasted;
           const wastageRate = denominator > 0 ? parseFloat(((totalWasted / denominator) * 100).toFixed(2)) : 0;
 
-          compiledStk[vc.name] = {
+          compiledStk[vcName] = {
             opening,
             received: totalReceived,
             administered,
@@ -1057,9 +1075,13 @@ export default function StockLedger() {
 
           {/* Active Balances SOH Cards */}
           <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-4">
-            {vaccineConfigs?.filter(c => c.isActive).map((config) => {
-              const status = antigenStatusByName.get(config.name);
-              const balance = status?.balance ?? stockOnHand[config.name] ?? 0;
+            {Array.from(new Set(
+              vaccineConfigs?.filter(c => c.isActive).map(c => normalizeStockVaccineName(c.name)) ?? []
+            )).map((normName) => {
+              const config = vaccineConfigs?.find(c => c.isActive && normalizeStockVaccineName(c.name) === normName);
+              const wastageFactor = config?.wastageFactor ?? 10;
+              const status = antigenStatusByName.get(normName);
+              const balance = status?.balance ?? stockOnHand[normName] ?? 0;
               const mos = status?.monthsOfStock ?? null;
               const isLow = status?.isLowStock ?? false;
               const isOut = status?.isOutOfStock ?? false;
@@ -1071,15 +1093,15 @@ export default function StockLedger() {
 
               return (
                 <Card
-                  key={config.id}
+                  key={normName}
                   className={`border-border/40 backdrop-blur-md bg-card/45 shadow transition-all hover:scale-[1.02] ${cardTone}`}
-                  data-testid={`card-soh-${config.name}`}
+                  data-testid={`card-soh-${normName}`}
                 >
                   <CardContent className="p-4 flex flex-col justify-between h-full">
                     <div>
                       <div className="flex items-center justify-between gap-2">
                         <span className="text-[10px] text-muted-foreground uppercase font-semibold tracking-wider truncate">
-                          {config.name}
+                          {normName}
                         </span>
                         {isOut ? (
                           <Badge variant="outline" className="border-rose-500/30 text-rose-600 bg-rose-500/10 text-[9px] px-1 py-0 h-4">
@@ -1101,7 +1123,7 @@ export default function StockLedger() {
                       </p>
                     </div>
                     <div className="text-[10px] text-muted-foreground mt-2 border-t pt-1 border-border/20">
-                      Wastage factor: {config.wastageFactor}
+                      Wastage factor: {wastageFactor}
                     </div>
                   </CardContent>
                 </Card>
@@ -1476,9 +1498,11 @@ export default function StockLedger() {
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
-                        {vaccineConfigs?.filter(c => c.isActive).map((c) => (
-                          <SelectItem key={c.id} value={c.name}>
-                            {c.name}
+                        {Array.from(new Set(
+                          vaccineConfigs?.filter(c => c.isActive).map(c => normalizeStockVaccineName(c.name)) ?? []
+                        )).map((name) => (
+                          <SelectItem key={name} value={name}>
+                            {name}
                           </SelectItem>
                         ))}
                       </SelectContent>

@@ -2,7 +2,7 @@ import { Badge } from "@/components/ui/badge";
 import { Clock, CheckCircle, XCircle, Lock, FileEdit } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-type ApprovalStatus = "draft" | "pending" | "approved" | "rejected" | "locked";
+type ApprovalStatus = "draft" | "pending" | "approved" | "rejected" | "locked" | "archived" | "under_review" | "returned" | "superseded";
 
 interface ApprovalBadgeProps {
   status: ApprovalStatus;
@@ -42,6 +42,30 @@ const statusConfig: Record<ApprovalStatus, {
   locked: {
     label: "Locked",
     icon: Lock,
+    variant: "secondary",
+    className: "bg-muted text-muted-foreground",
+  },
+  archived: {
+    label: "Archived",
+    icon: Clock,
+    variant: "secondary",
+    className: "bg-muted text-muted-foreground",
+  },
+  under_review: {
+    label: "Under Review",
+    icon: Clock,
+    variant: "outline",
+    className: "border-blue-500 text-blue-600 dark:text-blue-400",
+  },
+  returned: {
+    label: "Returned",
+    icon: FileEdit,
+    variant: "outline",
+    className: "border-orange-500 text-orange-600 dark:text-orange-400",
+  },
+  superseded: {
+    label: "Superseded",
+    icon: Clock,
     variant: "secondary",
     className: "bg-muted text-muted-foreground",
   },

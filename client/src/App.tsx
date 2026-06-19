@@ -376,6 +376,7 @@ function AuthenticatedRouter() {
       <Route path="/surveillance" component={Surveillance} />
       <Route path="/settings" component={Settings} />
       <Route path="/help" component={Help} />
+      <Route path="/research/admin" component={lazy(() => import("@/pages/ResearchAdmin"))} />
       
       <Route path="/vgie/recommendations" component={VgieRecommendations} />
       <Route path="/vgie/alerts" component={VgieAlerts} />
@@ -453,6 +454,9 @@ function AuthenticatedLayout() {
 }
 
 function App() {
+  const host = typeof window !== "undefined" ? window.location.hostname : "";
+  const isResearchSubdomain = host.startsWith("research.");
+
   // Task #276 — the basemap attribution credit on every Leaflet map ends with a
   // "Data sources" link (see CARTO_POSITRON_ATTRIBUTION / CARTO_VOYAGER_ATTRIBUTION).
   // Leaflet renders attribution as raw HTML outside React, so a delegated click
@@ -484,6 +488,31 @@ function App() {
     return () => document.removeEventListener("click", handleClick);
   }, []);
 
+  if (isResearchSubdomain) {
+    return (
+      <QueryClientProvider client={queryClient}>
+        <ThemeProvider>
+          <TooltipProvider>
+            <Suspense fallback={<RouteFallback />}>
+              <Switch>
+                <Route path="/" component={lazy(() => import("@/pages/ResearchHub"))} />
+                <Route path="/admin" component={lazy(() => import("@/pages/ResearchAdmin"))} />
+                <Route path="/research">
+                  <Redirect to="/" />
+                </Route>
+                <Route path="/research/admin">
+                  <Redirect to="/admin" />
+                </Route>
+                <Route component={NotFound} />
+              </Switch>
+            </Suspense>
+            <Toaster />
+          </TooltipProvider>
+        </ThemeProvider>
+      </QueryClientProvider>
+    );
+  }
+
   return (
     <QueryClientProvider client={queryClient}>
       <ThemeProvider>
@@ -491,6 +520,7 @@ function App() {
           <Suspense fallback={<RouteFallback />}>
             <Switch>
               <Route path="/signup" component={Signup} />
+              <Route path="/research" component={lazy(() => import("@/pages/ResearchHub"))} />
               <Route path="/data-sources" component={DataSourcesGate} />
               <Route path="/help" component={HelpGate} />
               <Route><AuthenticatedLayout /></Route>

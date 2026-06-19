@@ -111,6 +111,7 @@ import {
   type InsertUserPermission,
 } from "@shared/schema";
 import type { UserRole } from "@shared/schema";
+import { normalizeStockVaccineName } from "@shared/vaccineSchedule";
 import { db } from "./db";
 import { eq, and, desc, isNull, inArray, getTableColumns, sql, gte } from "drizzle-orm";
 
@@ -2440,7 +2441,10 @@ export class DatabaseStorage implements IStorage {
 
   async createStockTransaction(tenantId: string, data: InsertStockTransaction): Promise<StockTransaction> {
     // Parse transactionDate string from offline JSON outbox payloads to native Date objects
-    const cleanData = { ...data };
+    const cleanData = { 
+      ...data,
+      vaccineName: normalizeStockVaccineName(data.vaccineName),
+    };
     if (cleanData.transactionDate && typeof cleanData.transactionDate === "string") {
       cleanData.transactionDate = new Date(cleanData.transactionDate);
     }
@@ -2468,6 +2472,7 @@ export class DatabaseStorage implements IStorage {
       recordedByUserId: string | null;
     },
   ): Promise<{ issue: StockTransaction; receipt: StockTransaction }> {
+    const normalizedVaccineName = normalizeStockVaccineName(args.vaccineName);
     // Atomic: either both rows are written or neither is.
     return await db.transaction(async (tx) => {
       const [issue] = await tx
@@ -2475,7 +2480,7 @@ export class DatabaseStorage implements IStorage {
         .values({
           tenantId,
           facilityId: args.sourceFacilityId,
-          vaccineName: args.vaccineName,
+          vaccineName: normalizedVaccineName,
           transactionType: "issue",
           quantityDoses: args.quantityDoses,
           batchNumber: args.batchNumber,
@@ -2491,7 +2496,7 @@ export class DatabaseStorage implements IStorage {
         .values({
           tenantId,
           facilityId: args.destFacilityId,
-          vaccineName: args.vaccineName,
+          vaccineName: normalizedVaccineName,
           transactionType: "receipt",
           quantityDoses: args.quantityDoses,
           batchNumber: args.batchNumber,

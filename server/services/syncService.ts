@@ -37,7 +37,7 @@ import {
   mobilizationActivities, // COMMENT: Added mobilizationActivities import for social mobilization offline sync
 } from "@shared/schema";
 import { eq, and, gt, sql, inArray } from "drizzle-orm";
-import { canonicalizePerAntigen } from "@shared/vaccineSchedule";
+import { canonicalizePerAntigen, normalizeStockVaccineName } from "@shared/vaccineSchedule";
 import { checkProximityAndPopulation } from "./proximityCheck";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -345,6 +345,7 @@ export async function batchMutate(
         if (mutation.method === "POST") {
           const txPayload = {
             ...payload,
+            vaccineName: payload.vaccineName ? normalizeStockVaccineName(payload.vaccineName) : undefined,
             expiryDate: payload.expiryDate ? new Date(payload.expiryDate) : undefined,
             transactionDate: payload.transactionDate ? new Date(payload.transactionDate) : new Date(),
           };

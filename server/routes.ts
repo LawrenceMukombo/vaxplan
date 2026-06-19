@@ -23,6 +23,7 @@ import { sendSms, sendWhatsApp, sendEmail as sendMessagingEmail, dispatchWithFal
 import { dispatchNotification } from "./services/uce";
 import { surveillanceRouter } from "./routes/surveillance";
 import vgieRouter from "./routes/vgie";
+import { researchRouter } from "./routes/research";
 import { VgieService } from "./services/vgieService";
 import {
   FACILITY_AUTHOR_ROLES,
@@ -97,7 +98,7 @@ import {
   notifications,
   users,
 } from "@shared/schema";
-import { expandVaccineSchedule, canonicalizePerAntigen } from "@shared/vaccineSchedule";
+import { expandVaccineSchedule, canonicalizePerAntigen, normalizeStockVaccineName } from "@shared/vaccineSchedule";
 import { isAtLeastDaysAhead, DEFAULT_LEAD_TIME_DAYS } from "@shared/schedulingDates";
 import {
   runMissingSettlementDetection,
@@ -1203,12 +1204,59 @@ export async function registerRoutes(
     );
   }
 
+  // --- SUBDOMAIN ROUTING MIDDLEWARE ---
+  app.use(async (req, res, next) => {
+    const host = req.get("host") || "";
+    
+    // 1. Technical Docs Subdomain (docs.vaxplan.org)
+    if (host.startsWith("docs.")) {
+      const _path = await import("path");
+      const docsSitePath = _path.resolve(process.cwd(), "docs-site");
+      console.log(`[Subdomain:Docs] Matching path ${req.path} in path ${docsSitePath}`);
+      return express.static(docsSitePath, { maxAge: "5m" })(req, res, (err) => {
+        console.log(`[Subdomain:Docs] express.static fallback callback for path ${req.path}, err: ${err}`);
+        if (err) return next(err);
+        res.status(404).send("Document not found");
+      });
+    }
+
+    // 2. Research & Pilots Hub Subdomain (research.vaxplan.org)
+    if (host.startsWith("research.")) {
+      console.log(`[Subdomain:Research] Matching path ${req.path}`);
+      // Allow API endpoints, static assets and hot-module reloading in dev to pass through
+      if (
+        req.path.startsWith("/api/") ||
+        req.path.startsWith("/uploads/") ||
+        req.path.startsWith("/assets/") ||
+        req.path.startsWith("/@") ||
+        req.path.startsWith("/src/") ||
+        req.path.startsWith("/vite-hmr")
+      ) {
+        return next();
+      }
+      
+      // Serve the index.html for React SPA
+      const _path = await import("path");
+      if (process.env.NODE_ENV === "production") {
+        return res.sendFile(_path.resolve(process.cwd(), "dist/public/index.html"));
+      } else {
+        // In local development, fall through so Vite can handle SSR and transformIndexHtml
+        return next();
+      }
+    }
+
+    next();
+  });
+
   app.use(tenantContext);
   app.use(loadDbUser);
 
   // --- VGIE & SURVEILLANCE ROUTERS ---
-  app.use("/api/vgie", auth, vgieRouter);
+  // Original code commented out for TypeScript compatibility with readonly tuple:
+  // app.use("/api/vgie", auth, vgieRouter);
+  app.use("/api/vgie", ...auth, vgieRouter);
   app.use("/api/surveillance", surveillanceRouter);
+  app.use("/api/research", researchRouter);
 
   // --- USER ACCESS MANAGEMENT ENDPOINTS ---
   /* Original Code commented out for backward-compatibility:
@@ -3502,14 +3550,26 @@ export async function registerRoutes(
       if (scope.all) return res.json(all);
 
       // Build visible province IDs: direct province grants + provinces inferred
-      // from the user's granted districts (district managers and facility staff
-      // don't carry provinceIds in scope but must still see the province that
-      // contains their district/facility — e.g. for MicroplanWizard labels).
+      // from the user's granted districts/facilities (so district managers and
+      // facility staff can see the province containing their district/facility).
       const visibleProvinceIds = new Set<number>(scope.provinceIds);
-      if (scope.districtIds.size > 0 && visibleProvinceIds.size === 0) {
+      
+      const districtsForProvinces = new Set<number>(scope.districtIds);
+      if (scope.facilityIds.size > 0) {
+        const allFacilities = await storage.getFacilities(req.tenantId);
+        for (const f of allFacilities) {
+          if (scope.facilityIds.has(f.id) && f.districtId) {
+            districtsForProvinces.add(f.districtId);
+          }
+        }
+      }
+
+      if (districtsForProvinces.size > 0) {
         const allDistricts = await storage.getDistricts(req.tenantId);
         for (const d of allDistricts) {
-          if (scope.districtIds.has(d.id)) visibleProvinceIds.add(d.provinceId);
+          if (districtsForProvinces.has(d.id)) {
+            visibleProvinceIds.add(d.provinceId);
+          }
         }
       }
 
@@ -3575,10 +3635,18 @@ export async function registerRoutes(
       // Cache stable geo-reference lists in the browser for 5 minutes.
       res.set("Cache-Control", "private, max-age=300, stale-while-revalidate=60");
       const all = await storage.getDistricts(req.tenantId, provinceId);
-      // scope.districtIds is already expanded from provinces by getGeoScope,
-      // so provincial coordinators, district managers, and facility staff all
-      // receive only the districts that fall within their access boundary.
-      const result = scope.all ? all : all.filter((d) => scope.districtIds.has(d.id));
+      
+      const visibleDistrictIds = new Set<number>(scope.districtIds);
+      if (scope.facilityIds.size > 0) {
+        const allFacilities = await storage.getFacilities(req.tenantId);
+        for (const f of allFacilities) {
+          if (scope.facilityIds.has(f.id) && f.districtId) {
+            visibleDistrictIds.add(f.districtId);
+          }
+        }
+      }
+
+      const result = scope.all ? all : all.filter((d) => visibleDistrictIds.has(d.id));
       setCacheHeaders(res, 1800); // 30 min — district list is near-static
       res.json(result);
     } catch (error) {
@@ -7380,40 +7448,6 @@ export async function registerRoutes(
     }
   });
 
-  // ─── Population data ──────────────────────────────────
-  /* Original Code:
-  app.get("/api/population", ...auth, async (req: any, res) => {
-    try {
-      const dbUser = req.dbUser!;
-
-      const filters: any = {
-        source: req.query.source as string | undefined,
-        provinceId: req.query.provinceId ? parseInt(req.query.provinceId as string) : undefined,
-        districtId: req.query.districtId ? parseInt(req.query.districtId as string) : undefined,
-        villageId: req.query.villageId ? parseInt(req.query.villageId as string) : undefined,
-        facilityId: req.query.facilityId ? parseInt(req.query.facilityId as string) : undefined,
-        year: req.query.year ? parseInt(req.query.year as string) : undefined,
-      };
-
-      const isNationalAdmin = dbUser.role === "national_admin" || (Array.isArray(dbUser.roles) && (dbUser.roles as string[]).includes("national_admin"));
-
-      if (!isNationalAdmin) {
-        if (dbUser.facilityId) {
-          filters.facilityId = dbUser.facilityId;
-        } else if (dbUser.districtId) {
-          filters.districtId = dbUser.districtId;
-        } else if (dbUser.provinceId) {
-          filters.provinceId = dbUser.provinceId;
-        }
-      }
-
-      res.json(await storage.getPopulationData(req.tenantId, filters));
-    } catch (error) {
-      console.error("Error fetching population data:", error);
-      res.status(500).json({ message: "Failed to fetch population data" });
-    }
-  });
-  */
   app.get("/api/population", ...auth, async (req: any, res) => {
     try {
       const dbUser = req.dbUser!;
@@ -7432,22 +7466,46 @@ export async function registerRoutes(
       const excludeVillages = req.query.excludeVillages === "true" || (isNationalAdmin && !filters.provinceId && !filters.districtId && !filters.villageId && !filters.facilityId);
       filters.excludeVillages = excludeVillages;
 
-      if (!isNationalAdmin) {
-        if (dbUser.facilityId) {
-          const allVillages = await storage.getVillages(req.tenantId);
-          const facilityVillageIds = new Set(allVillages.filter((v: any) => v.assignedFacilityId === dbUser.facilityId).map((v: any) => v.id));
+      const scope = await getGeoScope(dbUser, req.tenantId);
+      let allPop = await storage.getPopulationData(req.tenantId, filters);
+
+      if (!scope.all) {
+        const allVillages = await storage.getVillages(req.tenantId);
+        const villageToFacilityMap = new Map<number, number>();
+        allVillages.forEach((v: any) => {
+          if (v.id && v.assignedFacilityId) {
+            villageToFacilityMap.set(v.id, v.assignedFacilityId);
+          }
+        });
+
+        allPop = allPop.filter((p: any) => {
+          // Check if explicit facilityId matches facility scope
+          if (p.facilityId && scope.facilityIds.has(p.facilityId)) return true;
+          // Check if explicit districtId matches district scope
+          if (p.districtId && scope.districtIds.has(p.districtId)) return true;
+          // Check if explicit provinceId matches province scope
+          if (p.provinceId && scope.provinceIds.has(p.provinceId)) return true;
           
-          const allPop = await storage.getPopulationData(req.tenantId, { ...filters, facilityId: undefined });
-          const filtered = allPop.filter((p: any) => p.facilityId === dbUser.facilityId || (p.villageId && facilityVillageIds.has(p.villageId)));
-          return res.json(filtered);
-        } else if (dbUser.districtId) {
-          filters.districtId = dbUser.districtId;
-        } else if (dbUser.provinceId) {
-          filters.provinceId = dbUser.provinceId;
-        }
+          // Check if village is assigned to a facility in scope
+          if (p.villageId) {
+            const facId = villageToFacilityMap.get(p.villageId);
+            if (facId && scope.facilityIds.has(facId)) return true;
+            
+            const village = allVillages.find((v: any) => v.id === p.villageId);
+            if (village && village.districtId && scope.districtIds.has(village.districtId)) return true;
+          }
+          
+          // If no specific boundaries are set, fallback check using the record's parents
+          if (!p.facilityId && !p.villageId) {
+            if (p.districtId && scope.districtIds.has(p.districtId)) return true;
+            if (p.provinceId && scope.provinceIds.has(p.provinceId)) return true;
+          }
+
+          return false;
+        });
       }
 
-      res.json(await storage.getPopulationData(req.tenantId, filters));
+      res.json(allPop);
     } catch (error) {
       console.error("Error fetching population data:", error);
       res.status(500).json({ message: "Failed to fetch population data" });
@@ -7982,7 +8040,18 @@ export async function registerRoutes(
 
   app.post("/api/population", ...auth, async (req: any, res) => {
     try {
+      const dbUser = req.dbUser!;
       const data = insertPopulationDataSchema.parse(req.body);
+
+      // Validate geographic access
+      if (!(await userCanAccessGeo(dbUser, req.tenantId, {
+        facilityId: data.facilityId,
+        districtId: data.districtId,
+        provinceId: data.provinceId
+      }))) {
+        return res.status(403).json({ message: "Forbidden: no access to this geographic area" });
+      }
+
       const pop = await storage.createPopulationData(req.tenantId, data);
       await logAudit(req, "create", "population_data", pop.id, null, pop);
       res.status(201).json(pop);
@@ -7994,8 +8063,45 @@ export async function registerRoutes(
 
   app.patch("/api/population/:id", ...auth, async (req: any, res) => {
     try {
+      const dbUser = req.dbUser!;
       const entityId = parseInt(req.params.id);
       const oldPop = await storage.getPopulationDataById(req.tenantId, entityId);
+      if (!oldPop) return res.status(404).json({ message: "Population data not found" });
+
+      // Validate geographic access to the record
+      if (!(await userCanAccessGeo(dbUser, req.tenantId, {
+        facilityId: oldPop.facilityId,
+        districtId: oldPop.districtId,
+        provinceId: oldPop.provinceId
+      }))) {
+        return res.status(403).json({ message: "Forbidden: no access to this population data" });
+      }
+
+      // Check access to target location if updating geography
+      if (req.body.facilityId || req.body.districtId || req.body.provinceId) {
+        if (!(await userCanAccessGeo(dbUser, req.tenantId, {
+          facilityId: req.body.facilityId ?? oldPop.facilityId,
+          districtId: req.body.districtId ?? oldPop.districtId,
+          provinceId: req.body.provinceId ?? oldPop.provinceId
+        }))) {
+          return res.status(403).json({ message: "Forbidden: no access to target geographic area" });
+        }
+      }
+
+      // Block unauthorized edits to submitted/approved/locked records
+      const isApprover = dbUser.role === "national_admin" || dbUser.role === "gis_specialist" ||
+        dbUser.role === "provincial_coordinator" || dbUser.role === "district_manager" ||
+        (Array.isArray(dbUser.roles) && (dbUser.roles as string[]).some(r => ["national_admin", "gis_specialist", "provincial_coordinator", "district_manager"].includes(r)));
+
+      if (oldPop.approvalStatus === "approved" || oldPop.approvalStatus === "locked" || oldPop.approvalStatus === "archived") {
+        if (!isApprover) {
+          return res.status(403).json({ message: "This population record is approved and locked. Scoped users cannot edit approved records." });
+        }
+      }
+      if (!isApprover && (oldPop.approvalStatus === "pending" || oldPop.approvalStatus === "under_review")) {
+        return res.status(403).json({ message: "This population record has already been submitted and cannot be edited." });
+      }
+
       const pop = await storage.updatePopulationData(req.tenantId, entityId, req.body);
       if (!pop) return res.status(404).json({ message: "Population data not found" });
       await logAudit(req, "update", "population_data", entityId, oldPop, pop);
@@ -8008,8 +8114,30 @@ export async function registerRoutes(
 
   app.delete("/api/population/:id", ...auth, async (req: any, res) => {
     try {
+      const dbUser = req.dbUser!;
       const entityId = parseInt(req.params.id);
       const oldPop = await storage.getPopulationDataById(req.tenantId, entityId);
+      if (!oldPop) return res.status(404).json({ message: "Population data not found" });
+
+      if (!(await userCanAccessGeo(dbUser, req.tenantId, {
+        facilityId: oldPop.facilityId,
+        districtId: oldPop.districtId,
+        provinceId: oldPop.provinceId
+      }))) {
+        return res.status(403).json({ message: "Forbidden: no access to this population data" });
+      }
+
+      // Check if locked/approved/submitted
+      const isApprover = dbUser.role === "national_admin" || dbUser.role === "gis_specialist" ||
+        dbUser.role === "provincial_coordinator" || dbUser.role === "district_manager" ||
+        (Array.isArray(dbUser.roles) && (dbUser.roles as string[]).some(r => ["national_admin", "gis_specialist", "provincial_coordinator", "district_manager"].includes(r)));
+
+      if (oldPop.approvalStatus === "approved" || oldPop.approvalStatus === "locked" || oldPop.approvalStatus === "archived" || oldPop.approvalStatus === "pending" || oldPop.approvalStatus === "under_review") {
+        if (!isApprover) {
+          return res.status(403).json({ message: "Cannot delete a record that is submitted or approved." });
+        }
+      }
+
       const ok = await storage.deletePopulationData(req.tenantId, entityId);
       if (!ok) return res.status(404).json({ message: "Population data not found" });
       await logAudit(req, "delete", "population_data", entityId, oldPop, null);
@@ -8017,6 +8145,334 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error deleting population data:", error);
       res.status(500).json({ message: "Failed to delete population data" });
+    }
+  });
+
+  app.post("/api/population/:id/submit", ...auth, async (req: any, res) => {
+    try {
+      const dbUser = req.dbUser!;
+      const entityId = parseInt(req.params.id);
+      const oldPop = await storage.getPopulationDataById(req.tenantId, entityId);
+      if (!oldPop) return res.status(404).json({ message: "Population data not found" });
+
+      if (!(await userCanAccessGeo(dbUser, req.tenantId, {
+        facilityId: oldPop.facilityId,
+        districtId: oldPop.districtId,
+        provinceId: oldPop.provinceId
+      }))) {
+        return res.status(403).json({ message: "Forbidden: no access to this population data" });
+      }
+
+      if (oldPop.approvalStatus !== "draft" && oldPop.approvalStatus !== "returned") {
+        return res.status(400).json({ message: "Only draft or returned records can be submitted for review." });
+      }
+
+      const meta = oldPop.metadata || {};
+      const updatedMeta = {
+        ...meta,
+        submittedAt: new Date().toISOString(),
+        submittedBy: `${dbUser.firstName || ""} ${dbUser.lastName || ""}`.trim() || dbUser.username || "System",
+        submittedById: dbUser.id,
+        submittedByRole: dbUser.role
+      };
+
+      const pop = await storage.updatePopulationData(req.tenantId, entityId, {
+        approvalStatus: "pending",
+        metadata: updatedMeta
+      });
+
+      await logAudit(req, "update", "population_data", entityId, oldPop, pop);
+      res.json(pop);
+    } catch (error) {
+      console.error("Error submitting population data:", error);
+      res.status(500).json({ message: "Failed to submit population data" });
+    }
+  });
+
+  app.post("/api/population/:id/review", ...auth, async (req: any, res) => {
+    try {
+      const dbUser = req.dbUser!;
+      const entityId = parseInt(req.params.id);
+      const oldPop = await storage.getPopulationDataById(req.tenantId, entityId);
+      if (!oldPop) return res.status(404).json({ message: "Population data not found" });
+
+      if (!(await userCanAccessGeo(dbUser, req.tenantId, {
+        facilityId: oldPop.facilityId,
+        districtId: oldPop.districtId,
+        provinceId: oldPop.provinceId
+      }))) {
+        return res.status(403).json({ message: "Forbidden: no access to this population data" });
+      }
+
+      const isApprover = dbUser.role === "national_admin" || dbUser.role === "gis_specialist" ||
+        dbUser.role === "provincial_coordinator" || dbUser.role === "district_manager" ||
+        (Array.isArray(dbUser.roles) && (dbUser.roles as string[]).some(r => ["national_admin", "gis_specialist", "provincial_coordinator", "district_manager"].includes(r)));
+      
+      if (!isApprover) {
+        return res.status(403).json({ message: "Forbidden: only reviewers are authorized to review population data" });
+      }
+
+      if (oldPop.approvalStatus !== "pending") {
+        return res.status(400).json({ message: "Only pending records can be set to under review." });
+      }
+
+      const meta = oldPop.metadata || {};
+      const updatedMeta = {
+        ...meta,
+        underReviewAt: new Date().toISOString(),
+        underReviewBy: `${dbUser.firstName || ""} ${dbUser.lastName || ""}`.trim() || dbUser.username || "System",
+        underReviewById: dbUser.id,
+        underReviewByRole: dbUser.role
+      };
+
+      const pop = await storage.updatePopulationData(req.tenantId, entityId, {
+        approvalStatus: "under_review",
+        metadata: updatedMeta
+      });
+
+      await logAudit(req, "update", "population_data", entityId, oldPop, pop);
+      res.json(pop);
+    } catch (error) {
+      console.error("Error setting review status:", error);
+      res.status(500).json({ message: "Failed to set review status" });
+    }
+  });
+
+  app.post("/api/population/:id/approve", ...auth, async (req: any, res) => {
+    try {
+      const dbUser = req.dbUser!;
+      const entityId = parseInt(req.params.id);
+      const oldPop = await storage.getPopulationDataById(req.tenantId, entityId);
+      if (!oldPop) return res.status(404).json({ message: "Population data not found" });
+
+      if (!(await userCanAccessGeo(dbUser, req.tenantId, {
+        facilityId: oldPop.facilityId,
+        districtId: oldPop.districtId,
+        provinceId: oldPop.provinceId
+      }))) {
+        return res.status(403).json({ message: "Forbidden: no access to this population data" });
+      }
+
+      const isApprover = dbUser.role === "national_admin" || dbUser.role === "gis_specialist" ||
+        dbUser.role === "provincial_coordinator" || dbUser.role === "district_manager" ||
+        (Array.isArray(dbUser.roles) && (dbUser.roles as string[]).some(r => ["national_admin", "gis_specialist", "provincial_coordinator", "district_manager"].includes(r)));
+      
+      if (!isApprover) {
+        return res.status(403).json({ message: "Forbidden: only reviewers are authorized to approve population data" });
+      }
+
+      if (oldPop.approvalStatus !== "pending" && oldPop.approvalStatus !== "under_review") {
+        return res.status(400).json({ message: "Only pending or under-review records can be approved." });
+      }
+
+      const meta = (oldPop.metadata as any) || {};
+      const updatedMeta = {
+        ...meta,
+        approvedAt: new Date().toISOString(),
+        approvedBy: `${dbUser.firstName || ""} ${dbUser.lastName || ""}`.trim() || dbUser.username || "System",
+        approvedById: dbUser.id,
+        approvedByRole: dbUser.role,
+        comments: req.body.comments || meta.comments || ""
+      };
+
+      const pop = await storage.updatePopulationData(req.tenantId, entityId, {
+        approvalStatus: "approved",
+        metadata: updatedMeta
+      });
+
+      await logAudit(req, "update", "population_data", entityId, oldPop, pop);
+      res.json(pop);
+    } catch (error) {
+      console.error("Error approving population data:", error);
+      res.status(500).json({ message: "Failed to approve population data" });
+    }
+  });
+
+  app.post("/api/population/:id/return", ...auth, async (req: any, res) => {
+    try {
+      const dbUser = req.dbUser!;
+      const entityId = parseInt(req.params.id);
+      const oldPop = await storage.getPopulationDataById(req.tenantId, entityId);
+      if (!oldPop) return res.status(404).json({ message: "Population data not found" });
+
+      if (!(await userCanAccessGeo(dbUser, req.tenantId, {
+        facilityId: oldPop.facilityId,
+        districtId: oldPop.districtId,
+        provinceId: oldPop.provinceId
+      }))) {
+        return res.status(403).json({ message: "Forbidden: no access to this population data" });
+      }
+
+      const isApprover = dbUser.role === "national_admin" || dbUser.role === "gis_specialist" ||
+        dbUser.role === "provincial_coordinator" || dbUser.role === "district_manager" ||
+        (Array.isArray(dbUser.roles) && (dbUser.roles as string[]).some(r => ["national_admin", "gis_specialist", "provincial_coordinator", "district_manager"].includes(r)));
+      
+      if (!isApprover) {
+        return res.status(403).json({ message: "Forbidden: only reviewers are authorized to return population data" });
+      }
+
+      if (oldPop.approvalStatus !== "pending" && oldPop.approvalStatus !== "under_review") {
+        return res.status(400).json({ message: "Only pending or under-review records can be returned." });
+      }
+
+      const meta = oldPop.metadata || {};
+      const updatedMeta = {
+        ...meta,
+        returnedAt: new Date().toISOString(),
+        returnedBy: `${dbUser.firstName || ""} ${dbUser.lastName || ""}`.trim() || dbUser.username || "System",
+        returnedById: dbUser.id,
+        returnedByRole: dbUser.role,
+        comments: req.body.comments || ""
+      };
+
+      const pop = await storage.updatePopulationData(req.tenantId, entityId, {
+        approvalStatus: "returned",
+        metadata: updatedMeta
+      });
+
+      await logAudit(req, "update", "population_data", entityId, oldPop, pop);
+      res.json(pop);
+    } catch (error) {
+      console.error("Error returning population data:", error);
+      res.status(500).json({ message: "Failed to return population data" });
+    }
+  });
+
+  app.post("/api/population/:id/reject", ...auth, async (req: any, res) => {
+    try {
+      const dbUser = req.dbUser!;
+      const entityId = parseInt(req.params.id);
+      const oldPop = await storage.getPopulationDataById(req.tenantId, entityId);
+      if (!oldPop) return res.status(404).json({ message: "Population data not found" });
+
+      if (!(await userCanAccessGeo(dbUser, req.tenantId, {
+        facilityId: oldPop.facilityId,
+        districtId: oldPop.districtId,
+        provinceId: oldPop.provinceId
+      }))) {
+        return res.status(403).json({ message: "Forbidden: no access to this population data" });
+      }
+
+      const isApprover = dbUser.role === "national_admin" || dbUser.role === "gis_specialist" ||
+        dbUser.role === "provincial_coordinator" || dbUser.role === "district_manager" ||
+        (Array.isArray(dbUser.roles) && (dbUser.roles as string[]).some(r => ["national_admin", "gis_specialist", "provincial_coordinator", "district_manager"].includes(r)));
+      
+      if (!isApprover) {
+        return res.status(403).json({ message: "Forbidden: only reviewers are authorized to reject population data" });
+      }
+
+      if (oldPop.approvalStatus !== "pending" && oldPop.approvalStatus !== "under_review") {
+        return res.status(400).json({ message: "Only pending or under-review records can be rejected." });
+      }
+
+      const meta = oldPop.metadata || {};
+      const updatedMeta = {
+        ...meta,
+        rejectedAt: new Date().toISOString(),
+        rejectedBy: `${dbUser.firstName || ""} ${dbUser.lastName || ""}`.trim() || dbUser.username || "System",
+        rejectedById: dbUser.id,
+        rejectedByRole: dbUser.role,
+        comments: req.body.comments || ""
+      };
+
+      const pop = await storage.updatePopulationData(req.tenantId, entityId, {
+        approvalStatus: "rejected",
+        metadata: updatedMeta
+      });
+
+      await logAudit(req, "update", "population_data", entityId, oldPop, pop);
+      res.json(pop);
+    } catch (error) {
+      console.error("Error rejecting population data:", error);
+      res.status(500).json({ message: "Failed to reject population data" });
+    }
+  });
+
+  app.post("/api/population/:id/archive", ...auth, async (req: any, res) => {
+    try {
+      const dbUser = req.dbUser!;
+      const entityId = parseInt(req.params.id);
+      const oldPop = await storage.getPopulationDataById(req.tenantId, entityId);
+      if (!oldPop) return res.status(404).json({ message: "Population data not found" });
+
+      if (!(await userCanAccessGeo(dbUser, req.tenantId, {
+        facilityId: oldPop.facilityId,
+        districtId: oldPop.districtId,
+        provinceId: oldPop.provinceId
+      }))) {
+        return res.status(403).json({ message: "Forbidden: no access to this population data" });
+      }
+
+      const isNational = dbUser.role === "national_admin" || dbUser.role === "gis_specialist" || dbUser.isPlatformAdmin ||
+        (Array.isArray(dbUser.roles) && (dbUser.roles as string[]).some(r => ["national_admin", "gis_specialist"].includes(r)));
+      
+      if (!isNational) {
+        return res.status(403).json({ message: "Forbidden: only national administrators can archive population datasets" });
+      }
+
+      const meta = oldPop.metadata || {};
+      const updatedMeta = {
+        ...meta,
+        archivedAt: new Date().toISOString(),
+        archivedBy: `${dbUser.firstName || ""} ${dbUser.lastName || ""}`.trim() || dbUser.username || "System",
+        archivedById: dbUser.id
+      };
+
+      const pop = await storage.updatePopulationData(req.tenantId, entityId, {
+        approvalStatus: "archived",
+        metadata: updatedMeta
+      });
+
+      await logAudit(req, "update", "population_data", entityId, oldPop, pop);
+      res.json(pop);
+    } catch (error) {
+      console.error("Error archiving population data:", error);
+      res.status(500).json({ message: "Failed to archive population data" });
+    }
+  });
+
+  app.post("/api/population/:id/reopen", ...auth, async (req: any, res) => {
+    try {
+      const dbUser = req.dbUser!;
+      const entityId = parseInt(req.params.id);
+      const oldPop = await storage.getPopulationDataById(req.tenantId, entityId);
+      if (!oldPop) return res.status(404).json({ message: "Population data not found" });
+
+      if (!(await userCanAccessGeo(dbUser, req.tenantId, {
+        facilityId: oldPop.facilityId,
+        districtId: oldPop.districtId,
+        provinceId: oldPop.provinceId
+      }))) {
+        return res.status(403).json({ message: "Forbidden: no access to this population data" });
+      }
+
+      const isApprover = dbUser.role === "national_admin" || dbUser.role === "gis_specialist" ||
+        dbUser.role === "provincial_coordinator" || dbUser.role === "district_manager" ||
+        (Array.isArray(dbUser.roles) && (dbUser.roles as string[]).some(r => ["national_admin", "gis_specialist", "provincial_coordinator", "district_manager"].includes(r)));
+      
+      if (!isApprover) {
+        return res.status(403).json({ message: "Forbidden: not authorized to reopen population data" });
+      }
+
+      const meta = oldPop.metadata || {};
+      const updatedMeta = {
+        ...meta,
+        reopenedAt: new Date().toISOString(),
+        reopenedBy: `${dbUser.firstName || ""} ${dbUser.lastName || ""}`.trim() || dbUser.username || "System",
+        reopenedById: dbUser.id,
+        comments: req.body.comments || "Record reopened for correction."
+      };
+
+      const pop = await storage.updatePopulationData(req.tenantId, entityId, {
+        approvalStatus: "draft",
+        metadata: updatedMeta
+      });
+
+      await logAudit(req, "update", "population_data", entityId, oldPop, pop);
+      res.json(pop);
+    } catch (error) {
+      console.error("Error reopening population data:", error);
+      res.status(500).json({ message: "Failed to reopen population data" });
     }
   });
 
@@ -13272,7 +13728,7 @@ export async function registerRoutes(
       const transferSchema = z.object({
         sourceFacilityId: z.number().int().positive(),
         destFacilityId: z.number().int().positive(),
-        vaccineName: z.string().min(1),
+        vaccineName: z.string().min(1).transform(normalizeStockVaccineName),
         batchNumber: z.string().min(1),
         expiryDate: z.string().min(1),
         vvmStatus: z.number().int().min(1).max(4).default(1),

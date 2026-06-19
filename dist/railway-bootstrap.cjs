@@ -71,6 +71,8 @@ __export(schema_exports, {
   deviceTokens: () => deviceTokens,
   districts: () => districts,
   districtsRelations: () => districtsRelations,
+  downloadAssets: () => downloadAssets,
+  downloadAssetsRelations: () => downloadAssetsRelations,
   facilities: () => facilities,
   facilitiesRelations: () => facilitiesRelations,
   facilityCatchments: () => facilityCatchments,
@@ -84,6 +86,8 @@ __export(schema_exports, {
   hfcCommitteeRelations: () => hfcCommitteeRelations,
   htrScores: () => htrScores,
   idpProtocolEnum: () => idpProtocolEnum,
+  implementationLessons: () => implementationLessons,
+  implementationLessonsRelations: () => implementationLessonsRelations,
   importedCoverage: () => importedCoverage,
   indicatorManual: () => indicatorManual,
   insertAdminBoundarySchema: () => insertAdminBoundarySchema,
@@ -100,11 +104,13 @@ __export(schema_exports, {
   insertCsvImportSchema: () => insertCsvImportSchema,
   insertCustomLayerSchema: () => insertCustomLayerSchema,
   insertDistrictSchema: () => insertDistrictSchema,
+  insertDownloadAssetSchema: () => insertDownloadAssetSchema,
   insertFacilityCatchmentSchema: () => insertFacilityCatchmentSchema,
   insertFacilitySchema: () => insertFacilitySchema,
   insertFacilityStaffSchema: () => insertFacilityStaffSchema,
   insertHfcCommitteeMemberSchema: () => insertHfcCommitteeMemberSchema,
   insertHfcCommitteeSchema: () => insertHfcCommitteeSchema,
+  insertImplementationLessonSchema: () => insertImplementationLessonSchema,
   insertImportedCoverageSchema: () => insertImportedCoverageSchema,
   insertIndicatorManualSchema: () => insertIndicatorManualSchema,
   insertLabSampleSchema: () => insertLabSampleSchema,
@@ -112,11 +118,15 @@ __export(schema_exports, {
   insertMicroplanSchema: () => insertMicroplanSchema,
   insertMobilizationActivitySchema: () => insertMobilizationActivitySchema,
   insertMonthlyReportSchema: () => insertMonthlyReportSchema,
+  insertPilotActivitySchema: () => insertPilotActivitySchema,
+  insertPilotUpdateSchema: () => insertPilotUpdateSchema,
   insertPopulationDataSchema: () => insertPopulationDataSchema,
   insertPopulationGridSchema: () => insertPopulationGridSchema,
   insertProvinceSchema: () => insertProvinceSchema,
   insertQuarterlyReviewSchema: () => insertQuarterlyReviewSchema,
   insertRegionSchema: () => insertRegionSchema,
+  insertResearchDocumentSchema: () => insertResearchDocumentSchema,
+  insertResearchInterestSubmissionSchema: () => insertResearchInterestSubmissionSchema,
   insertSessionDayPlanSchema: () => insertSessionDayPlanSchema,
   insertSessionPlanSchema: () => insertSessionPlanSchema,
   insertSettlementMasterSchema: () => insertSettlementMasterSchema,
@@ -152,6 +162,10 @@ __export(schema_exports, {
   monthlyReportsRelations: () => monthlyReportsRelations,
   notifications: () => notifications,
   pageViews: () => pageViews,
+  pilotActivities: () => pilotActivities,
+  pilotActivitiesRelations: () => pilotActivitiesRelations,
+  pilotUpdates: () => pilotUpdates,
+  pilotUpdatesRelations: () => pilotUpdatesRelations,
   populationData: () => populationData,
   populationGrids: () => populationGrids,
   populationGridsRelations: () => populationGridsRelations,
@@ -164,6 +178,11 @@ __export(schema_exports, {
   quarterlyReviews: () => quarterlyReviews,
   regions: () => regions,
   regionsRelations: () => regionsRelations,
+  researchDocuments: () => researchDocuments,
+  researchDocumentsRelations: () => researchDocumentsRelations,
+  researchDownloadEvents: () => researchDownloadEvents,
+  researchDownloadEventsRelations: () => researchDownloadEventsRelations,
+  researchInterestSubmissions: () => researchInterestSubmissions,
   sessionDayPlans: () => sessionDayPlans,
   sessionDayPlansRelations: () => sessionDayPlansRelations,
   sessionPlanTypeEnum: () => sessionPlanTypeEnum,
@@ -212,6 +231,50 @@ var import_drizzle_orm = require("drizzle-orm");
 var import_pg_core = require("drizzle-orm/pg-core");
 var import_drizzle_zod = require("drizzle-zod");
 var import_zod = require("zod");
+
+// shared/vaccineSchedule.ts
+function normalizeStockVaccineName(input) {
+  if (!input) return "";
+  let value = input.trim().toUpperCase();
+  value = value.replace(/DOSE\s*-?\s*([0-9]+)/g, "-$1");
+  value = value.replace(/\s+/g, "");
+  value = value.replace(/^([A-Z]+)-?([0-9]+)$/, "$1-$2");
+  const mapping = {
+    "BCG": "BCG",
+    "OPV": "OPV",
+    "OPV-0": "OPV",
+    "OPV-1": "OPV",
+    "OPV-2": "OPV",
+    "OPV-3": "OPV",
+    "IPV": "IPV",
+    "IPV-1": "IPV",
+    "IPV-2": "IPV",
+    "PCV": "PCV",
+    "PCV-1": "PCV",
+    "PCV-2": "PCV",
+    "PCV-3": "PCV",
+    "PENTA": "PENTA",
+    "PENTA-1": "PENTA",
+    "PENTA-2": "PENTA",
+    "PENTA-3": "PENTA",
+    "ROTA": "ROTAVIRUS",
+    "ROTA-1": "ROTAVIRUS",
+    "ROTA-2": "ROTAVIRUS",
+    "ROTAVIRUS": "ROTAVIRUS",
+    "MR": "MR",
+    "MR-1": "MR",
+    "MR-2": "MR",
+    "TT": "TT",
+    "TT-1": "TT",
+    "TT-2": "TT",
+    "HPV": "HPV",
+    "COVID-19": "COVID-19",
+    "TD": "TD"
+  };
+  return mapping[value] ?? input.trim();
+}
+
+// shared/schema.ts
 var tenantStatusEnum = (0, import_pg_core.pgEnum)("tenant_status", [
   "trial",
   "active",
@@ -1988,6 +2051,7 @@ var insertSessionDayPlanSchema = (0, import_drizzle_zod.createInsertSchema)(sess
 var insertStockTransactionSchema = (0, import_drizzle_zod.createInsertSchema)(stockTransactions).omit({
   createdAt: true
 }).extend({
+  vaccineName: import_zod.z.string().transform(normalizeStockVaccineName),
   expiryDate: import_zod.z.coerce.date(),
   transactionDate: import_zod.z.coerce.date().optional()
 });
@@ -2417,6 +2481,223 @@ var insertVgieRecommendationSchema = (0, import_drizzle_zod.createInsertSchema)(
   updatedAt: true
 });
 var insertVgieAlertSchema = (0, import_drizzle_zod.createInsertSchema)(vgieAlerts).omit({
+  createdAt: true,
+  updatedAt: true
+});
+var researchDocuments = (0, import_pg_core.pgTable)("research_documents", {
+  id: (0, import_pg_core.integer)("id").primaryKey().generatedAlwaysAsIdentity(),
+  tenantId: (0, import_pg_core.varchar)("tenant_id").notNull(),
+  title: (0, import_pg_core.varchar)("title", { length: 255 }).notNull(),
+  slug: (0, import_pg_core.varchar)("slug", { length: 255 }).notNull(),
+  abstract: (0, import_pg_core.text)("abstract"),
+  documentType: (0, import_pg_core.varchar)("document_type", { length: 100 }).notNull(),
+  authors: (0, import_pg_core.varchar)("authors", { length: 255 }),
+  organizations: (0, import_pg_core.varchar)("organizations", { length: 255 }),
+  publicationDate: (0, import_pg_core.varchar)("publication_date", { length: 20 }),
+  year: (0, import_pg_core.integer)("year"),
+  version: (0, import_pg_core.varchar)("version", { length: 50 }).default("1.0.0"),
+  country: (0, import_pg_core.varchar)("country", { length: 100 }),
+  region: (0, import_pg_core.varchar)("region", { length: 100 }),
+  language: (0, import_pg_core.varchar)("language", { length: 50 }).default("en"),
+  tags: (0, import_pg_core.jsonb)("tags").default(import_drizzle_orm.sql`'[]'::jsonb`),
+  status: (0, import_pg_core.varchar)("status", { length: 50 }).default("Draft").notNull(),
+  visibility: (0, import_pg_core.varchar)("visibility", { length: 50 }).default("Public").notNull(),
+  fileUrl: (0, import_pg_core.varchar)("file_url", { length: 512 }),
+  fileName: (0, import_pg_core.varchar)("file_name", { length: 255 }),
+  fileType: (0, import_pg_core.varchar)("file_type", { length: 100 }),
+  fileSize: (0, import_pg_core.integer)("file_size"),
+  thumbnailUrl: (0, import_pg_core.varchar)("thumbnail_url", { length: 512 }),
+  citationText: (0, import_pg_core.text)("citation_text"),
+  doi: (0, import_pg_core.varchar)("doi", { length: 100 }),
+  license: (0, import_pg_core.varchar)("license", { length: 100 }).default("CC BY 4.0"),
+  isFeatured: (0, import_pg_core.boolean)("is_featured").default(false).notNull(),
+  downloadCount: (0, import_pg_core.integer)("download_count").default(0).notNull(),
+  createdByUserId: (0, import_pg_core.varchar)("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  updatedByUserId: (0, import_pg_core.varchar)("updated_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  publishedByUserId: (0, import_pg_core.varchar)("published_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  createdAt: (0, import_pg_core.timestamp)("created_at").defaultNow().notNull(),
+  updatedAt: (0, import_pg_core.timestamp)("updated_at").defaultNow().notNull(),
+  publishedAt: (0, import_pg_core.timestamp)("published_at"),
+  archivedAt: (0, import_pg_core.timestamp)("archived_at")
+}, (table) => [
+  (0, import_pg_core.index)("idx_research_doc_tenant").on(table.tenantId),
+  (0, import_pg_core.index)("idx_research_doc_status").on(table.status)
+]);
+var pilotActivities = (0, import_pg_core.pgTable)("pilot_activities", {
+  id: (0, import_pg_core.integer)("id").primaryKey().generatedAlwaysAsIdentity(),
+  tenantId: (0, import_pg_core.varchar)("tenant_id").notNull(),
+  title: (0, import_pg_core.varchar)("title", { length: 255 }).notNull(),
+  slug: (0, import_pg_core.varchar)("slug", { length: 255 }).notNull(),
+  summary: (0, import_pg_core.text)("summary"),
+  country: (0, import_pg_core.varchar)("country", { length: 100 }).notNull(),
+  province: (0, import_pg_core.varchar)("province", { length: 100 }),
+  district: (0, import_pg_core.varchar)("district", { length: 100 }),
+  facility: (0, import_pg_core.varchar)("facility", { length: 255 }),
+  communities: (0, import_pg_core.text)("communities"),
+  latitude: (0, import_pg_core.decimal)("latitude", { precision: 9, scale: 6 }),
+  longitude: (0, import_pg_core.decimal)("longitude", { precision: 9, scale: 6 }),
+  startDate: (0, import_pg_core.varchar)("start_date", { length: 20 }),
+  endDate: (0, import_pg_core.varchar)("end_date", { length: 20 }),
+  status: (0, import_pg_core.varchar)("status", { length: 50 }).default("Planned").notNull(),
+  pilotType: (0, import_pg_core.varchar)("pilot_type", { length: 100 }),
+  partners: (0, import_pg_core.varchar)("partners", { length: 255 }),
+  ministryFocalPoint: (0, import_pg_core.varchar)("ministry_focal_point", { length: 255 }),
+  technicalLead: (0, import_pg_core.varchar)("technical_lead", { length: 255 }),
+  objectives: (0, import_pg_core.text)("objectives"),
+  researchQuestions: (0, import_pg_core.text)("research_questions"),
+  methodology: (0, import_pg_core.text)("methodology"),
+  indicators: (0, import_pg_core.jsonb)("indicators").default(import_drizzle_orm.sql`'[]'::jsonb`),
+  baselineFindings: (0, import_pg_core.text)("baseline_findings"),
+  achievements: (0, import_pg_core.text)("achievements"),
+  challenges: (0, import_pg_core.text)("challenges"),
+  lessonsLearned: (0, import_pg_core.text)("lessons_learned"),
+  recommendations: (0, import_pg_core.text)("recommendations"),
+  ethicsStatus: (0, import_pg_core.varchar)("ethics_status", { length: 100 }),
+  visibility: (0, import_pg_core.varchar)("visibility", { length: 50 }).default("Public").notNull(),
+  isFeatured: (0, import_pg_core.boolean)("is_featured").default(false).notNull(),
+  createdByUserId: (0, import_pg_core.varchar)("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  updatedByUserId: (0, import_pg_core.varchar)("updated_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  createdAt: (0, import_pg_core.timestamp)("created_at").defaultNow().notNull(),
+  updatedAt: (0, import_pg_core.timestamp)("updated_at").defaultNow().notNull(),
+  publishedAt: (0, import_pg_core.timestamp)("published_at")
+}, (table) => [
+  (0, import_pg_core.index)("idx_pilot_act_tenant").on(table.tenantId),
+  (0, import_pg_core.index)("idx_pilot_act_status").on(table.status)
+]);
+var pilotUpdates = (0, import_pg_core.pgTable)("pilot_updates", {
+  id: (0, import_pg_core.integer)("id").primaryKey().generatedAlwaysAsIdentity(),
+  pilotId: (0, import_pg_core.integer)("pilot_id").notNull().references(() => pilotActivities.id, { onDelete: "cascade" }),
+  title: (0, import_pg_core.varchar)("title", { length: 255 }).notNull(),
+  updateDate: (0, import_pg_core.varchar)("update_date", { length: 20 }).notNull(),
+  updateType: (0, import_pg_core.varchar)("update_type", { length: 100 }),
+  description: (0, import_pg_core.text)("description"),
+  achievements: (0, import_pg_core.text)("achievements"),
+  challenges: (0, import_pg_core.text)("challenges"),
+  nextSteps: (0, import_pg_core.text)("next_steps"),
+  attachments: (0, import_pg_core.jsonb)("attachments").default(import_drizzle_orm.sql`'[]'::jsonb`),
+  createdByUserId: (0, import_pg_core.varchar)("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  createdAt: (0, import_pg_core.timestamp)("created_at").defaultNow().notNull(),
+  updatedAt: (0, import_pg_core.timestamp)("updated_at").defaultNow().notNull()
+}, (table) => [
+  (0, import_pg_core.index)("idx_pilot_upd_pilot").on(table.pilotId)
+]);
+var implementationLessons = (0, import_pg_core.pgTable)("implementation_lessons", {
+  id: (0, import_pg_core.integer)("id").primaryKey().generatedAlwaysAsIdentity(),
+  tenantId: (0, import_pg_core.varchar)("tenant_id").notNull(),
+  title: (0, import_pg_core.varchar)("title", { length: 255 }).notNull(),
+  slug: (0, import_pg_core.varchar)("slug", { length: 255 }).notNull(),
+  category: (0, import_pg_core.varchar)("category", { length: 100 }).notNull(),
+  context: (0, import_pg_core.text)("context"),
+  whatWasTested: (0, import_pg_core.text)("what_was_tested"),
+  whatWorked: (0, import_pg_core.text)("what_worked"),
+  whatDidNotWork: (0, import_pg_core.text)("what_did_not_work"),
+  recommendation: (0, import_pg_core.text)("recommendation"),
+  pilotId: (0, import_pg_core.integer)("pilot_id").references(() => pilotActivities.id, { onDelete: "set null" }),
+  documentId: (0, import_pg_core.integer)("document_id").references(() => researchDocuments.id, { onDelete: "set null" }),
+  tags: (0, import_pg_core.jsonb)("tags").default(import_drizzle_orm.sql`'[]'::jsonb`),
+  status: (0, import_pg_core.varchar)("status", { length: 50 }).default("Published").notNull(),
+  visibility: (0, import_pg_core.varchar)("visibility", { length: 50 }).default("Public").notNull(),
+  author: (0, import_pg_core.varchar)("author", { length: 255 }),
+  createdAt: (0, import_pg_core.timestamp)("created_at").defaultNow().notNull(),
+  updatedAt: (0, import_pg_core.timestamp)("updated_at").defaultNow().notNull()
+}, (table) => [
+  (0, import_pg_core.index)("idx_impl_lesson_tenant").on(table.tenantId),
+  (0, import_pg_core.index)("idx_impl_lesson_category").on(table.category)
+]);
+var downloadAssets = (0, import_pg_core.pgTable)("download_assets", {
+  id: (0, import_pg_core.integer)("id").primaryKey().generatedAlwaysAsIdentity(),
+  tenantId: (0, import_pg_core.varchar)("tenant_id").notNull(),
+  title: (0, import_pg_core.varchar)("title", { length: 255 }).notNull(),
+  slug: (0, import_pg_core.varchar)("slug", { length: 255 }).notNull(),
+  description: (0, import_pg_core.text)("description"),
+  category: (0, import_pg_core.varchar)("category", { length: 100 }).notNull(),
+  recommendedAudience: (0, import_pg_core.varchar)("recommended_audience", { length: 255 }),
+  fileUrl: (0, import_pg_core.varchar)("file_url", { length: 512 }),
+  fileName: (0, import_pg_core.varchar)("file_name", { length: 255 }),
+  fileType: (0, import_pg_core.varchar)("file_type", { length: 100 }),
+  fileSize: (0, import_pg_core.integer)("file_size"),
+  version: (0, import_pg_core.varchar)("version", { length: 50 }).default("1.0.0"),
+  status: (0, import_pg_core.varchar)("status", { length: 50 }).default("Published").notNull(),
+  visibility: (0, import_pg_core.varchar)("visibility", { length: 50 }).default("Public").notNull(),
+  downloadCount: (0, import_pg_core.integer)("download_count").default(0).notNull(),
+  createdByUserId: (0, import_pg_core.varchar)("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  updatedByUserId: (0, import_pg_core.varchar)("updated_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  createdAt: (0, import_pg_core.timestamp)("created_at").defaultNow().notNull(),
+  updatedAt: (0, import_pg_core.timestamp)("updated_at").defaultNow().notNull()
+}, (table) => [
+  (0, import_pg_core.index)("idx_download_asset_tenant").on(table.tenantId)
+]);
+var researchInterestSubmissions = (0, import_pg_core.pgTable)("research_interest_submissions", {
+  id: (0, import_pg_core.integer)("id").primaryKey().generatedAlwaysAsIdentity(),
+  tenantId: (0, import_pg_core.varchar)("tenant_id").notNull(),
+  fullName: (0, import_pg_core.varchar)("full_name", { length: 255 }).notNull(),
+  organization: (0, import_pg_core.varchar)("organization", { length: 255 }),
+  role: (0, import_pg_core.varchar)("role", { length: 255 }),
+  email: (0, import_pg_core.varchar)("email", { length: 255 }).notNull(),
+  country: (0, import_pg_core.varchar)("country", { length: 100 }),
+  areaOfInterest: (0, import_pg_core.varchar)("area_of_interest", { length: 255 }),
+  message: (0, import_pg_core.text)("message"),
+  consent: (0, import_pg_core.boolean)("consent").default(false).notNull(),
+  status: (0, import_pg_core.varchar)("status", { length: 50 }).default("pending").notNull(),
+  createdAt: (0, import_pg_core.timestamp)("created_at").defaultNow().notNull(),
+  updatedAt: (0, import_pg_core.timestamp)("updated_at").defaultNow().notNull()
+}, (table) => [
+  (0, import_pg_core.index)("idx_res_interest_tenant").on(table.tenantId)
+]);
+var researchDownloadEvents = (0, import_pg_core.pgTable)("research_download_events", {
+  id: (0, import_pg_core.integer)("id").primaryKey().generatedAlwaysAsIdentity(),
+  documentId: (0, import_pg_core.integer)("document_id").references(() => researchDocuments.id, { onDelete: "cascade" }),
+  assetId: (0, import_pg_core.integer)("asset_id").references(() => downloadAssets.id, { onDelete: "cascade" }),
+  userId: (0, import_pg_core.varchar)("user_id").references(() => users.id, { onDelete: "set null" }),
+  ipHash: (0, import_pg_core.varchar)("ip_hash", { length: 64 }),
+  userAgent: (0, import_pg_core.text)("user_agent"),
+  downloadedAt: (0, import_pg_core.timestamp)("downloaded_at").defaultNow().notNull()
+});
+var researchDocumentsRelations = (0, import_drizzle_orm.relations)(researchDocuments, ({ one, many }) => ({
+  createdBy: one(users, { fields: [researchDocuments.createdByUserId], references: [users.id] }),
+  lessons: many(implementationLessons)
+}));
+var pilotActivitiesRelations = (0, import_drizzle_orm.relations)(pilotActivities, ({ one, many }) => ({
+  createdBy: one(users, { fields: [pilotActivities.createdByUserId], references: [users.id] }),
+  updates: many(pilotUpdates),
+  lessons: many(implementationLessons)
+}));
+var pilotUpdatesRelations = (0, import_drizzle_orm.relations)(pilotUpdates, ({ one }) => ({
+  pilot: one(pilotActivities, { fields: [pilotUpdates.pilotId], references: [pilotActivities.id] }),
+  createdBy: one(users, { fields: [pilotUpdates.createdByUserId], references: [users.id] })
+}));
+var implementationLessonsRelations = (0, import_drizzle_orm.relations)(implementationLessons, ({ one }) => ({
+  pilot: one(pilotActivities, { fields: [implementationLessons.pilotId], references: [pilotActivities.id] }),
+  document: one(researchDocuments, { fields: [implementationLessons.documentId], references: [researchDocuments.id] })
+}));
+var downloadAssetsRelations = (0, import_drizzle_orm.relations)(downloadAssets, ({ one }) => ({
+  createdBy: one(users, { fields: [downloadAssets.createdByUserId], references: [users.id] })
+}));
+var researchDownloadEventsRelations = (0, import_drizzle_orm.relations)(researchDownloadEvents, ({ one }) => ({
+  document: one(researchDocuments, { fields: [researchDownloadEvents.documentId], references: [researchDocuments.id] }),
+  asset: one(downloadAssets, { fields: [researchDownloadEvents.assetId], references: [downloadAssets.id] })
+}));
+var insertResearchDocumentSchema = (0, import_drizzle_zod.createInsertSchema)(researchDocuments).omit({
+  createdAt: true,
+  updatedAt: true
+});
+var insertPilotActivitySchema = (0, import_drizzle_zod.createInsertSchema)(pilotActivities).omit({
+  createdAt: true,
+  updatedAt: true
+});
+var insertPilotUpdateSchema = (0, import_drizzle_zod.createInsertSchema)(pilotUpdates).omit({
+  createdAt: true,
+  updatedAt: true
+});
+var insertImplementationLessonSchema = (0, import_drizzle_zod.createInsertSchema)(implementationLessons).omit({
+  createdAt: true,
+  updatedAt: true
+});
+var insertDownloadAssetSchema = (0, import_drizzle_zod.createInsertSchema)(downloadAssets).omit({
+  createdAt: true,
+  updatedAt: true
+});
+var insertResearchInterestSubmissionSchema = (0, import_drizzle_zod.createInsertSchema)(researchInterestSubmissions).omit({
   createdAt: true,
   updatedAt: true
 });

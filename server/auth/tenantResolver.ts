@@ -44,7 +44,21 @@ const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export const tenantContext: RequestHandler = async (req, _res, next) => {
-  if (!req.isAuthenticated?.()) return next();
+  // Original check:
+  // if (!req.isAuthenticated?.()) return next();
+
+  const headerTenantRaw = req.headers["x-tenant-id"] || req.query["x-tenant-id"];
+  const headerTenantId =
+    typeof headerTenantRaw === "string" && UUID_RE.test(headerTenantRaw)
+      ? headerTenantRaw
+      : null;
+
+  if (!req.isAuthenticated?.()) {
+    if (headerTenantId) {
+      req.tenantId = headerTenantId;
+    }
+    return next();
+  }
 
   // Support both OIDC-authenticated users (claims.sub) and password-auth users
   // (where buildSessionUser stores the id directly on req.user.id). The OIDC
@@ -58,11 +72,6 @@ export const tenantContext: RequestHandler = async (req, _res, next) => {
   // cleared, so reads and writes can only ever scope to the user's home tenant.
   // We only pay the extra user lookup when an override is actually in play
   // (the common request has neither header nor viewTenantId, so this is free).
-  const headerTenantRaw = req.headers["x-tenant-id"] || req.query["x-tenant-id"];
-  const headerTenantId =
-    typeof headerTenantRaw === "string" && UUID_RE.test(headerTenantRaw)
-      ? headerTenantRaw
-      : null;
   const hasOverrideIntent = !!headerTenantId || !!req.session.viewTenantId;
 
   let isSuperAdmin = false;

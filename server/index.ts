@@ -35,6 +35,8 @@ import { applyWikiPages } from "./migrations/017-wiki-pages";
 import { promoteAdminUser } from "./migrations/018-promote-admin";
 import { applyNewUserRoles } from "./migrations/019-new-user-roles";
 import { up as applyColdChainEquipment } from "./migrations/020-cold-chain-equipment";
+import { up as applyStockNormalization } from "./migrations/021-normalize-stock-vaccine-names";
+import { up as applyResearchHubSchema } from "./migrations/022-research-hub-schema";
 
 
 const app = express();
@@ -335,6 +337,20 @@ async function backfillClientIds() {
       .then(() => log("cold chain equipment table ensured", "db"))
       .catch((err) => log(`cold chain equipment migration warning: ${err?.message ?? err}`, "db"))
   ).catch((err) => log(`cold chain migration db import failed: ${err?.message ?? err}`, "db"));
+
+  // Normalize stock vaccine names (migration 021)
+  import("./db").then(({ db }) =>
+    applyStockNormalization(db as any)
+      .then(() => log("stock transaction vaccine names normalized", "db"))
+      .catch((err) => log(`stock normalization migration warning: ${err?.message ?? err}`, "db"))
+  ).catch((err) => log(`stock normalization migration db import failed: ${err?.message ?? err}`, "db"));
+
+  // Research hub tables (migration 022)
+  import("./db").then(({ db }) =>
+    applyResearchHubSchema(db as any)
+      .then(() => log("research hub tables and seed data ensured", "db"))
+      .catch((err) => log(`research hub migration warning: ${err?.message ?? err}`, "db"))
+  ).catch((err) => log(`research hub migration db import failed: ${err?.message ?? err}`, "db"));
 
   setupRealtime(httpServer, getSession());
   startPopulationRefreshScheduler();

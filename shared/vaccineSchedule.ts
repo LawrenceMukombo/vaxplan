@@ -107,3 +107,61 @@ export function expandVaccineSchedule(
 
   return stages;
 }
+
+export function normalizeStockVaccineName(input: string): string {
+  if (!input) return "";
+  let value = input.trim().toUpperCase();
+
+  // Replace e.g., "PENTA DOSE 1", "PENTA DOSE-1", "PENTADOSE 1", "PENTADOSE1" with "PENTA-1"
+  value = value.replace(/DOSE\s*-?\s*([0-9]+)/g, "-$1");
+
+  // Remove spaces
+  value = value.replace(/\s+/g, "");
+
+  // Standardize single trailing digit pattern, e.g. "PENTA1" -> "PENTA-1"
+  value = value.replace(/^([A-Z]+)-?([0-9]+)$/, "$1-$2");
+
+  const mapping: Record<string, string> = {
+    "BCG": "BCG",
+
+    "OPV": "OPV",
+    "OPV-0": "OPV",
+    "OPV-1": "OPV",
+    "OPV-2": "OPV",
+    "OPV-3": "OPV",
+
+    "IPV": "IPV",
+    "IPV-1": "IPV",
+    "IPV-2": "IPV",
+
+    "PCV": "PCV",
+    "PCV-1": "PCV",
+    "PCV-2": "PCV",
+    "PCV-3": "PCV",
+
+    "PENTA": "PENTA",
+    "PENTA-1": "PENTA",
+    "PENTA-2": "PENTA",
+    "PENTA-3": "PENTA",
+
+    "ROTA": "ROTAVIRUS",
+    "ROTA-1": "ROTAVIRUS",
+    "ROTA-2": "ROTAVIRUS",
+    "ROTAVIRUS": "ROTAVIRUS",
+
+    "MR": "MR",
+    "MR-1": "MR",
+    "MR-2": "MR",
+
+    "TT": "TT",
+    "TT-1": "TT",
+    "TT-2": "TT",
+
+    "HPV": "HPV",
+    "COVID-19": "COVID-19",
+    "TD": "TD"
+  };
+
+  return mapping[value] ?? input.trim();
+}
+

@@ -33,6 +33,15 @@ import {
   Pencil,
   Trash2,
   AlertCircle,
+  CheckCircle2,
+  XCircle,
+  Lock,
+  Unlock,
+  Send,
+  Clock,
+  CornerUpLeft,
+  Archive,
+  X,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
@@ -40,6 +49,16 @@ import { canCreateData, canDeleteData } from "@/lib/permissions";
 import { PopulationDialog } from "@/components/PopulationDialog";
 import { DeleteConfirmDialog } from "@/components/DeleteConfirmDialog";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
 // XLSX is loaded lazily on-demand only when the user clicks Export.
 import type { 
   PopulationData, 
@@ -179,6 +198,71 @@ function MapEventsHandler({ onMapClick }: { onMapClick: () => void }) {
   return null;
 }
 
+interface WorkflowStepperProps {
+  status: string;
+}
+
+function WorkflowStepper({ status }: WorkflowStepperProps) {
+  const steps = [
+    { key: "draft", label: "Draft", desc: "Creation & Edit" },
+    { key: "pending", label: "Submitted", desc: "Awaiting Review" },
+    { key: "under_review", label: "In Review", desc: "Detailed Check" },
+    { key: "approved", label: "Approved", desc: "Locked & Active" },
+  ];
+
+  // Determine current step index
+  let currentIndex = 0;
+  if (status === "pending") currentIndex = 1;
+  else if (status === "under_review") currentIndex = 2;
+  else if (status === "approved" || status === "locked") currentIndex = 3;
+  else if (status === "returned") currentIndex = 0; // returns to draft state visually
+  else if (status === "rejected") currentIndex = 2; // failed during review
+
+  return (
+    <div className="relative pl-6 space-y-6 before:absolute before:left-2 before:top-2 before:bottom-2 before:w-[2px] before:bg-slate-200 dark:before:bg-slate-800">
+      {steps.map((step, index) => {
+        const isCompleted = currentIndex > index || (currentIndex === index && status !== "returned" && status !== "rejected");
+        const isCurrent = currentIndex === index;
+        const isReturnedState = isCurrent && status === "returned";
+        const isRejectedState = isCurrent && status === "rejected";
+
+        let markerColor = "bg-slate-200 dark:bg-slate-800 ring-transparent";
+        let titleColor = "text-muted-foreground";
+
+        if (isCompleted) {
+          markerColor = "bg-green-500 ring-green-100 dark:ring-green-950/50";
+          titleColor = "text-foreground font-semibold";
+        } else if (isCurrent) {
+          if (isReturnedState) {
+            markerColor = "bg-orange-500 ring-orange-100 dark:ring-orange-950/50";
+            titleColor = "text-orange-600 dark:text-orange-400 font-semibold";
+          } else if (isRejectedState) {
+            markerColor = "bg-red-500 ring-red-100 dark:ring-red-950/50";
+            titleColor = "text-red-600 dark:text-red-400 font-semibold";
+          } else {
+            markerColor = "bg-indigo-650 ring-indigo-100 dark:ring-indigo-950/50";
+            titleColor = "text-indigo-600 dark:text-indigo-400 font-semibold";
+          }
+        }
+
+        return (
+          <div key={step.key} className="relative flex gap-4 text-xs items-start">
+            <span className={`absolute -left-[22px] flex h-[14px] w-[14px] items-center justify-center rounded-full ring-4 ${markerColor}`} />
+            <div className="flex flex-col">
+              <span className={titleColor}>
+                {step.label}
+                {isReturnedState && " (Returned)"}
+                {isRejectedState && " (Rejected)"}
+              </span>
+              <span className="text-[10px] text-muted-foreground mt-0.5">{step.desc}</span>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 /* Original Code commented out to adhere to global rules:
 // Helper to extract coordinates safely from jsonb coordinates
 const getAdminCoordinates = (adminRecord: any): [number, number] | null => {
@@ -252,6 +336,13 @@ export default function Population() {
   const [selectedRegion, setSelectedRegion] = useState<string>("all");
   const [selectedProvince, setSelectedProvince] = useState<string>("all");
   const [selectedDistrict, setSelectedDistrict] = useState<string>("all");
+  const [selectedFacility, setSelectedFacility] = useState<string>("all");
+  const [selectedRecord, setSelectedRecord] = useState<(PopulationData & { metadata?: any }) | null>(null);
+
+  const [commentDialogOpen, setCommentDialogOpen] = useState(false);
+  const [commentAction, setCommentAction] = useState<"return" | "reject" | "reopen" | null>(null);
+  const [reviewerComment, setReviewerComment] = useState("");
+
   /* Original Code commented out for backward-compatibility:
   const [selectedYear, setSelectedYear] = useState<string>("all");
   */
@@ -273,9 +364,16 @@ export default function Population() {
       setSelectedRegion("all");
       setSelectedProvince("all");
       setSelectedDistrict("all");
+      setSelectedFacility("all");
       setSelectedYear("all");
+      setSelectedRecord(null);
     }
   }, [tenantInfo?.id]);
+
+  // Reset selected record when changing tabs to prevent state leakage
+  useEffect(() => {
+    setSelectedRecord(null);
+  }, [activeTab]);
 
 
   const skipRegionLevel = tenantInfo?.settings?.skipRegionLevel ?? (tenantInfo?.countryCode === "ZMB" || false);
@@ -370,14 +468,15 @@ export default function Population() {
     if (selectedYear !== "all") params.set("year", selectedYear);
     if (selectedProvince !== "all") params.set("provinceId", selectedProvince);
     if (selectedDistrict !== "all") params.set("districtId", selectedDistrict);
+    if (selectedFacility !== "all") params.set("facilityId", selectedFacility);
     
     // When no geographical scope filters are selected, exclude village-level records 
     // to avoid downloading a 17MB nationwide dataset for the data grid.
-    if (selectedProvince === "all" && selectedDistrict === "all") {
+    if (selectedProvince === "all" && selectedDistrict === "all" && selectedFacility === "all") {
       params.set("excludeVillages", "true");
     }
     return params.toString();
-  }, [activeTab, selectedYear, selectedProvince, selectedDistrict]);
+  }, [activeTab, selectedYear, selectedProvince, selectedDistrict, selectedFacility]);
 
   // Separate lightweight query for the heatmap — always includes village-level
   // records (with coordinates) so the density map shows even when the data grid
@@ -387,9 +486,10 @@ export default function Population() {
     if (selectedYear !== "all") params.set("year", selectedYear);
     if (selectedProvince !== "all") params.set("provinceId", selectedProvince);
     if (selectedDistrict !== "all") params.set("districtId", selectedDistrict);
+    if (selectedFacility !== "all") params.set("facilityId", selectedFacility);
     // NOTE: no excludeVillages — we NEED village records for the map dots
     return params.toString();
-  }, [selectedYear, selectedProvince, selectedDistrict]);
+  }, [selectedYear, selectedProvince, selectedDistrict, selectedFacility]);
 
   const { data: heatmapPopData = [] } = useQuery<PopulationData[]>({
     queryKey: ["/api/population/heatmap", heatmapQueryParams],
@@ -426,6 +526,7 @@ export default function Population() {
       });
       setDeleteDialogOpen(false);
       setDeletingRecord(null);
+      setSelectedRecord(null);
     },
     onError: (error) => {
       toast({
@@ -434,6 +535,119 @@ export default function Population() {
         variant: "destructive",
       });
     },
+  });
+
+  const submitMutation = useMutation({
+    mutationFn: async (id: number) => {
+      return await apiRequest<PopulationData>("POST", `/api/population/${id}/submit`);
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/population"] });
+      setSelectedRecord(data);
+      toast({
+        title: "Submitted for Review",
+        description: "The population record has been submitted for review.",
+      });
+    },
+    onError: (err) => {
+      toast({
+        title: "Submission Failed",
+        description: err instanceof Error ? err.message : "Failed to submit record.",
+        variant: "destructive"
+      });
+    }
+  });
+
+  const reviewMutation = useMutation({
+    mutationFn: async (id: number) => {
+      return await apiRequest<PopulationData>("POST", `/api/population/${id}/review`);
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/population"] });
+      setSelectedRecord(data);
+      toast({
+        title: "Review Started",
+        description: "The population record status is now set to Under Review.",
+      });
+    },
+    onError: (err) => {
+      toast({
+        title: "Action Failed",
+        description: err instanceof Error ? err.message : "Failed to begin review.",
+        variant: "destructive"
+      });
+    }
+  });
+
+  const approveMutation = useMutation({
+    mutationFn: async ({ id, comments }: { id: number; comments?: string }) => {
+      return await apiRequest<PopulationData>("POST", `/api/population/${id}/approve`, { comments });
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/population"] });
+      setSelectedRecord(data);
+      toast({
+        title: "Record Approved",
+        description: "The population record has been approved and locked.",
+      });
+    },
+    onError: (err) => {
+      toast({
+        title: "Approval Failed",
+        description: err instanceof Error ? err.message : "Failed to approve record.",
+        variant: "destructive"
+      });
+    }
+  });
+
+  const workflowActionMutation = useMutation({
+    mutationFn: async ({ id, action, comments }: { id: number; action: "return" | "reject" | "reopen"; comments?: string }) => {
+      const endpoint = action === "return" ? "return" : action === "reject" ? "reject" : "reopen";
+      return await apiRequest<PopulationData>("POST", `/api/population/${id}/${endpoint}`, { comments });
+    },
+    onSuccess: (data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/population"] });
+      setSelectedRecord(data);
+      const actionLabels = {
+        return: "Returned for Correction",
+        reject: "Record Rejected",
+        reopen: "Record Reopened"
+      };
+      toast({
+        title: actionLabels[variables.action],
+        description: `Successfully processed workflow action.`,
+      });
+      setCommentDialogOpen(false);
+      setReviewerComment("");
+    },
+    onError: (err) => {
+      toast({
+        title: "Action Failed",
+        description: err instanceof Error ? err.message : "Failed to perform action.",
+        variant: "destructive"
+      });
+    }
+  });
+
+  const archiveMutation = useMutation({
+    mutationFn: async (id: number) => {
+      return await apiRequest<PopulationData>("POST", `/api/population/${id}/archive`);
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/population"] });
+      setSelectedRecord(data);
+      toast({
+        title: "Record Archived",
+        description: "The population record has been archived.",
+      });
+    },
+    onError: (err) => {
+      toast({
+        title: "Action Failed",
+        description: err instanceof Error ? err.message : "Failed to archive record.",
+        variant: "destructive"
+      });
+    }
   });
 
   // 1. Memoized maps for quick O(1) lookups
@@ -528,6 +742,37 @@ export default function Population() {
     return { regionId, provinceId: base.provinceId, districtId: base.districtId };
   }, [provinceMap, districtMap, villageMap, facilityMap]);
 
+  const userCanApproveRecord = useCallback((currentUser: any, record: PopulationData | null): boolean => {
+    if (!currentUser || !record) return false;
+    
+    // Check roles
+    const roles = Array.isArray(currentUser.roles) ? currentUser.roles : [currentUser.role];
+    const isApproverRole = roles.some((r: string) => 
+      ["national_admin", "gis_specialist", "provincial_coordinator", "district_manager"].includes(r)
+    );
+    
+    if (!isApproverRole) return false;
+    if (currentUser.isPlatformAdmin || roles.includes("national_admin") || roles.includes("gis_specialist")) {
+      return true;
+    }
+    
+    const hierarchy = getRecordHierarchy(record);
+    
+    // Check provincial coordinator access
+    if (roles.includes("provincial_coordinator")) {
+      if (!currentUser.provinceId || !hierarchy.provinceId) return false;
+      return Number(currentUser.provinceId) === Number(hierarchy.provinceId);
+    }
+    
+    // Check district manager access
+    if (roles.includes("district_manager")) {
+      if (!currentUser.districtId || !hierarchy.districtId) return false;
+      return Number(currentUser.districtId) === Number(hierarchy.districtId);
+    }
+    
+    return false;
+  }, [getRecordHierarchy]);
+
   const filteredPopulationData = useMemo(() => {
     if (!populationData) return [];
     return populationData.filter((item) => {
@@ -546,9 +791,19 @@ export default function Population() {
       if (selectedDistrict !== "all" && Number(hierarchy.districtId) !== Number(selectedDistrict)) {
         return false;
       }
+      if (selectedFacility !== "all") {
+        if (item.facilityId) {
+          if (Number(item.facilityId) !== Number(selectedFacility)) return false;
+        } else if (item.villageId) {
+          const v = villageMap.get(Number(item.villageId));
+          if (!v || Number(v.assignedFacilityId) !== Number(selectedFacility)) return false;
+        } else {
+          return false; // exclude high-level records when facility filter is set
+        }
+      }
       return true;
     });
-  }, [populationData, activeTab, selectedRegion, selectedProvince, selectedDistrict, getRecordHierarchy]);
+  }, [populationData, activeTab, selectedRegion, selectedProvince, selectedDistrict, selectedFacility, getRecordHierarchy, villageMap]);
 
   // Compute exact coordinates and populations for the density heatmap.
   // Uses heatmapPopData (which always includes village-level records) rather than
@@ -605,6 +860,12 @@ export default function Population() {
   }, [tenantInfo?.countryCode]);
 
   const { mapCenter, mapZoom } = useMemo(() => {
+    if (selectedFacility !== "all") {
+      const f = facilityMap.get(Number(selectedFacility));
+      const coords = getAdminCoordinates(f);
+      if (coords) return { mapCenter: coords, mapZoom: 12 };
+    }
+
     if (selectedDistrict !== "all") {
       const d = districtMap.get(Number(selectedDistrict));
       const coords = getAdminCoordinates(d);
@@ -638,7 +899,7 @@ export default function Population() {
     }
 
     return { mapCenter: defaultCenterAndZoom.center, mapZoom: defaultCenterAndZoom.zoom };
-  }, [selectedDistrict, selectedProvince, heatmapPoints, districtMap, provinceMap, defaultCenterAndZoom, filteredPopulationData, villageMap]);
+  }, [selectedFacility, selectedDistrict, selectedProvince, heatmapPoints, districtMap, provinceMap, facilityMap, defaultCenterAndZoom, filteredPopulationData, villageMap]);
 
   // Memoized multi-source comparison summaries
   const comparisonSummary = useMemo(() => {
@@ -655,6 +916,16 @@ export default function Population() {
       }
       if (selectedDistrict !== "all" && Number(hierarchy.districtId) !== Number(selectedDistrict)) {
         return false;
+      }
+      if (selectedFacility !== "all") {
+        if (item.facilityId) {
+          if (Number(item.facilityId) !== Number(selectedFacility)) return false;
+        } else if (item.villageId) {
+          const v = villageMap.get(Number(item.villageId));
+          if (!v || Number(v.assignedFacilityId) !== Number(selectedFacility)) return false;
+        } else {
+          return false;
+        }
       }
       return true;
     });
@@ -729,16 +1000,51 @@ export default function Population() {
     };
   }, [comparisonSummary]);
 
+  const isNational = useMemo(() => {
+    return user?.role === "national_admin" || user?.role === "gis_specialist" || user?.isPlatformAdmin ||
+      (Array.isArray(user?.roles) && (user.roles as string[]).some(r => ["national_admin", "gis_specialist"].includes(r)));
+  }, [user]);
+
+  const isProvinceLocked = useMemo(() => !isNational && !!(user?.provinceId || user?.districtId || user?.facilityId), [isNational, user]);
+  const isDistrictLocked = useMemo(() => !isNational && !!(user?.districtId || user?.facilityId), [isNational, user]);
+  const isFacilityLocked = useMemo(() => !isNational && !!user?.facilityId, [isNational, user]);
+
   const filteredProvinces = useMemo(() => {
     if (!provinces) return [];
+    if (isProvinceLocked && user?.provinceId) {
+      return provinces.filter(p => Number(p.id) === Number(user.provinceId));
+    }
+    if (isProvinceLocked && user?.districtId) {
+      const dist = districtMap.get(Number(user.districtId));
+      if (dist) return provinces.filter(p => Number(p.id) === Number(dist.provinceId));
+    }
+    if (isProvinceLocked && user?.facilityId) {
+      const fac = facilityMap.get(Number(user.facilityId));
+      if (fac) {
+        const dist = districtMap.get(Number(fac.districtId));
+        if (dist) return provinces.filter(p => Number(p.id) === Number(dist.provinceId));
+      }
+    }
     if (selectedRegion === "all") return provinces;
     return provinces.filter(p => Number(p.regionId) === Number(selectedRegion));
-  }, [provinces, selectedRegion]);
+  }, [provinces, selectedRegion, isProvinceLocked, user, districtMap, facilityMap]);
 
   const filteredDistricts = useMemo(() => {
     if (!districts) return [];
+    if (isDistrictLocked && user?.districtId) {
+      return districts.filter(d => Number(d.id) === Number(user.districtId));
+    }
+    if (isDistrictLocked && user?.facilityId) {
+      const fac = facilityMap.get(Number(user.facilityId));
+      if (fac) {
+        return districts.filter(d => Number(d.id) === Number(fac.districtId));
+      }
+    }
     if (selectedProvince !== "all") {
       return districts.filter(d => Number(d.provinceId) === Number(selectedProvince));
+    }
+    if (!isNational && user?.provinceId) {
+      return districts.filter(d => Number(d.provinceId) === Number(user.provinceId));
     }
     if (selectedRegion !== "all" && provinces) {
       const allowedProvinceIds = new Set(
@@ -749,7 +1055,62 @@ export default function Population() {
       return districts.filter(d => allowedProvinceIds.has(Number(d.provinceId)));
     }
     return districts;
-  }, [districts, provinces, selectedRegion, selectedProvince]);
+  }, [districts, provinces, selectedRegion, selectedProvince, isDistrictLocked, user, facilityMap, isNational]);
+
+  const filteredFacilities = useMemo(() => {
+    if (!facilities) return [];
+    if (isFacilityLocked && user?.facilityId) {
+      return facilities.filter(f => Number(f.id) === Number(user.facilityId));
+    }
+    if (selectedDistrict !== "all") {
+      return facilities.filter(f => Number(f.districtId) === Number(selectedDistrict));
+    }
+    if (selectedProvince !== "all") {
+      const allowedDistrictIds = new Set(filteredDistricts.map(d => Number(d.id)));
+      return facilities.filter(f => allowedDistrictIds.has(Number(f.districtId)));
+    }
+    if (!isNational && user?.districtId) {
+      return facilities.filter(f => Number(f.districtId) === Number(user.districtId));
+    }
+    if (!isNational && user?.provinceId) {
+      const allowedDistrictIds = new Set(
+        districts?.filter(d => Number(d.provinceId) === Number(user.provinceId)).map(d => Number(d.id)) || []
+      );
+      return facilities.filter(f => allowedDistrictIds.has(Number(f.districtId)));
+    }
+    return facilities;
+  }, [facilities, selectedDistrict, selectedProvince, filteredDistricts, isFacilityLocked, user, isNational, districts]);
+
+  // Pre-populate and lock filters on load based on user role
+  useEffect(() => {
+    if (!user || loadingProvinces || loadingDistricts || loadingFacilities) return;
+
+    if (user.facilityId) {
+      const fId = Number(user.facilityId);
+      const fac = facilityMap.get(fId);
+      if (fac) {
+        setSelectedFacility(fId.toString());
+        const dId = fac.districtId;
+        if (dId) {
+          setSelectedDistrict(dId.toString());
+          const dist = districtMap.get(Number(dId));
+          if (dist && dist.provinceId) {
+            setSelectedProvince(dist.provinceId.toString());
+          }
+        }
+      }
+    } else if (user.districtId) {
+      const dId = Number(user.districtId);
+      setSelectedDistrict(dId.toString());
+      const dist = districtMap.get(dId);
+      if (dist && dist.provinceId) {
+        setSelectedProvince(dist.provinceId.toString());
+      }
+    } else if (user.provinceId) {
+      const pId = Number(user.provinceId);
+      setSelectedProvince(pId.toString());
+    }
+  }, [user, loadingProvinces, loadingDistricts, loadingFacilities, facilityMap, districtMap, provinceMap]);
 
   const isLoading = loadingRegions || loadingProvinces || loadingDistricts || loadingVillages || loadingPopulation || loadingFacilities;
 
@@ -809,6 +1170,26 @@ export default function Population() {
     return districtMap.get(Number(h.districtId))?.name ?? "—";
   };
 
+  const getFacilityNameForRecord = (item: PopulationData) => {
+    if (item.facilityId) {
+      return facilityMap.get(Number(item.facilityId))?.name ?? "—";
+    }
+    if (item.villageId) {
+      const v = villageMap.get(Number(item.villageId));
+      if (v && v.assignedFacilityId) {
+        return facilityMap.get(Number(v.assignedFacilityId))?.name ?? "—";
+      }
+    }
+    return "—";
+  };
+
+  const getCommunityNameForRecord = (item: PopulationData) => {
+    if (item.villageId) {
+      return villageMap.get(Number(item.villageId))?.name ?? "—";
+    }
+    return "—";
+  };
+
   const columns = [
     {
       key: "_geoProvinceName",
@@ -827,14 +1208,19 @@ export default function Population() {
       ),
     },
     {
-      key: "location",
-      header: "Location",
+      key: "_geoFacilityName",
+      header: "Facility",
       sortable: true,
       render: (item: PopulationData) => (
-        <div>
-          <p className="font-medium">{getLocationName(item)}</p>
-          <p className="text-xs text-muted-foreground">{getLocationType(item)}</p>
-        </div>
+        <span className="text-sm font-medium">{getFacilityNameForRecord(item)}</span>
+      ),
+    },
+    {
+      key: "_geoCommunityName",
+      header: "Community / Catchment",
+      sortable: true,
+      render: (item: PopulationData) => (
+        <span className="text-sm">{getCommunityNameForRecord(item)}</span>
       ),
     },
     {
@@ -847,7 +1233,7 @@ export default function Population() {
     },
     {
       key: "totalPopulation",
-      header: "Total Population",
+      header: "Total Pop",
       sortable: true,
       render: (item: PopulationData) => (
         <span className="font-mono font-medium">
@@ -856,22 +1242,12 @@ export default function Population() {
       ),
     },
     {
-      key: "malePopulation",
-      header: "Male",
+      key: "under1Population",
+      header: "Under 1",
       sortable: true,
       render: (item: PopulationData) => (
         <span className="font-mono">
-          {item.malePopulation?.toLocaleString() || "-"}
-        </span>
-      ),
-    },
-    {
-      key: "femalePopulation",
-      header: "Female",
-      sortable: true,
-      render: (item: PopulationData) => (
-        <span className="font-mono">
-          {item.femalePopulation?.toLocaleString() || "-"}
+          {item.under1Population?.toLocaleString() || "-"}
         </span>
       ),
     },
@@ -886,48 +1262,59 @@ export default function Population() {
       ),
     },
     {
-      key: "growthRate",
-      header: "Growth Rate",
+      key: "pregnantWomen",
+      header: "Pregnant Women",
       sortable: true,
       render: (item: PopulationData) => (
         <span className="font-mono">
-          {item.growthRate ? `${Number(item.growthRate).toFixed(2)}%` : "-"}
+          {item.pregnantWomen?.toLocaleString() || "-"}
         </span>
       ),
     },
     {
-      key: "confidenceScore",
-      header: "Confidence",
-      sortable: true,
-      render: (item: PopulationData) => {
-        const score = Number(item.confidenceScore) || 0;
-        return (
-          <Badge 
-            variant={score >= 80 ? "default" : score >= 50 ? "secondary" : "outline"}
-            className="text-xs"
-          >
-            {score}%
-          </Badge>
-        );
-      },
-    },
-    {
       key: "approvalStatus",
       header: "Status",
+      sortable: true,
       render: (item: PopulationData) => {
         const statusColors: Record<string, string> = {
           draft: "secondary",
           pending: "outline",
+          under_review: "outline",
           approved: "default",
+          returned: "outline",
           rejected: "destructive",
           locked: "secondary",
+          archived: "outline",
+          superseded: "outline",
+        };
+        const statusLabels: Record<string, string> = {
+          draft: "Draft",
+          pending: "Submitted",
+          under_review: "Under Review",
+          approved: "Approved",
+          returned: "Returned",
+          rejected: "Rejected",
+          locked: "Locked",
+          archived: "Archived",
+          superseded: "Superseded",
+        };
+        const badgeClasses: Record<string, string> = {
+          draft: "bg-gray-100 text-gray-800 border-gray-200 dark:bg-gray-800 dark:text-gray-250 dark:border-gray-700",
+          pending: "bg-blue-100 text-blue-800 border-blue-200 dark:bg-blue-900/35 text-blue-400 border-blue-900/50",
+          under_review: "bg-yellow-100 text-yellow-800 border-yellow-200 dark:bg-yellow-900/35 text-yellow-400 border-yellow-900/50",
+          approved: "bg-green-100 text-green-800 border-green-200 dark:bg-green-900/35 text-green-400 border-green-900/50",
+          returned: "bg-orange-100 text-orange-800 border-orange-200 dark:bg-orange-900/35 text-orange-400 border-orange-900/50",
+          rejected: "bg-red-100 text-red-800 border-red-200 dark:bg-red-900/35 text-red-400 border-red-900/50",
+          locked: "bg-purple-100 text-purple-800 border-purple-200 dark:bg-purple-900/35 text-purple-400 border-purple-900/50",
+          archived: "bg-zinc-100 text-zinc-800 border-zinc-200 dark:bg-zinc-850 text-zinc-400 border-zinc-700",
+          superseded: "bg-slate-100 text-slate-800 border-slate-200 dark:bg-slate-850 text-slate-400 border-slate-700",
         };
         return (
           <Badge 
-            variant={statusColors[item.approvalStatus || "draft"] as "default" | "secondary" | "outline" | "destructive"}
-            className="text-xs capitalize"
+            variant={statusColors[item.approvalStatus || "draft"] as any}
+            className={`text-[11px] font-semibold py-0.5 px-2 rounded-full ${badgeClasses[item.approvalStatus || "draft"]}`}
           >
-            {item.approvalStatus || "draft"}
+            {statusLabels[item.approvalStatus || "draft"]}
           </Badge>
         );
       },
@@ -935,30 +1322,52 @@ export default function Population() {
     {
       key: "actions",
       header: "Actions",
-      render: (item: PopulationData) => (
-        <div className="flex items-center gap-1">
-          {canCreateData(user) && (
+      render: (item: PopulationData) => {
+        const canEdit = item.approvalStatus === "draft" || item.approvalStatus === "returned" || isNational;
+        return (
+          <div className="flex items-center gap-1">
             <Button
-              size="icon"
+              size="sm"
               variant="ghost"
-              onClick={() => handleEditRecord(item)}
-              data-testid={`button-edit-${item.id}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                setSelectedRecord(item);
+              }}
+              className="text-xs text-indigo-600 dark:text-indigo-400 font-semibold hover:bg-indigo-50 dark:hover:bg-indigo-950/20"
             >
-              <Pencil className="h-4 w-4" />
+              Review
             </Button>
-          )}
-          {canDeleteData(user) && (
-            <Button
-              size="icon"
-              variant="ghost"
-              onClick={() => handleDeleteClick(item)}
-              data-testid={`button-delete-${item.id}`}
-            >
-              <Trash2 className="h-4 w-4" />
-            </Button>
-          )}
-        </div>
-      ),
+            {canCreateData(user) && canEdit && (
+              <Button
+                size="icon"
+                variant="ghost"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleEditRecord(item);
+                }}
+                data-testid={`button-edit-${item.id}`}
+                className="h-7 w-7"
+              >
+                <Pencil className="h-3.5 w-3.5" />
+              </Button>
+            )}
+            {canDeleteData(user) && canEdit && (
+              <Button
+                size="icon"
+                variant="ghost"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleDeleteClick(item);
+                }}
+                data-testid={`button-delete-${item.id}`}
+                className="h-7 w-7 text-red-500 hover:text-red-600"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </Button>
+            )}
+          </div>
+        );
+      },
     },
   ];
 
@@ -1011,10 +1420,17 @@ export default function Population() {
   };
 
   const handleResetFilters = () => {
-    setSelectedRegion("all");
-    setSelectedProvince("all");
-    setSelectedDistrict("all");
-    setSelectedYear("all");
+    if (!isProvinceLocked) {
+      setSelectedRegion("all");
+      setSelectedProvince("all");
+    }
+    if (!isDistrictLocked) {
+      setSelectedDistrict("all");
+    }
+    if (!isFacilityLocked) {
+      setSelectedFacility("all");
+    }
+    setSelectedYear(CURRENT_YEAR.toString());
   };
 
   const totalPopulation = useMemo(() => {
@@ -1065,16 +1481,21 @@ export default function Population() {
           <CardTitle className="text-base">Filters</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className={`grid grid-cols-1 sm:grid-cols-2 ${skipRegionLevel ? "lg:grid-cols-4" : "lg:grid-cols-5"} gap-4`}>
+          <div className={`grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 ${skipRegionLevel ? "lg:grid-cols-5" : "lg:grid-cols-6"} gap-4`}>
             {/* If skipRegionLevel is true (Zambia), the redundant Region selector is hidden completely */}
             {!skipRegionLevel && (
               <div>
                 <label className="text-sm text-muted-foreground mb-1.5 block">Region</label>
-                <Select value={selectedRegion} onValueChange={(val) => {
-                  setSelectedRegion(val);
-                  setSelectedProvince("all");
-                  setSelectedDistrict("all");
-                }}>
+                <Select
+                  value={selectedRegion}
+                  onValueChange={(val) => {
+                    setSelectedRegion(val);
+                    setSelectedProvince("all");
+                    setSelectedDistrict("all");
+                    setSelectedFacility("all");
+                  }}
+                  disabled={isProvinceLocked}
+                >
                   <SelectTrigger data-testid="select-region">
                     <SelectValue placeholder="All Regions" />
                   </SelectTrigger>
@@ -1092,10 +1513,15 @@ export default function Population() {
 
             <div>
               <label className="text-sm text-muted-foreground mb-1.5 block">{adminLabels.level1}</label>
-              <Select value={selectedProvince} onValueChange={(val) => {
-                setSelectedProvince(val);
-                setSelectedDistrict("all");
-              }}>
+              <Select
+                value={selectedProvince}
+                onValueChange={(val) => {
+                  setSelectedProvince(val);
+                  setSelectedDistrict("all");
+                  setSelectedFacility("all");
+                }}
+                disabled={isProvinceLocked}
+              >
                 <SelectTrigger data-testid="select-province">
                   <SelectValue placeholder={`All ${adminLabels.level1}s`} />
                 </SelectTrigger>
@@ -1112,7 +1538,14 @@ export default function Population() {
 
             <div>
               <label className="text-sm text-muted-foreground mb-1.5 block">{adminLabels.level2}</label>
-              <Select value={selectedDistrict} onValueChange={setSelectedDistrict}>
+              <Select
+                value={selectedDistrict}
+                onValueChange={(val) => {
+                  setSelectedDistrict(val);
+                  setSelectedFacility("all");
+                }}
+                disabled={isDistrictLocked}
+              >
                 <SelectTrigger data-testid="select-district">
                   <SelectValue placeholder={`All ${adminLabels.level2}s`} />
                 </SelectTrigger>
@@ -1121,6 +1554,27 @@ export default function Population() {
                   {filteredDistricts.map((district) => (
                     <SelectItem key={district.id} value={district.id.toString()}>
                       {district.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div>
+              <label className="text-sm text-muted-foreground mb-1.5 block">Health Facility</label>
+              <Select
+                value={selectedFacility}
+                onValueChange={setSelectedFacility}
+                disabled={isFacilityLocked}
+              >
+                <SelectTrigger data-testid="select-facility">
+                  <SelectValue placeholder="All Facilities" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Facilities</SelectItem>
+                  {filteredFacilities.map((facility) => (
+                    <SelectItem key={facility.id} value={facility.id.toString()}>
+                      {facility.name}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -1304,44 +1758,341 @@ export default function Population() {
           </TabsTrigger>
         </TabsList>
 
-        {TAB_CONFIG.map((tab) => (
-          <TabsContent key={tab.value} value={tab.value} className="space-y-4">
-            <Card>
-              <CardHeader className="pb-3">
-                <div className="flex items-center justify-between gap-4 flex-wrap">
-                  <div>
-                    <CardTitle className="text-lg flex items-center gap-2">
-                      <tab.icon className="h-5 w-5" />
-                      {tab.label}
-                    </CardTitle>
-                    <p className="text-sm text-muted-foreground mt-1">{tab.description}</p>
-                  </div>
-                  <div className="flex items-center gap-4 text-sm">
-                    <div>
-                      <span className="text-muted-foreground">Records:</span>{" "}
-                      <span className="font-medium" data-testid="text-record-count">{recordCount}</span>
-                    </div>
-                    <div>
-                      <span className="text-muted-foreground">Total Pop:</span>{" "}
-                      <span className="font-medium font-mono" data-testid="text-total-population">
-                        {totalPopulation.toLocaleString()}
-                      </span>
-                    </div>
-                  </div>
+        {TAB_CONFIG.map((tab) => {
+          const isCurrentTabSelected = selectedRecord && selectedRecord.source === tab.value;
+          return (
+            <TabsContent key={tab.value} value={tab.value} className="space-y-4">
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+                <div className={isCurrentTabSelected ? "lg:col-span-8 space-y-4" : "lg:col-span-12 space-y-4"}>
+                  <Card>
+                    <CardHeader className="pb-3">
+                      <div className="flex items-center justify-between gap-4 flex-wrap">
+                        <div>
+                          <CardTitle className="text-lg flex items-center gap-2">
+                            <tab.icon className="h-5 w-5" />
+                            {tab.label}
+                          </CardTitle>
+                          <p className="text-sm text-muted-foreground mt-1">{tab.description}</p>
+                        </div>
+                        <div className="flex items-center gap-4 text-sm">
+                          <div>
+                            <span className="text-muted-foreground">Records:</span>{" "}
+                            <span className="font-medium" data-testid="text-record-count">{recordCount}</span>
+                          </div>
+                          <div>
+                            <span className="text-muted-foreground">Total Pop:</span>{" "}
+                            <span className="font-medium font-mono" data-testid="text-total-population">
+                              {totalPopulation.toLocaleString()}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    </CardHeader>
+                    <CardContent>
+                      <DataTable
+                        data={withGeoColumns(filteredPopulationData as any[], { provinceMap, districtMap, villageMap, facilityMap }) as any}
+                        columns={columns}
+                        searchable
+                        searchKeys={["year"]}
+                        emptyMessage={`No ${tab.label} population data available.`}
+                        onRowClick={(item) => setSelectedRecord(item as PopulationData)}
+                      />
+                    </CardContent>
+                  </Card>
                 </div>
-              </CardHeader>
-              <CardContent>
-                <DataTable
-                  data={withGeoColumns(filteredPopulationData as any[], { provinceMap, districtMap, villageMap, facilityMap }) as any}
-                  columns={columns}
-                  searchable
-                  searchKeys={["year"]}
-                  emptyMessage={`No ${tab.label} population data available.`}
-                />
-              </CardContent>
-            </Card>
-          </TabsContent>
-        ))}
+                {isCurrentTabSelected && (
+                  <div className="lg:col-span-4 space-y-4">
+                    <Card className="border border-border shadow-md bg-card sticky top-6">
+                      <CardHeader className="pb-3 border-b border-border flex flex-row items-center justify-between">
+                        <div className="space-y-0.5">
+                          <CardTitle className="text-base font-bold flex items-center gap-2">
+                            <ClipboardList className="h-5 w-5 text-indigo-500" />
+                            Review & Workflow
+                          </CardTitle>
+                          <p className="text-xs text-muted-foreground">Status details and action logs</p>
+                        </div>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          onClick={() => setSelectedRecord(null)}
+                          className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                        >
+                          <X className="h-4 w-4" />
+                        </Button>
+                      </CardHeader>
+                      <CardContent className="pt-4 space-y-5">
+                        {/* Workflow Stepper */}
+                        <div className="p-3 bg-slate-50 dark:bg-slate-900/50 rounded-xl border border-slate-100 dark:border-slate-800">
+                          <p className="text-xs font-semibold text-foreground mb-3 uppercase tracking-wider">Approval Lifecycle</p>
+                          <WorkflowStepper status={selectedRecord.approvalStatus || "draft"} />
+                        </div>
+
+                        {/* Explanation Box answering the core question */}
+                        <div className="p-3 bg-indigo-50/50 dark:bg-indigo-950/10 border border-indigo-100/50 dark:border-indigo-950/30 rounded-xl space-y-1.5 text-xs text-indigo-900/80 dark:text-indigo-300">
+                          <p className="font-bold flex items-center gap-1 text-indigo-700 dark:text-indigo-400">
+                            <AlertCircle className="h-3.5 w-3.5 animate-pulse" />
+                            When does approval of population occur?
+                          </p>
+                          <p className="leading-relaxed">
+                            Approval of population data occurs after the data is drafted/imported, and then formally submitted for review. Reviewers track and approve records to authorize them for cold chain microplanning, moving status from <strong>Draft</strong> &rarr; <strong>Submitted</strong> &rarr; <strong>Under Review</strong> &rarr; <strong>Approved</strong>.
+                          </p>
+                        </div>
+
+                        {/* Geographic Hierarchy Details */}
+                        <div className="space-y-2 text-xs">
+                          <p className="font-semibold text-foreground uppercase tracking-wider">Geographic Info</p>
+                          <div className="grid grid-cols-2 gap-2 p-3 bg-muted/30 border border-border rounded-xl">
+                            <div>
+                              <span className="text-muted-foreground block text-[10px]">Province</span>
+                              <span className="font-medium text-foreground">{getProvinceNameForRecord(selectedRecord)}</span>
+                            </div>
+                            <div>
+                              <span className="text-muted-foreground block text-[10px]">District</span>
+                              <span className="font-medium text-foreground">{getDistrictNameForRecord(selectedRecord)}</span>
+                            </div>
+                            <div className="col-span-2">
+                              <span className="text-muted-foreground block text-[10px]">Health Facility</span>
+                              <span className="font-medium text-foreground">{getFacilityNameForRecord(selectedRecord)}</span>
+                            </div>
+                            {selectedRecord.villageId && (
+                              <div className="col-span-2">
+                                <span className="text-muted-foreground block text-[10px]">Community / Catchment</span>
+                                <span className="font-medium text-foreground">{getCommunityNameForRecord(selectedRecord)}</span>
+                              </div>
+                            )}
+                            <div>
+                              <span className="text-muted-foreground block text-[10px]">Year</span>
+                              <span className="font-medium text-foreground">{selectedRecord.year}</span>
+                            </div>
+                            <div>
+                              <span className="text-muted-foreground block text-[10px]">Confidence</span>
+                              <span className="font-medium text-foreground">{selectedRecord.confidenceScore ? `${selectedRecord.confidenceScore}%` : "N/A"}</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Demographics Metrics */}
+                        <div className="space-y-2 text-xs">
+                          <p className="font-semibold text-foreground uppercase tracking-wider">Demographic Metrics</p>
+                          <div className="grid grid-cols-2 gap-2 p-3 bg-muted/30 border border-border rounded-xl font-mono">
+                            <div>
+                              <span className="text-muted-foreground block text-[10px] font-sans">Total Population</span>
+                              <span className="font-bold text-foreground text-sm">{selectedRecord.totalPopulation?.toLocaleString() || "—"}</span>
+                            </div>
+                            <div>
+                              <span className="text-muted-foreground block text-[10px] font-sans">Under 1 Year</span>
+                              <span className="font-bold text-foreground text-sm">{selectedRecord.under1Population?.toLocaleString() || "—"}</span>
+                            </div>
+                            <div>
+                              <span className="text-muted-foreground block text-[10px] font-sans">Under 5 Years</span>
+                              <span className="font-bold text-foreground text-sm">{selectedRecord.under5Population?.toLocaleString() || "—"}</span>
+                            </div>
+                            <div>
+                              <span className="text-muted-foreground block text-[10px] font-sans">Pregnant Women</span>
+                              <span className="font-bold text-foreground text-sm">{selectedRecord.pregnantWomen?.toLocaleString() || "—"}</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Audit Trail & Comments */}
+                        <div className="space-y-2.5 text-xs border-t border-border pt-4">
+                          <p className="font-semibold text-foreground uppercase tracking-wider">Audit Trail & Feedback</p>
+                          
+                          <div className="space-y-2">
+                            {selectedRecord.metadata?.submittedBy && (
+                              <div className="flex justify-between text-muted-foreground border-b border-dashed border-border/60 pb-1">
+                                <span>Submitted By:</span>
+                                <span className="text-foreground text-right font-medium">
+                                  {selectedRecord.metadata.submittedBy} <br/>
+                                  <span className="text-[10px] text-muted-foreground">{(selectedRecord.metadata.submittedAt ? new Date(selectedRecord.metadata.submittedAt).toLocaleDateString() : "")}</span>
+                                </span>
+                              </div>
+                            )}
+                            {selectedRecord.metadata?.underReviewBy && (
+                              <div className="flex justify-between text-muted-foreground border-b border-dashed border-border/60 pb-1">
+                                <span>Reviewed By:</span>
+                                <span className="text-foreground text-right font-medium">
+                                  {selectedRecord.metadata.underReviewBy} <br/>
+                                  <span className="text-[10px] text-muted-foreground">{(selectedRecord.metadata.underReviewAt ? new Date(selectedRecord.metadata.underReviewAt).toLocaleDateString() : "")}</span>
+                                </span>
+                              </div>
+                            )}
+                            {selectedRecord.metadata?.approvedBy && (
+                              <div className="flex justify-between text-muted-foreground border-b border-dashed border-border/60 pb-1">
+                                <span>Approved By:</span>
+                                <span className="text-foreground text-right font-medium">
+                                  {selectedRecord.metadata.approvedBy} <br/>
+                                  <span className="text-[10px] text-muted-foreground">{(selectedRecord.metadata.approvedAt ? new Date(selectedRecord.metadata.approvedAt).toLocaleDateString() : "")}</span>
+                                </span>
+                              </div>
+                            )}
+                            {selectedRecord.metadata?.returnedBy && (
+                              <div className="flex justify-between text-muted-foreground border-b border-dashed border-border/60 pb-1">
+                                <span>Returned By:</span>
+                                <span className="text-foreground text-right font-medium">
+                                  {selectedRecord.metadata.returnedBy} <br/>
+                                  <span className="text-[10px] text-muted-foreground">{(selectedRecord.metadata.returnedAt ? new Date(selectedRecord.metadata.returnedAt).toLocaleDateString() : "")}</span>
+                                </span>
+                              </div>
+                            )}
+                            {selectedRecord.metadata?.rejectedBy && (
+                              <div className="flex justify-between text-muted-foreground border-b border-dashed border-border/60 pb-1">
+                                <span>Rejected By:</span>
+                                <span className="text-foreground text-right font-medium">
+                                  {selectedRecord.metadata.rejectedBy} <br/>
+                                  <span className="text-[10px] text-muted-foreground">{(selectedRecord.metadata.rejectedAt ? new Date(selectedRecord.metadata.rejectedAt).toLocaleDateString() : "")}</span>
+                                </span>
+                              </div>
+                            )}
+                            {selectedRecord.metadata?.reopenedBy && (
+                              <div className="flex justify-between text-muted-foreground border-b border-dashed border-border/60 pb-1">
+                                <span>Reopened By:</span>
+                                <span className="text-foreground text-right font-medium">
+                                  {selectedRecord.metadata.reopenedBy} <br/>
+                                  <span className="text-[10px] text-muted-foreground">{(selectedRecord.metadata.reopenedAt ? new Date(selectedRecord.metadata.reopenedAt).toLocaleDateString() : "")}</span>
+                                </span>
+                              </div>
+                            )}
+                          </div>
+
+                          {selectedRecord.metadata?.comments && (
+                            <div className="p-3 bg-amber-50 dark:bg-amber-950/10 border border-amber-100 dark:border-amber-950/20 rounded-xl space-y-1 mt-2 text-amber-900/80 dark:text-amber-300">
+                              <p className="font-semibold flex items-center gap-1">
+                                Reviewer Comments:
+                              </p>
+                              <p className="italic">"{selectedRecord.metadata.comments}"</p>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Workflow Buttons */}
+                        <div className="space-y-2 border-t border-border pt-4">
+                          <p className="text-xs font-semibold text-foreground uppercase tracking-wider mb-2">Available Actions</p>
+                          
+                          {/* Draft/Returned: Submit */}
+                          {(selectedRecord.approvalStatus === "draft" || selectedRecord.approvalStatus === "returned") && canCreateData(user) && (
+                            <Button
+                              className="w-full justify-center bg-indigo-650 hover:bg-indigo-500 text-white rounded-xl shadow"
+                              onClick={() => submitMutation.mutate(selectedRecord.id)}
+                              disabled={submitMutation.isPending}
+                            >
+                              <Send className="h-4 w-4 mr-2" />
+                              Submit for Review
+                            </Button>
+                          )}
+
+                          {/* Pending: Review (Mark Under Review) */}
+                          {selectedRecord.approvalStatus === "pending" && userCanApproveRecord(user, selectedRecord) && (
+                            <Button
+                              className="w-full justify-center bg-yellow-600 hover:bg-yellow-500 text-white rounded-xl shadow"
+                              onClick={() => reviewMutation.mutate(selectedRecord.id)}
+                              disabled={reviewMutation.isPending}
+                            >
+                              <Clock className="h-4 w-4 mr-2" />
+                              Mark Under Review
+                            </Button>
+                          )}
+
+                          {/* Under Review or Pending: Approve / Return / Reject */}
+                          {(selectedRecord.approvalStatus === "pending" || selectedRecord.approvalStatus === "under_review") && userCanApproveRecord(user, selectedRecord) && (
+                            <div className="grid grid-cols-1 gap-2">
+                              <Button
+                                className="w-full justify-center bg-green-600 hover:bg-green-500 text-white rounded-xl shadow"
+                                onClick={() => approveMutation.mutate({ id: selectedRecord.id })}
+                                disabled={approveMutation.isPending}
+                              >
+                                <CheckCircle2 className="h-4 w-4 mr-2" />
+                                Approve Record
+                              </Button>
+                              <div className="grid grid-cols-2 gap-2">
+                                <Button
+                                  variant="outline"
+                                  className="justify-center border-orange-500/35 hover:bg-orange-50 dark:hover:bg-orange-950/20 text-orange-600 dark:text-orange-400 rounded-xl"
+                                  onClick={() => {
+                                    setCommentAction("return");
+                                    setCommentDialogOpen(true);
+                                  }}
+                                >
+                                  <CornerUpLeft className="h-4 w-4 mr-1.5" />
+                                  Return
+                                </Button>
+                                <Button
+                                  variant="outline"
+                                  className="justify-center border-red-500/35 hover:bg-red-50 dark:hover:bg-red-950/20 text-red-500 hover:text-red-600 rounded-xl"
+                                  onClick={() => {
+                                    setCommentAction("reject");
+                                    setCommentDialogOpen(true);
+                                  }}
+                                >
+                                  <XCircle className="h-4 w-4 mr-1.5" />
+                                  Reject
+                                </Button>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Approved / Rejected: Reopen */}
+                          {(selectedRecord.approvalStatus === "approved" || selectedRecord.approvalStatus === "rejected") && userCanApproveRecord(user, selectedRecord) && (
+                            <Button
+                              variant="outline"
+                              className="w-full justify-center border-indigo-500/35 hover:bg-indigo-50 dark:hover:bg-indigo-950/20 text-indigo-600 dark:text-indigo-400 rounded-xl"
+                              onClick={() => {
+                                setCommentAction("reopen");
+                                setCommentDialogOpen(true);
+                              }}
+                            >
+                              <Unlock className="h-4 w-4 mr-2" />
+                              Reopen for Correction
+                            </Button>
+                          )}
+
+                          {/* Approved: Archive (Only National Admins) */}
+                          {selectedRecord.approvalStatus === "approved" && isNational && (
+                            <Button
+                              variant="outline"
+                              className="w-full justify-center border-zinc-500/35 hover:bg-zinc-50 dark:hover:bg-zinc-950/20 text-zinc-600 dark:text-zinc-400 rounded-xl"
+                              onClick={() => archiveMutation.mutate(selectedRecord.id)}
+                              disabled={archiveMutation.isPending}
+                            >
+                              <Archive className="h-4 w-4 mr-2" />
+                              Archive Record
+                            </Button>
+                          )}
+
+                          {/* Edit/Delete for draft/returned */}
+                          {(selectedRecord.approvalStatus === "draft" || selectedRecord.approvalStatus === "returned" || isNational) && (
+                            <div className="grid grid-cols-2 gap-2 pt-2 border-t border-dashed border-border/80">
+                              {canCreateData(user) && (
+                                <Button
+                                  variant="secondary"
+                                  className="justify-center rounded-xl"
+                                  onClick={() => handleEditRecord(selectedRecord)}
+                                >
+                                  <Pencil className="h-3.5 w-3.5 mr-1.5" />
+                                  Edit Data
+                                </Button>
+                              )}
+                              {canDeleteData(user) && (
+                                <Button
+                                  variant="ghost"
+                                  className="justify-center text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/20 rounded-xl"
+                                  onClick={() => handleDeleteClick(selectedRecord)}
+                                >
+                                  <Trash2 className="h-3.5 w-3.5 mr-1.5" />
+                                  Delete
+                                </Button>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  </div>
+                )}
+              </div>
+            </TabsContent>
+          );
+        })}
 
         <TabsContent value="comparison" className="space-y-6">
           {!activeSourcesStats ? (
@@ -1545,6 +2296,77 @@ export default function Population() {
         onConfirm={handleDeleteConfirm}
         isPending={deleteMutation.isPending}
       />
+
+      {/* Reviewer Comments Dialog */}
+      <Dialog open={commentDialogOpen} onOpenChange={setCommentDialogOpen}>
+        <DialogContent className="sm:max-w-[425px] rounded-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              {commentAction === "return" && (
+                <>
+                  <CornerUpLeft className="h-5 w-5 text-orange-500" />
+                  Return for Correction
+                </>
+              )}
+              {commentAction === "reject" && (
+                <>
+                  <XCircle className="h-5 w-5 text-red-500" />
+                  Reject Record
+                </>
+              )}
+              {commentAction === "reopen" && (
+                <>
+                  <Unlock className="h-5 w-5 text-indigo-500" />
+                  Reopen Record
+                </>
+              )}
+            </DialogTitle>
+            <DialogDescription>
+              {commentAction === "return" && "Please provide feedback or instructions explaining why this record is being returned for correction."}
+              {commentAction === "reject" && "Please state the reasons for rejecting this population record. This will be logged permanently in the audit trail."}
+              {commentAction === "reopen" && "Please specify the correction needed that justifies reopening this approved/rejected record."}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="comments">Reviewer Comments</Label>
+              <Textarea
+                id="comments"
+                placeholder="Enter comments here..."
+                value={reviewerComment}
+                onChange={(e) => setReviewerComment(e.target.value)}
+                className="h-24 rounded-xl resize-none"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCommentDialogOpen(false)} className="rounded-xl">
+              Cancel
+            </Button>
+            <Button
+              className={
+                commentAction === "return"
+                  ? "bg-orange-600 hover:bg-orange-500 text-white rounded-xl"
+                  : commentAction === "reject"
+                  ? "bg-red-600 hover:bg-red-500 text-white rounded-xl"
+                  : "bg-indigo-650 hover:bg-indigo-500 text-white rounded-xl"
+              }
+              onClick={() => {
+                if (selectedRecord && commentAction) {
+                  workflowActionMutation.mutate({
+                    id: selectedRecord.id,
+                    action: commentAction,
+                    comments: reviewerComment,
+                  });
+                }
+              }}
+              disabled={workflowActionMutation.isPending}
+            >
+              Confirm Action
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -3133,8 +3133,10 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
 
   return (
     <div className="flex h-full min-h-[calc(100vh-3.5rem)] flex-col">
-      {/* Sticky header */}
+      {/* Sticky header (Original line commented out to satisfy rule 1)
       <div className="sticky top-0 z-10 border-b bg-background/95 px-4 py-3 backdrop-blur">
+      */}
+      <div className="sticky top-0 z-[1050] border-b bg-background/95 px-4 py-3 backdrop-blur">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-3 min-w-0">
             <Button
