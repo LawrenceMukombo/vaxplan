@@ -23,7 +23,7 @@ import { db } from "./db";
 import { users, auditLogs } from "@shared/schema";
 import { eq } from "drizzle-orm";
 
-export const IS_LOCAL_DEV = process.env.NODE_ENV !== "production";
+export const IS_LOCAL_DEV = process.env.NODE_ENV === "development";
 
 // ── Session store ─────────────────────────────────────────────────────────────
 // Local dev: in-memory (zero network latency, sessions reset on restart).

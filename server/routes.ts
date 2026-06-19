@@ -8670,7 +8670,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/microplans", ...auth, async (req: any, res) => {
+  app.post("/api/microplans", ...auth, requirePermission("manage_session_plans"), async (req: any, res) => {
     try {
       const data = insertMicroplanSchema.parse(req.body);
       
@@ -8688,7 +8688,7 @@ export async function registerRoutes(
     }
   });
 
-  app.patch("/api/microplans/:id", ...auth, async (req: any, res) => {
+  app.patch("/api/microplans/:id", ...auth, requirePermission("manage_session_plans"), async (req: any, res) => {
     try {
       const planId = parseInt(req.params.id);
       const oldPlan = await storage.getMicroplan(req.tenantId, planId);
@@ -8782,7 +8782,7 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/microplans/:id", ...auth, async (req: any, res) => {
+  app.delete("/api/microplans/:id", ...auth, requirePermission("manage_session_plans"), async (req: any, res) => {
     try {
       const planId = parseInt(req.params.id);
       const oldPlan = await storage.getMicroplan(req.tenantId, planId);
@@ -9039,7 +9039,7 @@ export async function registerRoutes(
     return { ok: true, parent, sessionPlanType: parentSessionPlanType };
   }
 
-  app.post("/api/sessions", ...auth, async (req: any, res) => {
+  app.post("/api/sessions", ...auth, requirePermission("manage_session_plans"), async (req: any, res) => {
     try {
       const user = req.user as any;
       const dbUser = req.dbUser!;
@@ -9225,7 +9225,7 @@ export async function registerRoutes(
     }
   });
 
-  app.patch("/api/sessions/:id", ...auth, async (req: any, res) => {
+  app.patch("/api/sessions/:id", ...auth, requirePermission("manage_session_plans"), async (req: any, res) => {
     try {
       const user = req.user as any;
       const dbUser = req.dbUser!;
@@ -9441,7 +9441,7 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/sessions/:id", ...auth, async (req: any, res) => {
+  app.delete("/api/sessions/:id", ...auth, requirePermission("manage_session_plans"), async (req: any, res) => {
     try {
       const user = req.user as any;
       const dbUser = req.dbUser!;
@@ -13712,7 +13712,7 @@ export async function registerRoutes(
   });
 
   // POST /api/stock/transaction — Log a stock ledger card transaction (receipt, issue, loss, adjustment)
-  app.post("/api/stock/transaction", isAuthenticated, requireTenant, async (req: any, res) => {
+  app.post("/api/stock/transaction", isAuthenticated, requireTenant, requirePermission("manage_stock"), async (req: any, res) => {
     try {
       /* ORIGINAL CODE:
       const parsed = insertStockTransactionSchema.parse(req.body);
@@ -13756,7 +13756,7 @@ export async function registerRoutes(
 
   // POST /api/stock/transfer — Atomically record a paired issue (source) + receipt (dest)
   // for a suggested stock transfer between two facilities in the same tenant.
-  app.post("/api/stock/transfer", isAuthenticated, requireTenant, async (req: any, res) => {
+  app.post("/api/stock/transfer", isAuthenticated, requireTenant, requirePermission("manage_stock"), async (req: any, res) => {
     try {
       const transferSchema = z.object({
         sourceFacilityId: z.number().int().positive(),
@@ -13814,7 +13814,7 @@ export async function registerRoutes(
   });
 
   // DELETE /api/stock/transaction/:id — Revert/delete a stock card entry
-  app.delete("/api/stock/transaction/:id", isAuthenticated, requireTenant, async (req: any, res) => {
+  app.delete("/api/stock/transaction/:id", isAuthenticated, requireTenant, requirePermission("manage_stock"), async (req: any, res) => {
     try {
       const id = parseInt(req.params.id);
       if (isNaN(id)) return res.status(400).json({ message: "Invalid transaction ID" });
