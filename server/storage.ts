@@ -109,6 +109,10 @@ import {
   userPermissions,
   type CustomUserPermission,
   type InsertUserPermission,
+  catalogueVaccines,
+  catalogueScheduleDoses,
+  type CatalogueVaccine,
+  type CatalogueScheduleDose,
 } from "@shared/schema";
 import type { UserRole } from "@shared/schema";
 import { normalizeStockVaccineName } from "@shared/vaccineSchedule";
@@ -372,7 +376,7 @@ export interface IStorage {
   deleteSessionDayPlan(tenantId: string, id: number): Promise<boolean>;
 
   // --- 5. Stock Transactions ---
-  getStockTransactions(tenantId: string, facilityId?: number): Promise<StockTransaction[]>;
+  getStockTransactions(tenantId: string, facilityId?: number, productId?: number): Promise<StockTransaction[]>;
   createStockTransaction(tenantId: string, data: InsertStockTransaction): Promise<StockTransaction>;
   createStockTransferPair(
     tenantId: string,
@@ -2273,6 +2277,22 @@ export class DatabaseStorage implements IStorage {
     return row;
   }
 
+  async getCatalogueVaccines(tenantId: string): Promise<CatalogueVaccine[]> {
+    return await db
+      .select()
+      .from(catalogueVaccines)
+      .where(eq(catalogueVaccines.tenantId, tenantId))
+      .orderBy(catalogueVaccines.name);
+  }
+
+  async getCatalogueScheduleDoses(tenantId: string): Promise<CatalogueScheduleDose[]> {
+    return await db
+      .select()
+      .from(catalogueScheduleDoses)
+      .where(eq(catalogueScheduleDoses.tenantId, tenantId))
+      .orderBy(catalogueScheduleDoses.name);
+  }
+
   // --- 2. Clients ---
   async getClients(tenantId: string, facilityId?: number, clientType?: string): Promise<Client[]> {
     return await db
@@ -2428,10 +2448,15 @@ export class DatabaseStorage implements IStorage {
   }
 
   // --- 5. Stock Transactions ---
-  async getStockTransactions(tenantId: string, facilityId?: number): Promise<StockTransaction[]> {
-    const conds = facilityId !== undefined
+  async getStockTransactions(tenantId: string, facilityId?: number, productId?: number): Promise<StockTransaction[]> {
+    let conds = facilityId !== undefined
       ? and(eq(stockTransactions.tenantId, tenantId), eq(stockTransactions.facilityId, facilityId))
       : eq(stockTransactions.tenantId, tenantId);
+    
+    if (productId !== undefined) {
+      conds = and(conds, eq(stockTransactions.productId, productId));
+    }
+    
     return await db
       .select()
       .from(stockTransactions)
@@ -2460,6 +2485,8 @@ export class DatabaseStorage implements IStorage {
     args: {
       sourceFacilityId: number;
       destFacilityId: number;
+      productId?: number;
+      productCode?: string;
       vaccineName: string;
       batchNumber: string;
       expiryDate: Date;
@@ -2480,6 +2507,8 @@ export class DatabaseStorage implements IStorage {
         .values({
           tenantId,
           facilityId: args.sourceFacilityId,
+          productId: args.productId,
+          productCode: args.productCode,
           vaccineName: normalizedVaccineName,
           transactionType: "issue",
           quantityDoses: args.quantityDoses,
@@ -2496,6 +2525,8 @@ export class DatabaseStorage implements IStorage {
         .values({
           tenantId,
           facilityId: args.destFacilityId,
+          productId: args.productId,
+          productCode: args.productCode,
           vaccineName: normalizedVaccineName,
           transactionType: "receipt",
           quantityDoses: args.quantityDoses,

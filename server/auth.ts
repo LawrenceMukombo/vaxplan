@@ -20,7 +20,7 @@ import connectPg from "connect-pg-simple";
 import MemoryStore from "memorystore";
 import { storage } from "./storage";
 import { db } from "./db";
-import { users } from "@shared/schema";
+import { users, auditLogs } from "@shared/schema";
 import { eq } from "drizzle-orm";
 
 export const IS_LOCAL_DEV = process.env.NODE_ENV !== "production";
@@ -89,15 +89,34 @@ export async function setupAuth(app: Express) {
   // It must live ABOVE the IS_LOCAL_DEV early-return below so it is never
   // blocked by that guard. The route destroys the server-side session and
   // redirects to '/' (the login / landing page).
-  app.get("/api/logout", (req: any, res) => {
-    // Destroy the server-side session (connect-pg-simple / memorystore).
+  app.get("/api/logout", async (req: any, res) => {
+    const reason = req.query.reason;
+    const userId = req.user?.id;
+    const tenantId = req.user?.tenantId;
+
+    if (reason === "idle_timeout" && userId) {
+      try {
+        await db.insert(auditLogs).values({
+          userId: userId,
+          tenantId: tenantId,
+          action: "IDLE_TIMEOUT_LOGOUT",
+          entityType: "User",
+          entityId: 0,
+          oldValue: null,
+          newValue: { message: "User session logged out automatically due to inactivity" },
+          ipAddress: req.ip || req.socket.remoteAddress
+        });
+      } catch (e) {
+        console.error("Failed to insert idle timeout audit log:", e);
+      }
+    }
+
     if (typeof req.session?.destroy === "function") {
       req.session.destroy(() => {
         res.clearCookie("connect.sid", { path: "/" });
         res.redirect("/");
       });
     } else {
-      // Fallback: passport logout + redirect.
       req.logout?.(() => {
         res.clearCookie("connect.sid", { path: "/" });
         res.redirect("/");

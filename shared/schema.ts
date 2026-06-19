@@ -12,7 +12,7 @@ import {
   unique,
   pgEnum,
 } from "drizzle-orm/pg-core";
-import { createInsertSchema } from "drizzle-zod";
+import { createInsertSchema, createSelectSchema } from "drizzle-zod";
 import { z } from "zod";
 import { normalizeStockVaccineName } from "./vaccineSchedule";
 
@@ -1820,6 +1820,8 @@ export const stockTransactions = pgTable("stock_transactions", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
   tenantId: varchar("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
   facilityId: integer("facility_id").notNull().references(() => facilities.id, { onDelete: "cascade" }),
+  productId: integer("product_id").references(() => catalogueVaccines.id, { onDelete: "set null" }), // link to catalogue
+  productCode: varchar("product_code", { length: 100 }), // snapshot of product code
   vaccineName: varchar("vaccine_name", { length: 100 }).notNull(), // BCG, Penta, etc.
   transactionType: varchar("transaction_type", { length: 50 }).notNull(), // 'receipt', 'issue', 'loss', 'adjustment'
   quantityDoses: integer("quantity_doses").notNull(),
@@ -2433,6 +2435,8 @@ export const insertSessionDayPlanSchema = createInsertSchema(sessionDayPlans).om
 export const insertStockTransactionSchema = createInsertSchema(stockTransactions).omit({
   createdAt: true,
 }).extend({
+  productId: z.number().optional().nullable(),
+  productCode: z.string().optional().nullable(),
   vaccineName: z.string().transform(normalizeStockVaccineName),
   expiryDate: z.coerce.date(),
   transactionDate: z.coerce.date().optional(),
@@ -3423,3 +3427,133 @@ export const insertResearchInterestSubmissionSchema = createInsertSchema(researc
 export type ResearchInterestSubmission = typeof researchInterestSubmissions.$inferSelect;
 export type InsertResearchInterestSubmission = z.infer<typeof insertResearchInterestSubmissionSchema>;
 
+// ============================================================================
+// COUNTRY IMMUNIZATION CATALOGUE
+// ============================================================================
+
+export const commodityTypeEnum = pgEnum("commodity_type", ["diluent", "syringe", "safety_box", "ppe", "cold_chain", "other"]);
+export const doseClassificationEnum = pgEnum("dose_classification", ["routine", "campaign", "outbreak", "school_based", "other"]);
+
+// Master Vaccine Products (Stock-managed entities)
+export const catalogueVaccines = pgTable("catalogue_vaccines", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  productId: varchar("product_id", { length: 100 }).notNull(), // e.g., 'vaccine_product_penta'
+  name: varchar("name", { length: 255 }).notNull(),
+  antigenName: varchar("antigen_name", { length: 255 }),
+  category: varchar("category", { length: 100 }).default('Vaccine'),
+  presentation: varchar("presentation", { length: 100 }), // e.g., 'Liquid', 'Lyophilized'
+  dosesPerVial: integer("doses_per_vial").notNull().default(1),
+  unitOfMeasure: varchar("unit_of_measure", { length: 50 }).default('vials'),
+  storageTemperature: varchar("storage_temperature", { length: 50 }).default('+2 to +8 °C'),
+  wastageThreshold: decimal("wastage_threshold", { precision: 5, scale: 2 }).default("10.00"), // Legacy fallback
+  stockManaged: boolean("stock_managed").default(true).notNull(),
+  forecastable: boolean("forecastable").default(true).notNull(),
+  requisitionable: boolean("requisitionable").default(true).notNull(),
+  requiresDiluent: boolean("requires_diluent").default(false).notNull(),
+  requiresInjectionDevice: boolean("requires_injection_device").default(true).notNull(),
+  requiresSafetyBox: boolean("requires_safety_box").default(true).notNull(),
+  routineUse: boolean("routine_use").default(true).notNull(),
+  campaignUse: boolean("campaign_use").default(false).notNull(),
+  outbreakUse: boolean("outbreak_use").default(false).notNull(),
+  modules: jsonb("modules").default({}).notNull(),
+  active: boolean("active").default(true).notNull(),
+  approvalStatus: approvalStatusEnum("approval_status").default("draft").notNull(),
+  effectiveStartDate: timestamp("effective_start_date").defaultNow(),
+  effectiveEndDate: timestamp("effective_end_date"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => ({
+  tenantIdx: index("idx_catalogue_vaccines_tenant").on(table.tenantId),
+  productIdx: index("idx_catalogue_vaccines_product").on(table.productId),
+}));
+
+// Administered Schedule Doses (e.g., PENTA-1, PENTA-2)
+export const catalogueScheduleDoses = pgTable("catalogue_schedule_doses", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  vaccineId: integer("vaccine_id").notNull().references(() => catalogueVaccines.id, { onDelete: "cascade" }),
+  doseCode: varchar("dose_code", { length: 100 }).notNull(),
+  name: varchar("name", { length: 100 }).notNull(), // e.g., PENTA-1
+  doseNumber: integer("dose_number").notNull().default(1),
+  targetAge: varchar("target_age", { length: 100 }),
+  minimumAge: varchar("minimum_age", { length: 100 }),
+  maximumAge: varchar("maximum_age", { length: 100 }),
+  minimumInterval: varchar("minimum_interval", { length: 100 }),
+  targetPopulationGroup: varchar("target_population_group", { length: 100 }).default('infants'),
+  route: varchar("route", { length: 100 }), // e.g., 'IM', 'Oral'
+  site: varchar("site", { length: 100 }), // e.g., 'Left Thigh'
+  classification: doseClassificationEnum("classification").default("routine").notNull(),
+  stockDeducting: boolean("stock_deducting").default(true).notNull(),
+  active: boolean("active").default(true).notNull(),
+  effectiveStartDate: timestamp("effective_start_date").defaultNow(),
+  approvalStatus: approvalStatusEnum("approval_status").default("draft").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => ({
+  tenantIdx: index("idx_catalogue_doses_tenant").on(table.tenantId),
+  vaccineIdx: index("idx_catalogue_doses_vaccine").on(table.vaccineId),
+}));
+
+// Logistics Commodities (Syringes, Safety Boxes, Diluents)
+export const catalogueCommodities = pgTable("catalogue_commodities", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  commodityCode: varchar("commodity_code", { length: 100 }).notNull(),
+  type: commodityTypeEnum("type").notNull(),
+  name: varchar("name", { length: 255 }).notNull(),
+  category: varchar("category", { length: 100 }),
+  unitOfMeasure: varchar("unit_of_measure", { length: 50 }).default('pieces'),
+  packSize: integer("pack_size").default(100).notNull(),
+  stockManaged: boolean("stock_managed").default(true).notNull(),
+  forecastable: boolean("forecastable").default(true).notNull(),
+  requisitionable: boolean("requisitionable").default(true).notNull(),
+  sessionSupply: boolean("session_supply").default(true).notNull(),
+  linkedVaccineId: integer("linked_vaccine_id").references(() => catalogueVaccines.id, { onDelete: "set null" }),
+  consumptionRule: jsonb("consumption_rule").default({}),
+  bufferPercentage: decimal("buffer_percentage", { precision: 5, scale: 2 }).default("10.00"),
+  minimumStockThreshold: integer("minimum_stock_threshold").default(0),
+  maximumStockThreshold: integer("maximum_stock_threshold").default(0),
+  reorderLevel: integer("reorder_level").default(0),
+  modules: jsonb("modules").default({}).notNull(),
+  active: boolean("active").default(true).notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => ({
+  tenantIdx: index("idx_catalogue_commodities_tenant").on(table.tenantId),
+  commodityCodeIdx: index("idx_catalogue_commodities_code").on(table.commodityCode),
+}));
+
+// Wastage Thresholds Configuration
+export const catalogueWastageThresholds = pgTable("catalogue_wastage_thresholds", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  vaccineId: integer("vaccine_id").notNull().references(() => catalogueVaccines.id, { onDelete: "cascade" }),
+  wastageRate: decimal("wastage_rate", { precision: 5, scale: 2 }).notNull(),
+  wastageFactor: decimal("wastage_factor", { precision: 5, scale: 2 }).notNull(),
+  minAcceptable: decimal("min_acceptable", { precision: 5, scale: 2 }),
+  maxAcceptable: decimal("max_acceptable", { precision: 5, scale: 2 }),
+  strategy: varchar("strategy", { length: 100 }).default('routine'), // 'fixed', 'outreach', 'campaign', 'htr'
+  active: boolean("active").default(true).notNull(),
+  notes: text("notes"),
+  effectiveStartDate: timestamp("effective_start_date").defaultNow(),
+  effectiveEndDate: timestamp("effective_end_date"),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => ({
+  tenantIdx: index("idx_catalogue_wastage_tenant").on(table.tenantId),
+  vaccineIdx: index("idx_catalogue_wastage_vaccine").on(table.vaccineId),
+}));
+
+export const insertCatalogueVaccineSchema = createInsertSchema(catalogueVaccines);
+export const selectCatalogueVaccineSchema = createSelectSchema(catalogueVaccines);
+export type CatalogueVaccine = typeof catalogueVaccines.$inferSelect;
+
+export const insertCatalogueScheduleDoseSchema = createInsertSchema(catalogueScheduleDoses);
+export const selectCatalogueScheduleDoseSchema = createSelectSchema(catalogueScheduleDoses);
+export type CatalogueScheduleDose = typeof catalogueScheduleDoses.$inferSelect;
+
+export const insertCatalogueCommoditySchema = createInsertSchema(catalogueCommodities);
+export const selectCatalogueCommoditySchema = createSelectSchema(catalogueCommodities);
+export type CatalogueCommodity = typeof catalogueCommodities.$inferSelect;
+
+export const insertCatalogueWastageThresholdSchema = createInsertSchema(catalogueWastageThresholds);
+export const selectCatalogueWastageThresholdSchema = createSelectSchema(catalogueWastageThresholds);
+export type CatalogueWastageThreshold = typeof catalogueWastageThresholds.$inferSelect;

@@ -87,7 +87,7 @@ import {
   type District,
   type InsertSessionPlan,
   type Microplan,
-  type VaccineConfig,
+  type CatalogueScheduleDose,
   type Village,
 } from "@shared/schema";
 import { expandVaccineSchedule } from "@shared/vaccineSchedule";
@@ -385,20 +385,19 @@ export default function SessionPlanning({
   });
 
   // Tenant antigen / dose schedule — drives the Mark Done dialog inputs so
-  // counts are captured per the tenant's actual schedule (not a hardcoded list).
-  const { data: vaccineConfigs } = useQuery<VaccineConfig[]>({
-    queryKey: ["/api/vaccines/config"],
+  // counts are captured per the tenant's actual schedule
+  const { data: scheduleDoses } = useQuery<CatalogueScheduleDose[]>({
+    queryKey: ["/api/catalogue/schedules"],
+    staleTime: 5 * 60 * 1000,
     queryFn: async () => {
-      if (!navigator.onLine) {
-        return (await offlineDb.vaccineConfigs.toArray()) as unknown as VaccineConfig[];
-      }
-      const res = await fetch("/api/vaccines/config");
-      if (!res.ok) throw new Error("Failed to load vaccine configs");
+      const res = await fetch("/api/catalogue/schedules");
+      if (!res.ok) throw new Error("Failed to fetch catalogue schedules");
       return res.json();
     },
   });
 
-  const doseStages = useMemo(() => expandVaccineSchedule(vaccineConfigs), [vaccineConfigs]);
+  // Calculate schedule stages from catalogue schedules
+  const doseStages = useMemo(() => expandVaccineSchedule(scheduleDoses), [scheduleDoses]);
 
   // Task #128 — Tenant village list (used by the edit dialog's village picker).
   const { data: tenantVillages } = useQuery<Village[]>({

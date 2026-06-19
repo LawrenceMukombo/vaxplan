@@ -125,6 +125,7 @@ const adminNavItems = [
   { title: "Boundary Manager", path: "/admin/boundaries", icon: Map },
   { title: "Custom Layers", path: "/admin/custom-layers", icon: Layers },
   { title: "National Plan", path: "/national-plan", icon: FileText },
+  { title: "Catalogue", path: "/admin/catalogue", icon: Package },
   { title: "Wiki / Docs", path: "/admin/wiki", icon: BookOpen, wikiAdminOnly: true },
 ];
 

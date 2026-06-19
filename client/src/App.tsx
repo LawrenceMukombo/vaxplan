@@ -87,6 +87,7 @@ const HouseToHouse = lazy(() => import("@/pages/HouseToHouse"));
 const ModuleDisabled = lazy(() => import("@/pages/ModuleDisabled"));
 const Surveillance = lazy(() => import("@/pages/Surveillance"));
 const WikiEditor = lazy(() => import("@/pages/WikiEditor"));
+const CatalogueAdmin = lazy(() => import("@/pages/CatalogueAdmin"));
 import { DEFAULT_MODULES } from "@/lib/modules";
 
 // Task #50 — Small wrapper that reads :id from the route and passes it to
@@ -357,6 +358,7 @@ function AuthenticatedRouter() {
       <Route path="/admin/countries" component={CountryOnboarding} />
       <Route path="/admin/boundaries" component={BoundaryManager} />
       <Route path="/admin/custom-layers" component={CustomLayers} />
+      <Route path="/admin/catalogue" component={CatalogueAdmin} />
       <Route path="/admin/wiki" component={WikiEditor} />
       <Route path="/his-integrations">
         {modules.interop !== false ? <HisIntegrations /> : <ModuleDisabled moduleName="HIS Interoperability" />}

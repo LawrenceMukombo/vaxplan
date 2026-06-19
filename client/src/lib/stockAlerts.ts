@@ -1,4 +1,4 @@
-import type { StockTransaction, VaccineConfig } from "@shared/schema";
+import type { StockTransaction, CatalogueVaccine } from "@shared/schema";
 import {
   DEFAULT_MONTHS_OF_STOCK_THRESHOLD,
   computeAntigenStatus,
@@ -36,7 +36,7 @@ export interface TransferSuggestion {
  */
 export function computeTransferSuggestions(
   transactions: StockTransaction[],
-  vaccineConfigs: VaccineConfig[] | undefined,
+  vaccineConfigs: CatalogueVaccine[] | undefined,
   thresholdMonths: number,
   now: Date = new Date(),
 ): TransferSuggestion[] {

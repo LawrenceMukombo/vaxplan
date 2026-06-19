@@ -42,7 +42,7 @@ import {
   TooltipTrigger,
   TooltipProvider,
 } from "@/components/ui/tooltip";
-import type { Facility, Village, SessionPlan, BudgetItem, ApprovalRequest, PopulationData, StockTransaction, VaccineConfig } from "@shared/schema";
+import type { Facility, Village, SessionPlan, BudgetItem, ApprovalRequest, PopulationData, StockTransaction, CatalogueVaccine } from "@shared/schema";
 import { deriveSessionLifecycle } from "@/lib/sessionStatus";
 import { summarizeFacilityAlerts, loadStockThreshold } from "@/lib/stockAlerts";
 import { Package } from "lucide-react";
@@ -1070,8 +1070,8 @@ export default function Dashboard() {
     staleTime: 5 * 60 * 1000,
   });
 
-  const { data: vaccineConfigs } = useQuery<VaccineConfig[]>({
-    queryKey: ["/api/vaccines/config"],
+  const { data: vaccineConfigs } = useQuery<CatalogueVaccine[]>({
+    queryKey: ["/api/catalogue/vaccines"],
     staleTime: 30 * 60 * 1000, // vaccine config is near-static
   });
 

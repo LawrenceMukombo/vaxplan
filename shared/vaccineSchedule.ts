@@ -1,4 +1,4 @@
-import type { VaccineConfig } from "./schema";
+import type { CatalogueScheduleDose } from "./schema";
 
 export interface DoseStage {
   code: string;
@@ -34,9 +34,9 @@ export interface CanonicalizePerAntigenResult {
  */
 export function canonicalizePerAntigen(
   raw: Record<string, unknown> | null | undefined,
-  configs: VaccineConfig[] | undefined | null,
+  doses: CatalogueScheduleDose[] | undefined | null,
 ): CanonicalizePerAntigenResult {
-  const stages = expandVaccineSchedule(configs);
+  const stages = expandVaccineSchedule(doses);
   const lookup = new Map<string, string>();
   for (const s of stages) {
     lookup.set(s.code, s.code);
@@ -68,41 +68,26 @@ export function canonicalizePerAntigen(
 }
 
 export function expandVaccineSchedule(
-  configs: VaccineConfig[] | undefined | null,
+  doses: CatalogueScheduleDose[] | undefined | null,
 ): DoseStage[] {
-  if (!configs || configs.length === 0) return [];
+  if (!doses || doses.length === 0) return [];
 
   const stages: DoseStage[] = [];
 
-  for (const cfg of configs) {
-    if (!cfg || (cfg as any).isActive === false) continue;
-    const doses = Math.max(1, Number(cfg.doses) || 1);
-    const rawName = (cfg.name || "").trim();
+  for (const dose of doses) {
+    if (!dose || dose.active === false) continue;
+    const rawName = (dose.name || "").trim();
     if (!rawName) continue;
 
-    if (doses === 1) {
-      stages.push({
-        code: normalizeCode(rawName),
-        label: rawName,
-        antigen: rawName,
-        doseNumber: 1,
-        configId: cfg.id,
-      });
-      continue;
-    }
-
     const antigenLabel = stripDoseListSuffix(rawName);
-    const codeBase = normalizeCode(antigenLabel);
 
-    for (let i = 1; i <= doses; i++) {
-      stages.push({
-        code: `${codeBase}-${i}`,
-        label: `${antigenLabel}-${i}`,
-        antigen: antigenLabel,
-        doseNumber: i,
-        configId: cfg.id,
-      });
-    }
+    stages.push({
+      code: normalizeCode(dose.doseCode || rawName),
+      label: rawName,
+      antigen: antigenLabel,
+      doseNumber: dose.doseNumber || 1,
+      configId: dose.vaccineId,
+    });
   }
 
   return stages;

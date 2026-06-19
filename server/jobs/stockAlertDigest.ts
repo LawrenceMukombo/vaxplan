@@ -83,7 +83,7 @@ export async function runStockAlertDigest(now: Date = new Date()): Promise<Diges
 
     const [facilities, vaccineConfigs, transactions] = await Promise.all([
       storage.getFacilities(tenant.id),
-      storage.getVaccineConfigs(tenant.id),
+      storage.getCatalogueVaccines(tenant.id),
       storage.getStockTransactions(tenant.id),
     ]);
     const facilitiesById = new Map<number, (typeof facilities)[number]>(

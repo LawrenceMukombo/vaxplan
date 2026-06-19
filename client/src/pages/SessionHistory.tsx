@@ -14,7 +14,9 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import type { VaccineConfig } from "@shared/schema";
+import type {
+  CatalogueScheduleDose,
+} from "@shared/schema";
 import { expandVaccineSchedule } from "@shared/vaccineSchedule";
 import { offlineDb } from "@/lib/offlineDb";
 
@@ -128,25 +130,23 @@ export default function SessionHistory() {
 
   // Tenant antigen schedule — used to translate stable codes captured at
   // mark-done time (e.g. PENTA-1) back into friendly labels.
-  const { data: vaccineConfigs } = useQuery<VaccineConfig[]>({
-    queryKey: ["/api/vaccines/config"],
+  const { data: scheduleDoses } = useQuery<CatalogueScheduleDose[]>({
+    queryKey: ["/api/catalogue/schedules"],
+    staleTime: 5 * 60 * 1000,
     queryFn: async () => {
-      if (!navigator.onLine) {
-        return (await offlineDb.vaccineConfigs.toArray()) as unknown as VaccineConfig[];
-      }
-      const res = await fetch("/api/vaccines/config");
-      if (!res.ok) throw new Error("Failed to load vaccine configs");
+      const res = await fetch("/api/catalogue/schedules");
+      if (!res.ok) throw new Error("Failed to fetch catalogue schedules");
       return res.json();
     },
   });
 
   const codeToLabel = useMemo(() => {
     const map = new Map<string, string>();
-    for (const stage of expandVaccineSchedule(vaccineConfigs)) {
+    for (const stage of expandVaccineSchedule(scheduleDoses)) {
       map.set(stage.code, stage.label);
     }
     return (code: string) => map.get(code) ?? code;
-  }, [vaccineConfigs]);
+  }, [scheduleDoses]);
 
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();

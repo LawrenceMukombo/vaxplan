@@ -34,11 +34,12 @@ import {
   Smartphone,
   Globe,
   Settings as SettingsIcon,
+  Clock,
 } from "lucide-react";
 */
 
 import {
-  User,
+  User, Clock,
   Bell,
   Shield,
   Database,
@@ -245,6 +246,8 @@ export default function Settings() {
   const [brandLogoUrl, setBrandLogoUrl] = useState<string>("");
   const [brandLogoUploading, setBrandLogoUploading] = useState<boolean>(false);
   const [brandColor, setBrandColor] = useState<string>("#1e40af");
+  const [idleTimeoutMinutes, setIdleTimeoutMinutes] = useState<string>("15");
+  const [roleIdleTimeouts, setRoleIdleTimeouts] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -963,8 +966,26 @@ export default function Settings() {
       if (typeof s.brandLogoDataUrl === "string") setBrandLogoDataUrl(s.brandLogoDataUrl);
       if (typeof s.brandLogoUrl === "string") setBrandLogoUrl(s.brandLogoUrl);
       if (typeof s.brandColor === "string") setBrandColor(s.brandColor);
+      if (s.security?.idleTimeoutMinutes) setIdleTimeoutMinutes(String(s.security.idleTimeoutMinutes));
+      if (s.security?.roleIdleTimeouts) {
+        const strRecord: Record<string, string> = {};
+        for (const k in s.security.roleIdleTimeouts) {
+          strRecord[k] = String(s.security.roleIdleTimeouts[k]);
+        }
+        setRoleIdleTimeouts(strRecord);
+      }
     }
   }, [tenant]);
+
+  const handleSaveSecuritySettings = () => {
+    const s = (tenant?.settings || {}) as Record<string, any>;
+    const updatedSecurity = {
+      ...(s.security || {}),
+      idleTimeoutMinutes: parseInt(idleTimeoutMinutes) || 15,
+      roleIdleTimeouts: Object.fromEntries(Object.entries(roleIdleTimeouts).map(([k,v]) => [k, parseInt(v)]))
+    };
+    updateSettings.mutate({ settings: { ...s, security: updatedSecurity } });
+  };
 
   const updateSettings = useMutation({
     mutationFn: async (updatedFields: Partial<Tenant>) => {
@@ -1036,6 +1057,12 @@ export default function Settings() {
     district_manager: ["view_demographics", "approve_session_plans", "manage_facilities"],
     provincial_coordinator: ["view_demographics", "approve_session_plans", "manage_facilities"],
     national_admin: ["view_demographics", "log_immunizations", "create_session_plans", "approve_session_plans", "manage_facilities", "manage_settings"],
+    gis_specialist: ["view_demographics"],
+    facility_partner: ["view_demographics"],
+    district_partner: ["view_demographics"],
+    provincial_partner: ["view_demographics"],
+    national_partner: ["view_demographics"],
+    national_manager: ["view_demographics", "manage_facilities"],
   };
 
   const rbac = (tenant?.settings as any)?.rbac || DEFAULT_PERMISSIONS;
@@ -1727,7 +1754,24 @@ export default function Settings() {
             </CardContent>
           </Card>
 
-          <WastageThresholdsCard isNationalAdmin={isNationalAdmin} />
+          <Card className="mt-6 border border-border/80 shadow-md">
+            <CardHeader>
+              <CardTitle>Country Immunization Catalogue</CardTitle>
+              <CardDescription>
+                Unified master catalogue for physical vaccines, schedule doses, and logistics commodities.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Button
+                variant="outline"
+                className="w-full sm:w-auto"
+                onClick={() => window.location.href = "/admin/catalogue"}
+                disabled={!isNationalAdmin}
+              >
+                Manage Country Catalogue
+              </Button>
+            </CardContent>
+          </Card>
         </TabsContent>        <TabsContent value="data_import" className="space-y-6 mt-6">
           {/* SECTION 1: POPULATION DATASETS */}
           <Card className="border border-border/80 shadow-md bg-card/60 backdrop-blur-md">
@@ -2108,6 +2152,64 @@ export default function Settings() {
         </TabsContent>
 
         <TabsContent value="access" className="space-y-6 mt-6">
+          {/* IDLE TIMEOUT SETTINGS */}
+          <Card className="border border-border/80 shadow-xl bg-card/60 backdrop-blur-md overflow-hidden rounded-3xl">
+            <CardHeader className="border-b border-border/40 pb-5">
+              <div className="flex items-center gap-3">
+                <div className="h-10 w-10 rounded-2xl bg-gradient-to-tr from-amber-500/20 to-orange-500/20 flex items-center justify-center border border-amber-500/30">
+                  <Clock className="h-5 w-5 text-amber-600" />
+                </div>
+                <div>
+                  <CardTitle className="text-lg font-bold">Session Security & Timeout</CardTitle>
+                  <CardDescription>
+                    Configure automatic idle logout settings.
+                  </CardDescription>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-6 p-6">
+              <div className="space-y-2">
+                <Label>Global Idle Timeout (Minutes)</Label>
+                <div className="flex gap-2 max-w-sm">
+                  <Input 
+                    type="number" 
+                    min="5" 
+                    max="60" 
+                    value={idleTimeoutMinutes} 
+                    onChange={e => setIdleTimeoutMinutes(e.target.value)}
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground">Applies to all users unless a role override is defined (min: 5, max: 60).</p>
+              </div>
+              <div className="space-y-2">
+                <Label>Role-Based Overrides</Label>
+                <div className="grid gap-2 max-w-md">
+                  {[
+                      "facility_clerk", "facility_in_charge", "district_manager", 
+                      "provincial_coordinator", "national_admin", "gis_specialist", 
+                      "facility_partner", "district_partner", "provincial_partner", 
+                      "national_partner", "national_manager"
+                    ].map(role => (
+                    <div key={role} className="flex items-center gap-4">
+                      <Label className="flex-1 capitalize">{role.replace(/_/g, " ")}</Label>
+                      <Input
+                        type="number"
+                        placeholder="e.g. 15"
+                        min="5" max="60"
+                        className="w-24"
+                        value={roleIdleTimeouts[role] || ""}
+                        onChange={(e) => setRoleIdleTimeouts(prev => ({ ...prev, [role]: e.target.value }))}
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <Button onClick={handleSaveSecuritySettings}>
+                Save Security Settings
+              </Button>
+            </CardContent>
+          </Card>
+
           {/* SYSTEM MODULES DASHBOARD */}
           <Card className="border border-border/80 shadow-xl bg-card/60 backdrop-blur-md overflow-hidden rounded-3xl">
             <CardHeader className="border-b border-border/40 pb-5">

@@ -404,7 +404,7 @@ export async function batchMutate(
           payload.perAntigen && typeof payload.perAntigen === "object"
             ? (payload.perAntigen as Record<string, unknown>)
             : {};
-        const tenantConfigs = await storage.getVaccineConfigs(tenantId);
+        const tenantConfigs = await storage.getCatalogueScheduleDoses(tenantId);
         const { perAntigen, perAntigenUnmapped, unmappedCodes } =
           canonicalizePerAntigen(rawPerAntigen, tenantConfigs);
         const totals = Number(

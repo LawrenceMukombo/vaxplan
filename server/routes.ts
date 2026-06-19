@@ -13662,15 +13662,48 @@ export async function registerRoutes(
   app.get("/api/stock/ledger", ...auth, async (req: any, res) => {
     try {
       const facilityIdRaw = req.query.facilityId as string | undefined;
+      const districtIdRaw = req.query.districtId as string | undefined;
+      const provinceIdRaw = req.query.provinceId as string | undefined;
+      const productIdRaw = req.query.productId as string | undefined;
+
       const facilityId = facilityIdRaw ? parseInt(facilityIdRaw) : undefined;
+      const districtId = districtIdRaw ? parseInt(districtIdRaw) : undefined;
+      const provinceId = provinceIdRaw ? parseInt(provinceIdRaw) : undefined;
+      const productId = productIdRaw ? parseInt(productIdRaw) : undefined;
+
       if (facilityIdRaw && (facilityId === undefined || isNaN(facilityId))) {
         return res.status(400).json({ message: "Invalid facility ID parameter" });
       }
-      let list = await storage.getStockTransactions(req.tenantId, facilityId);
-      const scope = await getGeoScope(req.dbUser, req.tenantId);
-      if (!scope.all) {
-        list = list.filter((t: any) => recordInGeoScope(scope, { facilityId: t.facilityId }));
+      if (productIdRaw && (productId === undefined || isNaN(productId))) {
+        return res.status(400).json({ message: "Invalid product ID parameter" });
       }
+
+      let list = await storage.getStockTransactions(req.tenantId, facilityId, productId);
+      const scope = await getGeoScope(req.dbUser, req.tenantId);
+
+      let geoMaps: any = null;
+      if (provinceId || districtId) {
+         const allFacilities = await storage.getFacilities(req.tenantId);
+         const allDistricts = await storage.getDistricts(req.tenantId);
+         const districtMap = new Map(allDistricts.map(d => [d.id, d]));
+         geoMaps = { allFacilities, districtMap };
+      }
+
+      list = list.filter((t: any) => {
+         if (!recordInGeoScope(scope, { facilityId: t.facilityId })) return false;
+         
+         if (geoMaps) {
+           const fac = geoMaps.allFacilities.find((f: any) => f.id === t.facilityId);
+           if (!fac) return false;
+           if (districtId && fac.districtId !== districtId) return false;
+           if (provinceId) {
+              const dist = geoMaps.districtMap.get(fac.districtId);
+              if (!dist || dist.provinceId !== provinceId) return false;
+           }
+         }
+         return true;
+      });
+
       res.json(list);
     } catch (err: any) {
       console.error("GET /api/stock/ledger failed:", err);
@@ -13804,16 +13837,44 @@ export async function registerRoutes(
     try {
       const dbUser = req.dbUser!;
       const facilityIdRaw = req.query.facilityId as string | undefined;
-      let facilityId = facilityIdRaw ? parseInt(facilityIdRaw) : undefined;
+      const districtIdRaw = req.query.districtId as string | undefined;
+      const provinceIdRaw = req.query.provinceId as string | undefined;
+
+      const facilityId = facilityIdRaw ? parseInt(facilityIdRaw) : undefined;
+      const districtId = districtIdRaw ? parseInt(districtIdRaw) : undefined;
+      const provinceId = provinceIdRaw ? parseInt(provinceIdRaw) : undefined;
+
       if (facilityIdRaw && (facilityId === undefined || isNaN(facilityId))) {
         return res.status(400).json({ message: "Invalid facility ID parameter" });
       }
+
       let list = await storage.getMonthlyReports(req.tenantId, facilityId);
       // Role-aware geographic scoping (facility staff → own facility, etc.).
       const scope = await getGeoScope(dbUser, req.tenantId);
-      if (!scope.all) {
-        list = list.filter((r: any) => recordInGeoScope(scope, { facilityId: (r as any).facilityId }));
+
+      let geoMaps: any = null;
+      if (provinceId || districtId) {
+         const allFacilities = await storage.getFacilities(req.tenantId);
+         const allDistricts = await storage.getDistricts(req.tenantId);
+         const districtMap = new Map(allDistricts.map(d => [d.id, d]));
+         geoMaps = { allFacilities, districtMap };
       }
+
+      list = list.filter((r: any) => {
+         if (!recordInGeoScope(scope, { facilityId: r.facilityId })) return false;
+         
+         if (geoMaps) {
+           const fac = geoMaps.allFacilities.find((f: any) => f.id === r.facilityId);
+           if (!fac) return false;
+           if (districtId && fac.districtId !== districtId) return false;
+           if (provinceId) {
+              const dist = geoMaps.districtMap.get(fac.districtId);
+              if (!dist || dist.provinceId !== provinceId) return false;
+           }
+         }
+         return true;
+      });
+
       res.json(list);
     } catch (err: any) {
       console.error("GET /api/monthly-reports failed:", err);

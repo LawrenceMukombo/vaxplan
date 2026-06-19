@@ -38,8 +38,8 @@ function stripDoseListSuffix(name) {
 function normalizeCode(s) {
   return s.trim().toUpperCase().replace(/\s+/g, "_");
 }
-function canonicalizePerAntigen(raw, configs) {
-  const stages = expandVaccineSchedule(configs);
+function canonicalizePerAntigen(raw, doses) {
+  const stages = expandVaccineSchedule(doses);
   const lookup = /* @__PURE__ */ new Map();
   for (const s of stages) {
     lookup.set(s.code, s.code);
@@ -66,35 +66,21 @@ function canonicalizePerAntigen(raw, configs) {
     unmappedCodes: Object.keys(perAntigenUnmapped)
   };
 }
-function expandVaccineSchedule(configs) {
-  if (!configs || configs.length === 0) return [];
+function expandVaccineSchedule(doses) {
+  if (!doses || doses.length === 0) return [];
   const stages = [];
-  for (const cfg of configs) {
-    if (!cfg || cfg.isActive === false) continue;
-    const doses = Math.max(1, Number(cfg.doses) || 1);
-    const rawName = (cfg.name || "").trim();
+  for (const dose of doses) {
+    if (!dose || dose.active === false) continue;
+    const rawName = (dose.name || "").trim();
     if (!rawName) continue;
-    if (doses === 1) {
-      stages.push({
-        code: normalizeCode(rawName),
-        label: rawName,
-        antigen: rawName,
-        doseNumber: 1,
-        configId: cfg.id
-      });
-      continue;
-    }
     const antigenLabel = stripDoseListSuffix(rawName);
-    const codeBase = normalizeCode(antigenLabel);
-    for (let i = 1; i <= doses; i++) {
-      stages.push({
-        code: `${codeBase}-${i}`,
-        label: `${antigenLabel}-${i}`,
-        antigen: antigenLabel,
-        doseNumber: i,
-        configId: cfg.id
-      });
-    }
+    stages.push({
+      code: normalizeCode(dose.doseCode || rawName),
+      label: rawName,
+      antigen: antigenLabel,
+      doseNumber: dose.doseNumber || 1,
+      configId: dose.vaccineId
+    });
   }
   return stages;
 }
@@ -163,6 +149,10 @@ __export(schema_exports, {
   candidateUnmappedSettlements: () => candidateUnmappedSettlements,
   candidateUnmappedSettlementsRelations: () => candidateUnmappedSettlementsRelations,
   caseClassificationEnum: () => caseClassificationEnum,
+  catalogueCommodities: () => catalogueCommodities,
+  catalogueScheduleDoses: () => catalogueScheduleDoses,
+  catalogueVaccines: () => catalogueVaccines,
+  catalogueWastageThresholds: () => catalogueWastageThresholds,
   catchmentConflicts: () => catchmentConflicts,
   chvProfiles: () => chvProfiles,
   clientVaccinations: () => clientVaccinations,
@@ -171,6 +161,7 @@ __export(schema_exports, {
   clientsRelations: () => clientsRelations,
   coldChainEquipment: () => coldChainEquipment,
   coldChainEquipmentRelations: () => coldChainEquipmentRelations,
+  commodityTypeEnum: () => commodityTypeEnum,
   communicationChannels: () => communicationChannels,
   communicationLogs: () => communicationLogs,
   communications: () => communications,
@@ -187,6 +178,7 @@ __export(schema_exports, {
   deviceTokens: () => deviceTokens,
   districts: () => districts,
   districtsRelations: () => districtsRelations,
+  doseClassificationEnum: () => doseClassificationEnum,
   downloadAssets: () => downloadAssets,
   downloadAssetsRelations: () => downloadAssetsRelations,
   facilities: () => facilities,
@@ -211,6 +203,10 @@ __export(schema_exports, {
   insertApprovalRequestSchema: () => insertApprovalRequestSchema,
   insertBudgetItemSchema: () => insertBudgetItemSchema,
   insertCandidateUnmappedSettlementSchema: () => insertCandidateUnmappedSettlementSchema,
+  insertCatalogueCommoditySchema: () => insertCatalogueCommoditySchema,
+  insertCatalogueScheduleDoseSchema: () => insertCatalogueScheduleDoseSchema,
+  insertCatalogueVaccineSchema: () => insertCatalogueVaccineSchema,
+  insertCatalogueWastageThresholdSchema: () => insertCatalogueWastageThresholdSchema,
   insertCatchmentConflictSchema: () => insertCatchmentConflictSchema,
   insertChvProfileSchema: () => insertChvProfileSchema,
   insertClientSchema: () => insertClientSchema,
@@ -299,6 +295,10 @@ __export(schema_exports, {
   researchDownloadEvents: () => researchDownloadEvents,
   researchDownloadEventsRelations: () => researchDownloadEventsRelations,
   researchInterestSubmissions: () => researchInterestSubmissions,
+  selectCatalogueCommoditySchema: () => selectCatalogueCommoditySchema,
+  selectCatalogueScheduleDoseSchema: () => selectCatalogueScheduleDoseSchema,
+  selectCatalogueVaccineSchema: () => selectCatalogueVaccineSchema,
+  selectCatalogueWastageThresholdSchema: () => selectCatalogueWastageThresholdSchema,
   sessionDayPlans: () => sessionDayPlans,
   sessionDayPlansRelations: () => sessionDayPlansRelations,
   sessionPlanTypeEnum: () => sessionPlanTypeEnum,
@@ -343,7 +343,7 @@ __export(schema_exports, {
   vpdDiseasesEnum: () => vpdDiseasesEnum,
   vpdLinelistTemplates: () => vpdLinelistTemplates
 });
-var import_drizzle_orm, import_pg_core, import_drizzle_zod, import_zod, tenantStatusEnum, idpProtocolEnum, signupStatusEnum, populationRefreshStatusEnum, populationRefreshTriggerEnum, tenants, tenantIdpConfigs, signupRequests, tenantInterestRequests, userRoleEnum, approvalStatusEnum, sessionTypeEnum, transportModeEnum, populationSourceEnum, sessions, users, userRoles, userPermissions, deviceTokens, regions, provinces, districts, llgs, facilities, villages, catchmentConflicts, vgieSettlementFacilityLinks, vgieRecommendations, vgieAlerts, facilityExcludedVillages, populationData, microplanTypeEnum, sessionPlanTypeEnum, microplans, sessionPlans, sessionVillages, fundingSourceEnum, budgetItems, vaccineRequirements, mobilizationActivities, approvalRequests, populationRefreshJobs, auditLogs, pageViews, htrScores, hfcCommitteeMembers, chvProfiles, facilityStaff, uncoveredCommunities, usersRelations, regionsRelations, provincesRelations, districtsRelations, llgsRelations, facilitiesRelations, villagesRelations, microplansRelations, sessionPlansRelations, sessionVillagesRelations, insertTenantSchema, insertTenantIdpConfigSchema, SELF_SIGNUP_ROLES, insertSignupRequestSchema, insertUserSchema, insertUserRoleSchema, insertUserPermissionSchema, insertRegionSchema, insertProvinceSchema, insertDistrictSchema, insertLlgSchema, insertFacilitySchema, insertVillageSchema, insertPopulationDataSchema, insertMicroplanSchema, insertSessionPlanSchema, insertBudgetItemSchema, insertVaccineRequirementSchema, boundarySourceEnum, adminBoundaries, customLayerCategoryEnum, customLayerTypeEnum, customLayerFormatEnum, customLayers, facilityCatchments, vaccineConfigurations, clients, clientVaccinations, sessionDayPlans, stockTransactions, monthlyReports, settlementsMaster, populationGrids, candidateUnmappedSettlements, importedCoverage, csvImports, vpdDiseasesEnum, caseClassificationEnum, vpdLinelistTemplates, tenantVpdConfigurations, surveillanceCases, labSamples, supervisionVisits, supervisionChecklistTemplates, insertSupervisionChecklistTemplateSchema, annualImmunizationPlans, insertAnnualImmunizationPlanSchema, quarterlyReviews, adminBoundariesRelations, customLayersRelations, facilityCatchmentsRelations, vaccineConfigurationsRelations, clientsRelations, clientVaccinationsRelations, sessionDayPlansRelations, stockTransactionsRelations, monthlyReportsRelations, settlementsMasterRelations, populationGridsRelations, candidateUnmappedSettlementsRelations, insertAdminBoundarySchema, insertFacilityCatchmentSchema, insertCustomLayerSchema, insertVaccineConfigSchema, insertClientSchema, insertClientVaccinationSchema, insertSessionDayPlanSchema, insertStockTransactionSchema, insertMonthlyReportSchema, insertSettlementMasterSchema, insertPopulationGridSchema, insertCandidateUnmappedSettlementSchema, insertImportedCoverageSchema, insertCsvImportSchema, coverageCsvRowSchema, insertMobilizationActivitySchema, insertApprovalRequestSchema, insertTenantInterestRequestSchema, insertSupervisionVisitSchema, insertQuarterlyReviewSchema, notifications, DEFAULT_STOCK_ALERT_DIGEST, stockAlertDigestSettingsSchema, tenantSecuritySettingsSchema, emailOrEmpty, tenantEmailSettingsSchema, insertCatchmentConflictSchema, FACILITY_AUTHOR_ROLES, indicatorManual, insertIndicatorManualSchema, messageTemplates, communications, communicationChannels, deliveryLogs, communicationLogs, insertVpdLinelistTemplateSchema, insertTenantVpdConfigurationSchema, insertSurveillanceCaseSchema, insertLabSampleSchema, facilityStaffRelations, insertFacilityStaffSchema, hfcCommittee, hfcCommitteeRelations, insertHfcCommitteeSchema, communityHealthVolunteers, communityHealthVolunteersRelations, insertCommunityHealthVolunteerSchema, insertHfcCommitteeMemberSchema, insertChvProfileSchema, insertUncoveredCommunitySchema, coldChainEquipment, coldChainEquipmentRelations, insertColdChainEquipmentSchema, insertVgieSettlementFacilityLinkSchema, insertVgieRecommendationSchema, insertVgieAlertSchema, researchDocuments, pilotActivities, pilotUpdates, implementationLessons, downloadAssets, researchInterestSubmissions, researchDownloadEvents, researchDocumentsRelations, pilotActivitiesRelations, pilotUpdatesRelations, implementationLessonsRelations, downloadAssetsRelations, researchDownloadEventsRelations, insertResearchDocumentSchema, insertPilotActivitySchema, insertPilotUpdateSchema, insertImplementationLessonSchema, insertDownloadAssetSchema, insertResearchInterestSubmissionSchema;
+var import_drizzle_orm, import_pg_core, import_drizzle_zod, import_zod, tenantStatusEnum, idpProtocolEnum, signupStatusEnum, populationRefreshStatusEnum, populationRefreshTriggerEnum, tenants, tenantIdpConfigs, signupRequests, tenantInterestRequests, userRoleEnum, approvalStatusEnum, sessionTypeEnum, transportModeEnum, populationSourceEnum, sessions, users, userRoles, userPermissions, deviceTokens, regions, provinces, districts, llgs, facilities, villages, catchmentConflicts, vgieSettlementFacilityLinks, vgieRecommendations, vgieAlerts, facilityExcludedVillages, populationData, microplanTypeEnum, sessionPlanTypeEnum, microplans, sessionPlans, sessionVillages, fundingSourceEnum, budgetItems, vaccineRequirements, mobilizationActivities, approvalRequests, populationRefreshJobs, auditLogs, pageViews, htrScores, hfcCommitteeMembers, chvProfiles, facilityStaff, uncoveredCommunities, usersRelations, regionsRelations, provincesRelations, districtsRelations, llgsRelations, facilitiesRelations, villagesRelations, microplansRelations, sessionPlansRelations, sessionVillagesRelations, insertTenantSchema, insertTenantIdpConfigSchema, SELF_SIGNUP_ROLES, insertSignupRequestSchema, insertUserSchema, insertUserRoleSchema, insertUserPermissionSchema, insertRegionSchema, insertProvinceSchema, insertDistrictSchema, insertLlgSchema, insertFacilitySchema, insertVillageSchema, insertPopulationDataSchema, insertMicroplanSchema, insertSessionPlanSchema, insertBudgetItemSchema, insertVaccineRequirementSchema, boundarySourceEnum, adminBoundaries, customLayerCategoryEnum, customLayerTypeEnum, customLayerFormatEnum, customLayers, facilityCatchments, vaccineConfigurations, clients, clientVaccinations, sessionDayPlans, stockTransactions, monthlyReports, settlementsMaster, populationGrids, candidateUnmappedSettlements, importedCoverage, csvImports, vpdDiseasesEnum, caseClassificationEnum, vpdLinelistTemplates, tenantVpdConfigurations, surveillanceCases, labSamples, supervisionVisits, supervisionChecklistTemplates, insertSupervisionChecklistTemplateSchema, annualImmunizationPlans, insertAnnualImmunizationPlanSchema, quarterlyReviews, adminBoundariesRelations, customLayersRelations, facilityCatchmentsRelations, vaccineConfigurationsRelations, clientsRelations, clientVaccinationsRelations, sessionDayPlansRelations, stockTransactionsRelations, monthlyReportsRelations, settlementsMasterRelations, populationGridsRelations, candidateUnmappedSettlementsRelations, insertAdminBoundarySchema, insertFacilityCatchmentSchema, insertCustomLayerSchema, insertVaccineConfigSchema, insertClientSchema, insertClientVaccinationSchema, insertSessionDayPlanSchema, insertStockTransactionSchema, insertMonthlyReportSchema, insertSettlementMasterSchema, insertPopulationGridSchema, insertCandidateUnmappedSettlementSchema, insertImportedCoverageSchema, insertCsvImportSchema, coverageCsvRowSchema, insertMobilizationActivitySchema, insertApprovalRequestSchema, insertTenantInterestRequestSchema, insertSupervisionVisitSchema, insertQuarterlyReviewSchema, notifications, DEFAULT_STOCK_ALERT_DIGEST, stockAlertDigestSettingsSchema, tenantSecuritySettingsSchema, emailOrEmpty, tenantEmailSettingsSchema, insertCatchmentConflictSchema, FACILITY_AUTHOR_ROLES, indicatorManual, insertIndicatorManualSchema, messageTemplates, communications, communicationChannels, deliveryLogs, communicationLogs, insertVpdLinelistTemplateSchema, insertTenantVpdConfigurationSchema, insertSurveillanceCaseSchema, insertLabSampleSchema, facilityStaffRelations, insertFacilityStaffSchema, hfcCommittee, hfcCommitteeRelations, insertHfcCommitteeSchema, communityHealthVolunteers, communityHealthVolunteersRelations, insertCommunityHealthVolunteerSchema, insertHfcCommitteeMemberSchema, insertChvProfileSchema, insertUncoveredCommunitySchema, coldChainEquipment, coldChainEquipmentRelations, insertColdChainEquipmentSchema, insertVgieSettlementFacilityLinkSchema, insertVgieRecommendationSchema, insertVgieAlertSchema, researchDocuments, pilotActivities, pilotUpdates, implementationLessons, downloadAssets, researchInterestSubmissions, researchDownloadEvents, researchDocumentsRelations, pilotActivitiesRelations, pilotUpdatesRelations, implementationLessonsRelations, downloadAssetsRelations, researchDownloadEventsRelations, insertResearchDocumentSchema, insertPilotActivitySchema, insertPilotUpdateSchema, insertImplementationLessonSchema, insertDownloadAssetSchema, insertResearchInterestSubmissionSchema, commodityTypeEnum, doseClassificationEnum, catalogueVaccines, catalogueScheduleDoses, catalogueCommodities, catalogueWastageThresholds, insertCatalogueVaccineSchema, selectCatalogueVaccineSchema, insertCatalogueScheduleDoseSchema, selectCatalogueScheduleDoseSchema, insertCatalogueCommoditySchema, selectCatalogueCommoditySchema, insertCatalogueWastageThresholdSchema, selectCatalogueWastageThresholdSchema;
 var init_schema = __esm({
   "shared/schema.ts"() {
     "use strict";
@@ -465,7 +465,11 @@ var init_schema = __esm({
       "pending",
       "approved",
       "rejected",
-      "locked"
+      "locked",
+      "under_review",
+      "returned",
+      "archived",
+      "superseded"
     ]);
     sessionTypeEnum = (0, import_pg_core.pgEnum)("session_type", [
       "static",
@@ -1620,6 +1624,10 @@ var init_schema = __esm({
       id: (0, import_pg_core.integer)("id").primaryKey().generatedAlwaysAsIdentity(),
       tenantId: (0, import_pg_core.varchar)("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
       facilityId: (0, import_pg_core.integer)("facility_id").notNull().references(() => facilities.id, { onDelete: "cascade" }),
+      productId: (0, import_pg_core.integer)("product_id").references(() => catalogueVaccines.id, { onDelete: "set null" }),
+      // link to catalogue
+      productCode: (0, import_pg_core.varchar)("product_code", { length: 100 }),
+      // snapshot of product code
       vaccineName: (0, import_pg_core.varchar)("vaccine_name", { length: 100 }).notNull(),
       // BCG, Penta, etc.
       transactionType: (0, import_pg_core.varchar)("transaction_type", { length: 50 }).notNull(),
@@ -2128,6 +2136,8 @@ var init_schema = __esm({
     insertStockTransactionSchema = (0, import_drizzle_zod.createInsertSchema)(stockTransactions).omit({
       createdAt: true
     }).extend({
+      productId: import_zod.z.number().optional().nullable(),
+      productCode: import_zod.z.string().optional().nullable(),
       vaccineName: import_zod.z.string().transform(normalizeStockVaccineName),
       expiryDate: import_zod.z.coerce.date(),
       transactionDate: import_zod.z.coerce.date().optional()
@@ -2757,10 +2767,14 @@ var init_schema = __esm({
     insertResearchDocumentSchema = (0, import_drizzle_zod.createInsertSchema)(researchDocuments).omit({
       createdAt: true,
       updatedAt: true
+    }).extend({
+      slug: import_zod.z.string().optional()
     });
     insertPilotActivitySchema = (0, import_drizzle_zod.createInsertSchema)(pilotActivities).omit({
       createdAt: true,
       updatedAt: true
+    }).extend({
+      slug: import_zod.z.string().optional()
     });
     insertPilotUpdateSchema = (0, import_drizzle_zod.createInsertSchema)(pilotUpdates).omit({
       createdAt: true,
@@ -2769,15 +2783,136 @@ var init_schema = __esm({
     insertImplementationLessonSchema = (0, import_drizzle_zod.createInsertSchema)(implementationLessons).omit({
       createdAt: true,
       updatedAt: true
+    }).extend({
+      slug: import_zod.z.string().optional()
     });
     insertDownloadAssetSchema = (0, import_drizzle_zod.createInsertSchema)(downloadAssets).omit({
       createdAt: true,
       updatedAt: true
+    }).extend({
+      slug: import_zod.z.string().optional()
     });
     insertResearchInterestSubmissionSchema = (0, import_drizzle_zod.createInsertSchema)(researchInterestSubmissions).omit({
       createdAt: true,
       updatedAt: true
     });
+    commodityTypeEnum = (0, import_pg_core.pgEnum)("commodity_type", ["diluent", "syringe", "safety_box", "ppe", "cold_chain", "other"]);
+    doseClassificationEnum = (0, import_pg_core.pgEnum)("dose_classification", ["routine", "campaign", "outbreak", "school_based", "other"]);
+    catalogueVaccines = (0, import_pg_core.pgTable)("catalogue_vaccines", {
+      id: (0, import_pg_core.integer)("id").primaryKey().generatedAlwaysAsIdentity(),
+      tenantId: (0, import_pg_core.varchar)("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+      productId: (0, import_pg_core.varchar)("product_id", { length: 100 }).notNull(),
+      // e.g., 'vaccine_product_penta'
+      name: (0, import_pg_core.varchar)("name", { length: 255 }).notNull(),
+      antigenName: (0, import_pg_core.varchar)("antigen_name", { length: 255 }),
+      category: (0, import_pg_core.varchar)("category", { length: 100 }).default("Vaccine"),
+      presentation: (0, import_pg_core.varchar)("presentation", { length: 100 }),
+      // e.g., 'Liquid', 'Lyophilized'
+      dosesPerVial: (0, import_pg_core.integer)("doses_per_vial").notNull().default(1),
+      unitOfMeasure: (0, import_pg_core.varchar)("unit_of_measure", { length: 50 }).default("vials"),
+      storageTemperature: (0, import_pg_core.varchar)("storage_temperature", { length: 50 }).default("+2 to +8 \xB0C"),
+      wastageThreshold: (0, import_pg_core.decimal)("wastage_threshold", { precision: 5, scale: 2 }).default("10.00"),
+      // Legacy fallback
+      stockManaged: (0, import_pg_core.boolean)("stock_managed").default(true).notNull(),
+      forecastable: (0, import_pg_core.boolean)("forecastable").default(true).notNull(),
+      requisitionable: (0, import_pg_core.boolean)("requisitionable").default(true).notNull(),
+      requiresDiluent: (0, import_pg_core.boolean)("requires_diluent").default(false).notNull(),
+      requiresInjectionDevice: (0, import_pg_core.boolean)("requires_injection_device").default(true).notNull(),
+      requiresSafetyBox: (0, import_pg_core.boolean)("requires_safety_box").default(true).notNull(),
+      routineUse: (0, import_pg_core.boolean)("routine_use").default(true).notNull(),
+      campaignUse: (0, import_pg_core.boolean)("campaign_use").default(false).notNull(),
+      outbreakUse: (0, import_pg_core.boolean)("outbreak_use").default(false).notNull(),
+      modules: (0, import_pg_core.jsonb)("modules").default({}).notNull(),
+      active: (0, import_pg_core.boolean)("active").default(true).notNull(),
+      approvalStatus: approvalStatusEnum("approval_status").default("draft").notNull(),
+      effectiveStartDate: (0, import_pg_core.timestamp)("effective_start_date").defaultNow(),
+      effectiveEndDate: (0, import_pg_core.timestamp)("effective_end_date"),
+      createdAt: (0, import_pg_core.timestamp)("created_at").defaultNow(),
+      updatedAt: (0, import_pg_core.timestamp)("updated_at").defaultNow()
+    }, (table) => ({
+      tenantIdx: (0, import_pg_core.index)("idx_catalogue_vaccines_tenant").on(table.tenantId),
+      productIdx: (0, import_pg_core.index)("idx_catalogue_vaccines_product").on(table.productId)
+    }));
+    catalogueScheduleDoses = (0, import_pg_core.pgTable)("catalogue_schedule_doses", {
+      id: (0, import_pg_core.integer)("id").primaryKey().generatedAlwaysAsIdentity(),
+      tenantId: (0, import_pg_core.varchar)("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+      vaccineId: (0, import_pg_core.integer)("vaccine_id").notNull().references(() => catalogueVaccines.id, { onDelete: "cascade" }),
+      doseCode: (0, import_pg_core.varchar)("dose_code", { length: 100 }).notNull(),
+      name: (0, import_pg_core.varchar)("name", { length: 100 }).notNull(),
+      // e.g., PENTA-1
+      doseNumber: (0, import_pg_core.integer)("dose_number").notNull().default(1),
+      targetAge: (0, import_pg_core.varchar)("target_age", { length: 100 }),
+      minimumAge: (0, import_pg_core.varchar)("minimum_age", { length: 100 }),
+      maximumAge: (0, import_pg_core.varchar)("maximum_age", { length: 100 }),
+      minimumInterval: (0, import_pg_core.varchar)("minimum_interval", { length: 100 }),
+      targetPopulationGroup: (0, import_pg_core.varchar)("target_population_group", { length: 100 }).default("infants"),
+      route: (0, import_pg_core.varchar)("route", { length: 100 }),
+      // e.g., 'IM', 'Oral'
+      site: (0, import_pg_core.varchar)("site", { length: 100 }),
+      // e.g., 'Left Thigh'
+      classification: doseClassificationEnum("classification").default("routine").notNull(),
+      stockDeducting: (0, import_pg_core.boolean)("stock_deducting").default(true).notNull(),
+      active: (0, import_pg_core.boolean)("active").default(true).notNull(),
+      effectiveStartDate: (0, import_pg_core.timestamp)("effective_start_date").defaultNow(),
+      approvalStatus: approvalStatusEnum("approval_status").default("draft").notNull(),
+      createdAt: (0, import_pg_core.timestamp)("created_at").defaultNow()
+    }, (table) => ({
+      tenantIdx: (0, import_pg_core.index)("idx_catalogue_doses_tenant").on(table.tenantId),
+      vaccineIdx: (0, import_pg_core.index)("idx_catalogue_doses_vaccine").on(table.vaccineId)
+    }));
+    catalogueCommodities = (0, import_pg_core.pgTable)("catalogue_commodities", {
+      id: (0, import_pg_core.integer)("id").primaryKey().generatedAlwaysAsIdentity(),
+      tenantId: (0, import_pg_core.varchar)("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+      commodityCode: (0, import_pg_core.varchar)("commodity_code", { length: 100 }).notNull(),
+      type: commodityTypeEnum("type").notNull(),
+      name: (0, import_pg_core.varchar)("name", { length: 255 }).notNull(),
+      category: (0, import_pg_core.varchar)("category", { length: 100 }),
+      unitOfMeasure: (0, import_pg_core.varchar)("unit_of_measure", { length: 50 }).default("pieces"),
+      packSize: (0, import_pg_core.integer)("pack_size").default(100).notNull(),
+      stockManaged: (0, import_pg_core.boolean)("stock_managed").default(true).notNull(),
+      forecastable: (0, import_pg_core.boolean)("forecastable").default(true).notNull(),
+      requisitionable: (0, import_pg_core.boolean)("requisitionable").default(true).notNull(),
+      sessionSupply: (0, import_pg_core.boolean)("session_supply").default(true).notNull(),
+      linkedVaccineId: (0, import_pg_core.integer)("linked_vaccine_id").references(() => catalogueVaccines.id, { onDelete: "set null" }),
+      consumptionRule: (0, import_pg_core.jsonb)("consumption_rule").default({}),
+      bufferPercentage: (0, import_pg_core.decimal)("buffer_percentage", { precision: 5, scale: 2 }).default("10.00"),
+      minimumStockThreshold: (0, import_pg_core.integer)("minimum_stock_threshold").default(0),
+      maximumStockThreshold: (0, import_pg_core.integer)("maximum_stock_threshold").default(0),
+      reorderLevel: (0, import_pg_core.integer)("reorder_level").default(0),
+      modules: (0, import_pg_core.jsonb)("modules").default({}).notNull(),
+      active: (0, import_pg_core.boolean)("active").default(true).notNull(),
+      createdAt: (0, import_pg_core.timestamp)("created_at").defaultNow()
+    }, (table) => ({
+      tenantIdx: (0, import_pg_core.index)("idx_catalogue_commodities_tenant").on(table.tenantId),
+      commodityCodeIdx: (0, import_pg_core.index)("idx_catalogue_commodities_code").on(table.commodityCode)
+    }));
+    catalogueWastageThresholds = (0, import_pg_core.pgTable)("catalogue_wastage_thresholds", {
+      id: (0, import_pg_core.integer)("id").primaryKey().generatedAlwaysAsIdentity(),
+      tenantId: (0, import_pg_core.varchar)("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+      vaccineId: (0, import_pg_core.integer)("vaccine_id").notNull().references(() => catalogueVaccines.id, { onDelete: "cascade" }),
+      wastageRate: (0, import_pg_core.decimal)("wastage_rate", { precision: 5, scale: 2 }).notNull(),
+      wastageFactor: (0, import_pg_core.decimal)("wastage_factor", { precision: 5, scale: 2 }).notNull(),
+      minAcceptable: (0, import_pg_core.decimal)("min_acceptable", { precision: 5, scale: 2 }),
+      maxAcceptable: (0, import_pg_core.decimal)("max_acceptable", { precision: 5, scale: 2 }),
+      strategy: (0, import_pg_core.varchar)("strategy", { length: 100 }).default("routine"),
+      // 'fixed', 'outreach', 'campaign', 'htr'
+      active: (0, import_pg_core.boolean)("active").default(true).notNull(),
+      notes: (0, import_pg_core.text)("notes"),
+      effectiveStartDate: (0, import_pg_core.timestamp)("effective_start_date").defaultNow(),
+      effectiveEndDate: (0, import_pg_core.timestamp)("effective_end_date"),
+      createdAt: (0, import_pg_core.timestamp)("created_at").defaultNow()
+    }, (table) => ({
+      tenantIdx: (0, import_pg_core.index)("idx_catalogue_wastage_tenant").on(table.tenantId),
+      vaccineIdx: (0, import_pg_core.index)("idx_catalogue_wastage_vaccine").on(table.vaccineId)
+    }));
+    insertCatalogueVaccineSchema = (0, import_drizzle_zod.createInsertSchema)(catalogueVaccines);
+    selectCatalogueVaccineSchema = (0, import_drizzle_zod.createSelectSchema)(catalogueVaccines);
+    insertCatalogueScheduleDoseSchema = (0, import_drizzle_zod.createInsertSchema)(catalogueScheduleDoses);
+    selectCatalogueScheduleDoseSchema = (0, import_drizzle_zod.createSelectSchema)(catalogueScheduleDoses);
+    insertCatalogueCommoditySchema = (0, import_drizzle_zod.createInsertSchema)(catalogueCommodities);
+    selectCatalogueCommoditySchema = (0, import_drizzle_zod.createSelectSchema)(catalogueCommodities);
+    insertCatalogueWastageThresholdSchema = (0, import_drizzle_zod.createInsertSchema)(catalogueWastageThresholds);
+    selectCatalogueWastageThresholdSchema = (0, import_drizzle_zod.createSelectSchema)(catalogueWastageThresholds);
   }
 });
 
@@ -3967,6 +4102,12 @@ var init_storage = __esm({
         const [row] = await db.update(vaccineConfigurations).set(safe).where((0, import_drizzle_orm2.and)((0, import_drizzle_orm2.eq)(vaccineConfigurations.id, id), (0, import_drizzle_orm2.eq)(vaccineConfigurations.tenantId, tenantId))).returning();
         return row;
       }
+      async getCatalogueVaccines(tenantId) {
+        return await db.select().from(catalogueVaccines).where((0, import_drizzle_orm2.eq)(catalogueVaccines.tenantId, tenantId)).orderBy(catalogueVaccines.name);
+      }
+      async getCatalogueScheduleDoses(tenantId) {
+        return await db.select().from(catalogueScheduleDoses).where((0, import_drizzle_orm2.eq)(catalogueScheduleDoses.tenantId, tenantId)).orderBy(catalogueScheduleDoses.name);
+      }
       // --- 2. Clients ---
       async getClients(tenantId, facilityId, clientType) {
         return await db.select().from(clients).where(
@@ -4061,8 +4202,11 @@ var init_storage = __esm({
         return (result.rowCount ?? 0) > 0;
       }
       // --- 5. Stock Transactions ---
-      async getStockTransactions(tenantId, facilityId) {
-        const conds = facilityId !== void 0 ? (0, import_drizzle_orm2.and)((0, import_drizzle_orm2.eq)(stockTransactions.tenantId, tenantId), (0, import_drizzle_orm2.eq)(stockTransactions.facilityId, facilityId)) : (0, import_drizzle_orm2.eq)(stockTransactions.tenantId, tenantId);
+      async getStockTransactions(tenantId, facilityId, productId) {
+        let conds = facilityId !== void 0 ? (0, import_drizzle_orm2.and)((0, import_drizzle_orm2.eq)(stockTransactions.tenantId, tenantId), (0, import_drizzle_orm2.eq)(stockTransactions.facilityId, facilityId)) : (0, import_drizzle_orm2.eq)(stockTransactions.tenantId, tenantId);
+        if (productId !== void 0) {
+          conds = (0, import_drizzle_orm2.and)(conds, (0, import_drizzle_orm2.eq)(stockTransactions.productId, productId));
+        }
         return await db.select().from(stockTransactions).where(conds).orderBy((0, import_drizzle_orm2.desc)(stockTransactions.transactionDate));
       }
       async createStockTransaction(tenantId, data) {
@@ -4082,6 +4226,8 @@ var init_storage = __esm({
           const [issue] = await tx.insert(stockTransactions).values({
             tenantId,
             facilityId: args.sourceFacilityId,
+            productId: args.productId,
+            productCode: args.productCode,
             vaccineName: normalizedVaccineName,
             transactionType: "issue",
             quantityDoses: args.quantityDoses,
@@ -4095,6 +4241,8 @@ var init_storage = __esm({
           const [receipt] = await tx.insert(stockTransactions).values({
             tenantId,
             facilityId: args.destFacilityId,
+            productId: args.productId,
+            productCode: args.productCode,
             vaccineName: normalizedVaccineName,
             transactionType: "receipt",
             quantityDoses: args.quantityDoses,
@@ -4209,7 +4357,26 @@ async function setupAuth(app2) {
   app2.use(import_passport.default.session());
   import_passport.default.serializeUser((user, cb) => cb(null, user));
   import_passport.default.deserializeUser((user, cb) => cb(null, user));
-  app2.get("/api/logout", (req, res) => {
+  app2.get("/api/logout", async (req, res) => {
+    const reason = req.query.reason;
+    const userId = req.user?.id;
+    const tenantId = req.user?.tenantId;
+    if (reason === "idle_timeout" && userId) {
+      try {
+        await db.insert(auditLogs).values({
+          userId,
+          tenantId,
+          action: "IDLE_TIMEOUT_LOGOUT",
+          entityType: "User",
+          entityId: 0,
+          oldValue: null,
+          newValue: { message: "User session logged out automatically due to inactivity" },
+          ipAddress: req.ip || req.socket.remoteAddress
+        });
+      } catch (e) {
+        console.error("Failed to insert idle timeout audit log:", e);
+      }
+    }
     if (typeof req.session?.destroy === "function") {
       req.session.destroy(() => {
         res.clearCookie("connect.sid", { path: "/" });
@@ -4719,10 +4886,15 @@ var init_tenantResolver = __esm({
     init_storage();
     UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     tenantContext = async (req, _res, next) => {
-      if (!req.isAuthenticated?.()) return next();
-      const userId = req.user?.claims?.sub || req.user?.id;
       const headerTenantRaw = req.headers["x-tenant-id"] || req.query["x-tenant-id"];
       const headerTenantId = typeof headerTenantRaw === "string" && UUID_RE.test(headerTenantRaw) ? headerTenantRaw : null;
+      if (!req.isAuthenticated?.()) {
+        if (headerTenantId) {
+          req.tenantId = headerTenantId;
+        }
+        return next();
+      }
+      const userId = req.user?.claims?.sub || req.user?.id;
       const hasOverrideIntent = !!headerTenantId || !!req.session.viewTenantId;
       let isSuperAdmin = false;
       if (hasOverrideIntent && userId) {
@@ -6796,6 +6968,36 @@ function isUserResearchAdmin(user) {
   ];
   return isPlatformAdmin || allowedRoles.includes(user.role);
 }
+function resolveExt(file) {
+  const orig = (file.originalname || "").toLowerCase();
+  const knownExts = [
+    ".apk",
+    ".exe",
+    ".zip",
+    ".7z",
+    ".tar",
+    ".gz",
+    ".pdf",
+    ".docx",
+    ".xlsx",
+    ".pptx",
+    ".csv",
+    ".mp4",
+    ".json",
+    ".geojson",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".webp"
+  ];
+  for (const ext of knownExts) {
+    if (orig.endsWith(ext)) return ext === ".jpeg" ? ".jpg" : ext;
+  }
+  const fromMime = ALLOWED_MIME[file.mimetype];
+  if (fromMime) return fromMime;
+  return ".bin";
+}
 var import_express3, import_drizzle_orm10, researchRouter, ALLOWED_MIME;
 var init_research = __esm({
   "server/routes/research.ts"() {
@@ -6809,14 +7011,39 @@ var init_research = __esm({
     init_loadDbUser();
     researchRouter = (0, import_express3.Router)();
     ALLOWED_MIME = {
+      // ── Documents ────────────────────────────────────────────────────────────
       "application/pdf": ".pdf",
       "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
+      "application/msword": ".doc",
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
+      "application/vnd.ms-excel": ".xls",
       "application/vnd.openxmlformats-officedocument.presentationml.presentation": ".pptx",
+      "application/vnd.ms-powerpoint": ".ppt",
       "text/csv": ".csv",
+      "text/plain": ".txt",
+      // ── Images ────────────────────────────────────────────────────────────
       "image/png": ".png",
       "image/jpeg": ".jpg",
-      "image/jpg": ".jpg"
+      "image/jpg": ".jpg",
+      "image/gif": ".gif",
+      "image/webp": ".webp",
+      // ── Archives ──────────────────────────────────────────────────────────
+      "application/zip": ".zip",
+      "application/x-zip-compressed": ".zip",
+      "application/x-tar": ".tar",
+      "application/gzip": ".gz",
+      "application/x-7z-compressed": ".7z",
+      // ── Executables / App installers ─────────────────────────────────────
+      "application/vnd.android.package-archive": ".apk",
+      "application/octet-stream": ".exe",
+      // also catches generic binary blobs
+      "application/x-msdownload": ".exe",
+      "application/x-msdos-program": ".exe",
+      "application/x-executable": ".bin",
+      // ── Video / Data ──────────────────────────────────────────────────────
+      "video/mp4": ".mp4",
+      "application/json": ".json",
+      "application/geo+json": ".geojson"
     };
     researchRouter.post(
       "/upload",
@@ -6837,11 +7064,27 @@ var init_research = __esm({
           }
           const upload = _multer({
             storage: _multer.memoryStorage(),
-            limits: { fileSize: 15 * 1024 * 1024 },
-            // 15 MB limit
+            limits: { fileSize: 500 * 1024 * 1024 },
+            // 500 MB
             fileFilter: (_req, file, cb) => {
               if (ALLOWED_MIME[file.mimetype]) return cb(null, true);
-              cb(new Error("Unsupported file format. Use PDF, DOCX, XLSX, PPTX, CSV, PNG, or JPG."));
+              const orig = (file.originalname || "").toLowerCase();
+              const ok = [
+                ".apk",
+                ".exe",
+                ".zip",
+                ".7z",
+                ".tar",
+                ".gz",
+                ".bin",
+                ".json",
+                ".geojson",
+                ".mp4"
+              ];
+              if (ok.some((e) => orig.endsWith(e))) return cb(null, true);
+              cb(new Error(
+                "Unsupported file format. Allowed: PDF, DOCX, XLSX, PPTX, CSV, PNG, JPG, ZIP, 7Z, APK, EXE, MP4, JSON, GeoJSON."
+              ));
             }
           }).single("file");
           upload(req, res, async (err) => {
@@ -6851,7 +7094,7 @@ var init_research = __esm({
             if (!req.file) {
               return res.status(400).json({ message: "No file uploaded" });
             }
-            const ext = ALLOWED_MIME[req.file.mimetype] ?? ".bin";
+            const ext = resolveExt(req.file);
             const rand = _crypto.randomBytes(8).toString("hex");
             const filename = `res-${Date.now()}-${rand}${ext}`;
             const fullPath = _path.join(researchDir, filename);
@@ -6869,6 +7112,35 @@ var init_research = __esm({
         }
       }
     );
+    researchRouter.get("/filter-metadata", async (req, res) => {
+      try {
+        const docs = await db.select({
+          documentType: researchDocuments.documentType,
+          country: researchDocuments.country,
+          year: researchDocuments.year
+        }).from(researchDocuments);
+        const pilotsList = await db.select({
+          country: pilotActivities.country,
+          startDate: pilotActivities.startDate
+        }).from(pilotActivities);
+        const docTypes = Array.from(new Set(docs.map((d) => d.documentType).filter(Boolean)));
+        const countries = Array.from(
+          /* @__PURE__ */ new Set([
+            ...docs.map((d) => d.country).filter(Boolean),
+            ...pilotsList.map((p) => p.country).filter(Boolean)
+          ])
+        );
+        const years = Array.from(
+          /* @__PURE__ */ new Set([
+            ...docs.map((d) => Number(d.year)),
+            ...pilotsList.map((p) => p.startDate ? new Date(p.startDate).getFullYear() : null)
+          ])
+        ).filter((y) => y !== null && !isNaN(y)).sort((a, b) => b - a);
+        res.json({ docTypes, countries, years });
+      } catch (error) {
+        res.status(500).json({ message: error.message || "Failed to fetch filter metadata" });
+      }
+    });
     researchRouter.get("/documents", loadDbUser, async (req, res) => {
       try {
         const { search, type, country, year, status, visibility, sort } = req.query;
@@ -6878,8 +7150,8 @@ var init_research = __esm({
           conditions.push((0, import_drizzle_orm10.eq)(researchDocuments.status, "Published"));
           conditions.push((0, import_drizzle_orm10.eq)(researchDocuments.visibility, "Public"));
         } else {
-          if (status) conditions.push((0, import_drizzle_orm10.eq)(researchDocuments.status, String(status)));
-          if (visibility) conditions.push((0, import_drizzle_orm10.eq)(researchDocuments.visibility, String(visibility)));
+          if (status && status !== "all") conditions.push((0, import_drizzle_orm10.eq)(researchDocuments.status, String(status)));
+          if (visibility && visibility !== "all") conditions.push((0, import_drizzle_orm10.eq)(researchDocuments.visibility, String(visibility)));
         }
         if (search) {
           conditions.push(
@@ -6890,9 +7162,9 @@ var init_research = __esm({
             )
           );
         }
-        if (type) conditions.push((0, import_drizzle_orm10.eq)(researchDocuments.documentType, String(type)));
-        if (country) conditions.push((0, import_drizzle_orm10.eq)(researchDocuments.country, String(country)));
-        if (year) conditions.push((0, import_drizzle_orm10.eq)(researchDocuments.year, Number(year)));
+        if (type && type !== "all") conditions.push((0, import_drizzle_orm10.eq)(researchDocuments.documentType, String(type)));
+        if (country && country !== "all") conditions.push((0, import_drizzle_orm10.eq)(researchDocuments.country, String(country)));
+        if (year && year !== "all") conditions.push((0, import_drizzle_orm10.eq)(researchDocuments.year, Number(year)));
         const whereClause = conditions.length > 0 ? (0, import_drizzle_orm10.and)(...conditions) : void 0;
         let order = (0, import_drizzle_orm10.desc)(researchDocuments.createdAt);
         if (sort === "newest") order = (0, import_drizzle_orm10.desc)(researchDocuments.createdAt);
@@ -7018,8 +7290,8 @@ var init_research = __esm({
             )
           );
         }
-        if (country) conditions.push((0, import_drizzle_orm10.eq)(pilotActivities.country, String(country)));
-        if (status) conditions.push((0, import_drizzle_orm10.eq)(pilotActivities.status, String(status)));
+        if (country && country !== "all") conditions.push((0, import_drizzle_orm10.eq)(pilotActivities.country, String(country)));
+        if (status && status !== "all") conditions.push((0, import_drizzle_orm10.eq)(pilotActivities.status, String(status)));
         if (partner) conditions.push((0, import_drizzle_orm10.ilike)(pilotActivities.partners, `%${partner}%`));
         const whereClause = conditions.length > 0 ? (0, import_drizzle_orm10.and)(...conditions) : void 0;
         const list = await db.select().from(pilotActivities).where(whereClause).orderBy((0, import_drizzle_orm10.desc)(pilotActivities.createdAt));
@@ -7103,6 +7375,26 @@ var init_research = __esm({
         }
       }
     );
+    researchRouter.delete(
+      "/pilots/:id",
+      isAuthenticated,
+      requireTenant,
+      loadDbUser,
+      requireResearchAdmin,
+      async (req, res) => {
+        try {
+          const id = Number(req.params.id);
+          const [existing] = await db.select().from(pilotActivities).where((0, import_drizzle_orm10.eq)(pilotActivities.id, id)).limit(1);
+          if (!existing) {
+            return res.status(404).json({ message: "Pilot not found" });
+          }
+          await db.delete(pilotActivities).where((0, import_drizzle_orm10.eq)(pilotActivities.id, id));
+          res.json({ success: true, message: "Pilot deleted successfully" });
+        } catch (error) {
+          res.status(500).json({ message: error.message || "Failed to delete pilot" });
+        }
+      }
+    );
     researchRouter.post(
       "/pilots/:id/updates",
       isAuthenticated,
@@ -7181,6 +7473,50 @@ var init_research = __esm({
         }
       }
     );
+    researchRouter.patch(
+      "/lessons/:id",
+      isAuthenticated,
+      requireTenant,
+      loadDbUser,
+      requireResearchAdmin,
+      async (req, res) => {
+        try {
+          const id = Number(req.params.id);
+          const [existing] = await db.select().from(implementationLessons).where((0, import_drizzle_orm10.eq)(implementationLessons.id, id)).limit(1);
+          if (!existing) {
+            return res.status(404).json({ message: "Lesson not found" });
+          }
+          const parsed = insertImplementationLessonSchema.partial().parse({
+            ...req.body,
+            updatedByUserId: req.dbUser?.id || req.user?.id
+          });
+          const [updated] = await db.update(implementationLessons).set({ ...parsed, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm10.eq)(implementationLessons.id, id)).returning();
+          res.json(updated);
+        } catch (error) {
+          res.status(400).json({ message: error.message || "Invalid lesson payload" });
+        }
+      }
+    );
+    researchRouter.delete(
+      "/lessons/:id",
+      isAuthenticated,
+      requireTenant,
+      loadDbUser,
+      requireResearchAdmin,
+      async (req, res) => {
+        try {
+          const id = Number(req.params.id);
+          const [existing] = await db.select().from(implementationLessons).where((0, import_drizzle_orm10.eq)(implementationLessons.id, id)).limit(1);
+          if (!existing) {
+            return res.status(404).json({ message: "Lesson not found" });
+          }
+          await db.delete(implementationLessons).where((0, import_drizzle_orm10.eq)(implementationLessons.id, id));
+          res.json({ success: true, message: "Lesson deleted successfully" });
+        } catch (error) {
+          res.status(500).json({ message: error.message || "Failed to delete lesson" });
+        }
+      }
+    );
     researchRouter.get("/assets", loadDbUser, async (req, res) => {
       try {
         const { category, search } = req.query;
@@ -7230,6 +7566,50 @@ var init_research = __esm({
           res.status(210).json(newAsset);
         } catch (error) {
           res.status(400).json({ message: error.message || "Invalid asset payload" });
+        }
+      }
+    );
+    researchRouter.patch(
+      "/assets/:id",
+      isAuthenticated,
+      requireTenant,
+      loadDbUser,
+      requireResearchAdmin,
+      async (req, res) => {
+        try {
+          const id = Number(req.params.id);
+          const [existing] = await db.select().from(downloadAssets).where((0, import_drizzle_orm10.eq)(downloadAssets.id, id)).limit(1);
+          if (!existing) {
+            return res.status(404).json({ message: "Asset not found" });
+          }
+          const parsed = insertDownloadAssetSchema.partial().parse({
+            ...req.body,
+            updatedByUserId: req.dbUser?.id || req.user?.id
+          });
+          const [updated] = await db.update(downloadAssets).set({ ...parsed, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm10.eq)(downloadAssets.id, id)).returning();
+          res.json(updated);
+        } catch (error) {
+          res.status(400).json({ message: error.message || "Invalid asset payload" });
+        }
+      }
+    );
+    researchRouter.delete(
+      "/assets/:id",
+      isAuthenticated,
+      requireTenant,
+      loadDbUser,
+      requireResearchAdmin,
+      async (req, res) => {
+        try {
+          const id = Number(req.params.id);
+          const [existing] = await db.select().from(downloadAssets).where((0, import_drizzle_orm10.eq)(downloadAssets.id, id)).limit(1);
+          if (!existing) {
+            return res.status(404).json({ message: "Asset not found" });
+          }
+          await db.delete(downloadAssets).where((0, import_drizzle_orm10.eq)(downloadAssets.id, id));
+          res.json({ success: true, message: "Asset deleted successfully" });
+        } catch (error) {
+          res.status(500).json({ message: error.message || "Failed to delete asset" });
         }
       }
     );
@@ -7349,7 +7729,12 @@ var init_research = __esm({
             title: researchDocuments.title,
             downloadCount: researchDocuments.downloadCount
           }).from(researchDocuments).orderBy((0, import_drizzle_orm10.desc)(researchDocuments.downloadCount)).limit(5);
-          const [submissionsCount] = await db.select({ count: import_drizzle_orm10.sql`count(*)` }).from(researchInterestSubmissions).where((0, import_drizzle_orm10.eq)(researchInterestSubmissions.status, "pending"));
+          const [submissionsCount] = await db.select({ count: import_drizzle_orm10.sql`count(*)` }).from(researchInterestSubmissions).where(
+            (0, import_drizzle_orm10.and)(
+              (0, import_drizzle_orm10.eq)(researchInterestSubmissions.status, "pending"),
+              (0, import_drizzle_orm10.eq)(researchInterestSubmissions.tenantId, tenantId)
+            )
+          );
           res.json({
             documents: {
               total: Number(docsTotal?.count || 0),
@@ -9127,7 +9512,7 @@ async function batchMutate(tenantId, mutations, performedById) {
         const old = await storage.getSessionPlan(tenantId, sessionId);
         if (!old) throw new Error(`mark-done: session ${sessionId} not found`);
         const rawPerAntigen = payload.perAntigen && typeof payload.perAntigen === "object" ? payload.perAntigen : {};
-        const tenantConfigs = await storage.getVaccineConfigs(tenantId);
+        const tenantConfigs = await storage.getCatalogueScheduleDoses(tenantId);
         const { perAntigen, perAntigenUnmapped, unmappedCodes } = canonicalizePerAntigen(rawPerAntigen, tenantConfigs);
         const totals = Number(
           payload.totals != null ? payload.totals : Object.values(perAntigen).reduce((s, n) => s + Number(n || 0), 0) + Object.values(perAntigenUnmapped).reduce((s, n) => s + Number(n || 0), 0)
@@ -13954,10 +14339,21 @@ async function registerRoutes(httpServer2, app2) {
       const all = await storage.getProvinces(req.tenantId, regionId);
       if (scope.all) return res.json(all);
       const visibleProvinceIds = new Set(scope.provinceIds);
-      if (scope.districtIds.size > 0 && visibleProvinceIds.size === 0) {
+      const districtsForProvinces = new Set(scope.districtIds);
+      if (scope.facilityIds.size > 0) {
+        const allFacilities = await storage.getFacilities(req.tenantId);
+        for (const f of allFacilities) {
+          if (scope.facilityIds.has(f.id) && f.districtId) {
+            districtsForProvinces.add(f.districtId);
+          }
+        }
+      }
+      if (districtsForProvinces.size > 0) {
         const allDistricts = await storage.getDistricts(req.tenantId);
         for (const d of allDistricts) {
-          if (scope.districtIds.has(d.id)) visibleProvinceIds.add(d.provinceId);
+          if (districtsForProvinces.has(d.id)) {
+            visibleProvinceIds.add(d.provinceId);
+          }
         }
       }
       setCacheHeaders(res, 1800);
@@ -14016,7 +14412,16 @@ async function registerRoutes(httpServer2, app2) {
       const provinceId = req.query.provinceId ? parseInt(req.query.provinceId) : void 0;
       res.set("Cache-Control", "private, max-age=300, stale-while-revalidate=60");
       const all = await storage.getDistricts(req.tenantId, provinceId);
-      const result = scope.all ? all : all.filter((d) => scope.districtIds.has(d.id));
+      const visibleDistrictIds = new Set(scope.districtIds);
+      if (scope.facilityIds.size > 0) {
+        const allFacilities = await storage.getFacilities(req.tenantId);
+        for (const f of allFacilities) {
+          if (scope.facilityIds.has(f.id) && f.districtId) {
+            visibleDistrictIds.add(f.districtId);
+          }
+        }
+      }
+      const result = scope.all ? all : all.filter((d) => visibleDistrictIds.has(d.id));
       setCacheHeaders(res, 1800);
       res.json(result);
     } catch (error) {
@@ -16776,20 +17181,34 @@ Note from the requester: ${conflict.note}` : ""}`,
       const isNationalAdmin = dbUser.role === "national_admin" || Array.isArray(dbUser.roles) && dbUser.roles.includes("national_admin");
       const excludeVillages = req.query.excludeVillages === "true" || isNationalAdmin && !filters.provinceId && !filters.districtId && !filters.villageId && !filters.facilityId;
       filters.excludeVillages = excludeVillages;
-      if (!isNationalAdmin) {
-        if (dbUser.facilityId) {
-          const allVillages = await storage.getVillages(req.tenantId);
-          const facilityVillageIds = new Set(allVillages.filter((v) => v.assignedFacilityId === dbUser.facilityId).map((v) => v.id));
-          const allPop = await storage.getPopulationData(req.tenantId, { ...filters, facilityId: void 0 });
-          const filtered = allPop.filter((p) => p.facilityId === dbUser.facilityId || p.villageId && facilityVillageIds.has(p.villageId));
-          return res.json(filtered);
-        } else if (dbUser.districtId) {
-          filters.districtId = dbUser.districtId;
-        } else if (dbUser.provinceId) {
-          filters.provinceId = dbUser.provinceId;
-        }
+      const scope = await getGeoScope(dbUser, req.tenantId);
+      let allPop = await storage.getPopulationData(req.tenantId, filters);
+      if (!scope.all) {
+        const allVillages = await storage.getVillages(req.tenantId);
+        const villageToFacilityMap = /* @__PURE__ */ new Map();
+        allVillages.forEach((v) => {
+          if (v.id && v.assignedFacilityId) {
+            villageToFacilityMap.set(v.id, v.assignedFacilityId);
+          }
+        });
+        allPop = allPop.filter((p) => {
+          if (p.facilityId && scope.facilityIds.has(p.facilityId)) return true;
+          if (p.districtId && scope.districtIds.has(p.districtId)) return true;
+          if (p.provinceId && scope.provinceIds.has(p.provinceId)) return true;
+          if (p.villageId) {
+            const facId = villageToFacilityMap.get(p.villageId);
+            if (facId && scope.facilityIds.has(facId)) return true;
+            const village = allVillages.find((v) => v.id === p.villageId);
+            if (village && village.districtId && scope.districtIds.has(village.districtId)) return true;
+          }
+          if (!p.facilityId && !p.villageId) {
+            if (p.districtId && scope.districtIds.has(p.districtId)) return true;
+            if (p.provinceId && scope.provinceIds.has(p.provinceId)) return true;
+          }
+          return false;
+        });
       }
-      res.json(await storage.getPopulationData(req.tenantId, filters));
+      res.json(allPop);
     } catch (error) {
       console.error("Error fetching population data:", error);
       res.status(500).json({ message: "Failed to fetch population data" });
@@ -17133,7 +17552,15 @@ Note from the requester: ${conflict.note}` : ""}`,
   });
   app2.post("/api/population", ...auth, async (req, res) => {
     try {
+      const dbUser = req.dbUser;
       const data = insertPopulationDataSchema.parse(req.body);
+      if (!await userCanAccessGeo(dbUser, req.tenantId, {
+        facilityId: data.facilityId,
+        districtId: data.districtId,
+        provinceId: data.provinceId
+      })) {
+        return res.status(403).json({ message: "Forbidden: no access to this geographic area" });
+      }
       const pop = await storage.createPopulationData(req.tenantId, data);
       await logAudit(req, "create", "population_data", pop.id, null, pop);
       res.status(201).json(pop);
@@ -17144,8 +17571,35 @@ Note from the requester: ${conflict.note}` : ""}`,
   });
   app2.patch("/api/population/:id", ...auth, async (req, res) => {
     try {
+      const dbUser = req.dbUser;
       const entityId = parseInt(req.params.id);
       const oldPop = await storage.getPopulationDataById(req.tenantId, entityId);
+      if (!oldPop) return res.status(404).json({ message: "Population data not found" });
+      if (!await userCanAccessGeo(dbUser, req.tenantId, {
+        facilityId: oldPop.facilityId,
+        districtId: oldPop.districtId,
+        provinceId: oldPop.provinceId
+      })) {
+        return res.status(403).json({ message: "Forbidden: no access to this population data" });
+      }
+      if (req.body.facilityId || req.body.districtId || req.body.provinceId) {
+        if (!await userCanAccessGeo(dbUser, req.tenantId, {
+          facilityId: req.body.facilityId ?? oldPop.facilityId,
+          districtId: req.body.districtId ?? oldPop.districtId,
+          provinceId: req.body.provinceId ?? oldPop.provinceId
+        })) {
+          return res.status(403).json({ message: "Forbidden: no access to target geographic area" });
+        }
+      }
+      const isApprover = dbUser.role === "national_admin" || dbUser.role === "gis_specialist" || dbUser.role === "provincial_coordinator" || dbUser.role === "district_manager" || Array.isArray(dbUser.roles) && dbUser.roles.some((r) => ["national_admin", "gis_specialist", "provincial_coordinator", "district_manager"].includes(r));
+      if (oldPop.approvalStatus === "approved" || oldPop.approvalStatus === "locked" || oldPop.approvalStatus === "archived") {
+        if (!isApprover) {
+          return res.status(403).json({ message: "This population record is approved and locked. Scoped users cannot edit approved records." });
+        }
+      }
+      if (!isApprover && (oldPop.approvalStatus === "pending" || oldPop.approvalStatus === "under_review")) {
+        return res.status(403).json({ message: "This population record has already been submitted and cannot be edited." });
+      }
       const pop = await storage.updatePopulationData(req.tenantId, entityId, req.body);
       if (!pop) return res.status(404).json({ message: "Population data not found" });
       await logAudit(req, "update", "population_data", entityId, oldPop, pop);
@@ -17157,8 +17611,23 @@ Note from the requester: ${conflict.note}` : ""}`,
   });
   app2.delete("/api/population/:id", ...auth, async (req, res) => {
     try {
+      const dbUser = req.dbUser;
       const entityId = parseInt(req.params.id);
       const oldPop = await storage.getPopulationDataById(req.tenantId, entityId);
+      if (!oldPop) return res.status(404).json({ message: "Population data not found" });
+      if (!await userCanAccessGeo(dbUser, req.tenantId, {
+        facilityId: oldPop.facilityId,
+        districtId: oldPop.districtId,
+        provinceId: oldPop.provinceId
+      })) {
+        return res.status(403).json({ message: "Forbidden: no access to this population data" });
+      }
+      const isApprover = dbUser.role === "national_admin" || dbUser.role === "gis_specialist" || dbUser.role === "provincial_coordinator" || dbUser.role === "district_manager" || Array.isArray(dbUser.roles) && dbUser.roles.some((r) => ["national_admin", "gis_specialist", "provincial_coordinator", "district_manager"].includes(r));
+      if (oldPop.approvalStatus === "approved" || oldPop.approvalStatus === "locked" || oldPop.approvalStatus === "archived" || oldPop.approvalStatus === "pending" || oldPop.approvalStatus === "under_review") {
+        if (!isApprover) {
+          return res.status(403).json({ message: "Cannot delete a record that is submitted or approved." });
+        }
+      }
       const ok = await storage.deletePopulationData(req.tenantId, entityId);
       if (!ok) return res.status(404).json({ message: "Population data not found" });
       await logAudit(req, "delete", "population_data", entityId, oldPop, null);
@@ -17166,6 +17635,271 @@ Note from the requester: ${conflict.note}` : ""}`,
     } catch (error) {
       console.error("Error deleting population data:", error);
       res.status(500).json({ message: "Failed to delete population data" });
+    }
+  });
+  app2.post("/api/population/:id/submit", ...auth, async (req, res) => {
+    try {
+      const dbUser = req.dbUser;
+      const entityId = parseInt(req.params.id);
+      const oldPop = await storage.getPopulationDataById(req.tenantId, entityId);
+      if (!oldPop) return res.status(404).json({ message: "Population data not found" });
+      if (!await userCanAccessGeo(dbUser, req.tenantId, {
+        facilityId: oldPop.facilityId,
+        districtId: oldPop.districtId,
+        provinceId: oldPop.provinceId
+      })) {
+        return res.status(403).json({ message: "Forbidden: no access to this population data" });
+      }
+      if (oldPop.approvalStatus !== "draft" && oldPop.approvalStatus !== "returned") {
+        return res.status(400).json({ message: "Only draft or returned records can be submitted for review." });
+      }
+      const meta = oldPop.metadata || {};
+      const updatedMeta = {
+        ...meta,
+        submittedAt: (/* @__PURE__ */ new Date()).toISOString(),
+        submittedBy: `${dbUser.firstName || ""} ${dbUser.lastName || ""}`.trim() || dbUser.username || "System",
+        submittedById: dbUser.id,
+        submittedByRole: dbUser.role
+      };
+      const pop = await storage.updatePopulationData(req.tenantId, entityId, {
+        approvalStatus: "pending",
+        metadata: updatedMeta
+      });
+      await logAudit(req, "update", "population_data", entityId, oldPop, pop);
+      res.json(pop || { ...oldPop, approvalStatus: "pending", metadata: updatedMeta });
+    } catch (error) {
+      console.error("Error submitting population data:", error);
+      res.status(500).json({ message: "Failed to submit population data" });
+    }
+  });
+  app2.post("/api/population/:id/review", ...auth, async (req, res) => {
+    try {
+      const dbUser = req.dbUser;
+      const entityId = parseInt(req.params.id);
+      const oldPop = await storage.getPopulationDataById(req.tenantId, entityId);
+      if (!oldPop) return res.status(404).json({ message: "Population data not found" });
+      if (!await userCanAccessGeo(dbUser, req.tenantId, {
+        facilityId: oldPop.facilityId,
+        districtId: oldPop.districtId,
+        provinceId: oldPop.provinceId
+      })) {
+        return res.status(403).json({ message: "Forbidden: no access to this population data" });
+      }
+      const isApprover = dbUser.role === "national_admin" || dbUser.role === "gis_specialist" || dbUser.role === "provincial_coordinator" || dbUser.role === "district_manager" || Array.isArray(dbUser.roles) && dbUser.roles.some((r) => ["national_admin", "gis_specialist", "provincial_coordinator", "district_manager"].includes(r));
+      if (!isApprover) {
+        return res.status(403).json({ message: "Forbidden: only reviewers are authorized to review population data" });
+      }
+      if (oldPop.approvalStatus !== "pending") {
+        return res.status(400).json({ message: "Only pending records can be set to under review." });
+      }
+      const meta = oldPop.metadata || {};
+      const updatedMeta = {
+        ...meta,
+        underReviewAt: (/* @__PURE__ */ new Date()).toISOString(),
+        underReviewBy: `${dbUser.firstName || ""} ${dbUser.lastName || ""}`.trim() || dbUser.username || "System",
+        underReviewById: dbUser.id,
+        underReviewByRole: dbUser.role
+      };
+      const pop = await storage.updatePopulationData(req.tenantId, entityId, {
+        approvalStatus: "under_review",
+        metadata: updatedMeta
+      });
+      await logAudit(req, "update", "population_data", entityId, oldPop, pop);
+      res.json(pop || { ...oldPop, approvalStatus: "under_review", metadata: updatedMeta });
+    } catch (error) {
+      console.error("Error setting review status:", error);
+      res.status(500).json({ message: "Failed to set review status" });
+    }
+  });
+  app2.post("/api/population/:id/approve", ...auth, async (req, res) => {
+    try {
+      const dbUser = req.dbUser;
+      const entityId = parseInt(req.params.id);
+      const oldPop = await storage.getPopulationDataById(req.tenantId, entityId);
+      if (!oldPop) return res.status(404).json({ message: "Population data not found" });
+      if (!await userCanAccessGeo(dbUser, req.tenantId, {
+        facilityId: oldPop.facilityId,
+        districtId: oldPop.districtId,
+        provinceId: oldPop.provinceId
+      })) {
+        return res.status(403).json({ message: "Forbidden: no access to this population data" });
+      }
+      const isApprover = dbUser.role === "national_admin" || dbUser.role === "gis_specialist" || dbUser.role === "provincial_coordinator" || dbUser.role === "district_manager" || Array.isArray(dbUser.roles) && dbUser.roles.some((r) => ["national_admin", "gis_specialist", "provincial_coordinator", "district_manager"].includes(r));
+      if (!isApprover) {
+        return res.status(403).json({ message: "Forbidden: only reviewers are authorized to approve population data" });
+      }
+      if (oldPop.approvalStatus !== "pending" && oldPop.approvalStatus !== "under_review") {
+        return res.status(400).json({ message: "Only pending or under-review records can be approved." });
+      }
+      const meta = oldPop.metadata || {};
+      const updatedMeta = {
+        ...meta,
+        approvedAt: (/* @__PURE__ */ new Date()).toISOString(),
+        approvedBy: `${dbUser.firstName || ""} ${dbUser.lastName || ""}`.trim() || dbUser.username || "System",
+        approvedById: dbUser.id,
+        approvedByRole: dbUser.role,
+        comments: req.body.comments || meta.comments || ""
+      };
+      const pop = await storage.updatePopulationData(req.tenantId, entityId, {
+        approvalStatus: "approved",
+        metadata: updatedMeta
+      });
+      await logAudit(req, "update", "population_data", entityId, oldPop, pop);
+      res.json(pop || { ...oldPop, approvalStatus: "approved", metadata: updatedMeta });
+    } catch (error) {
+      console.error("Error approving population data:", error);
+      res.status(500).json({ message: "Failed to approve population data" });
+    }
+  });
+  app2.post("/api/population/:id/return", ...auth, async (req, res) => {
+    try {
+      const dbUser = req.dbUser;
+      const entityId = parseInt(req.params.id);
+      const oldPop = await storage.getPopulationDataById(req.tenantId, entityId);
+      if (!oldPop) return res.status(404).json({ message: "Population data not found" });
+      if (!await userCanAccessGeo(dbUser, req.tenantId, {
+        facilityId: oldPop.facilityId,
+        districtId: oldPop.districtId,
+        provinceId: oldPop.provinceId
+      })) {
+        return res.status(403).json({ message: "Forbidden: no access to this population data" });
+      }
+      const isApprover = dbUser.role === "national_admin" || dbUser.role === "gis_specialist" || dbUser.role === "provincial_coordinator" || dbUser.role === "district_manager" || Array.isArray(dbUser.roles) && dbUser.roles.some((r) => ["national_admin", "gis_specialist", "provincial_coordinator", "district_manager"].includes(r));
+      if (!isApprover) {
+        return res.status(403).json({ message: "Forbidden: only reviewers are authorized to return population data" });
+      }
+      if (oldPop.approvalStatus !== "pending" && oldPop.approvalStatus !== "under_review") {
+        return res.status(400).json({ message: "Only pending or under-review records can be returned." });
+      }
+      const meta = oldPop.metadata || {};
+      const updatedMeta = {
+        ...meta,
+        returnedAt: (/* @__PURE__ */ new Date()).toISOString(),
+        returnedBy: `${dbUser.firstName || ""} ${dbUser.lastName || ""}`.trim() || dbUser.username || "System",
+        returnedById: dbUser.id,
+        returnedByRole: dbUser.role,
+        comments: req.body.comments || ""
+      };
+      const pop = await storage.updatePopulationData(req.tenantId, entityId, {
+        approvalStatus: "returned",
+        metadata: updatedMeta
+      });
+      await logAudit(req, "update", "population_data", entityId, oldPop, pop);
+      res.json(pop || { ...oldPop, approvalStatus: "returned", metadata: updatedMeta });
+    } catch (error) {
+      console.error("Error returning population data:", error);
+      res.status(500).json({ message: "Failed to return population data" });
+    }
+  });
+  app2.post("/api/population/:id/reject", ...auth, async (req, res) => {
+    try {
+      const dbUser = req.dbUser;
+      const entityId = parseInt(req.params.id);
+      const oldPop = await storage.getPopulationDataById(req.tenantId, entityId);
+      if (!oldPop) return res.status(404).json({ message: "Population data not found" });
+      if (!await userCanAccessGeo(dbUser, req.tenantId, {
+        facilityId: oldPop.facilityId,
+        districtId: oldPop.districtId,
+        provinceId: oldPop.provinceId
+      })) {
+        return res.status(403).json({ message: "Forbidden: no access to this population data" });
+      }
+      const isApprover = dbUser.role === "national_admin" || dbUser.role === "gis_specialist" || dbUser.role === "provincial_coordinator" || dbUser.role === "district_manager" || Array.isArray(dbUser.roles) && dbUser.roles.some((r) => ["national_admin", "gis_specialist", "provincial_coordinator", "district_manager"].includes(r));
+      if (!isApprover) {
+        return res.status(403).json({ message: "Forbidden: only reviewers are authorized to reject population data" });
+      }
+      if (oldPop.approvalStatus !== "pending" && oldPop.approvalStatus !== "under_review") {
+        return res.status(400).json({ message: "Only pending or under-review records can be rejected." });
+      }
+      const meta = oldPop.metadata || {};
+      const updatedMeta = {
+        ...meta,
+        rejectedAt: (/* @__PURE__ */ new Date()).toISOString(),
+        rejectedBy: `${dbUser.firstName || ""} ${dbUser.lastName || ""}`.trim() || dbUser.username || "System",
+        rejectedById: dbUser.id,
+        rejectedByRole: dbUser.role,
+        comments: req.body.comments || ""
+      };
+      const pop = await storage.updatePopulationData(req.tenantId, entityId, {
+        approvalStatus: "rejected",
+        metadata: updatedMeta
+      });
+      await logAudit(req, "update", "population_data", entityId, oldPop, pop);
+      res.json(pop || { ...oldPop, approvalStatus: "rejected", metadata: updatedMeta });
+    } catch (error) {
+      console.error("Error rejecting population data:", error);
+      res.status(500).json({ message: "Failed to reject population data" });
+    }
+  });
+  app2.post("/api/population/:id/archive", ...auth, async (req, res) => {
+    try {
+      const dbUser = req.dbUser;
+      const entityId = parseInt(req.params.id);
+      const oldPop = await storage.getPopulationDataById(req.tenantId, entityId);
+      if (!oldPop) return res.status(404).json({ message: "Population data not found" });
+      if (!await userCanAccessGeo(dbUser, req.tenantId, {
+        facilityId: oldPop.facilityId,
+        districtId: oldPop.districtId,
+        provinceId: oldPop.provinceId
+      })) {
+        return res.status(403).json({ message: "Forbidden: no access to this population data" });
+      }
+      const isNational = dbUser.role === "national_admin" || dbUser.role === "gis_specialist" || dbUser.isPlatformAdmin || Array.isArray(dbUser.roles) && dbUser.roles.some((r) => ["national_admin", "gis_specialist"].includes(r));
+      if (!isNational) {
+        return res.status(403).json({ message: "Forbidden: only national administrators can archive population datasets" });
+      }
+      const meta = oldPop.metadata || {};
+      const updatedMeta = {
+        ...meta,
+        archivedAt: (/* @__PURE__ */ new Date()).toISOString(),
+        archivedBy: `${dbUser.firstName || ""} ${dbUser.lastName || ""}`.trim() || dbUser.username || "System",
+        archivedById: dbUser.id
+      };
+      const pop = await storage.updatePopulationData(req.tenantId, entityId, {
+        approvalStatus: "archived",
+        metadata: updatedMeta
+      });
+      await logAudit(req, "update", "population_data", entityId, oldPop, pop);
+      res.json(pop || { ...oldPop, approvalStatus: "archived", metadata: updatedMeta });
+    } catch (error) {
+      console.error("Error archiving population data:", error);
+      res.status(500).json({ message: "Failed to archive population data" });
+    }
+  });
+  app2.post("/api/population/:id/reopen", ...auth, async (req, res) => {
+    try {
+      const dbUser = req.dbUser;
+      const entityId = parseInt(req.params.id);
+      const oldPop = await storage.getPopulationDataById(req.tenantId, entityId);
+      if (!oldPop) return res.status(404).json({ message: "Population data not found" });
+      if (!await userCanAccessGeo(dbUser, req.tenantId, {
+        facilityId: oldPop.facilityId,
+        districtId: oldPop.districtId,
+        provinceId: oldPop.provinceId
+      })) {
+        return res.status(403).json({ message: "Forbidden: no access to this population data" });
+      }
+      const isApprover = dbUser.role === "national_admin" || dbUser.role === "gis_specialist" || dbUser.role === "provincial_coordinator" || dbUser.role === "district_manager" || Array.isArray(dbUser.roles) && dbUser.roles.some((r) => ["national_admin", "gis_specialist", "provincial_coordinator", "district_manager"].includes(r));
+      if (!isApprover) {
+        return res.status(403).json({ message: "Forbidden: not authorized to reopen population data" });
+      }
+      const meta = oldPop.metadata || {};
+      const updatedMeta = {
+        ...meta,
+        reopenedAt: (/* @__PURE__ */ new Date()).toISOString(),
+        reopenedBy: `${dbUser.firstName || ""} ${dbUser.lastName || ""}`.trim() || dbUser.username || "System",
+        reopenedById: dbUser.id,
+        comments: req.body.comments || "Record reopened for correction."
+      };
+      const pop = await storage.updatePopulationData(req.tenantId, entityId, {
+        approvalStatus: "draft",
+        metadata: updatedMeta
+      });
+      await logAudit(req, "update", "population_data", entityId, oldPop, pop);
+      res.json(pop || { ...oldPop, approvalStatus: "draft", metadata: updatedMeta });
+    } catch (error) {
+      console.error("Error reopening population data:", error);
+      res.status(500).json({ message: "Failed to reopen population data" });
     }
   });
   app2.get("/api/microplans", ...auth, async (req, res) => {
@@ -20947,15 +21681,41 @@ Note from the requester: ${conflict.note}` : ""}`,
   app2.get("/api/stock/ledger", ...auth, async (req, res) => {
     try {
       const facilityIdRaw = req.query.facilityId;
+      const districtIdRaw = req.query.districtId;
+      const provinceIdRaw = req.query.provinceId;
+      const productIdRaw = req.query.productId;
       const facilityId = facilityIdRaw ? parseInt(facilityIdRaw) : void 0;
+      const districtId = districtIdRaw ? parseInt(districtIdRaw) : void 0;
+      const provinceId = provinceIdRaw ? parseInt(provinceIdRaw) : void 0;
+      const productId = productIdRaw ? parseInt(productIdRaw) : void 0;
       if (facilityIdRaw && (facilityId === void 0 || isNaN(facilityId))) {
         return res.status(400).json({ message: "Invalid facility ID parameter" });
       }
-      let list = await storage.getStockTransactions(req.tenantId, facilityId);
-      const scope = await getGeoScope(req.dbUser, req.tenantId);
-      if (!scope.all) {
-        list = list.filter((t) => recordInGeoScope(scope, { facilityId: t.facilityId }));
+      if (productIdRaw && (productId === void 0 || isNaN(productId))) {
+        return res.status(400).json({ message: "Invalid product ID parameter" });
       }
+      let list = await storage.getStockTransactions(req.tenantId, facilityId, productId);
+      const scope = await getGeoScope(req.dbUser, req.tenantId);
+      let geoMaps = null;
+      if (provinceId || districtId) {
+        const allFacilities = await storage.getFacilities(req.tenantId);
+        const allDistricts = await storage.getDistricts(req.tenantId);
+        const districtMap = new Map(allDistricts.map((d) => [d.id, d]));
+        geoMaps = { allFacilities, districtMap };
+      }
+      list = list.filter((t) => {
+        if (!recordInGeoScope(scope, { facilityId: t.facilityId })) return false;
+        if (geoMaps) {
+          const fac = geoMaps.allFacilities.find((f) => f.id === t.facilityId);
+          if (!fac) return false;
+          if (districtId && fac.districtId !== districtId) return false;
+          if (provinceId) {
+            const dist = geoMaps.districtMap.get(fac.districtId);
+            if (!dist || dist.provinceId !== provinceId) return false;
+          }
+        }
+        return true;
+      });
       res.json(list);
     } catch (err) {
       console.error("GET /api/stock/ledger failed:", err);
@@ -21060,15 +21820,36 @@ Note from the requester: ${conflict.note}` : ""}`,
     try {
       const dbUser = req.dbUser;
       const facilityIdRaw = req.query.facilityId;
-      let facilityId = facilityIdRaw ? parseInt(facilityIdRaw) : void 0;
+      const districtIdRaw = req.query.districtId;
+      const provinceIdRaw = req.query.provinceId;
+      const facilityId = facilityIdRaw ? parseInt(facilityIdRaw) : void 0;
+      const districtId = districtIdRaw ? parseInt(districtIdRaw) : void 0;
+      const provinceId = provinceIdRaw ? parseInt(provinceIdRaw) : void 0;
       if (facilityIdRaw && (facilityId === void 0 || isNaN(facilityId))) {
         return res.status(400).json({ message: "Invalid facility ID parameter" });
       }
       let list = await storage.getMonthlyReports(req.tenantId, facilityId);
       const scope = await getGeoScope(dbUser, req.tenantId);
-      if (!scope.all) {
-        list = list.filter((r) => recordInGeoScope(scope, { facilityId: r.facilityId }));
+      let geoMaps = null;
+      if (provinceId || districtId) {
+        const allFacilities = await storage.getFacilities(req.tenantId);
+        const allDistricts = await storage.getDistricts(req.tenantId);
+        const districtMap = new Map(allDistricts.map((d) => [d.id, d]));
+        geoMaps = { allFacilities, districtMap };
       }
+      list = list.filter((r) => {
+        if (!recordInGeoScope(scope, { facilityId: r.facilityId })) return false;
+        if (geoMaps) {
+          const fac = geoMaps.allFacilities.find((f) => f.id === r.facilityId);
+          if (!fac) return false;
+          if (districtId && fac.districtId !== districtId) return false;
+          if (provinceId) {
+            const dist = geoMaps.districtMap.get(fac.districtId);
+            if (!dist || dist.provinceId !== provinceId) return false;
+          }
+        }
+        return true;
+      });
       res.json(list);
     } catch (err) {
       console.error("GET /api/monthly-reports failed:", err);
@@ -25792,7 +26573,7 @@ function computeStockOnHand(transactions, vaccineConfigs) {
   const soh = {};
   if (vaccineConfigs) {
     for (const c of vaccineConfigs) {
-      if (c.isActive) soh[normalizeStockVaccineName(c.name)] = 0;
+      if (c.active && c.stockManaged) soh[normalizeStockVaccineName(c.name)] = 0;
     }
   }
   for (const tx of transactions) {
@@ -25952,7 +26733,7 @@ async function runStockAlertDigest(now = /* @__PURE__ */ new Date()) {
     tenantsProcessed++;
     const [facilities3, vaccineConfigs, transactions] = await Promise.all([
       storage.getFacilities(tenant.id),
-      storage.getVaccineConfigs(tenant.id),
+      storage.getCatalogueVaccines(tenant.id),
       storage.getStockTransactions(tenant.id)
     ]);
     const facilitiesById = new Map(

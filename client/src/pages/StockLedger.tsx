@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect } from "react";
+import { useLocation, useSearch } from "wouter";
 import { loadActiveTenant } from "@/lib/tenantCache";
 import type { Province, District, Village } from "@shared/schema";
 import { GeoCascadeFilter } from "@/components/GeoCascadeFilter";
@@ -38,7 +39,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { FacilityCascadePicker } from "@/components/FacilityCascadePicker";
+
 import {
   Package,
   Plus,
@@ -104,6 +105,8 @@ const transactionFormSchema = z.object({
   vvmStatus: z.number().min(1).max(4),
   supplierOrRecipient: z.string().min(1, "Supplier/Recipient name is required"),
   notes: z.string().optional(),
+  productId: z.number().optional().nullable(),
+  productCode: z.string().optional().nullable(),
 });
 
 type TransactionFormValues = z.infer<typeof transactionFormSchema>;
@@ -123,6 +126,23 @@ export default function StockLedger() {
 
   // Wizard Steps for Monthly Report
   const [wizardStep, setWizardStep] = useState(1);
+
+  // URL State for Product Filter
+  const [location, setLocation] = useLocation();
+  const searchString = useSearch();
+  const searchParams = new URLSearchParams(searchString);
+  const selectedProductIdParam = searchParams.get("productId");
+  const selectedProductId = selectedProductIdParam ? parseInt(selectedProductIdParam) : null;
+
+  const updateProductIdInUrl = (id: number | null) => {
+    const params = new URLSearchParams(searchString);
+    if (id !== null) {
+      params.set("productId", id.toString());
+    } else {
+      params.delete("productId");
+    }
+    setLocation(`${location}?${params.toString()}`);
+  };
 
   // Configurable months-of-stock threshold for low-stock warnings
   const [mosThreshold, setMosThreshold] = useState<number>(() => loadStockThreshold());
@@ -149,18 +169,13 @@ export default function StockLedger() {
     },
   });
 
-  // Load vaccine configurations
-  const { data: vaccineConfigs } = useQuery<VaccineConfig[]>({
-    queryKey: ["/api/vaccines/config"],
+  // Load vaccine configurations from Country Catalogue
+  const { data: vaccineConfigs = [], isLoading: isLoadingConfigs } = useQuery<any[]>({
+    queryKey: ["/api/catalogue/vaccines"],
     queryFn: async () => {
-      if (!navigator.onLine) {
-        const _tid = loadActiveTenant()?.id;
-        return (_tid
-          ? offlineDb.vaccineConfigs.where("tenantId").equals(_tid).toArray()
-          : offlineDb.vaccineConfigs.toArray()) as unknown as VaccineConfig[];
-      }
-      const res = await fetch("/api/vaccines/config");
-      if (!res.ok) throw new Error("Failed to load configs");
+      // Return physical stock-managed catalogue products
+      const res = await fetch("/api/catalogue/vaccines");
+      if (!res.ok) throw new Error("Failed to fetch catalogue vaccines");
       return res.json();
     },
   });
@@ -192,28 +207,34 @@ export default function StockLedger() {
     };
   }, [selectedFacilityId, geoMaps]);
 
-  // Load Stock Ledger Transactions (all in tenant; client filters by cascade)
+  // Load Stock Ledger Transactions (server and client filter by cascade)
   const { data: allTransactions, isLoading: loadingTxns } = useQuery<StockTransaction[]>({
-    queryKey: [`/api/stock/ledger`, { facilityId: null }],
+    queryKey: [`/api/stock/ledger`, { provinceId: geoProvinceId, districtId: geoDistrictId, facilityId: selectedFacilityId, productId: selectedProductId }],
     queryFn: async () => {
       if (!navigator.onLine) {
         const _tid = loadActiveTenant()?.id;
-        const localTxns = _tid
+        let localTxns = _tid
           ? await offlineDb.stockTransactions.where("tenantId").equals(_tid).toArray()
           : await offlineDb.stockTransactions.toArray();
         return (localTxns as unknown as StockTransaction[]).sort(
           (a, b) => new Date(b.transactionDate).getTime() - new Date(a.transactionDate).getTime()
         );
       }
-      const res = await fetch(`/api/stock/ledger`);
+      const params = new URLSearchParams();
+      if (geoProvinceId) params.append("provinceId", geoProvinceId.toString());
+      if (geoDistrictId) params.append("districtId", geoDistrictId.toString());
+      if (selectedFacilityId) params.append("facilityId", selectedFacilityId.toString());
+      if (selectedProductId) params.append("productId", selectedProductId.toString());
+      
+      const res = await fetch(`/api/stock/ledger?${params.toString()}`);
       if (!res.ok) throw new Error("Failed to load stock ledger");
       return res.json();
     },
   });
 
-  // Load Monthly Reports (all in tenant; client filters by cascade)
+  // Load Monthly Reports (server and client filter by cascade)
   const { data: allReports, isLoading: loadingReports } = useQuery<MonthlyReport[]>({
-    queryKey: [`/api/monthly-reports`, { facilityId: null }],
+    queryKey: [`/api/monthly-reports`, { provinceId: geoProvinceId, districtId: geoDistrictId, facilityId: selectedFacilityId }],
     queryFn: async () => {
       if (!navigator.onLine) {
         const _tid = loadActiveTenant()?.id;
@@ -222,7 +243,12 @@ export default function StockLedger() {
           : await offlineDb.monthlyReports.toArray();
         return localReports as unknown as MonthlyReport[];
       }
-      const res = await fetch(`/api/monthly-reports`);
+      const params = new URLSearchParams();
+      if (geoProvinceId) params.append("provinceId", geoProvinceId.toString());
+      if (geoDistrictId) params.append("districtId", geoDistrictId.toString());
+      if (selectedFacilityId) params.append("facilityId", selectedFacilityId.toString());
+
+      const res = await fetch(`/api/monthly-reports?${params.toString()}`);
       if (!res.ok) throw new Error("Failed to load monthly reports");
       return res.json();
     },
@@ -249,9 +275,10 @@ export default function StockLedger() {
       if (geoProvinceId !== null && g.provinceId !== geoProvinceId) return false;
       if (geoDistrictId !== null && g.districtId !== geoDistrictId) return false;
       if (selectedFacilityId !== null && Number(tx.facilityId) !== selectedFacilityId) return false;
+      if (selectedProductId !== null && tx.productId !== selectedProductId) return false;
       return true;
     });
-  }, [allTransactions, geoMaps, geoProvinceId, geoDistrictId, selectedFacilityId]);
+  }, [allTransactions, geoMaps, geoProvinceId, geoDistrictId, selectedFacilityId, selectedProductId]);
 
   const reports = useMemo(() => {
     const list = allReports ?? [];
@@ -429,7 +456,7 @@ export default function StockLedger() {
     // Initialize with active configs using normalized names
     if (vaccineConfigs) {
       vaccineConfigs.forEach(c => {
-        if (c.isActive) {
+        if (c.active && c.stockManaged) {
           const norm = normalizeStockVaccineName(c.name);
           soh[norm] = 0;
         }
@@ -473,6 +500,17 @@ export default function StockLedger() {
       txnForm.setValue("facilityId", selectedFacilityId);
     }
   }, [selectedFacilityId, txnForm]);
+
+  useEffect(() => {
+    if (selectedProductId && vaccineConfigs) {
+      const conf = vaccineConfigs.find(c => c.id === selectedProductId);
+      if (conf) {
+        txnForm.setValue("vaccineName", conf.name);
+        txnForm.setValue("productId", conf.id);
+        txnForm.setValue("productCode", conf.code ?? null);
+      }
+    }
+  }, [selectedProductId, vaccineConfigs, txnForm, txnDialogOpen]);
 
   const saveTxnMutation = useMutation({
     mutationFn: async (data: TransactionFormValues) => {
@@ -633,7 +671,7 @@ export default function StockLedger() {
       if (vaccineConfigs) {
         // Unique normalized vaccine product names
         const uniqueProductNames = Array.from(new Set(
-          vaccineConfigs.filter(c => c.isActive).map(c => normalizeStockVaccineName(c.name))
+          vaccineConfigs.filter(c => c.active && c.stockManaged).map(c => normalizeStockVaccineName(c.name))
         ));
 
         uniqueProductNames.forEach(vcName => {
@@ -727,35 +765,28 @@ export default function StockLedger() {
   return (
     <div className="p-6 space-y-6 max-w-[1600px] mx-auto">
       {/* Top Header Section */}
-      <div className="flex items-center justify-between gap-4 flex-wrap">
-        <div>
-          <h1 className="text-2xl font-bold">WHO RED Stock Ledger & Monthly Reports</h1>
-          <p className="text-sm text-muted-foreground">
-            Track cold chain transaction ledgers and compile monthly facility immunization coverage reports.
-          </p>
-        </div>
-
-        <div className="flex items-center gap-3">
-          {/* Facility Selector */}
-          {!user?.facilityId && facilities && (
-            <div className="flex items-center gap-2 min-w-[640px]">
-              <span className="text-xs font-semibold text-muted-foreground uppercase shrink-0">Facility:</span>
-              <div className="flex-1">
-                <FacilityCascadePicker
-                  value={selectedFacilityId ?? null}
-                  onChange={(id) => setSelectedFacilityId(id ?? undefined as any)}
-                  showLabels={false}
-                  testIdPrefix="stock-facility"
-                />
-              </div>
-            </div>
-          )}
+      <div className="flex flex-col gap-4">
+        <div className="flex items-center justify-between gap-4 flex-wrap">
+          <div>
+            <h1 className="text-2xl font-bold">WHO RED Stock Ledger & Monthly Reports</h1>
+            <p className="text-sm text-muted-foreground">
+              Track cold chain transaction ledgers and compile monthly facility immunization coverage reports.
+            </p>
+          </div>
 
           {/* Action buttons */}
           <div className="flex items-center gap-2">
             <Button
               variant="outline"
               onClick={() => {
+                if (!selectedFacilityId) {
+                  toast({
+                    title: "Facility Required",
+                    description: "Please select a specific facility from the location filters to compile a report.",
+                    variant: "destructive"
+                  });
+                  return;
+                }
                 setReportDialogOpen(true);
                 setWizardStep(1);
               }}
@@ -771,22 +802,24 @@ export default function StockLedger() {
             </Button>
           </div>
         </div>
-      </div>
 
-      {/* Geo cascade filter (Province → District → Facility — each level independently narrows table rows) */}
-      <GeoCascadeFilter
-        provinceId={geoProvinceId}
-        districtId={geoDistrictId}
-        facilityId={selectedFacilityId}
-        onProvinceChange={(id) => { setGeoProvinceId(id); setGeoDistrictId(null); setSelectedFacilityId(null); }}
-        onDistrictChange={(id) => { setGeoDistrictId(id); setSelectedFacilityId(null); }}
-        onFacilityChange={setSelectedFacilityId}
-        showFacility
-        provinces={provinces}
-        districts={districts}
-        facilities={facilities ?? []}
-        testIdPrefix="stockledger"
-      />
+        {/* Geo cascade filter (Province → District → Facility — each level independently narrows table rows) */}
+        <div className="bg-card border border-border/40 rounded-xl p-4 shadow-sm">
+          <GeoCascadeFilter
+            provinceId={geoProvinceId}
+            districtId={geoDistrictId}
+            facilityId={selectedFacilityId}
+            onProvinceChange={(id) => { setGeoProvinceId(id); setGeoDistrictId(null); setSelectedFacilityId(null); }}
+            onDistrictChange={(id) => { setGeoDistrictId(id); setSelectedFacilityId(null); }}
+            onFacilityChange={setSelectedFacilityId}
+            showFacility
+            provinces={provinces}
+            districts={districts}
+            facilities={facilities ?? []}
+            testIdPrefix="stockledger"
+          />
+        </div>
+      </div>
 
       {/* Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
@@ -1076,16 +1109,19 @@ export default function StockLedger() {
           {/* Active Balances SOH Cards */}
           <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-4">
             {Array.from(new Set(
-              vaccineConfigs?.filter(c => c.isActive).map(c => normalizeStockVaccineName(c.name)) ?? []
+              vaccineConfigs?.filter(c => c.active && c.stockManaged).map(c => normalizeStockVaccineName(c.name)) ?? []
             )).map((normName) => {
-              const config = vaccineConfigs?.find(c => c.isActive && normalizeStockVaccineName(c.name) === normName);
-              const wastageFactor = config?.wastageFactor ?? 10;
+              const config = vaccineConfigs?.find(c => c.active && c.stockManaged && normalizeStockVaccineName(c.name) === normName);
+              const wastageFactor = config?.wastageThreshold ?? 10;
               const status = antigenStatusByName.get(normName);
               const balance = status?.balance ?? stockOnHand[normName] ?? 0;
               const mos = status?.monthsOfStock ?? null;
               const isLow = status?.isLowStock ?? false;
               const isOut = status?.isOutOfStock ?? false;
-              const cardTone = isOut
+              const isSelected = config?.id === selectedProductId;
+              const cardTone = isSelected
+                ? "border-primary ring-2 ring-primary bg-primary/5"
+                : isOut
                 ? "border-rose-500/30 bg-rose-500/5"
                 : isLow
                   ? "border-amber-500/30 bg-amber-500/5"
@@ -1094,7 +1130,20 @@ export default function StockLedger() {
               return (
                 <Card
                   key={normName}
-                  className={`border-border/40 backdrop-blur-md bg-card/45 shadow transition-all hover:scale-[1.02] ${cardTone}`}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => {
+                    if (isSelected) updateProductIdInUrl(null);
+                    else updateProductIdInUrl(config?.id ?? null);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      if (isSelected) updateProductIdInUrl(null);
+                      else updateProductIdInUrl(config?.id ?? null);
+                    }
+                  }}
+                  className={`border-border/40 backdrop-blur-md shadow transition-all hover:scale-[1.02] cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${cardTone}`}
                   data-testid={`card-soh-${normName}`}
                 >
                   <CardContent className="p-4 flex flex-col justify-between h-full">
@@ -1103,7 +1152,11 @@ export default function StockLedger() {
                         <span className="text-[10px] text-muted-foreground uppercase font-semibold tracking-wider truncate">
                           {normName}
                         </span>
-                        {isOut ? (
+                        {isSelected ? (
+                          <Badge variant="default" className="text-[9px] px-1 py-0 h-4">
+                            Selected
+                          </Badge>
+                        ) : isOut ? (
                           <Badge variant="outline" className="border-rose-500/30 text-rose-600 bg-rose-500/10 text-[9px] px-1 py-0 h-4">
                             Out
                           </Badge>
@@ -1133,11 +1186,21 @@ export default function StockLedger() {
 
           {/* Ledger Transaction History */}
           <Card className="border-border/40 backdrop-blur-md bg-card/45 shadow-xl">
-            <CardHeader className="border-b border-border/40 bg-muted/20 px-6 py-4">
+            <CardHeader className="border-b border-border/40 bg-muted/20 px-6 py-4 flex flex-row items-center justify-between">
               <CardTitle className="text-sm font-semibold tracking-wider uppercase text-muted-foreground flex items-center gap-2">
                 <Activity className="h-4 w-4" />
-                <span>Stock Card Transactions Ledger</span>
+                <span>
+                  Stock Card Transactions Ledger 
+                  {selectedProductId && vaccineConfigs?.find(c => c.id === selectedProductId) 
+                    ? ` — ${vaccineConfigs.find(c => c.id === selectedProductId)?.name}` 
+                    : ""}
+                </span>
               </CardTitle>
+              {selectedProductId && (
+                <Button variant="ghost" size="sm" onClick={() => updateProductIdInUrl(null)} className="h-8 gap-1 text-xs">
+                  <Trash2 className="h-3 w-3" /> Clear Product Filter
+                </Button>
+              )}
             </CardHeader>
             <CardContent className="p-0 overflow-x-auto">
               {loadingTxns ? (
@@ -1272,8 +1335,20 @@ export default function StockLedger() {
                   </tbody>
                 </table>
               ) : (
-                <div className="p-12 text-center text-muted-foreground">
-                  No stock transactions logged yet. Click "Stock Card Action" to register cold chain arrivals or issues.
+                <div className="p-12 text-center text-muted-foreground flex flex-col items-center justify-center gap-2">
+                  <div className="h-12 w-12 rounded-full bg-muted flex items-center justify-center mb-2">
+                    <Package className="h-6 w-6 text-muted-foreground/60" />
+                  </div>
+                  {selectedProductId ? (
+                    <>
+                      <p>No stock transactions found for {vaccineConfigs?.find(c => c.id === selectedProductId)?.name} in the selected location.</p>
+                      <Button variant="outline" size="sm" onClick={() => updateProductIdInUrl(null)} className="mt-2">
+                        Show All Products
+                      </Button>
+                    </>
+                  ) : (
+                    <p>No stock transactions logged yet. Click "Stock Card Action" to register cold chain arrivals or issues.</p>
+                  )}
                 </div>
               )}
             </CardContent>
@@ -1499,7 +1574,7 @@ export default function StockLedger() {
                       </FormControl>
                       <SelectContent>
                         {Array.from(new Set(
-                          vaccineConfigs?.filter(c => c.isActive).map(c => normalizeStockVaccineName(c.name)) ?? []
+                          vaccineConfigs?.filter(c => c.active && c.stockManaged).map(c => normalizeStockVaccineName(c.name)) ?? []
                         )).map((name) => (
                           <SelectItem key={name} value={name}>
                             {name}

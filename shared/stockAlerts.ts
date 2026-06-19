@@ -1,4 +1,4 @@
-import type { StockTransaction, VaccineConfig } from "./schema";
+import type { StockTransaction, CatalogueVaccine } from "./schema";
 import { normalizeStockVaccineName } from "./vaccineSchedule";
 
 export const DEFAULT_MONTHS_OF_STOCK_THRESHOLD = 1;
@@ -50,12 +50,12 @@ export function computeAvgMonthlyConsumption(
 
 export function computeStockOnHand(
   transactions: StockTransaction[],
-  vaccineConfigs?: VaccineConfig[],
+  vaccineConfigs?: CatalogueVaccine[],
 ): Record<string, number> {
   const soh: Record<string, number> = {};
   if (vaccineConfigs) {
     for (const c of vaccineConfigs) {
-      if (c.isActive) soh[normalizeStockVaccineName(c.name)] = 0;
+      if (c.active && c.stockManaged) soh[normalizeStockVaccineName(c.name)] = 0;
     }
   }
   for (const tx of transactions) {
@@ -82,7 +82,7 @@ export interface AntigenStockStatus {
 
 export function computeAntigenStatus(
   transactions: StockTransaction[],
-  vaccineConfigs: VaccineConfig[] | undefined,
+  vaccineConfigs: CatalogueVaccine[] | undefined,
   thresholdMonths: number,
   now: Date = new Date(),
 ): AntigenStockStatus[] {
@@ -171,7 +171,7 @@ export interface FacilityStockAlertSummary {
 
 export function summarizeFacilityAlerts(
   transactions: StockTransaction[],
-  vaccineConfigs: VaccineConfig[] | undefined,
+  vaccineConfigs: CatalogueVaccine[] | undefined,
   thresholdMonths: number,
   now: Date = new Date(),
 ): FacilityStockAlertSummary[] {

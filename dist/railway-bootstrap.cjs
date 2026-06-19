@@ -47,6 +47,10 @@ __export(schema_exports, {
   candidateUnmappedSettlements: () => candidateUnmappedSettlements,
   candidateUnmappedSettlementsRelations: () => candidateUnmappedSettlementsRelations,
   caseClassificationEnum: () => caseClassificationEnum,
+  catalogueCommodities: () => catalogueCommodities,
+  catalogueScheduleDoses: () => catalogueScheduleDoses,
+  catalogueVaccines: () => catalogueVaccines,
+  catalogueWastageThresholds: () => catalogueWastageThresholds,
   catchmentConflicts: () => catchmentConflicts,
   chvProfiles: () => chvProfiles,
   clientVaccinations: () => clientVaccinations,
@@ -55,6 +59,7 @@ __export(schema_exports, {
   clientsRelations: () => clientsRelations,
   coldChainEquipment: () => coldChainEquipment,
   coldChainEquipmentRelations: () => coldChainEquipmentRelations,
+  commodityTypeEnum: () => commodityTypeEnum,
   communicationChannels: () => communicationChannels,
   communicationLogs: () => communicationLogs,
   communications: () => communications,
@@ -71,6 +76,7 @@ __export(schema_exports, {
   deviceTokens: () => deviceTokens,
   districts: () => districts,
   districtsRelations: () => districtsRelations,
+  doseClassificationEnum: () => doseClassificationEnum,
   downloadAssets: () => downloadAssets,
   downloadAssetsRelations: () => downloadAssetsRelations,
   facilities: () => facilities,
@@ -95,6 +101,10 @@ __export(schema_exports, {
   insertApprovalRequestSchema: () => insertApprovalRequestSchema,
   insertBudgetItemSchema: () => insertBudgetItemSchema,
   insertCandidateUnmappedSettlementSchema: () => insertCandidateUnmappedSettlementSchema,
+  insertCatalogueCommoditySchema: () => insertCatalogueCommoditySchema,
+  insertCatalogueScheduleDoseSchema: () => insertCatalogueScheduleDoseSchema,
+  insertCatalogueVaccineSchema: () => insertCatalogueVaccineSchema,
+  insertCatalogueWastageThresholdSchema: () => insertCatalogueWastageThresholdSchema,
   insertCatchmentConflictSchema: () => insertCatchmentConflictSchema,
   insertChvProfileSchema: () => insertChvProfileSchema,
   insertClientSchema: () => insertClientSchema,
@@ -183,6 +193,10 @@ __export(schema_exports, {
   researchDownloadEvents: () => researchDownloadEvents,
   researchDownloadEventsRelations: () => researchDownloadEventsRelations,
   researchInterestSubmissions: () => researchInterestSubmissions,
+  selectCatalogueCommoditySchema: () => selectCatalogueCommoditySchema,
+  selectCatalogueScheduleDoseSchema: () => selectCatalogueScheduleDoseSchema,
+  selectCatalogueVaccineSchema: () => selectCatalogueVaccineSchema,
+  selectCatalogueWastageThresholdSchema: () => selectCatalogueWastageThresholdSchema,
   sessionDayPlans: () => sessionDayPlans,
   sessionDayPlansRelations: () => sessionDayPlansRelations,
   sessionPlanTypeEnum: () => sessionPlanTypeEnum,
@@ -388,7 +402,11 @@ var approvalStatusEnum = (0, import_pg_core.pgEnum)("approval_status", [
   "pending",
   "approved",
   "rejected",
-  "locked"
+  "locked",
+  "under_review",
+  "returned",
+  "archived",
+  "superseded"
 ]);
 var sessionTypeEnum = (0, import_pg_core.pgEnum)("session_type", [
   "static",
@@ -1543,6 +1561,10 @@ var stockTransactions = (0, import_pg_core.pgTable)("stock_transactions", {
   id: (0, import_pg_core.integer)("id").primaryKey().generatedAlwaysAsIdentity(),
   tenantId: (0, import_pg_core.varchar)("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
   facilityId: (0, import_pg_core.integer)("facility_id").notNull().references(() => facilities.id, { onDelete: "cascade" }),
+  productId: (0, import_pg_core.integer)("product_id").references(() => catalogueVaccines.id, { onDelete: "set null" }),
+  // link to catalogue
+  productCode: (0, import_pg_core.varchar)("product_code", { length: 100 }),
+  // snapshot of product code
   vaccineName: (0, import_pg_core.varchar)("vaccine_name", { length: 100 }).notNull(),
   // BCG, Penta, etc.
   transactionType: (0, import_pg_core.varchar)("transaction_type", { length: 50 }).notNull(),
@@ -2051,6 +2073,8 @@ var insertSessionDayPlanSchema = (0, import_drizzle_zod.createInsertSchema)(sess
 var insertStockTransactionSchema = (0, import_drizzle_zod.createInsertSchema)(stockTransactions).omit({
   createdAt: true
 }).extend({
+  productId: import_zod.z.number().optional().nullable(),
+  productCode: import_zod.z.string().optional().nullable(),
   vaccineName: import_zod.z.string().transform(normalizeStockVaccineName),
   expiryDate: import_zod.z.coerce.date(),
   transactionDate: import_zod.z.coerce.date().optional()
@@ -2680,10 +2704,14 @@ var researchDownloadEventsRelations = (0, import_drizzle_orm.relations)(research
 var insertResearchDocumentSchema = (0, import_drizzle_zod.createInsertSchema)(researchDocuments).omit({
   createdAt: true,
   updatedAt: true
+}).extend({
+  slug: import_zod.z.string().optional()
 });
 var insertPilotActivitySchema = (0, import_drizzle_zod.createInsertSchema)(pilotActivities).omit({
   createdAt: true,
   updatedAt: true
+}).extend({
+  slug: import_zod.z.string().optional()
 });
 var insertPilotUpdateSchema = (0, import_drizzle_zod.createInsertSchema)(pilotUpdates).omit({
   createdAt: true,
@@ -2692,15 +2720,136 @@ var insertPilotUpdateSchema = (0, import_drizzle_zod.createInsertSchema)(pilotUp
 var insertImplementationLessonSchema = (0, import_drizzle_zod.createInsertSchema)(implementationLessons).omit({
   createdAt: true,
   updatedAt: true
+}).extend({
+  slug: import_zod.z.string().optional()
 });
 var insertDownloadAssetSchema = (0, import_drizzle_zod.createInsertSchema)(downloadAssets).omit({
   createdAt: true,
   updatedAt: true
+}).extend({
+  slug: import_zod.z.string().optional()
 });
 var insertResearchInterestSubmissionSchema = (0, import_drizzle_zod.createInsertSchema)(researchInterestSubmissions).omit({
   createdAt: true,
   updatedAt: true
 });
+var commodityTypeEnum = (0, import_pg_core.pgEnum)("commodity_type", ["diluent", "syringe", "safety_box", "ppe", "cold_chain", "other"]);
+var doseClassificationEnum = (0, import_pg_core.pgEnum)("dose_classification", ["routine", "campaign", "outbreak", "school_based", "other"]);
+var catalogueVaccines = (0, import_pg_core.pgTable)("catalogue_vaccines", {
+  id: (0, import_pg_core.integer)("id").primaryKey().generatedAlwaysAsIdentity(),
+  tenantId: (0, import_pg_core.varchar)("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  productId: (0, import_pg_core.varchar)("product_id", { length: 100 }).notNull(),
+  // e.g., 'vaccine_product_penta'
+  name: (0, import_pg_core.varchar)("name", { length: 255 }).notNull(),
+  antigenName: (0, import_pg_core.varchar)("antigen_name", { length: 255 }),
+  category: (0, import_pg_core.varchar)("category", { length: 100 }).default("Vaccine"),
+  presentation: (0, import_pg_core.varchar)("presentation", { length: 100 }),
+  // e.g., 'Liquid', 'Lyophilized'
+  dosesPerVial: (0, import_pg_core.integer)("doses_per_vial").notNull().default(1),
+  unitOfMeasure: (0, import_pg_core.varchar)("unit_of_measure", { length: 50 }).default("vials"),
+  storageTemperature: (0, import_pg_core.varchar)("storage_temperature", { length: 50 }).default("+2 to +8 \xB0C"),
+  wastageThreshold: (0, import_pg_core.decimal)("wastage_threshold", { precision: 5, scale: 2 }).default("10.00"),
+  // Legacy fallback
+  stockManaged: (0, import_pg_core.boolean)("stock_managed").default(true).notNull(),
+  forecastable: (0, import_pg_core.boolean)("forecastable").default(true).notNull(),
+  requisitionable: (0, import_pg_core.boolean)("requisitionable").default(true).notNull(),
+  requiresDiluent: (0, import_pg_core.boolean)("requires_diluent").default(false).notNull(),
+  requiresInjectionDevice: (0, import_pg_core.boolean)("requires_injection_device").default(true).notNull(),
+  requiresSafetyBox: (0, import_pg_core.boolean)("requires_safety_box").default(true).notNull(),
+  routineUse: (0, import_pg_core.boolean)("routine_use").default(true).notNull(),
+  campaignUse: (0, import_pg_core.boolean)("campaign_use").default(false).notNull(),
+  outbreakUse: (0, import_pg_core.boolean)("outbreak_use").default(false).notNull(),
+  modules: (0, import_pg_core.jsonb)("modules").default({}).notNull(),
+  active: (0, import_pg_core.boolean)("active").default(true).notNull(),
+  approvalStatus: approvalStatusEnum("approval_status").default("draft").notNull(),
+  effectiveStartDate: (0, import_pg_core.timestamp)("effective_start_date").defaultNow(),
+  effectiveEndDate: (0, import_pg_core.timestamp)("effective_end_date"),
+  createdAt: (0, import_pg_core.timestamp)("created_at").defaultNow(),
+  updatedAt: (0, import_pg_core.timestamp)("updated_at").defaultNow()
+}, (table) => ({
+  tenantIdx: (0, import_pg_core.index)("idx_catalogue_vaccines_tenant").on(table.tenantId),
+  productIdx: (0, import_pg_core.index)("idx_catalogue_vaccines_product").on(table.productId)
+}));
+var catalogueScheduleDoses = (0, import_pg_core.pgTable)("catalogue_schedule_doses", {
+  id: (0, import_pg_core.integer)("id").primaryKey().generatedAlwaysAsIdentity(),
+  tenantId: (0, import_pg_core.varchar)("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  vaccineId: (0, import_pg_core.integer)("vaccine_id").notNull().references(() => catalogueVaccines.id, { onDelete: "cascade" }),
+  doseCode: (0, import_pg_core.varchar)("dose_code", { length: 100 }).notNull(),
+  name: (0, import_pg_core.varchar)("name", { length: 100 }).notNull(),
+  // e.g., PENTA-1
+  doseNumber: (0, import_pg_core.integer)("dose_number").notNull().default(1),
+  targetAge: (0, import_pg_core.varchar)("target_age", { length: 100 }),
+  minimumAge: (0, import_pg_core.varchar)("minimum_age", { length: 100 }),
+  maximumAge: (0, import_pg_core.varchar)("maximum_age", { length: 100 }),
+  minimumInterval: (0, import_pg_core.varchar)("minimum_interval", { length: 100 }),
+  targetPopulationGroup: (0, import_pg_core.varchar)("target_population_group", { length: 100 }).default("infants"),
+  route: (0, import_pg_core.varchar)("route", { length: 100 }),
+  // e.g., 'IM', 'Oral'
+  site: (0, import_pg_core.varchar)("site", { length: 100 }),
+  // e.g., 'Left Thigh'
+  classification: doseClassificationEnum("classification").default("routine").notNull(),
+  stockDeducting: (0, import_pg_core.boolean)("stock_deducting").default(true).notNull(),
+  active: (0, import_pg_core.boolean)("active").default(true).notNull(),
+  effectiveStartDate: (0, import_pg_core.timestamp)("effective_start_date").defaultNow(),
+  approvalStatus: approvalStatusEnum("approval_status").default("draft").notNull(),
+  createdAt: (0, import_pg_core.timestamp)("created_at").defaultNow()
+}, (table) => ({
+  tenantIdx: (0, import_pg_core.index)("idx_catalogue_doses_tenant").on(table.tenantId),
+  vaccineIdx: (0, import_pg_core.index)("idx_catalogue_doses_vaccine").on(table.vaccineId)
+}));
+var catalogueCommodities = (0, import_pg_core.pgTable)("catalogue_commodities", {
+  id: (0, import_pg_core.integer)("id").primaryKey().generatedAlwaysAsIdentity(),
+  tenantId: (0, import_pg_core.varchar)("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  commodityCode: (0, import_pg_core.varchar)("commodity_code", { length: 100 }).notNull(),
+  type: commodityTypeEnum("type").notNull(),
+  name: (0, import_pg_core.varchar)("name", { length: 255 }).notNull(),
+  category: (0, import_pg_core.varchar)("category", { length: 100 }),
+  unitOfMeasure: (0, import_pg_core.varchar)("unit_of_measure", { length: 50 }).default("pieces"),
+  packSize: (0, import_pg_core.integer)("pack_size").default(100).notNull(),
+  stockManaged: (0, import_pg_core.boolean)("stock_managed").default(true).notNull(),
+  forecastable: (0, import_pg_core.boolean)("forecastable").default(true).notNull(),
+  requisitionable: (0, import_pg_core.boolean)("requisitionable").default(true).notNull(),
+  sessionSupply: (0, import_pg_core.boolean)("session_supply").default(true).notNull(),
+  linkedVaccineId: (0, import_pg_core.integer)("linked_vaccine_id").references(() => catalogueVaccines.id, { onDelete: "set null" }),
+  consumptionRule: (0, import_pg_core.jsonb)("consumption_rule").default({}),
+  bufferPercentage: (0, import_pg_core.decimal)("buffer_percentage", { precision: 5, scale: 2 }).default("10.00"),
+  minimumStockThreshold: (0, import_pg_core.integer)("minimum_stock_threshold").default(0),
+  maximumStockThreshold: (0, import_pg_core.integer)("maximum_stock_threshold").default(0),
+  reorderLevel: (0, import_pg_core.integer)("reorder_level").default(0),
+  modules: (0, import_pg_core.jsonb)("modules").default({}).notNull(),
+  active: (0, import_pg_core.boolean)("active").default(true).notNull(),
+  createdAt: (0, import_pg_core.timestamp)("created_at").defaultNow()
+}, (table) => ({
+  tenantIdx: (0, import_pg_core.index)("idx_catalogue_commodities_tenant").on(table.tenantId),
+  commodityCodeIdx: (0, import_pg_core.index)("idx_catalogue_commodities_code").on(table.commodityCode)
+}));
+var catalogueWastageThresholds = (0, import_pg_core.pgTable)("catalogue_wastage_thresholds", {
+  id: (0, import_pg_core.integer)("id").primaryKey().generatedAlwaysAsIdentity(),
+  tenantId: (0, import_pg_core.varchar)("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  vaccineId: (0, import_pg_core.integer)("vaccine_id").notNull().references(() => catalogueVaccines.id, { onDelete: "cascade" }),
+  wastageRate: (0, import_pg_core.decimal)("wastage_rate", { precision: 5, scale: 2 }).notNull(),
+  wastageFactor: (0, import_pg_core.decimal)("wastage_factor", { precision: 5, scale: 2 }).notNull(),
+  minAcceptable: (0, import_pg_core.decimal)("min_acceptable", { precision: 5, scale: 2 }),
+  maxAcceptable: (0, import_pg_core.decimal)("max_acceptable", { precision: 5, scale: 2 }),
+  strategy: (0, import_pg_core.varchar)("strategy", { length: 100 }).default("routine"),
+  // 'fixed', 'outreach', 'campaign', 'htr'
+  active: (0, import_pg_core.boolean)("active").default(true).notNull(),
+  notes: (0, import_pg_core.text)("notes"),
+  effectiveStartDate: (0, import_pg_core.timestamp)("effective_start_date").defaultNow(),
+  effectiveEndDate: (0, import_pg_core.timestamp)("effective_end_date"),
+  createdAt: (0, import_pg_core.timestamp)("created_at").defaultNow()
+}, (table) => ({
+  tenantIdx: (0, import_pg_core.index)("idx_catalogue_wastage_tenant").on(table.tenantId),
+  vaccineIdx: (0, import_pg_core.index)("idx_catalogue_wastage_vaccine").on(table.vaccineId)
+}));
+var insertCatalogueVaccineSchema = (0, import_drizzle_zod.createInsertSchema)(catalogueVaccines);
+var selectCatalogueVaccineSchema = (0, import_drizzle_zod.createSelectSchema)(catalogueVaccines);
+var insertCatalogueScheduleDoseSchema = (0, import_drizzle_zod.createInsertSchema)(catalogueScheduleDoses);
+var selectCatalogueScheduleDoseSchema = (0, import_drizzle_zod.createSelectSchema)(catalogueScheduleDoses);
+var insertCatalogueCommoditySchema = (0, import_drizzle_zod.createInsertSchema)(catalogueCommodities);
+var selectCatalogueCommoditySchema = (0, import_drizzle_zod.createSelectSchema)(catalogueCommodities);
+var insertCatalogueWastageThresholdSchema = (0, import_drizzle_zod.createInsertSchema)(catalogueWastageThresholds);
+var selectCatalogueWastageThresholdSchema = (0, import_drizzle_zod.createSelectSchema)(catalogueWastageThresholds);
 
 // server/db.ts
 var { Pool } = import_pg.default;
