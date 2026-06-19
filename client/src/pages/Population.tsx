@@ -2362,7 +2362,7 @@ export default function Population() {
               }}
               disabled={workflowActionMutation.isPending}
             >
-              Confirm Action
+              {commentAction === "return" ? "Return for Correction" : commentAction === "reject" ? "Reject Record" : "Reopen Record"}
             </Button>
           </DialogFooter>
         </DialogContent>

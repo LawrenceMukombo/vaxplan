@@ -8182,7 +8182,7 @@ export async function registerRoutes(
       });
 
       await logAudit(req, "update", "population_data", entityId, oldPop, pop);
-      res.json(pop);
+      res.json(pop || { ...oldPop, approvalStatus: "pending", metadata: updatedMeta });
     } catch (error) {
       console.error("Error submitting population data:", error);
       res.status(500).json({ message: "Failed to submit population data" });
@@ -8231,7 +8231,7 @@ export async function registerRoutes(
       });
 
       await logAudit(req, "update", "population_data", entityId, oldPop, pop);
-      res.json(pop);
+      res.json(pop || { ...oldPop, approvalStatus: "under_review", metadata: updatedMeta });
     } catch (error) {
       console.error("Error setting review status:", error);
       res.status(500).json({ message: "Failed to set review status" });
@@ -8281,7 +8281,7 @@ export async function registerRoutes(
       });
 
       await logAudit(req, "update", "population_data", entityId, oldPop, pop);
-      res.json(pop);
+      res.json(pop || { ...oldPop, approvalStatus: "approved", metadata: updatedMeta });
     } catch (error) {
       console.error("Error approving population data:", error);
       res.status(500).json({ message: "Failed to approve population data" });
@@ -8331,7 +8331,7 @@ export async function registerRoutes(
       });
 
       await logAudit(req, "update", "population_data", entityId, oldPop, pop);
-      res.json(pop);
+      res.json(pop || { ...oldPop, approvalStatus: "returned", metadata: updatedMeta });
     } catch (error) {
       console.error("Error returning population data:", error);
       res.status(500).json({ message: "Failed to return population data" });
@@ -8381,7 +8381,7 @@ export async function registerRoutes(
       });
 
       await logAudit(req, "update", "population_data", entityId, oldPop, pop);
-      res.json(pop);
+      res.json(pop || { ...oldPop, approvalStatus: "rejected", metadata: updatedMeta });
     } catch (error) {
       console.error("Error rejecting population data:", error);
       res.status(500).json({ message: "Failed to reject population data" });
@@ -8424,7 +8424,7 @@ export async function registerRoutes(
       });
 
       await logAudit(req, "update", "population_data", entityId, oldPop, pop);
-      res.json(pop);
+      res.json(pop || { ...oldPop, approvalStatus: "archived", metadata: updatedMeta });
     } catch (error) {
       console.error("Error archiving population data:", error);
       res.status(500).json({ message: "Failed to archive population data" });
@@ -8469,7 +8469,7 @@ export async function registerRoutes(
       });
 
       await logAudit(req, "update", "population_data", entityId, oldPop, pop);
-      res.json(pop);
+      res.json(pop || { ...oldPop, approvalStatus: "draft", metadata: updatedMeta });
     } catch (error) {
       console.error("Error reopening population data:", error);
       res.status(500).json({ message: "Failed to reopen population data" });
