@@ -703,6 +703,10 @@ export const populationData = pgTable("population_data", {
   confidenceScore: decimal("confidence_score", { precision: 5, scale: 2 }),
   metadata: jsonb("metadata"),
   approvalStatus: approvalStatusEnum("approval_status").default("draft"),
+  // Audit trail (Phase 5 hardening)
+  createdBy: varchar("created_by").references(() => users.id, { onDelete: "set null" }),
+  updatedBy: varchar("updated_by").references(() => users.id, { onDelete: "set null" }),
+  approvedBy: varchar("approved_by").references(() => users.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 }, (table) => [index("idx_population_tenant").on(table.tenantId)]);
@@ -763,7 +767,7 @@ export const microplans = pgTable("microplans", {
 export const microplans = pgTable("microplans", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
   tenantId: varchar("tenant_id").references(() => tenants.id, { onDelete: "cascade" }),
-  facilityId: integer("facility_id").references(() => facilities.id), // Nullable for high-level SIA
+  facilityId: integer("facility_id").references(() => facilities.id, { onDelete: "restrict" }), // Nullable for high-level SIA
   name: varchar("name", { length: 255 }).notNull(),
   planType: microplanTypeEnum("plan_type").notNull().default("facility_routine"),
   year: integer("year").notNull(),
@@ -793,11 +797,14 @@ export const microplans = pgTable("microplans", {
   reminderSentAt: timestamp("reminder_sent_at"),
   districtEditReason: text("district_edit_reason"),
 
+  // Audit trail (Phase 5 hardening)
+  createdBy: varchar("created_by").references(() => users.id, { onDelete: "set null" }),
+  updatedBy: varchar("updated_by").references(() => users.id, { onDelete: "set null" }),
+  approvedBy: varchar("approved_by").references(() => users.id, { onDelete: "set null" }),
+
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 }, (table) => [index("idx_microplans_tenant").on(table.tenantId)]);
-
-
 // Session Plans (Vaccination) - Modified to include microplanId link, custom polygon geofencing geojson, and isAchieved tick status.
 // Original Code commented out for backward-compatibility and strict traceability:
 /*
@@ -1832,6 +1839,8 @@ export const stockTransactions = pgTable("stock_transactions", {
   transactionDate: timestamp("transaction_date").defaultNow().notNull(),
   notes: text("notes"),
   recordedByUserId: varchar("recorded_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  // Audit trail (Phase 5 hardening)
+  updatedBy: varchar("updated_by").references(() => users.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at").defaultNow(),
 }, (table) => ({
   tenantIdx: index("stock_txn_tenant_idx").on(table.tenantId),
@@ -1852,6 +1861,10 @@ export const monthlyReports = pgTable("monthly_reports", {
   surveillance: jsonb("surveillance").default({}).notNull(), // cases count, e.g. { measles: 0, afp: 1, nnt: 0, aefi: 1 }
   submittedById: varchar("submitted_by_id").references(() => users.id, { onDelete: "set null" }),
   approvalStatus: approvalStatusEnum("approval_status").default("draft").notNull(),
+  // Audit trail (Phase 5 hardening)
+  createdBy: varchar("created_by").references(() => users.id, { onDelete: "set null" }),
+  updatedBy: varchar("updated_by").references(() => users.id, { onDelete: "set null" }),
+  approvedBy: varchar("approved_by").references(() => users.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at").defaultNow(),
 }, (table) => ({
   tenantIdx: index("monthly_rep_tenant_idx").on(table.tenantId),
