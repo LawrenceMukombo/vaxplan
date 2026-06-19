@@ -10,6 +10,7 @@ try {
 import express, { type Request, Response, NextFunction } from "express";
 import compression from "compression";
 import helmet from "helmet";
+import rateLimit from "express-rate-limit";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
@@ -83,16 +84,30 @@ app.use((req, res, next) => {
 // from 1–2 MB down to 80–200 KB — a 5-10× speed improvement on large datasets.
 app.use(compression({ level: 6, threshold: 1024 }));
 
+// ── Global API rate limiting (SEC-012) ───────────────────────────────────────
+// 200 requests / minute per IP across all /api/* routes. This prevents
+// enumeration attacks and API abuse without affecting normal field usage.
+// The login endpoint has its own tighter in-memory limit (8 attempts / 15 min).
+const apiLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 200,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: (req) => !req.path.startsWith("/api/"),
+  message: { message: "Too many requests, please try again later." },
+});
+app.use(apiLimiter);
+
 app.use(
   express.json({
-    limit: "50mb",
+    limit: "10mb", // SEC-010: reduced from 50 MB; GeoJSON polygon routes apply their own 10 MB limit
     verify: (req, _res, buf) => {
       req.rawBody = buf;
     },
   }),
 );
 
-app.use(express.urlencoded({ extended: false, limit: "50mb" }));
+app.use(express.urlencoded({ extended: false, limit: "10mb" }));
 
 // ─── CORS for packaged native apps ───────────────────────────────────────────
 // The web app is same-origin and needs no CORS. The packaged Android
@@ -306,9 +321,8 @@ async function backfillClientIds() {
   const { reportsRouter } = await import("./routes/reports");
   app.use("/api/reports", reportsRouter);
 
-  // VPD Surveillance Engine
-  const { surveillanceRouter } = await import("./routes/surveillance");
-  app.use("/api/surveillance", surveillanceRouter);
+  // VPD Surveillance Engine is already mounted inside registerRoutes (routes.ts).
+  // Duplicate mount removed — ARCH-006.
 
   /* Original Code commented out for backward-compatibility:
   applyPerfIndexes()

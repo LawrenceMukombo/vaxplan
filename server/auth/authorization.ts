@@ -216,13 +216,3 @@ export function hasPermission(
   return true;
 }
 
-/* Original dummy hasPermission commented out:
-export function hasPermission(
-  user: User,
-  requiredPermission: Permission,
-  context?: GeographicContext
-): boolean {
-  return true;
-}
-*/
-

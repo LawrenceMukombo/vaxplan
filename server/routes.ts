@@ -1058,12 +1058,20 @@ export async function registerRoutes(
   })();
   const SERVER_BOOT_TIME = new Date().toISOString();
   app.get("/api/version", (_req, res) => {
+    // SEC-011: only expose version/buildTime publicly; download URLs are
+    // returned on the authenticated /api/version/downloads endpoint below.
     res.json({
       version: APP_VERSION,
       buildTime: SERVER_BOOT_TIME,
+    });
+  });
+
+  // Authenticated endpoint — returns native-client download URLs.
+  // Only reached by logged-in Electron/Android update checks.
+  app.get("/api/version/downloads", isAuthenticated, (_req, res) => {
+    res.json({
       windowsInstallerUrl: process.env.WINDOWS_INSTALLER_URL || null,
       androidApkUrl: process.env.ANDROID_APK_URL || null,
-      messagingSenderNumber: process.env.MESSAGING_SENDER_NUMBER || "+260963328807",
     });
   });
 
@@ -1268,130 +1276,6 @@ export async function registerRoutes(
   app.use("/api/research", researchRouter);
 
   // --- USER ACCESS MANAGEMENT ENDPOINTS ---
-  /* Original Code commented out for backward-compatibility:
-  app.get("/api/users", isAuthenticated, requireTenant, requirePermission("manage_users"), async (req: any, res) => {
-    try {
-      const list = await storage.listUsers(req.tenantId);
-      res.json(list);
-    } catch (err: any) {
-      console.error("GET /api/users failed:", err);
-      res.status(500).json({ message: "Failed to list users" });
-    }
-  });
-
-  app.put("/api/users/:id/roles-permissions", isAuthenticated, requireTenant, requirePermission("manage_users"), async (req: any, res) => {
-    try {
-      const { roles, permissions, dataAccessScope } = req.body;
-      if (!Array.isArray(roles)) {
-        return res.status(400).json({ message: "roles must be a string array" });
-      }
-      if (!Array.isArray(permissions)) {
-        return res.status(400).json({ message: "permissions must be a string array" });
-      }
-      if (!dataAccessScope || typeof dataAccessScope !== "object") {
-        return res.status(400).json({ message: "dataAccessScope must be a geographic scope object" });
-      }
-      
-      const updatedUser = await storage.updateUserRolesAndPermissions(
-        req.tenantId,
-        req.params.id,
-        roles,
-        permissions,
-        dataAccessScope
-      );
-      
-      if (!updatedUser) {
-        return res.status(404).json({ message: "User not found" });
-      }
-      
-      await logAudit(req, "update_user_access", "users", null, null, {
-        userId: req.params.id,
-        roles,
-        permissions,
-        dataAccessScope
-      });
-
-      res.json(updatedUser);
-    } catch (err: any) {
-      console.error("PUT /api/users/:id/roles-permissions failed:", err);
-      res.status(500).json({ message: "Failed to update user access parameters" });
-    }
-  });
-
-  app.post("/api/users", isAuthenticated, requireTenant, requirePermission("manage_users"), async (req: any, res) => {
-    try {
-      const { email, firstName, lastName, roles, dataAccessScope, isActive, facilityId, districtId, provinceId } = req.body;
-      if (!email) {
-        return res.status(400).json({ message: "Email is required" });
-      }
-      const existing = await storage.getUserByEmailAndTenant(email, req.tenantId);
-      if (existing) {
-        return res.status(400).json({ message: "A user with this email address already exists" });
-      }
-      const user = await storage.createUser(req.tenantId, {
-        email,
-        firstName,
-        lastName,
-        roles: roles || ["facility_clerk"],
-        dataAccessScope: dataAccessScope || { provinces: [], districts: [], facilities: [] },
-        isActive: isActive !== undefined ? isActive : true,
-        facilityId: facilityId || null,
-        districtId: districtId || null,
-        provinceId: provinceId || null,
-      });
-      await logAudit(req, "create_user", "users", user.id, null, user);
-      res.status(201).json(user);
-    } catch (err: any) {
-      console.error("POST /api/users failed:", err);
-      res.status(500).json({ message: "Failed to create user account" });
-    }
-  });
-
-  app.patch("/api/users/:id", isAuthenticated, requireTenant, requirePermission("manage_users"), async (req: any, res) => {
-    try {
-      const { firstName, lastName, email, roles, permissions, dataAccessScope, isActive, facilityId, districtId, provinceId } = req.body;
-      const oldUser = await storage.getUser(req.params.id);
-      if (!oldUser || oldUser.tenantId !== req.tenantId) {
-        return res.status(404).json({ message: "User not found" });
-      }
-      const updated = await storage.updateUser(req.tenantId, req.params.id, {
-        firstName,
-        lastName,
-        email,
-        roles,
-        permissions,
-        dataAccessScope,
-        isActive,
-        facilityId: facilityId === undefined ? oldUser.facilityId : (facilityId || null),
-        districtId: districtId === undefined ? oldUser.districtId : (districtId || null),
-        provinceId: provinceId === undefined ? oldUser.provinceId : (provinceId || null),
-      });
-      await logAudit(req, "update_user", "users", req.params.id, oldUser, updated);
-      // Bust the scope cache so the updated scope is reflected on the next request
-      invalidateGeoScopeCache(req.params.id, req.tenantId);
-      res.json(updated);
-    } catch (err: any) {
-      console.error("PATCH /api/users/:id failed:", err);
-      res.status(500).json({ message: "Failed to update user details" });
-    }
-  });
-
-  app.delete("/api/users/:id", isAuthenticated, requireTenant, requirePermission("manage_users"), async (req: any, res) => {
-    try {
-      const oldUser = await storage.getUser(req.params.id);
-      if (!oldUser || oldUser.tenantId !== req.tenantId) {
-        return res.status(404).json({ message: "User not found" });
-      }
-      await storage.deleteUser(req.tenantId, req.params.id);
-      await logAudit(req, "delete_user", "users", req.params.id, oldUser, null);
-      invalidateGeoScopeCache(req.params.id, req.tenantId);
-      res.status(204).send();
-    } catch (err: any) {
-      console.error("DELETE /api/users/:id failed:", err);
-      res.status(500).json({ message: "Failed to delete user" });
-    }
-  });
-  */
 
   // GET /api/users with geographic scoping
   app.get("/api/users", isAuthenticated, requireTenant, requirePermission("manage_users"), async (req: any, res) => {

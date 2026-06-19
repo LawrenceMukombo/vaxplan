@@ -8,7 +8,7 @@ import { isAuthenticated } from "../auth";
 import { tenantContext } from "./tenantResolver";
 
 const BCRYPT_ROUNDS = 12;
-const MIN_PASSWORD_LEN = 8;
+const MIN_PASSWORD_LEN = 12;
 
 // Dummy bcrypt hash used to equalize timing on failure paths (no user, no
 // password set, etc.) so attackers can't distinguish "user exists" from
