@@ -4319,6 +4319,7 @@ var init_storage = __esm({
 function getSession() {
   const absoluteTimeoutMinutes = parseInt(process.env.SESSION_ABSOLUTE_TIMEOUT_MINUTES || "480", 10);
   const sessionTtl = absoluteTimeoutMinutes * 60 * 1e3;
+  const cookieName = process.env.SESSION_COOKIE_NAME || "vaxplan.sid";
   let secret = process.env.SESSION_SECRET;
   if (!secret) {
     if (!IS_LOCAL_DEV) {
@@ -4345,14 +4346,17 @@ function getSession() {
     });
   }
   return (0, import_express_session.default)({
+    name: cookieName,
     secret,
     store,
     resave: false,
     saveUninitialized: false,
+    rolling: false,
+    // Ensures cookie expiration is not endlessly extended
     cookie: {
       httpOnly: true,
-      // Require secure cookies only in production (HTTPS).
-      secure: !IS_LOCAL_DEV,
+      // Require secure cookies in production unless overridden
+      secure: process.env.SESSION_SECURE_COOKIE === "true" || !IS_LOCAL_DEV,
       // Packaged native apps (Android/Windows) send cross-origin requests, so
       // the cookie must be SameSite=None + Secure in production. In local dev
       // we fall back to "lax" (no HTTPS).
@@ -4372,6 +4376,7 @@ async function setupAuth(app2) {
     const reason = req.query.reason;
     const userId = req.user?.id;
     const tenantId = req.user?.tenantId;
+    const cookieName = process.env.SESSION_COOKIE_NAME || "vaxplan.sid";
     if (reason === "idle_timeout" && userId) {
       try {
         await db.insert(auditLogs).values({
@@ -4390,19 +4395,26 @@ async function setupAuth(app2) {
     }
     if (typeof req.session?.destroy === "function") {
       req.session.destroy(() => {
-        res.clearCookie("connect.sid", { path: "/" });
+        res.clearCookie(cookieName, { path: "/" });
         res.redirect("/");
       });
     } else {
       req.logout?.(() => {
-        res.clearCookie("connect.sid", { path: "/" });
+        res.clearCookie(cookieName, { path: "/" });
         res.redirect("/");
       });
     }
   });
   app2.post("/api/auth/ping", (req, res) => {
     if (req.isAuthenticated?.() && req.session) {
-      req.session.lastActive = Math.floor(Date.now() / 1e3);
+      const now = Math.floor(Date.now() / 1e3);
+      const session3 = req.session;
+      if (!session3.createdAt) {
+        session3.createdAt = now;
+      }
+      if (!session3.lastActive || now - session3.lastActive >= 60) {
+        session3.lastActive = now;
+      }
       res.json({ success: true });
     } else {
       res.status(401).json({ error: "Unauthorized" });
@@ -4526,17 +4538,37 @@ var init_auth = __esm({
     isAuthenticated = async (req, res, next) => {
       const user = req.user;
       if (!req.isAuthenticated?.() || !user?.expires_at) {
-        return res.status(401).json({ message: "Unauthorized" });
+        return res.status(401).json({ message: "Unauthorized", reason: "unauthenticated" });
       }
       const now = Math.floor(Date.now() / 1e3);
-      const idleTimeoutMinutes = parseInt(process.env.SESSION_IDLE_TIMEOUT_MINUTES || "15", 10);
-      if (req.session?.lastActive) {
-        if (now - req.session.lastActive > idleTimeoutMinutes * 60) {
+      const session3 = req.session;
+      const cookieName = process.env.SESSION_COOKIE_NAME || "vaxplan.sid";
+      if (session3 && !session3.createdAt) {
+        session3.createdAt = now;
+      }
+      if (session3 && !session3.lastActive) {
+        session3.lastActive = now;
+      }
+      const absoluteTimeoutMinutes = parseInt(process.env.SESSION_ABSOLUTE_TIMEOUT_MINUTES || "480", 10);
+      if (session3?.createdAt) {
+        if (now - session3.createdAt > absoluteTimeoutMinutes * 60) {
           if (typeof req.session?.destroy === "function") {
             req.session.destroy(() => {
             });
           }
-          return res.status(401).json({ message: "Session expired due to inactivity." });
+          res.clearCookie(cookieName, { path: "/" });
+          return res.status(401).json({ message: "Session expired due to absolute timeout limit.", reason: "absolute_timeout" });
+        }
+      }
+      const idleTimeoutMinutes = parseInt(process.env.SESSION_IDLE_TIMEOUT_MINUTES || "15", 10);
+      if (session3?.lastActive) {
+        if (now - session3.lastActive > idleTimeoutMinutes * 60) {
+          if (typeof req.session?.destroy === "function") {
+            req.session.destroy(() => {
+            });
+          }
+          res.clearCookie(cookieName, { path: "/" });
+          return res.status(401).json({ message: "Session expired due to inactivity.", reason: "idle_timeout" });
         }
       }
       if (now <= user.expires_at) {
@@ -6911,7 +6943,7 @@ Return a JSON object with these exact fields (no markdown, no explanation, raw J
   "description": "2-3 sentence actionable recommendation"
 }`;
             try {
-              const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+              const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
               const geminiRes = await fetch(geminiUrl, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -25835,7 +25867,7 @@ Instructions:
 1. Answer the user's question accurately using these live statistics.
 2. Keep your answer helpful, professional, and concise.
 3. Support Markdown formatting for clear tabular data or bulleted highlights.`;
-          const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+          const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
           const response = await fetch(geminiUrl, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
