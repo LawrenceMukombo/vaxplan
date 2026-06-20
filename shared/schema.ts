@@ -703,6 +703,9 @@ export const populationData = pgTable("population_data", {
   confidenceScore: decimal("confidence_score", { precision: 5, scale: 2 }),
   metadata: jsonb("metadata"),
   approvalStatus: approvalStatusEnum("approval_status").default("draft"),
+  createdByUserId: varchar("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  updatedByUserId: varchar("updated_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  approvedByUserId: varchar("approved_by_user_id").references(() => users.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 }, (table) => [index("idx_population_tenant").on(table.tenantId)]);
@@ -792,6 +795,10 @@ export const microplans = pgTable("microplans", {
   autoApproveAt: timestamp("auto_approve_at"),
   reminderSentAt: timestamp("reminder_sent_at"),
   districtEditReason: text("district_edit_reason"),
+
+  createdByUserId: varchar("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  updatedByUserId: varchar("updated_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  approvedByUserId: varchar("approved_by_user_id").references(() => users.id, { onDelete: "set null" }),
 
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
@@ -1820,9 +1827,9 @@ export const stockTransactions = pgTable("stock_transactions", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
   tenantId: varchar("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
   facilityId: integer("facility_id").notNull().references(() => facilities.id, { onDelete: "cascade" }),
-  productId: integer("product_id").references(() => catalogueVaccines.id, { onDelete: "set null" }), // link to catalogue
+  productId: integer("product_id").notNull().references(() => catalogueVaccines.id, { onDelete: "restrict" }), // Must link to catalogue physical product
   productCode: varchar("product_code", { length: 100 }), // snapshot of product code
-  vaccineName: varchar("vaccine_name", { length: 100 }).notNull(), // BCG, Penta, etc.
+  vaccineName: varchar("vaccine_name", { length: 100 }), // Legacy / Snapshot name
   transactionType: varchar("transaction_type", { length: 50 }).notNull(), // 'receipt', 'issue', 'loss', 'adjustment'
   quantityDoses: integer("quantity_doses").notNull(),
   batchNumber: varchar("batch_number", { length: 100 }).notNull(),
@@ -1852,7 +1859,13 @@ export const monthlyReports = pgTable("monthly_reports", {
   surveillance: jsonb("surveillance").default({}).notNull(), // cases count, e.g. { measles: 0, afp: 1, nnt: 0, aefi: 1 }
   submittedById: varchar("submitted_by_id").references(() => users.id, { onDelete: "set null" }),
   approvalStatus: approvalStatusEnum("approval_status").default("draft").notNull(),
+
+  createdByUserId: varchar("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  updatedByUserId: varchar("updated_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  approvedByUserId: varchar("approved_by_user_id").references(() => users.id, { onDelete: "set null" }),
+
   createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
 }, (table) => ({
   tenantIdx: index("monthly_rep_tenant_idx").on(table.tenantId),
   facilityIdx: index("monthly_rep_facility_idx").on(table.facilityId),
@@ -2435,9 +2448,9 @@ export const insertSessionDayPlanSchema = createInsertSchema(sessionDayPlans).om
 export const insertStockTransactionSchema = createInsertSchema(stockTransactions).omit({
   createdAt: true,
 }).extend({
-  productId: z.number().optional().nullable(),
+  productId: z.number().int().positive(),
   productCode: z.string().optional().nullable(),
-  vaccineName: z.string().transform(normalizeStockVaccineName),
+  vaccineName: z.string().optional().nullable(),
   expiryDate: z.coerce.date(),
   transactionDate: z.coerce.date().optional(),
 });

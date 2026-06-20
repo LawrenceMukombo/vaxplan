@@ -245,50 +245,6 @@ var import_drizzle_orm = require("drizzle-orm");
 var import_pg_core = require("drizzle-orm/pg-core");
 var import_drizzle_zod = require("drizzle-zod");
 var import_zod = require("zod");
-
-// shared/vaccineSchedule.ts
-function normalizeStockVaccineName(input) {
-  if (!input) return "";
-  let value = input.trim().toUpperCase();
-  value = value.replace(/DOSE\s*-?\s*([0-9]+)/g, "-$1");
-  value = value.replace(/\s+/g, "");
-  value = value.replace(/^([A-Z]+)-?([0-9]+)$/, "$1-$2");
-  const mapping = {
-    "BCG": "BCG",
-    "OPV": "OPV",
-    "OPV-0": "OPV",
-    "OPV-1": "OPV",
-    "OPV-2": "OPV",
-    "OPV-3": "OPV",
-    "IPV": "IPV",
-    "IPV-1": "IPV",
-    "IPV-2": "IPV",
-    "PCV": "PCV",
-    "PCV-1": "PCV",
-    "PCV-2": "PCV",
-    "PCV-3": "PCV",
-    "PENTA": "PENTA",
-    "PENTA-1": "PENTA",
-    "PENTA-2": "PENTA",
-    "PENTA-3": "PENTA",
-    "ROTA": "ROTAVIRUS",
-    "ROTA-1": "ROTAVIRUS",
-    "ROTA-2": "ROTAVIRUS",
-    "ROTAVIRUS": "ROTAVIRUS",
-    "MR": "MR",
-    "MR-1": "MR",
-    "MR-2": "MR",
-    "TT": "TT",
-    "TT-1": "TT",
-    "TT-2": "TT",
-    "HPV": "HPV",
-    "COVID-19": "COVID-19",
-    "TD": "TD"
-  };
-  return mapping[value] ?? input.trim();
-}
-
-// shared/schema.ts
 var tenantStatusEnum = (0, import_pg_core.pgEnum)("tenant_status", [
   "trial",
   "active",
@@ -765,6 +721,9 @@ var populationData = (0, import_pg_core.pgTable)("population_data", {
   confidenceScore: (0, import_pg_core.decimal)("confidence_score", { precision: 5, scale: 2 }),
   metadata: (0, import_pg_core.jsonb)("metadata"),
   approvalStatus: approvalStatusEnum("approval_status").default("draft"),
+  createdByUserId: (0, import_pg_core.varchar)("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  updatedByUserId: (0, import_pg_core.varchar)("updated_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  approvedByUserId: (0, import_pg_core.varchar)("approved_by_user_id").references(() => users.id, { onDelete: "set null" }),
   createdAt: (0, import_pg_core.timestamp)("created_at").defaultNow(),
   updatedAt: (0, import_pg_core.timestamp)("updated_at").defaultNow()
 }, (table) => [(0, import_pg_core.index)("idx_population_tenant").on(table.tenantId)]);
@@ -806,6 +765,9 @@ var microplans = (0, import_pg_core.pgTable)("microplans", {
   autoApproveAt: (0, import_pg_core.timestamp)("auto_approve_at"),
   reminderSentAt: (0, import_pg_core.timestamp)("reminder_sent_at"),
   districtEditReason: (0, import_pg_core.text)("district_edit_reason"),
+  createdByUserId: (0, import_pg_core.varchar)("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  updatedByUserId: (0, import_pg_core.varchar)("updated_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  approvedByUserId: (0, import_pg_core.varchar)("approved_by_user_id").references(() => users.id, { onDelete: "set null" }),
   createdAt: (0, import_pg_core.timestamp)("created_at").defaultNow(),
   updatedAt: (0, import_pg_core.timestamp)("updated_at").defaultNow()
 }, (table) => [(0, import_pg_core.index)("idx_microplans_tenant").on(table.tenantId)]);
@@ -1561,12 +1523,12 @@ var stockTransactions = (0, import_pg_core.pgTable)("stock_transactions", {
   id: (0, import_pg_core.integer)("id").primaryKey().generatedAlwaysAsIdentity(),
   tenantId: (0, import_pg_core.varchar)("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
   facilityId: (0, import_pg_core.integer)("facility_id").notNull().references(() => facilities.id, { onDelete: "cascade" }),
-  productId: (0, import_pg_core.integer)("product_id").references(() => catalogueVaccines.id, { onDelete: "set null" }),
-  // link to catalogue
+  productId: (0, import_pg_core.integer)("product_id").notNull().references(() => catalogueVaccines.id, { onDelete: "restrict" }),
+  // Must link to catalogue physical product
   productCode: (0, import_pg_core.varchar)("product_code", { length: 100 }),
   // snapshot of product code
-  vaccineName: (0, import_pg_core.varchar)("vaccine_name", { length: 100 }).notNull(),
-  // BCG, Penta, etc.
+  vaccineName: (0, import_pg_core.varchar)("vaccine_name", { length: 100 }),
+  // Legacy / Snapshot name
   transactionType: (0, import_pg_core.varchar)("transaction_type", { length: 50 }).notNull(),
   // 'receipt', 'issue', 'loss', 'adjustment'
   quantityDoses: (0, import_pg_core.integer)("quantity_doses").notNull(),
@@ -1599,7 +1561,11 @@ var monthlyReports = (0, import_pg_core.pgTable)("monthly_reports", {
   // cases count, e.g. { measles: 0, afp: 1, nnt: 0, aefi: 1 }
   submittedById: (0, import_pg_core.varchar)("submitted_by_id").references(() => users.id, { onDelete: "set null" }),
   approvalStatus: approvalStatusEnum("approval_status").default("draft").notNull(),
-  createdAt: (0, import_pg_core.timestamp)("created_at").defaultNow()
+  createdByUserId: (0, import_pg_core.varchar)("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  updatedByUserId: (0, import_pg_core.varchar)("updated_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  approvedByUserId: (0, import_pg_core.varchar)("approved_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  createdAt: (0, import_pg_core.timestamp)("created_at").defaultNow(),
+  updatedAt: (0, import_pg_core.timestamp)("updated_at").defaultNow()
 }, (table) => ({
   tenantIdx: (0, import_pg_core.index)("monthly_rep_tenant_idx").on(table.tenantId),
   facilityIdx: (0, import_pg_core.index)("monthly_rep_facility_idx").on(table.facilityId)
@@ -2073,9 +2039,9 @@ var insertSessionDayPlanSchema = (0, import_drizzle_zod.createInsertSchema)(sess
 var insertStockTransactionSchema = (0, import_drizzle_zod.createInsertSchema)(stockTransactions).omit({
   createdAt: true
 }).extend({
-  productId: import_zod.z.number().optional().nullable(),
+  productId: import_zod.z.number().int().positive(),
   productCode: import_zod.z.string().optional().nullable(),
-  vaccineName: import_zod.z.string().transform(normalizeStockVaccineName),
+  vaccineName: import_zod.z.string().optional().nullable(),
   expiryDate: import_zod.z.coerce.date(),
   transactionDate: import_zod.z.coerce.date().optional()
 });

@@ -1300,7 +1300,7 @@ export default function MicroplanBuilder({ prePlanType }: MicroplanBuilderProps 
 
   if (!isBuilding) {
     return (
-      <div className="p-4 md:p-6 space-y-6 max-w-4xl mx-auto font-sans bg-slate-50/50 dark:bg-slate-900/10 min-h-[90vh]">
+      <div className="p-4 md:p-6 space-y-6 max-w-4xl mx-auto font-sans bg-muted/50 dark:bg-background min-h-[90vh]">
         {/* Developed Microplans Dashboard Listing */}
         <div className="flex items-center justify-between gap-4 flex-wrap pb-2 border-b border-border/40">
           <div>
@@ -1400,7 +1400,7 @@ export default function MicroplanBuilder({ prePlanType }: MicroplanBuilderProps 
                               ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" 
                               : plan.status === "scheduled" 
                                 ? "bg-sky-500/10 text-sky-600 dark:text-sky-400" 
-                                : "bg-slate-500/10 text-slate-500"
+                                : "bg-slate-500/10 text-muted-foreground"
                           }`}>
                             {plan.status || "Planned"}
                           </span>
@@ -1452,10 +1452,10 @@ export default function MicroplanBuilder({ prePlanType }: MicroplanBuilderProps 
   }
 
   return (
-    <div className="p-4 md:p-6 space-y-4 md:space-y-6 max-w-lg mx-auto font-sans bg-slate-50/50 dark:bg-slate-900/10 min-h-[90vh]">
+    <div className="p-4 md:p-6 space-y-4 md:space-y-6 max-w-lg mx-auto font-sans bg-muted/50 dark:bg-background min-h-[90vh]">
       
       {/* Mobile-Friendly Stepper HUD */}
-      <div className="bg-background/95 dark:bg-slate-900/90 border border-border/80 backdrop-blur rounded-2xl p-4 shadow-md flex items-center justify-between gap-3 sticky top-1 z-40">
+      <div className="bg-background/95 dark:bg-background border border-border/80 backdrop-blur rounded-2xl p-4 shadow-md flex items-center justify-between gap-3 sticky top-1 z-40">
         <div className="flex items-center gap-2">
           <Button
             size="icon"
@@ -2295,7 +2295,7 @@ export default function MicroplanBuilder({ prePlanType }: MicroplanBuilderProps 
                         </div>
                         <div className="space-y-3">
                           {criticalInsights.map((insight, idx) => (
-                            <div key={idx} className="bg-background/60 dark:bg-slate-900/40 border border-border/30 rounded-xl p-3 text-xs space-y-1.5 transition-all hover:bg-background/80">
+                            <div key={idx} className="bg-background/60 dark:bg-background border border-border/30 rounded-xl p-3 text-xs space-y-1.5 transition-all hover:bg-background/80">
                               <div className="flex items-center justify-between">
                                 <span className="font-extrabold text-foreground">{insight.antigen} Utilization</span>
                                 <Badge className={insight.severity === "high" ? "bg-rose-500/10 text-rose-600 border border-rose-500/20 text-[9px]" : "bg-amber-500/10 text-amber-600 border border-amber-500/20 text-[9px]"}>
@@ -3072,7 +3072,7 @@ export default function MicroplanBuilder({ prePlanType }: MicroplanBuilderProps 
                               />
                             )}
                           </td>
-                          <td className="py-1.5 px-1 text-right font-mono font-bold text-slate-500">
+                          <td className="py-1.5 px-1 text-right font-mono font-bold text-muted-foreground">
                             K{rowTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                           </td>
                           <td className="py-1.5 px-1 text-center">
@@ -3683,7 +3683,7 @@ export default function MicroplanBuilder({ prePlanType }: MicroplanBuilderProps 
 
       {/* FOOTER WIZARD NAVIGATION CONTROLS */}
       {/* Original Code: Standard static Back and Next buttons without adjacent step names
-      <div className="flex justify-between items-center gap-4 bg-background/80 dark:bg-slate-900/80 border border-border/80 p-3 rounded-2xl shadow-lg no-print">
+      <div className="flex justify-between items-center gap-4 bg-background/80 dark:bg-background border border-border/80 p-3 rounded-2xl shadow-lg no-print">
         <Button
           variant="outline"
           size="sm"
@@ -3719,7 +3719,7 @@ export default function MicroplanBuilder({ prePlanType }: MicroplanBuilderProps 
       */}
 
       {/* Updated Code: Next/Back buttons with clear context-aware dynamic labels showing next step */}
-      <div className="flex justify-between items-center gap-4 bg-background/80 dark:bg-slate-900/80 border border-border/80 p-3 rounded-2xl shadow-lg no-print">
+      <div className="flex justify-between items-center gap-4 bg-background/80 dark:bg-background border border-border/80 p-3 rounded-2xl shadow-lg no-print">
         <Button
           variant="outline"
           size="sm"

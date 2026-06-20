@@ -27,16 +27,16 @@ function StatCard({
     amber: "text-amber-400 bg-amber-500/10",
     blue: "text-blue-400 bg-blue-500/10",
     purple: "text-purple-400 bg-purple-500/10",
-    slate: "text-slate-400 bg-slate-500/10",
+    slate: "text-muted-foreground bg-slate-500/10",
   };
   return (
-    <Card className="bg-slate-900 border-slate-800">
+    <Card className="bg-background border-border">
       <CardContent className="p-5">
         <div className="flex items-start justify-between">
           <div className="flex-1 min-w-0">
-            <p className="text-xs text-slate-500 font-medium uppercase tracking-wider truncate">{title}</p>
+            <p className="text-xs text-muted-foreground font-medium uppercase tracking-wider truncate">{title}</p>
             <p className="text-2xl font-bold text-slate-100 mt-1">{value}</p>
-            {subtitle && <p className="text-xs text-slate-500 mt-0.5 truncate">{subtitle}</p>}
+            {subtitle && <p className="text-xs text-muted-foreground mt-0.5 truncate">{subtitle}</p>}
             {trend && <p className="text-xs text-emerald-400 mt-1">{trend}</p>}
           </div>
           <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ml-3 ${colorMap[color]}`}>
@@ -57,7 +57,7 @@ const severityColors: Record<string, string> = {
 const priorityColors: Record<string, string> = {
   high: "bg-red-500/10 text-red-400 border-red-500/20",
   medium: "bg-amber-500/10 text-amber-400 border-amber-500/20",
-  low: "bg-slate-500/10 text-slate-400 border-slate-500/20",
+  low: "bg-slate-500/10 text-muted-foreground border-border/20",
 };
 
 export default function Dashboard() {
@@ -85,9 +85,9 @@ export default function Dashboard() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {loadingSummary ? (
           Array.from({ length: 4 }).map((_, i) => (
-            <Card key={i} className="bg-slate-900 border-slate-800">
+            <Card key={i} className="bg-background border-border">
               <CardContent className="p-5">
-                <Skeleton className="h-16 bg-slate-800" />
+                <Skeleton className="h-16 bg-muted" />
               </CardContent>
             </Card>
           ))
@@ -127,16 +127,16 @@ export default function Dashboard() {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* District Coverage Chart */}
-        <Card className="bg-slate-900 border-slate-800 lg:col-span-2">
+        <Card className="bg-background border-border lg:col-span-2">
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-semibold text-slate-300 flex items-center gap-2">
+            <CardTitle className="text-sm font-semibold text-foreground flex items-center gap-2">
               <TrendingUp className="w-4 h-4 text-emerald-400" />
               Coverage by District
             </CardTitle>
           </CardHeader>
           <CardContent>
             {loadingDistricts ? (
-              <Skeleton className="h-48 bg-slate-800 rounded" />
+              <Skeleton className="h-48 bg-muted rounded" />
             ) : (
               <ResponsiveContainer width="100%" height={200}>
                 <BarChart data={chartData} barSize={20} barGap={4}>
@@ -156,7 +156,7 @@ export default function Dashboard() {
               {[["#10b981","Served"],["#f59e0b","Underserved"],["#ef4444","Unserved"]].map(([color, label]) => (
                 <div key={label} className="flex items-center gap-1.5">
                   <div className="w-2.5 h-2.5 rounded-sm" style={{ background: color }} />
-                  <span className="text-xs text-slate-500">{label}</span>
+                  <span className="text-xs text-muted-foreground">{label}</span>
                 </div>
               ))}
             </div>
@@ -165,10 +165,10 @@ export default function Dashboard() {
 
         {/* Quick Stats */}
         <div className="space-y-4">
-          <Card className="bg-slate-900 border-slate-800">
+          <Card className="bg-background border-border">
             <CardContent className="p-4">
               <div className="flex items-center justify-between mb-3">
-                <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">Service Status</span>
+                <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Service Status</span>
               </div>
               <div className="space-y-2.5">
                 {[
@@ -178,31 +178,31 @@ export default function Dashboard() {
                 ].map(({ label, count, color, icon: Icon }) => (
                   <div key={label} className="flex items-center gap-2.5">
                     <div className={`w-1.5 h-1.5 rounded-full ${color}`} />
-                    <span className="text-sm text-slate-400 flex-1">{label}</span>
-                    <span className="text-sm font-semibold text-slate-200">{count}</span>
+                    <span className="text-sm text-muted-foreground flex-1">{label}</span>
+                    <span className="text-sm font-semibold text-foreground">{count}</span>
                   </div>
                 ))}
               </div>
             </CardContent>
           </Card>
 
-          <Card className="bg-slate-900 border-slate-800">
+          <Card className="bg-background border-border">
             <CardContent className="p-4">
               <div className="space-y-3">
                 <div className="flex items-center gap-2.5">
                   <Hospital className="w-4 h-4 text-blue-400" />
-                  <span className="text-sm text-slate-400 flex-1">Health Facilities</span>
-                  <span className="text-sm font-semibold text-slate-200">{summary?.totalFacilities ?? 0}</span>
+                  <span className="text-sm text-muted-foreground flex-1">Health Facilities</span>
+                  <span className="text-sm font-semibold text-foreground">{summary?.totalFacilities ?? 0}</span>
                 </div>
                 <div className="flex items-center gap-2.5">
                   <MapPin className="w-4 h-4 text-purple-400" />
-                  <span className="text-sm text-slate-400 flex-1">Total Population</span>
-                  <span className="text-sm font-semibold text-slate-200">{(summary?.totalPopulation ?? 0).toLocaleString()}</span>
+                  <span className="text-sm text-muted-foreground flex-1">Total Population</span>
+                  <span className="text-sm font-semibold text-foreground">{(summary?.totalPopulation ?? 0).toLocaleString()}</span>
                 </div>
                 <div className="flex items-center gap-2.5">
                   <Zap className="w-4 h-4 text-amber-400" />
-                  <span className="text-sm text-slate-400 flex-1">New Settlements</span>
-                  <span className="text-sm font-semibold text-slate-200">{summary?.newSettlementsCount ?? 0}</span>
+                  <span className="text-sm text-muted-foreground flex-1">New Settlements</span>
+                  <span className="text-sm font-semibold text-foreground">{summary?.newSettlementsCount ?? 0}</span>
                 </div>
               </div>
             </CardContent>
@@ -212,15 +212,15 @@ export default function Dashboard() {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Active Alerts */}
-        <Card className="bg-slate-900 border-slate-800">
+        <Card className="bg-background border-border">
           <CardHeader className="pb-2">
             <div className="flex items-center justify-between">
-              <CardTitle className="text-sm font-semibold text-slate-300 flex items-center gap-2">
+              <CardTitle className="text-sm font-semibold text-foreground flex items-center gap-2">
                 <AlertTriangle className="w-4 h-4 text-amber-400" />
                 Recent Alerts
               </CardTitle>
               <Link href="/vgie/alerts">
-                <Button variant="ghost" size="sm" className="text-xs text-slate-500 hover:text-slate-300 h-6 px-2">
+                <Button variant="ghost" size="sm" className="text-xs text-muted-foreground hover:text-foreground h-6 px-2">
                   View all <ChevronRight className="w-3 h-3 ml-1" />
                 </Button>
               </Link>
@@ -229,15 +229,15 @@ export default function Dashboard() {
           <CardContent>
             <div className="space-y-2">
               {(alerts ?? []).slice(0, 4).map((alert) => (
-                <div key={alert.id} className="flex items-start gap-2.5 p-2.5 rounded-lg bg-slate-800/50 border border-slate-800">
+                <div key={alert.id} className="flex items-start gap-2.5 p-2.5 rounded-lg bg-muted border border-border">
                   <Badge className={`text-[10px] px-1.5 py-0 shrink-0 mt-0.5 border ${severityColors[alert.severity]}`}>
                     {alert.severity}
                   </Badge>
-                  <p className="text-xs text-slate-400 leading-relaxed line-clamp-2">{alert.message}</p>
+                  <p className="text-xs text-muted-foreground leading-relaxed line-clamp-2">{alert.message}</p>
                 </div>
               ))}
               {(!alerts || alerts.length === 0) && (
-                <div className="flex items-center justify-center py-6 text-slate-600 text-sm">
+                <div className="flex items-center justify-center py-6 text-muted-foreground text-sm">
                   <Shield className="w-4 h-4 mr-2" /> No active alerts
                 </div>
               )}
@@ -246,15 +246,15 @@ export default function Dashboard() {
         </Card>
 
         {/* Pending Recommendations */}
-        <Card className="bg-slate-900 border-slate-800">
+        <Card className="bg-background border-border">
           <CardHeader className="pb-2">
             <div className="flex items-center justify-between">
-              <CardTitle className="text-sm font-semibold text-slate-300 flex items-center gap-2">
+              <CardTitle className="text-sm font-semibold text-foreground flex items-center gap-2">
                 <Shield className="w-4 h-4 text-emerald-400" />
                 Pending Recommendations
               </CardTitle>
               <Link href="/vgie/recommendations">
-                <Button variant="ghost" size="sm" className="text-xs text-slate-500 hover:text-slate-300 h-6 px-2">
+                <Button variant="ghost" size="sm" className="text-xs text-muted-foreground hover:text-foreground h-6 px-2">
                   View all <ChevronRight className="w-3 h-3 ml-1" />
                 </Button>
               </Link>
@@ -263,18 +263,18 @@ export default function Dashboard() {
           <CardContent>
             <div className="space-y-2">
               {(recs ?? []).slice(0, 4).map((rec) => (
-                <div key={rec.id} className="flex items-start gap-2.5 p-2.5 rounded-lg bg-slate-800/50 border border-slate-800">
+                <div key={rec.id} className="flex items-start gap-2.5 p-2.5 rounded-lg bg-muted border border-border">
                   <Badge className={`text-[10px] px-1.5 py-0 shrink-0 mt-0.5 border ${priorityColors[rec.priority]}`}>
                     {rec.priority}
                   </Badge>
                   <div className="min-w-0">
-                    <p className="text-xs font-medium text-slate-300 truncate">{rec.settlementName}</p>
-                    <p className="text-xs text-slate-500 truncate">{rec.recommendationType}</p>
+                    <p className="text-xs font-medium text-foreground truncate">{rec.settlementName}</p>
+                    <p className="text-xs text-muted-foreground truncate">{rec.recommendationType}</p>
                   </div>
                 </div>
               ))}
               {(!recs || recs.length === 0) && (
-                <div className="flex items-center justify-center py-6 text-slate-600 text-sm">
+                <div className="flex items-center justify-center py-6 text-muted-foreground text-sm">
                   <CheckCircle className="w-4 h-4 mr-2" /> All caught up!
                 </div>
               )}
@@ -284,51 +284,51 @@ export default function Dashboard() {
       </div>
 
       {/* Outreach Coverage by District */}
-      <Card className="bg-slate-900 border-slate-800">
+      <Card className="bg-background border-border">
         <CardHeader className="pb-2">
           <div className="flex items-center justify-between">
-            <CardTitle className="text-sm font-semibold text-slate-300 flex items-center gap-2">
+            <CardTitle className="text-sm font-semibold text-foreground flex items-center gap-2">
               <Radio className="w-4 h-4 text-purple-400" />
               Outreach Coverage by District
             </CardTitle>
-            <span className="text-[10px] text-slate-600 uppercase tracking-wider">sorted by most overdue</span>
+            <span className="text-[10px] text-muted-foreground uppercase tracking-wider">sorted by most overdue</span>
           </div>
         </CardHeader>
         <CardContent>
           {loadingCoverage ? (
             <div className="space-y-2">
               {Array.from({ length: 5 }).map((_, i) => (
-                <Skeleton key={i} className="h-9 bg-slate-800 rounded" />
+                <Skeleton key={i} className="h-9 bg-muted rounded" />
               ))}
             </div>
           ) : !outreachCoverage || outreachCoverage.length === 0 ? (
-            <div className="flex items-center justify-center py-8 text-slate-600 text-sm">
+            <div className="flex items-center justify-center py-8 text-muted-foreground text-sm">
               <Radio className="w-4 h-4 mr-2" /> No district data available
             </div>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-xs">
                 <thead>
-                  <tr className="border-b border-slate-800">
-                    <th className="text-left py-2 pr-4 font-medium text-slate-500 uppercase tracking-wider">District</th>
-                    <th className="text-right py-2 pr-4 font-medium text-slate-500 uppercase tracking-wider">Settlements</th>
-                    <th className="text-right py-2 pr-6 font-medium text-slate-500 uppercase tracking-wider">
-                      <span className="text-emerald-500">Recent</span> <span className="text-slate-600">&lt;6 mo</span>
+                  <tr className="border-b border-border">
+                    <th className="text-left py-2 pr-4 font-medium text-muted-foreground uppercase tracking-wider">District</th>
+                    <th className="text-right py-2 pr-4 font-medium text-muted-foreground uppercase tracking-wider">Settlements</th>
+                    <th className="text-right py-2 pr-6 font-medium text-muted-foreground uppercase tracking-wider">
+                      <span className="text-emerald-500">Recent</span> <span className="text-muted-foreground">&lt;6 mo</span>
                     </th>
-                    <th className="text-right py-2 pr-4 font-medium text-slate-500 uppercase tracking-wider">
-                      <span className="text-red-500">Overdue</span> <span className="text-slate-600">&gt;12 mo / never</span>
+                    <th className="text-right py-2 pr-4 font-medium text-muted-foreground uppercase tracking-wider">
+                      <span className="text-red-500">Overdue</span> <span className="text-muted-foreground">&gt;12 mo / never</span>
                     </th>
                     <th className="py-2 w-8" />
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/60">
                   {outreachCoverage.map((row) => (
-                    <tr key={row.district} className="hover:bg-slate-800/40 transition-colors group">
-                      <td className="py-2.5 pr-4 font-medium text-slate-300">{row.district}</td>
-                      <td className="py-2.5 pr-4 text-right text-slate-400">{row.totalSettlements}</td>
+                    <tr key={row.district} className="hover:bg-muted transition-colors group">
+                      <td className="py-2.5 pr-4 font-medium text-foreground">{row.district}</td>
+                      <td className="py-2.5 pr-4 text-right text-muted-foreground">{row.totalSettlements}</td>
                       <td className="py-2.5 pr-6">
                         <div className="flex items-center justify-end gap-2">
-                          <div className="w-20 h-1.5 rounded-full bg-slate-800 overflow-hidden">
+                          <div className="w-20 h-1.5 rounded-full bg-muted overflow-hidden">
                             <div
                               className="h-full rounded-full bg-emerald-500"
                               style={{ width: `${row.recentPct}%` }}
@@ -339,7 +339,7 @@ export default function Dashboard() {
                       </td>
                       <td className="py-2.5 pr-4">
                         <div className="flex items-center justify-end gap-2">
-                          <div className="w-20 h-1.5 rounded-full bg-slate-800 overflow-hidden">
+                          <div className="w-20 h-1.5 rounded-full bg-muted overflow-hidden">
                             <div
                               className="h-full rounded-full bg-red-500"
                               style={{ width: `${row.overduePct}%` }}
@@ -353,7 +353,7 @@ export default function Dashboard() {
                           <Button
                             variant="ghost"
                             size="sm"
-                            className="h-6 w-6 p-0 opacity-0 group-hover:opacity-100 transition-opacity text-slate-500 hover:text-slate-200"
+                            className="h-6 w-6 p-0 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-foreground"
                             title="Open in map"
                           >
                             <MapPin className="w-3 h-3" />
@@ -370,9 +370,9 @@ export default function Dashboard() {
       </Card>
 
       {/* Recent Outreach Activity Feed */}
-      <Card className="bg-slate-900 border-slate-800">
+      <Card className="bg-background border-border">
         <CardHeader className="pb-2">
-          <CardTitle className="text-sm font-semibold text-slate-300 flex items-center gap-2">
+          <CardTitle className="text-sm font-semibold text-foreground flex items-center gap-2">
             <Activity className="w-4 h-4 text-emerald-400" />
             Recent Outreach
           </CardTitle>
@@ -381,37 +381,37 @@ export default function Dashboard() {
           {loadingFeed ? (
             <div className="space-y-2">
               {Array.from({ length: 4 }).map((_, i) => (
-                <Skeleton key={i} className="h-10 bg-slate-800 rounded" />
+                <Skeleton key={i} className="h-10 bg-muted rounded" />
               ))}
             </div>
           ) : !outreachFeed || outreachFeed.length === 0 ? (
-            <div className="flex items-center justify-center py-8 text-slate-600 text-sm">
+            <div className="flex items-center justify-center py-8 text-muted-foreground text-sm">
               <Syringe className="w-4 h-4 mr-2" /> No outreach sessions recorded yet
             </div>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-xs">
                 <thead>
-                  <tr className="border-b border-slate-800">
-                    <th className="text-left py-2 pr-4 font-medium text-slate-500 uppercase tracking-wider">Settlement</th>
-                    <th className="text-left py-2 pr-4 font-medium text-slate-500 uppercase tracking-wider">District</th>
-                    <th className="text-left py-2 pr-4 font-medium text-slate-500 uppercase tracking-wider">Date</th>
-                    <th className="text-left py-2 pr-4 font-medium text-slate-500 uppercase tracking-wider">Vaccines</th>
-                    <th className="text-right py-2 font-medium text-slate-500 uppercase tracking-wider">Children</th>
+                  <tr className="border-b border-border">
+                    <th className="text-left py-2 pr-4 font-medium text-muted-foreground uppercase tracking-wider">Settlement</th>
+                    <th className="text-left py-2 pr-4 font-medium text-muted-foreground uppercase tracking-wider">District</th>
+                    <th className="text-left py-2 pr-4 font-medium text-muted-foreground uppercase tracking-wider">Date</th>
+                    <th className="text-left py-2 pr-4 font-medium text-muted-foreground uppercase tracking-wider">Vaccines</th>
+                    <th className="text-right py-2 font-medium text-muted-foreground uppercase tracking-wider">Children</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/60">
                   {outreachFeed.map((item) => (
-                    <tr key={item.id} className="hover:bg-slate-800/40 transition-colors group">
+                    <tr key={item.id} className="hover:bg-muted transition-colors group">
                       <td className="py-2.5 pr-4">
                         <Link href={`/settlements/${item.settlementId}`}>
-                          <span className="text-slate-300 font-medium group-hover:text-emerald-400 transition-colors cursor-pointer">
+                          <span className="text-foreground font-medium group-hover:text-emerald-400 transition-colors cursor-pointer">
                             {item.settlementName}
                           </span>
                         </Link>
                       </td>
-                      <td className="py-2.5 pr-4 text-slate-500">{item.district}</td>
-                      <td className="py-2.5 pr-4 text-slate-400 whitespace-nowrap">{item.visitDate}</td>
+                      <td className="py-2.5 pr-4 text-muted-foreground">{item.district}</td>
+                      <td className="py-2.5 pr-4 text-muted-foreground whitespace-nowrap">{item.visitDate}</td>
                       <td className="py-2.5 pr-4">
                         <div className="flex flex-wrap gap-1">
                           {item.vaccineTypes.split(",").map((v: any) => (
@@ -421,7 +421,7 @@ export default function Dashboard() {
                           ))}
                         </div>
                       </td>
-                      <td className="py-2.5 text-right font-semibold text-slate-200">{item.childrenVaccinated.toLocaleString()}</td>
+                      <td className="py-2.5 text-right font-semibold text-foreground">{item.childrenVaccinated.toLocaleString()}</td>
                     </tr>
                   ))}
                 </tbody>

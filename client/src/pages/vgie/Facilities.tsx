@@ -40,7 +40,7 @@ const typeColors: Record<string, string> = {
   "Zonal Health Centre":             "text-emerald-400 bg-emerald-500/10 border-emerald-500/20",
   "Urban Health Centre":             "text-teal-400 bg-teal-500/10 border-teal-500/20",
   "Rural Health Centre":             "text-amber-400 bg-amber-500/10 border-amber-500/20",
-  "Health Post":                     "text-slate-400 bg-slate-500/10 border-slate-500/20",
+  "Health Post":                     "text-muted-foreground bg-slate-500/10 border-border/20",
   "Border Health Post":              "text-orange-400 bg-orange-500/10 border-orange-500/20",
 };
 
@@ -48,7 +48,7 @@ const ownershipColors: Record<string, string> = {
   GRZ:     "text-emerald-400 bg-emerald-500/10 border-emerald-500/20",
   NGO:     "text-blue-400 bg-blue-500/10 border-blue-500/20",
   Private: "text-amber-400 bg-amber-500/10 border-amber-500/20",
-  Military:"text-slate-400 bg-slate-500/10 border-slate-500/20",
+  Military:"text-muted-foreground bg-slate-500/10 border-border/20",
   Police:  "text-orange-400 bg-orange-500/10 border-orange-500/20",
 };
 
@@ -67,7 +67,7 @@ function Th({
 }) {
   return (
     <th
-      className={`px-3 py-2.5 text-left text-[11px] font-medium text-slate-400 uppercase tracking-wide cursor-pointer select-none whitespace-nowrap hover:text-slate-200 transition-colors ${className}`}
+      className={`px-3 py-2.5 text-left text-[11px] font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none whitespace-nowrap hover:text-foreground transition-colors ${className}`}
       onClick={() => onSort(col)}
     >
       <span className="flex items-center gap-1">
@@ -154,7 +154,7 @@ export default function Facilities() {
       <div className="px-6 pt-5 pb-3 shrink-0 space-y-3">
         <div>
           <h2 className="text-lg font-semibold text-slate-100">Health Facilities</h2>
-          <p className="text-sm text-slate-500">
+          <p className="text-sm text-muted-foreground">
             {isLoading ? "Loading…" : `${filtered.length.toLocaleString()} of ${facilities.length.toLocaleString()} facilities · ${totalServed} served settlements · ${totalPop.toLocaleString()} catchment pop.`}
           </p>
         </div>
@@ -162,38 +162,38 @@ export default function Facilities() {
         {/* Filters */}
         <div className="flex flex-wrap gap-2 items-center">
           <div className="relative">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-500" />
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
             <Input
               placeholder="Search name, district, province, HMIS…"
               value={search}
               onChange={e => handleFilterChange(() => setSearch(e.target.value))}
-              className="pl-8 h-8 text-sm bg-slate-900 border-slate-700 text-slate-200 placeholder:text-slate-600 w-72"
+              className="pl-8 h-8 text-sm bg-background border-border text-foreground placeholder:text-muted-foreground w-72"
             />
           </div>
           <Select value={province} onValueChange={v => handleFilterChange(() => setProvince(v))}>
-            <SelectTrigger className="w-40 h-8 text-sm bg-slate-900 border-slate-700 text-slate-300">
+            <SelectTrigger className="w-40 h-8 text-sm bg-background border-border text-foreground">
               <SelectValue placeholder="Province" />
             </SelectTrigger>
-            <SelectContent className="bg-slate-900 border-slate-700 max-h-60">
-              <SelectItem value="all" className="text-slate-300">All provinces</SelectItem>
+            <SelectContent className="bg-background border-border max-h-60">
+              <SelectItem value="all" className="text-foreground">All provinces</SelectItem>
               {provinces.map(p => (
-                <SelectItem key={p} value={p} className="text-slate-300">{p}</SelectItem>
+                <SelectItem key={p} value={p} className="text-foreground">{p}</SelectItem>
               ))}
             </SelectContent>
           </Select>
           <Select value={facilityType} onValueChange={v => handleFilterChange(() => setFacilityType(v))}>
-            <SelectTrigger className="w-44 h-8 text-sm bg-slate-900 border-slate-700 text-slate-300">
+            <SelectTrigger className="w-44 h-8 text-sm bg-background border-border text-foreground">
               <SelectValue placeholder="Type" />
             </SelectTrigger>
-            <SelectContent className="bg-slate-900 border-slate-700 max-h-60">
-              <SelectItem value="all" className="text-slate-300">All types</SelectItem>
+            <SelectContent className="bg-background border-border max-h-60">
+              <SelectItem value="all" className="text-foreground">All types</SelectItem>
               {Object.keys(typeColors).map(t => (
-                <SelectItem key={t} value={t} className="text-slate-300">{t}</SelectItem>
+                <SelectItem key={t} value={t} className="text-foreground">{t}</SelectItem>
               ))}
             </SelectContent>
           </Select>
           {(search || province !== "all" || facilityType !== "all") && (
-            <Button variant="ghost" size="sm" className="h-8 text-xs text-slate-500 hover:text-slate-300"
+            <Button variant="ghost" size="sm" className="h-8 text-xs text-muted-foreground hover:text-foreground"
               onClick={() => handleFilterChange(() => { setSearch(""); setProvince("all"); setFacilityType("all"); })}>
               Clear
             </Button>
@@ -203,16 +203,16 @@ export default function Facilities() {
 
       {/* Table + pagination wrapper */}
       <div className="flex-1 overflow-auto min-h-0 px-6 pb-4">
-        <div className="rounded-lg border border-slate-800 overflow-hidden">
+        <div className="rounded-lg border border-border overflow-hidden">
           <table className="w-full text-sm border-collapse">
-            <thead className="sticky top-0 z-10 bg-slate-900 border-b border-slate-800">
+            <thead className="sticky top-0 z-10 bg-background border-b border-border">
               <tr>
                 <Th label="Name"        col="name"                sortKey={sortKey} sortDir={sortDir} onSort={handleSort} className="min-w-[220px]" />
                 <Th label="District"    col="district"            sortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
                 <Th label="Province"    col="province"            sortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
                 <Th label="Type"        col="type"                sortKey={sortKey} sortDir={sortDir} onSort={handleSort} className="min-w-[160px]" />
                 <Th label="Ownership"   col="ownership"           sortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
-                <th className="px-3 py-2.5 text-left text-[11px] font-medium text-slate-400 uppercase tracking-wide whitespace-nowrap">
+                <th className="px-3 py-2.5 text-left text-[11px] font-medium text-muted-foreground uppercase tracking-wide whitespace-nowrap">
                   HMIS Code
                 </th>
                 <Th label="Catchment"   col="catchmentRadiusKm"   sortKey={sortKey} sortDir={sortDir} onSort={handleSort} className="text-right" />
@@ -227,25 +227,25 @@ export default function Facilities() {
                     <tr key={i} className="bg-slate-950">
                       {Array.from({ length: 10 }).map((__, j) => (
                         <td key={j} className="px-3 py-2.5">
-                          <Skeleton className="h-4 bg-slate-800 rounded" style={{ width: j === 0 ? 180 : j === 3 ? 120 : 60 }} />
+                          <Skeleton className="h-4 bg-muted rounded" style={{ width: j === 0 ? 180 : j === 3 ? 120 : 60 }} />
                         </td>
                       ))}
                     </tr>
                   ))
                 : pageRows.map((f, idx) => {
-                    const typeColor  = typeColors[f.type]           ?? "text-slate-400 bg-slate-500/10 border-slate-500/20";
-                    const ownColor   = ownershipColors[f.ownership ?? ""] ?? "text-slate-400 bg-slate-500/10 border-slate-500/20";
-                    const rowBg      = idx % 2 === 0 ? "bg-slate-950" : "bg-slate-900/30";
+                    const typeColor  = typeColors[f.type]           ?? "text-muted-foreground bg-slate-500/10 border-border/20";
+                    const ownColor   = ownershipColors[f.ownership ?? ""] ?? "text-muted-foreground bg-slate-500/10 border-border/20";
+                    const rowBg      = idx % 2 === 0 ? "bg-slate-950" : "bg-background";
                     return (
-                      <tr key={f.id} className={`${rowBg} hover:bg-slate-800/50 transition-colors group`}>
+                      <tr key={f.id} className={`${rowBg} hover:bg-muted transition-colors group`}>
                         {/* Name */}
                         <td className="px-3 py-2.5">
-                          <span className="text-slate-200 font-medium text-xs leading-snug line-clamp-2">{f.name}</span>
+                          <span className="text-foreground font-medium text-xs leading-snug line-clamp-2">{f.name}</span>
                         </td>
                         {/* District */}
-                        <td className="px-3 py-2.5 text-xs text-slate-400 whitespace-nowrap">{f.district}</td>
+                        <td className="px-3 py-2.5 text-xs text-muted-foreground whitespace-nowrap">{f.district}</td>
                         {/* Province */}
-                        <td className="px-3 py-2.5 text-xs text-slate-400 whitespace-nowrap">{f.province ?? "—"}</td>
+                        <td className="px-3 py-2.5 text-xs text-muted-foreground whitespace-nowrap">{f.province ?? "—"}</td>
                         {/* Type */}
                         <td className="px-3 py-2.5">
                           <Badge className={`text-[10px] px-1.5 py-0 border whitespace-nowrap ${typeColor}`}>{f.type}</Badge>
@@ -254,27 +254,27 @@ export default function Facilities() {
                         <td className="px-3 py-2.5">
                           {f.ownership
                             ? <Badge className={`text-[10px] px-1.5 py-0 border ${ownColor}`}>{f.ownership}</Badge>
-                            : <span className="text-slate-600 text-xs">—</span>}
+                            : <span className="text-muted-foreground text-xs">—</span>}
                         </td>
                         {/* HMIS */}
                         <td className="px-3 py-2.5">
                           {f.hmisCode
-                            ? <span className="text-[11px] text-slate-500 font-mono flex items-center gap-1">
+                            ? <span className="text-[11px] text-muted-foreground font-mono flex items-center gap-1">
                                 <Building2 className="w-2.5 h-2.5 shrink-0" />{f.hmisCode}
                               </span>
-                            : <span className="text-slate-600 text-xs">—</span>}
+                            : <span className="text-muted-foreground text-xs">—</span>}
                         </td>
                         {/* Catchment radius */}
-                        <td className="px-3 py-2.5 text-xs text-slate-400 text-right whitespace-nowrap">
+                        <td className="px-3 py-2.5 text-xs text-muted-foreground text-right whitespace-nowrap">
                           {f.catchmentRadiusKm} km
                         </td>
                         {/* Population */}
-                        <td className="px-3 py-2.5 text-xs text-slate-400 text-right whitespace-nowrap">
+                        <td className="px-3 py-2.5 text-xs text-muted-foreground text-right whitespace-nowrap">
                           {f.catchmentPopulation != null ? f.catchmentPopulation.toLocaleString() : "—"}
                         </td>
                         {/* Served */}
                         <td className="px-3 py-2.5 text-right">
-                          <span className={`text-xs font-medium ${f.servedSettlementsCount > 0 ? "text-emerald-400" : "text-slate-600"}`}>
+                          <span className={`text-xs font-medium ${f.servedSettlementsCount > 0 ? "text-emerald-400" : "text-muted-foreground"}`}>
                             {f.servedSettlementsCount}
                           </span>
                         </td>
@@ -293,7 +293,7 @@ export default function Facilities() {
           </table>
 
           {!isLoading && pageRows.length === 0 && (
-            <div className="flex flex-col items-center justify-center py-16 text-slate-600">
+            <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
               <Hospital className="w-8 h-8 mb-2" />
               <p className="text-sm">No facilities match your filters</p>
             </div>
@@ -303,32 +303,32 @@ export default function Facilities() {
 
       {/* Pagination footer */}
       {!isLoading && sorted.length > 0 && (
-        <div className="shrink-0 px-6 pb-4 flex items-center justify-between gap-4 text-xs text-slate-500">
+        <div className="shrink-0 px-6 pb-4 flex items-center justify-between gap-4 text-xs text-muted-foreground">
           {/* Left: rows per page + count */}
           <div className="flex items-center gap-3">
             <span>Rows per page</span>
             <Select value={String(pageSize)} onValueChange={v => { setPageSize(Number(v)); setPage(1); }}>
-              <SelectTrigger className="w-16 h-7 text-xs bg-slate-900 border-slate-700 text-slate-300">
+              <SelectTrigger className="w-16 h-7 text-xs bg-background border-border text-foreground">
                 <SelectValue />
               </SelectTrigger>
-              <SelectContent className="bg-slate-900 border-slate-700">
+              <SelectContent className="bg-background border-border">
                 {PAGE_SIZE_OPTIONS.map(n => (
-                  <SelectItem key={n} value={String(n)} className="text-slate-300 text-xs">{n}</SelectItem>
+                  <SelectItem key={n} value={String(n)} className="text-foreground text-xs">{n}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
-            <span className="text-slate-600">
+            <span className="text-muted-foreground">
               {pageStart + 1}–{Math.min(pageStart + pageSize, sorted.length)} of {sorted.length.toLocaleString()}
             </span>
           </div>
 
           {/* Right: page navigation */}
           <div className="flex items-center gap-1">
-            <Button variant="ghost" size="icon" className="w-7 h-7 text-slate-400 hover:text-slate-100 hover:bg-slate-800 disabled:opacity-30"
+            <Button variant="ghost" size="icon" className="w-7 h-7 text-muted-foreground hover:text-slate-100 hover:bg-muted disabled:opacity-30"
               disabled={safePage === 1} onClick={() => setPage(1)}>
               <ChevronsLeft className="w-3.5 h-3.5" />
             </Button>
-            <Button variant="ghost" size="icon" className="w-7 h-7 text-slate-400 hover:text-slate-100 hover:bg-slate-800 disabled:opacity-30"
+            <Button variant="ghost" size="icon" className="w-7 h-7 text-muted-foreground hover:text-slate-100 hover:bg-muted disabled:opacity-30"
               disabled={safePage === 1} onClick={() => setPage(p => Math.max(1, p - 1))}>
               <ChevronLeft className="w-3.5 h-3.5" />
             </Button>
@@ -346,24 +346,24 @@ export default function Facilities() {
               if (totalPages > 1) pages.push(totalPages);
               return pages.map((p, i) =>
                 p === "…"
-                  ? <span key={`e${i}`} className="px-1 text-slate-600">…</span>
+                  ? <span key={`e${i}`} className="px-1 text-muted-foreground">…</span>
                   : <button key={p}
                       onClick={() => setPage(p as number)}
                       className={`w-7 h-7 rounded text-xs font-medium transition-colors ${
                         p === safePage
                           ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
-                          : "text-slate-400 hover:text-slate-100 hover:bg-slate-800"
+                          : "text-muted-foreground hover:text-slate-100 hover:bg-muted"
                       }`}>
                       {p}
                     </button>
               );
             })()}
 
-            <Button variant="ghost" size="icon" className="w-7 h-7 text-slate-400 hover:text-slate-100 hover:bg-slate-800 disabled:opacity-30"
+            <Button variant="ghost" size="icon" className="w-7 h-7 text-muted-foreground hover:text-slate-100 hover:bg-muted disabled:opacity-30"
               disabled={safePage === totalPages} onClick={() => setPage(p => Math.min(totalPages, p + 1))}>
               <ChevronRight className="w-3.5 h-3.5" />
             </Button>
-            <Button variant="ghost" size="icon" className="w-7 h-7 text-slate-400 hover:text-slate-100 hover:bg-slate-800 disabled:opacity-30"
+            <Button variant="ghost" size="icon" className="w-7 h-7 text-muted-foreground hover:text-slate-100 hover:bg-muted disabled:opacity-30"
               disabled={safePage === totalPages} onClick={() => setPage(totalPages)}>
               <ChevronsRight className="w-3.5 h-3.5" />
             </Button>

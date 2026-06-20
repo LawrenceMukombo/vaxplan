@@ -99,7 +99,9 @@ export function useGetFacility(id?: string | number) {
 
 // Recommendations
 export function useGetRecommendations(params?: Record<string, string>) {
-  const qs = params ? "?" + new URLSearchParams(params).toString() : "";
+  // Filter out undefined keys so URLSearchParams doesn't stringify them as "undefined"
+  const cleanParams = params ? Object.fromEntries(Object.entries(params).filter(([_, v]) => v !== undefined)) : {};
+  const qs = Object.keys(cleanParams).length ? "?" + new URLSearchParams(cleanParams as any).toString() : "";
   return useQuery<any[]>({
     queryKey: ["/api/vgie/recommendations", params],
     queryFn: async () => {

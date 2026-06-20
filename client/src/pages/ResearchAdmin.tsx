@@ -854,10 +854,10 @@ export default function ResearchAdmin() {
   };
 
   return (
-    <div className="bg-slate-50 dark:bg-slate-950 min-h-screen p-6 max-w-7xl mx-auto space-y-6">
+    <div className="bg-muted dark:bg-background min-h-screen p-6 max-w-7xl mx-auto space-y-6">
       <div className="flex justify-between items-center flex-wrap gap-4 border-b pb-4">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white flex items-center gap-2">
+          <h1 className="text-2xl font-bold tracking-tight text-foreground dark:text-white flex items-center gap-2">
             <BookOpen className="h-6 w-6 text-primary" /> VaxPlan Research Admin Console
           </h1>
           <p className="text-xs text-muted-foreground mt-1">
@@ -867,7 +867,7 @@ export default function ResearchAdmin() {
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-        <TabsList className="bg-slate-200 dark:bg-slate-900 p-1 flex gap-2 w-max max-w-full overflow-x-auto">
+        <TabsList className="bg-slate-200 dark:bg-background p-1 flex gap-2 w-max max-w-full overflow-x-auto">
           <TabsTrigger value="overview" className="text-xs">Analytics Overview</TabsTrigger>
           <TabsTrigger value="documents" className="text-xs">Research Library ({documents.length})</TabsTrigger>
           <TabsTrigger value="pilots" className="text-xs">Pilots Registry ({pilots.length})</TabsTrigger>
@@ -886,9 +886,9 @@ export default function ResearchAdmin() {
         {/* ─── TAB 1: ANALYTICS OVERVIEW ────────────────────────────────────────── */}
         <TabsContent value="overview" className="space-y-6">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <Card className="bg-white dark:bg-slate-900 border">
+            <Card className="bg-white dark:bg-background border">
               <CardHeader className="p-4 flex flex-row items-center justify-between pb-2 space-y-0">
-                <CardTitle className="text-xs font-semibold text-slate-400 uppercase">Documents</CardTitle>
+                <CardTitle className="text-xs font-semibold text-muted-foreground uppercase">Documents</CardTitle>
                 <FileText className="h-4 w-4 text-primary" />
               </CardHeader>
               <CardContent className="p-4 pt-0">
@@ -900,9 +900,9 @@ export default function ResearchAdmin() {
               </CardContent>
             </Card>
 
-            <Card className="bg-white dark:bg-slate-900 border">
+            <Card className="bg-white dark:bg-background border">
               <CardHeader className="p-4 flex flex-row items-center justify-between pb-2 space-y-0">
-                <CardTitle className="text-xs font-semibold text-slate-400 uppercase">Pilots</CardTitle>
+                <CardTitle className="text-xs font-semibold text-muted-foreground uppercase">Pilots</CardTitle>
                 <Activity className="h-4 w-4 text-amber-500" />
               </CardHeader>
               <CardContent className="p-4 pt-0">
@@ -914,9 +914,9 @@ export default function ResearchAdmin() {
               </CardContent>
             </Card>
 
-            <Card className="bg-white dark:bg-slate-900 border">
+            <Card className="bg-white dark:bg-background border">
               <CardHeader className="p-4 flex flex-row items-center justify-between pb-2 space-y-0">
-                <CardTitle className="text-xs font-semibold text-slate-400 uppercase">Total Downloads</CardTitle>
+                <CardTitle className="text-xs font-semibold text-muted-foreground uppercase">Total Downloads</CardTitle>
                 <Download className="h-4 w-4 text-indigo-500" />
               </CardHeader>
               <CardContent className="p-4 pt-0">
@@ -925,9 +925,9 @@ export default function ResearchAdmin() {
               </CardContent>
             </Card>
 
-            <Card className="bg-white dark:bg-slate-900 border">
+            <Card className="bg-white dark:bg-background border">
               <CardHeader className="p-4 flex flex-row items-center justify-between pb-2 space-y-0">
-                <CardTitle className="text-xs font-semibold text-slate-400 uppercase">Pending Inquiries</CardTitle>
+                <CardTitle className="text-xs font-semibold text-muted-foreground uppercase">Pending Inquiries</CardTitle>
                 <TrendingUp className="h-4 w-4 text-rose-500" />
               </CardHeader>
               <CardContent className="p-4 pt-0">
@@ -939,17 +939,17 @@ export default function ResearchAdmin() {
 
           <div className="grid md:grid-cols-2 gap-6">
             {/* Top downloaded docs */}
-            <Card className="bg-white dark:bg-slate-900 border">
+            <Card className="bg-white dark:bg-background border">
               <CardHeader>
-                <CardTitle className="text-sm font-bold uppercase text-slate-400">Top Publications</CardTitle>
+                <CardTitle className="text-sm font-bold uppercase text-muted-foreground">Top Publications</CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="space-y-3">
                   {(analytics?.topDocuments || []).map((doc: any, i: number) => (
                     <div key={i} className="flex justify-between items-center border-b pb-2 text-xs">
-                      <span className="truncate max-w-[300px] font-semibold text-slate-800 dark:text-slate-200">{doc.title}</span>
+                      <span className="truncate max-w-[300px] font-semibold text-foreground dark:text-foreground">{doc.title}</span>
                       <Badge variant="secondary" className="gap-1 font-mono text-[10px]">
-                        <Download className="h-3 w-3 text-slate-400" /> {doc.downloadCount}
+                        <Download className="h-3 w-3 text-muted-foreground" /> {doc.downloadCount}
                       </Badge>
                     </div>
                   ))}
@@ -958,11 +958,11 @@ export default function ResearchAdmin() {
             </Card>
 
             {/* General help card */}
-            <Card className="bg-white dark:bg-slate-900 border">
+            <Card className="bg-white dark:bg-background border">
               <CardHeader>
-                <CardTitle className="text-sm font-bold uppercase text-slate-400">Hub Actions Guidelines</CardTitle>
+                <CardTitle className="text-sm font-bold uppercase text-muted-foreground">Hub Actions Guidelines</CardTitle>
               </CardHeader>
-              <CardContent className="text-xs space-y-2 leading-relaxed text-slate-600 dark:text-slate-400">
+              <CardContent className="text-xs space-y-2 leading-relaxed text-muted-foreground dark:text-muted-foreground">
                 <p>
                   <strong>Role Scoping:</strong> All uploads and edits made in this console automatically apply to the active tenant domain. Document listings default to Draft/Internal visibility until published.
                 </p>
@@ -977,16 +977,16 @@ export default function ResearchAdmin() {
         {/* ─── TAB 2: DOCUMENTS LIBRARY ─────────────────────────────────────────── */}
         <TabsContent value="documents" className="space-y-4">
           <div className="flex justify-between items-center">
-            <h2 className="text-sm font-semibold uppercase text-slate-400">Publications Registry</h2>
+            <h2 className="text-sm font-semibold uppercase text-muted-foreground">Publications Registry</h2>
             <Button size="sm" onClick={openDocCreate} className="gap-1.5 text-xs font-semibold">
               <Plus className="h-4 w-4" /> Upload Document
             </Button>
           </div>
 
-          <Card className="bg-white dark:bg-slate-900 border overflow-x-auto">
+          <Card className="bg-white dark:bg-background border overflow-x-auto">
             <table className="w-full text-xs">
-              <thead className="bg-slate-50 dark:bg-slate-800 border-b">
-                <tr className="text-left font-bold text-slate-600">
+              <thead className="bg-muted dark:bg-muted border-b">
+                <tr className="text-left font-bold text-muted-foreground">
                   <th className="p-3">Title</th>
                   <th className="p-3">Type</th>
                   <th className="p-3">Status</th>
@@ -998,12 +998,12 @@ export default function ResearchAdmin() {
               </thead>
               <tbody>
                 {documents.map((doc) => (
-                  <tr key={doc.id} className="border-b hover:bg-slate-50 dark:hover:bg-slate-800/40">
-                    <td className="p-3 font-semibold text-slate-800 dark:text-slate-200">
+                  <tr key={doc.id} className="border-b hover:bg-muted dark:hover:bg-muted">
+                    <td className="p-3 font-semibold text-foreground dark:text-foreground">
                       <div className="truncate max-w-[280px]">{doc.title}</div>
-                      <span className="text-[10px] text-slate-400 block font-normal">v{doc.version} · {doc.country}</span>
+                      <span className="text-[10px] text-muted-foreground block font-normal">v{doc.version} · {doc.country}</span>
                     </td>
-                    <td className="p-3 uppercase text-[10px] font-semibold text-slate-500">{doc.documentType}</td>
+                    <td className="p-3 uppercase text-[10px] font-semibold text-muted-foreground">{doc.documentType}</td>
                     <td className="p-3">
                       <Badge className={
                         doc.status === "Published" ? "bg-emerald-500/10 text-emerald-700" : "bg-amber-500/10 text-amber-700"
@@ -1015,9 +1015,9 @@ export default function ResearchAdmin() {
                       <Badge variant="outline">{doc.visibility}</Badge>
                     </td>
                     <td className="p-3 font-mono">{doc.downloadCount}</td>
-                    <td className="p-3 text-slate-400">{new Date(doc.updatedAt).toISOString().split("T")[0]}</td>
+                    <td className="p-3 text-muted-foreground">{new Date(doc.updatedAt).toISOString().split("T")[0]}</td>
                     <td className="p-3 text-right space-x-1 whitespace-nowrap">
-                      <Button size="icon" variant="ghost" onClick={() => openDocEdit(doc)} className="h-8 w-8 text-slate-400 hover:text-slate-600">
+                      <Button size="icon" variant="ghost" onClick={() => openDocEdit(doc)} className="h-8 w-8 text-muted-foreground hover:text-muted-foreground">
                         <Edit className="h-4 w-4" />
                       </Button>
                       {/* Original delete button commented out to satisfy rule 1
@@ -1046,7 +1046,7 @@ export default function ResearchAdmin() {
         {/* ─── TAB 3: PILOTS REGISTRY ───────────────────────────────────────────── */}
         <TabsContent value="pilots" className="space-y-4">
           <div className="flex justify-between items-center">
-            <h2 className="text-sm font-semibold uppercase text-slate-400">VaxPlan Active/Completed Pilots</h2>
+            <h2 className="text-sm font-semibold uppercase text-muted-foreground">VaxPlan Active/Completed Pilots</h2>
             <Button size="sm" onClick={openPilotCreate} className="gap-1.5 text-xs font-semibold">
               <Plus className="h-4 w-4" /> Add Pilot Activity
             </Button>
@@ -1054,20 +1054,20 @@ export default function ResearchAdmin() {
 
           <div className="grid md:grid-cols-2 gap-6">
             {pilots.map((p) => (
-              <Card key={p.id} className="bg-white dark:bg-slate-900 border flex flex-col justify-between">
+              <Card key={p.id} className="bg-white dark:bg-background border flex flex-col justify-between">
                 <CardHeader className="p-4 pb-2">
                   <div className="flex justify-between items-center mb-1">
                     <Badge className="text-[10px] font-bold uppercase">{p.status}</Badge>
-                    <span className="text-xs text-slate-400 font-medium">{p.startDate}</span>
+                    <span className="text-xs text-muted-foreground font-medium">{p.startDate}</span>
                   </div>
-                  <CardTitle className="text-sm font-bold text-slate-900 dark:text-white leading-tight">
+                  <CardTitle className="text-sm font-bold text-foreground dark:text-white leading-tight">
                     {p.title}
                   </CardTitle>
-                  <CardDescription className="text-xs text-slate-400 flex items-center gap-1 mt-1">
+                  <CardDescription className="text-xs text-muted-foreground flex items-center gap-1 mt-1">
                     <MapPin className="h-3 w-3" /> {p.district}, {p.province}, {p.country}
                   </CardDescription>
                 </CardHeader>
-                <CardContent className="p-4 pt-0 text-xs text-slate-600 dark:text-slate-400 flex-1 leading-relaxed">
+                <CardContent className="p-4 pt-0 text-xs text-muted-foreground dark:text-muted-foreground flex-1 leading-relaxed">
                   <p className="line-clamp-3">{p.summary}</p>
                 </CardContent>
                 <CardFooter className="p-4 border-t flex justify-between items-center">
@@ -1100,7 +1100,7 @@ export default function ResearchAdmin() {
         {/* ─── TAB 4: FIELD LESSONS ─────────────────────────────────────────────── */}
         <TabsContent value="lessons" className="space-y-4">
           <div className="flex justify-between items-center">
-            <h2 className="text-sm font-semibold uppercase text-slate-400">Deployment Learnings Log</h2>
+            <h2 className="text-sm font-semibold uppercase text-muted-foreground">Deployment Learnings Log</h2>
             <Button size="sm" onClick={openLessonCreate} className="gap-1.5 text-xs font-semibold">
               <Plus className="h-4 w-4" /> Record New Lesson
             </Button>
@@ -1108,18 +1108,18 @@ export default function ResearchAdmin() {
 
           <div className="grid md:grid-cols-2 gap-6">
             {lessons.map((lesson) => (
-              <Card key={lesson.id} className="bg-white dark:bg-slate-900 border flex flex-col justify-between">
+              <Card key={lesson.id} className="bg-white dark:bg-background border flex flex-col justify-between">
                 <CardHeader className="p-4 pb-2">
                   <div className="flex justify-between items-center mb-1">
                     <Badge variant="outline" className="text-[10px] text-primary border-primary/20 bg-primary/5 uppercase font-bold">
                       {lesson.category}
                     </Badge>
                   </div>
-                  <CardTitle className="text-sm font-bold text-slate-900 dark:text-white leading-snug">
+                  <CardTitle className="text-sm font-bold text-foreground dark:text-white leading-snug">
                     {lesson.title}
                   </CardTitle>
                 </CardHeader>
-                <CardContent className="p-4 pt-0 text-xs text-slate-700 dark:text-slate-300 flex-1 space-y-2">
+                <CardContent className="p-4 pt-0 text-xs text-foreground dark:text-foreground flex-1 space-y-2">
                   <p className="line-clamp-2"><strong>Context:</strong> {lesson.context}</p>
                   <p className="line-clamp-2"><strong>Recommendation:</strong> {lesson.recommendation}</p>
                 </CardContent>
@@ -1150,16 +1150,16 @@ export default function ResearchAdmin() {
         {/* ─── TAB 5: DOWNLOAD ASSETS ───────────────────────────────────────────── */}
         <TabsContent value="assets" className="space-y-4">
           <div className="flex justify-between items-center">
-            <h2 className="text-sm font-semibold uppercase text-slate-400">Download Centre Assets</h2>
+            <h2 className="text-sm font-semibold uppercase text-muted-foreground">Download Centre Assets</h2>
             <Button size="sm" onClick={openAssetCreate} className="gap-1.5 text-xs font-semibold">
               <Plus className="h-4 w-4" /> Add Asset
             </Button>
           </div>
 
-          <Card className="bg-white dark:bg-slate-900 border overflow-x-auto">
+          <Card className="bg-white dark:bg-background border overflow-x-auto">
             <table className="w-full text-xs">
-              <thead className="bg-slate-50 dark:bg-slate-800 border-b">
-                <tr className="text-left font-bold text-slate-600">
+              <thead className="bg-muted dark:bg-muted border-b">
+                <tr className="text-left font-bold text-muted-foreground">
                   <th className="p-3">Title</th>
                   <th className="p-3">Category</th>
                   <th className="p-3">Audience</th>
@@ -1170,14 +1170,14 @@ export default function ResearchAdmin() {
               </thead>
               <tbody>
                 {assets.map((asset) => (
-                  <tr key={asset.id} className="border-b hover:bg-slate-50 dark:hover:bg-slate-800/40">
-                    <td className="p-3 font-semibold text-slate-800 dark:text-slate-200">{asset.title}</td>
+                  <tr key={asset.id} className="border-b hover:bg-muted dark:hover:bg-muted">
+                    <td className="p-3 font-semibold text-foreground dark:text-foreground">{asset.title}</td>
                     <td className="p-3">{asset.category}</td>
                     <td className="p-3 font-medium">{asset.recommendedAudience}</td>
                     <td className="p-3 font-mono">{asset.downloadCount}</td>
                     <td className="p-3 font-medium">v{asset.version}</td>
                     <td className="p-3 text-right space-x-1 whitespace-nowrap">
-                      <Button size="icon" variant="ghost" onClick={() => openAssetEdit(asset)} className="h-8 w-8 text-slate-400 hover:text-slate-600">
+                      <Button size="icon" variant="ghost" onClick={() => openAssetEdit(asset)} className="h-8 w-8 text-muted-foreground hover:text-muted-foreground">
                         <Edit className="h-4 w-4" />
                       </Button>
                       <Button
@@ -1202,7 +1202,7 @@ export default function ResearchAdmin() {
 
         {/* ─── TAB 6: INTEREST SUBMISSIONS ──────────────────────────────────────── */}
         <TabsContent value="submissions" className="space-y-4">
-          <h2 className="text-sm font-semibold uppercase text-slate-400">Collaboration & Inquiries Inbox</h2>
+          <h2 className="text-sm font-semibold uppercase text-muted-foreground">Collaboration & Inquiries Inbox</h2>
 
           {submissions.length === 0 ? (
             <div className="text-center py-12 text-muted-foreground text-sm border border-dashed rounded-xl">
@@ -1211,30 +1211,30 @@ export default function ResearchAdmin() {
           ) : (
             <div className="grid md:grid-cols-2 gap-6">
               {submissions.map((sub) => (
-                <Card key={sub.id} className="bg-white dark:bg-slate-900 border flex flex-col justify-between">
+                <Card key={sub.id} className="bg-white dark:bg-background border flex flex-col justify-between">
                   <CardHeader className="p-4 pb-2">
                     <div className="flex justify-between items-center mb-1">
                       <Badge variant={sub.status === "reviewed" ? "secondary" : "destructive"}>
                         {sub.status}
                       </Badge>
-                      <span className="text-[10px] text-slate-400 font-medium">
+                      <span className="text-[10px] text-muted-foreground font-medium">
                         {new Date(sub.createdAt).toISOString().split("T")[0]}
                       </span>
                     </div>
-                    <CardTitle className="text-sm font-bold text-slate-900 dark:text-white leading-tight">
+                    <CardTitle className="text-sm font-bold text-foreground dark:text-white leading-tight">
                       {sub.fullName}
                     </CardTitle>
-                    <CardDescription className="text-xs text-slate-400 font-medium">
+                    <CardDescription className="text-xs text-muted-foreground font-medium">
                       {sub.role} at {sub.organization} ({sub.country})
                     </CardDescription>
                   </CardHeader>
-                  <CardContent className="p-4 text-xs text-slate-700 dark:text-slate-300 flex-1 leading-relaxed border-t pt-2 mt-2">
+                  <CardContent className="p-4 text-xs text-foreground dark:text-foreground flex-1 leading-relaxed border-t pt-2 mt-2">
                     <div>
-                      <span className="text-[9px] uppercase font-bold text-slate-400">AREA OF INTEREST</span>
+                      <span className="text-[9px] uppercase font-bold text-muted-foreground">AREA OF INTEREST</span>
                       <p className="font-semibold text-primary">{sub.areaOfInterest}</p>
                     </div>
                     <div className="mt-2">
-                      <span className="text-[9px] uppercase font-bold text-slate-400">MESSAGE</span>
+                      <span className="text-[9px] uppercase font-bold text-muted-foreground">MESSAGE</span>
                       <p className="mt-0.5 whitespace-pre-wrap">{sub.message || "No message context provided."}</p>
                     </div>
                   </CardContent>
@@ -1257,7 +1257,7 @@ export default function ResearchAdmin() {
 
       {/* ─── DIALOG: DOCUMENT FORM ────────────────────────────────────────────── */}
       <Dialog open={docDialog} onOpenChange={setDocDialog}>
-        <DialogContent className="max-w-xl max-h-[85vh] overflow-y-auto bg-white dark:bg-slate-900">
+        <DialogContent className="max-w-xl max-h-[85vh] overflow-y-auto bg-white dark:bg-background">
           <DialogHeader>
             <DialogTitle>{editingDoc ? "Edit Document Metadata" : "Upload & Register Document"}</DialogTitle>
             <DialogDescription className="text-xs">
@@ -1372,7 +1372,7 @@ export default function ResearchAdmin() {
             </div>
 
             {/* File Upload Section */}
-            <div className="border p-3 rounded-lg space-y-2 bg-slate-50 dark:bg-slate-900/50">
+            <div className="border p-3 rounded-lg space-y-2 bg-muted dark:bg-background">
               <Label className="font-bold block">Document File Attachment</Label>
               {uploadedFile ? (
                 <div className="space-y-2">
@@ -1389,7 +1389,7 @@ export default function ResearchAdmin() {
                       disabled={uploading}
                       className="text-xs flex-1"
                     />
-                    {uploading && <RefreshCw className="h-4 w-4 animate-spin text-slate-400" />}
+                    {uploading && <RefreshCw className="h-4 w-4 animate-spin text-muted-foreground" />}
                   </div>
                 </div>
               ) : (
@@ -1401,7 +1401,7 @@ export default function ResearchAdmin() {
                     disabled={uploading}
                     className="text-xs w-full"
                   />
-                  {uploading && <RefreshCw className="h-4 w-4 animate-spin text-slate-400" />}
+                  {uploading && <RefreshCw className="h-4 w-4 animate-spin text-muted-foreground" />}
                 </div>
               )}
             </div>
@@ -1415,7 +1415,7 @@ export default function ResearchAdmin() {
 
       {/* ─── DIALOG: PILOT FORM ───────────────────────────────────────────────── */}
       <Dialog open={pilotDialog} onOpenChange={setPilotDialog}>
-        <DialogContent className="max-w-xl max-h-[85vh] overflow-y-auto bg-white dark:bg-slate-900">
+        <DialogContent className="max-w-xl max-h-[85vh] overflow-y-auto bg-white dark:bg-background">
           <DialogHeader>
             <DialogTitle>{editingPilot ? "Edit Pilot Activity" : "Create Pilot Activity"}</DialogTitle>
           </DialogHeader>
@@ -1523,7 +1523,7 @@ export default function ResearchAdmin() {
 
       {/* ─── DIALOG: PILOT UPDATE FORM ────────────────────────────────────────── */}
       <Dialog open={pilotUpdateDialog} onOpenChange={setPilotUpdateDialog}>
-        <DialogContent className="max-w-md bg-white dark:bg-slate-900">
+        <DialogContent className="max-w-md bg-white dark:bg-background">
           <DialogHeader>
             <DialogTitle>Add Progress Update Log</DialogTitle>
           </DialogHeader>
@@ -1580,7 +1580,7 @@ export default function ResearchAdmin() {
 
       {/* ─── DIALOG: LESSON FORM ──────────────────────────────────────────────── */}
       <Dialog open={lessonDialog} onOpenChange={setLessonDialog}>
-        <DialogContent className="max-w-xl max-h-[85vh] overflow-y-auto bg-white dark:bg-slate-900">
+        <DialogContent className="max-w-xl max-h-[85vh] overflow-y-auto bg-white dark:bg-background">
           <DialogHeader>
             <DialogTitle>Record Deployment Lesson</DialogTitle>
           </DialogHeader>
@@ -1662,7 +1662,7 @@ export default function ResearchAdmin() {
 
       {/* ─── DIALOG: ASSET FORM ───────────────────────────────────────────────── */}
       <Dialog open={assetDialog} onOpenChange={setAssetDialog}>
-        <DialogContent className="max-w-md bg-white dark:bg-slate-900">
+        <DialogContent className="max-w-md bg-white dark:bg-background">
           <DialogHeader>
             <DialogTitle>Register Downloadable Resource</DialogTitle>
           </DialogHeader>
@@ -1701,7 +1701,7 @@ export default function ResearchAdmin() {
             </div>
 
             {/* File Upload Section */}
-            <div className="border p-3 rounded-lg space-y-2 bg-slate-50 dark:bg-slate-900/50">
+            <div className="border p-3 rounded-lg space-y-2 bg-muted dark:bg-background">
               <Label className="font-bold block">Document File Attachment</Label>
               {uploadedFile ? (
                 <div className="space-y-2">
@@ -1718,7 +1718,7 @@ export default function ResearchAdmin() {
                       disabled={uploading}
                       className="text-xs flex-1"
                     />
-                    {uploading && <RefreshCw className="h-4 w-4 animate-spin text-slate-400" />}
+                    {uploading && <RefreshCw className="h-4 w-4 animate-spin text-muted-foreground" />}
                   </div>
                 </div>
               ) : (
@@ -1730,7 +1730,7 @@ export default function ResearchAdmin() {
                     disabled={uploading}
                     className="text-xs w-full"
                   />
-                  {uploading && <RefreshCw className="h-4 w-4 animate-spin text-slate-400" />}
+                  {uploading && <RefreshCw className="h-4 w-4 animate-spin text-muted-foreground" />}
                 </div>
               )}
             </div>

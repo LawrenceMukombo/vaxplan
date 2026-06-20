@@ -509,7 +509,7 @@ export default function HardToReach() {
             <Plus className="h-4 w-4" />
             <span>Add Community</span>
           </Button>
-          <div className="flex items-center gap-3 bg-muted/60 dark:bg-slate-800/40 border p-2.5 px-4 rounded-xl shadow-xs">
+          <div className="flex items-center gap-3 bg-muted/60 dark:bg-muted border p-2.5 px-4 rounded-xl shadow-xs">
             <Label htmlFor="toggle-htr-only" className="text-xs font-bold text-muted-foreground uppercase cursor-pointer">
               Show Hard-to-Reach Only
             </Label>

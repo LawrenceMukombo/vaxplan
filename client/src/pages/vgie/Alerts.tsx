@@ -97,23 +97,23 @@ export default function Alerts() {
 
       {/* Filters */}
       <Select value={severity} onValueChange={setSeverity}>
-        <SelectTrigger className="w-40 h-8 text-sm bg-slate-900 border-slate-700 text-slate-300">
+        <SelectTrigger className="w-40 h-8 text-sm bg-background border-border text-foreground">
           <SelectValue />
         </SelectTrigger>
-        <SelectContent className="bg-slate-900 border-slate-700">
-          <SelectItem value="all" className="text-slate-300">All severities</SelectItem>
-          <SelectItem value="critical" className="text-slate-300">Critical</SelectItem>
-          <SelectItem value="warning" className="text-slate-300">Warning</SelectItem>
-          <SelectItem value="info" className="text-slate-300">Info</SelectItem>
+        <SelectContent className="bg-background border-border">
+          <SelectItem value="all" className="text-foreground">All severities</SelectItem>
+          <SelectItem value="critical" className="text-foreground">Critical</SelectItem>
+          <SelectItem value="warning" className="text-foreground">Warning</SelectItem>
+          <SelectItem value="info" className="text-foreground">Info</SelectItem>
         </SelectContent>
       </Select>
 
       <div className="space-y-2.5">
         {isLoading
           ? Array.from({ length: 5 }).map((_, i) => (
-              <Card key={i} className="bg-slate-900 border-slate-800">
+              <Card key={i} className="bg-background border-border">
                 <CardContent className="p-4">
-                  <Skeleton className="h-16 bg-slate-800 rounded" />
+                  <Skeleton className="h-16 bg-muted rounded" />
                 </CardContent>
               </Card>
             ))
@@ -123,7 +123,7 @@ export default function Alerts() {
               return (
                 <Card
                   key={alert.id}
-                  className={`bg-slate-900 border-slate-800 border-l-4 ${sc.border} hover:border-slate-700 transition-colors`}
+                  className={`bg-background border-border border-l-4 ${sc.border} hover:border-border transition-colors`}
                 >
                   <CardContent className="p-4">
                     <div className="flex items-start gap-3">
@@ -133,11 +133,11 @@ export default function Alerts() {
                           <Badge className={`text-[10px] px-1.5 py-0 border ${sc.color}`}>
                             {alert.severity}
                           </Badge>
-                          <span className="text-[10px] text-slate-600 uppercase tracking-wide">
+                          <span className="text-[10px] text-muted-foreground uppercase tracking-wide">
                             {alert.alertType.replace(/_/g, " ")}
                           </span>
                         </div>
-                        <p className="text-sm text-slate-300 mt-1.5 leading-relaxed">{alert.message}</p>
+                        <p className="text-sm text-foreground mt-1.5 leading-relaxed">{alert.message}</p>
                         <div className="flex items-center gap-3 mt-2">
                           {alert.settlementName && (
                             <Link href={`/settlements/${alert.settlementId}`}>
@@ -146,7 +146,7 @@ export default function Alerts() {
                               </span>
                             </Link>
                           )}
-                          <span className="text-xs text-slate-600">
+                          <span className="text-xs text-muted-foreground">
                             {formatDistanceToNow(new Date(alert.createdAt), { addSuffix: true })}
                           </span>
                         </div>
@@ -154,7 +154,7 @@ export default function Alerts() {
                       <Button
                         variant="ghost"
                         size="sm"
-                        className="h-7 w-7 p-0 text-slate-600 hover:text-slate-300 hover:bg-slate-800 shrink-0"
+                        className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground hover:bg-muted shrink-0"
                         onClick={() => handleDismiss(alert.id)}
                         disabled={isPending}
                       >
@@ -166,7 +166,7 @@ export default function Alerts() {
               );
             })}
         {!isLoading && (!alerts || alerts.length === 0) && (
-          <div className="flex flex-col items-center justify-center py-16 text-slate-600">
+          <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
             <CheckCircle className="w-8 h-8 mb-2 text-emerald-700" />
             <p className="text-sm">All clear — no active alerts</p>
           </div>

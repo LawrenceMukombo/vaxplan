@@ -459,7 +459,7 @@ export default function ApiReference() {
       case "DELETE":
         return "bg-rose-500/10 text-rose-700 dark:text-rose-400 border-rose-500/20";
       default:
-        return "bg-slate-500/10 text-slate-700 border-slate-500/20";
+        return "bg-slate-500/10 text-foreground border-border/20";
     }
   };
 

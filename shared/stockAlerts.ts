@@ -36,7 +36,7 @@ export function computeAvgMonthlyConsumption(
     if (tx.transactionType !== "issue" && tx.transactionType !== "loss") continue;
     const txTime = new Date(tx.transactionDate).getTime();
     if (txTime < cutoff) continue;
-    const normName = normalizeStockVaccineName(tx.vaccineName);
+    const normName = normalizeStockVaccineName(tx.vaccineName || "Unknown");
     totals[normName] =
       (totals[normName] ?? 0) + Number(tx.quantityDoses ?? 0);
   }
@@ -59,7 +59,7 @@ export function computeStockOnHand(
     }
   }
   for (const tx of transactions) {
-    const normName = normalizeStockVaccineName(tx.vaccineName);
+    const normName = normalizeStockVaccineName(tx.vaccineName || "Unknown");
     if (!(normName in soh)) soh[normName] = 0;
     const doses = Number(tx.quantityDoses ?? 0);
     if (tx.transactionType === "receipt" || tx.transactionType === "adjustment") {
@@ -127,7 +127,7 @@ export function computeNearExpiryReceipts(
 ): NearExpiryReceipt[] {
   const batchBalance: Record<string, number> = {};
   for (const tx of transactions) {
-    const normName = normalizeStockVaccineName(tx.vaccineName);
+    const normName = normalizeStockVaccineName(tx.vaccineName || "Unknown");
     const key = `${normName}::${tx.batchNumber}`;
     const doses = Number(tx.quantityDoses ?? 0);
     if (!(key in batchBalance)) batchBalance[key] = 0;
@@ -143,7 +143,7 @@ export function computeNearExpiryReceipts(
     if (tx.transactionType !== "receipt") continue;
     const { status, daysUntil } = getExpiryStatus(tx.expiryDate, now);
     if (status === "ok") continue;
-    const normName = normalizeStockVaccineName(tx.vaccineName);
+    const normName = normalizeStockVaccineName(tx.vaccineName || "Unknown");
     const key = `${normName}::${tx.batchNumber}`;
     const remaining = batchBalance[key] ?? 0;
     if (remaining <= 0) continue;

@@ -133,7 +133,7 @@ function classificationBadgeClass(c: string) {
 
     discarded:  "bg-emerald-100 text-emerald-800 border-emerald-200",
 
-  }[c] ?? "bg-slate-100 text-slate-800 border-slate-200";
+  }[c] ?? "bg-muted text-foreground border-border";
 
 }
 
@@ -573,9 +573,7 @@ export default function Surveillance() {
     reportCaseMutation.mutate({
 
       ...formData,
-
-      patientAge:   parseInt(formData.patientAge) || null,
-
+      patientAgeMonths: parseInt(formData.patientAge) || null,
       facilityId:   parseInt(formData.facilityId) || null,
 
       dateOfOnset:  new Date(formData.dateOfOnset).toISOString(),
@@ -1764,7 +1762,7 @@ export default function Surveillance() {
                             <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-semibold uppercase border ${classificationBadgeClass(c.classification)}`}>{c.classification}</span>
                           </td>
                           <td className="px-3 py-2.5">
-                            <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-semibold uppercase border ${c.status === "closed" ? "bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-300" : "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950 dark:text-emerald-400"}`}>{c.status || "open"}</span>
+                            <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-semibold uppercase border ${c.status === "closed" ? "bg-muted text-muted-foreground border-border dark:bg-muted dark:text-foreground" : "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950 dark:text-emerald-400"}`}>{c.status || "open"}</span>
                           </td>
                           <td className="px-3 py-2.5 text-right" onClick={(e) => e.stopPropagation()}>
                             <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-red-500 hover:text-red-700 hover:bg-red-50" onClick={() => { if (window.confirm("Delete this case?")) deleteCaseMutation.mutate(c.id); }}><Trash2 className="h-3 w-3" /></Button>
@@ -2355,7 +2353,7 @@ export default function Surveillance() {
 
                     { label: "Specimens",    done: selectedCaseSamples.length > 0 },
 
-                    { label: "Outcome",      done: selectedCase.status === "closed" },
+                    { label: "Outcome",      done: selectedCase.status === "closed" && !!selectedCase.investigationDate && selectedCaseSamples.length > 0 },
 
                   ].map((step, i, arr) => (
 
@@ -2470,9 +2468,9 @@ export default function Surveillance() {
                       <div className="space-y-1">
                         <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Age (years)</p>
                         {isEditingCase ? (
-                          <Input className="h-8 text-xs" type="number" min={0} max={150} value={caseEditData?.patientAgeMonthsMonths ?? ""} onChange={(e) => setCaseEditData((p: any) => ({ ...p, patientAgeMonths: e.target.value }))} />
+                          <Input className="h-8 text-xs" type="number" min={0} max={150} value={caseEditData?.patientAgeMonths ?? ""} onChange={(e) => setCaseEditData((p: any) => ({ ...p, patientAgeMonths: e.target.value }))} />
                         ) : (
-                          <p className="text-sm font-semibold">{selectedCase.patientAge != null ? `${selectedCase.patientAge} years` : "Not recorded"}</p>
+                          <p className="text-sm font-semibold">{selectedCase.patientAgeMonths != null ? `${selectedCase.patientAgeMonths} years` : "Not recorded"}</p>
                         )}
                       </div>
                       {/* Sex */}
@@ -2549,9 +2547,21 @@ export default function Surveillance() {
 
                   {/* Close case button */}
                   {selectedCase.status !== "closed" && (
-                    <Button variant="outline" className="w-full h-9 text-sm border-dashed" onClick={() => updateCaseMutation.mutate({ id: selectedCase.id, status: "closed" })}>
-                      Mark Case as Closed
-                    </Button>
+                    <div className="space-y-2">
+                      <Button 
+                        variant="outline" 
+                        className="w-full h-9 text-sm border-dashed" 
+                        disabled={!selectedCase.investigationDate || selectedCaseSamples.length === 0}
+                        onClick={() => updateCaseMutation.mutate({ id: selectedCase.id, status: "closed" })}
+                      >
+                        Mark Case as Closed
+                      </Button>
+                      {(!selectedCase.investigationDate || selectedCaseSamples.length === 0) && (
+                        <p className="text-[10px] text-muted-foreground text-center">
+                          Investigation and specimens must be completed before closing the case.
+                        </p>
+                      )}
+                    </div>
                   )}
                 </TabsContent>
 

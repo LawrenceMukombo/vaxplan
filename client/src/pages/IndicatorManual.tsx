@@ -297,7 +297,7 @@ export default function IndicatorManual() {
     if (masteryPercent === 100) return { title: "EPI Mastery Legend 🏆", color: "text-amber-500 bg-amber-50 dark:bg-amber-950/20 border-amber-200 dark:border-amber-900/30" };
     if (masteryPercent >= 70) return { title: "EPI Specialist 🎯", color: "text-violet-500 bg-violet-50 dark:bg-violet-950/20 border-violet-200 dark:border-violet-900/30" };
     if (masteryPercent >= 35) return { title: "EPI Practitioner 📘", color: "text-emerald-500 bg-emerald-50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-900/30" };
-    return { title: "EPI Novice 🌱", color: "text-slate-500 bg-slate-50 dark:bg-slate-800/20 border-slate-200 dark:border-slate-800/40" };
+    return { title: "EPI Novice 🌱", color: "text-muted-foreground bg-muted dark:bg-muted border-border dark:border-border" };
   }, [masteryPercent]);
 
   const toggleMastered = (id: string) => {
@@ -449,7 +449,7 @@ export default function IndicatorManual() {
 
         <div className="flex flex-wrap items-center gap-3">
           {!canEdit && (
-            <Badge variant="secondary" className="px-3 py-1 font-medium bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400">
+            <Badge variant="secondary" className="px-3 py-1 font-medium bg-muted dark:bg-muted text-muted-foreground dark:text-muted-foreground">
               Read-Only
             </Badge>
           )}
@@ -476,7 +476,7 @@ export default function IndicatorManual() {
                     <form onSubmit={handleCreateSubmit} className="space-y-4 py-2">
                       <div className="space-y-1">
                         <div className="flex justify-between items-center">
-                          <label htmlFor="create-category" className="text-xs font-semibold text-slate-500 dark:text-slate-400">Category</label>
+                          <label htmlFor="create-category" className="text-xs font-semibold text-muted-foreground dark:text-muted-foreground">Category</label>
                           <button
                             type="button"
                             onClick={() => setIsCustomCategory(!isCustomCategory)}
@@ -511,7 +511,7 @@ export default function IndicatorManual() {
                       </div>
 
                       <div className="space-y-1">
-                        <label htmlFor="create-subcategory" className="text-xs font-semibold text-slate-500 dark:text-slate-400">Sub-Category</label>
+                        <label htmlFor="create-subcategory" className="text-xs font-semibold text-muted-foreground dark:text-muted-foreground">Sub-Category</label>
                         <Input
                           id="create-subcategory"
                           value={createSubCategory}
@@ -523,7 +523,7 @@ export default function IndicatorManual() {
                       </div>
 
                       <div className="space-y-1">
-                        <label htmlFor="create-name" className="text-xs font-semibold text-slate-500 dark:text-slate-400">Indicator Name</label>
+                        <label htmlFor="create-name" className="text-xs font-semibold text-muted-foreground dark:text-muted-foreground">Indicator Name</label>
                         <Input
                           id="create-name"
                           value={createName}
@@ -535,7 +535,7 @@ export default function IndicatorManual() {
                       </div>
 
                       <div className="space-y-1">
-                        <label htmlFor="create-numerator" className="text-xs font-semibold text-slate-500 dark:text-slate-400">Numerator Description</label>
+                        <label htmlFor="create-numerator" className="text-xs font-semibold text-muted-foreground dark:text-muted-foreground">Numerator Description</label>
                         <Textarea
                           id="create-numerator"
                           value={createNumerator}
@@ -547,7 +547,7 @@ export default function IndicatorManual() {
                       </div>
 
                       <div className="space-y-1">
-                        <label htmlFor="create-numerator-source" className="text-xs font-semibold text-slate-500 dark:text-slate-400">Numerator Data Source</label>
+                        <label htmlFor="create-numerator-source" className="text-xs font-semibold text-muted-foreground dark:text-muted-foreground">Numerator Data Source</label>
                         <Textarea
                           id="create-numerator-source"
                           value={createNumeratorSource}
@@ -559,7 +559,7 @@ export default function IndicatorManual() {
                       </div>
 
                       <div className="space-y-1">
-                        <label htmlFor="create-denominator" className="text-xs font-semibold text-slate-500 dark:text-slate-400">Denominator Description</label>
+                        <label htmlFor="create-denominator" className="text-xs font-semibold text-muted-foreground dark:text-muted-foreground">Denominator Description</label>
                         <Textarea
                           id="create-denominator"
                           value={createDenominator}
@@ -571,7 +571,7 @@ export default function IndicatorManual() {
                       </div>
 
                       <div className="space-y-1">
-                        <label htmlFor="create-denominator-source" className="text-xs font-semibold text-slate-500 dark:text-slate-400">Denominator Data Source</label>
+                        <label htmlFor="create-denominator-source" className="text-xs font-semibold text-muted-foreground dark:text-muted-foreground">Denominator Data Source</label>
                         <Textarea
                           id="create-denominator-source"
                           value={createDenominatorSource}
@@ -583,7 +583,7 @@ export default function IndicatorManual() {
                       </div>
 
                       <div className="space-y-1">
-                        <label htmlFor="create-calculation" className="text-xs font-semibold text-slate-500 dark:text-slate-400">Calculation Formula</label>
+                        <label htmlFor="create-calculation" className="text-xs font-semibold text-muted-foreground dark:text-muted-foreground">Calculation Formula</label>
                         <Input
                           id="create-calculation"
                           value={createCalculation}
@@ -595,7 +595,7 @@ export default function IndicatorManual() {
                       </div>
 
                       <div className="space-y-1">
-                        <label htmlFor="create-calculation-example" className="text-xs font-semibold text-slate-500 dark:text-slate-400">Calculation Example</label>
+                        <label htmlFor="create-calculation-example" className="text-xs font-semibold text-muted-foreground dark:text-muted-foreground">Calculation Example</label>
                         <Textarea
                           id="create-calculation-example"
                           value={createCalculationExample}
@@ -607,7 +607,7 @@ export default function IndicatorManual() {
                       </div>
 
                       <div className="space-y-1">
-                        <label htmlFor="create-reference" className="text-xs font-semibold text-slate-500 dark:text-slate-400">Reference Guidelines (Optional)</label>
+                        <label htmlFor="create-reference" className="text-xs font-semibold text-muted-foreground dark:text-muted-foreground">Reference Guidelines (Optional)</label>
                         <Input
                           id="create-reference"
                           value={createReference}
@@ -618,7 +618,7 @@ export default function IndicatorManual() {
                       </div>
 
                       <div className="space-y-1">
-                        <label htmlFor="create-reference-url" className="text-xs font-semibold text-slate-500 dark:text-slate-400">Reference URL (Optional)</label>
+                        <label htmlFor="create-reference-url" className="text-xs font-semibold text-muted-foreground dark:text-muted-foreground">Reference URL (Optional)</label>
                         <Input
                           id="create-reference-url"
                           value={createReferenceUrl}
@@ -666,14 +666,14 @@ export default function IndicatorManual() {
       </div>
 
       {/* Gamification Dashboard */}
-      <Card className="border border-slate-200/80 dark:border-slate-800/80 bg-slate-50/50 dark:bg-slate-900/10 shadow-sm overflow-hidden">
+      <Card className="border border-border/80 dark:border-border bg-muted/50 dark:bg-background shadow-sm overflow-hidden">
         <CardContent className="p-4 sm:p-5 flex flex-col sm:flex-row items-center gap-5 justify-between">
           <div className="flex items-center gap-4 text-left">
             <div className="h-12 w-12 rounded-2xl bg-primary/10 flex items-center justify-center text-2xl animate-bounce shrink-0">
               🎓
             </div>
             <div>
-              <h3 className="font-bold text-slate-900 dark:text-slate-100 text-sm sm:text-base">EPI Knowledge Mastery</h3>
+              <h3 className="font-bold text-foreground dark:text-foreground text-sm sm:text-base">EPI Knowledge Mastery</h3>
               <p className="text-xs text-muted-foreground mt-0.5">
                 Toggle checklist checkmarks inside metrics to track your understanding of standard formulas.
               </p>
@@ -689,13 +689,13 @@ export default function IndicatorManual() {
             </div>
             
             <div className="flex items-center gap-3 w-full sm:w-48 mt-1">
-              <div className="flex-1 bg-slate-200 dark:bg-slate-800 h-2.5 rounded-full overflow-hidden">
+              <div className="flex-1 bg-slate-200 dark:bg-muted h-2.5 rounded-full overflow-hidden">
                 <div
                   className="bg-primary h-full rounded-full transition-all duration-500 ease-out"
                   style={{ width: `${masteryPercent}%` }}
                 />
               </div>
-              <span className="text-xs font-bold text-slate-700 dark:text-slate-300 w-10 text-right shrink-0">
+              <span className="text-xs font-bold text-foreground dark:text-foreground w-10 text-right shrink-0">
                 {masteredCount}/{totalIndicators}
               </span>
             </div>
@@ -710,7 +710,7 @@ export default function IndicatorManual() {
           const styles = getCategoryStyles(category);
 
           return (
-            <Card key={category} className="shadow-sm border border-slate-200 dark:border-slate-800 overflow-hidden">
+            <Card key={category} className="shadow-sm border border-border dark:border-border overflow-hidden">
               {/* Category Header */}
               <button
                 type="button"
@@ -721,7 +721,7 @@ export default function IndicatorManual() {
                   {styles.icon}
                   <span>{category}</span>
                 </div>
-                {isCatCollapsed ? <ChevronRight className="h-5 w-5 text-slate-400" /> : <ChevronDown className="h-5 w-5 text-slate-400" />}
+                {isCatCollapsed ? <ChevronRight className="h-5 w-5 text-muted-foreground" /> : <ChevronDown className="h-5 w-5 text-muted-foreground" />}
               </button>
 
               {/* Category Content */}
@@ -736,7 +736,7 @@ export default function IndicatorManual() {
                         <button
                           type="button"
                           onClick={() => toggleSubCategory(subKey)}
-                          className="flex items-center gap-1.5 text-sm font-semibold uppercase tracking-wider text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-300 transition-colors"
+                          className="flex items-center gap-1.5 text-sm font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground dark:text-muted-foreground dark:hover:text-foreground transition-colors"
                         >
                           {isSubCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                           {subCategory}
@@ -750,16 +750,16 @@ export default function IndicatorManual() {
                               return (
                                 <div
                                   key={entry.id}
-                                  className={`border rounded-xl p-4 bg-white dark:bg-slate-950 hover:shadow-md transition-all space-y-4 relative group ${
+                                  className={`border rounded-xl p-4 bg-white dark:bg-background hover:shadow-md transition-all space-y-4 relative group ${
                                     isMastered
                                       ? "border-emerald-200 dark:border-emerald-950/60 bg-emerald-50/5 dark:bg-emerald-950/5"
-                                      : "border-slate-200 dark:border-slate-800/80"
+                                      : "border-border dark:border-border"
                                   }`}
                                 >
                                   {/* Name and Action buttons */}
                                   <div className="flex justify-between items-start gap-4">
                                     <div className="space-y-1.5">
-                                      <h3 className="font-bold text-slate-900 dark:text-slate-100 text-sm md:text-base leading-tight flex items-center gap-2">
+                                      <h3 className="font-bold text-foreground dark:text-foreground text-sm md:text-base leading-tight flex items-center gap-2">
                                         {entry.name}
                                         {isMastered && (
                                           <span className="text-emerald-500 text-sm" title="Mastered">
@@ -779,7 +779,7 @@ export default function IndicatorManual() {
                                               {entry.reference} ↗
                                             </a>
                                           ) : (
-                                            <span className="text-[11px] text-slate-500 font-medium bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-full border border-slate-200 dark:border-slate-800">
+                                            <span className="text-[11px] text-muted-foreground font-medium bg-muted dark:bg-muted px-2 py-0.5 rounded-full border border-border dark:border-border">
                                               {entry.reference}
                                             </span>
                                           )}
@@ -794,7 +794,7 @@ export default function IndicatorManual() {
                                         className={`text-xs px-2.5 py-1 rounded-lg border font-semibold flex items-center gap-1 transition-all ${
                                           isMastered
                                             ? "bg-emerald-500 border-emerald-500 text-white"
-                                            : "bg-transparent border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
+                                            : "bg-transparent border-border dark:border-border text-muted-foreground dark:text-muted-foreground hover:bg-muted dark:hover:bg-muted"
                                         }`}
                                       >
                                         🎯 {isMastered ? "Mastered" : "Learn"}
@@ -804,7 +804,7 @@ export default function IndicatorManual() {
                                         <Button
                                           variant="ghost"
                                           size="icon"
-                                          className="h-7 w-7 text-slate-400 hover:text-primary hover:bg-slate-100 dark:hover:bg-slate-800"
+                                          className="h-7 w-7 text-muted-foreground hover:text-primary hover:bg-muted dark:hover:bg-muted"
                                           onClick={() => handleEditClick(entry)}
                                           title="Edit formula details"
                                         >
@@ -816,7 +816,7 @@ export default function IndicatorManual() {
                                         <Button
                                           variant="ghost"
                                           size="icon"
-                                          className="h-7 w-7 text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/20"
+                                          className="h-7 w-7 text-muted-foreground hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/20"
                                           onClick={() => handleDeleteClick(entry)}
                                           title="Delete indicator"
                                         >
@@ -830,48 +830,48 @@ export default function IndicatorManual() {
                                   <div className="grid sm:grid-cols-2 gap-4 text-xs md:text-sm pt-2">
                                     {/* Numerator */}
                                     <div className="space-y-1">
-                                      <span className="font-semibold text-slate-500 dark:text-slate-400 block text-[11px] uppercase tracking-wider">Numerator</span>
-                                      <p className="text-slate-700 dark:text-slate-300 font-medium leading-normal bg-slate-50/50 dark:bg-slate-900/30 p-2.5 rounded-lg border border-slate-100/50 dark:border-slate-800/50">
+                                      <span className="font-semibold text-muted-foreground dark:text-muted-foreground block text-[11px] uppercase tracking-wider">Numerator</span>
+                                      <p className="text-foreground dark:text-foreground font-medium leading-normal bg-muted/50 dark:bg-background p-2.5 rounded-lg border border-slate-100/50 dark:border-border">
                                         {entry.numerator}
                                       </p>
                                     </div>
 
                                     {/* Denominator */}
                                     <div className="space-y-1">
-                                      <span className="font-semibold text-slate-500 dark:text-slate-400 block text-[11px] uppercase tracking-wider">Denominator</span>
-                                      <p className="text-slate-700 dark:text-slate-300 font-medium leading-normal bg-slate-50/50 dark:bg-slate-900/30 p-2.5 rounded-lg border border-slate-100/50 dark:border-slate-800/50">
+                                      <span className="font-semibold text-muted-foreground dark:text-muted-foreground block text-[11px] uppercase tracking-wider">Denominator</span>
+                                      <p className="text-foreground dark:text-foreground font-medium leading-normal bg-muted/50 dark:bg-background p-2.5 rounded-lg border border-slate-100/50 dark:border-border">
                                         {entry.denominator}
                                       </p>
                                     </div>
 
                                     {/* Numerator Source */}
                                     <div className="space-y-1">
-                                      <span className="font-semibold text-slate-500 dark:text-slate-400 block text-[11px] uppercase tracking-wider">Numerator Source</span>
-                                      <p className="text-slate-600 dark:text-slate-400 font-medium leading-normal bg-slate-50/50 dark:bg-slate-900/30 p-2.5 rounded-lg border border-slate-100/50 dark:border-slate-800/50">
+                                      <span className="font-semibold text-muted-foreground dark:text-muted-foreground block text-[11px] uppercase tracking-wider">Numerator Source</span>
+                                      <p className="text-muted-foreground dark:text-muted-foreground font-medium leading-normal bg-muted/50 dark:bg-background p-2.5 rounded-lg border border-slate-100/50 dark:border-border">
                                         {entry.numeratorSource}
                                       </p>
                                     </div>
 
                                     {/* Denominator Source */}
                                     <div className="space-y-1">
-                                      <span className="font-semibold text-slate-500 dark:text-slate-400 block text-[11px] uppercase tracking-wider">Denominator Source</span>
-                                      <p className="text-slate-600 dark:text-slate-400 font-medium leading-normal bg-slate-50/50 dark:bg-slate-900/30 p-2.5 rounded-lg border border-slate-100/50 dark:border-slate-800/50">
+                                      <span className="font-semibold text-muted-foreground dark:text-muted-foreground block text-[11px] uppercase tracking-wider">Denominator Source</span>
+                                      <p className="text-muted-foreground dark:text-muted-foreground font-medium leading-normal bg-muted/50 dark:bg-background p-2.5 rounded-lg border border-slate-100/50 dark:border-border">
                                         {entry.denominatorSource}
                                       </p>
                                     </div>
 
                                     {/* Calculation Formula */}
                                     <div className="space-y-1">
-                                      <span className="font-semibold text-slate-500 dark:text-slate-400 block text-[11px] uppercase tracking-wider">Calculation Formula</span>
-                                      <p className="text-slate-800 dark:text-slate-200 font-mono text-[11px] md:text-xs leading-normal bg-slate-50/50 dark:bg-slate-900/30 p-2.5 rounded-lg border border-slate-100/50 dark:border-slate-800/50">
+                                      <span className="font-semibold text-muted-foreground dark:text-muted-foreground block text-[11px] uppercase tracking-wider">Calculation Formula</span>
+                                      <p className="text-foreground dark:text-foreground font-mono text-[11px] md:text-xs leading-normal bg-muted/50 dark:bg-background p-2.5 rounded-lg border border-slate-100/50 dark:border-border">
                                         {entry.calculation}
                                       </p>
                                     </div>
 
                                     {/* Calculation Example */}
                                     <div className="space-y-1">
-                                      <span className="font-semibold text-slate-500 dark:text-slate-400 block text-[11px] uppercase tracking-wider">Calculation Example</span>
-                                      <p className="text-slate-700 dark:text-slate-300 italic leading-normal bg-slate-50/50 dark:bg-slate-900/30 p-2.5 rounded-lg border border-slate-100/50 dark:border-slate-800/50">
+                                      <span className="font-semibold text-muted-foreground dark:text-muted-foreground block text-[11px] uppercase tracking-wider">Calculation Example</span>
+                                      <p className="text-foreground dark:text-foreground italic leading-normal bg-muted/50 dark:bg-background p-2.5 rounded-lg border border-slate-100/50 dark:border-border">
                                         {entry.calculationExample}
                                       </p>
                                     </div>
@@ -902,7 +902,7 @@ export default function IndicatorManual() {
           </DialogHeader>
           <form onSubmit={handleSaveEdit} className="space-y-4 py-2">
             <div className="space-y-1">
-              <label htmlFor="numerator-input" className="text-xs font-semibold text-slate-500 dark:text-slate-400">Numerator</label>
+              <label htmlFor="numerator-input" className="text-xs font-semibold text-muted-foreground dark:text-muted-foreground">Numerator</label>
               <Textarea
                 id="numerator-input"
                 value={formNumerator}
@@ -914,7 +914,7 @@ export default function IndicatorManual() {
             </div>
 
             <div className="space-y-1">
-              <label htmlFor="numerator-source-input" className="text-xs font-semibold text-slate-500 dark:text-slate-400">Numerator Source</label>
+              <label htmlFor="numerator-source-input" className="text-xs font-semibold text-muted-foreground dark:text-muted-foreground">Numerator Source</label>
               <Textarea
                 id="numerator-source-input"
                 value={formNumeratorSource}
@@ -926,7 +926,7 @@ export default function IndicatorManual() {
             </div>
             
             <div className="space-y-1">
-              <label htmlFor="denominator-input" className="text-xs font-semibold text-slate-500 dark:text-slate-400">Denominator</label>
+              <label htmlFor="denominator-input" className="text-xs font-semibold text-muted-foreground dark:text-muted-foreground">Denominator</label>
               <Textarea
                 id="denominator-input"
                 value={formDenominator}
@@ -938,7 +938,7 @@ export default function IndicatorManual() {
             </div>
 
             <div className="space-y-1">
-              <label htmlFor="denominator-source-input" className="text-xs font-semibold text-slate-500 dark:text-slate-400">Denominator Source</label>
+              <label htmlFor="denominator-source-input" className="text-xs font-semibold text-muted-foreground dark:text-muted-foreground">Denominator Source</label>
               <Textarea
                 id="denominator-source-input"
                 value={formDenominatorSource}
@@ -950,7 +950,7 @@ export default function IndicatorManual() {
             </div>
 
             <div className="space-y-1">
-              <label htmlFor="calculation-input" className="text-xs font-semibold text-slate-500 dark:text-slate-400">Calculation Formula</label>
+              <label htmlFor="calculation-input" className="text-xs font-semibold text-muted-foreground dark:text-muted-foreground">Calculation Formula</label>
               <Input
                 id="calculation-input"
                 value={formCalculation}
@@ -962,7 +962,7 @@ export default function IndicatorManual() {
             </div>
 
             <div className="space-y-1">
-              <label htmlFor="calculation-example-input" className="text-xs font-semibold text-slate-500 dark:text-slate-400">Calculation Example</label>
+              <label htmlFor="calculation-example-input" className="text-xs font-semibold text-muted-foreground dark:text-muted-foreground">Calculation Example</label>
               <Textarea
                 id="calculation-example-input"
                 value={formCalculationExample}
@@ -974,7 +974,7 @@ export default function IndicatorManual() {
             </div>
 
             <div className="space-y-1">
-              <label htmlFor="reference-input" className="text-xs font-semibold text-slate-500 dark:text-slate-400">Reference Guidelines</label>
+              <label htmlFor="reference-input" className="text-xs font-semibold text-muted-foreground dark:text-muted-foreground">Reference Guidelines</label>
               <Input
                 id="reference-input"
                 value={formReference}
@@ -985,7 +985,7 @@ export default function IndicatorManual() {
             </div>
 
             <div className="space-y-1">
-              <label htmlFor="reference-url-input" className="text-xs font-semibold text-slate-500 dark:text-slate-400">Reference URL</label>
+              <label htmlFor="reference-url-input" className="text-xs font-semibold text-muted-foreground dark:text-muted-foreground">Reference URL</label>
               <Input
                 id="reference-url-input"
                 value={formReferenceUrl}

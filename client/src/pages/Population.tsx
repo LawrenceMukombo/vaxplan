@@ -219,14 +219,14 @@ function WorkflowStepper({ status }: WorkflowStepperProps) {
   else if (status === "rejected") currentIndex = 2; // failed during review
 
   return (
-    <div className="relative pl-6 space-y-6 before:absolute before:left-2 before:top-2 before:bottom-2 before:w-[2px] before:bg-slate-200 dark:before:bg-slate-800">
+    <div className="relative pl-6 space-y-6 before:absolute before:left-2 before:top-2 before:bottom-2 before:w-[2px] before:bg-slate-200 dark:before:bg-muted">
       {steps.map((step, index) => {
         const isCompleted = currentIndex > index || (currentIndex === index && status !== "returned" && status !== "rejected");
         const isCurrent = currentIndex === index;
         const isReturnedState = isCurrent && status === "returned";
         const isRejectedState = isCurrent && status === "rejected";
 
-        let markerColor = "bg-slate-200 dark:bg-slate-800 ring-transparent";
+        let markerColor = "bg-slate-200 dark:bg-muted ring-transparent";
         let titleColor = "text-muted-foreground";
 
         if (isCompleted) {
@@ -1307,7 +1307,7 @@ export default function Population() {
           rejected: "bg-red-100 text-red-800 border-red-200 dark:bg-red-900/35 text-red-400 border-red-900/50",
           locked: "bg-purple-100 text-purple-800 border-purple-200 dark:bg-purple-900/35 text-purple-400 border-purple-900/50",
           archived: "bg-zinc-100 text-zinc-800 border-zinc-200 dark:bg-zinc-850 text-zinc-400 border-zinc-700",
-          superseded: "bg-slate-100 text-slate-800 border-slate-200 dark:bg-slate-850 text-slate-400 border-slate-700",
+          superseded: "bg-muted text-foreground border-border dark:bg-background text-muted-foreground border-border",
         };
         return (
           <Badge 
@@ -1323,7 +1323,8 @@ export default function Population() {
       key: "actions",
       header: "Actions",
       render: (item: PopulationData) => {
-        const canEdit = item.approvalStatus === "draft" || item.approvalStatus === "returned" || isNational;
+        const isLockedStatus = ["pending", "under_review", "approved", "locked", "archived", "superseded"].includes(item.approvalStatus || "");
+        const canEdit = !isLockedStatus && (item.approvalStatus === "draft" || item.approvalStatus === "returned" || isNational);
         return (
           <div className="flex items-center gap-1">
             <Button
@@ -1822,7 +1823,7 @@ export default function Population() {
                       </CardHeader>
                       <CardContent className="pt-4 space-y-5">
                         {/* Workflow Stepper */}
-                        <div className="p-3 bg-slate-50 dark:bg-slate-900/50 rounded-xl border border-slate-100 dark:border-slate-800">
+                        <div className="p-3 bg-muted dark:bg-background rounded-xl border border-slate-100 dark:border-border">
                           <p className="text-xs font-semibold text-foreground mb-3 uppercase tracking-wider">Approval Lifecycle</p>
                           <WorkflowStepper status={selectedRecord.approvalStatus || "draft"} />
                         </div>
@@ -2060,7 +2061,7 @@ export default function Population() {
                           )}
 
                           {/* Edit/Delete for draft/returned */}
-                          {(selectedRecord.approvalStatus === "draft" || selectedRecord.approvalStatus === "returned" || isNational) && (
+                          {!["pending", "under_review", "approved", "locked", "archived", "superseded"].includes(selectedRecord.approvalStatus || "") && (selectedRecord.approvalStatus === "draft" || selectedRecord.approvalStatus === "returned" || isNational) && (
                             <div className="grid grid-cols-2 gap-2 pt-2 border-t border-dashed border-border/80">
                               {canCreateData(user) && (
                                 <Button

@@ -115,7 +115,7 @@ const fundingSourceOptions: Array<{ value: string; label: string; color: string 
   { value: "gavi", label: "Gavi", color: "bg-purple-500/15 text-purple-700 dark:text-purple-300 border-purple-500/30" },
   { value: "who", label: "WHO", color: "bg-cyan-500/15 text-cyan-700 dark:text-cyan-300 border-cyan-500/30" },
   { value: "unicef", label: "UNICEF", color: "bg-sky-500/15 text-sky-700 dark:text-sky-300 border-sky-500/30" },
-  { value: "other", label: "Other", color: "bg-slate-500/15 text-slate-700 dark:text-slate-300 border-slate-500/30" },
+  { value: "other", label: "Other", color: "bg-slate-500/15 text-foreground dark:text-foreground border-border/30" },
 ];
 
 interface TenantSummary { id: string; name: string; code: string; settings?: any }

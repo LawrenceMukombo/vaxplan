@@ -21,7 +21,7 @@ const statusConfig = {
 };
 
 const riskConfig = {
-  low: { label: "Low", color: "text-slate-400 bg-slate-500/10 border-slate-500/20" },
+  low: { label: "Low", color: "text-muted-foreground bg-slate-500/10 border-border/20" },
   medium: { label: "Medium", color: "text-amber-400 bg-amber-500/10 border-amber-500/20" },
   high: { label: "High", color: "text-red-400 bg-red-500/10 border-red-500/20" },
   very_high: { label: "Very High", color: "text-red-500 bg-red-600/10 border-red-500/20" },
@@ -83,53 +83,53 @@ export default function Settlements() {
       {/* Filters */}
       <div className="flex flex-wrap items-center gap-3">
         <div className="relative flex-1 min-w-48 max-w-72">
-          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-500" />
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
           <Input
             placeholder="Search settlements..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="pl-8 h-8 text-sm bg-slate-900 border-slate-700 text-slate-200 placeholder:text-slate-600"
+            className="pl-8 h-8 text-sm bg-background border-border text-foreground placeholder:text-muted-foreground"
           />
         </div>
         <Select value={status} onValueChange={setStatus}>
-          <SelectTrigger className="w-36 h-8 text-sm bg-slate-900 border-slate-700 text-slate-300">
+          <SelectTrigger className="w-36 h-8 text-sm bg-background border-border text-foreground">
             <SelectValue placeholder="Status" />
           </SelectTrigger>
-          <SelectContent className="bg-slate-900 border-slate-700">
-            <SelectItem value="all" className="text-slate-300">All statuses</SelectItem>
-            <SelectItem value="served" className="text-slate-300">Served</SelectItem>
-            <SelectItem value="underserved" className="text-slate-300">Underserved</SelectItem>
-            <SelectItem value="unserved" className="text-slate-300">Unserved</SelectItem>
+          <SelectContent className="bg-background border-border">
+            <SelectItem value="all" className="text-foreground">All statuses</SelectItem>
+            <SelectItem value="served" className="text-foreground">Served</SelectItem>
+            <SelectItem value="underserved" className="text-foreground">Underserved</SelectItem>
+            <SelectItem value="unserved" className="text-foreground">Unserved</SelectItem>
           </SelectContent>
         </Select>
         <Select value={riskLevel} onValueChange={setRiskLevel}>
-          <SelectTrigger className="w-36 h-8 text-sm bg-slate-900 border-slate-700 text-slate-300">
+          <SelectTrigger className="w-36 h-8 text-sm bg-background border-border text-foreground">
             <SelectValue placeholder="Risk Level" />
           </SelectTrigger>
-          <SelectContent className="bg-slate-900 border-slate-700">
-            <SelectItem value="all" className="text-slate-300">All risks</SelectItem>
-            <SelectItem value="very_high" className="text-slate-300">Very High</SelectItem>
-            <SelectItem value="high" className="text-slate-300">High</SelectItem>
-            <SelectItem value="medium" className="text-slate-300">Medium</SelectItem>
-            <SelectItem value="low" className="text-slate-300">Low</SelectItem>
+          <SelectContent className="bg-background border-border">
+            <SelectItem value="all" className="text-foreground">All risks</SelectItem>
+            <SelectItem value="very_high" className="text-foreground">Very High</SelectItem>
+            <SelectItem value="high" className="text-foreground">High</SelectItem>
+            <SelectItem value="medium" className="text-foreground">Medium</SelectItem>
+            <SelectItem value="low" className="text-foreground">Low</SelectItem>
           </SelectContent>
         </Select>
         <Select value={district} onValueChange={setDistrict}>
-          <SelectTrigger className="w-36 h-8 text-sm bg-slate-900 border-slate-700 text-slate-300">
+          <SelectTrigger className="w-36 h-8 text-sm bg-background border-border text-foreground">
             <SelectValue placeholder="District" />
           </SelectTrigger>
-          <SelectContent className="bg-slate-900 border-slate-700">
-            <SelectItem value="all" className="text-slate-300">All districts</SelectItem>
-            <SelectItem value="Lusaka" className="text-slate-300">Lusaka</SelectItem>
-            <SelectItem value="Kafue" className="text-slate-300">Kafue</SelectItem>
-            <SelectItem value="Chilanga" className="text-slate-300">Chilanga</SelectItem>
+          <SelectContent className="bg-background border-border">
+            <SelectItem value="all" className="text-foreground">All districts</SelectItem>
+            <SelectItem value="Lusaka" className="text-foreground">Lusaka</SelectItem>
+            <SelectItem value="Kafue" className="text-foreground">Kafue</SelectItem>
+            <SelectItem value="Chilanga" className="text-foreground">Chilanga</SelectItem>
           </SelectContent>
         </Select>
         {(status !== "all" || riskLevel !== "all" || district !== "all" || search) && (
           <Button
             variant="ghost"
             size="sm"
-            className="h-8 text-xs text-slate-500 hover:text-slate-300"
+            className="h-8 text-xs text-muted-foreground hover:text-foreground"
             onClick={() => { setStatus("all"); setRiskLevel("all"); setDistrict("all"); setSearch(""); }}
           >
             Clear filters
@@ -142,7 +142,7 @@ export default function Settlements() {
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-slate-800">
+              <tr className="border-b border-border">
                 <th className={`${thClass} text-left`} onClick={() => handleSort("name")}>
                   Settlement <SortIcon col="name" sortKey={sortKey} sortDir={sortDir} />
                 </th>
@@ -166,7 +166,7 @@ export default function Settlements() {
                     <tr key={i}>
                       {Array.from({ length: 7 }).map((_, j) => (
                         <td key={j} className="px-4 py-3">
-                          <Skeleton className="h-4 bg-slate-800 rounded" />
+                          <Skeleton className="h-4 bg-muted rounded" />
                         </td>
                       ))}
                     </tr>
@@ -175,21 +175,21 @@ export default function Settlements() {
                       const sc = statusConfig[s.serviceStatus as keyof typeof statusConfig] ?? statusConfig.unserved;
                       const rc = s.riskLevel ? riskConfig[s.riskLevel as keyof typeof riskConfig] : null;
                     return (
-                      <tr key={s.id} className="hover:bg-slate-800/40 transition-colors">
+                      <tr key={s.id} className="hover:bg-muted transition-colors">
                         <td className="px-4 py-3">
                           <div className="flex items-center gap-2">
-                            <Building2 className="w-3.5 h-3.5 text-slate-600 shrink-0" />
-                            <span className="font-medium text-slate-200 truncate max-w-52">{s.name}</span>
+                            <Building2 className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                            <span className="font-medium text-foreground truncate max-w-52">{s.name}</span>
                             {s.isNewSettlement && (
                               <Badge className="text-[10px] px-1 py-0 bg-purple-500/10 text-purple-400 border border-purple-500/20 shrink-0">NEW</Badge>
                             )}
                           </div>
                         </td>
-                        <td className="px-4 py-3 text-slate-400">{s.district}</td>
+                        <td className="px-4 py-3 text-muted-foreground">{s.district}</td>
                         <td className="px-4 py-3 text-right">
                           <div className="flex items-center justify-end gap-1">
-                            <Users className="w-3 h-3 text-slate-600" />
-                            <span className="text-slate-300">{s.population.toLocaleString()}</span>
+                            <Users className="w-3 h-3 text-muted-foreground" />
+                            <span className="text-foreground">{s.population.toLocaleString()}</span>
                           </div>
                         </td>
                         <td className="px-4 py-3 text-center">
@@ -199,27 +199,27 @@ export default function Settlements() {
                           {rc ? (
                             <Badge className={`text-[10px] px-1.5 py-0 border ${rc.color}`}>{rc.label}</Badge>
                           ) : (
-                            <span className="text-slate-600">—</span>
+                            <span className="text-muted-foreground">—</span>
                           )}
                         </td>
                         <td className="px-4 py-3 text-right">
                           {s.riskScore != null ? (
                             <div className="flex items-center justify-end gap-1.5">
-                              <div className="w-16 h-1.5 rounded-full bg-slate-800 overflow-hidden">
+                              <div className="w-16 h-1.5 rounded-full bg-muted overflow-hidden">
                                 <div
                                   className={`h-full rounded-full ${s.riskScore >= 75 ? "bg-red-500" : s.riskScore >= 50 ? "bg-amber-500" : s.riskScore >= 25 ? "bg-yellow-500" : "bg-emerald-500"}`}
                                   style={{ width: `${s.riskScore}%` }}
                                 />
                               </div>
-                              <span className="text-slate-400 text-xs w-6 text-right">{s.riskScore}</span>
+                              <span className="text-muted-foreground text-xs w-6 text-right">{s.riskScore}</span>
                             </div>
                           ) : (
-                            <span className="text-slate-600">—</span>
+                            <span className="text-muted-foreground">—</span>
                           )}
                         </td>
                         <td className="px-4 py-3">
                           <Link href={`/settlements/${s.id}`}>
-                            <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-slate-600 hover:text-slate-300">
+                            <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground">
                               <ChevronRight className="w-3.5 h-3.5" />
                             </Button>
                           </Link>
@@ -230,7 +230,7 @@ export default function Settlements() {
             </tbody>
           </table>
           {!isLoading && sorted.length === 0 && (
-            <div className="flex flex-col items-center justify-center py-16 text-slate-600">
+            <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
               <Building2 className="w-8 h-8 mb-2" />
               <p className="text-sm">No settlements match your filters</p>
             </div>

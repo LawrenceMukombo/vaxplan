@@ -21,14 +21,22 @@ export function IdleTimeoutController() {
   const [showWarning, setShowWarning] = useState(false);
   const [countdown, setCountdown] = useState(0);
 
+  // Fetch server configuration
+  const { data: sessionConfig } = useQuery<{ idleTimeoutMinutes: number, warningMinutes: number }>({
+    queryKey: ["/api/auth/session-config"],
+    staleTime: Infinity,
+  });
+
   const timeoutId = useRef<NodeJS.Timeout | null>(null);
   const warningId = useRef<NodeJS.Timeout | null>(null);
   const countdownId = useRef<NodeJS.Timeout | null>(null);
+  const pingTimeoutId = useRef<NodeJS.Timeout | null>(null);
   const channel = useRef<BroadcastChannel | null>(null);
 
   const getTimeoutMinutes = useCallback(() => {
-    // Note: settings.idleTimeoutMinutes or settings.security.idleTimeoutMinutes.
-    // For safety, we check the top-level settings as well if security is absent.
+    if (sessionConfig?.idleTimeoutMinutes) {
+      return sessionConfig.idleTimeoutMinutes;
+    }
     const security = tenant?.settings?.security || tenant?.settings || {};
     const globalTimeout = security.idleTimeoutMinutes || 15;
     
@@ -36,7 +44,7 @@ export function IdleTimeoutController() {
       return security.roleIdleTimeouts[user.role];
     }
     return globalTimeout;
-  }, [tenant, user]);
+  }, [tenant, user, sessionConfig]);
 
   const doLogout = useCallback(() => {
     window.location.href = "/api/logout?reason=idle_timeout";
@@ -52,12 +60,10 @@ export function IdleTimeoutController() {
     const timeoutMinutes = getTimeoutMinutes();
     if (!timeoutMinutes || timeoutMinutes <= 0) return;
 
-    // Constrain bounds based on requirements
-    const effectiveMinutes = Math.min(Math.max(timeoutMinutes, 5), 60);
-    const timeoutMs = effectiveMinutes * 60 * 1000;
+    const timeoutMs = timeoutMinutes * 60 * 1000;
     
     // Warning logic
-    const warningPeriodMinutes = effectiveMinutes > 15 ? 2 : 1;
+    const warningPeriodMinutes = sessionConfig?.warningMinutes || (timeoutMinutes > 15 ? 2 : 1);
     const warningPeriodMs = warningPeriodMinutes * 60 * 1000;
     const timeUntilWarning = timeoutMs - warningPeriodMs;
 
@@ -84,7 +90,16 @@ export function IdleTimeoutController() {
     if (broadcast && channel.current) {
       channel.current.postMessage({ type: "RESET_IDLE" });
     }
-  }, [getTimeoutMinutes, doLogout]);
+    
+    // Ping server to keep session alive, throttled to 1 minute
+    if (!pingTimeoutId.current) {
+      pingTimeoutId.current = setTimeout(() => {
+        fetch("/api/auth/ping", { method: "POST" }).catch(() => {});
+        pingTimeoutId.current = null;
+      }, 60000);
+    }
+
+  }, [getTimeoutMinutes, doLogout, sessionConfig]);
 
   useEffect(() => {
     if (!user) return; // Only run if logged in
@@ -121,6 +136,7 @@ export function IdleTimeoutController() {
       if (warningId.current) clearTimeout(warningId.current);
       if (countdownId.current) clearInterval(countdownId.current);
       if (throttleTimeout) clearTimeout(throttleTimeout);
+      if (pingTimeoutId.current) clearTimeout(pingTimeoutId.current);
       events.forEach((e) => window.removeEventListener(e, handleActivity));
       channel.current?.close();
     };
@@ -128,6 +144,7 @@ export function IdleTimeoutController() {
 
   const handleStaySignedIn = () => {
     resetTimer();
+    fetch("/api/auth/ping", { method: "POST" }).catch(() => {});
   };
 
   const handleSignOutNow = () => {

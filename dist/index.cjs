@@ -30,108 +30,6 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
 ));
 var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 
-// shared/vaccineSchedule.ts
-function stripDoseListSuffix(name) {
-  const m = name.match(DOSE_LIST_SUFFIX);
-  return m ? m[1].trim() : name;
-}
-function normalizeCode(s) {
-  return s.trim().toUpperCase().replace(/\s+/g, "_");
-}
-function canonicalizePerAntigen(raw, doses) {
-  const stages = expandVaccineSchedule(doses);
-  const lookup = /* @__PURE__ */ new Map();
-  for (const s of stages) {
-    lookup.set(s.code, s.code);
-    lookup.set(s.code.toUpperCase(), s.code);
-    lookup.set(s.code.replace(/\s+/g, "_").toUpperCase(), s.code);
-  }
-  const perAntigen = {};
-  const perAntigenUnmapped = {};
-  for (const [rawKey, rawVal] of Object.entries(raw ?? {})) {
-    const key = String(rawKey).trim();
-    if (!key) continue;
-    const val = Number(rawVal);
-    if (!Number.isFinite(val) || val < 0) continue;
-    const canonical = lookup.get(key) ?? lookup.get(key.toUpperCase()) ?? lookup.get(key.replace(/\s+/g, "_").toUpperCase());
-    if (canonical) {
-      perAntigen[canonical] = (perAntigen[canonical] ?? 0) + val;
-    } else {
-      perAntigenUnmapped[key] = (perAntigenUnmapped[key] ?? 0) + val;
-    }
-  }
-  return {
-    perAntigen,
-    perAntigenUnmapped,
-    unmappedCodes: Object.keys(perAntigenUnmapped)
-  };
-}
-function expandVaccineSchedule(doses) {
-  if (!doses || doses.length === 0) return [];
-  const stages = [];
-  for (const dose of doses) {
-    if (!dose || dose.active === false) continue;
-    const rawName = (dose.name || "").trim();
-    if (!rawName) continue;
-    const antigenLabel = stripDoseListSuffix(rawName);
-    stages.push({
-      code: normalizeCode(dose.doseCode || rawName),
-      label: rawName,
-      antigen: antigenLabel,
-      doseNumber: dose.doseNumber || 1,
-      configId: dose.vaccineId
-    });
-  }
-  return stages;
-}
-function normalizeStockVaccineName(input) {
-  if (!input) return "";
-  let value = input.trim().toUpperCase();
-  value = value.replace(/DOSE\s*-?\s*([0-9]+)/g, "-$1");
-  value = value.replace(/\s+/g, "");
-  value = value.replace(/^([A-Z]+)-?([0-9]+)$/, "$1-$2");
-  const mapping = {
-    "BCG": "BCG",
-    "OPV": "OPV",
-    "OPV-0": "OPV",
-    "OPV-1": "OPV",
-    "OPV-2": "OPV",
-    "OPV-3": "OPV",
-    "IPV": "IPV",
-    "IPV-1": "IPV",
-    "IPV-2": "IPV",
-    "PCV": "PCV",
-    "PCV-1": "PCV",
-    "PCV-2": "PCV",
-    "PCV-3": "PCV",
-    "PENTA": "PENTA",
-    "PENTA-1": "PENTA",
-    "PENTA-2": "PENTA",
-    "PENTA-3": "PENTA",
-    "ROTA": "ROTAVIRUS",
-    "ROTA-1": "ROTAVIRUS",
-    "ROTA-2": "ROTAVIRUS",
-    "ROTAVIRUS": "ROTAVIRUS",
-    "MR": "MR",
-    "MR-1": "MR",
-    "MR-2": "MR",
-    "TT": "TT",
-    "TT-1": "TT",
-    "TT-2": "TT",
-    "HPV": "HPV",
-    "COVID-19": "COVID-19",
-    "TD": "TD"
-  };
-  return mapping[value] ?? input.trim();
-}
-var DOSE_LIST_SUFFIX;
-var init_vaccineSchedule = __esm({
-  "shared/vaccineSchedule.ts"() {
-    "use strict";
-    DOSE_LIST_SUFFIX = /^(.+?)[-_\s]+(\d+(?:\s*[,/]\s*\d+)*\+?)\s*$/;
-  }
-});
-
 // shared/schema.ts
 var schema_exports = {};
 __export(schema_exports, {
@@ -351,7 +249,6 @@ var init_schema = __esm({
     import_pg_core = require("drizzle-orm/pg-core");
     import_drizzle_zod = require("drizzle-zod");
     import_zod = require("zod");
-    init_vaccineSchedule();
     tenantStatusEnum = (0, import_pg_core.pgEnum)("tenant_status", [
       "trial",
       "active",
@@ -828,6 +725,9 @@ var init_schema = __esm({
       confidenceScore: (0, import_pg_core.decimal)("confidence_score", { precision: 5, scale: 2 }),
       metadata: (0, import_pg_core.jsonb)("metadata"),
       approvalStatus: approvalStatusEnum("approval_status").default("draft"),
+      createdByUserId: (0, import_pg_core.varchar)("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+      updatedByUserId: (0, import_pg_core.varchar)("updated_by_user_id").references(() => users.id, { onDelete: "set null" }),
+      approvedByUserId: (0, import_pg_core.varchar)("approved_by_user_id").references(() => users.id, { onDelete: "set null" }),
       createdAt: (0, import_pg_core.timestamp)("created_at").defaultNow(),
       updatedAt: (0, import_pg_core.timestamp)("updated_at").defaultNow()
     }, (table) => [(0, import_pg_core.index)("idx_population_tenant").on(table.tenantId)]);
@@ -869,6 +769,9 @@ var init_schema = __esm({
       autoApproveAt: (0, import_pg_core.timestamp)("auto_approve_at"),
       reminderSentAt: (0, import_pg_core.timestamp)("reminder_sent_at"),
       districtEditReason: (0, import_pg_core.text)("district_edit_reason"),
+      createdByUserId: (0, import_pg_core.varchar)("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+      updatedByUserId: (0, import_pg_core.varchar)("updated_by_user_id").references(() => users.id, { onDelete: "set null" }),
+      approvedByUserId: (0, import_pg_core.varchar)("approved_by_user_id").references(() => users.id, { onDelete: "set null" }),
       createdAt: (0, import_pg_core.timestamp)("created_at").defaultNow(),
       updatedAt: (0, import_pg_core.timestamp)("updated_at").defaultNow()
     }, (table) => [(0, import_pg_core.index)("idx_microplans_tenant").on(table.tenantId)]);
@@ -1624,12 +1527,12 @@ var init_schema = __esm({
       id: (0, import_pg_core.integer)("id").primaryKey().generatedAlwaysAsIdentity(),
       tenantId: (0, import_pg_core.varchar)("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
       facilityId: (0, import_pg_core.integer)("facility_id").notNull().references(() => facilities.id, { onDelete: "cascade" }),
-      productId: (0, import_pg_core.integer)("product_id").references(() => catalogueVaccines.id, { onDelete: "set null" }),
-      // link to catalogue
+      productId: (0, import_pg_core.integer)("product_id").notNull().references(() => catalogueVaccines.id, { onDelete: "restrict" }),
+      // Must link to catalogue physical product
       productCode: (0, import_pg_core.varchar)("product_code", { length: 100 }),
       // snapshot of product code
-      vaccineName: (0, import_pg_core.varchar)("vaccine_name", { length: 100 }).notNull(),
-      // BCG, Penta, etc.
+      vaccineName: (0, import_pg_core.varchar)("vaccine_name", { length: 100 }),
+      // Legacy / Snapshot name
       transactionType: (0, import_pg_core.varchar)("transaction_type", { length: 50 }).notNull(),
       // 'receipt', 'issue', 'loss', 'adjustment'
       quantityDoses: (0, import_pg_core.integer)("quantity_doses").notNull(),
@@ -1662,7 +1565,11 @@ var init_schema = __esm({
       // cases count, e.g. { measles: 0, afp: 1, nnt: 0, aefi: 1 }
       submittedById: (0, import_pg_core.varchar)("submitted_by_id").references(() => users.id, { onDelete: "set null" }),
       approvalStatus: approvalStatusEnum("approval_status").default("draft").notNull(),
-      createdAt: (0, import_pg_core.timestamp)("created_at").defaultNow()
+      createdByUserId: (0, import_pg_core.varchar)("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+      updatedByUserId: (0, import_pg_core.varchar)("updated_by_user_id").references(() => users.id, { onDelete: "set null" }),
+      approvedByUserId: (0, import_pg_core.varchar)("approved_by_user_id").references(() => users.id, { onDelete: "set null" }),
+      createdAt: (0, import_pg_core.timestamp)("created_at").defaultNow(),
+      updatedAt: (0, import_pg_core.timestamp)("updated_at").defaultNow()
     }, (table) => ({
       tenantIdx: (0, import_pg_core.index)("monthly_rep_tenant_idx").on(table.tenantId),
       facilityIdx: (0, import_pg_core.index)("monthly_rep_facility_idx").on(table.facilityId)
@@ -2136,9 +2043,9 @@ var init_schema = __esm({
     insertStockTransactionSchema = (0, import_drizzle_zod.createInsertSchema)(stockTransactions).omit({
       createdAt: true
     }).extend({
-      productId: import_zod.z.number().optional().nullable(),
+      productId: import_zod.z.number().int().positive(),
       productCode: import_zod.z.string().optional().nullable(),
-      vaccineName: import_zod.z.string().transform(normalizeStockVaccineName),
+      vaccineName: import_zod.z.string().optional().nullable(),
       expiryDate: import_zod.z.coerce.date(),
       transactionDate: import_zod.z.coerce.date().optional()
     });
@@ -2913,6 +2820,108 @@ var init_schema = __esm({
     selectCatalogueCommoditySchema = (0, import_drizzle_zod.createSelectSchema)(catalogueCommodities);
     insertCatalogueWastageThresholdSchema = (0, import_drizzle_zod.createInsertSchema)(catalogueWastageThresholds);
     selectCatalogueWastageThresholdSchema = (0, import_drizzle_zod.createSelectSchema)(catalogueWastageThresholds);
+  }
+});
+
+// shared/vaccineSchedule.ts
+function stripDoseListSuffix(name) {
+  const m = name.match(DOSE_LIST_SUFFIX);
+  return m ? m[1].trim() : name;
+}
+function normalizeCode(s) {
+  return s.trim().toUpperCase().replace(/\s+/g, "_");
+}
+function canonicalizePerAntigen(raw, doses) {
+  const stages = expandVaccineSchedule(doses);
+  const lookup = /* @__PURE__ */ new Map();
+  for (const s of stages) {
+    lookup.set(s.code, s.code);
+    lookup.set(s.code.toUpperCase(), s.code);
+    lookup.set(s.code.replace(/\s+/g, "_").toUpperCase(), s.code);
+  }
+  const perAntigen = {};
+  const perAntigenUnmapped = {};
+  for (const [rawKey, rawVal] of Object.entries(raw ?? {})) {
+    const key = String(rawKey).trim();
+    if (!key) continue;
+    const val = Number(rawVal);
+    if (!Number.isFinite(val) || val < 0) continue;
+    const canonical = lookup.get(key) ?? lookup.get(key.toUpperCase()) ?? lookup.get(key.replace(/\s+/g, "_").toUpperCase());
+    if (canonical) {
+      perAntigen[canonical] = (perAntigen[canonical] ?? 0) + val;
+    } else {
+      perAntigenUnmapped[key] = (perAntigenUnmapped[key] ?? 0) + val;
+    }
+  }
+  return {
+    perAntigen,
+    perAntigenUnmapped,
+    unmappedCodes: Object.keys(perAntigenUnmapped)
+  };
+}
+function expandVaccineSchedule(doses) {
+  if (!doses || doses.length === 0) return [];
+  const stages = [];
+  for (const dose of doses) {
+    if (!dose || dose.active === false) continue;
+    const rawName = (dose.name || "").trim();
+    if (!rawName) continue;
+    const antigenLabel = stripDoseListSuffix(rawName);
+    stages.push({
+      code: normalizeCode(dose.doseCode || rawName),
+      label: rawName,
+      antigen: antigenLabel,
+      doseNumber: dose.doseNumber || 1,
+      configId: dose.vaccineId
+    });
+  }
+  return stages;
+}
+function normalizeStockVaccineName(input) {
+  if (!input) return "";
+  let value = input.trim().toUpperCase();
+  value = value.replace(/DOSE\s*-?\s*([0-9]+)/g, "-$1");
+  value = value.replace(/\s+/g, "");
+  value = value.replace(/^([A-Z]+)-?([0-9]+)$/, "$1-$2");
+  const mapping = {
+    "BCG": "BCG",
+    "OPV": "OPV",
+    "OPV-0": "OPV",
+    "OPV-1": "OPV",
+    "OPV-2": "OPV",
+    "OPV-3": "OPV",
+    "IPV": "IPV",
+    "IPV-1": "IPV",
+    "IPV-2": "IPV",
+    "PCV": "PCV",
+    "PCV-1": "PCV",
+    "PCV-2": "PCV",
+    "PCV-3": "PCV",
+    "PENTA": "PENTA",
+    "PENTA-1": "PENTA",
+    "PENTA-2": "PENTA",
+    "PENTA-3": "PENTA",
+    "ROTA": "ROTAVIRUS",
+    "ROTA-1": "ROTAVIRUS",
+    "ROTA-2": "ROTAVIRUS",
+    "ROTAVIRUS": "ROTAVIRUS",
+    "MR": "MR",
+    "MR-1": "MR",
+    "MR-2": "MR",
+    "TT": "TT",
+    "TT-1": "TT",
+    "TT-2": "TT",
+    "HPV": "HPV",
+    "COVID-19": "COVID-19",
+    "TD": "TD"
+  };
+  return mapping[value] ?? input.trim();
+}
+var DOSE_LIST_SUFFIX;
+var init_vaccineSchedule = __esm({
+  "shared/vaccineSchedule.ts"() {
+    "use strict";
+    DOSE_LIST_SUFFIX = /^(.+?)[-_\s]+(\d+(?:\s*[,/]\s*\d+)*\+?)\s*$/;
   }
 });
 
@@ -4212,7 +4221,7 @@ var init_storage = __esm({
       async createStockTransaction(tenantId, data) {
         const cleanData = {
           ...data,
-          vaccineName: normalizeStockVaccineName(data.vaccineName)
+          vaccineName: data.vaccineName ? normalizeStockVaccineName(data.vaccineName) : null
         };
         if (cleanData.transactionDate && typeof cleanData.transactionDate === "string") {
           cleanData.transactionDate = new Date(cleanData.transactionDate);
@@ -4221,7 +4230,7 @@ var init_storage = __esm({
         return row;
       }
       async createStockTransferPair(tenantId, args) {
-        const normalizedVaccineName = normalizeStockVaccineName(args.vaccineName);
+        const normalizedVaccineName = args.vaccineName ? normalizeStockVaccineName(args.vaccineName) : null;
         return await db.transaction(async (tx) => {
           const [issue] = await tx.insert(stockTransactions).values({
             tenantId,
@@ -4308,7 +4317,8 @@ var init_storage = __esm({
 
 // server/auth.ts
 function getSession() {
-  const sessionTtl = 7 * 24 * 60 * 60 * 1e3;
+  const absoluteTimeoutMinutes = parseInt(process.env.SESSION_ABSOLUTE_TIMEOUT_MINUTES || "480", 10);
+  const sessionTtl = absoluteTimeoutMinutes * 60 * 1e3;
   let secret = process.env.SESSION_SECRET;
   if (!secret) {
     if (!IS_LOCAL_DEV) {
@@ -4329,7 +4339,8 @@ function getSession() {
     store = new PgStore({
       conString: process.env.DATABASE_URL,
       createTableIfMissing: false,
-      ttl: sessionTtl,
+      ttl: Math.floor(sessionTtl / 1e3),
+      // ttl is in seconds
       tableName: "sessions"
     });
   }
@@ -4388,6 +4399,21 @@ async function setupAuth(app2) {
         res.redirect("/");
       });
     }
+  });
+  app2.post("/api/auth/ping", (req, res) => {
+    if (req.isAuthenticated?.() && req.session) {
+      req.session.lastActive = Math.floor(Date.now() / 1e3);
+      res.json({ success: true });
+    } else {
+      res.status(401).json({ error: "Unauthorized" });
+    }
+  });
+  app2.get("/api/auth/session-config", (req, res) => {
+    res.json({
+      idleTimeoutMinutes: parseInt(process.env.SESSION_IDLE_TIMEOUT_MINUTES || "15", 10),
+      absoluteTimeoutMinutes: parseInt(process.env.SESSION_ABSOLUTE_TIMEOUT_MINUTES || "480", 10),
+      warningMinutes: parseInt(process.env.SESSION_WARNING_BEFORE_TIMEOUT_MINUTES || "2", 10)
+    });
   });
   if (!IS_LOCAL_DEV) {
     console.log("[auth] Production mode \u2014 mock login routes disabled.");
@@ -4503,6 +4529,16 @@ var init_auth = __esm({
         return res.status(401).json({ message: "Unauthorized" });
       }
       const now = Math.floor(Date.now() / 1e3);
+      const idleTimeoutMinutes = parseInt(process.env.SESSION_IDLE_TIMEOUT_MINUTES || "15", 10);
+      if (req.session?.lastActive) {
+        if (now - req.session.lastActive > idleTimeoutMinutes * 60) {
+          if (typeof req.session?.destroy === "function") {
+            req.session.destroy(() => {
+            });
+          }
+          return res.status(401).json({ message: "Session expired due to inactivity." });
+        }
+      }
       if (now <= user.expires_at) {
         return next();
       }
@@ -18751,7 +18787,7 @@ Note from the requester: ${conflict.note}` : ""}`,
       }
       const body = req.body || {};
       const rawPerAntigen = body.perAntigen && typeof body.perAntigen === "object" ? body.perAntigen : {};
-      const tenantConfigs = await storage.getVaccineConfigs(req.tenantId);
+      const tenantConfigs = await storage.getCatalogueScheduleDoses(req.tenantId);
       const scheduleStages = expandVaccineSchedule(tenantConfigs);
       const { perAntigen, perAntigenUnmapped } = canonicalizePerAntigen(rawPerAntigen, tenantConfigs);
       const totals = Number(
@@ -18890,7 +18926,7 @@ Note from the requester: ${conflict.note}` : ""}`,
       if (!reconcileRoles.has(dbUser.role)) {
         return res.status(403).json({ message: "Forbidden: admin only." });
       }
-      const tenantConfigs = await storage.getVaccineConfigs(req.tenantId);
+      const tenantConfigs = await storage.getCatalogueScheduleDoses(req.tenantId);
       const stages = expandVaccineSchedule(tenantConfigs);
       const rows = await db.select({ id: sessionPlans.id, vc: sessionPlans.vaccinatedCounts }).from(sessionPlans).where((0, import_drizzle_orm18.eq)(sessionPlans.tenantId, String(req.tenantId)));
       const byCode = /* @__PURE__ */ new Map();
@@ -18928,7 +18964,7 @@ Note from the requester: ${conflict.note}` : ""}`,
       if (!from || !to) {
         return res.status(400).json({ message: "fromCode and toCode are required." });
       }
-      const tenantConfigs = await storage.getVaccineConfigs(req.tenantId);
+      const tenantConfigs = await storage.getCatalogueScheduleDoses(req.tenantId);
       const stages = expandVaccineSchedule(tenantConfigs);
       const canonical = stages.find((s) => s.code === to);
       if (!canonical) {
@@ -21722,7 +21758,7 @@ Note from the requester: ${conflict.note}` : ""}`,
       res.status(500).json({ message: "Failed to fetch stock transactions" });
     }
   });
-  app2.post("/api/stock/transaction", isAuthenticated, requireTenant, async (req, res) => {
+  app2.post("/api/stock/transaction", isAuthenticated, requireTenant, loadRole, async (req, res) => {
     try {
       const payload = {
         ...req.body,
@@ -21731,13 +21767,17 @@ Note from the requester: ${conflict.note}` : ""}`,
         transactionDate: req.body.transactionDate ? new Date(req.body.transactionDate) : /* @__PURE__ */ new Date()
       };
       const parsed = insertStockTransactionSchema.parse(payload);
+      const scope = await getGeoScope(req.dbUser, req.tenantId);
+      if (scope.facilityIds && !scope.facilityIds.has(parsed.facilityId)) {
+        return res.status(403).json({ message: "Not authorized to post transactions for this facility." });
+      }
       const transaction = await storage.createStockTransaction(req.tenantId, {
         ...parsed,
         recordedByUserId: req.user?.id ?? req.user?.claims?.sub ?? null
       });
       await logAudit(req, "create_stock_transaction", "stock_transaction", transaction.id, null, {
         facilityId: transaction.facilityId,
-        vaccineName: transaction.vaccineName,
+        productId: transaction.productId,
         transactionType: transaction.transactionType,
         quantityDoses: transaction.quantityDoses
       });
@@ -21755,7 +21795,7 @@ Note from the requester: ${conflict.note}` : ""}`,
       const transferSchema = import_zod3.z.object({
         sourceFacilityId: import_zod3.z.number().int().positive(),
         destFacilityId: import_zod3.z.number().int().positive(),
-        vaccineName: import_zod3.z.string().min(1).transform(normalizeStockVaccineName),
+        productId: import_zod3.z.number().int().positive(),
         batchNumber: import_zod3.z.string().min(1),
         expiryDate: import_zod3.z.string().min(1),
         vvmStatus: import_zod3.z.number().int().min(1).max(4).default(1),
@@ -21774,7 +21814,7 @@ Note from the requester: ${conflict.note}` : ""}`,
       const pair = await storage.createStockTransferPair(req.tenantId, {
         sourceFacilityId: parsed.sourceFacilityId,
         destFacilityId: parsed.destFacilityId,
-        vaccineName: parsed.vaccineName,
+        productId: parsed.productId,
         batchNumber: parsed.batchNumber,
         expiryDate: new Date(parsed.expiryDate),
         vvmStatus: parsed.vvmStatus,
@@ -21788,7 +21828,7 @@ Note from the requester: ${conflict.note}` : ""}`,
       await logAudit(req, "create_stock_transfer", "stock_transaction", pair.issue.id, null, {
         sourceFacilityId: parsed.sourceFacilityId,
         destFacilityId: parsed.destFacilityId,
-        vaccineName: parsed.vaccineName,
+        productId: parsed.productId,
         batchNumber: parsed.batchNumber,
         quantityDoses: parsed.quantityDoses,
         issueId: pair.issue.id,
@@ -21872,9 +21912,13 @@ Note from the requester: ${conflict.note}` : ""}`,
       res.status(500).json({ message: "Failed to fetch monthly report" });
     }
   });
-  app2.post("/api/monthly-reports", isAuthenticated, requireTenant, async (req, res) => {
+  app2.post("/api/monthly-reports", isAuthenticated, requireTenant, loadRole, async (req, res) => {
     try {
       const parsed = insertMonthlyReportSchema.parse(req.body);
+      const scope = await getGeoScope(req.dbUser, req.tenantId);
+      if (scope.facilityIds && !scope.facilityIds.has(parsed.facilityId)) {
+        return res.status(403).json({ message: "Not authorized to submit reports for this facility." });
+      }
       const report = await storage.createMonthlyReport(req.tenantId, {
         ...parsed,
         submittedById: req.user?.id ?? req.user?.claims?.sub ?? null
@@ -25803,7 +25847,7 @@ This response is powered by the local VaxPlan database query engine. You can que
       const txns = await storage.getStockTransactions(req.tenantId, facilityId);
       const balance = {};
       for (const t of txns) {
-        const name = t.vaccineName;
+        const name = t.vaccineName || "Unknown";
         if (!balance[name]) balance[name] = 0;
         const qty = t.quantityDoses;
         if (t.transactionType === "receipt") {
@@ -26559,7 +26603,7 @@ function computeAvgMonthlyConsumption(transactions, now = /* @__PURE__ */ new Da
     if (tx.transactionType !== "issue" && tx.transactionType !== "loss") continue;
     const txTime = new Date(tx.transactionDate).getTime();
     if (txTime < cutoff) continue;
-    const normName = normalizeStockVaccineName(tx.vaccineName);
+    const normName = normalizeStockVaccineName(tx.vaccineName || "Unknown");
     totals[normName] = (totals[normName] ?? 0) + Number(tx.quantityDoses ?? 0);
   }
   const monthsInWindow = windowDays / 30;
@@ -26577,7 +26621,7 @@ function computeStockOnHand(transactions, vaccineConfigs) {
     }
   }
   for (const tx of transactions) {
-    const normName = normalizeStockVaccineName(tx.vaccineName);
+    const normName = normalizeStockVaccineName(tx.vaccineName || "Unknown");
     if (!(normName in soh)) soh[normName] = 0;
     const doses = Number(tx.quantityDoses ?? 0);
     if (tx.transactionType === "receipt" || tx.transactionType === "adjustment") {
@@ -26610,7 +26654,7 @@ function computeAntigenStatus(transactions, vaccineConfigs, thresholdMonths, now
 function computeNearExpiryReceipts(transactions, now = /* @__PURE__ */ new Date()) {
   const batchBalance = {};
   for (const tx of transactions) {
-    const normName = normalizeStockVaccineName(tx.vaccineName);
+    const normName = normalizeStockVaccineName(tx.vaccineName || "Unknown");
     const key = `${normName}::${tx.batchNumber}`;
     const doses = Number(tx.quantityDoses ?? 0);
     if (!(key in batchBalance)) batchBalance[key] = 0;
@@ -26625,7 +26669,7 @@ function computeNearExpiryReceipts(transactions, now = /* @__PURE__ */ new Date(
     if (tx.transactionType !== "receipt") continue;
     const { status, daysUntil } = getExpiryStatus(tx.expiryDate, now);
     if (status === "ok") continue;
-    const normName = normalizeStockVaccineName(tx.vaccineName);
+    const normName = normalizeStockVaccineName(tx.vaccineName || "Unknown");
     const key = `${normName}::${tx.batchNumber}`;
     const remaining = batchBalance[key] ?? 0;
     if (remaining <= 0) continue;
@@ -28030,6 +28074,7 @@ async function seedStockTransactions(tenantId, picks) {
         tenantId,
         facilityId: p.facilityId,
         vaccineName: v.name,
+        productId: 1,
         transactionType: "receipt",
         quantityDoses: receiptDoses,
         batchNumber: `DEMO-${v.name.toUpperCase()}-Q${QUARTER}${YEAR}`,
@@ -28056,6 +28101,7 @@ async function seedStockTransactions(tenantId, picks) {
             tenantId,
             facilityId: p.facilityId,
             vaccineName: v.name,
+            productId: 1,
             transactionType: "issue",
             quantityDoses: routineShare,
             batchNumber: `DEMO-${v.name.toUpperCase()}-Q${QUARTER}${YEAR}`,
@@ -28072,6 +28118,7 @@ async function seedStockTransactions(tenantId, picks) {
             tenantId,
             facilityId: p.facilityId,
             vaccineName: v.name,
+            productId: 1,
             transactionType: "issue",
             quantityDoses: outreachShare,
             batchNumber: `DEMO-${v.name.toUpperCase()}-Q${QUARTER}${YEAR}`,
@@ -28094,17 +28141,6 @@ async function seedSurveillanceCases(tenantId, picks, villagesByFacility) {
   if (existing.length > 0) return 0;
   let inserted = 0;
   const diseases = ["afp", "measles", "cholera"];
-  const names = [
-    "John Mwansa",
-    "Mary Tembo",
-    "Joseph Phiri",
-    "Chipo Mwanza",
-    "Agness Banda",
-    "Moses Mulenga",
-    "Loveness Kabwe",
-    "Kelvin Chanda",
-    "Patricia Chihana"
-  ];
   for (let pi = 0; pi < picks.length; pi++) {
     const p = picks[pi];
     const villagePool = villagesByFacility.get(p.facilityId) || [];
@@ -28112,25 +28148,45 @@ async function seedSurveillanceCases(tenantId, picks, villagesByFacility) {
     if (!fac || !fac.latitude || !fac.longitude) continue;
     const lat = Number(fac.latitude);
     const lng = Number(fac.longitude);
+    const facilityClients = await db.select({
+      id: clients.id,
+      name: clients.name,
+      gender: clients.gender,
+      dateOfBirth: clients.dateOfBirth,
+      villageId: clients.villageId
+    }).from(clients).where((0, import_drizzle_orm22.eq)(clients.facilityId, p.facilityId)).limit(10);
     const numCases = 3;
     for (let cIdx = 0; cIdx < numCases; cIdx++) {
-      const name = names[(pi * 3 + cIdx) % names.length];
       const disease = diseases[(pi + cIdx) % diseases.length];
       const classification = cIdx === 0 ? "confirmed" : "suspected";
-      const ageMonths = 12 + cIdx * 15;
+      let realClientId = null;
+      let realPatientName = "Unknown Case";
+      let realPatientGender = "unknown";
+      let realAgeMonths = 12 + cIdx * 15;
+      let realVillageId = villagePool.length > 0 ? villagePool[cIdx % villagePool.length] : null;
+      if (facilityClients.length > 0) {
+        const client3 = facilityClients[cIdx % facilityClients.length];
+        realClientId = client3.id;
+        realPatientName = client3.name;
+        realPatientGender = client3.gender || "unknown";
+        if (client3.villageId) realVillageId = client3.villageId;
+        const dob = new Date(client3.dateOfBirth);
+        const diffTime = Math.abs(Date.now() - dob.getTime());
+        realAgeMonths = Math.ceil(diffTime / (1e3 * 60 * 60 * 24 * 30));
+      }
       const angle = cIdx * 120 * (Math.PI / 180);
       const r = 8e-3 + cIdx * 5e-3;
       const caseLat = lat + r * Math.sin(angle);
       const caseLng = lng + r * Math.cos(angle);
-      const villageId = villagePool.length > 0 ? villagePool[cIdx % villagePool.length] : null;
       await db.insert(surveillanceCases).values({
         tenantId,
         facilityId: p.facilityId,
-        villageId,
+        villageId: realVillageId,
+        clientId: realClientId,
         disease,
-        patientName: `Demo Case ${name}`,
-        patientAgeMonths: ageMonths,
-        patientGender: cIdx % 2 === 0 ? "male" : "female",
+        patientName: realPatientName,
+        patientAgeMonths: realAgeMonths,
+        patientGender: realPatientGender,
         dateOfOnset: new Date(Date.now() - (3 + cIdx * 5) * 24 * 3600 * 1e3),
         classification,
         gpsLatitude: String(caseLat),

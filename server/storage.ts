@@ -383,7 +383,9 @@ export interface IStorage {
     args: {
       sourceFacilityId: number;
       destFacilityId: number;
-      vaccineName: string;
+      productId: number;
+      productCode?: string | null;
+      vaccineName?: string | null;
       batchNumber: string;
       expiryDate: Date;
       vvmStatus: number;
@@ -2468,7 +2470,7 @@ export class DatabaseStorage implements IStorage {
     // Parse transactionDate string from offline JSON outbox payloads to native Date objects
     const cleanData = { 
       ...data,
-      vaccineName: normalizeStockVaccineName(data.vaccineName),
+      vaccineName: data.vaccineName ? normalizeStockVaccineName(data.vaccineName) : null,
     };
     if (cleanData.transactionDate && typeof cleanData.transactionDate === "string") {
       cleanData.transactionDate = new Date(cleanData.transactionDate);
@@ -2485,9 +2487,9 @@ export class DatabaseStorage implements IStorage {
     args: {
       sourceFacilityId: number;
       destFacilityId: number;
-      productId?: number;
-      productCode?: string;
-      vaccineName: string;
+      productId: number;
+      productCode?: string | null;
+      vaccineName?: string | null;
       batchNumber: string;
       expiryDate: Date;
       vvmStatus: number;
@@ -2499,7 +2501,7 @@ export class DatabaseStorage implements IStorage {
       recordedByUserId: string | null;
     },
   ): Promise<{ issue: StockTransaction; receipt: StockTransaction }> {
-    const normalizedVaccineName = normalizeStockVaccineName(args.vaccineName);
+    const normalizedVaccineName = args.vaccineName ? normalizeStockVaccineName(args.vaccineName) : null;
     // Atomic: either both rows are written or neither is.
     return await db.transaction(async (tx) => {
       const [issue] = await tx

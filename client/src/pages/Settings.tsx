@@ -2311,7 +2311,7 @@ export default function Settings() {
                       { id: "provincial_coordinator", label: "Provincial Coordinator" },
                       { id: "national_admin", label: "National Admin" },
                     ].map((role) => (
-                      <tr key={role.id} className="hover:bg-slate-50/50">
+                      <tr key={role.id} className="hover:bg-muted/50">
                         <td className="p-3 font-bold text-foreground capitalize">{role.label}</td>
                         {[
                           { id: "view_demographics", label: "View Registry" },
@@ -2327,7 +2327,7 @@ export default function Settings() {
                               <Checkbox
                                 checked={hasPerm}
                                 onCheckedChange={() => togglePermission(role.id, gate.id)}
-                                className="h-4 w-4 border-slate-300 data-[state=checked]:bg-sky-500 data-[state=checked]:border-sky-500"
+                                className="h-4 w-4 border-border data-[state=checked]:bg-sky-500 data-[state=checked]:border-sky-500"
                               />
                             </td>
                           );

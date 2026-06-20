@@ -24,6 +24,7 @@ import { dispatchNotification } from "./services/uce";
 import { surveillanceRouter } from "./routes/surveillance";
 import vgieRouter from "./routes/vgie";
 import { researchRouter } from "./routes/research";
+import catalogueRouter from "./routes/catalogue";
 import { VgieService } from "./services/vgieService";
 import {
   FACILITY_AUTHOR_ROLES,
@@ -1257,6 +1258,7 @@ export async function registerRoutes(
   app.use("/api/vgie", ...auth, vgieRouter);
   app.use("/api/surveillance", surveillanceRouter);
   app.use("/api/research", researchRouter);
+  app.use("/api/catalogue", catalogueRouter);
 
   // --- USER ACCESS MANAGEMENT ENDPOINTS ---
   /* Original Code commented out for backward-compatibility:
@@ -9662,7 +9664,7 @@ export async function registerRoutes(
       // Unknown codes are not rejected (older offline-outbox entries may carry them);
       // instead we split them into an "unmapped" bucket and emit an audit warning so
       // they remain visible in reports without polluting the per-antigen rollups.
-      const tenantConfigs = await storage.getVaccineConfigs(req.tenantId);
+      const tenantConfigs = await storage.getCatalogueScheduleDoses(req.tenantId);
       const scheduleStages = expandVaccineSchedule(tenantConfigs);
       const { perAntigen, perAntigenUnmapped } = canonicalizePerAntigen(rawPerAntigen, tenantConfigs);
 
@@ -9841,7 +9843,7 @@ export async function registerRoutes(
       if (!reconcileRoles.has(dbUser.role)) {
         return res.status(403).json({ message: "Forbidden: admin only." });
       }
-      const tenantConfigs = await storage.getVaccineConfigs(req.tenantId);
+      const tenantConfigs = await storage.getCatalogueScheduleDoses(req.tenantId);
       const stages = expandVaccineSchedule(tenantConfigs);
       const rows = await db
         .select({ id: sessionPlans.id, vc: sessionPlans.vaccinatedCounts })
@@ -9885,7 +9887,7 @@ export async function registerRoutes(
       if (!from || !to) {
         return res.status(400).json({ message: "fromCode and toCode are required." });
       }
-      const tenantConfigs = await storage.getVaccineConfigs(req.tenantId);
+      const tenantConfigs = await storage.getCatalogueScheduleDoses(req.tenantId);
       const stages = expandVaccineSchedule(tenantConfigs);
       const canonical = stages.find((s) => s.code === to);
       if (!canonical) {
@@ -13712,7 +13714,7 @@ export async function registerRoutes(
   });
 
   // POST /api/stock/transaction — Log a stock ledger card transaction (receipt, issue, loss, adjustment)
-  app.post("/api/stock/transaction", isAuthenticated, requireTenant, async (req: any, res) => {
+  app.post("/api/stock/transaction", isAuthenticated, requireTenant, loadRole, async (req: any, res) => {
     try {
       /* ORIGINAL CODE:
       const parsed = insertStockTransactionSchema.parse(req.body);
@@ -13734,13 +13736,18 @@ export async function registerRoutes(
       };
 
       const parsed = insertStockTransactionSchema.parse(payload);
+
+      const scope = await getGeoScope(req.dbUser, req.tenantId);
+      if (scope.facilityIds && !scope.facilityIds.has(parsed.facilityId)) {
+        return res.status(403).json({ message: "Not authorized to post transactions for this facility." });
+      }
       const transaction = await storage.createStockTransaction(req.tenantId, {
         ...parsed,
         recordedByUserId: req.user?.id ?? req.user?.claims?.sub ?? null,
       });
       await logAudit(req, "create_stock_transaction", "stock_transaction", transaction.id, null, {
         facilityId: transaction.facilityId,
-        vaccineName: transaction.vaccineName,
+        productId: transaction.productId,
         transactionType: transaction.transactionType,
         quantityDoses: transaction.quantityDoses,
       });
@@ -13761,7 +13768,7 @@ export async function registerRoutes(
       const transferSchema = z.object({
         sourceFacilityId: z.number().int().positive(),
         destFacilityId: z.number().int().positive(),
-        vaccineName: z.string().min(1).transform(normalizeStockVaccineName),
+        productId: z.number().int().positive(),
         batchNumber: z.string().min(1),
         expiryDate: z.string().min(1),
         vvmStatus: z.number().int().min(1).max(4).default(1),
@@ -13781,7 +13788,7 @@ export async function registerRoutes(
       const pair = await storage.createStockTransferPair(req.tenantId, {
         sourceFacilityId: parsed.sourceFacilityId,
         destFacilityId: parsed.destFacilityId,
-        vaccineName: parsed.vaccineName,
+        productId: parsed.productId,
         batchNumber: parsed.batchNumber,
         expiryDate: new Date(parsed.expiryDate),
         vvmStatus: parsed.vvmStatus,
@@ -13796,7 +13803,7 @@ export async function registerRoutes(
       await logAudit(req, "create_stock_transfer", "stock_transaction", pair.issue.id, null, {
         sourceFacilityId: parsed.sourceFacilityId,
         destFacilityId: parsed.destFacilityId,
-        vaccineName: parsed.vaccineName,
+        productId: parsed.productId,
         batchNumber: parsed.batchNumber,
         quantityDoses: parsed.quantityDoses,
         issueId: pair.issue.id,
@@ -13901,9 +13908,15 @@ export async function registerRoutes(
   });
 
   // POST /api/monthly-reports — Submit a compiled monthly facility report
-  app.post("/api/monthly-reports", isAuthenticated, requireTenant, async (req: any, res) => {
+  app.post("/api/monthly-reports", isAuthenticated, requireTenant, loadRole, async (req: any, res) => {
     try {
       const parsed = insertMonthlyReportSchema.parse(req.body);
+
+      const scope = await getGeoScope(req.dbUser, req.tenantId);
+      if (scope.facilityIds && !scope.facilityIds.has(parsed.facilityId)) {
+        return res.status(403).json({ message: "Not authorized to submit reports for this facility." });
+      }
+
       const report = await storage.createMonthlyReport(req.tenantId, {
         ...parsed,
         submittedById: req.user?.id ?? req.user?.claims?.sub ?? null,
@@ -19064,7 +19077,7 @@ Instructions:
       const balance: Record<string, number> = {};
 
       for (const t of txns) {
-        const name = t.vaccineName;
+        const name = t.vaccineName || "Unknown";
         if (!balance[name]) balance[name] = 0;
         const qty = t.quantityDoses;
         if (t.transactionType === "receipt") {

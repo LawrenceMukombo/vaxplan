@@ -4,11 +4,19 @@ import IORedis from 'ioredis';
 // Create a singleton Redis connection for queues
 export const redisConnection = new IORedis(process.env.REDIS_URL || 'redis://localhost:6379', {
   maxRetriesPerRequest: null,
+  retryStrategy(times) {
+    const delay = Math.min(times * 1000, 10000);
+    return delay;
+  }
 });
 
+let lastErrorTime = 0;
 redisConnection.on('error', (err) => {
-  // Log connection errors without crashing the process
-  console.warn(`[Redis] Connection warning: ${err.message || err}`);
+  const now = Date.now();
+  if (now - lastErrorTime > 10000) {
+    console.warn(`[Redis] Connection warning: ${err.message || err}`);
+    lastErrorTime = now;
+  }
 });
 
 // Main queue for processing outbound communications

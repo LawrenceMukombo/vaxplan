@@ -63,7 +63,7 @@ export const LEVEL_COLOR: Record<ReportLevel, string> = {
 };
 
 export const LEVEL_BADGE: Record<ReportLevel, string> = {
-  national: "bg-slate-500/10 text-slate-600 border-slate-300",
+  national: "bg-slate-500/10 text-muted-foreground border-border",
   province: "bg-blue-500/10 text-blue-700 border-blue-200",
   district: "bg-green-500/10 text-green-700 border-green-200",
   facility: "bg-orange-500/10 text-orange-700 border-orange-200",

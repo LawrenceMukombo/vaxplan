@@ -18,14 +18,14 @@ import { useToast } from "@/hooks/use-toast";
 import { useQueryClient } from "@tanstack/react-query";
 
 const priorityColors: Record<string, string> = {
-  high: "text-red-400 bg-red-500/10 border-red-500/20",
-  medium: "text-amber-400 bg-amber-500/10 border-amber-500/20",
-  low: "text-slate-400 bg-slate-500/10 border-slate-500/20",
+  high: "text-red-600 dark:text-red-400 bg-red-100 dark:bg-red-500/10 border-red-200 dark:border-red-500/20",
+  medium: "text-amber-600 dark:text-amber-400 bg-amber-100 dark:bg-amber-500/10 border-amber-200 dark:border-amber-500/20",
+  low: "text-muted-foreground dark:text-muted-foreground bg-muted dark:bg-background border-border dark:border-border/20",
 };
 const statusColors: Record<string, string> = {
-  pending: "text-blue-400 bg-blue-500/10 border-blue-500/20",
-  accepted: "text-emerald-400 bg-emerald-500/10 border-emerald-500/20",
-  dismissed: "text-slate-500 bg-slate-500/10 border-slate-600/20",
+  pending: "text-blue-600 dark:text-blue-400 bg-blue-100 dark:bg-blue-500/10 border-blue-200 dark:border-blue-500/20",
+  accepted: "text-emerald-600 dark:text-emerald-400 bg-emerald-100 dark:bg-emerald-500/10 border-emerald-200 dark:border-emerald-500/20",
+  dismissed: "text-muted-foreground dark:text-muted-foreground bg-muted dark:bg-background border-border dark:border-border/20",
 };
 
 export default function Recommendations() {
@@ -47,7 +47,7 @@ export default function Recommendations() {
     updateRec({ id, status: "accepted" }, {
       onSuccess: () => {
         toast({ title: "Recommendation accepted" });
-        queryClient.invalidateQueries({ queryKey: ["/api/recommendations"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/vgie/recommendations"] });
       },
     });
   };
@@ -56,7 +56,7 @@ export default function Recommendations() {
     updateRec({ id, status: "dismissed" }, {
       onSuccess: () => {
         toast({ title: "Recommendation dismissed" });
-        queryClient.invalidateQueries({ queryKey: ["/api/recommendations"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/vgie/recommendations"] });
       },
     });
   };
@@ -68,7 +68,7 @@ export default function Recommendations() {
           title: `Generated ${result.generated} new recommendations`,
           description: `${result.skipped} settlements already had recommendations.`,
         });
-        queryClient.invalidateQueries({ queryKey: ["/api/recommendations"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/vgie/recommendations"] });
       },
       onError: () => toast({ title: "Failed to generate recommendations", variant: "destructive" }),
     });
@@ -96,7 +96,7 @@ export default function Recommendations() {
           ? "AI-powered analysis complete. Review and accept below."
           : `${result.skipped ?? 0} settlements already had pending recommendations.`,
       });
-      queryClient.invalidateQueries({ queryKey: ["/api/recommendations"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/vgie/recommendations"] });
     } catch (err: any) {
       toast({ title: "AI generation failed", description: err.message, variant: "destructive" });
     } finally {
@@ -119,7 +119,7 @@ export default function Recommendations() {
             onClick={handleGenerate}
             disabled={generating}
             variant="outline"
-            className="border-slate-700 text-slate-300 hover:bg-slate-800 text-sm"
+            className="text-muted-foreground hover:bg-accent text-sm"
             size="sm"
           >
             <Zap className="w-3.5 h-3.5 mr-1.5 text-amber-400" />
@@ -137,32 +137,32 @@ export default function Recommendations() {
         </div>
       </div>
 
-      <div className="p-3 rounded-lg bg-emerald-500/5 border border-emerald-500/10 text-xs text-slate-500">
-        <span className="text-emerald-400 font-medium">AI Generate</span> uses GPT-4o-mini to analyze each unserved settlement and write specific, contextual vaccination recommendations based on population, access, and facility data.
+      <div className="p-3 rounded-lg bg-emerald-100 dark:bg-emerald-500/5 border border-emerald-200 dark:border-emerald-500/10 text-xs text-muted-foreground">
+        <span className="text-emerald-600 dark:text-emerald-400 font-medium">AI Generate</span> uses GPT-4o-mini to analyze each unserved settlement and write specific, contextual vaccination recommendations based on population, access, and facility data.
       </div>
 
       {/* Filters */}
       <div className="flex flex-wrap items-center gap-3">
         <Select value={status} onValueChange={setStatus}>
-          <SelectTrigger className="w-36 h-8 text-sm bg-slate-900 border-slate-700 text-slate-300">
+          <SelectTrigger className="w-36 h-8 text-sm">
             <SelectValue />
           </SelectTrigger>
-          <SelectContent className="bg-slate-900 border-slate-700">
-            <SelectItem value="all" className="text-slate-300">All statuses</SelectItem>
-            <SelectItem value="pending" className="text-slate-300">Pending</SelectItem>
-            <SelectItem value="accepted" className="text-slate-300">Accepted</SelectItem>
-            <SelectItem value="dismissed" className="text-slate-300">Dismissed</SelectItem>
+          <SelectContent>
+            <SelectItem value="all">All statuses</SelectItem>
+            <SelectItem value="pending">Pending</SelectItem>
+            <SelectItem value="accepted">Accepted</SelectItem>
+            <SelectItem value="dismissed">Dismissed</SelectItem>
           </SelectContent>
         </Select>
         <Select value={priority} onValueChange={setPriority}>
-          <SelectTrigger className="w-36 h-8 text-sm bg-slate-900 border-slate-700 text-slate-300">
+          <SelectTrigger className="w-36 h-8 text-sm">
             <SelectValue />
           </SelectTrigger>
-          <SelectContent className="bg-slate-900 border-slate-700">
-            <SelectItem value="all" className="text-slate-300">All priorities</SelectItem>
-            <SelectItem value="high" className="text-slate-300">High</SelectItem>
-            <SelectItem value="medium" className="text-slate-300">Medium</SelectItem>
-            <SelectItem value="low" className="text-slate-300">Low</SelectItem>
+          <SelectContent>
+            <SelectItem value="all">All priorities</SelectItem>
+            <SelectItem value="high">High</SelectItem>
+            <SelectItem value="medium">Medium</SelectItem>
+            <SelectItem value="low">Low</SelectItem>
           </SelectContent>
         </Select>
       </div>
@@ -171,14 +171,14 @@ export default function Recommendations() {
       <div className="space-y-2">
         {isLoading
           ? Array.from({ length: 6 }).map((_, i) => (
-              <Card key={i} className="bg-slate-900 border-slate-800">
+              <Card key={i}>
                 <CardContent className="p-4">
-                  <Skeleton className="h-16 bg-slate-800 rounded" />
+                  <Skeleton className="h-16 rounded" />
                 </CardContent>
               </Card>
             ))
           : (recs ?? []).map((rec: any) => (
-              <Card key={rec.id} className="bg-slate-900 border-slate-800 hover:border-slate-700 transition-colors">
+              <Card key={rec.id} className="hover:border-primary/50 transition-colors">
                 <CardContent className="p-4">
                   <div className="flex items-start gap-3">
                     <div className="flex-1 min-w-0">
@@ -190,21 +190,21 @@ export default function Recommendations() {
                           {rec.status}
                         </Badge>
                       </div>
-                      <p className="text-sm font-medium text-slate-200 mt-1.5">{rec.recommendationType}</p>
+                      <p className="text-sm font-medium text-foreground mt-1.5">{rec.recommendationType}</p>
                       <div className="flex items-center gap-3 mt-1">
                         <Link href={`/settlements/${rec.settlementId}`}
-                          className="text-xs text-emerald-400 hover:text-emerald-300 flex items-center gap-1"
+                          className="text-xs text-emerald-600 dark:text-emerald-400 hover:underline flex items-center gap-1"
                         >
                           <ClipboardList className="w-3 h-3" /> {rec.settlementName ?? `Settlement #${rec.settlementId}`}
                         </Link>
                         {rec.expectedChildren != null && (
-                          <span className="text-xs text-slate-600 flex items-center gap-1">
+                          <span className="text-xs text-muted-foreground flex items-center gap-1">
                             <Users className="w-3 h-3" /> {rec.expectedChildren} children U5
                           </span>
                         )}
                       </div>
                       {rec.notes && (
-                        <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">{rec.notes}</p>
+                        <p className="text-xs text-muted-foreground mt-1.5 leading-relaxed">{rec.notes}</p>
                       )}
                     </div>
                     {rec.status === "pending" && (
@@ -220,7 +220,7 @@ export default function Recommendations() {
                         <Button
                           size="sm"
                           variant="ghost"
-                          className="h-7 px-2 text-xs text-slate-500 hover:text-slate-300 hover:bg-slate-800"
+                          className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground hover:bg-accent"
                           onClick={() => handleDismiss(rec.id)}
                           disabled={updating}
                         >
@@ -233,8 +233,8 @@ export default function Recommendations() {
               </Card>
             ))}
         {!isLoading && (!recs || recs.length === 0) && (
-          <div className="flex flex-col items-center justify-center py-16 text-slate-600">
-            <CheckCircle className="w-8 h-8 mb-2 text-emerald-700" />
+          <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
+            <CheckCircle className="w-8 h-8 mb-2 text-emerald-600 dark:text-emerald-700" />
             <p className="text-sm">No recommendations found for the current filters</p>
             <Button
               variant="ghost"

@@ -330,9 +330,15 @@ surveillanceRouter.post("/cases", async (req: any, res) => {
 
 surveillanceRouter.patch("/cases/:id", async (req: any, res) => {
   try {
+    const updateData = { ...req.body, updatedAt: new Date() };
+    delete updateData.id;
+    if (updateData.dateOfOnset) updateData.dateOfOnset = new Date(updateData.dateOfOnset);
+    if (updateData.dateReported) updateData.dateReported = new Date(updateData.dateReported);
+    if (updateData.investigationDate) updateData.investigationDate = new Date(updateData.investigationDate);
+
     const [updated] = await db
       .update(surveillanceCases)
-      .set({ ...req.body, updatedAt: new Date() })
+      .set(updateData)
       .where(
         and(
           eq(surveillanceCases.id, req.params.id),

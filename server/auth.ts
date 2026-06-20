@@ -29,7 +29,8 @@ export const IS_LOCAL_DEV = process.env.NODE_ENV !== "production";
 // Local dev: in-memory (zero network latency, sessions reset on restart).
 // Production: PostgreSQL (durable, shared across PM2 workers).
 export function getSession() {
-  const sessionTtl = 7 * 24 * 60 * 60 * 1000; // 1 week
+  const absoluteTimeoutMinutes = parseInt(process.env.SESSION_ABSOLUTE_TIMEOUT_MINUTES || "480", 10);
+  const sessionTtl = absoluteTimeoutMinutes * 60 * 1000;
 
   let secret = process.env.SESSION_SECRET;
   if (!secret) {
@@ -52,7 +53,7 @@ export function getSession() {
     store = new PgStore({
       conString: process.env.DATABASE_URL,
       createTableIfMissing: false,
-      ttl: sessionTtl,
+      ttl: Math.floor(sessionTtl / 1000), // ttl is in seconds
       tableName: "sessions",
     });
   }
@@ -122,6 +123,23 @@ export async function setupAuth(app: Express) {
         res.redirect("/");
       });
     }
+  });
+
+  app.post("/api/auth/ping", (req, res) => {
+    if (req.isAuthenticated?.() && req.session) {
+      (req.session as any).lastActive = Math.floor(Date.now() / 1000);
+      res.json({ success: true });
+    } else {
+      res.status(401).json({ error: "Unauthorized" });
+    }
+  });
+
+  app.get("/api/auth/session-config", (req, res) => {
+    res.json({
+      idleTimeoutMinutes: parseInt(process.env.SESSION_IDLE_TIMEOUT_MINUTES || "15", 10),
+      absoluteTimeoutMinutes: parseInt(process.env.SESSION_ABSOLUTE_TIMEOUT_MINUTES || "480", 10),
+      warningMinutes: parseInt(process.env.SESSION_WARNING_BEFORE_TIMEOUT_MINUTES || "2", 10),
+    });
   });
 
   // Only register dev-only mock login routes in local dev.
@@ -237,6 +255,18 @@ export const isAuthenticated: RequestHandler = async (req, res, next) => {
   }
 
   const now = Math.floor(Date.now() / 1000);
+
+  // Enforce server-side idle timeout (backend source of truth)
+  const idleTimeoutMinutes = parseInt(process.env.SESSION_IDLE_TIMEOUT_MINUTES || "15", 10);
+  if ((req.session as any)?.lastActive) {
+    if (now - (req.session as any).lastActive > idleTimeoutMinutes * 60) {
+      if (typeof req.session?.destroy === "function") {
+        req.session.destroy(() => {});
+      }
+      return res.status(401).json({ message: "Session expired due to inactivity." });
+    }
+  }
+
   if (now <= user.expires_at) {
     return next();
   }

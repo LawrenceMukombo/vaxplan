@@ -162,17 +162,17 @@ function SelectedPanel({ selectedId, onClose }: { selectedId: number; onClose: (
 
   return (
     <div className="absolute top-4 right-4 z-[500] w-80">
-      <Card className="bg-slate-900/97 border-slate-700 backdrop-blur-sm shadow-2xl">
+      <Card className="bg-background border-border backdrop-blur-sm shadow-2xl">
         <CardContent className="p-4">
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0 flex-1">
               {isLoading
-                ? <div className="h-4 w-32 bg-slate-800 animate-pulse rounded mb-1" />
-                : <p className="font-semibold text-slate-200 text-sm leading-tight truncate">{detail?.name}</p>}
-              <p className="text-xs text-slate-500 mt-0.5">{detail?.district ?? "…"} District</p>
+                ? <div className="h-4 w-32 bg-muted animate-pulse rounded mb-1" />
+                : <p className="font-semibold text-foreground text-sm leading-tight truncate">{detail?.name}</p>}
+              <p className="text-xs text-muted-foreground mt-0.5">{detail?.district ?? "…"} District</p>
             </div>
             <Button variant="ghost" size="sm"
-              className="h-6 w-6 p-0 text-slate-600 hover:text-slate-300 shrink-0"
+              className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground shrink-0"
               onClick={onClose}>
               <X className="w-3.5 h-3.5" />
             </Button>
@@ -195,23 +195,23 @@ function SelectedPanel({ selectedId, onClose }: { selectedId: number; onClose: (
                 )}
               </div>
               <div className="grid grid-cols-3 gap-1.5 mt-3">
-                <div className="p-2 rounded bg-slate-800/50">
-                  <p className="text-[10px] text-slate-600 flex items-center gap-1"><Users className="w-3 h-3" /> Pop.</p>
-                  <p className="text-sm font-bold text-slate-200">{detail.population.toLocaleString()}</p>
+                <div className="p-2 rounded bg-muted">
+                  <p className="text-[10px] text-muted-foreground flex items-center gap-1"><Users className="w-3 h-3" /> Pop.</p>
+                  <p className="text-sm font-bold text-foreground">{detail.population.toLocaleString()}</p>
                 </div>
-                <div className="p-2 rounded bg-slate-800/50">
-                  <p className="text-[10px] text-slate-600">Children U5</p>
-                  <p className="text-sm font-bold text-slate-200">{detail.childrenUnderFive ?? "—"}</p>
+                <div className="p-2 rounded bg-muted">
+                  <p className="text-[10px] text-muted-foreground">Children U5</p>
+                  <p className="text-sm font-bold text-foreground">{detail.childrenUnderFive ?? "—"}</p>
                 </div>
-                <div className="p-2 rounded bg-slate-800/50">
-                  <p className="text-[10px] text-slate-600 flex items-center gap-1"><Building2 className="w-3 h-3" /> Bldgs</p>
-                  <p className="text-sm font-bold text-slate-200">{detail.buildingCount ?? "—"}</p>
+                <div className="p-2 rounded bg-muted">
+                  <p className="text-[10px] text-muted-foreground flex items-center gap-1"><Building2 className="w-3 h-3" /> Bldgs</p>
+                  <p className="text-sm font-bold text-foreground">{detail.buildingCount ?? "—"}</p>
                 </div>
               </div>
 
               {/* Last outreach row */}
-              <div className="mt-2 px-2 py-1.5 rounded bg-slate-800/40 flex items-center justify-between gap-2">
-                <span className="text-[10px] text-slate-500 flex items-center gap-1">
+              <div className="mt-2 px-2 py-1.5 rounded bg-muted flex items-center justify-between gap-2">
+                <span className="text-[10px] text-muted-foreground flex items-center gap-1">
                   <Calendar className="w-3 h-3" /> Last outreach
                 </span>
                 {lastSession ? (
@@ -219,7 +219,7 @@ function SelectedPanel({ selectedId, onClose }: { selectedId: number; onClose: (
                 ) : detailAny?.hasOutreachSession ? (
                   <span className="text-[10px] font-medium text-emerald-400">Session recorded</span>
                 ) : (
-                  <span className="text-[10px] text-slate-600 italic">No outreach yet</span>
+                  <span className="text-[10px] text-muted-foreground italic">No outreach yet</span>
                 )}
               </div>
 
@@ -227,40 +227,40 @@ function SelectedPanel({ selectedId, onClose }: { selectedId: number; onClose: (
               {!showOutreachForm ? (
                 <button
                   onClick={() => setShowOutreachForm(true)}
-                  className="mt-2 w-full flex items-center justify-center gap-1.5 py-1.5 rounded border border-dashed border-slate-700 text-[10px] text-slate-500 hover:border-emerald-600 hover:text-emerald-400 transition-colors"
+                  className="mt-2 w-full flex items-center justify-center gap-1.5 py-1.5 rounded border border-dashed border-border text-[10px] text-muted-foreground hover:border-emerald-600 hover:text-emerald-400 transition-colors"
                 >
                   <Plus className="w-3 h-3" /> Log outreach session
                 </button>
               ) : (
-                <div className="mt-2 p-2.5 rounded-lg bg-slate-800/60 border border-emerald-500/20 space-y-2.5">
+                <div className="mt-2 p-2.5 rounded-lg bg-muted border border-emerald-500/20 space-y-2.5">
                   <p className="text-[10px] font-semibold text-emerald-400 uppercase tracking-wide flex items-center gap-1">
                     <Syringe className="w-3 h-3" /> New outreach session
                   </p>
                   <div className="grid grid-cols-2 gap-2">
                     <div>
-                      <p className="text-[10px] text-slate-500 mb-1">Date</p>
+                      <p className="text-[10px] text-muted-foreground mb-1">Date</p>
                       <input
                         type="date"
                         value={outreachDate}
                         max={new Date().toISOString().slice(0, 10)}
                         onChange={e => setOutreachDate(e.target.value)}
-                        className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200 focus:outline-none focus:border-emerald-500"
+                        className="w-full bg-background border border-border rounded px-2 py-1 text-xs text-foreground focus:outline-none focus:border-emerald-500"
                       />
                     </div>
                     <div>
-                      <p className="text-[10px] text-slate-500 mb-1">Children vaccinated</p>
+                      <p className="text-[10px] text-muted-foreground mb-1">Children vaccinated</p>
                       <input
                         type="number"
                         min="0"
                         placeholder="e.g. 24"
                         value={outreachCount}
                         onChange={e => setOutreachCount(e.target.value)}
-                        className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200 focus:outline-none focus:border-emerald-500"
+                        className="w-full bg-background border border-border rounded px-2 py-1 text-xs text-foreground focus:outline-none focus:border-emerald-500"
                       />
                     </div>
                   </div>
                   <div>
-                    <p className="text-[10px] text-slate-500 mb-1.5">Vaccines covered</p>
+                    <p className="text-[10px] text-muted-foreground mb-1.5">Vaccines covered</p>
                     <div className="flex flex-wrap gap-1">
                       {PANEL_VACCINES.map(v => (
                         <button
@@ -269,7 +269,7 @@ function SelectedPanel({ selectedId, onClose }: { selectedId: number; onClose: (
                           className={`px-1.5 py-0.5 rounded text-[10px] border transition-colors ${
                             outreachVaccines.includes(v)
                               ? "bg-emerald-600 border-emerald-500 text-white"
-                              : "bg-slate-900 border-slate-700 text-slate-400 hover:border-slate-500"
+                              : "bg-background border-border text-muted-foreground hover:border-border"
                           }`}
                         >
                           {v}
@@ -279,7 +279,7 @@ function SelectedPanel({ selectedId, onClose }: { selectedId: number; onClose: (
                   </div>
                   <div className="flex gap-1.5 justify-end pt-0.5">
                     <Button size="sm" variant="ghost"
-                      className="h-6 px-2 text-[10px] text-slate-500 hover:text-slate-300"
+                      className="h-6 px-2 text-[10px] text-muted-foreground hover:text-foreground"
                       onClick={() => { setShowOutreachForm(false); setOutreachVaccines([]); setOutreachCount(""); }}
                       disabled={outreachPending}
                     >
@@ -300,9 +300,9 @@ function SelectedPanel({ selectedId, onClose }: { selectedId: number; onClose: (
               {nf ? (
                 <div className="mt-3 p-2.5 rounded-lg bg-blue-500/5 border border-blue-500/10">
                   <p className="text-[10px] text-blue-400 font-medium mb-1 flex items-center gap-1"><Hospital className="w-3 h-3" /> Nearest Facility</p>
-                  <p className="text-xs text-slate-300 font-medium truncate">{nf.name}</p>
-                  <p className="text-[10px] text-slate-500">{nf.type}</p>
-                  <div className="flex items-center gap-3 mt-1.5 text-[10px] text-slate-500">
+                  <p className="text-xs text-foreground font-medium truncate">{nf.name}</p>
+                  <p className="text-[10px] text-muted-foreground">{nf.type}</p>
+                  <div className="flex items-center gap-3 mt-1.5 text-[10px] text-muted-foreground">
                     <span className="flex items-center gap-0.5"><Ruler className="w-3 h-3" /> {nf.distanceKm?.toFixed(1)} km</span>
                     {nf.travelTimeWalkingMin && <span className="flex items-center gap-0.5"><Clock className="w-3 h-3" /> {nf.travelTimeWalkingMin} min walk</span>}
                     {nf.travelTimeMotorcycleMin && <span className="flex items-center gap-0.5"><Bike className="w-3 h-3" /> {nf.travelTimeMotorcycleMin} min moto</span>}
@@ -310,25 +310,25 @@ function SelectedPanel({ selectedId, onClose }: { selectedId: number; onClose: (
                   </div>
                 </div>
               ) : (
-                <div className="mt-3 p-2.5 rounded-lg bg-slate-800/50 text-[10px] text-slate-600 flex items-center gap-1.5">
+                <div className="mt-3 p-2.5 rounded-lg bg-muted text-[10px] text-muted-foreground flex items-center gap-1.5">
                   <AlertTriangle className="w-3 h-3 text-amber-600" /> No facility link data
                 </div>
               )}
               {topRec ? (
                 <div className="mt-3 p-2.5 rounded-lg bg-emerald-500/5 border border-emerald-500/10">
                   <p className="text-[10px] text-emerald-400 font-medium mb-1 flex items-center gap-1"><Sparkles className="w-3 h-3" /> Top Recommendation</p>
-                  <p className="text-xs text-slate-300 leading-relaxed">{topRec.recommendationType}</p>
+                  <p className="text-xs text-foreground leading-relaxed">{topRec.recommendationType}</p>
                   <div className="flex items-center gap-2 mt-1">
                     <Badge className={`text-[9px] px-1 py-0 border ${
                       topRec.priority === "high"   ? "text-red-400 bg-red-500/10 border-red-500/20"
                       : topRec.priority === "medium" ? "text-amber-400 bg-amber-500/10 border-amber-500/20"
-                      : "text-slate-400 bg-slate-500/10 border-slate-500/20"
+                      : "text-muted-foreground bg-slate-500/10 border-border/20"
                     }`}>{topRec.priority} priority</Badge>
                   </div>
                 </div>
               ) : detail.serviceStatus !== "served" ? (
-                <div className="mt-3 p-2 rounded-lg bg-slate-800/50 text-[10px] text-slate-500 flex items-center gap-1.5">
-                  <Sparkles className="w-3 h-3 text-slate-600" /> No pending recommendations
+                <div className="mt-3 p-2 rounded-lg bg-muted text-[10px] text-muted-foreground flex items-center gap-1.5">
+                  <Sparkles className="w-3 h-3 text-muted-foreground" /> No pending recommendations
                 </div>
               ) : null}
               <Link href={`/settlements/${detail.id}`}>
@@ -375,18 +375,18 @@ function FacilityPanel({ facilityId, activeRadiusKm, settlements, onClose }: {
 
   return (
     <div className="absolute top-4 right-4 z-[500] w-80 max-h-[calc(100vh-120px)] flex flex-col">
-      <Card className="bg-slate-900/97 border-slate-700 backdrop-blur-sm shadow-2xl flex flex-col overflow-hidden">
+      <Card className="bg-background border-border backdrop-blur-sm shadow-2xl flex flex-col overflow-hidden">
         <CardContent className="p-4 flex flex-col gap-0 overflow-hidden">
           {/* Header */}
           <div className="flex items-start justify-between gap-2 shrink-0">
             <div className="min-w-0 flex-1">
               {isLoading
-                ? <div className="h-4 w-36 bg-slate-800 animate-pulse rounded mb-1" />
-                : <p className="font-semibold text-slate-200 text-sm leading-tight truncate">{detail?.name}</p>}
-              <p className="text-xs text-slate-500 mt-0.5">{detail?.type ?? "…"} · {detail?.district ?? "…"}</p>
+                ? <div className="h-4 w-36 bg-muted animate-pulse rounded mb-1" />
+                : <p className="font-semibold text-foreground text-sm leading-tight truncate">{detail?.name}</p>}
+              <p className="text-xs text-muted-foreground mt-0.5">{detail?.type ?? "…"} · {detail?.district ?? "…"}</p>
             </div>
             <Button variant="ghost" size="sm"
-              className="h-6 w-6 p-0 text-slate-600 hover:text-slate-300 shrink-0"
+              className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground shrink-0"
               onClick={onClose}>
               <X className="w-3.5 h-3.5" />
             </Button>
@@ -399,33 +399,33 @@ function FacilityPanel({ facilityId, activeRadiusKm, settlements, onClose }: {
                 <span className="text-[10px] text-blue-400 flex items-center gap-1">
                   <Hospital className="w-3 h-3" /> Catchment: {activeRadiusKm} km radius
                 </span>
-                <span className="text-[10px] text-slate-400 font-medium">{withinCatchment.length} settlements</span>
+                <span className="text-[10px] text-muted-foreground font-medium">{withinCatchment.length} settlements</span>
               </div>
 
               {/* Stats grid */}
               <div className="grid grid-cols-3 gap-1 mt-2 shrink-0">
-                <div className="rounded bg-slate-800/50 p-1.5 text-center">
+                <div className="rounded bg-muted p-1.5 text-center">
                   <p className="text-xs font-bold text-emerald-400">{servedIn}</p>
-                  <p className="text-[9px] text-slate-600">Served</p>
+                  <p className="text-[9px] text-muted-foreground">Served</p>
                 </div>
-                <div className="rounded bg-slate-800/50 p-1.5 text-center">
+                <div className="rounded bg-muted p-1.5 text-center">
                   <p className="text-xs font-bold text-amber-400">{underIn}</p>
-                  <p className="text-[9px] text-slate-600">Under</p>
+                  <p className="text-[9px] text-muted-foreground">Under</p>
                 </div>
-                <div className="rounded bg-slate-800/50 p-1.5 text-center">
+                <div className="rounded bg-muted p-1.5 text-center">
                   <p className="text-xs font-bold text-red-400">{unservedIn}</p>
-                  <p className="text-[9px] text-slate-600">Unserved</p>
+                  <p className="text-[9px] text-muted-foreground">Unserved</p>
                 </div>
               </div>
 
               <div className="mt-1.5 grid grid-cols-2 gap-1 shrink-0">
-                <div className="rounded bg-slate-800/40 px-2 py-1 flex items-center justify-between">
-                  <span className="text-[10px] text-slate-600 flex items-center gap-1"><Users className="w-3 h-3" /> Pop.</span>
-                  <span className="text-[10px] font-semibold text-slate-300">{totalPop.toLocaleString()}</span>
+                <div className="rounded bg-muted px-2 py-1 flex items-center justify-between">
+                  <span className="text-[10px] text-muted-foreground flex items-center gap-1"><Users className="w-3 h-3" /> Pop.</span>
+                  <span className="text-[10px] font-semibold text-foreground">{totalPop.toLocaleString()}</span>
                 </div>
                 {totalU5 > 0 && (
-                  <div className="rounded bg-slate-800/40 px-2 py-1 flex items-center justify-between">
-                    <span className="text-[10px] text-slate-600">U5</span>
+                  <div className="rounded bg-muted px-2 py-1 flex items-center justify-between">
+                    <span className="text-[10px] text-muted-foreground">U5</span>
                     <span className="text-[10px] font-semibold text-amber-300">{totalU5.toLocaleString()}</span>
                   </div>
                 )}
@@ -433,18 +433,18 @@ function FacilityPanel({ facilityId, activeRadiusKm, settlements, onClose }: {
 
               {/* Settlement list */}
               <div className="mt-2.5 flex-1 overflow-y-auto min-h-0" style={{ maxHeight: "260px" }}>
-                <p className="text-[9px] text-slate-600 uppercase tracking-wide mb-1.5 flex items-center gap-1">
+                <p className="text-[9px] text-muted-foreground uppercase tracking-wide mb-1.5 flex items-center gap-1">
                   <ListChecks className="w-3 h-3" /> Settlements within catchment
                 </p>
                 {withinCatchment.length === 0 ? (
-                  <p className="text-[11px] text-slate-600 italic px-1">No linked settlements within {activeRadiusKm} km</p>
+                  <p className="text-[11px] text-muted-foreground italic px-1">No linked settlements within {activeRadiusKm} km</p>
                 ) : (
                   <div className="space-y-0.5">
                     {listed.map(s => (
-                      <div key={s.id} className="flex items-center justify-between px-2 py-1.5 rounded bg-slate-800/40 hover:bg-slate-800/70 transition-colors">
+                      <div key={s.id} className="flex items-center justify-between px-2 py-1.5 rounded bg-muted hover:bg-muted transition-colors">
                         <div className="min-w-0 flex-1">
-                          <p className="text-[11px] text-slate-300 font-medium truncate">{s.name}</p>
-                          <p className="text-[10px] text-slate-600">
+                          <p className="text-[11px] text-foreground font-medium truncate">{s.name}</p>
+                          <p className="text-[10px] text-muted-foreground">
                             {s.population.toLocaleString()} pop · {s._distKm.toFixed(1)} km
                           </p>
                         </div>
@@ -458,7 +458,7 @@ function FacilityPanel({ facilityId, activeRadiusKm, settlements, onClose }: {
                       </div>
                     ))}
                     {overflow > 0 && (
-                      <p className="text-[10px] text-slate-600 italic text-center pt-1">+{overflow} more within catchment</p>
+                      <p className="text-[10px] text-muted-foreground italic text-center pt-1">+{overflow} more within catchment</p>
                     )}
                   </div>
                 )}
@@ -841,12 +841,12 @@ export default function MapView() {
 
       {/* ── Left controls panel ── */}
       <div className="absolute top-4 left-4 z-[500] flex flex-col gap-2 max-h-[calc(100vh-100px)] overflow-y-auto">
-        <Card className="bg-slate-900/97 border-slate-700 backdrop-blur-sm shadow-xl">
+        <Card className="bg-background border-border backdrop-blur-sm shadow-xl">
           <CardContent className="p-3 space-y-3">
 
             {/* Basemap switcher */}
             <div>
-              <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide mb-1.5 flex items-center gap-1">
+              <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1.5 flex items-center gap-1">
                 <Map className="w-3 h-3" /> Basemap
               </p>
               {/* Commented out original grid layout
@@ -860,7 +860,7 @@ export default function MapView() {
                       className={`flex items-center gap-1.5 px-2 py-1.5 rounded text-[11px] transition-colors ${
                         basemap === key
                           ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
-                          : "bg-slate-800/60 text-slate-400 hover:bg-slate-700/60 hover:text-slate-200 border border-transparent"
+                          : "bg-muted text-muted-foreground hover:bg-accent/60 hover:text-foreground border border-transparent"
                       }`}
                     >
                       <Icon className="w-3 h-3 shrink-0" />
@@ -871,12 +871,12 @@ export default function MapView() {
               </div>
               */}
               <Select value={basemap} onValueChange={(v) => setBasemap(v as Basemap)}>
-                <SelectTrigger className="w-full h-8 text-xs bg-slate-800 border-slate-700 text-slate-300">
+                <SelectTrigger className="w-full h-8 text-xs bg-muted border-border text-foreground">
                   <SelectValue placeholder="Select basemap" />
                 </SelectTrigger>
-                <SelectContent className="bg-slate-900 border-slate-700">
+                <SelectContent className="bg-background border-border">
                   {BASEMAP_ITEMS.map((item) => (
-                    <SelectItem key={item.key} value={item.key} className="text-xs text-slate-300">
+                    <SelectItem key={item.key} value={item.key} className="text-xs text-foreground">
                       <span className="flex items-center gap-2">
                         {item.label}
                       </span>
@@ -887,24 +887,24 @@ export default function MapView() {
             </div>
 
             {/* Divider */}
-            <div className="border-t border-slate-800" />
+            <div className="border-t border-border" />
 
             {/* Layers */}
             <div>
-              <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide mb-1.5 flex items-center gap-1">
+              <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1.5 flex items-center gap-1">
                 <Layers className="w-3 h-3" /> Layers
               </p>
               <div className="space-y-1.5">
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input type="checkbox" checked={showFacilities} onChange={e => setShowFacilities(e.target.checked)}
                     className="w-3 h-3 accent-blue-500 shrink-0" />
-                  <span className="text-xs text-slate-400">Health facilities</span>
+                  <span className="text-xs text-muted-foreground">Health facilities</span>
                 </label>
                 <div className="space-y-1">
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input type="checkbox" checked={showCatchment} onChange={e => setShowCatchment(e.target.checked)}
                       className="w-3 h-3 accent-blue-500 shrink-0" />
-                    <span className="text-xs text-slate-400">Catchment radii</span>
+                    <span className="text-xs text-muted-foreground">Catchment radii</span>
                     {showCatchment && zoomLevel < CATCHMENT_ZOOM_THRESHOLD && (
                       <span className="text-[9px] text-amber-500 ml-auto">zoom in</span>
                     )}
@@ -912,7 +912,7 @@ export default function MapView() {
                   {showCatchment && (
                     <div className="pl-5 space-y-1">
                       <div className="flex items-center justify-between">
-                        <span className="text-[10px] text-slate-600">Radius</span>
+                        <span className="text-[10px] text-muted-foreground">Radius</span>
                         <span className="text-[10px] font-semibold text-blue-400 tabular-nums">{catchmentRadiusKm} km</span>
                       </div>
                       <input
@@ -925,7 +925,7 @@ export default function MapView() {
                         className="w-full h-1.5 rounded accent-blue-500 cursor-pointer"
                         style={{ accentColor: "#3b82f6" }}
                       />
-                      <div className="flex justify-between text-[9px] text-slate-700">
+                      <div className="flex justify-between text-[9px] text-foreground">
                         <span>1 km</span>
                         <span>25 km</span>
                       </div>
@@ -934,61 +934,61 @@ export default function MapView() {
                 </div>
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input type="checkbox" checked={showClusters} onChange={(e) => setShowClusters(e.target.checked)} className="w-3 h-3 accent-purple-500" />
-                  <span className="text-xs text-slate-400">Cluster markers</span>
+                  <span className="text-xs text-muted-foreground">Cluster markers</span>
                 </label>
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input type="checkbox" checked={colorByRisk} onChange={(e) => { setColorByRisk(e.target.checked); if (e.target.checked) setColorByOutreach(false); }} className="w-3 h-3 accent-orange-500" />
-                  <span className="text-xs text-slate-400">Color by risk</span>
+                  <span className="text-xs text-muted-foreground">Color by risk</span>
                 </label>
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input type="checkbox" checked={colorByOutreach} onChange={(e) => { setColorByOutreach(e.target.checked); if (e.target.checked) setColorByRisk(false); }} className="w-3 h-3 accent-emerald-500" />
-                  <span className="text-xs text-slate-400">Outreach recency</span>
+                  <span className="text-xs text-muted-foreground">Outreach recency</span>
                 </label>
-                <div className="border-t border-slate-800/60 mt-1 pt-1.5">
-                  <p className="text-[9px] text-slate-600 uppercase tracking-wide mb-1.5">Boundaries</p>
+                <div className="border-t border-border mt-1 pt-1.5">
+                  <p className="text-[9px] text-muted-foreground uppercase tracking-wide mb-1.5">Boundaries</p>
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input type="checkbox" checked={showCountryOutline} onChange={e => setShowCountryOutline(e.target.checked)} className="w-3 h-3 accent-slate-400" />
-                    <span className="text-xs text-slate-400">Country outline</span>
+                    <span className="text-xs text-muted-foreground">Country outline</span>
                   </label>
                   <label className="flex items-center gap-2 cursor-pointer mt-1">
                     <input type="checkbox" checked={showProvinces} onChange={e => setShowProvinces(e.target.checked)} className="w-3 h-3 accent-amber-500" />
-                    <span className="text-xs text-slate-400">Province borders</span>
+                    <span className="text-xs text-muted-foreground">Province borders</span>
                   </label>
                   <label className="flex items-center gap-2 cursor-pointer mt-1">
                     <input type="checkbox" checked={showDistricts} onChange={e => setShowDistricts(e.target.checked)} className="w-3 h-3 accent-violet-500" />
-                    <span className="text-xs text-slate-400">District borders</span>
+                    <span className="text-xs text-muted-foreground">District borders</span>
                   </label>
                 </div>
               </div>
             </div>
 
             {/* Divider */}
-            <div className="border-t border-slate-800" />
+            <div className="border-t border-border" />
 
             {/* Filters */}
             <div>
-              <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide mb-1.5">Filters</p>
+              <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">Filters</p>
               <div className="space-y-1.5">
                 <Select value={statusFilter} onValueChange={setStatusFilter}>
-                  <SelectTrigger className="w-full h-7 text-xs bg-slate-800 border-slate-700 text-slate-300">
+                  <SelectTrigger className="w-full h-7 text-xs bg-muted border-border text-foreground">
                     <SelectValue placeholder="Service status" />
                   </SelectTrigger>
-                  <SelectContent className="bg-slate-900 border-slate-700">
-                    <SelectItem value="all"          className="text-xs text-slate-300">All statuses</SelectItem>
-                    <SelectItem value="served"       className="text-xs text-slate-300">Served</SelectItem>
-                    <SelectItem value="underserved"  className="text-xs text-slate-300">Underserved</SelectItem>
-                    <SelectItem value="unserved"     className="text-xs text-slate-300">Unserved</SelectItem>
+                  <SelectContent className="bg-background border-border">
+                    <SelectItem value="all"          className="text-xs text-foreground">All statuses</SelectItem>
+                    <SelectItem value="served"       className="text-xs text-foreground">Served</SelectItem>
+                    <SelectItem value="underserved"  className="text-xs text-foreground">Underserved</SelectItem>
+                    <SelectItem value="unserved"     className="text-xs text-foreground">Unserved</SelectItem>
                   </SelectContent>
                 </Select>
                 <Select value={riskFilter} onValueChange={setRiskFilter}>
-                  <SelectTrigger className="w-full h-7 text-xs bg-slate-800 border-slate-700 text-slate-300">
+                  <SelectTrigger className="w-full h-7 text-xs bg-muted border-border text-foreground">
                     <SelectValue placeholder="Risk level" />
                   </SelectTrigger>
-                  <SelectContent className="bg-slate-900 border-slate-700">
-                    <SelectItem value="all"         className="text-xs text-slate-300">All risk levels</SelectItem>
-                    <SelectItem value="high_risk"   className="text-xs text-slate-300">High risk</SelectItem>
-                    <SelectItem value="medium_risk" className="text-xs text-slate-300">Medium risk</SelectItem>
-                    <SelectItem value="low_risk"    className="text-xs text-slate-300">Low risk</SelectItem>
+                  <SelectContent className="bg-background border-border">
+                    <SelectItem value="all"         className="text-xs text-foreground">All risk levels</SelectItem>
+                    <SelectItem value="high_risk"   className="text-xs text-foreground">High risk</SelectItem>
+                    <SelectItem value="medium_risk" className="text-xs text-foreground">Medium risk</SelectItem>
+                    <SelectItem value="low_risk"    className="text-xs text-foreground">Low risk</SelectItem>
                   </SelectContent>
                 </Select>
                 {/* Province first — constrains the district list below */}
@@ -1000,13 +1000,13 @@ export default function MapView() {
                     if (!inProv.includes(districtFilter)) setDistrictFilter("all");
                   }
                 }}>
-                  <SelectTrigger className="w-full h-7 text-xs bg-slate-800 border-slate-700 text-slate-300">
+                  <SelectTrigger className="w-full h-7 text-xs bg-muted border-border text-foreground">
                     <SelectValue placeholder="All provinces" />
                   </SelectTrigger>
-                  <SelectContent className="bg-slate-900 border-slate-700 max-h-48">
-                    <SelectItem value="all" className="text-xs text-slate-300">All provinces</SelectItem>
+                  <SelectContent className="bg-background border-border max-h-48">
+                    <SelectItem value="all" className="text-xs text-foreground">All provinces</SelectItem>
                     {provinces.map(p => (
-                      <SelectItem key={p} value={p} className="text-xs text-slate-300">{p}</SelectItem>
+                      <SelectItem key={p} value={p} className="text-xs text-foreground">{p}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -1019,17 +1019,17 @@ export default function MapView() {
                     if (p) setProvinceFilter(p);
                   }
                 }}>
-                  <SelectTrigger className="w-full h-7 text-xs bg-slate-800 border-slate-700 text-slate-300">
+                  <SelectTrigger className="w-full h-7 text-xs bg-muted border-border text-foreground">
                     <SelectValue placeholder="All districts" />
                   </SelectTrigger>
-                  <SelectContent className="bg-slate-900 border-slate-700 max-h-52">
-                    <SelectItem value="all" className="text-xs text-slate-300">
+                  <SelectContent className="bg-background border-border max-h-52">
+                    <SelectItem value="all" className="text-xs text-foreground">
                       {provinceFilter !== "all"
                         ? `All ${cascadedDistricts.length} districts`
                         : "All districts"}
                     </SelectItem>
                     {cascadedDistricts.map(d => (
-                      <SelectItem key={d} value={d} className="text-xs text-slate-300">{d}</SelectItem>
+                      <SelectItem key={d} value={d} className="text-xs text-foreground">{d}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -1037,7 +1037,7 @@ export default function MapView() {
                 {(statusFilter !== "all" || riskFilter !== "all" || districtFilter !== "all" || provinceFilter !== "all") && (
                   <button
                     onClick={() => { setStatusFilter("all"); setRiskFilter("all"); setDistrictFilter("all"); setProvinceFilter("all"); }}
-                    className="w-full text-[10px] text-slate-500 hover:text-red-400 transition-colors py-0.5 flex items-center justify-center gap-1"
+                    className="w-full text-[10px] text-muted-foreground hover:text-red-400 transition-colors py-0.5 flex items-center justify-center gap-1"
                   >
                     <X className="w-3 h-3" /> Clear all filters
                   </button>
@@ -1046,18 +1046,18 @@ export default function MapView() {
             </div>
 
             {/* Divider */}
-            <div className="border-t border-slate-800" />
+            <div className="border-t border-border" />
 
             {/* Legend */}
             <div className="space-y-1.5">
-              <p className="text-[9px] text-slate-600 uppercase tracking-wide mb-1">
+              <p className="text-[9px] text-muted-foreground uppercase tracking-wide mb-1">
                 {colorByOutreach ? "Outreach recency" : colorByRisk ? "Risk level" : "Service status"}
               </p>
               {colorByOutreach ? (
                 Object.entries(outreachRecencyColors).map(([key, { dot, label }]) => (
                   <div key={key} className="flex items-center gap-1.5">
                     <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: dot }} />
-                    <span className="text-[11px] text-slate-500">{label}</span>
+                    <span className="text-[11px] text-muted-foreground">{label}</span>
                   </div>
                 ))
               ) : colorByRisk ? (
@@ -1065,50 +1065,50 @@ export default function MapView() {
                   {Object.entries(riskColors).map(([level, color]) => (
                     <div key={level} className="flex items-center gap-1.5">
                       <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: color }} />
-                      <span className="text-[11px] text-slate-500 capitalize">{level.replace("_", " ")}</span>
+                      <span className="text-[11px] text-muted-foreground capitalize">{level.replace("_", " ")}</span>
                     </div>
                   ))}
                   <div className="flex items-center gap-1.5">
                     <div className="w-2.5 h-2.5 rounded-full bg-slate-500 shrink-0" />
-                    <span className="text-[11px] text-slate-500">No risk data</span>
+                    <span className="text-[11px] text-muted-foreground">No risk data</span>
                   </div>
                 </>
               ) : (
                 Object.entries(statusColors).map(([s, { dot, label }]) => (
                   <div key={s} className="flex items-center gap-1.5">
                     <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: dot }} />
-                    <span className="text-[11px] text-slate-500">{label} settlement</span>
+                    <span className="text-[11px] text-muted-foreground">{label} settlement</span>
                   </div>
                 ))
               )}
               {showFacilities && (
                 <div className="flex items-center gap-1.5">
                   <div className="w-2.5 h-2.5 rounded shrink-0 bg-blue-500/40 border border-blue-500/70" />
-                  <span className="text-[11px] text-slate-500">Health facility</span>
+                  <span className="text-[11px] text-muted-foreground">Health facility</span>
                 </div>
               )}
               {showCatchment && (
                 <div className="flex items-center gap-1.5">
                   <div className="w-2.5 h-2.5 rounded-full shrink-0 border border-blue-400/60" style={{ background: "rgba(59,130,246,0.1)" }} />
-                  <span className="text-[11px] text-slate-500">Catchment radius ({catchmentRadiusKm} km)</span>
+                  <span className="text-[11px] text-muted-foreground">Catchment radius ({catchmentRadiusKm} km)</span>
                 </div>
               )}
               {showCountryOutline && (
                 <div className="flex items-center gap-1.5">
                   <div className="w-3.5 shrink-0 border-t-2" style={{ borderColor: "rgba(255,255,255,0.5)" }} />
-                  <span className="text-[11px] text-slate-500">Country outline</span>
+                  <span className="text-[11px] text-muted-foreground">Country outline</span>
                 </div>
               )}
               {showProvinces && (
                 <div className="flex items-center gap-1.5">
                   <div className="w-3.5 shrink-0 border-t border-dashed border-amber-400/80" />
-                  <span className="text-[11px] text-slate-500">Province border</span>
+                  <span className="text-[11px] text-muted-foreground">Province border</span>
                 </div>
               )}
               {showDistricts && (
                 <div className="flex items-center gap-1.5">
                   <div className="w-3.5 shrink-0 border-t border-violet-400/60" />
-                  <span className="text-[11px] text-slate-500">District border</span>
+                  <span className="text-[11px] text-muted-foreground">District border</span>
                 </div>
               )}
             </div>
@@ -1117,28 +1117,28 @@ export default function MapView() {
         </Card>
 
         {/* Stats card */}
-        <Card className="bg-slate-900/97 border-slate-700 backdrop-blur-sm shadow-xl">
+        <Card className="bg-background border-border backdrop-blur-sm shadow-xl">
           <CardContent className="p-3 space-y-1.5">
-            <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">Coverage</p>
+            <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">Coverage</p>
             <div className="grid grid-cols-3 gap-1 text-center">
-              <div className="rounded bg-slate-800/50 p-1.5">
+              <div className="rounded bg-muted p-1.5">
                 <p className="text-xs font-bold text-emerald-400">{servedCount}</p>
-                <p className="text-[9px] text-slate-600">Served</p>
+                <p className="text-[9px] text-muted-foreground">Served</p>
               </div>
-              <div className="rounded bg-slate-800/50 p-1.5">
+              <div className="rounded bg-muted p-1.5">
                 <p className="text-xs font-bold text-amber-400">
                   {visibleSettlements.filter(s => s.serviceStatus === "underserved").length}
                 </p>
-                <p className="text-[9px] text-slate-600">Under</p>
+                <p className="text-[9px] text-muted-foreground">Under</p>
               </div>
-              <div className="rounded bg-slate-800/50 p-1.5">
+              <div className="rounded bg-muted p-1.5">
                 <p className="text-xs font-bold text-red-400">{unservedCount}</p>
-                <p className="text-[9px] text-slate-600">Unserved</p>
+                <p className="text-[9px] text-muted-foreground">Unserved</p>
               </div>
             </div>
-            <p className="text-[10px] text-slate-600 text-center">{visibleSettlements.length} settlements visible</p>
+            <p className="text-[10px] text-muted-foreground text-center">{visibleSettlements.length} settlements visible</p>
             {showFacilities && (
-              <p className="text-[10px] text-slate-600 text-center">
+              <p className="text-[10px] text-muted-foreground text-center">
                 {visibleFacilities.length} facilities shown
               </p>
             )}
@@ -1146,9 +1146,9 @@ export default function MapView() {
         </Card>
 
         {/* Export card */}
-        <Card className="bg-slate-900/97 border-slate-700 backdrop-blur-sm shadow-xl">
+        <Card className="bg-background border-border backdrop-blur-sm shadow-xl">
           <CardContent className="p-3">
-            <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide mb-2 flex items-center gap-1">
+            <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-2 flex items-center gap-1">
               <Download className="w-3 h-3" /> Export
             </p>
             <div className="flex flex-col gap-1.5">
@@ -1156,8 +1156,8 @@ export default function MapView() {
                 onClick={exportAsPng}
                 disabled={!!isExporting}
                 className="flex items-center gap-2 px-2.5 py-1.5 rounded text-[11px] w-full
-                  bg-slate-800/60 text-slate-300 hover:bg-slate-700/80 hover:text-slate-100
-                  border border-slate-700/50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  bg-muted text-foreground hover:bg-accent/80 hover:text-slate-100
+                  border border-border transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {isExporting === "png"
                   ? <Loader2 className="w-3 h-3 shrink-0 animate-spin" />
@@ -1168,8 +1168,8 @@ export default function MapView() {
                 onClick={exportAsPdf}
                 disabled={!!isExporting}
                 className="flex items-center gap-2 px-2.5 py-1.5 rounded text-[11px] w-full
-                  bg-slate-800/60 text-slate-300 hover:bg-slate-700/80 hover:text-slate-100
-                  border border-slate-700/50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  bg-muted text-foreground hover:bg-accent/80 hover:text-slate-100
+                  border border-border transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {isExporting === "pdf"
                   ? <Loader2 className="w-3 h-3 shrink-0 animate-spin" />
@@ -1178,7 +1178,7 @@ export default function MapView() {
               </button>
             </div>
             {isExporting && (
-              <p className="text-[10px] text-slate-600 mt-2 text-center animate-pulse">
+              <p className="text-[10px] text-muted-foreground mt-2 text-center animate-pulse">
                 Rendering map, please wait…
               </p>
             )}
@@ -1229,7 +1229,7 @@ export default function MapView() {
           />
         ) : (
           <div className="w-full h-full flex items-center justify-center bg-slate-950">
-            <div className="text-center text-slate-600">
+            <div className="text-center text-muted-foreground">
               <MapPin className="w-8 h-8 mx-auto mb-2 animate-pulse" />
               <p className="text-sm">Loading map…</p>
             </div>

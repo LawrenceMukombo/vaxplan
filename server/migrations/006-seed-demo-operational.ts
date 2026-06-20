@@ -2057,6 +2057,7 @@ async function seedStockTransactions(
         tenantId,
         facilityId: p.facilityId,
         vaccineName: v.name,
+        productId: 1,
         transactionType: "receipt",
         quantityDoses: receiptDoses,
         batchNumber: `DEMO-${v.name.toUpperCase()}-Q${QUARTER}${YEAR}`,
@@ -2088,6 +2089,7 @@ async function seedStockTransactions(
             tenantId,
             facilityId: p.facilityId,
             vaccineName: v.name,
+            productId: 1,
             transactionType: "issue",
             quantityDoses: routineShare,
             batchNumber: `DEMO-${v.name.toUpperCase()}-Q${QUARTER}${YEAR}`,
@@ -2104,6 +2106,7 @@ async function seedStockTransactions(
             tenantId,
             facilityId: p.facilityId,
             vaccineName: v.name,
+            productId: 1,
             transactionType: "issue",
             quantityDoses: outreachShare,
             batchNumber: `DEMO-${v.name.toUpperCase()}-Q${QUARTER}${YEAR}`,
@@ -2142,11 +2145,6 @@ async function seedSurveillanceCases(
 
   let inserted = 0;
   const diseases = ["afp", "measles", "cholera"] as const;
-  const names = [
-    "John Mwansa", "Mary Tembo", "Joseph Phiri",
-    "Chipo Mwanza", "Agness Banda", "Moses Mulenga",
-    "Loveness Kabwe", "Kelvin Chanda", "Patricia Chihana"
-  ];
 
   for (let pi = 0; pi < picks.length; pi++) {
     const p = picks[pi];
@@ -2164,13 +2162,43 @@ async function seedSurveillanceCases(
     const lat = Number(fac.latitude);
     const lng = Number(fac.longitude);
 
+    // Fetch up to 10 clients from this facility to act as the source of "real seeded data"
+    const facilityClients = await db
+      .select({
+        id: clients.id,
+        name: clients.name,
+        gender: clients.gender,
+        dateOfBirth: clients.dateOfBirth,
+        villageId: clients.villageId,
+      })
+      .from(clients)
+      .where(eq(clients.facilityId, p.facilityId))
+      .limit(10);
+
     // Seed 2 suspected and 1 confirmed cases per facility
     const numCases = 3;
     for (let cIdx = 0; cIdx < numCases; cIdx++) {
-      const name = names[(pi * 3 + cIdx) % names.length];
       const disease = diseases[(pi + cIdx) % diseases.length];
       const classification = cIdx === 0 ? "confirmed" : "suspected";
-      const ageMonths = 12 + (cIdx * 15);
+      
+      let realClientId: string | null = null;
+      let realPatientName = "Unknown Case";
+      let realPatientGender = "unknown";
+      let realAgeMonths = 12 + (cIdx * 15);
+      let realVillageId = villagePool.length > 0 ? villagePool[cIdx % villagePool.length] : null;
+
+      if (facilityClients.length > 0) {
+        const client = facilityClients[cIdx % facilityClients.length];
+        realClientId = client.id;
+        realPatientName = client.name;
+        realPatientGender = client.gender || "unknown";
+        if (client.villageId) realVillageId = client.villageId;
+        
+        // Calculate age in months
+        const dob = new Date(client.dateOfBirth);
+        const diffTime = Math.abs(Date.now() - dob.getTime());
+        realAgeMonths = Math.ceil(diffTime / (1000 * 60 * 60 * 24 * 30));
+      }
 
       // Jitter coordinates within a 1-2km range of the facility using the golden angle
       const angle = (cIdx * 120) * (Math.PI / 180);
@@ -2178,16 +2206,15 @@ async function seedSurveillanceCases(
       const caseLat = lat + r * Math.sin(angle);
       const caseLng = lng + r * Math.cos(angle);
 
-      const villageId = villagePool.length > 0 ? villagePool[cIdx % villagePool.length] : null;
-
       await db.insert(surveillanceCases).values({
         tenantId,
         facilityId: p.facilityId,
-        villageId,
+        villageId: realVillageId,
+        clientId: realClientId,
         disease,
-        patientName: `Demo Case ${name}`,
-        patientAgeMonths: ageMonths,
-        patientGender: cIdx % 2 === 0 ? "male" : "female",
+        patientName: realPatientName,
+        patientAgeMonths: realAgeMonths,
+        patientGender: realPatientGender,
         dateOfOnset: new Date(Date.now() - (3 + cIdx * 5) * 24 * 3600 * 1000),
         classification,
         gpsLatitude: String(caseLat),

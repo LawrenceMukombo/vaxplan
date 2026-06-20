@@ -97,7 +97,8 @@ import {
 
 const transactionFormSchema = z.object({
   facilityId: z.number({ required_error: "Pick a facility" }),
-  vaccineName: z.string().min(1, "Antigen name is required"),
+  productId: z.number({ required_error: "Product is required" }),
+  vaccineName: z.string().optional(),
   transactionType: z.enum(["receipt", "issue", "loss", "adjustment"]),
   quantityDoses: z.number().min(1, "Quantity must be at least 1 dose"),
   batchNumber: z.string().min(1, "Batch number is required"),
@@ -105,7 +106,6 @@ const transactionFormSchema = z.object({
   vvmStatus: z.number().min(1).max(4),
   supplierOrRecipient: z.string().min(1, "Supplier/Recipient name is required"),
   notes: z.string().optional(),
-  productId: z.number().optional().nullable(),
   productCode: z.string().optional().nullable(),
 });
 
@@ -466,7 +466,7 @@ export default function StockLedger() {
     transactions.forEach((tx) => {
       const type = tx.transactionType;
       const doses = tx.quantityDoses;
-      const normName = normalizeStockVaccineName(tx.vaccineName);
+      const normName = normalizeStockVaccineName(tx.vaccineName || "Unknown");
       if (!soh[normName]) soh[normName] = 0;
 
       if (type === "receipt" || type === "adjustment") {
@@ -484,7 +484,7 @@ export default function StockLedger() {
     resolver: zodResolver(transactionFormSchema),
     defaultValues: {
       facilityId: selectedFacilityId ?? undefined,
-      vaccineName: "",
+      productId: selectedProductId ?? undefined,
       transactionType: "receipt",
       quantityDoses: 100,
       batchNumber: "",
@@ -521,7 +521,8 @@ export default function StockLedger() {
           id: newId,
           tenantId: user?.tenantId ?? "SSD",
           facilityId: data.facilityId,
-          vaccineName: data.vaccineName,
+          productId: data.productId,
+          vaccineName: vaccineConfigs?.find(c => c.id === data.productId)?.name || data.vaccineName,
           transactionType: data.transactionType,
           quantityDoses: data.quantityDoses,
           batchNumber: data.batchNumber,
@@ -563,7 +564,7 @@ export default function StockLedger() {
       setTxnDialogOpen(false);
       txnForm.reset({
         facilityId: selectedFacilityId ?? undefined,
-        vaccineName: "",
+        productId: selectedProductId ?? undefined,
         transactionType: "receipt",
         quantityDoses: 100,
         batchNumber: "",
@@ -690,7 +691,7 @@ export default function StockLedger() {
 
           if (transactions) {
             transactions.forEach(tx => {
-              if (normalizeStockVaccineName(tx.vaccineName) !== vcName) return;
+              if (normalizeStockVaccineName(tx.vaccineName || "Unknown") !== vcName) return;
               const date = new Date(tx.transactionDate);
               const txInPeriod = date.getMonth() + 1 === reportPeriod.month && date.getFullYear() === reportPeriod.year;
 
@@ -1559,25 +1560,30 @@ export default function StockLedger() {
           </DialogHeader>
 
           <Form {...txnForm}>
-            <form onSubmit={txnForm.handleSubmit((d) => saveTxnMutation.mutate(d))} className="space-y-4 pt-4">
+            <form onSubmit={txnForm.handleSubmit((d) => {
+              const vaccine = vaccineConfigs?.find(c => c.id === d.productId);
+              saveTxnMutation.mutate({
+                ...d,
+                vaccineName: vaccine?.name || "",
+                productCode: vaccine?.productId || "",
+              });
+            })} className="space-y-4 pt-4">
               <FormField
                 control={txnForm.control}
-                name="vaccineName"
+                name="productId"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Antigen / Vaccine Name</FormLabel>
-                    <Select onValueChange={field.onChange} defaultValue={field.value}>
+                    <FormLabel>Product</FormLabel>
+                    <Select onValueChange={(val) => field.onChange(parseInt(val))} value={field.value?.toString() || ""}>
                       <FormControl>
                         <SelectTrigger>
-                          <SelectValue placeholder="Pick vaccine" />
+                          <SelectValue placeholder="Pick product" />
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
-                        {Array.from(new Set(
-                          vaccineConfigs?.filter(c => c.active && c.stockManaged).map(c => normalizeStockVaccineName(c.name)) ?? []
-                        )).map((name) => (
-                          <SelectItem key={name} value={name}>
-                            {name}
+                        {vaccineConfigs?.filter(c => c.active && c.stockManaged).map((c) => (
+                          <SelectItem key={c.id} value={c.id.toString()}>
+                            {c.name}
                           </SelectItem>
                         ))}
                       </SelectContent>

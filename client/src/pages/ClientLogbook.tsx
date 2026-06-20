@@ -2369,7 +2369,7 @@ export default function ClientLogbook() {
       </div>
 
       {/* BULK REMINDER CAMPAIGNS PANEL */}
-      <Card className="border shadow-xs bg-slate-50/50">
+      <Card className="border shadow-xs bg-muted/50">
         <CardContent className="p-4">
           <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
             <div className="space-y-0.5">
@@ -4072,7 +4072,7 @@ export default function ClientLogbook() {
                                 isGiven 
                                   ? "bg-green-500/10 text-green-500" 
                                   : isLater 
-                                    ? "bg-slate-500/10 text-slate-500" 
+                                    ? "bg-slate-500/10 text-muted-foreground" 
                                     : "bg-red-500/10 text-red-500"
                               }`}
                             >
@@ -4420,7 +4420,7 @@ export default function ClientLogbook() {
                       <span className="text-muted-foreground">Antigen Schedule Completion</span>
                       <span className="text-emerald-600 dark:text-emerald-400 font-bold">{givenDosesCount} / {totalDosesCount} Doses ({completionRatePercent}%)</span>
                     </div>
-                    <div className="h-2.5 w-full bg-muted dark:bg-slate-800 rounded-full overflow-hidden border border-border/30">
+                    <div className="h-2.5 w-full bg-muted dark:bg-muted rounded-full overflow-hidden border border-border/30">
                       <div className="h-full bg-gradient-to-r from-emerald-500 to-teal-500 transition-all duration-700 rounded-full" style={{ width: `${completionRatePercent}%` }}></div>
                     </div>
                   </div>
@@ -4510,7 +4510,7 @@ export default function ClientLogbook() {
                           </h5>
                           <div className="space-y-2.5">
                             {upcomingDoses.length === 0 ? (
-                              <div className="bg-slate-500/5 border border-slate-500/20 rounded-2xl p-4 flex items-center gap-3">
+                              <div className="bg-slate-500/5 border border-border/20 rounded-2xl p-4 flex items-center gap-3">
                                 <Clock className="h-5 w-5 text-muted-foreground shrink-0" />
                                 <p className="text-xs text-muted-foreground font-medium">
                                   No upcoming routine doses scheduled in the immediate horizon.
@@ -4587,7 +4587,7 @@ export default function ClientLogbook() {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6 border-b pb-6 print:border-none print:pb-0 print-double-sided">
                   
                   {/* SIDE A: CHILD HEALTH CARD FRONT */}
-                  <div className="relative overflow-hidden border rounded-3xl p-6 bg-gradient-to-br from-slate-50 to-white dark:from-slate-900/30 dark:to-slate-900/10 shadow-lg border-slate-200/80 dark:border-white/5 flex flex-col justify-between min-h-[500px] print-card-side">
+                  <div className="relative overflow-hidden border rounded-3xl p-6 bg-gradient-to-br from-slate-50 to-white dark:from-slate-900/30 dark:to-slate-900/10 shadow-lg border-border/80 dark:border-white/5 flex flex-col justify-between min-h-[500px] print-card-side">
                     {/* Security Crest Watermark */}
                     <div className="absolute inset-0 opacity-[0.03] dark:opacity-[0.01] pointer-events-none flex items-center justify-center print:opacity-[0.02]">
                       <Layers className="h-72 w-72" />
@@ -4595,7 +4595,7 @@ export default function ClientLogbook() {
 
                     <div>
                       {/* National Emblem & Title Header */}
-                      <div className="flex items-center justify-between gap-3 border-b pb-4 mb-5 border-slate-200 print:border-black">
+                      <div className="flex items-center justify-between gap-3 border-b pb-4 mb-5 border-border print:border-black">
                         <div className="flex items-center gap-3">
                           {(tenantCode === "ZMB" || tenant?.name?.toLowerCase().includes("zambia") || tenant?.code?.toLowerCase().includes("zmb")) ? (
                             <img 
@@ -4615,7 +4615,7 @@ export default function ClientLogbook() {
                             </div>
                           )}
                           <div>
-                            <h2 className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-wider print:text-black leading-none">
+                            <h2 className="text-[10px] font-black text-muted-foreground dark:text-muted-foreground uppercase tracking-wider print:text-black leading-none">
                               {(tenantCode === "ZMB" || tenant?.name?.toLowerCase().includes("zambia") || tenant?.code?.toLowerCase().includes("zmb"))
                                 ? "Republic of Zambia"
                                 : tenantCode === "PNG"
@@ -4632,7 +4632,7 @@ export default function ClientLogbook() {
                         </div>
  
                         {/* Digital Authenticity Verification QR Code */}
-                        <div className="flex flex-col items-center justify-center border border-slate-200 p-1 bg-white rounded-xl shrink-0 shadow-xs print:border-black">
+                        <div className="flex flex-col items-center justify-center border border-border p-1 bg-white rounded-xl shrink-0 shadow-xs print:border-black">
                           <img 
                             src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(
                               window.location.origin + `/clients?verify=${selectedClient.id}`
@@ -4640,7 +4640,7 @@ export default function ClientLogbook() {
                             alt="Verification QR Code" 
                             className="w-12 h-12 rounded-lg"
                           />
-                          <span className="text-[6px] text-slate-500 font-mono tracking-tighter mt-1 block">SCAN TO VERIFY</span>
+                          <span className="text-[6px] text-muted-foreground font-mono tracking-tighter mt-1 block">SCAN TO VERIFY</span>
                         </div>
                       </div>
 
@@ -4651,45 +4651,45 @@ export default function ClientLogbook() {
                             <span className="text-[9px] text-indigo-600 dark:text-indigo-400 block font-bold uppercase tracking-wider">Unique Client ID</span>
                             <span className="font-mono font-extrabold text-indigo-600 dark:text-indigo-400 text-sm block mt-0.5">{selectedClient.clientId || "Pending Generation"}</span>
                           </div>
-                          <div className="bg-slate-100/50 dark:bg-slate-800/40 p-2.5 border border-slate-200/50 dark:border-white/5 rounded-xl print:bg-none print:border-black">
+                          <div className="bg-muted/50 dark:bg-muted p-2.5 border border-border/50 dark:border-white/5 rounded-xl print:bg-none print:border-black">
                             <span className="text-[9px] text-muted-foreground block font-bold uppercase tracking-wider">Child Full Name</span>
                             <span className="font-extrabold text-foreground dark:text-white text-xs block mt-0.5">{selectedClient.name}</span>
                           </div>
-                          <div className="bg-slate-100/50 dark:bg-slate-800/40 p-2.5 border border-slate-200/50 dark:border-white/5 rounded-xl print:bg-none print:border-black">
+                          <div className="bg-muted/50 dark:bg-muted p-2.5 border border-border/50 dark:border-white/5 rounded-xl print:bg-none print:border-black">
                             <span className="text-[9px] text-muted-foreground block font-bold uppercase tracking-wider">Date of Birth (DOB)</span>
                             <span className="font-bold text-foreground dark:text-white block mt-0.5">{new Date(selectedClient.dateOfBirth).toLocaleDateString()}</span>
                           </div>
-                          <div className="bg-slate-100/50 dark:bg-slate-800/40 p-2.5 border border-slate-200/50 dark:border-white/5 rounded-xl print:bg-none print:border-black">
+                          <div className="bg-muted/50 dark:bg-muted p-2.5 border border-border/50 dark:border-white/5 rounded-xl print:bg-none print:border-black">
                             <span className="text-[9px] text-muted-foreground block font-bold uppercase tracking-wider">Gender / Sex</span>
                             <span className="font-semibold text-foreground dark:text-white capitalize block mt-0.5">{selectedClient.gender || "N/A"}</span>
                           </div>
-                          <div className="bg-slate-100/50 dark:bg-slate-800/40 p-2.5 border border-slate-200/50 dark:border-white/5 rounded-xl print:bg-none print:border-black">
+                          <div className="bg-muted/50 dark:bg-muted p-2.5 border border-border/50 dark:border-white/5 rounded-xl print:bg-none print:border-black">
                             <span className="text-[9px] text-muted-foreground block font-bold uppercase tracking-wider">Mother/Guardian Name</span>
                             <span className="font-semibold text-foreground dark:text-white block mt-0.5">{selectedClient.parentName || "Not registered"}</span>
                           </div>
-                          <div className="bg-slate-100/50 dark:bg-slate-800/40 p-2.5 border border-slate-200/50 dark:border-white/5 rounded-xl col-span-2 print:bg-none print:border-black">
+                          <div className="bg-muted/50 dark:bg-muted p-2.5 border border-border/50 dark:border-white/5 rounded-xl col-span-2 print:bg-none print:border-black">
                             <span className="text-[9px] text-muted-foreground block font-bold uppercase tracking-wider">Guardian Contact Phone</span>
                             <span className="font-mono font-semibold text-foreground dark:text-white block mt-0.5">{selectedClient.contactPhone || "None"}</span>
                           </div>
                         </div>
 
                         {/* Residency / Cross-border Context */}
-                        <div className="p-3.5 rounded-xl border border-slate-200 dark:border-white/5 bg-slate-50/50 dark:bg-slate-800/20 text-xs space-y-1.5 print:bg-none print:border-black">
-                          <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider block mb-1">Geographic Access Scope</span>
+                        <div className="p-3.5 rounded-xl border border-border dark:border-white/5 bg-muted/50 dark:bg-muted text-xs space-y-1.5 print:bg-none print:border-black">
+                          <span className="text-[9px] text-muted-foreground font-bold uppercase tracking-wider block mb-1">Geographic Access Scope</span>
                           {!selectedClient.isCrossBorder ? (
                             <>
-                              <p className="text-foreground dark:text-slate-200"><strong>Village Catchment:</strong> {getVillageName(selectedClient.villageId, selectedClient)}</p>
+                              <p className="text-foreground dark:text-foreground"><strong>Village Catchment:</strong> {getVillageName(selectedClient.villageId, selectedClient)}</p>
                               <p className="text-[10px] text-muted-foreground"><strong>Hierarchy Trace:</strong> {(selectedClient as any)._geoDistrictName && (selectedClient as any)._geoProvinceName ? `${(selectedClient as any)._geoDistrictName} District, ${(selectedClient as any)._geoProvinceName} Province` : getVillageResidencyPath(selectedClient.villageId) || "Local catchments"}</p>
-                              <p className="text-foreground dark:text-slate-200"><strong>Registered Clinic:</strong> {getFacilityName(selectedClient.facilityId)}</p>
+                              <p className="text-foreground dark:text-foreground"><strong>Registered Clinic:</strong> {getFacilityName(selectedClient.facilityId)}</p>
                             </>
                           ) : (
                             <>
-                              <div className="flex items-center justify-between border-b pb-1.5 mb-1.5 border-slate-200 dark:border-white/5">
+                              <div className="flex items-center justify-between border-b pb-1.5 mb-1.5 border-border dark:border-white/5">
                                 <span className="font-bold text-sky-600 dark:text-sky-400">Cross-Border / Foreign Resident</span>
                                 <Badge className="bg-sky-500/10 text-sky-600 border-none text-[8px] font-extrabold uppercase rounded-lg">OVERSEAS</Badge>
                               </div>
-                              <p className="text-foreground dark:text-slate-200"><strong>Country of Origin:</strong> {selectedClient.countryOfOrigin}</p>
-                              <p className="text-foreground dark:text-slate-200"><strong>Border Point of Entry:</strong> {selectedClient.borderPointOfEntry || "N/A"}</p>
+                              <p className="text-foreground dark:text-foreground"><strong>Country of Origin:</strong> {selectedClient.countryOfOrigin}</p>
+                              <p className="text-foreground dark:text-foreground"><strong>Border Point of Entry:</strong> {selectedClient.borderPointOfEntry || "N/A"}</p>
                               <p className="italic text-muted-foreground text-[11px]"><strong>Foreign Residence:</strong> {selectedClient.foreignResidence || "N/A"}</p>
                             </>
                           )}
@@ -4698,7 +4698,7 @@ export default function ClientLogbook() {
                     </div>
 
                     {/* Health Warning & Advisories */}
-                    <div className="mt-5 pt-4 border-t border-slate-200 dark:border-white/5 print:border-black">
+                    <div className="mt-5 pt-4 border-t border-border dark:border-white/5 print:border-black">
                       {(selectedClient.isRefusal || (Array.isArray(selectedClient.contraindications) && selectedClient.contraindications.length > 0)) ? (
                         <div className="p-3 bg-red-500/10 border border-red-500/20 text-red-700 dark:text-red-400 rounded-xl text-[10px] space-y-1 font-semibold print:border-black">
                           <p className="font-bold flex items-center gap-1"><AlertTriangle className="h-3.5 w-3.5 shrink-0" /> CLINICAL RISK FLAGS</p>
@@ -4712,7 +4712,7 @@ export default function ClientLogbook() {
                           <Heart className="h-4 w-4 shrink-0 text-emerald-500 mt-0.5" />
                           <div>
                             <p className="font-bold uppercase tracking-wide">Clinician Instruction</p>
-                            <p className="text-muted-foreground/80 dark:text-slate-400/90 font-normal mt-0.5 leading-relaxed">Ensure parents complete the schedule sessions. Verify subsequent visits and stamp the grid accordingly.</p>
+                            <p className="text-muted-foreground/80 dark:text-muted-foreground/90 font-normal mt-0.5 leading-relaxed">Ensure parents complete the schedule sessions. Verify subsequent visits and stamp the grid accordingly.</p>
                           </div>
                         </div>
                       )}
@@ -4726,14 +4726,14 @@ export default function ClientLogbook() {
                   </div>
 
                   {/* SIDE B: CHILD HEALTH CARD BACK */}
-                  <div className="relative border rounded-3xl p-6 bg-white dark:bg-slate-900/20 shadow-lg border-slate-200/80 dark:border-white/5 flex flex-col justify-between min-h-[500px] print-card-side">
+                  <div className="relative border rounded-3xl p-6 bg-white dark:bg-background shadow-lg border-border/80 dark:border-white/5 flex flex-col justify-between min-h-[500px] print-card-side">
                     {/* Security Crest Watermark */}
                     <div className="absolute inset-0 opacity-[0.03] dark:opacity-[0.01] pointer-events-none flex items-center justify-center print:opacity-[0.02]">
                       <Layers className="h-72 w-72" />
                     </div>
 
                     <div>
-                      <h3 className="text-xs font-black uppercase tracking-tight flex items-center gap-2 border-b pb-3 mb-4 border-slate-200 dark:border-white/5 print:border-black">
+                      <h3 className="text-xs font-black uppercase tracking-tight flex items-center gap-2 border-b pb-3 mb-4 border-border dark:border-white/5 print:border-black">
                         <BadgeCheck className="h-4 w-4 text-indigo-500" />
                         Immunization Schedule & Dose Grid
                       </h3>
@@ -4742,7 +4742,7 @@ export default function ClientLogbook() {
                       <div className="overflow-x-auto">
                         <table className="w-full text-[9px] text-left border-collapse">
                           <thead>
-                            <tr className="border-b text-slate-400 dark:text-slate-500 font-bold uppercase tracking-wider pb-1.5 print:border-black print:text-black">
+                            <tr className="border-b text-muted-foreground dark:text-muted-foreground font-bold uppercase tracking-wider pb-1.5 print:border-black print:text-black">
                               <th className="py-1.5 px-1">Antigen Dose</th>
                               <th className="py-1.5 px-1 text-center">Target</th>
                               <th className="py-1.5 px-1 text-center">Status</th>
@@ -4754,9 +4754,9 @@ export default function ClientLogbook() {
                             {VACCINE_SCHEDULE.map((dose, idx) => {
                               const res = getDoseStatus(dose);
                               return (
-                                <tr key={idx} className="hover:bg-slate-50/50 dark:hover:bg-white/5 print:hover:bg-transparent">
-                                  <td className="py-1.5 px-1 font-bold text-slate-800 dark:text-slate-200">{dose.name}</td>
-                                  <td className="py-1.5 px-1 text-center font-medium text-slate-500">{dose.group}</td>
+                                <tr key={idx} className="hover:bg-muted/50 dark:hover:bg-white/5 print:hover:bg-transparent">
+                                  <td className="py-1.5 px-1 font-bold text-foreground dark:text-foreground">{dose.name}</td>
+                                  <td className="py-1.5 px-1 text-center font-medium text-muted-foreground">{dose.group}</td>
                                   <td className="py-1.5 px-1 text-center">
                                     {/* Original Code commented out for backward compatibility and to satisfy Rule 2:
                                     {res.status === "administered" ? (
@@ -4768,7 +4768,7 @@ export default function ClientLogbook() {
                                         <AlertTriangle className="h-2 w-2 shrink-0 text-rose-500" /> DUE
                                       </Badge>
                                     ) : (
-                                      <Badge variant="outline" className="text-slate-400 border-slate-200 dark:border-white/5 font-medium py-0.5 px-1.5 text-[8px] uppercase tracking-wide rounded-md">
+                                      <Badge variant="outline" className="text-muted-foreground border-border dark:border-white/5 font-medium py-0.5 px-1.5 text-[8px] uppercase tracking-wide rounded-md">
                                         PENDING
                                       </Badge>
                                     )}
@@ -4790,7 +4790,7 @@ export default function ClientLogbook() {
                                         <AlertTriangle className="h-2 w-2 shrink-0 text-amber-500" /> DUE
                                       </Badge>
                                     ) : (
-                                      <Badge variant="outline" className="text-slate-400 border-slate-200 dark:border-white/5 font-medium py-0.5 px-1.5 text-[8px] uppercase tracking-wide rounded-md">
+                                      <Badge variant="outline" className="text-muted-foreground border-border dark:border-white/5 font-medium py-0.5 px-1.5 text-[8px] uppercase tracking-wide rounded-md">
                                         PENDING
                                       </Badge>
                                     )}
@@ -4799,7 +4799,7 @@ export default function ClientLogbook() {
                                     {/* Original Code commented out for backward compatibility and to satisfy Rule 2:
                                     {res.status === "administered" ? (
                                       <div className="leading-tight">
-                                        <span className="font-bold text-slate-800 dark:text-slate-200">{res.date}</span>
+                                        <span className="font-bold text-foreground dark:text-foreground">{res.date}</span>
                                         <span className="block text-[7px] text-muted-foreground truncate max-w-[100px]">{res.facility}</span>
                                       </div>
                                     ) : res.status === "overdue" ? (
@@ -4808,12 +4808,12 @@ export default function ClientLogbook() {
                                         <span className="block text-[7px]">({res.weeksOverdue}w overdue)</span>
                                       </div>
                                     ) : (
-                                      <span className="text-slate-400 dark:text-slate-500 font-medium">Due: {res.dueDate}</span>
+                                      <span className="text-muted-foreground dark:text-muted-foreground font-medium">Due: {res.dueDate}</span>
                                     )}
                                     */}
                                     {res.status === "administered" ? (
                                       <div className="leading-tight">
-                                        <span className="font-bold text-slate-800 dark:text-slate-200">{res.date}</span>
+                                        <span className="font-bold text-foreground dark:text-foreground">{res.date}</span>
                                         <span className="block text-[7px] text-muted-foreground truncate max-w-[100px]">{res.facility}</span>
                                       </div>
                                     ) : res.status === "missed" ? (
@@ -4832,10 +4832,10 @@ export default function ClientLogbook() {
                                         <span className="block text-[7px] font-semibold">(Due Now)</span>
                                       </div>
                                     ) : (
-                                      <span className="text-slate-400 dark:text-slate-500 font-medium">Due: {res.dueDate}</span>
+                                      <span className="text-muted-foreground dark:text-muted-foreground font-medium">Due: {res.dueDate}</span>
                                     )}
                                   </td>
-                                  <td className="py-1.5 px-1 font-mono text-slate-600 dark:text-slate-400">
+                                  <td className="py-1.5 px-1 font-mono text-muted-foreground dark:text-muted-foreground">
                                     {res.status === "administered" ? (
                                       <div className="leading-tight text-[8px]">
                                         <span>#{res.record.batchNumber}</span>
@@ -4854,7 +4854,7 @@ export default function ClientLogbook() {
                     </div>
 
                     {/* Summary appointments */}
-                    <div className="border-t pt-3 mt-3 border-slate-200 dark:border-white/5 print:border-black flex justify-between items-center text-[9px] text-muted-foreground font-semibold uppercase tracking-wider print:text-black">
+                    <div className="border-t pt-3 mt-3 border-border dark:border-white/5 print:border-black flex justify-between items-center text-[9px] text-muted-foreground font-semibold uppercase tracking-wider print:text-black">
                       <span>EPI Certified Registry Card</span>
                       <span>Next Visit: ________________</span>
                     </div>
@@ -4916,7 +4916,7 @@ export default function ClientLogbook() {
                 {/* Print and interaction controls */}
                 <div className="flex flex-wrap items-center justify-between gap-3 pt-4 border-t border-border no-print">
                   {/* Guardian Notifications Dispatches */}
-                  <div className="flex items-center gap-1.5 bg-secondary/50 dark:bg-slate-800/40 p-1 rounded-xl border border-border/80">
+                  <div className="flex items-center gap-1.5 bg-secondary/50 dark:bg-muted p-1 rounded-xl border border-border/80">
                     <span className="text-[10px] font-bold text-muted-foreground uppercase px-2">Notify Guardian</span>
                     <Button 
                       variant="ghost" 

@@ -734,7 +734,7 @@ export default function MicroplanPrintView() {
             );
           })}
         </MapContainer>
-        <div className="absolute bottom-2 right-2 bg-white/95 px-2 py-1.5 rounded-md text-[10px] font-medium border shadow-xs z-10 text-slate-800 flex flex-col gap-0.5 print:border-black">
+        <div className="absolute bottom-2 right-2 bg-white/95 px-2 py-1.5 rounded-md text-[10px] font-medium border shadow-xs z-10 text-foreground flex flex-col gap-0.5 print:border-black">
           <div className="flex items-center gap-1.5">
             <span className="w-2.5 h-2.5 bg-blue-500 rounded-full inline-block border border-blue-600" />
             <span>Facility Center</span>
@@ -755,7 +755,7 @@ export default function MicroplanPrintView() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 p-4 md:p-8 flex flex-col gap-6 print:bg-white print:p-0 print:text-black">
+    <div className="min-h-screen bg-muted text-foreground p-4 md:p-8 flex flex-col gap-6 print:bg-white print:p-0 print:text-black">
       {/* Print Style Injector */}
       <style>{`
         @media print {
@@ -812,7 +812,7 @@ export default function MicroplanPrintView() {
         <div className="flex items-center gap-3 flex-wrap">
           {/* Print Size Selection */}
           <div className="flex items-center gap-2">
-            <label className="text-xs font-semibold text-slate-500 font-sans">Print Format:</label>
+            <label className="text-xs font-semibold text-muted-foreground font-sans">Print Format:</label>
             <Select value={printSize} onValueChange={(v: any) => setPrintSize(v)}>
               <SelectTrigger className="w-[110px] h-8 text-xs font-sans">
                 <SelectValue />
@@ -841,13 +841,13 @@ export default function MicroplanPrintView() {
       <div className="flex flex-col gap-8 w-full max-w-[1200px] mx-auto bg-white p-6 md:p-10 border rounded-2xl shadow-sm print:shadow-none print:border-0 print:p-0 print:max-w-none">
         
         {/* Document Header */}
-        <div className="flex items-start justify-between border-b pb-4 border-slate-300">
+        <div className="flex items-start justify-between border-b pb-4 border-border">
           <div className="space-y-1">
-            <p className="text-xs uppercase tracking-wider font-semibold text-slate-500 print:text-slate-700">National Immunization Program</p>
-            <h2 className="text-2xl font-bold text-slate-900 tracking-tight flex items-center gap-2">
+            <p className="text-xs uppercase tracking-wider font-semibold text-muted-foreground print:text-foreground">National Immunization Program</p>
+            <h2 className="text-2xl font-bold text-foreground tracking-tight flex items-center gap-2">
               {microplan.name}
             </h2>
-            <p className="text-sm text-slate-600 print:text-slate-800">
+            <p className="text-sm text-muted-foreground print:text-foreground">
               Facility: <strong>{facility.name}</strong> &middot; District: <strong>{district?.name || "—"}</strong> &middot; Province: <strong>{province?.name || "—"}</strong>
             </p>
           </div>
@@ -855,10 +855,10 @@ export default function MicroplanPrintView() {
             <Badge variant="outline" className="capitalize text-xs font-semibold px-2.5 py-1 print:border-black">
               Status: {microplan.status}
             </Badge>
-            <p className="text-xs text-slate-500 mt-1">
+            <p className="text-xs text-muted-foreground mt-1">
               Quarter {microplan.quarter}, {microplan.year}
             </p>
-            <p className="text-[10px] text-slate-400 font-mono">
+            <p className="text-[10px] text-muted-foreground font-mono">
               Generated {new Date().toLocaleDateString()}
             </p>
           </div>
@@ -867,43 +867,43 @@ export default function MicroplanPrintView() {
         {/* Section 1: Executive Summary & Map */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 print:grid-cols-2">
           {/* Summary Box */}
-          <Card className="print-card border shadow-xs bg-slate-50/50">
+          <Card className="print-card border shadow-xs bg-muted/50">
             <CardContent className="p-4 space-y-4">
-              <h3 className="text-sm font-bold border-b pb-1.5 text-slate-800 flex items-center gap-1.5">
+              <h3 className="text-sm font-bold border-b pb-1.5 text-foreground flex items-center gap-1.5">
                 <FileText className="h-4 w-4 text-primary" /> Executive Plan Summary
               </h3>
               <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
                 <div>
-                  <span className="text-slate-500 font-medium">Plan Type:</span>
+                  <span className="text-muted-foreground font-medium">Plan Type:</span>
                   <p className="font-semibold capitalize">{isCampaign ? "SIA Campaign" : "Routine Services"}</p>
                 </div>
                 <div>
-                  <span className="text-slate-500 font-medium">Target Population:</span>
+                  <span className="text-muted-foreground font-medium">Target Population:</span>
                   <p className="font-bold text-primary">{targetPopulationTotal.toLocaleString()} Infants</p>
                 </div>
                 <div>
-                  <span className="text-slate-500 font-medium">Catchment Communities:</span>
+                  <span className="text-muted-foreground font-medium">Catchment Communities:</span>
                   <p className="font-semibold">{mappedCommunities.length} registered villages</p>
                 </div>
                 <div>
-                  <span className="text-slate-500 font-medium">Planned Sessions:</span>
+                  <span className="text-muted-foreground font-medium">Planned Sessions:</span>
                   <p className="font-semibold">{hydration?.sessions?.length ?? 0} sessions</p>
                 </div>
                 {isCampaign && (
                   <>
                     <div>
-                      <span className="text-slate-500 font-medium">Campaign Antigen:</span>
+                      <span className="text-muted-foreground font-medium">Campaign Antigen:</span>
                       <p className="font-semibold">{(microplan as any).campaignAntigen || "—"}</p>
                     </div>
                     <div>
-                      <span className="text-slate-500 font-medium">Target Age Group:</span>
+                      <span className="text-muted-foreground font-medium">Target Age Group:</span>
                       <p className="font-semibold">{(microplan as any).campaignTargetAge || "—"}</p>
                     </div>
                   </>
                 )}
                 <div className="col-span-2 pt-2 border-t mt-2">
-                  <span className="text-slate-500 font-medium">Total Planned Budget:</span>
-                  <p className="text-base font-extrabold text-slate-900">$ {budgetTotal.toLocaleString()}</p>
+                  <span className="text-muted-foreground font-medium">Total Planned Budget:</span>
+                  <p className="text-base font-extrabold text-foreground">$ {budgetTotal.toLocaleString()}</p>
                 </div>
               </div>
             </CardContent>
@@ -912,7 +912,7 @@ export default function MicroplanPrintView() {
           {/* Catchment Map */}
           <Card className="print-card border shadow-xs">
             <CardContent className="p-4">
-              <h3 className="text-sm font-bold border-b pb-1.5 mb-3 text-slate-800 flex items-center gap-1.5">
+              <h3 className="text-sm font-bold border-b pb-1.5 mb-3 text-foreground flex items-center gap-1.5">
                 <MapPin className="h-4 w-4 text-primary" /> Catchment GIS Map
               </h3>
               <MapComponent />
@@ -922,12 +922,12 @@ export default function MicroplanPrintView() {
 
         {/* Section 2: Catchment Communities Table */}
         <div className="print-page-break space-y-3">
-          <h3 className="text-base font-bold border-b pb-1 text-slate-800 flex items-center gap-1.5">
+          <h3 className="text-base font-bold border-b pb-1 text-foreground flex items-center gap-1.5">
             <UsersIcon className="h-5 w-5 text-primary" /> 1. Communities served & Target Populations
           </h3>
           <table className="w-full text-left text-xs border print-table border-collapse">
             <thead>
-              <tr className="bg-slate-100 border-b print:bg-slate-200">
+              <tr className="bg-muted border-b print:bg-slate-200">
                 <th className="p-2 font-bold border">Community Name</th>
                 <th className="p-2 font-bold border">Type</th>
                 <th className="p-2 font-bold border">Target Population</th>
@@ -946,10 +946,10 @@ export default function MicroplanPrintView() {
               ) : (
                 mappedCommunities.map((c) => {
                   return (
-                    <tr key={c.id} className="border-b hover:bg-slate-50/50">
+                    <tr key={c.id} className="border-b hover:bg-muted/50">
                       <td className="p-2 border font-medium">{c.name}</td>
                       <td className="p-2 border capitalize">{c.type}</td>
-                      <td className="p-2 border font-bold text-slate-800">
+                      <td className="p-2 border font-bold text-foreground">
                         {c.targetPopulation.toLocaleString()}
                       </td>
                       <td className="p-2 border capitalize">{c.strategy}</td>
@@ -959,14 +959,14 @@ export default function MicroplanPrintView() {
                         {c.communicationContactMade ? (
                           <Check className="h-4 w-4 text-emerald-600 mx-auto" />
                         ) : (
-                          <Square className="h-4 w-4 text-slate-300 mx-auto" />
+                          <Square className="h-4 w-4 text-foreground mx-auto" />
                         )}
                       </td>
                       <td className="p-2 border text-center">
                         {c.outsideFollowUpCheck ? (
                           <Check className="h-4 w-4 text-emerald-600 mx-auto" />
                         ) : (
-                          <Square className="h-4 w-4 text-slate-300 mx-auto" />
+                          <Square className="h-4 w-4 text-foreground mx-auto" />
                         )}
                       </td>
                     </tr>
@@ -979,12 +979,12 @@ export default function MicroplanPrintView() {
 
         {/* Section 3: Session Calendar */}
         <div className="print-page-break space-y-3">
-          <h3 className="text-base font-bold border-b pb-1 text-slate-800 flex items-center gap-1.5">
+          <h3 className="text-base font-bold border-b pb-1 text-foreground flex items-center gap-1.5">
             <Calendar className="h-5 w-5 text-primary" /> 2. Session Calendar (12-Month Schedule)
           </h3>
           <table className="w-full text-left text-xs border print-table border-collapse">
             <thead>
-              <tr className="bg-slate-100 border-b print:bg-slate-200">
+              <tr className="bg-muted border-b print:bg-slate-200">
                 <th className="p-2 font-bold border">Target Community</th>
                 <th className="p-2 font-bold border">Scheduled Date</th>
                 <th className="p-2 font-bold border">Strategy</th>
@@ -1012,7 +1012,7 @@ export default function MicroplanPrintView() {
                     const pop = vMatch?.targetPopulation ?? 0;
 
                     return (
-                      <tr key={s.id} className="border-b hover:bg-slate-50/50">
+                      <tr key={s.id} className="border-b hover:bg-muted/50">
                         <td className="p-2 border font-medium">{vName}</td>
                         <td className="p-2 border font-mono">
                           {s.scheduledDate ? new Date(s.scheduledDate).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" }) : "—"}
@@ -1032,12 +1032,12 @@ export default function MicroplanPrintView() {
 
         {/* Section 4: Staffing Roster */}
         <div className="print-page-break space-y-3">
-          <h3 className="text-base font-bold border-b pb-1 text-slate-800 flex items-center gap-1.5">
+          <h3 className="text-base font-bold border-b pb-1 text-foreground flex items-center gap-1.5">
             <ShieldCheck className="h-5 w-5 text-primary" /> 3. Staffing & Session Day Roster
           </h3>
           <table className="w-full text-left text-xs border print-table border-collapse">
             <thead>
-              <tr className="bg-slate-100 border-b print:bg-slate-200">
+              <tr className="bg-muted border-b print:bg-slate-200">
                 <th className="p-2 font-bold border">Session Name / Label</th>
                 <th className="p-2 font-bold border">Vaccinator Name</th>
                 <th className="p-2 font-bold border">Recorder Name</th>
@@ -1054,7 +1054,7 @@ export default function MicroplanPrintView() {
                 </tr>
               ) : (
                 staffingRoster.map((s: any) => (
-                  <tr key={s.rowId} className="border-b hover:bg-slate-50/50">
+                  <tr key={s.rowId} className="border-b hover:bg-muted/50">
                     <td className="p-2 border font-medium">{s.sessionLabel}</td>
                     <td className="p-2 border">{s.vaccinator || "—"}</td>
                     <td className="p-2 border">{s.recorder || "—"}</td>
@@ -1073,12 +1073,12 @@ export default function MicroplanPrintView() {
         <div className="print-page-break grid grid-cols-1 lg:grid-cols-2 gap-6 print:grid-cols-2">
           {/* Forecasting */}
           <div className="space-y-3">
-            <h3 className="text-base font-bold border-b pb-1 text-slate-800 flex items-center gap-1.5">
+            <h3 className="text-base font-bold border-b pb-1 text-foreground flex items-center gap-1.5">
               <Syringe className="h-5 w-5 text-primary" /> 4a. Vaccine Doses Forecast
             </h3>
             <table className="w-full text-left text-xs border print-table border-collapse">
               <thead>
-                <tr className="bg-slate-100 border-b print:bg-slate-200">
+                <tr className="bg-muted border-b print:bg-slate-200">
                   <th className="p-2 font-bold border">Antigen</th>
                   <th className="p-2 font-bold border text-right">Target Pop</th>
                   <th className="p-2 font-bold border text-right">Wastage %</th>
@@ -1094,7 +1094,7 @@ export default function MicroplanPrintView() {
                 ) : (
                   hydration.vaccineRequirements.map((v) => {
                     return (
-                      <tr key={v.id} className="border-b hover:bg-slate-50/50">
+                      <tr key={v.id} className="border-b hover:bg-muted/50">
                         <td className="p-2 border font-medium">{v.vaccineName}</td>
                         <td className="p-2 border text-right font-mono">{v.targetPopulation.toLocaleString()}</td>
                         <td className="p-2 border text-right font-mono">{v.wastageRate}%</td>
@@ -1110,24 +1110,24 @@ export default function MicroplanPrintView() {
 
           {/* Requisition Slip */}
           <div className="space-y-3">
-            <h3 className="text-base font-bold border-b pb-1 text-slate-800 flex items-center gap-1.5">
+            <h3 className="text-base font-bold border-b pb-1 text-foreground flex items-center gap-1.5">
               <FileText className="h-5 w-5 text-primary" /> 4b. Stock Requisition Slip
             </h3>
-            <div className="border border-slate-300 rounded-lg p-4 bg-slate-50 space-y-4 text-xs print:bg-white print:border-black print:text-black">
-              <div className="flex justify-between items-start border-b pb-2 border-slate-200 print:border-black">
+            <div className="border border-border rounded-lg p-4 bg-muted space-y-4 text-xs print:bg-white print:border-black print:text-black">
+              <div className="flex justify-between items-start border-b pb-2 border-border print:border-black">
                 <div>
-                  <p className="font-bold uppercase tracking-wider text-slate-700">Official Stock Requisition</p>
+                  <p className="font-bold uppercase tracking-wider text-foreground">Official Stock Requisition</p>
                   <p className="text-[10px] text-muted-foreground">ID: REQ-MP-{microplan.id}</p>
                 </div>
                 <div className="text-right">
                   <p className="font-semibold">{facility.name}</p>
-                  <p className="text-[10px] text-slate-500">Date: {new Date().toLocaleDateString()}</p>
+                  <p className="text-[10px] text-muted-foreground">Date: {new Date().toLocaleDateString()}</p>
                 </div>
               </div>
 
               <table className="w-full text-left border-collapse text-[11px]">
                 <thead>
-                  <tr className="border-b font-semibold text-slate-700 print:text-black print:border-black">
+                  <tr className="border-b font-semibold text-foreground print:text-black print:border-black">
                     <th className="py-1">Antigen Name</th>
                     <th className="py-1 text-right">Doses Requested</th>
                     <th className="py-1 text-right">Recommended Vials</th>
@@ -1136,7 +1136,7 @@ export default function MicroplanPrintView() {
                 <tbody>
                   {(hydration?.vaccineRequirements || []).map((v) => {
                     return (
-                      <tr key={v.id} className="border-b border-slate-100 print:border-slate-200">
+                      <tr key={v.id} className="border-b border-slate-100 print:border-border">
                         <td className="py-1.5 font-medium">{v.vaccineName}</td>
                         <td className="py-1.5 text-right font-mono">{v.dosesWithWastage.toLocaleString()}</td>
                         <td className="py-1.5 text-right font-bold font-mono">{v.vialsRequired.toLocaleString()}</td>
@@ -1146,16 +1146,16 @@ export default function MicroplanPrintView() {
                 </tbody>
               </table>
 
-              <div className="grid grid-cols-2 gap-4 pt-4 border-t border-slate-200 print:border-black text-[10px]">
+              <div className="grid grid-cols-2 gap-4 pt-4 border-t border-border print:border-black text-[10px]">
                 <div className="space-y-4">
                   <p>Requisitioned By:</p>
                   <div className="border-b border-slate-400 w-32 h-4" />
-                  <p className="text-[9px] text-slate-500">Facility In-Charge Signature</p>
+                  <p className="text-[9px] text-muted-foreground">Facility In-Charge Signature</p>
                 </div>
                 <div className="space-y-4 text-right flex flex-col items-end">
                   <p>Authorized By:</p>
                   <div className="border-b border-slate-400 w-32 h-4" />
-                  <p className="text-[9px] text-slate-500">District Vaccine Officer Signature</p>
+                  <p className="text-[9px] text-muted-foreground">District Vaccine Officer Signature</p>
                 </div>
               </div>
             </div>
@@ -1164,15 +1164,15 @@ export default function MicroplanPrintView() {
 
         {/* Section 5b: Cold Chain Sizing & Inventory */}
         <div className="print-page-break space-y-3">
-          <h3 className="text-base font-bold border-b pb-1 text-slate-800 flex items-center gap-1.5">
+          <h3 className="text-base font-bold border-b pb-1 text-foreground flex items-center gap-1.5">
             <Layers className="h-5 w-5 text-primary" /> 4c. Cold Chain Capacity & Equipment Inventory
           </h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 print:grid-cols-2">
-            <div className="border rounded-xl p-4 bg-slate-50/50 print:bg-white print:border-black space-y-2">
-              <h4 className="text-xs font-bold text-slate-700 uppercase mb-2 print:text-black">Required vs Available Sizing</h4>
+            <div className="border rounded-xl p-4 bg-muted/50 print:bg-white print:border-black space-y-2">
+              <h4 className="text-xs font-bold text-foreground uppercase mb-2 print:text-black">Required vs Available Sizing</h4>
               <table className="w-full text-xs border border-collapse print-table">
                 <thead>
-                  <tr className="bg-slate-100 print:bg-slate-200">
+                  <tr className="bg-muted print:bg-slate-200">
                     <th className="p-1.5 border font-semibold">Equipment Type</th>
                     <th className="p-1.5 border font-semibold text-center">Required (wizard)</th>
                     <th className="p-1.5 border font-semibold text-center">Available (inventory)</th>
@@ -1199,11 +1199,11 @@ export default function MicroplanPrintView() {
                 </tbody>
               </table>
             </div>
-            <div className="border rounded-xl p-4 bg-slate-50/50 print:bg-white print:border-black space-y-2">
-              <h4 className="text-xs font-bold text-slate-700 uppercase mb-2 print:text-black">Active Facility Cold Chain Roster</h4>
+            <div className="border rounded-xl p-4 bg-muted/50 print:bg-white print:border-black space-y-2">
+              <h4 className="text-xs font-bold text-foreground uppercase mb-2 print:text-black">Active Facility Cold Chain Roster</h4>
               <table className="w-full text-[10px] border border-collapse print-table">
                 <thead>
-                  <tr className="bg-slate-100 print:bg-slate-200">
+                  <tr className="bg-muted print:bg-slate-200">
                     <th className="p-1.5 border font-semibold">Classification</th>
                     <th className="p-1.5 border font-semibold">Brand / Model</th>
                     <th className="p-1.5 border font-semibold">Condition</th>
@@ -1217,12 +1217,12 @@ export default function MicroplanPrintView() {
                     </tr>
                   ) : (
                     dbColdChain.map((e: any) => (
-                      <tr key={e.id} className="border-b hover:bg-slate-50/50">
+                      <tr key={e.id} className="border-b hover:bg-muted/50">
                         <td className="p-1.5 border capitalize">{e.equipmentType?.replace("_", " ") || "—"}</td>
                         <td className="p-1.5 border">{e.brand || "—"} &middot; {e.model || "—"}</td>
                         <td className="p-1.5 border capitalize">{e.condition || "—"}</td>
                         <td className="p-1.5 border text-center">
-                          <Badge variant="outline" className={`text-[9px] px-1 py-0.2 ${e.isActive ? "bg-emerald-50 text-emerald-700 border-emerald-300" : "bg-slate-100 text-slate-600"}`}>
+                          <Badge variant="outline" className={`text-[9px] px-1 py-0.2 ${e.isActive ? "bg-emerald-50 text-emerald-700 border-emerald-300" : "bg-muted text-muted-foreground"}`}>
                             {e.isActive ? "Active" : "Inactive"}
                           </Badge>
                         </td>
@@ -1237,12 +1237,12 @@ export default function MicroplanPrintView() {
 
         {/* Section 6: Budget Allocation */}
         <div className="print-page-break space-y-3">
-          <h3 className="text-base font-bold border-b pb-1 text-slate-800 flex items-center gap-1.5">
+          <h3 className="text-base font-bold border-b pb-1 text-foreground flex items-center gap-1.5">
             <Wallet className="h-5 w-5 text-primary" /> 5. Microplan Budget Allocation
           </h3>
           <table className="w-full text-left text-xs border print-table border-collapse">
             <thead>
-              <tr className="bg-slate-100 border-b print:bg-slate-200">
+              <tr className="bg-muted border-b print:bg-slate-200">
                 <th className="p-2 font-bold border">Category</th>
                 <th className="p-2 font-bold border">Cost Item Description</th>
                 <th className="p-2 font-bold border text-right">Quantity</th>
@@ -1262,7 +1262,7 @@ export default function MicroplanPrintView() {
                   const uc = Number(b.unitCost || 0);
                   const total = qty * uc;
                   return (
-                    <tr key={b.id} className="border-b hover:bg-slate-50/50">
+                    <tr key={b.id} className="border-b hover:bg-muted/50">
                       <td className="p-2 border font-medium capitalize">{b.category}</td>
                       <td className="p-2 border">{b.description}</td>
                       <td className="p-2 border text-right font-mono">{qty.toLocaleString()}</td>
@@ -1273,7 +1273,7 @@ export default function MicroplanPrintView() {
                   );
                 })
               )}
-              <tr className="bg-slate-50 font-bold print:bg-slate-100">
+              <tr className="bg-muted font-bold print:bg-muted">
                 <td colSpan={4} className="p-2 border text-right">Grand Total Cost:</td>
                 <td className="p-2 border text-right font-bold text-primary font-mono">$ {budgetTotal.toLocaleString()}</td>
                 <td className="p-2 border" />
@@ -1284,12 +1284,12 @@ export default function MicroplanPrintView() {
 
         {/* Section 6b: Transport & Logistics Plan */}
         <div className="print-page-break space-y-3">
-          <h3 className="text-base font-bold border-b pb-1 text-slate-800 flex items-center gap-1.5">
+          <h3 className="text-base font-bold border-b pb-1 text-foreground flex items-center gap-1.5">
             <Truck className="h-5 w-5 text-primary" /> 5b. Transport & Logistics Plan
           </h3>
           <table className="w-full text-left text-xs border print-table border-collapse">
             <thead>
-              <tr className="bg-slate-100 border-b print:bg-slate-200">
+              <tr className="bg-muted border-b print:bg-slate-200">
                 <th className="p-2 font-bold border">Session site / Destination</th>
                 <th className="p-2 font-bold border">Transport Mode</th>
                 <th className="p-2 font-bold border">Vehicle details</th>
@@ -1315,7 +1315,7 @@ export default function MicroplanPrintView() {
                   const isCleared = /security_cleared/.test(notes);
 
                   return (
-                    <tr key={s.id} className="border-b hover:bg-slate-50/50">
+                    <tr key={s.id} className="border-b hover:bg-muted/50">
                       <td className="p-2 border font-medium">{s.name}</td>
                       <td className="p-2 border capitalize">{mode}</td>
                       <td className="p-2 border">{vehicle}</td>
@@ -1338,12 +1338,12 @@ export default function MicroplanPrintView() {
 
         {/* Section 6c: Social Mobilization Plan */}
         <div className="print-page-break space-y-3">
-          <h3 className="text-base font-bold border-b pb-1 text-slate-800 flex items-center gap-1.5">
+          <h3 className="text-base font-bold border-b pb-1 text-foreground flex items-center gap-1.5">
             <MessageSquare className="h-5 w-5 text-primary" /> 5c. Social Mobilization & Community Engagement
           </h3>
           <table className="w-full text-left text-xs border print-table border-collapse">
             <thead>
-              <tr className="bg-slate-100 border-b print:bg-slate-200">
+              <tr className="bg-muted border-b print:bg-slate-200">
                 <th className="p-2 font-bold border">ACSM Activity Type</th>
                 <th className="p-2 font-bold border">Session / Location Details</th>
                 <th className="p-2 font-bold border">Focal Person</th>
@@ -1379,14 +1379,14 @@ export default function MicroplanPrintView() {
                   const trimmedDesc = desc.replace(/^.*?—\s*/, "");
 
                   return (
-                    <tr key={m.id} className="border-b hover:bg-slate-50/50">
+                    <tr key={m.id} className="border-b hover:bg-muted/50">
                       <td className="p-2 border font-medium capitalize">{m.activityType?.replace("_", " ")}</td>
                       <td className="p-2 border">{trimmedDesc || desc}</td>
                       <td className="p-2 border">{focalPoint}</td>
                       <td className="p-2 border font-mono">{focalPhone}</td>
                       <td className="p-2 border">{iec}</td>
                       <td className="p-2 border text-center capitalize">
-                        <Badge variant="outline" className={`text-[10px] ${m.status === "completed" ? "bg-emerald-50 text-emerald-700" : "bg-slate-50 text-slate-700"}`}>
+                        <Badge variant="outline" className={`text-[10px] ${m.status === "completed" ? "bg-emerald-50 text-emerald-700" : "bg-muted text-foreground"}`}>
                           {m.status || "Planned"}
                         </Badge>
                       </td>
@@ -1400,12 +1400,12 @@ export default function MicroplanPrintView() {
 
         {/* Section 7: Supervision Plan */}
         <div className="print-page-break space-y-3">
-          <h3 className="text-base font-bold border-b pb-1 text-slate-800 flex items-center gap-1.5">
+          <h3 className="text-base font-bold border-b pb-1 text-foreground flex items-center gap-1.5">
             <ClipboardList className="h-5 w-5 text-primary" /> 6. Supportive Supervision & Checklists
           </h3>
           <table className="w-full text-left text-xs border print-table border-collapse">
             <thead>
-              <tr className="bg-slate-100 border-b print:bg-slate-200">
+              <tr className="bg-muted border-b print:bg-slate-200">
                 <th className="p-2 font-bold border">Quarter</th>
                 <th className="p-2 font-bold border">Scheduled Date</th>
                 <th className="p-2 font-bold border">Supervisor Name</th>
@@ -1420,7 +1420,7 @@ export default function MicroplanPrintView() {
                 </tr>
               ) : (
                 mappedSupervision.map((v) => (
-                  <tr key={v.id} className="border-b hover:bg-slate-50/50 align-top">
+                  <tr key={v.id} className="border-b hover:bg-muted/50 align-top">
                     <td className="p-2 border font-medium">Quarter {v.quarter}</td>
                     <td className="p-2 border font-mono">
                       {v.scheduledDate ? new Date(v.scheduledDate).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" }) : "—"}
@@ -1437,12 +1437,12 @@ export default function MicroplanPrintView() {
 
         {/* Section 7b: Health Facility Committee (HFC) Governance Board */}
         <div className="print-page-break space-y-3">
-          <h3 className="text-base font-bold border-b pb-1 text-slate-800 flex items-center gap-1.5">
+          <h3 className="text-base font-bold border-b pb-1 text-foreground flex items-center gap-1.5">
             <UsersIcon className="h-5 w-5 text-primary" /> 6b. Health Facility Governance Board (HFC Committee)
           </h3>
           <table className="w-full text-left text-xs border print-table border-collapse">
             <thead>
-              <tr className="bg-slate-100 border-b print:bg-slate-200">
+              <tr className="bg-muted border-b print:bg-slate-200">
                 <th className="p-2 font-bold border">Committee Position</th>
                 <th className="p-2 font-bold border">Member Name</th>
                 <th className="p-2 font-bold border">Gender</th>
@@ -1458,14 +1458,14 @@ export default function MicroplanPrintView() {
                 </tr>
               ) : (
                 hfcMembers.map((m: any) => (
-                  <tr key={m.id} className="border-b hover:bg-slate-50/50">
+                  <tr key={m.id} className="border-b hover:bg-muted/50">
                     <td className="p-2 border font-medium capitalize">{m.isChairperson ? `${m.position} (Chairperson)` : m.position}</td>
                     <td className="p-2 border">{m.memberName}</td>
                     <td className="p-2 border capitalize">{m.gender || "—"}</td>
                     <td className="p-2 border font-mono">{m.contactPhone || "—"}</td>
                     <td className="p-2 border text-right font-mono">{m.yearsOfService != null ? `${m.yearsOfService} yrs` : "—"}</td>
                     <td className="p-2 border text-center">
-                      <Badge variant="outline" className={`text-[10px] ${m.isActive === false ? "bg-slate-100 text-slate-600" : "bg-emerald-50 text-emerald-700"}`}>
+                      <Badge variant="outline" className={`text-[10px] ${m.isActive === false ? "bg-muted text-muted-foreground" : "bg-emerald-50 text-emerald-700"}`}>
                         {m.isActive === false ? "Inactive" : "Active"}
                       </Badge>
                     </td>
@@ -1478,12 +1478,12 @@ export default function MicroplanPrintView() {
 
         {/* Section 7c: Community Health Volunteers (CHV) Profiles */}
         <div className="print-page-break space-y-3">
-          <h3 className="text-base font-bold border-b pb-1 text-slate-800 flex items-center gap-1.5">
+          <h3 className="text-base font-bold border-b pb-1 text-foreground flex items-center gap-1.5">
             <UsersIcon className="h-5 w-5 text-primary" /> 6c. Community Health Volunteers (CHV) Roster
           </h3>
           <table className="w-full text-left text-xs border print-table border-collapse">
             <thead>
-              <tr className="bg-slate-100 border-b print:bg-slate-200">
+              <tr className="bg-muted border-b print:bg-slate-200">
                 <th className="p-2 font-bold border">CHV Name</th>
                 <th className="p-2 font-bold border">Gender</th>
                 <th className="p-2 font-bold border">Residence Village</th>
@@ -1502,7 +1502,7 @@ export default function MicroplanPrintView() {
                 chvProfiles.map((c: any) => {
                   const vMatch = villages?.find((v) => v.id === c.villageId);
                   return (
-                    <tr key={c.id} className="border-b hover:bg-slate-50/50">
+                    <tr key={c.id} className="border-b hover:bg-muted/50">
                       <td className="p-2 border font-medium">{c.name}</td>
                       <td className="p-2 border capitalize">{c.gender || "—"}</td>
                       <td className="p-2 border">{vMatch?.name || "Catchment"}</td>
@@ -1510,7 +1510,7 @@ export default function MicroplanPrintView() {
                       <td className="p-2 border capitalize">{c.campaignRole || "—"}</td>
                       <td className="p-2 border capitalize">{c.trainingStatus || "—"}</td>
                       <td className="p-2 border text-center">
-                        <Badge variant="outline" className={`text-[10px] ${c.active === false ? "bg-slate-100 text-slate-600" : "bg-emerald-50 text-emerald-700"}`}>
+                        <Badge variant="outline" className={`text-[10px] ${c.active === false ? "bg-muted text-muted-foreground" : "bg-emerald-50 text-emerald-700"}`}>
                           {c.active === false ? "Inactive" : "Active"}
                         </Badge>
                       </td>
@@ -1523,61 +1523,61 @@ export default function MicroplanPrintView() {
         </div>
 
         {/* Section 8: Signature Approval Sign-Off Block */}
-        <div className="print-page-break pt-8 border-t border-slate-300 print:border-black mt-8 space-y-6">
-          <h3 className="text-sm font-bold uppercase tracking-wider text-slate-700 print:text-black">Microplan Authorization & Approval Sign-Off</h3>
+        <div className="print-page-break pt-8 border-t border-border print:border-black mt-8 space-y-6">
+          <h3 className="text-sm font-bold uppercase tracking-wider text-foreground print:text-black">Microplan Authorization & Approval Sign-Off</h3>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 print:grid-cols-3 text-xs">
             {/* Signature 1 */}
-            <div className="border border-slate-200 p-4 rounded-xl space-y-4 print:border-black print:rounded-none">
-              <p className="font-semibold text-slate-800 print:text-black">1. Prepared By (Facility In-Charge):</p>
+            <div className="border border-border p-4 rounded-xl space-y-4 print:border-black print:rounded-none">
+              <p className="font-semibold text-foreground print:text-black">1. Prepared By (Facility In-Charge):</p>
               <div className="space-y-2">
                 <div className="flex gap-2">
-                  <span className="text-slate-400">Name:</span>
+                  <span className="text-muted-foreground">Name:</span>
                   <span className="font-medium">___________________________</span>
                 </div>
                 <div className="flex gap-2">
-                  <span className="text-slate-400">Signature:</span>
+                  <span className="text-muted-foreground">Signature:</span>
                   <span className="font-medium">___________________________</span>
                 </div>
                 <div className="flex gap-2">
-                  <span className="text-slate-400">Date:</span>
+                  <span className="text-muted-foreground">Date:</span>
                   <span className="font-medium">______ / ______ / 20___</span>
                 </div>
               </div>
             </div>
 
             {/* Signature 2 */}
-            <div className="border border-slate-200 p-4 rounded-xl space-y-4 print:border-black print:rounded-none">
-              <p className="font-semibold text-slate-800 print:text-black">2. Reviewed By (District Medical Officer):</p>
+            <div className="border border-border p-4 rounded-xl space-y-4 print:border-black print:rounded-none">
+              <p className="font-semibold text-foreground print:text-black">2. Reviewed By (District Medical Officer):</p>
               <div className="space-y-2">
                 <div className="flex gap-2">
-                  <span className="text-slate-400">Name:</span>
+                  <span className="text-muted-foreground">Name:</span>
                   <span className="font-medium">___________________________</span>
                 </div>
                 <div className="flex gap-2">
-                  <span className="text-slate-400">Signature:</span>
+                  <span className="text-muted-foreground">Signature:</span>
                   <span className="font-medium">___________________________</span>
                 </div>
                 <div className="flex gap-2">
-                  <span className="text-slate-400">Date:</span>
+                  <span className="text-muted-foreground">Date:</span>
                   <span className="font-medium">______ / ______ / 20___</span>
                 </div>
               </div>
             </div>
 
             {/* Signature 3 */}
-            <div className="border border-slate-200 p-4 rounded-xl space-y-4 print:border-black print:rounded-none">
-              <p className="font-semibold text-slate-800 print:text-black">3. Approved By (Provincial Coordinator):</p>
+            <div className="border border-border p-4 rounded-xl space-y-4 print:border-black print:rounded-none">
+              <p className="font-semibold text-foreground print:text-black">3. Approved By (Provincial Coordinator):</p>
               <div className="space-y-2">
                 <div className="flex gap-2">
-                  <span className="text-slate-400">Name:</span>
+                  <span className="text-muted-foreground">Name:</span>
                   <span className="font-medium">___________________________</span>
                 </div>
                 <div className="flex gap-2">
-                  <span className="text-slate-400">Signature:</span>
+                  <span className="text-muted-foreground">Signature:</span>
                   <span className="font-medium">___________________________</span>
                 </div>
                 <div className="flex gap-2">
-                  <span className="text-slate-400">Date:</span>
+                  <span className="text-muted-foreground">Date:</span>
                   <span className="font-medium">______ / ______ / 20___</span>
                 </div>
               </div>

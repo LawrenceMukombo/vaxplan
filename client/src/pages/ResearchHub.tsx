@@ -384,18 +384,18 @@ export default function ResearchHub() {
   }, [documents, pilots]);
 
   return (
-    <div className="bg-slate-50 dark:bg-slate-950 min-h-screen pb-12">
+    <div className="bg-muted dark:bg-background min-h-screen pb-12">
       {/* Original header line commented out to satisfy rule 1:
-      <header className="sticky top-0 z-40 bg-white/90 dark:bg-slate-900/90 backdrop-blur border-b border-slate-200 dark:border-slate-800">
+      <header className="sticky top-0 z-40 bg-white/90 dark:bg-background backdrop-blur border-b border-border dark:border-border">
       */}
-      <header className="sticky top-0 z-[2000] bg-white/90 dark:bg-slate-900/90 backdrop-blur border-b border-slate-200 dark:border-slate-800">
+      <header className="sticky top-0 z-[2000] bg-white/90 dark:bg-background backdrop-blur border-b border-border dark:border-border">
         <div className="max-w-7xl mx-auto px-4 md:px-6 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="bg-primary/10 p-2 rounded-lg">
               <BookOpen className="h-5 w-5 text-primary" />
             </div>
             <div>
-              <h1 className="font-bold text-base text-slate-900 dark:text-white leading-tight">
+              <h1 className="font-bold text-base text-foreground dark:text-white leading-tight">
                 VaxPlan Research & Pilots Hub
               </h1>
               <p className="text-xs text-muted-foreground hidden sm:block">
@@ -413,8 +413,8 @@ export default function ResearchHub() {
         </div>
 
         {/* TOP SUB-NAVIGATION */}
-        <div className="bg-slate-100 dark:bg-slate-900/50 border-t border-slate-200 dark:border-slate-800">
-          <div className="max-w-7xl mx-auto px-4 md:px-6 overflow-x-auto flex gap-6 py-2 text-xs font-semibold text-slate-600 dark:text-slate-300">
+        <div className="bg-muted dark:bg-background border-t border-border dark:border-border">
+          <div className="max-w-7xl mx-auto px-4 md:px-6 overflow-x-auto flex gap-6 py-2 text-xs font-semibold text-muted-foreground dark:text-foreground">
             {[
               { id: "overview", label: "Overview" },
               { id: "library", label: "Research Library" },
@@ -449,11 +449,11 @@ export default function ResearchHub() {
             <Badge variant="outline" className="bg-primary/5 border-primary/20 text-primary px-3 py-1 font-bold">
               Evidence & Evaluation
             </Badge>
-            <h1 className="text-4xl md:text-5xl font-extrabold tracking-tight text-slate-900 dark:text-white leading-tight">
+            <h1 className="text-4xl md:text-5xl font-extrabold tracking-tight text-foreground dark:text-white leading-tight">
               VaxPlan Research &<br />
               <span className="text-primary">Pilots Hub</span>
             </h1>
-            <p className="text-slate-600 dark:text-slate-400 text-lg leading-relaxed max-w-xl">
+            <p className="text-muted-foreground dark:text-muted-foreground text-lg leading-relaxed max-w-xl">
               Documenting VaxPlan research, pilots, implementation lessons, technical resources, and downloadable evidence products. Providing key insights to accelerate GIS-enabled immunization microplanning and unreached child identification globally.
             </p>
             <div className="flex gap-3 flex-wrap">
@@ -479,46 +479,46 @@ export default function ResearchHub() {
 
           {/* KPI STAT CARDS */}
           <div className="lg:col-span-2 grid grid-cols-2 gap-4">
-            <Card className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm hover:shadow-md transition-shadow">
+            <Card className="bg-white dark:bg-background border border-border dark:border-border shadow-sm hover:shadow-md transition-shadow">
               <CardHeader className="p-4 flex flex-row items-center justify-between space-y-0">
-                <CardTitle className="text-xs font-semibold text-slate-500 uppercase">Documents</CardTitle>
+                <CardTitle className="text-xs font-semibold text-muted-foreground uppercase">Documents</CardTitle>
                 <FileText className="h-4 w-4 text-primary" />
               </CardHeader>
               <CardContent className="p-4 pt-0">
-                <div className="text-2xl font-black text-slate-900 dark:text-white">{statsSummary.documentsCount}</div>
+                <div className="text-2xl font-black text-foreground dark:text-white">{statsSummary.documentsCount}</div>
                 <p className="text-[10px] text-muted-foreground mt-1">Research papers & briefs</p>
               </CardContent>
             </Card>
 
-            <Card className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm hover:shadow-md transition-shadow">
+            <Card className="bg-white dark:bg-background border border-border dark:border-border shadow-sm hover:shadow-md transition-shadow">
               <CardHeader className="p-4 flex flex-row items-center justify-between space-y-0">
-                <CardTitle className="text-xs font-semibold text-slate-500 uppercase">Active Pilots</CardTitle>
+                <CardTitle className="text-xs font-semibold text-muted-foreground uppercase">Active Pilots</CardTitle>
                 <Activity className="h-4 w-4 text-amber-500" />
               </CardHeader>
               <CardContent className="p-4 pt-0">
-                <div className="text-2xl font-black text-slate-900 dark:text-white">{statsSummary.activePilots}</div>
+                <div className="text-2xl font-black text-foreground dark:text-white">{statsSummary.activePilots}</div>
                 <p className="text-[10px] text-muted-foreground mt-1">Ongoing field runs</p>
               </CardContent>
             </Card>
 
-            <Card className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm hover:shadow-md transition-shadow">
+            <Card className="bg-white dark:bg-background border border-border dark:border-border shadow-sm hover:shadow-md transition-shadow">
               <CardHeader className="p-4 flex flex-row items-center justify-between space-y-0">
-                <CardTitle className="text-xs font-semibold text-slate-500 uppercase">Geographies</CardTitle>
+                <CardTitle className="text-xs font-semibold text-muted-foreground uppercase">Geographies</CardTitle>
                 <Globe className="h-4 w-4 text-emerald-500" />
               </CardHeader>
               <CardContent className="p-4 pt-0">
-                <div className="text-2xl font-black text-slate-900 dark:text-white">{statsSummary.countriesCount}</div>
+                <div className="text-2xl font-black text-foreground dark:text-white">{statsSummary.countriesCount}</div>
                 <p className="text-[10px] text-muted-foreground mt-1">Countries documented</p>
               </CardContent>
             </Card>
 
-            <Card className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm hover:shadow-md transition-shadow">
+            <Card className="bg-white dark:bg-background border border-border dark:border-border shadow-sm hover:shadow-md transition-shadow">
               <CardHeader className="p-4 flex flex-row items-center justify-between space-y-0">
-                <CardTitle className="text-xs font-semibold text-slate-500 uppercase">Downloads</CardTitle>
+                <CardTitle className="text-xs font-semibold text-muted-foreground uppercase">Downloads</CardTitle>
                 <Download className="h-4 w-4 text-indigo-500" />
               </CardHeader>
               <CardContent className="p-4 pt-0">
-                <div className="text-2xl font-black text-slate-900 dark:text-white">{statsSummary.downloadsCount}</div>
+                <div className="text-2xl font-black text-foreground dark:text-white">{statsSummary.downloadsCount}</div>
                 <p className="text-[10px] text-muted-foreground mt-1">White papers & assets</p>
               </CardContent>
             </Card>
@@ -530,10 +530,10 @@ export default function ResearchHub() {
           <section className="bg-gradient-to-r from-primary/10 via-indigo-50/50 to-primary/5 dark:from-primary/20 dark:via-slate-900 dark:to-slate-800 border border-primary/10 rounded-2xl p-6 md:p-8 flex flex-col md:flex-row gap-8 items-center shadow-sm">
             <div className="flex-1 space-y-4 text-left">
               <Badge className="bg-primary hover:bg-primary text-white">Featured Publication</Badge>
-              <h2 className="text-2xl md:text-3xl font-extrabold text-slate-900 dark:text-white leading-tight">
+              <h2 className="text-2xl md:text-3xl font-extrabold text-foreground dark:text-white leading-tight">
                 {documents[0].title}
               </h2>
-              <p className="text-slate-600 dark:text-slate-300 text-sm leading-relaxed">
+              <p className="text-muted-foreground dark:text-foreground text-sm leading-relaxed">
                 {documents[0].abstract}
               </p>
               <div className="text-xs text-muted-foreground flex gap-4">
@@ -545,7 +545,7 @@ export default function ResearchHub() {
               <Button onClick={() => handleDownload(documents[0], "document")} className="w-full gap-2">
                 <Download className="h-4 w-4" /> Download PDF
               </Button>
-              <Button variant="outline" onClick={() => setPreviewDoc(documents[0])} className="w-full gap-2 bg-white dark:bg-slate-900">
+              <Button variant="outline" onClick={() => setPreviewDoc(documents[0])} className="w-full gap-2 bg-white dark:bg-background">
                 <Eye className="h-4 w-4" /> Preview
               </Button>
               <Button variant="ghost" onClick={() => copyCitation(documents[0])} className="w-full gap-2 text-xs">
@@ -557,15 +557,15 @@ export default function ResearchHub() {
 
         {/* ─── SECTION 2: RESEARCH LIBRARY ────────────────────────────────────────── */}
         <section id="library" className="scroll-mt-36 space-y-6">
-          <div className="border-b border-slate-200 dark:border-slate-800 pb-4">
-            <h2 className="text-2xl font-extrabold text-slate-900 dark:text-white">Research Library</h2>
+          <div className="border-b border-border dark:border-border pb-4">
+            <h2 className="text-2xl font-extrabold text-foreground dark:text-white">Research Library</h2>
             <p className="text-muted-foreground text-sm mt-1">
               Search, filter, and download scientific papers, case studies, product briefs, and checklists.
             </p>
           </div>
 
           {/* SEARCH & FILTERS CONTROLS */}
-          <Card className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+          <Card className="bg-white dark:bg-background border border-border dark:border-border">
             <CardContent className="p-4 space-y-4">
               <div className="grid sm:grid-cols-2 md:grid-cols-5 gap-3">
                 <div className="relative md:col-span-2">
@@ -626,23 +626,23 @@ export default function ResearchHub() {
           {/* CARDS LIST */}
           {documents.length === 0 ? (
             <div className="text-center py-12 text-muted-foreground text-sm border border-dashed rounded-xl">
-              <Info className="h-6 w-6 mx-auto mb-2 text-slate-400" />
+              <Info className="h-6 w-6 mx-auto mb-2 text-muted-foreground" />
               No matching research documents found. Adjust filters to search.
             </div>
           ) : (
             <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
               {documents.map((doc) => (
-                <Card key={doc.id} className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 flex flex-col justify-between hover:shadow-md transition-shadow">
+                <Card key={doc.id} className="bg-white dark:bg-background border border-border dark:border-border flex flex-col justify-between hover:shadow-md transition-shadow">
                   <CardHeader className="p-5 pb-3">
                     <div className="flex justify-between items-start gap-2 mb-2">
-                      <Badge variant="secondary" className="bg-slate-100 dark:bg-slate-800 text-[10px] uppercase">
+                      <Badge variant="secondary" className="bg-muted dark:bg-muted text-[10px] uppercase">
                         {doc.documentType}
                       </Badge>
                       <Badge variant="outline" className="text-[10px] border-emerald-500/20 text-emerald-600 bg-emerald-50/50">
                         {doc.visibility}
                       </Badge>
                     </div>
-                    <CardTitle className="text-base font-bold text-slate-900 dark:text-white line-clamp-2 leading-snug">
+                    <CardTitle className="text-base font-bold text-foreground dark:text-white line-clamp-2 leading-snug">
                       {doc.title}
                     </CardTitle>
                     <CardDescription className="text-xs text-muted-foreground mt-1 flex gap-2">
@@ -655,7 +655,7 @@ export default function ResearchHub() {
                     </CardDescription>
                   </CardHeader>
                   <CardContent className="p-5 pt-0 pb-3 flex-1 flex flex-col justify-between">
-                    <p className="text-xs text-slate-600 dark:text-slate-400 line-clamp-3 mb-4 leading-relaxed">
+                    <p className="text-xs text-muted-foreground dark:text-muted-foreground line-clamp-3 mb-4 leading-relaxed">
                       {doc.abstract}
                     </p>
                     <div className="flex flex-wrap gap-1">
@@ -666,9 +666,9 @@ export default function ResearchHub() {
                       ))}
                     </div>
                   </CardContent>
-                  <CardFooter className="p-5 pt-0 border-t border-slate-100 dark:border-slate-800/50 mt-4 flex items-center justify-between text-xs text-slate-500">
+                  <CardFooter className="p-5 pt-0 border-t border-slate-100 dark:border-border mt-4 flex items-center justify-between text-xs text-muted-foreground">
                     <span className="flex items-center gap-1 font-mono">
-                      <Download className="h-3 w-3 text-slate-400" /> {doc.downloadCount || 0}
+                      <Download className="h-3 w-3 text-muted-foreground" /> {doc.downloadCount || 0}
                     </span>
                     <div className="flex gap-2">
                       <Button size="sm" variant="ghost" onClick={() => setPreviewDoc(doc)} className="h-7 text-xs px-2">
@@ -687,16 +687,16 @@ export default function ResearchHub() {
 
         {/* ─── SECTION 3: PILOT ACTIVITIES ────────────────────────────────────────── */}
         <section id="pilots" className="scroll-mt-36 space-y-6">
-          <div className="border-b border-slate-200 dark:border-slate-800 pb-4 flex justify-between items-center flex-wrap gap-4">
+          <div className="border-b border-border dark:border-border pb-4 flex justify-between items-center flex-wrap gap-4">
             <div>
-              <h2 className="text-2xl font-extrabold text-slate-900 dark:text-white">Pilot Activities</h2>
+              <h2 className="text-2xl font-extrabold text-foreground dark:text-white">Pilot Activities</h2>
               <p className="text-muted-foreground text-sm mt-1">
                 Explore active and completed VaxPlan field pilots, mapping status, and geographic points.
               </p>
             </div>
 
             {/* Map/List Toggle */}
-            <div className="flex border border-slate-200 dark:border-slate-800 rounded-lg p-1 bg-white dark:bg-slate-900">
+            <div className="flex border border-border dark:border-border rounded-lg p-1 bg-white dark:bg-background">
               <Button
                 size="sm"
                 variant={pilotViewMode === "map" ? "secondary" : "ghost"}
@@ -717,7 +717,7 @@ export default function ResearchHub() {
           </div>
 
           {/* PILOTS FILTERS */}
-          <Card className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+          <Card className="bg-white dark:bg-background border border-border dark:border-border">
             <CardContent className="p-4 flex gap-3 flex-wrap">
               <div className="w-[180px]">
                 <Select value={pilotCountry} onValueChange={setPilotCountry}>
@@ -757,16 +757,16 @@ export default function ResearchHub() {
                 {pilots.map((p) => (
                   <Card
                     key={p.id}
-                    className="p-4 cursor-pointer hover:border-primary/50 transition-colors bg-white dark:bg-slate-900"
+                    className="p-4 cursor-pointer hover:border-primary/50 transition-colors bg-white dark:bg-background"
                     onClick={() => setPreviewPilot(p)}
                   >
                     <div className="flex justify-between items-center mb-1">
                       <Badge className="text-[9px] px-1.5 py-0 font-bold uppercase">{p.status}</Badge>
                       <span className="text-[10px] text-muted-foreground font-semibold">{p.startDate}</span>
                     </div>
-                    <h3 className="font-bold text-sm text-slate-900 dark:text-white line-clamp-1">{p.title}</h3>
+                    <h3 className="font-bold text-sm text-foreground dark:text-white line-clamp-1">{p.title}</h3>
                     <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{p.summary}</p>
-                    <div className="flex gap-4 text-[10px] font-medium text-slate-500 mt-2">
+                    <div className="flex gap-4 text-[10px] font-medium text-muted-foreground mt-2">
                       <span className="flex items-center gap-1"><MapPin className="h-3 w-3" /> {p.province}, {p.country}</span>
                     </div>
                   </Card>
@@ -774,7 +774,7 @@ export default function ResearchHub() {
               </div>
 
               {/* Map */}
-              <div className="lg:col-span-2 h-[500px] rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800 shadow-sm relative">
+              <div className="lg:col-span-2 h-[500px] rounded-xl overflow-hidden border border-border dark:border-border shadow-sm relative">
                 <MapContainer center={mapCenter} zoom={4} className="h-full w-full">
                   <TileLayer url={BASEMAP_URL} attribution={BASEMAP_ATTRIBUTION} />
                   {pilots
@@ -809,30 +809,30 @@ export default function ResearchHub() {
           ) : (
             <div className="grid md:grid-cols-2 gap-6">
               {pilots.map((p) => (
-                <Card key={p.id} className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 flex flex-col justify-between">
+                <Card key={p.id} className="bg-white dark:bg-background border border-border dark:border-border flex flex-col justify-between">
                   <CardHeader className="p-5 pb-2">
                     <div className="flex justify-between items-center mb-2">
                       <Badge variant="outline" className="text-[10px] uppercase font-bold">
                         {p.status}
                       </Badge>
-                      <span className="text-xs text-slate-500 font-medium">{p.startDate}</span>
+                      <span className="text-xs text-muted-foreground font-medium">{p.startDate}</span>
                     </div>
-                    <CardTitle className="text-base font-bold text-slate-900 dark:text-white leading-tight">
+                    <CardTitle className="text-base font-bold text-foreground dark:text-white leading-tight">
                       {p.title}
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="p-5 pt-0 pb-3 flex-1">
-                    <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
+                    <p className="text-xs text-muted-foreground dark:text-muted-foreground leading-relaxed">
                       {p.summary}
                     </p>
-                    <div className="grid grid-cols-2 gap-2 mt-4 text-xs bg-slate-50 dark:bg-slate-800/30 p-3 rounded-lg border">
+                    <div className="grid grid-cols-2 gap-2 mt-4 text-xs bg-muted dark:bg-muted p-3 rounded-lg border">
                       <div>
-                        <span className="text-slate-400 block text-[10px]">FACILITIES INVOLVED</span>
-                        <span className="font-semibold text-slate-800 dark:text-slate-200">{p.facility || "Multiple"}</span>
+                        <span className="text-muted-foreground block text-[10px]">FACILITIES INVOLVED</span>
+                        <span className="font-semibold text-foreground dark:text-foreground">{p.facility || "Multiple"}</span>
                       </div>
                       <div>
-                        <span className="text-slate-400 block text-[10px]">MINISTRY FOCAL POINT</span>
-                        <span className="font-semibold text-slate-800 dark:text-slate-200">{p.ministryFocalPoint || "MoH Focal"}</span>
+                        <span className="text-muted-foreground block text-[10px]">MINISTRY FOCAL POINT</span>
+                        <span className="font-semibold text-foreground dark:text-foreground">{p.ministryFocalPoint || "MoH Focal"}</span>
                       </div>
                     </div>
                   </CardContent>
@@ -849,8 +849,8 @@ export default function ResearchHub() {
 
         {/* ─── SECTION 4: EVIDENCE DASHBOARD ──────────────────────────────────────── */}
         <section id="dashboard" className="scroll-mt-36 space-y-6">
-          <div className="border-b border-slate-200 dark:border-slate-800 pb-4">
-            <h2 className="text-2xl font-extrabold text-slate-900 dark:text-white">Evidence Dashboard</h2>
+          <div className="border-b border-border dark:border-border pb-4">
+            <h2 className="text-2xl font-extrabold text-foreground dark:text-white">Evidence Dashboard</h2>
             <p className="text-muted-foreground text-sm mt-1">
               Summarized charts and metrics displaying publication categories, pilot outcomes, and downloads.
             </p>
@@ -858,38 +858,38 @@ export default function ResearchHub() {
 
           <div className="grid md:grid-cols-3 gap-6">
             {/* Stat counts card */}
-            <Card className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 md:col-span-1">
+            <Card className="bg-white dark:bg-background border border-border dark:border-border md:col-span-1">
               <CardHeader>
-                <CardTitle className="text-sm font-bold uppercase text-slate-400">Metrics Rollup</CardTitle>
+                <CardTitle className="text-sm font-bold uppercase text-muted-foreground">Metrics Rollup</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="flex justify-between border-b pb-2">
-                  <span className="text-xs text-slate-500">Research Documents</span>
+                  <span className="text-xs text-muted-foreground">Research Documents</span>
                   <span className="font-bold text-sm text-slate-950 dark:text-white">{statsSummary.documentsCount}</span>
                 </div>
                 <div className="flex justify-between border-b pb-2">
-                  <span className="text-xs text-slate-500">Completed Pilots</span>
+                  <span className="text-xs text-muted-foreground">Completed Pilots</span>
                   <span className="font-bold text-sm text-slate-950 dark:text-white">{statsSummary.completedPilots}</span>
                 </div>
                 <div className="flex justify-between border-b pb-2">
-                  <span className="text-xs text-slate-500">Active Pilots</span>
+                  <span className="text-xs text-muted-foreground">Active Pilots</span>
                   <span className="font-bold text-sm text-slate-950 dark:text-white">{statsSummary.activePilots}</span>
                 </div>
                 <div className="flex justify-between border-b pb-2">
-                  <span className="text-xs text-slate-500">Total Downloads</span>
+                  <span className="text-xs text-muted-foreground">Total Downloads</span>
                   <span className="font-bold text-sm text-slate-950 dark:text-white">{statsSummary.downloadsCount}</span>
                 </div>
                 <div className="flex justify-between pb-2">
-                  <span className="text-xs text-slate-500">Lessons Catalogued</span>
+                  <span className="text-xs text-muted-foreground">Lessons Catalogued</span>
                   <span className="font-bold text-sm text-slate-950 dark:text-white">{statsSummary.lessonsCount}</span>
                 </div>
               </CardContent>
             </Card>
 
             {/* SVG Document Type Bar Chart */}
-            <Card className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 md:col-span-1">
+            <Card className="bg-white dark:bg-background border border-border dark:border-border md:col-span-1">
               <CardHeader>
-                <CardTitle className="text-sm font-bold uppercase text-slate-400 flex items-center gap-1">
+                <CardTitle className="text-sm font-bold uppercase text-muted-foreground flex items-center gap-1">
                   <BarChart3 className="h-4 w-4" /> Publications by Type
                 </CardTitle>
               </CardHeader>
@@ -907,7 +907,7 @@ export default function ResearchHub() {
                             <span className="truncate max-w-[200px]">{type.name}</span>
                             <span>{type.val}</span>
                           </div>
-                          <div className="w-full bg-slate-100 dark:bg-slate-800 h-2 rounded-full overflow-hidden">
+                          <div className="w-full bg-muted dark:bg-muted h-2 rounded-full overflow-hidden">
                             <div className="bg-primary h-full rounded-full" style={{ width: `${pct}%` }} />
                           </div>
                         </div>
@@ -919,9 +919,9 @@ export default function ResearchHub() {
             </Card>
 
             {/* SVG Pilot Status Pie Chart (Stacked representation for accessibility) */}
-            <Card className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 md:col-span-1">
+            <Card className="bg-white dark:bg-background border border-border dark:border-border md:col-span-1">
               <CardHeader>
-                <CardTitle className="text-sm font-bold uppercase text-slate-400">Pilots by Status</CardTitle>
+                <CardTitle className="text-sm font-bold uppercase text-muted-foreground">Pilots by Status</CardTitle>
               </CardHeader>
               <CardContent className="h-[200px] flex items-center justify-center">
                 <div className="w-full space-y-3">
@@ -937,7 +937,7 @@ export default function ResearchHub() {
                             <span>{status.name}</span>
                             <span>{status.val}</span>
                           </div>
-                          <div className="w-full bg-slate-100 dark:bg-slate-800 h-2 rounded-full overflow-hidden">
+                          <div className="w-full bg-muted dark:bg-muted h-2 rounded-full overflow-hidden">
                             <div
                               className="h-full rounded-full"
                               style={{
@@ -958,8 +958,8 @@ export default function ResearchHub() {
 
         {/* ─── SECTION 5: LESSONS LEARNED ─────────────────────────────────────────── */}
         <section id="learning" className="scroll-mt-36 space-y-6">
-          <div className="border-b border-slate-200 dark:border-slate-800 pb-4">
-            <h2 className="text-2xl font-extrabold text-slate-900 dark:text-white">Implementation Learning</h2>
+          <div className="border-b border-border dark:border-border pb-4">
+            <h2 className="text-2xl font-extrabold text-foreground dark:text-white">Implementation Learning</h2>
             <p className="text-muted-foreground text-sm mt-1">
               Structured operational lessons documented from VaxPlan deployments, zero-dose mappings, and field sessions.
             </p>
@@ -967,41 +967,41 @@ export default function ResearchHub() {
 
           <div className="grid md:grid-cols-2 gap-6">
             {lessons.map((lesson) => (
-              <Card key={lesson.id} className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 flex flex-col justify-between">
+              <Card key={lesson.id} className="bg-white dark:bg-background border border-border dark:border-border flex flex-col justify-between">
                 <CardHeader className="p-5 pb-3">
                   <div className="flex justify-between items-start gap-2 mb-2">
                     <Badge variant="outline" className="text-[10px] border-primary/20 text-primary bg-primary/5 uppercase font-bold">
                       {lesson.category}
                     </Badge>
-                    <span className="text-[10px] text-slate-500 font-medium">Recorded by {lesson.author || "Staff"}</span>
+                    <span className="text-[10px] text-muted-foreground font-medium">Recorded by {lesson.author || "Staff"}</span>
                   </div>
-                  <CardTitle className="text-base font-bold text-slate-900 dark:text-white leading-snug">
+                  <CardTitle className="text-base font-bold text-foreground dark:text-white leading-snug">
                     {lesson.title}
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="p-5 pt-0 space-y-3 text-xs leading-relaxed flex-1">
                   <div>
-                    <span className="font-bold text-slate-400 block uppercase text-[9px]">Context & Action</span>
-                    <p className="text-slate-700 dark:text-slate-300 mt-0.5">{lesson.context}</p>
+                    <span className="font-bold text-muted-foreground block uppercase text-[9px]">Context & Action</span>
+                    <p className="text-foreground dark:text-foreground mt-0.5">{lesson.context}</p>
                   </div>
                   <div className="grid grid-cols-2 gap-4 border-t pt-2 mt-2">
                     <div>
                       <span className="font-bold text-emerald-600 dark:text-emerald-400 block uppercase text-[9px]">What Worked</span>
-                      <p className="text-slate-700 dark:text-slate-300 mt-0.5">{lesson.whatWorked}</p>
+                      <p className="text-foreground dark:text-foreground mt-0.5">{lesson.whatWorked}</p>
                     </div>
                     <div>
                       <span className="font-bold text-rose-600 dark:text-rose-400 block uppercase text-[9px]">What Did Not Work</span>
-                      <p className="text-slate-700 dark:text-slate-300 mt-0.5">{lesson.whatDidNotWork}</p>
+                      <p className="text-foreground dark:text-foreground mt-0.5">{lesson.whatDidNotWork}</p>
                     </div>
                   </div>
-                  <div className="border-t pt-2 mt-2 bg-slate-50 dark:bg-slate-950 p-2 rounded-lg">
+                  <div className="border-t pt-2 mt-2 bg-muted dark:bg-background p-2 rounded-lg">
                     <span className="font-bold text-indigo-600 dark:text-indigo-400 block uppercase text-[9px]">Recommendation</span>
-                    <p className="text-slate-700 dark:text-slate-300 mt-0.5">{lesson.recommendation}</p>
+                    <p className="text-foreground dark:text-foreground mt-0.5">{lesson.recommendation}</p>
                   </div>
                 </CardContent>
                 <CardFooter className="p-5 pt-0 border-t flex flex-wrap gap-1 mt-3">
                   {(lesson.tags || []).map((t: string) => (
-                    <Badge key={t} variant="outline" className="text-[9px] bg-slate-100 dark:bg-slate-800">
+                    <Badge key={t} variant="outline" className="text-[9px] bg-muted dark:bg-muted">
                       #{t}
                     </Badge>
                   ))}
@@ -1013,8 +1013,8 @@ export default function ResearchHub() {
 
         {/* ─── SECTION 6: DOWNLOAD CENTRE ─────────────────────────────────────────── */}
         <section id="downloads" className="scroll-mt-36 space-y-6">
-          <div className="border-b border-slate-200 dark:border-slate-800 pb-4">
-            <h2 className="text-2xl font-extrabold text-slate-900 dark:text-white">Download Centre</h2>
+          <div className="border-b border-border dark:border-border pb-4">
+            <h2 className="text-2xl font-extrabold text-foreground dark:text-white">Download Centre</h2>
             <p className="text-muted-foreground text-sm mt-1">
               Ready-to-use templates, country onboarding briefs, assessment tools, and media resources.
             </p>
@@ -1022,19 +1022,19 @@ export default function ResearchHub() {
 
           <div className="grid md:grid-cols-2 gap-4">
             {assets.map((asset) => (
-              <Card key={asset.id} className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 flex items-center justify-between p-4 shadow-sm hover:shadow-md transition-shadow">
+              <Card key={asset.id} className="bg-white dark:bg-background border border-border dark:border-border flex items-center justify-between p-4 shadow-sm hover:shadow-md transition-shadow">
                 <div className="flex gap-4 items-center flex-1 min-w-0">
                   <div className="bg-primary/5 p-3 rounded-lg flex-shrink-0 text-primary">
                     <FileText className="h-6 w-6" />
                   </div>
                   <div className="min-w-0">
-                    <h3 className="font-bold text-sm text-slate-900 dark:text-white line-clamp-1 leading-snug">
+                    <h3 className="font-bold text-sm text-foreground dark:text-white line-clamp-1 leading-snug">
                       {asset.title}
                     </h3>
                     <p className="text-xs text-muted-foreground line-clamp-1 mt-0.5">
                       {asset.description}
                     </p>
-                    <div className="flex gap-3 text-[10px] text-slate-400 mt-1 flex-wrap font-medium">
+                    <div className="flex gap-3 text-[10px] text-muted-foreground mt-1 flex-wrap font-medium">
                       <span>{asset.category}</span>
                       <span>•</span>
                       <span>Audience: <strong>{asset.recommendedAudience}</strong></span>
@@ -1053,8 +1053,8 @@ export default function ResearchHub() {
 
         {/* ─── SECTION 7: RESEARCH AGENDA ─────────────────────────────────────────── */}
         <section id="agenda" className="scroll-mt-36 space-y-6">
-          <div className="border-b border-slate-200 dark:border-slate-800 pb-4">
-            <h2 className="text-2xl font-extrabold text-slate-900 dark:text-white">Research Agenda</h2>
+          <div className="border-b border-border dark:border-border pb-4">
+            <h2 className="text-2xl font-extrabold text-foreground dark:text-white">Research Agenda</h2>
             <p className="text-muted-foreground text-sm mt-1">
               Active research priorities and questions guiding the evolution of GIS-enabled primary healthcare planning.
             </p>
@@ -1091,7 +1091,7 @@ export default function ResearchHub() {
                 status: "Planned",
               },
             ].map((agenda, index) => (
-              <Card key={index} className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 flex flex-col justify-between">
+              <Card key={index} className="bg-white dark:bg-background border border-border dark:border-border flex flex-col justify-between">
                 <CardHeader className="p-5 pb-3">
                   <div className="flex justify-between items-center mb-2">
                     <Badge variant="outline" className={`text-[9px] font-bold ${
@@ -1099,20 +1099,20 @@ export default function ResearchHub() {
                     }`}>
                       {agenda.priority} Priority
                     </Badge>
-                    <Badge className="text-[9px] bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-300">{agenda.status}</Badge>
+                    <Badge className="text-[9px] bg-muted text-foreground dark:bg-muted dark:text-foreground">{agenda.status}</Badge>
                   </div>
-                  <CardTitle className="text-sm font-bold text-slate-900 dark:text-white leading-snug">
+                  <CardTitle className="text-sm font-bold text-foreground dark:text-white leading-snug">
                     &ldquo;{agenda.q}&rdquo;
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="p-5 pt-0 pb-4 text-xs space-y-2 flex-1">
                   <div>
-                    <span className="text-slate-400 font-semibold block text-[9px] uppercase">METHODOLOGY</span>
-                    <p className="text-slate-700 dark:text-slate-300 mt-0.5">{agenda.method}</p>
+                    <span className="text-muted-foreground font-semibold block text-[9px] uppercase">METHODOLOGY</span>
+                    <p className="text-foreground dark:text-foreground mt-0.5">{agenda.method}</p>
                   </div>
                   <div className="border-t pt-2 mt-2">
-                    <span className="text-slate-400 font-semibold block text-[9px] uppercase">COLLABORATIVE PARTNERS</span>
-                    <p className="text-slate-700 dark:text-slate-300 mt-0.5 font-medium">{agenda.partners}</p>
+                    <span className="text-muted-foreground font-semibold block text-[9px] uppercase">COLLABORATIVE PARTNERS</span>
+                    <p className="text-foreground dark:text-foreground mt-0.5 font-medium">{agenda.partners}</p>
                   </div>
                 </CardContent>
               </Card>
@@ -1123,15 +1123,15 @@ export default function ResearchHub() {
         {/* ─── SECTION 8: PARTNERS & COLLABORATION ────────────────────────────────── */}
         <section id="collaboration" className="scroll-mt-36 grid md:grid-cols-2 gap-8 items-start border-t pt-12">
           <div className="space-y-6">
-            <h2 className="text-3xl font-extrabold text-slate-900 dark:text-white tracking-tight leading-tight">
+            <h2 className="text-3xl font-extrabold text-foreground dark:text-white tracking-tight leading-tight">
               Partnership & Collaboration
             </h2>
-            <p className="text-slate-600 dark:text-slate-400 leading-relaxed text-sm">
+            <p className="text-muted-foreground dark:text-muted-foreground leading-relaxed text-sm">
               We invite Ministries of Health, donor organizations, academic institutions, technical developers, and implementation agencies to collaborate with the VaxPlan team.
             </p>
             <div className="space-y-3">
-              <h4 className="font-bold text-xs uppercase text-slate-400 tracking-wider">COLLABORATION AREAS</h4>
-              <ul className="text-xs text-slate-700 dark:text-slate-300 space-y-2 font-medium">
+              <h4 className="font-bold text-xs uppercase text-muted-foreground tracking-wider">COLLABORATION AREAS</h4>
+              <ul className="text-xs text-foreground dark:text-foreground space-y-2 font-medium">
                 <li className="flex items-center gap-2">
                   <CheckCircle2 className="h-4 w-4 text-emerald-500 flex-shrink-0" />
                   Country pilots & feasibility tests
@@ -1166,7 +1166,7 @@ export default function ResearchHub() {
           </div>
 
           {/* COLLABORATION SUBMISSION FORM */}
-          <Card id="interest-form" className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-md">
+          <Card id="interest-form" className="bg-white dark:bg-background border border-border dark:border-border shadow-md">
             <CardHeader className="p-6">
               <CardTitle className="text-lg font-bold">Submit Collaboration Inquiry</CardTitle>
               <CardDescription className="text-xs">
@@ -1275,7 +1275,7 @@ export default function ResearchHub() {
                     checked={consent}
                     onChange={(e) => setConsent(e.target.checked)}
                   />
-                  <Label htmlFor="form-consent" className="text-[10px] text-slate-500 cursor-pointer select-none">
+                  <Label htmlFor="form-consent" className="text-[10px] text-muted-foreground cursor-pointer select-none">
                     I consent to VaxPlan processing this request and storing these contact details. <span className="text-rose-500">*</span>
                   </Label>
                 </div>
@@ -1296,31 +1296,31 @@ export default function ResearchHub() {
       {/* ─── MODAL 1: DOCUMENT PREVIEW ──────────────────────────────────────────── */}
       <Dialog open={!!previewDoc} onOpenChange={(open) => !open && setPreviewDoc(null)}>
         {previewDoc && (
-          <DialogContent className="max-w-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+          <DialogContent className="max-w-2xl bg-white dark:bg-background border border-border dark:border-border">
             <DialogHeader>
               <div className="flex gap-2 mb-2 items-center">
                 <Badge variant="secondary" className="text-[10px] uppercase font-bold">{previewDoc.documentType}</Badge>
                 <Badge variant="outline" className="text-[10px]">{previewDoc.version}</Badge>
               </div>
-              <DialogTitle className="text-lg font-bold text-slate-900 dark:text-white leading-tight">
+              <DialogTitle className="text-lg font-bold text-foreground dark:text-white leading-tight">
                 {previewDoc.title}
               </DialogTitle>
-              <DialogDescription className="text-xs font-medium text-slate-400 mt-1">
+              <DialogDescription className="text-xs font-medium text-muted-foreground mt-1">
                 Published {previewDoc.publicationDate || previewDoc.year} by {previewDoc.authors} ({previewDoc.organizations})
               </DialogDescription>
             </DialogHeader>
 
             <div className="space-y-4 my-4">
               <div>
-                <span className="text-slate-400 font-bold uppercase text-[9px] block">Abstract / Summary</span>
-                <p className="text-slate-700 dark:text-slate-300 text-xs leading-relaxed mt-1">
+                <span className="text-muted-foreground font-bold uppercase text-[9px] block">Abstract / Summary</span>
+                <p className="text-foreground dark:text-foreground text-xs leading-relaxed mt-1">
                   {previewDoc.abstract}
                 </p>
               </div>
 
               {previewDoc.doi && (
                 <div>
-                  <span className="text-slate-400 font-bold uppercase text-[9px] block">DOI Reference</span>
+                  <span className="text-muted-foreground font-bold uppercase text-[9px] block">DOI Reference</span>
                   <a href={`https://doi.org/${previewDoc.doi}`} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline text-xs flex items-center gap-1 mt-0.5">
                     {previewDoc.doi} <ExternalLink className="h-3 w-3" />
                   </a>
@@ -1328,12 +1328,12 @@ export default function ResearchHub() {
               )}
 
               <div>
-                <span className="text-slate-400 font-bold uppercase text-[9px] block">Harvard Style Citation</span>
-                <div className="bg-slate-50 dark:bg-slate-950 p-3 rounded-lg border border-slate-200 dark:border-slate-800 flex items-start justify-between gap-4 mt-1">
-                  <p className="text-slate-700 dark:text-slate-300 text-xs leading-relaxed italic">
+                <span className="text-muted-foreground font-bold uppercase text-[9px] block">Harvard Style Citation</span>
+                <div className="bg-muted dark:bg-background p-3 rounded-lg border border-border dark:border-border flex items-start justify-between gap-4 mt-1">
+                  <p className="text-foreground dark:text-foreground text-xs leading-relaxed italic">
                     {previewDoc.citationText || `${previewDoc.authors || "Mukombo, L."} (${previewDoc.year || "2026"}) ${previewDoc.title}. VaxPlan Research Hub.`}
                   </p>
-                  <Button size="icon" variant="ghost" onClick={() => copyCitation(previewDoc)} className="h-7 w-7 text-slate-400 hover:text-slate-600">
+                  <Button size="icon" variant="ghost" onClick={() => copyCitation(previewDoc)} className="h-7 w-7 text-muted-foreground hover:text-muted-foreground">
                     {copiedId === previewDoc.id ? <Check className="h-4 w-4 text-emerald-500" /> : <Copy className="h-4 w-4" />}
                   </Button>
                 </div>
@@ -1355,67 +1355,67 @@ export default function ResearchHub() {
       {/* ─── MODAL 2: PILOT PREVIEW ────────────────────────────────────────────── */}
       <Dialog open={!!previewPilot} onOpenChange={(open) => !open && setPreviewPilot(null)}>
         {previewPilot && (
-          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto bg-white dark:bg-background border border-border dark:border-border">
             <DialogHeader>
               <div className="flex gap-2 mb-2 items-center">
                 <Badge className="text-[10px] uppercase font-bold">{previewPilot.status}</Badge>
-                <span className="text-xs text-slate-500 font-medium">Timeline: {previewPilot.startDate} to {previewPilot.endDate || "Present"}</span>
+                <span className="text-xs text-muted-foreground font-medium">Timeline: {previewPilot.startDate} to {previewPilot.endDate || "Present"}</span>
               </div>
-              <DialogTitle className="text-lg font-bold text-slate-900 dark:text-white leading-tight">
+              <DialogTitle className="text-lg font-bold text-foreground dark:text-white leading-tight">
                 {previewPilot.title}
               </DialogTitle>
-              <DialogDescription className="text-xs text-slate-500 mt-1 flex gap-2">
-                <MapPin className="h-3.5 w-3.5 text-slate-400" /> {previewPilot.district}, {previewPilot.province}, {previewPilot.country}
+              <DialogDescription className="text-xs text-muted-foreground mt-1 flex gap-2">
+                <MapPin className="h-3.5 w-3.5 text-muted-foreground" /> {previewPilot.district}, {previewPilot.province}, {previewPilot.country}
               </DialogDescription>
             </DialogHeader>
 
             <div className="space-y-4 my-4 text-xs leading-relaxed">
               <div>
-                <span className="text-slate-400 font-bold uppercase text-[9px] block">Summary</span>
-                <p className="text-slate-700 dark:text-slate-300 mt-1">{previewPilot.summary}</p>
+                <span className="text-muted-foreground font-bold uppercase text-[9px] block">Summary</span>
+                <p className="text-foreground dark:text-foreground mt-1">{previewPilot.summary}</p>
               </div>
 
               <div className="grid grid-cols-2 gap-4 border-t pt-3">
                 <div>
-                  <span className="text-slate-400 font-bold uppercase text-[9px] block">Implementing Partners</span>
-                  <p className="text-slate-700 dark:text-slate-300 mt-0.5">{previewPilot.partners || "None reported"}</p>
+                  <span className="text-muted-foreground font-bold uppercase text-[9px] block">Implementing Partners</span>
+                  <p className="text-foreground dark:text-foreground mt-0.5">{previewPilot.partners || "None reported"}</p>
                 </div>
                 <div>
-                  <span className="text-slate-400 font-bold uppercase text-[9px] block">Technical Lead</span>
-                  <p className="text-slate-700 dark:text-slate-300 mt-0.5">{previewPilot.technicalLead || "None reported"}</p>
+                  <span className="text-muted-foreground font-bold uppercase text-[9px] block">Technical Lead</span>
+                  <p className="text-foreground dark:text-foreground mt-0.5">{previewPilot.technicalLead || "None reported"}</p>
                 </div>
               </div>
 
               <div className="border-t pt-3 space-y-3">
                 <div>
-                  <span className="text-slate-400 font-bold uppercase text-[9px] block">Objectives</span>
-                  <p className="text-slate-700 dark:text-slate-300 mt-0.5">{previewPilot.objectives || "N/A"}</p>
+                  <span className="text-muted-foreground font-bold uppercase text-[9px] block">Objectives</span>
+                  <p className="text-foreground dark:text-foreground mt-0.5">{previewPilot.objectives || "N/A"}</p>
                 </div>
                 <div>
-                  <span className="text-slate-400 font-bold uppercase text-[9px] block">Baseline Findings</span>
-                  <p className="text-slate-700 dark:text-slate-300 mt-0.5">{previewPilot.baselineFindings || "N/A"}</p>
+                  <span className="text-muted-foreground font-bold uppercase text-[9px] block">Baseline Findings</span>
+                  <p className="text-foreground dark:text-foreground mt-0.5">{previewPilot.baselineFindings || "N/A"}</p>
                 </div>
                 <div>
-                  <span className="text-slate-400 font-bold uppercase text-[9px] block">Achievements & Learnings</span>
-                  <p className="text-slate-700 dark:text-slate-300 mt-0.5">{previewPilot.achievements || "N/A"}</p>
+                  <span className="text-muted-foreground font-bold uppercase text-[9px] block">Achievements & Learnings</span>
+                  <p className="text-foreground dark:text-foreground mt-0.5">{previewPilot.achievements || "N/A"}</p>
                 </div>
                 <div>
-                  <span className="text-slate-400 font-bold uppercase text-[9px] block">Challenges Encountered</span>
-                  <p className="text-slate-700 dark:text-slate-300 mt-0.5">{previewPilot.challenges || "N/A"}</p>
+                  <span className="text-muted-foreground font-bold uppercase text-[9px] block">Challenges Encountered</span>
+                  <p className="text-foreground dark:text-foreground mt-0.5">{previewPilot.challenges || "N/A"}</p>
                 </div>
               </div>
 
               {previewPilot.updates && previewPilot.updates.length > 0 && (
                 <div className="border-t pt-3 space-y-2">
-                  <span className="text-slate-400 font-bold uppercase text-[9px] block">Progress Log Timeline</span>
+                  <span className="text-muted-foreground font-bold uppercase text-[9px] block">Progress Log Timeline</span>
                   <div className="space-y-3 mt-2">
                     {previewPilot.updates.map((upd: any) => (
                       <div key={upd.id} className="border-l-2 border-primary/20 pl-3 py-0.5 space-y-1">
                         <div className="flex justify-between items-center text-[10px]">
-                          <span className="font-bold text-slate-800 dark:text-slate-200">{upd.title}</span>
-                          <span className="text-slate-400 font-semibold">{upd.updateDate}</span>
+                          <span className="font-bold text-foreground dark:text-foreground">{upd.title}</span>
+                          <span className="text-muted-foreground font-semibold">{upd.updateDate}</span>
                         </div>
-                        <p className="text-slate-600 dark:text-slate-400">{upd.description}</p>
+                        <p className="text-muted-foreground dark:text-muted-foreground">{upd.description}</p>
                       </div>
                     ))}
                   </div>

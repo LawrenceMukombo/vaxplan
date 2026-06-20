@@ -291,7 +291,7 @@ export default function ReportTable({
                     <Icon className={`h-3.5 w-3.5 flex-shrink-0 ${
                       level === "province" ? "text-blue-500" :
                       level === "district" ? "text-green-500" :
-                      level === "facility" ? "text-orange-500" : "text-slate-500"
+                      level === "facility" ? "text-orange-500" : "text-muted-foreground"
                     }`} />
                     <span className={LEVEL_COLOR[level]}>
                       {row.name as string}
