@@ -69,7 +69,7 @@ const mainNavItems = [
   { title: "Settlements", path: "/settlements", icon: Building },
   { title: "Facilities", path: "/facilities", icon: Hospital },
   { title: "Recommendations", path: "/vgie/recommendations", icon: ClipboardList },
-  { title: "Research Hub", path: "/research", icon: BookOpen },
+  { title: "Research Module", path: "/research", icon: BookOpen },
   { title: "Alerts", path: "/vgie/alerts", icon: Bell },
   { title: "Population Hub", path: "/population", icon: Users },
   { title: "Client Logbook", path: "/clients", icon: ClipboardList },

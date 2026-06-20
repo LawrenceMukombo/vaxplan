@@ -457,7 +457,7 @@ function AuthenticatedLayout() {
 
 function App() {
   const host = typeof window !== "undefined" ? window.location.hostname : "";
-  const isResearchSubdomain = host.startsWith("research.") || host.startsWith("doc.");
+  const isResearchSubdomain = host.startsWith("research.") || host.startsWith("doc.") || host.startsWith("docs.");
 
   // Task #276 — the basemap attribution credit on every Leaflet map ends with a
   // "Data sources" link (see CARTO_POSITRON_ATTRIBUTION / CARTO_VOYAGER_ATTRIBUTION).
