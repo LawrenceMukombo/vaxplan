@@ -14,21 +14,25 @@ import {
 import { isAuthenticated } from "../auth";
 import { requireTenant } from "../auth/tenantResolver";
 import { hasPermission, type Permission } from "../auth/authorization";
+import { requireDbUser } from "../auth/loadDbUser";
 
 const router = Router();
 
 function requirePermission(permissionCode: Permission) {
-  return async (req: any, res: any, next: any) => {
-    try {
-      const allowed = hasPermission(req.dbUser, permissionCode, { activeTenantId: req.tenantId });
-      if (!allowed) {
-        return res.status(403).json({ message: `Permission '${permissionCode}' required` });
+  return [
+    requireDbUser,
+    async (req: any, res: any, next: any) => {
+      try {
+        const allowed = hasPermission(req.dbUser, permissionCode, { activeTenantId: req.tenantId });
+        if (!allowed) {
+          return res.status(403).json({ message: `Permission '${permissionCode}' required` });
+        }
+        next();
+      } catch (err) {
+        next(err);
       }
-      next();
-    } catch (err) {
-      next(err);
     }
-  };
+  ];
 }
 
 // --- VACCINES ---
