@@ -20,7 +20,7 @@ const router = Router();
 function requirePermission(permissionCode: Permission) {
   return async (req: any, res: any, next: any) => {
     try {
-      const allowed = await hasPermission(req.dbUser, req.tenantId, permissionCode);
+      const allowed = hasPermission(req.dbUser, permissionCode, { activeTenantId: req.tenantId });
       if (!allowed) {
         return res.status(403).json({ message: `Permission '${permissionCode}' required` });
       }
@@ -206,7 +206,7 @@ router.post("/seed", isAuthenticated, requireTenant, requirePermission("manage_u
     for (const v of seedVaccines) {
       const [existing] = await db.select().from(catalogueVaccines).where(and(eq(catalogueVaccines.tenantId, tenantId), eq(catalogueVaccines.productId, v.productId)));
       if (!existing) {
-        await db.insert(catalogueVaccines).values({ ...v, tenantId, approvalStatus: 'published' });
+        await db.insert(catalogueVaccines).values({ ...v, tenantId, approvalStatus: 'approved' } as any);
       }
     }
 
@@ -244,7 +244,7 @@ router.post("/seed", isAuthenticated, requireTenant, requirePermission("manage_u
       if (!s.vaccineId) continue;
       const [existing] = await db.select().from(catalogueScheduleDoses).where(and(eq(catalogueScheduleDoses.tenantId, tenantId), eq(catalogueScheduleDoses.doseCode, s.doseCode)));
       if (!existing) {
-        await db.insert(catalogueScheduleDoses).values({ ...s, tenantId, approvalStatus: 'published' });
+        await db.insert(catalogueScheduleDoses).values({ ...s, tenantId, approvalStatus: 'approved' } as any);
       }
     }
 
@@ -270,8 +270,7 @@ router.post("/seed", isAuthenticated, requireTenant, requirePermission("manage_u
     for (const c of seedCommodities) {
       const [existing] = await db.select().from(catalogueCommodities).where(and(eq(catalogueCommodities.tenantId, tenantId), eq(catalogueCommodities.commodityCode, c.commodityCode)));
       if (!existing) {
-        // @ts-ignore
-        await db.insert(catalogueCommodities).values({ ...c, tenantId });
+        await db.insert(catalogueCommodities).values({ ...c, tenantId } as any);
       }
     }
 
@@ -288,7 +287,7 @@ router.post("/seed", isAuthenticated, requireTenant, requirePermission("manage_u
       if (!w.vaccineId) continue;
       const [existing] = await db.select().from(catalogueWastageThresholds).where(and(eq(catalogueWastageThresholds.tenantId, tenantId), eq(catalogueWastageThresholds.vaccineId, w.vaccineId)));
       if (!existing) {
-        await db.insert(catalogueWastageThresholds).values({ ...w, tenantId });
+        await db.insert(catalogueWastageThresholds).values({ ...w, tenantId } as any);
       }
     }
 
