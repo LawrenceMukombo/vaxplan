@@ -12949,17 +12949,19 @@ async function registerRoutes(httpServer2, app2) {
   }
   app2.use(async (req, res, next) => {
     const host = req.get("host") || "";
-    if (host.startsWith("docs.")) {
+    if (host.startsWith("docs.") || host.startsWith("doc.")) {
+      console.log(`[Subdomain:Docs] Matching path ${req.path}`);
+      if (req.path.startsWith("/api/") || req.path.startsWith("/uploads/") || req.path.startsWith("/assets/") || req.path.startsWith("/@") || req.path.startsWith("/src/") || req.path.startsWith("/vite-hmr")) {
+        return next();
+      }
       const _path = await import("path");
-      const docsSitePath = _path.resolve(process.cwd(), "docs-site");
-      console.log(`[Subdomain:Docs] Matching path ${req.path} in path ${docsSitePath}`);
-      return import_express5.default.static(docsSitePath, { maxAge: "5m" })(req, res, (err) => {
-        console.log(`[Subdomain:Docs] express.static fallback callback for path ${req.path}, err: ${err}`);
-        if (err) return next(err);
-        res.status(404).send("Document not found");
-      });
+      if (process.env.NODE_ENV === "production") {
+        return res.sendFile(_path.resolve(process.cwd(), "dist/public/index.html"));
+      } else {
+        return next();
+      }
     }
-    if (host.startsWith("research.")) {
+    if (host.startsWith("research.") || host.startsWith("reasearch.")) {
       console.log(`[Subdomain:Research] Matching path ${req.path}`);
       if (req.path.startsWith("/api/") || req.path.startsWith("/uploads/") || req.path.startsWith("/assets/") || req.path.startsWith("/@") || req.path.startsWith("/src/") || req.path.startsWith("/vite-hmr")) {
         return next();

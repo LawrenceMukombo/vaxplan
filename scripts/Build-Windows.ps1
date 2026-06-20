@@ -102,7 +102,8 @@ $forgePath = "node_modules\.bin\electron-forge.cmd"
 if (-not (Test-Path $forgePath)) {
   Write-Host ""
   Write-Host "> Installing Electron Forge CLI..." -ForegroundColor Yellow
-  npm install --save-dev `
+  npm install --save-dev --legacy-peer-deps `
+    "electron" `
     "@electron-forge/cli" `
     "@electron-forge/maker-squirrel" `
     "@electron-forge/maker-zip"

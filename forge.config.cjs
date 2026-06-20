@@ -20,7 +20,6 @@ module.exports = {
     executableName: "VaxPlan",
     appBundleId: "org.vaxplan.desktop",
     appCategoryType: "public.app-category.healthcare-fitness",
-    icon: path.resolve(__dirname, "Resources", "icon"),
     asar: true,
     // Only ship what the runtime needs — keep the installer small enough
     // for low-bandwidth field deployments.
@@ -65,7 +64,6 @@ module.exports = {
         authors: "VaxPlan",
         description: "VaxPlan offline-first microplanning workstation",
         setupExe: "VaxPlanSetup.exe",
-        setupIcon: path.resolve(__dirname, "Resources", "icon.ico"),
         // Code-signing — both must be set or signing is skipped (a warning
         // is fine for dev builds; production releases MUST be signed).
         ...(certificateFile && certificatePassword
