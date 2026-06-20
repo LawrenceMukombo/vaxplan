@@ -490,28 +490,38 @@ function App() {
     return () => document.removeEventListener("click", handleClick);
   }, []);
 
-  if (isResearchSubdomain) {
+  const isResearch = host.startsWith("research.");
+  const isDocs = host.startsWith("doc.") || host.startsWith("docs.");
+  
+  if (isResearch) {
     return (
-      <QueryClientProvider client={queryClient}>
-        <ThemeProvider>
-          <TooltipProvider>
-            <Suspense fallback={<RouteFallback />}>
-              <Switch>
-                <Route path="/" component={lazy(() => import("@/pages/ResearchHub"))} />
-                <Route path="/admin" component={lazy(() => import("@/pages/ResearchAdmin"))} />
-                <Route path="/research">
-                  <Redirect to="/" />
-                </Route>
-                <Route path="/research/admin">
-                  <Redirect to="/admin" />
-                </Route>
-                <Route component={NotFound} />
-              </Switch>
-            </Suspense>
-            <Toaster />
-          </TooltipProvider>
-        </ThemeProvider>
-      </QueryClientProvider>
+      <ThemeProvider>
+        <TooltipProvider>
+          <div className="flex h-screen w-full font-sans bg-background text-foreground antialiased selection:bg-primary/20">
+            <main className="flex-1 overflow-y-auto">
+              <Suspense fallback={<RouteFallback />}>
+                <Switch>
+                  <Route path="/" component={lazy(() => import("@/pages/ResearchHub"))} />
+                  <Route path="/research" component={lazy(() => import("@/pages/ResearchHub"))} />
+                  <Route component={NotFound} />
+                </Switch>
+              </Suspense>
+            </main>
+          </div>
+          <Toaster />
+        </TooltipProvider>
+      </ThemeProvider>
+    );
+  }
+
+  if (isDocs) {
+    return (
+      <Suspense fallback={<RouteFallback />}>
+        <Switch>
+          <Route path="/" component={lazy(() => import("@/pages/PublicDocs"))} />
+          <Route component={NotFound} />
+        </Switch>
+      </Suspense>
     );
   }
 
