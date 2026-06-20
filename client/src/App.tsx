@@ -88,6 +88,7 @@ const ModuleDisabled = lazy(() => import("@/pages/ModuleDisabled"));
 const Surveillance = lazy(() => import("@/pages/Surveillance"));
 const WikiEditor = lazy(() => import("@/pages/WikiEditor"));
 const CatalogueAdmin = lazy(() => import("@/pages/CatalogueAdmin"));
+const ResearchHubPage = lazy(() => import("@/pages/ResearchHub"));
 import { DEFAULT_MODULES } from "@/lib/modules";
 
 // Task #50 — Small wrapper that reads :id from the route and passes it to
@@ -530,7 +531,15 @@ function App() {
           <Suspense fallback={<RouteFallback />}>
             <Switch>
               <Route path="/signup" component={Signup} />
-              <Route path="/research" component={lazy(() => import("@/pages/ResearchHub"))} />
+              <Route path="/research">
+                {() => (
+                  <ThemeProvider forceTheme="light">
+                    <div className="min-h-screen bg-background text-foreground">
+                      <ResearchHubPage />
+                    </div>
+                  </ThemeProvider>
+                )}
+              </Route>
               <Route path="/data-sources" component={DataSourcesGate} />
               <Route path="/help" component={HelpGate} />
               <Route><AuthenticatedLayout /></Route>
