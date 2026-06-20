@@ -437,8 +437,8 @@ export default function Landing() {
 
           <div className="flex items-center gap-3">
             <ThemeToggle />
-            <a href="https://research.vaxplan.org" className="text-sm font-medium hover:underline text-muted-foreground hidden md:inline-block">Research</a>
-            <a href="https://docs.vaxplan.org" className="text-sm font-medium hover:underline text-muted-foreground hidden md:inline-block">Docs</a>
+            <a href="https://research.vaxplan.org" className="text-sm font-medium hover:underline text-muted-foreground">Research</a>
+            <a href="https://docs.vaxplan.org" className="text-sm font-medium hover:underline text-muted-foreground">Docs</a>
             <Button variant="outline" asChild data-testid="button-request-access">
               <a href="/signup">Request access</a>
             </Button>
