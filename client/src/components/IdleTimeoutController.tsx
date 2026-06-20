@@ -47,7 +47,12 @@ export function IdleTimeoutController() {
   }, [tenant, user, sessionConfig]);
 
   const doLogout = useCallback(() => {
-    window.location.href = "/api/logout?reason=idle_timeout";
+    if (!navigator.onLine) {
+      localStorage.removeItem("vaxplan_active_user");
+      window.location.href = "/";
+    } else {
+      window.location.href = "/api/logout?reason=idle_timeout";
+    }
   }, []);
 
   const resetTimer = useCallback((broadcast = true) => {

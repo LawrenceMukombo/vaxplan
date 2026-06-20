@@ -651,12 +651,28 @@ export const getQueryFn: <T>(options: {
       }
     }
 
-    if (unauthorizedBehavior === "returnNull" && res.status === 401) {
-      return null;
-    }
-
     const contentType = res.headers.get("content-type") || "";
     const isJson = contentType.includes("application/json");
+
+    if (res.status === 401) {
+      if (typeof window !== "undefined") {
+        localStorage.removeItem("vaxplan_active_user");
+        try {
+          const channel = new BroadcastChannel("vaxplan_session_sync");
+          channel.postMessage({ type: "LOGOUT_NOW" });
+          channel.close();
+        } catch (e) {}
+        
+        if (unauthorizedBehavior === "throw" && window.location.pathname !== "/") {
+          window.location.href = "/api/logout?reason=unauthenticated";
+          return new Promise(() => {}); // Suspend execution while redirecting
+        }
+      }
+      
+      if (unauthorizedBehavior === "returnNull") {
+        return null;
+      }
+    }
 
     // A clean JSON response from the server — including 4xx like 403
     // (cross-tenant write blocked) — is a real answer, not an offline

@@ -31,6 +31,7 @@ export const IS_LOCAL_DEV = process.env.NODE_ENV !== "production";
 export function getSession() {
   const absoluteTimeoutMinutes = parseInt(process.env.SESSION_ABSOLUTE_TIMEOUT_MINUTES || "480", 10);
   const sessionTtl = absoluteTimeoutMinutes * 60 * 1000;
+  const cookieName = process.env.SESSION_COOKIE_NAME || "vaxplan.sid";
 
   let secret = process.env.SESSION_SECRET;
   if (!secret) {
@@ -59,14 +60,16 @@ export function getSession() {
   }
 
   return session({
+    name: cookieName,
     secret,
     store,
     resave: false,
     saveUninitialized: false,
+    rolling: false, // Ensures cookie expiration is not endlessly extended
     cookie: {
       httpOnly: true,
-      // Require secure cookies only in production (HTTPS).
-      secure: !IS_LOCAL_DEV,
+      // Require secure cookies in production unless overridden
+      secure: process.env.SESSION_SECURE_COOKIE === "true" || !IS_LOCAL_DEV,
       // Packaged native apps (Android/Windows) send cross-origin requests, so
       // the cookie must be SameSite=None + Secure in production. In local dev
       // we fall back to "lax" (no HTTPS).
@@ -94,6 +97,7 @@ export async function setupAuth(app: Express) {
     const reason = req.query.reason;
     const userId = req.user?.id;
     const tenantId = req.user?.tenantId;
+    const cookieName = process.env.SESSION_COOKIE_NAME || "vaxplan.sid";
 
     if (reason === "idle_timeout" && userId) {
       try {
@@ -114,12 +118,12 @@ export async function setupAuth(app: Express) {
 
     if (typeof req.session?.destroy === "function") {
       req.session.destroy(() => {
-        res.clearCookie("connect.sid", { path: "/" });
+        res.clearCookie(cookieName, { path: "/" });
         res.redirect("/");
       });
     } else {
       req.logout?.(() => {
-        res.clearCookie("connect.sid", { path: "/" });
+        res.clearCookie(cookieName, { path: "/" });
         res.redirect("/");
       });
     }
@@ -127,7 +131,16 @@ export async function setupAuth(app: Express) {
 
   app.post("/api/auth/ping", (req, res) => {
     if (req.isAuthenticated?.() && req.session) {
-      (req.session as any).lastActive = Math.floor(Date.now() / 1000);
+      const now = Math.floor(Date.now() / 1000);
+      const session = req.session as any;
+      if (!session.createdAt) {
+        session.createdAt = now;
+      }
+      
+      // Throttle updating lastActive to once per minute to avoid excessive DB writes
+      if (!session.lastActive || now - session.lastActive >= 60) {
+        session.lastActive = now;
+      }
       res.json({ success: true });
     } else {
       res.status(401).json({ error: "Unauthorized" });
@@ -251,19 +264,41 @@ export const isAuthenticated: RequestHandler = async (req, res, next) => {
   const user = req.user as any;
 
   if (!req.isAuthenticated?.() || !user?.expires_at) {
-    return res.status(401).json({ message: "Unauthorized" });
+    return res.status(401).json({ message: "Unauthorized", reason: "unauthenticated" });
   }
 
   const now = Math.floor(Date.now() / 1000);
+  const session = req.session as any;
+  const cookieName = process.env.SESSION_COOKIE_NAME || "vaxplan.sid";
 
-  // Enforce server-side idle timeout (backend source of truth)
-  const idleTimeoutMinutes = parseInt(process.env.SESSION_IDLE_TIMEOUT_MINUTES || "15", 10);
-  if ((req.session as any)?.lastActive) {
-    if (now - (req.session as any).lastActive > idleTimeoutMinutes * 60) {
+  if (session && !session.createdAt) {
+    session.createdAt = now;
+  }
+  if (session && !session.lastActive) {
+    session.lastActive = now;
+  }
+
+  // 1. Enforce absolute timeout
+  const absoluteTimeoutMinutes = parseInt(process.env.SESSION_ABSOLUTE_TIMEOUT_MINUTES || "480", 10);
+  if (session?.createdAt) {
+    if (now - session.createdAt > absoluteTimeoutMinutes * 60) {
       if (typeof req.session?.destroy === "function") {
         req.session.destroy(() => {});
       }
-      return res.status(401).json({ message: "Session expired due to inactivity." });
+      res.clearCookie(cookieName, { path: "/" });
+      return res.status(401).json({ message: "Session expired due to absolute timeout limit.", reason: "absolute_timeout" });
+    }
+  }
+
+  // 2. Enforce server-side idle timeout (backend source of truth)
+  const idleTimeoutMinutes = parseInt(process.env.SESSION_IDLE_TIMEOUT_MINUTES || "15", 10);
+  if (session?.lastActive) {
+    if (now - session.lastActive > idleTimeoutMinutes * 60) {
+      if (typeof req.session?.destroy === "function") {
+        req.session.destroy(() => {});
+      }
+      res.clearCookie(cookieName, { path: "/" });
+      return res.status(401).json({ message: "Session expired due to inactivity.", reason: "idle_timeout" });
     }
   }
 
