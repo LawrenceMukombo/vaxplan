@@ -18,21 +18,21 @@ import { requireDbUser } from "../auth/loadDbUser";
 
 const router = Router();
 
-function requirePermission(permissionCode: Permission): any[] {
-  return [
-    requireDbUser,
-    async (req: any, res: any, next: any) => {
+function requirePermission(permissionCode: Permission) {
+  return async (req: any, res: any, next: any) => {
+    requireDbUser(req, res, async (err?: any) => {
+      if (err) return next(err);
       try {
         const allowed = hasPermission(req.dbUser, permissionCode, { activeTenantId: req.tenantId });
         if (!allowed) {
           return res.status(403).json({ message: `Permission '${permissionCode}' required` });
         }
         next();
-      } catch (err) {
-        next(err);
+      } catch (e) {
+        next(e);
       }
-    }
-  ];
+    });
+  };
 }
 
 // --- VACCINES ---
