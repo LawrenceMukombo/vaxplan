@@ -18,7 +18,7 @@ import { requireDbUser } from "../auth/loadDbUser";
 
 const router = Router();
 
-function requirePermission(permissionCode: Permission) {
+function requirePermission(permissionCode: Permission): any[] {
   return [
     requireDbUser,
     async (req: any, res: any, next: any) => {
