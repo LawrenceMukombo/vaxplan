@@ -18752,7 +18752,7 @@ Instructions:
 2. Keep your answer helpful, professional, and concise.
 3. Support Markdown formatting for clear tabular data or bulleted highlights.`;
 
-          const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+          const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
           const response = await fetch(geminiUrl, {
             method: "POST",
             headers: { "Content-Type": "application/json" },

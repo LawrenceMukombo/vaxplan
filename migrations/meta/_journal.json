@@ -71,6 +71,13 @@
       "when": 1781876567845,
       "tag": "0009_swift_gambit",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1781929228345,
+      "tag": "0010_peaceful_morgan_stark",
+      "breakpoints": true
     }
   ]
 }

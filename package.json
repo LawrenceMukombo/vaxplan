@@ -9,6 +9,7 @@
         "build:full": "tsx script/build.ts && npm run db:push",
         "start": "node dist/railway-bootstrap.cjs && NODE_ENV=production node dist/index.cjs",
         "check": "tsc",
+        "release": "npm version patch -m \"chore: release %s\"",
         "deploy:local": "npm run build && git add dist/ && git commit -m \"deploy: update production build\" && git push origin fix-line-endings",
         "test": "vitest run",
         "db:push": "drizzle-kit push",
@@ -181,6 +182,9 @@
         "es5-ext": "0.10.63",
         "@esbuild-kit/core-utils": {
             "esbuild": ">=0.25.0"
+        },
+        "react-leaflet-cluster": {
+            "@react-leaflet/core": "$@react-leaflet/core"
         }
     }
 }

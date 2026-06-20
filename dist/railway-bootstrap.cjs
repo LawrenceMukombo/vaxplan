@@ -829,7 +829,7 @@ var sessionPlans = (0, import_pg_core.pgTable)("session_plans", {
 var sessionVillages = (0, import_pg_core.pgTable)("session_villages", {
   id: (0, import_pg_core.integer)("id").primaryKey().generatedAlwaysAsIdentity(),
   tenantId: (0, import_pg_core.varchar)("tenant_id").references(() => tenants.id),
-  sessionId: (0, import_pg_core.integer)("session_id").notNull().references(() => sessionPlans.id),
+  sessionId: (0, import_pg_core.integer)("session_id").notNull().references(() => sessionPlans.id, { onDelete: "cascade" }),
   villageId: (0, import_pg_core.integer)("village_id").notNull().references(() => villages.id),
   orderIndex: (0, import_pg_core.integer)("order_index")
 }, (table) => [(0, import_pg_core.index)("idx_session_villages_tenant").on(table.tenantId)]);
@@ -845,7 +845,7 @@ var budgetItems = (0, import_pg_core.pgTable)("budget_items", {
   id: (0, import_pg_core.integer)("id").primaryKey().generatedAlwaysAsIdentity(),
   tenantId: (0, import_pg_core.varchar)("tenant_id").references(() => tenants.id),
   facilityId: (0, import_pg_core.integer)("facility_id").notNull().references(() => facilities.id),
-  sessionId: (0, import_pg_core.integer)("session_id").references(() => sessionPlans.id),
+  sessionId: (0, import_pg_core.integer)("session_id").references(() => sessionPlans.id, { onDelete: "cascade" }),
   category: (0, import_pg_core.varchar)("category", { length: 100 }).notNull(),
   description: (0, import_pg_core.varchar)("description", { length: 255 }).notNull(),
   unitCost: (0, import_pg_core.decimal)("unit_cost", { precision: 12, scale: 2 }).notNull(),
