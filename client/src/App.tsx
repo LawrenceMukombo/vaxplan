@@ -493,7 +493,7 @@ function App() {
   
   if (isResearch) {
     return (
-      <ThemeProvider>
+      <ThemeProvider forceTheme="light">
         <TooltipProvider>
           <div className="flex h-screen w-full font-sans bg-background text-foreground antialiased selection:bg-primary/20">
             <main className="flex-1 overflow-y-auto">
