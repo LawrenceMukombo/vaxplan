@@ -894,7 +894,7 @@ export const sessionPlans = pgTable("session_plans", {
 export const sessionVillages = pgTable("session_villages", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
   tenantId: varchar("tenant_id").references(() => tenants.id),
-  sessionId: integer("session_id").notNull().references(() => sessionPlans.id),
+  sessionId: integer("session_id").notNull().references(() => sessionPlans.id, { onDelete: "cascade" }),
   villageId: integer("village_id").notNull().references(() => villages.id),
   orderIndex: integer("order_index"),
 }, (table) => [index("idx_session_villages_tenant").on(table.tenantId)]);
@@ -915,7 +915,7 @@ export const budgetItems = pgTable("budget_items", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
   tenantId: varchar("tenant_id").references(() => tenants.id),
   facilityId: integer("facility_id").notNull().references(() => facilities.id),
-  sessionId: integer("session_id").references(() => sessionPlans.id),
+  sessionId: integer("session_id").references(() => sessionPlans.id, { onDelete: "cascade" }),
   category: varchar("category", { length: 100 }).notNull(),
   description: varchar("description", { length: 255 }).notNull(),
   unitCost: decimal("unit_cost", { precision: 12, scale: 2 }).notNull(),
