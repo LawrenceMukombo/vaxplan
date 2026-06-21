@@ -19658,6 +19658,197 @@ Instructions:
   });
   */
 
+  // ── GIS Location Intelligence API ─────────────────────────────────────────
+  app.get("/api/gis/location-intelligence", ...auth, async (req: any, res) => {
+    try {
+      const lat = parseFloat(req.query.lat as string);
+      const lng = parseFloat(req.query.lng as string);
+      const radiusKm = parseFloat(req.query.radiusKm as string) || 5;
+
+      if (isNaN(lat) || isNaN(lng)) {
+        return res.status(400).json({ message: "Valid lat and lng required." });
+      }
+
+      const tenantId = req.tenantId;
+      const radiusMeters = radiusKm * 1000;
+
+      // 1. Nearby Facilities
+      const facQuery = `
+        SELECT
+          id, name, type, status, latitude, longitude,
+          ST_Distance(
+            ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography,
+            ST_SetSRID(ST_MakePoint(longitude::float, latitude::float), 4326)::geography
+          ) as distance_meters
+        FROM facilities
+        WHERE tenant_id = $3
+          AND latitude IS NOT NULL AND longitude IS NOT NULL
+          AND ST_DWithin(
+            ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography,
+            ST_SetSRID(ST_MakePoint(longitude::float, latitude::float), 4326)::geography,
+            $4
+          )
+        ORDER BY distance_meters ASC
+        LIMIT 10
+      `;
+      const facilitiesRes = await pool.query(facQuery, [lng, lat, tenantId, radiusMeters]);
+
+      // 2. Nearby Communities/Villages
+      const commQuery = `
+        SELECT
+          id, name, population, assigned_facility_id, is_hard_to_reach, latitude, longitude,
+          ST_Distance(
+            ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography,
+            ST_SetSRID(ST_MakePoint(longitude::float, latitude::float), 4326)::geography
+          ) as distance_meters
+        FROM villages
+        WHERE tenant_id = $3
+          AND latitude IS NOT NULL AND longitude IS NOT NULL
+          AND ST_DWithin(
+            ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography,
+            ST_SetSRID(ST_MakePoint(longitude::float, latitude::float), 4326)::geography,
+            $4
+          )
+        ORDER BY distance_meters ASC
+        LIMIT 20
+      `;
+      const communitiesRes = await pool.query(commQuery, [lng, lat, tenantId, radiusMeters]);
+
+      // 3. Resolve Admin Boundaries for this point
+      const adminQuery = `
+        SELECT
+          b.admin_level,
+          COALESCE(
+            feat->'properties'->>'shapeName',
+            feat->'properties'->>'name',
+            feat->'properties'->>'NAME'
+          ) AS name
+        FROM admin_boundaries b,
+             LATERAL jsonb_array_elements(b.geojson->'features') AS feat
+        WHERE b.tenant_id = $1
+          AND ST_Contains(
+            ST_SetSRID(ST_GeomFromGeoJSON(feat->>'geometry'), 4326),
+            ST_SetSRID(ST_MakePoint($2, $3), 4326)
+          )
+      `;
+      const adminRes = await pool.query(adminQuery, [tenantId, lng, lat]);
+      const adminHierarchy: Record<number, string> = {};
+      adminRes.rows.forEach(r => {
+        adminHierarchy[r.admin_level] = r.name;
+      });
+
+      // Populate calculated data
+      let totalPop = 0;
+      let totalU5 = 0;
+      let zeroDose = 0;
+
+      const communities = communitiesRes.rows.map(c => {
+        const pop = Number(c.population) || 0;
+        const u5 = Math.round(pop * 0.17); // approx 17% under 5
+        const zd = Math.round(u5 * 0.05); // approx 5% zero dose
+        totalPop += pop;
+        totalU5 += u5;
+        zeroDose += zd;
+        return {
+          ...c,
+          under5: u5,
+          zeroDose: zd,
+          distance_km: (c.distance_meters / 1000).toFixed(2)
+        };
+      });
+
+      const facilitiesList = facilitiesRes.rows.map(f => ({
+        ...f,
+        distance_km: (f.distance_meters / 1000).toFixed(2)
+      }));
+
+      res.json({
+        success: true,
+        data: {
+          point: { lat, lng },
+          radiusKm,
+          adminHierarchy,
+          aggregated: {
+            totalPopulation: totalPop,
+            under5: totalU5,
+            zeroDoseEstimates: zeroDose
+          },
+          facilities: facilitiesList,
+          communities: communities
+        }
+      });
+    } catch (err: any) {
+      console.error("[GIS Intelligence API]", err);
+      res.status(500).json({ message: "Failed to load GIS intelligence data: " + err.message });
+    }
+  });
+
+  // ── Population Intelligence API ─────────────────────────────────────────
+  app.get("/api/gis/population-intelligence", ...auth, async (req: any, res) => {
+    try {
+      const lat = parseFloat(req.query.lat as string);
+      const lng = parseFloat(req.query.lng as string);
+      const radiusKm = parseFloat(req.query.radiusKm as string) || 5;
+
+      if (isNaN(lat) || isNaN(lng)) {
+        return res.status(400).json({ message: "Valid lat and lng required." });
+      }
+
+      const { PopulationIntelligenceService } = await import("./services/populationIntelligenceService");
+      const result = await PopulationIntelligenceService.fetchPointRadiusPopulation(req.tenantId, lat, lng, radiusKm);
+      
+      res.json({ success: true, data: result });
+    } catch (err: any) {
+      console.error("[Pop Intel API]", err);
+      res.status(500).json({ message: "Failed to load population intelligence: " + err.message });
+    }
+  });
+
+  app.get("/api/facilities/:facilityId/population-intelligence", ...auth, async (req: any, res) => {
+    try {
+      const facilityId = parseInt(req.params.facilityId);
+      const radiusKm = parseFloat(req.query.radiusKm as string) || 5;
+
+      if (isNaN(facilityId)) {
+        return res.status(400).json({ message: "Valid facilityId required." });
+      }
+
+      const { PopulationIntelligenceService } = await import("./services/populationIntelligenceService");
+      const result = await PopulationIntelligenceService.fetchFacilityPopulation(req.tenantId, facilityId, radiusKm);
+      
+      res.json({ success: true, data: result });
+    } catch (err: any) {
+      console.error("[Pop Intel API]", err);
+      res.status(500).json({ message: "Failed to load facility population intelligence: " + err.message });
+    }
+  });
+
+  app.get("/api/microplans/:microplanId/population-intelligence", ...auth, async (req: any, res) => {
+    try {
+      const microplanId = parseInt(req.params.microplanId);
+      const radiusKm = parseFloat(req.query.radiusKm as string) || 5;
+
+      if (isNaN(microplanId)) {
+        return res.status(400).json({ message: "Valid microplanId required." });
+      }
+
+      const { PopulationIntelligenceService } = await import("./services/populationIntelligenceService");
+      // Fallback: If no specific microplan fetching exists yet, just return dummy or use facility fetching
+      // Since we need the facilityId to fetch the microplan.
+      const [microplan] = await db.select().from(microplans).where(and(eq(microplans.id, microplanId), eq(microplans.tenantId, req.tenantId))).limit(1);
+      
+      if (!microplan || !microplan.facilityId) {
+        return res.status(404).json({ message: "Microplan or associated facility not found." });
+      }
+
+      const result = await PopulationIntelligenceService.fetchFacilityPopulation(req.tenantId, microplan.facilityId, radiusKm);
+      res.json({ success: true, data: result });
+    } catch (err: any) {
+      console.error("[Pop Intel API]", err);
+      res.status(500).json({ message: "Failed to load microplan population intelligence: " + err.message });
+    }
+  });
+
   return httpServer;
 
 }

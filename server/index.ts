@@ -292,6 +292,10 @@ async function backfillClientIds() {
   const { surveillanceRouter } = await import("./routes/surveillance");
   app.use("/api/surveillance", surveillanceRouter);
 
+  // GIS Advanced Polygons
+  const { gisPolygonsRouter } = await import("./routes/gisPolygons");
+  app.use("/api/gis/polygons", gisPolygonsRouter);
+
   /* Original Code commented out for backward-compatibility:
   applyPerfIndexes()
     .then(() => log("perf indexes applied", "db"))

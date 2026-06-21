@@ -3570,3 +3570,48 @@ export type CatalogueCommodity = typeof catalogueCommodities.$inferSelect;
 export const insertCatalogueWastageThresholdSchema = createInsertSchema(catalogueWastageThresholds);
 export const selectCatalogueWastageThresholdSchema = createSelectSchema(catalogueWastageThresholds);
 export type CatalogueWastageThreshold = typeof catalogueWastageThresholds.$inferSelect;
+
+// ============================================================================
+// GIS ADVANCED POLYGONS
+// ============================================================================
+
+export const gisPolygonTypeEnum = pgEnum("gis_polygon_type", [
+  "catchment",
+  "outreach_area",
+  "administrative_boundary",
+  "custom"
+]);
+
+export const gisPolygons = pgTable("gis_polygons", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  ownerType: varchar("owner_type", { length: 50 }).notNull(), // 'facility', 'district', 'province', 'village', etc.
+  ownerId: integer("owner_id").notNull(),
+  polygonType: gisPolygonTypeEnum("polygon_type").notNull().default("catchment"),
+  name: varchar("name", { length: 255 }),
+  description: text("description"),
+  geometry: jsonb("geometry").notNull(), // Stores GeoJSON natively
+  areaSqKm: decimal("area_sq_km", { precision: 10, scale: 2 }),
+  perimeterKm: decimal("perimeter_km", { precision: 10, scale: 2 }),
+  source: varchar("source", { length: 100 }), // 'manual', 'buffer', 'convex_hull', 'import'
+  method: varchar("method", { length: 100 }),
+  status: varchar("status", { length: 50 }).default("active"),
+  version: integer("version").default(1),
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => ({
+  tenantIdx: index("idx_gis_polygons_tenant").on(table.tenantId),
+  ownerIdx: index("idx_gis_polygons_owner").on(table.ownerType, table.ownerId),
+}));
+
+export const gisPolygonsRelations = relations(gisPolygons, ({ one }) => ({
+  tenant: one(tenants, {
+    fields: [gisPolygons.tenantId],
+    references: [tenants.id],
+  }),
+}));
+
+export const insertGisPolygonSchema = createInsertSchema(gisPolygons);
+export const selectGisPolygonSchema = createSelectSchema(gisPolygons);
+export type GisPolygon = typeof gisPolygons.$inferSelect;

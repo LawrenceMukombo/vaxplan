@@ -97,6 +97,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { canEditFacility, canDeleteData, canCreateFacility, canCreateCommunity } from "@/lib/permissions";
 import { FacilityCascadePicker } from "@/components/FacilityCascadePicker";
 import { ColdChainTab } from "@/components/ColdChainTab";
+import { FacilityPopulationTab } from "@/components/ui/population/FacilityPopulationTab";
 import { insertFacilitySchema, type Facility, type InsertFacility, type Region, type Province, type District, type Village, type FacilityCatchment } from "@shared/schema";
 import { z } from "zod";
 
@@ -1974,45 +1975,47 @@ export default function Facilities() {
                     <DialogTitle>{editingFacility ? "Edit Facility & Catchment" : "Add New Facility & Catchment"}</DialogTitle>
                   </DialogHeader>
                   
-                  <Tabs defaultValue="general" className="w-full">
-                    <div className="px-6 border-b flex items-center justify-between">
-                      <TabsList className="bg-muted/50 p-1 border-0 rounded-none h-12">
-                        <TabsTrigger value="general" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent h-full px-4">
-                          General & Catchment Area
-                        </TabsTrigger>
-                        <TabsTrigger value="communities" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent h-full px-4" disabled={!editingFacility}>
-                          Communities Served (CRUD)
-                        </TabsTrigger>
-                        {/* Original Polygon Drawing Tab trigger */}
-                        {/* <TabsTrigger value="gis" ...>Polygon Drawing</TabsTrigger> */}
-                        {/* Added Staff Roster Tab trigger for user-requested staff management capability */}
-                        <TabsTrigger value="gis" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent h-full px-4" disabled={!editingFacility}>
-                          Polygon Drawing
-                        </TabsTrigger>
-                        <TabsTrigger value="staff" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent h-full px-4" disabled={!editingFacility}>
-                          Staff Roster
-                        </TabsTrigger>
-                        {/* Cold Chain Equipment Inventory tab */}
-                        <TabsTrigger value="cold-chain" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent h-full px-4 gap-1.5" disabled={!editingFacility}>
-                          <Snowflake className="h-3.5 w-3.5 text-cyan-500" />
-                          Cold Chain
-                        </TabsTrigger>
-                      </TabsList>
-                      {editingFacility && (
-                        <Button
-                          type="button"
-                          variant="secondary"
-                          size="sm"
-                          disabled={aggressiveExtractMutation.isPending}
-                          onClick={() => aggressiveExtractMutation.mutate(editingFacility.id)}
-                          className="bg-emerald-600 hover:bg-emerald-700 text-white gap-1 shrink-0"
-                          data-testid="button-aggressive-extract"
-                        >
-                          <Building2 className="h-4 w-4" />
-                          {aggressiveExtractMutation.isPending ? "Extracting..." : "Aggressive Centroid Extractor"}
-                        </Button>
-                      )}
-                    </div>
+                    <Tabs defaultValue="general" className="w-full max-w-full overflow-hidden">
+                      <div className="px-6 pt-2 pb-0 border-b flex flex-col xl:flex-row items-start xl:items-center justify-between gap-4">
+                        <div className="w-full overflow-x-auto custom-scrollbar pb-2">
+                          <TabsList className="bg-muted/50 p-1 border-0 rounded-none h-12 w-max min-w-full flex-shrink-0">
+                            <TabsTrigger value="general" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent h-full px-4">
+                              General & Catchment Area
+                            </TabsTrigger>
+                            <TabsTrigger value="communities" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent h-full px-4" disabled={!editingFacility}>
+                              Communities Served (CRUD)
+                            </TabsTrigger>
+                            <TabsTrigger value="gis" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent h-full px-4" disabled={!editingFacility}>
+                              Polygon Drawing
+                            </TabsTrigger>
+                            <TabsTrigger value="staff" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent h-full px-4" disabled={!editingFacility}>
+                              Staff Roster
+                            </TabsTrigger>
+                            <TabsTrigger value="cold-chain" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent h-full px-4 gap-1.5" disabled={!editingFacility}>
+                              <Snowflake className="h-3.5 w-3.5 text-cyan-500" />
+                              Cold Chain
+                            </TabsTrigger>
+                            <TabsTrigger value="population" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent h-full px-4 gap-1.5" disabled={!editingFacility}>
+                              <Users className="h-3.5 w-3.5 text-blue-500" />
+                              Population
+                            </TabsTrigger>
+                          </TabsList>
+                        </div>
+                        {editingFacility && (
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            size="sm"
+                            disabled={aggressiveExtractMutation.isPending}
+                            onClick={() => aggressiveExtractMutation.mutate(editingFacility.id)}
+                            className="bg-emerald-600 hover:bg-emerald-700 text-white gap-1 shrink-0 mb-2 xl:mb-0"
+                            data-testid="button-aggressive-extract"
+                          >
+                            <Building2 className="h-4 w-4" />
+                            {aggressiveExtractMutation.isPending ? "Extracting..." : "Aggressive Centroid Extractor"}
+                          </Button>
+                        )}
+                      </div>
 
                     <TabsContent value="general" className="m-0">
                       <div className="grid grid-cols-1 md:grid-cols-2 h-[65vh]">
@@ -2741,6 +2744,11 @@ export default function Facilities() {
                     {/* ── Cold Chain Equipment Inventory ── */}
                     <TabsContent value="cold-chain" className="m-0">
                       <ColdChainTab facilityId={editingFacility?.id ?? null} />
+                    </TabsContent>
+
+                    {/* • Population Intelligence • */}
+                    <TabsContent value="population" className="m-0 bg-background">
+                      {editingFacility?.id && <FacilityPopulationTab facilityId={editingFacility.id} />}
                     </TabsContent>
                   </Tabs>
 

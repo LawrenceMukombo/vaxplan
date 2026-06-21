@@ -77,6 +77,7 @@ import {
 } from "lucide-react";
 import { MapAlertsPanel } from "./MapAlertsPanel";
 import { MapRecommendationsPanel } from "./MapRecommendationsPanel";
+import { LocationIntelligenceDrawer } from "./LocationIntelligenceDrawer";
 import type { Facility, Village, FacilityCatchment } from "@shared/schema";
 import { getMinScheduleDateInputValue } from "@shared/schedulingDates";
 import { deriveSessionLifecycle } from "@/lib/sessionStatus";
@@ -1838,6 +1839,7 @@ export function MapView({
   const geoJsonRefs = useRef<Record<string, any>>({});
   const fetchingRef = useRef<Record<string, boolean>>({});
   const [mapBounds, setMapBounds] = useState<L.LatLngBounds | null>(null);
+  const [intelligencePoint, setIntelligencePoint] = useState<{lat: number, lng: number} | null>(null);
 
   // WorldPop population-density overlay (off by default, session-scoped).
   const populationOverlay = usePopulationOverlay();
@@ -5292,7 +5294,9 @@ export function MapView({
         setNewSessionName(`Outreach Session Plan`);
       }
 
-      setClickDialogOpen(true);
+      setIntelligencePoint({ lat, lng });
+      // We are using the LocationIntelligenceDrawer now instead of clickDialog
+      // setClickDialogOpen(true);
 
       // Asynchronous Fallback for radial population
       if (density === 0) {
@@ -10566,6 +10570,7 @@ export function MapView({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      <LocationIntelligenceDrawer point={intelligencePoint} onClose={() => setIntelligencePoint(null)} />
     </div>
   );
 }

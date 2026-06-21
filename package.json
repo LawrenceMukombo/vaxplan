@@ -13,6 +13,8 @@
         "deploy:local": "npm run build && git add dist/ && git commit -m \"deploy: update production build\" && git push origin fix-line-endings",
         "test": "vitest run",
         "db:push": "drizzle-kit push",
+        "db:safe-update": "tsx script/safe-migration.ts",
+        "db:generate": "drizzle-kit generate",
         "db:migrate": "tsx scripts/migrate.ts",
         "docs:pdf": "node scripts/build-user-guide-pdf.mjs",
         "docs:site": "node docs-site/build.mjs",
@@ -119,6 +121,7 @@
         "react-dom": "^18.3.1",
         "react-hook-form": "^7.55.0",
         "react-icons": "^5.4.0",
+        "@react-leaflet/core": "^2.1.0",
         "react-leaflet": "^4.2.1",
         "react-leaflet-cluster": "^4.1.3",
         "react-markdown": "^10.1.0",
@@ -189,6 +192,9 @@
             "esbuild": ">=0.25.0"
         },
         "react-leaflet-cluster": {
+            "react": "$react",
+            "react-dom": "$react-dom",
+            "react-leaflet": "$react-leaflet",
             "@react-leaflet/core": "$@react-leaflet/core"
         }
     }

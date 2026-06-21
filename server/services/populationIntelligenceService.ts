@@ -101,6 +101,77 @@ export const PopulationIntelligenceService = {
   },
 
   /**
+   * Fetches population inside a GeoJSON Polygon
+   */
+  async fetchPolygonPopulation(tenantId: string, geojsonPolygon: any, countryCode: string = "ZMB"): Promise<IntelligenceResult> {
+    const sources: PopulationSourceData[] = [];
+    
+    // Convert GeoJSON to PostGIS Geometry using raw SQL
+    // We assume geojsonPolygon is a valid GeoJSON Feature or Geometry.
+    const geomStr = JSON.stringify(geojsonPolygon.geometry || geojsonPolygon);
+    
+    // We approximate a "radius" for discrepancy reporting (equivalent circle)
+    let radiusKm = 5;
+
+    // 1. Check local grid cache
+    try {
+      const localResult = await pool.query(
+        `SELECT COALESCE(SUM(population_total),0)::int AS total,
+                COALESCE(SUM(under5_population),0)::int AS under5
+         FROM population_grids
+         WHERE tenant_id = $1
+           AND geometry IS NOT NULL
+           AND ST_Intersects(
+             geometry,
+             ST_GeomFromGeoJSON($2)
+           )`,
+        [tenantId, geomStr]
+      );
+      const localTotal = localResult.rows[0]?.total ?? 0;
+      if (localTotal > 0) {
+        sources.push({
+          source: "Local Grid (Cached)",
+          totalPopulation: localTotal,
+          under5Population: localResult.rows[0]?.under5 ?? 0,
+          method: "ST_Intersects Polygon",
+          confidence: "High",
+          year: 2020
+        });
+      }
+
+      // Try to calculate the approx radius based on polygon area in PostGIS for the fallback
+      const areaResult = await pool.query(`SELECT ST_Area(ST_GeomFromGeoJSON($1)::geography) / 1000000 AS area_sq_km`, [geomStr]);
+      const areaSqKm = areaResult.rows[0]?.area_sq_km ?? 0;
+      if (areaSqKm > 0) {
+        radiusKm = Math.sqrt(areaSqKm / Math.PI);
+      }
+    } catch (e) {
+      console.warn("[PopIntel] local DB polygon query failed:", e);
+    }
+
+    // Since WorldPop WOPR doesn't easily accept arbitrary polygons via simple GET without an API key or complex setup in their public hub,
+    // we use the local grid or synthetic fallback. If we wanted to hit WOPR for polygon, we'd do a POST to /v1/wopr/polygonestimate.
+    // For now we rely on Local Grid which represents GridPop / GRID3 data imported locally.
+
+    // 2. Fallback to synthetic if nothing returned (offline/sandbox support)
+    if (sources.length === 0) {
+      const areaKm2 = Math.PI * radiusKm * radiusKm;
+      // create a mock density
+      const mockPop = Math.max(1, Math.round(150 * areaKm2));
+      sources.push({
+        source: "Synthetic Baseline",
+        totalPopulation: mockPop,
+        under5Population: Math.round(mockPop * 0.17),
+        method: "Procedural Polygon",
+        confidence: "Low",
+        year: new Date().getFullYear()
+      });
+    }
+
+    return this.comparePopulationSources(sources, radiusKm);
+  },
+
+  /**
    * Fetches populations for a specific facility, including its official stats
    * and spatial catchment queries
    */

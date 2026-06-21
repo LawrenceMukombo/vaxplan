@@ -78,6 +78,13 @@
       "when": 1781929228345,
       "tag": "0010_peaceful_morgan_stark",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1782041261575,
+      "tag": "0011_curly_triton",
+      "breakpoints": true
     }
   ]
 }

@@ -228,7 +228,7 @@ export function DataTable<T extends { id?: number | string }>({
         </div>
       </div>
 
-      <div className="rounded-md border overflow-hidden sticky-table-container max-h-[600px] custom-scrollbar">
+      <div className="rounded-md border overflow-auto sticky-table-container max-h-[600px] custom-scrollbar">
         <Table>
           <TableHeader>
             <TableRow>

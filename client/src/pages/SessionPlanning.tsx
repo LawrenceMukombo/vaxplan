@@ -2384,7 +2384,7 @@ export default function SessionPlanning({
 
             {/* Cascading Province → District → Facility */}
             <div className="space-y-3 rounded-2xl border p-4 bg-muted/20">
-              <div className="text-xs font-bold text-indigo-500 uppercase tracking-wider block flex items-center gap-1.5">
+              <div className="text-xs font-bold text-indigo-500 uppercase tracking-wider flex items-center gap-1.5">
                 <MapPin className="h-4 w-4 text-indigo-500" />
                 Assign Microplan Location Scope
               </div>

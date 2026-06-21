@@ -30,6 +30,7 @@ import type {
 
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { PolygonIntelligenceCard, type IntelligenceResult } from "@/components/PolygonIntelligenceCard";
 import "leaflet/dist/leaflet.css";
 
 // ─── Colour palette for community polygons ────────────────────────────────────
@@ -90,53 +91,19 @@ function toGeoRing(coords: [number, number][]): [number, number][] {
 // ─── Population estimation (server-side + cascade) ───────────────────────────
 async function estimatePolygonPop(
   coords: [number, number][]
-): Promise<{ total: number; under5: number }> {
+): Promise<IntelligenceResult | null> {
   const ring = toGeoRing(coords);
   const geojson = { type: "Polygon", coordinates: [ring] };
 
-  // 1. Local population_grids via server API
   try {
-    const r = await apiRequest<{ totalPopulation: number; under5Population: number }>(
-      "POST", "/api/population/estimate-polygon", { boundary: geojson }
-    );
-    if (r.totalPopulation > 0) return { total: r.totalPopulation, under5: r.under5Population ?? 0 };
-  } catch { /* fall through */ }
-
-  // Compute area once for fallbacks
-  const poly = turf.polygon([ring]);
-  const areaSqKm = turf.area(poly) / 1_000_000;
-  const centroid = turf.centroid(poly).geometry.coordinates; // [lng, lat]
-
-  // 2. WorldPop WOPR point estimate
-  try {
-    const woprUrl = `https://hub.worldpop.org/v1/wopr/pointestimate?iso3=ZMB&ver=1.0.0&lat=${centroid[1]}&lon=${centroid[0]}`;
-    const r = await fetch(woprUrl, { signal: AbortSignal.timeout(8000) });
-    if (r.ok) {
-      const d = await r.json();
-      const density = d?.data?.mean;
-      if (density && Number.isFinite(density)) {
-        const total = Math.round(density * areaSqKm);
-        return { total, under5: Math.round(total * 0.18) };
-      }
-    }
-  } catch { /* cascade */ }
-
-  // 3. WorldPop REST stats API
-  try {
-    const geoStr = encodeURIComponent(JSON.stringify(geojson));
-    const url = `https://api.worldpop.org/v1/services/stats?dataset=wpgppop&iso3=ZMB&year=2020&geojson=${geoStr}&runasync=false`;
-    const r = await fetch(url, { signal: AbortSignal.timeout(12000) });
-    if (r.ok) {
-      const d = await r.json();
-      const total = d?.data?.total_population;
-      if (total && Number.isFinite(total)) return { total: Math.round(total), under5: Math.round(total * 0.18) };
-    }
-  } catch { /* area-density fallback */ }
-
-  // 4. Area × regional density fallback (45 persons/km² sub-Saharan average)
-  const total = Math.round(45 * areaSqKm);
-  return { total, under5: Math.round(total * 0.18) };
+    const r = await apiRequest<IntelligenceResult>("POST", "/api/gis/polygons/intelligence", { geometry: geojson });
+    return r;
+  } catch (e) {
+    console.error("Intelligence API failed:", e);
+    return null;
+  }
 }
+
 
 // ─── Drawing controller — click to place vertices, dblclick to close ──────────
 function DrawingController({
@@ -260,6 +227,8 @@ export function CatchmentMapPanel({
   const [extracting, setExtracting] = useState(false);
   const [extractResult, setExtractResult] = useState<ExtractResult | null>(null);
   const [showGap, setShowGap] = useState(true);
+  const [intelligenceData, setIntelligenceData] = useState<IntelligenceResult | null>(null);
+  const [suggesting, setSuggesting] = useState(false);
   const catchingRef = useRef(false);
 
   // ─── Load existing polygons on mount ───────────────────────────────────────
@@ -337,10 +306,15 @@ export function CatchmentMapPanel({
     const mode = drawMode;
     setDrawMode(null);
 
+    setLoadingPop(true);
+    const intel = await estimatePolygonPop(coords);
+    setLoadingPop(false);
+    
+    if (intel) setIntelligenceData(intel);
+    const total = intel?.sources[0]?.totalPopulation || 0;
+    const under5 = intel?.sources[0]?.under5Population || 0;
+
     if (mode === "catchment") {
-      setLoadingPop(true);
-      const { total, under5 } = await estimatePolygonPop(coords);
-      setLoadingPop(false);
       setCatchment({ coords, gridPopulation: total || undefined, under5Population: under5 || undefined, locked: false });
       setFitCoords(coords);
       toast({
@@ -367,10 +341,6 @@ export function CatchmentMapPanel({
         return;
       }
     }
-
-    setLoadingPop(true);
-    const { total, under5 } = await estimatePolygonPop(coords);
-    setLoadingPop(false);
 
     const existingIdx = communityPolygons.findIndex((p) => p.communityName === selectedCommunity);
     const color = existingIdx >= 0 ? communityPolygons[existingIdx].color : PALETTE[communityPolygons.length % PALETTE.length];
@@ -428,6 +398,31 @@ export function CatchmentMapPanel({
     if (catchment && !catchment.locked) { await saveCatchment(); count++; }
     for (const poly of communityPolygons.filter((p) => !p.saved)) { await saveCommunity(poly); count++; }
     if (count === 0) toast({ title: "Nothing to save", description: "All polygons are already saved." });
+  };
+
+  // ─── Auto-suggest Catchment (Convex Hull) ───────────────────────────────────
+  const autoSuggestCatchment = async () => {
+    setSuggesting(true);
+    try {
+      const result = await apiRequest<any>("POST", "/api/gis/polygons/suggest", { facilityId });
+      if (result.geometry && result.geometry.coordinates) {
+        let coords: [number, number][];
+        if (result.geometry.type === "Polygon") {
+          coords = result.geometry.coordinates[0].map(([lng, lat]: number[]) => [lat, lng]);
+        } else if (result.geometry.type === "MultiPolygon") {
+          coords = result.geometry.coordinates[0][0].map(([lng, lat]: number[]) => [lat, lng]);
+        } else {
+          throw new Error("Invalid geometry type");
+        }
+        await handlePolygonComplete(coords);
+      } else {
+         toast({ title: "Suggest failed", description: "No geometry returned", variant: "destructive" });
+      }
+    } catch (e: any) {
+      toast({ title: "Auto-suggest failed", description: e?.message || "Not enough data points.", variant: "destructive" });
+    } finally {
+      setSuggesting(false);
+    }
   };
 
   // ─── Extract communities (aggressive OSM scraping) ──────────────────────────
@@ -514,6 +509,12 @@ export function CatchmentMapPanel({
                 <button type="button" onClick={() => setFitCoords(catchment.coords)}
                   className="rounded-md border px-2.5 py-1 text-xs hover:bg-muted">🎯 Fit</button>
               </>
+            )}
+            {!catchment.locked && (
+              <button type="button" onClick={autoSuggestCatchment} disabled={suggesting}
+                  className="rounded-md border border-purple-300 bg-purple-50 px-2.5 py-1 text-xs font-medium text-purple-700 hover:bg-purple-100 disabled:opacity-50">
+                  {suggesting ? "⏳ Auto-suggesting…" : "✨ Auto-suggest"}
+              </button>
             )}
           </>
         )}
@@ -656,6 +657,8 @@ export function CatchmentMapPanel({
           </button>
         </div>
       </div>
+
+      <PolygonIntelligenceCard data={intelligenceData} />
 
       {/* ── Population balance panel ── */}
       {catchment && (

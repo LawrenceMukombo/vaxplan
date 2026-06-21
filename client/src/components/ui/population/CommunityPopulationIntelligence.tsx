@@ -32,7 +32,7 @@ export function CommunityPopulationIntelligence({
     queryKey: ["/api/gis/population-intelligence", lat, lng, radiusKm],
     queryFn: async () => {
       if (!lat || !lng) return null;
-      const res = await fetch(`/api/gis/population-intelligence?lat=${lat}&lng=${lng}&radiusKm=${radiusKm}`);
+      const res = await fetch(`/api/gis/population-intelligence?lat=${lat}&lng=${lng}&radiusKm=${radiusKm}`, { credentials: "include" });
       if (!res.ok) throw new Error("Failed to fetch population intelligence");
       const json = await res.json();
       return json.data;

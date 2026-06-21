@@ -87,6 +87,9 @@ __export(schema_exports, {
   facilityStaff: () => facilityStaff,
   facilityStaffRelations: () => facilityStaffRelations,
   fundingSourceEnum: () => fundingSourceEnum,
+  gisPolygonTypeEnum: () => gisPolygonTypeEnum,
+  gisPolygons: () => gisPolygons,
+  gisPolygonsRelations: () => gisPolygonsRelations,
   hfcCommittee: () => hfcCommittee,
   hfcCommitteeMembers: () => hfcCommitteeMembers,
   hfcCommitteeRelations: () => hfcCommitteeRelations,
@@ -118,6 +121,7 @@ __export(schema_exports, {
   insertFacilityCatchmentSchema: () => insertFacilityCatchmentSchema,
   insertFacilitySchema: () => insertFacilitySchema,
   insertFacilityStaffSchema: () => insertFacilityStaffSchema,
+  insertGisPolygonSchema: () => insertGisPolygonSchema,
   insertHfcCommitteeMemberSchema: () => insertHfcCommitteeMemberSchema,
   insertHfcCommitteeSchema: () => insertHfcCommitteeSchema,
   insertImplementationLessonSchema: () => insertImplementationLessonSchema,
@@ -197,6 +201,7 @@ __export(schema_exports, {
   selectCatalogueScheduleDoseSchema: () => selectCatalogueScheduleDoseSchema,
   selectCatalogueVaccineSchema: () => selectCatalogueVaccineSchema,
   selectCatalogueWastageThresholdSchema: () => selectCatalogueWastageThresholdSchema,
+  selectGisPolygonSchema: () => selectGisPolygonSchema,
   sessionDayPlans: () => sessionDayPlans,
   sessionDayPlansRelations: () => sessionDayPlansRelations,
   sessionPlanTypeEnum: () => sessionPlanTypeEnum,
@@ -2816,6 +2821,45 @@ var insertCatalogueCommoditySchema = (0, import_drizzle_zod.createInsertSchema)(
 var selectCatalogueCommoditySchema = (0, import_drizzle_zod.createSelectSchema)(catalogueCommodities);
 var insertCatalogueWastageThresholdSchema = (0, import_drizzle_zod.createInsertSchema)(catalogueWastageThresholds);
 var selectCatalogueWastageThresholdSchema = (0, import_drizzle_zod.createSelectSchema)(catalogueWastageThresholds);
+var gisPolygonTypeEnum = (0, import_pg_core.pgEnum)("gis_polygon_type", [
+  "catchment",
+  "outreach_area",
+  "administrative_boundary",
+  "custom"
+]);
+var gisPolygons = (0, import_pg_core.pgTable)("gis_polygons", {
+  id: (0, import_pg_core.integer)("id").primaryKey().generatedAlwaysAsIdentity(),
+  tenantId: (0, import_pg_core.varchar)("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  ownerType: (0, import_pg_core.varchar)("owner_type", { length: 50 }).notNull(),
+  // 'facility', 'district', 'province', 'village', etc.
+  ownerId: (0, import_pg_core.integer)("owner_id").notNull(),
+  polygonType: gisPolygonTypeEnum("polygon_type").notNull().default("catchment"),
+  name: (0, import_pg_core.varchar)("name", { length: 255 }),
+  description: (0, import_pg_core.text)("description"),
+  geometry: (0, import_pg_core.jsonb)("geometry").notNull(),
+  // Stores GeoJSON natively
+  areaSqKm: (0, import_pg_core.decimal)("area_sq_km", { precision: 10, scale: 2 }),
+  perimeterKm: (0, import_pg_core.decimal)("perimeter_km", { precision: 10, scale: 2 }),
+  source: (0, import_pg_core.varchar)("source", { length: 100 }),
+  // 'manual', 'buffer', 'convex_hull', 'import'
+  method: (0, import_pg_core.varchar)("method", { length: 100 }),
+  status: (0, import_pg_core.varchar)("status", { length: 50 }).default("active"),
+  version: (0, import_pg_core.integer)("version").default(1),
+  isActive: (0, import_pg_core.boolean)("is_active").default(true),
+  createdAt: (0, import_pg_core.timestamp)("created_at").defaultNow(),
+  updatedAt: (0, import_pg_core.timestamp)("updated_at").defaultNow()
+}, (table) => ({
+  tenantIdx: (0, import_pg_core.index)("idx_gis_polygons_tenant").on(table.tenantId),
+  ownerIdx: (0, import_pg_core.index)("idx_gis_polygons_owner").on(table.ownerType, table.ownerId)
+}));
+var gisPolygonsRelations = (0, import_drizzle_orm.relations)(gisPolygons, ({ one }) => ({
+  tenant: one(tenants, {
+    fields: [gisPolygons.tenantId],
+    references: [tenants.id]
+  })
+}));
+var insertGisPolygonSchema = (0, import_drizzle_zod.createInsertSchema)(gisPolygons);
+var selectGisPolygonSchema = (0, import_drizzle_zod.createSelectSchema)(gisPolygons);
 
 // server/db.ts
 var { Pool } = import_pg.default;

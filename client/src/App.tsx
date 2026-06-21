@@ -492,8 +492,10 @@ function App() {
     return () => document.removeEventListener("click", handleClick);
   }, []);
   
+  let content;
+
   if (isResearch) {
-    return (
+    content = (
       <ThemeProvider forceTheme="light">
         <TooltipProvider>
           <div className="flex h-screen w-full font-sans bg-background text-foreground antialiased selection:bg-primary/20">
@@ -511,21 +513,22 @@ function App() {
         </TooltipProvider>
       </ThemeProvider>
     );
-  }
-
-  if (isDocs) {
-    return (
-      <Suspense fallback={<RouteFallback />}>
-        <Switch>
-          <Route path="/" component={lazy(() => import("@/pages/PublicDocs"))} />
-          <Route component={NotFound} />
-        </Switch>
-      </Suspense>
+  } else if (isDocs) {
+    content = (
+      <ThemeProvider>
+        <TooltipProvider>
+          <Suspense fallback={<RouteFallback />}>
+            <Switch>
+              <Route path="/" component={lazy(() => import("@/pages/PublicDocs"))} />
+              <Route component={NotFound} />
+            </Switch>
+          </Suspense>
+          <Toaster />
+        </TooltipProvider>
+      </ThemeProvider>
     );
-  }
-
-  return (
-    <QueryClientProvider client={queryClient}>
+  } else {
+    content = (
       <ThemeProvider>
         <TooltipProvider>
           <Suspense fallback={<RouteFallback />}>
@@ -548,6 +551,12 @@ function App() {
           <Toaster />
         </TooltipProvider>
       </ThemeProvider>
+    );
+  }
+
+  return (
+    <QueryClientProvider client={queryClient}>
+      {content}
     </QueryClientProvider>
   );
 }
