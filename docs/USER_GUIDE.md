@@ -412,9 +412,7 @@ you don't need to wait for your national admin.
 4. Fill in the community **name** and any other details.
 5. **Set the location.** Either drop a **single pin** for the centre of
    the community, or switch to **Draw Polygon Mode** and click points on
-   the map to trace the community's **catchment boundary**. Boundaries
-   are saved and shown on the map everywhere in the app, and can be
-   reused later.
+   the map to trace the community's **catchment boundary**. When you save a custom polygon boundary, VaxPlan uses Location Intelligence and PostGIS to intersect the polygon with WorldPop spatial data and calculates the precise estimated population living inside that boundary automatically. Boundaries are saved in the `gis_polygons` table and shown on the map everywhere in the app, and can be reused later.
 6. Click **Save**.
 
 > **Note.** Facility and district staff can add and edit **communities**,
@@ -504,6 +502,7 @@ National admins are the power users for your country. Your modules:
   rejected escalates to you.
 - **Audit log.** Every change to sensitive data is logged with who,
   when, and what.
+- **Safe Deployments.** All updates to the VaxPlan database use the `safe-migration` protocol, ensuring additive, non-destructive schema changes so your operational data is never wiped during new releases.
 - **Site activity.** A panel on your country dashboard shows who is
   online right now and where they are signed in from, a live map
   pinning those users, visits today and over the last two weeks, your
