@@ -13,7 +13,7 @@
         "deploy:local": "npm run build && git add dist/ && git commit -m \"deploy: update production build\" && git push origin fix-line-endings",
         "test": "vitest run",
         "db:push": "drizzle-kit push",
-        "db:safe-update": "tsx script/safe-migration.ts",
+        "db:safe-update": "tsx scripts/safe-migration.ts",
         "db:generate": "drizzle-kit generate",
         "db:migrate": "tsx scripts/migrate.ts",
         "docs:pdf": "node scripts/build-user-guide-pdf.mjs",
