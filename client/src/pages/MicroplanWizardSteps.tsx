@@ -68,6 +68,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { CommunityPopulationIntelligence } from "@/components/ui/population/CommunityPopulationIntelligence";
 import {
   Tooltip,
   TooltipContent,
@@ -2015,135 +2016,36 @@ export function Step2({
           </DialogHeader>
 
           {estimate && (
-            <div className="space-y-3">
-              <div>
-                <Label className="text-xs uppercase text-muted-foreground">
-                  Catchment radius
-                </Label>
-                <div className="mt-1 flex gap-2">
-                  {[1, 2, 3].map((r) => (
-                    <Button
-                      key={r}
-                      type="button"
-                      size="sm"
-                      variant={estimate.radiusKm === r ? "default" : "outline"}
-                      onClick={() => runEstimate(estimate.index, r)}
-                      disabled={estimate.status === "loading"}
-                      data-testid={`button-catchment-radius-${r}`}
-                    >
-                      {r} km
-                    </Button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="rounded-md border bg-muted/30 p-3 text-sm">
-                {estimate.status === "loading" && (
-                  <div className="flex items-center gap-2 text-muted-foreground">
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    Sampling WorldPop cells… ({estimate.progress.done}
-                    {estimate.progress.total > 0
-                      ? ` / ${estimate.progress.total}`
-                      : ""}
-                    )
-                  </div>
-                )}
-                {estimate.status === "done" && estimate.result?.status === "ok" && (
-                  <div data-testid="text-catchment-estimate">
-                    <div className="text-2xl font-semibold">
-                      ≈ {estimate.result.total.toLocaleString()} people
-                    </div>
-                    <div className="mt-1 text-xs text-muted-foreground">
-                      {estimate.result.sampledCells} cell
-                      {estimate.result.sampledCells === 1 ? "" : "s"} summed
-                      {estimate.result.nodataCells > 0 &&
-                        ` · ${estimate.result.nodataCells} no-data`}
-                      {estimate.result.errorCells > 0 &&
-                        ` · ${estimate.result.errorCells} missing`}
-                      <br />
-                      Source: WorldPop 2020, 1&nbsp;km grid
-                    </div>
-                    {(() => {
-                      const r = estimate.result;
-                      let badgeText = "";
-                      let badgeClass = "";
-                      let testId = "";
-                      if (r.partial) {
-                        badgeText = `Partial — ${r.errorCells} cell${
-                          r.errorCells === 1 ? "" : "s"
-                        } missing${r.offline ? " (offline)" : ""}, ${
-                          r.cachedCells
-                        } from cache, ${r.liveCells} live`;
-                        badgeClass =
-                          "bg-amber-100 text-amber-900 dark:bg-amber-900/30 dark:text-amber-200";
-                        testId = "badge-catchment-partial";
-                      } else if (r.liveCells === 0 && r.cachedCells > 0) {
-                        badgeText = `Using cached data${
-                          r.offline ? " (offline)" : ""
-                        } — ${r.cachedCells} cell${
-                          r.cachedCells === 1 ? "" : "s"
-                        } from previous lookups`;
-                        badgeClass =
-                          "bg-blue-100 text-blue-900 dark:bg-blue-900/30 dark:text-blue-200";
-                        testId = "badge-catchment-cached";
-                      } else if (r.cachedCells > 0) {
-                        badgeText = `Live — ${r.liveCells} fetched, ${r.cachedCells} from cache`;
-                        badgeClass =
-                          "bg-emerald-100 text-emerald-900 dark:bg-emerald-900/30 dark:text-emerald-200";
-                        testId = "badge-catchment-live";
-                      } else {
-                        badgeText = "Live — all cells fetched";
-                        badgeClass =
-                          "bg-emerald-100 text-emerald-900 dark:bg-emerald-900/30 dark:text-emerald-200";
-                        testId = "badge-catchment-live";
-                      }
-                      return (
-                        <div
-                          className={`mt-2 inline-block rounded px-2 py-0.5 text-xs font-medium ${badgeClass}`}
-                          data-testid={testId}
-                        >
-                          {badgeText}
-                        </div>
-                      );
-                    })()}
-                  </div>
-                )}
-                {estimate.status === "done" &&
-                  estimate.result?.status === "nodata" && (
-                    <div className="text-muted-foreground">
-                      No population data for cells in this area.
-                    </div>
-                  )}
-                {estimate.status === "done" &&
-                  estimate.result?.status === "error" && (
-                    <div className="text-destructive">
-                      {estimate.result.message}
-                    </div>
-                  )}
-              </div>
-            </div>
+            <CommunityPopulationIntelligence 
+              lat={estimate.lat} 
+              lng={estimate.lng}
+              initialRadiusKm={2}
+              onAcceptEstimate={(total) => {
+                const current = communities[estimate.index];
+                const surveyVal = parseInt(current?.surveyPop || "0", 10);
+                const targetPop = String(Math.max(total, surveyVal));
+                update(estimate.index, {
+                  gridPop: String(total),
+                  targetPopulation: targetPop,
+                  source: "worldpop",
+                });
+                toast({
+                  title: "Population estimate applied",
+                  description: `Grid Pop set to ${total.toLocaleString()}. Target = ${parseInt(targetPop).toLocaleString()}.`,
+                });
+                closeEstimate();
+              }}
+            />
           )}
 
-          <DialogFooter>
+          <DialogFooter className="mt-4 border-t pt-4">
             <Button
               type="button"
               variant="outline"
               onClick={closeEstimate}
               data-testid="button-catchment-cancel"
             >
-              Cancel
-            </Button>
-            <Button
-              type="button"
-              onClick={acceptEstimate}
-              disabled={
-                !estimate ||
-                estimate.status !== "done" ||
-                estimate.result?.status !== "ok"
-              }
-              data-testid="button-catchment-accept"
-            >
-              Use this estimate
+              Close
             </Button>
           </DialogFooter>
         </DialogContent>
