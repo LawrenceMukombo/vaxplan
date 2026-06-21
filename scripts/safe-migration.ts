@@ -1,8 +1,22 @@
-import "dotenv/config";
+import fs from "fs";
+import path from "path";
 import { sql } from "drizzle-orm";
-import { db } from "../server/db";
+
+try {
+  const envPath = path.join(process.cwd(), ".env");
+  const envContent = fs.readFileSync(envPath, "utf-8");
+  for (const line of envContent.split("\n")) {
+    const [key, ...value] = line.split("=");
+    if (key && value.length > 0) {
+      process.env[key.trim()] = value.join("=").trim().replace(/(^['"]|['"]$)/g, '');
+    }
+  }
+} catch (e) {
+  console.log("No .env file found or error reading it.");
+}
 
 async function main() {
+  const { db } = await import("../server/db");
   console.log("Starting safe database migration for gis_polygons...");
 
   try {
