@@ -513,10 +513,12 @@ export default function MapView() {
   const districtListRef = useRef<string[]>([]);
   const mapContainerRef = useRef<HTMLDivElement>(null);
 
-  const { data: settlements } = useGetSettlements({
+  const { data: settlementsRes } = useGetSettlements({
     status: statusFilter !== "all" ? (statusFilter as any) : undefined,
     district: districtFilter !== "all" ? districtFilter : undefined,
+    page: "all",
   } as any);
+  const settlements = settlementsRes?.data?.items ?? [];
   const { data: facilities } = useGetFacilities();
 
   useEffect(() => {

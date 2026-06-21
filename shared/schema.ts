@@ -601,7 +601,12 @@ export const villages = pgTable("villages", {
 
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
-}, (table) => [index("idx_villages_tenant").on(table.tenantId)]);
+}, (table) => [
+  index("idx_villages_tenant").on(table.tenantId),
+  index("idx_villages_district").on(table.districtId),
+  index("idx_villages_facility").on(table.assignedFacilityId),
+  index("idx_villages_name").on(table.name),
+]);
 
 
 // Catchment overlap conflicts: recorded when a newly drawn/edited community
@@ -659,6 +664,8 @@ export const vgieAlerts = pgTable("vgie_alerts", {
   title: varchar("title", { length: 255 }).notNull(),
   message: text("message"),
   status: varchar("status", { length: 50 }).notNull().default("active"), // active, resolved
+  villageId: integer("village_id").references(() => villages.id, { onDelete: "cascade" }),
+  facilityId: integer("facility_id").references(() => facilities.id, { onDelete: "cascade" }),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -3615,3 +3622,62 @@ export const gisPolygonsRelations = relations(gisPolygons, ({ one }) => ({
 export const insertGisPolygonSchema = createInsertSchema(gisPolygons);
 export const selectGisPolygonSchema = createSelectSchema(gisPolygons);
 export type GisPolygon = typeof gisPolygons.$inferSelect;
+
+// ============================================================================
+// VGIE RECOMMENDATION & ALERT RULES
+// ============================================================================
+
+export const vgieRecommendationRules = pgTable("vgie_recommendation_rules", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  name: varchar("name", { length: 255 }).notNull(),
+  description: text("description"),
+  category: varchar("category", { length: 100 }).notNull(), // 'accessibility', 'population', 'coverage', 'infrastructure'
+  conditionSql: text("condition_sql").notNull(), // Evaluated logic expression
+  recommendationText: text("recommendation_text").notNull(), 
+  priority: varchar("priority", { length: 50 }).notNull().default("medium"), // 'high', 'medium', 'low'
+  isActive: boolean("is_active").default(true).notNull(),
+  createdByUserId: varchar("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => ({
+  tenantIdx: index("idx_vgie_rec_rules_tenant").on(table.tenantId),
+}));
+
+export const vgieAlertRules = pgTable("vgie_alert_rules", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  name: varchar("name", { length: 255 }).notNull(),
+  description: text("description"),
+  severity: varchar("severity", { length: 50 }).notNull().default("warning"), // 'critical', 'warning', 'info'
+  triggerCondition: text("trigger_condition").notNull(), 
+  alertTemplate: text("alert_template").notNull(), 
+  isActive: boolean("is_active").default(true).notNull(),
+  createdByUserId: varchar("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => ({
+  tenantIdx: index("idx_vgie_alert_rules_tenant").on(table.tenantId),
+}));
+
+export const vgieRecommendationRulesRelations = relations(vgieRecommendationRules, ({ one }) => ({
+  tenant: one(tenants, {
+    fields: [vgieRecommendationRules.tenantId],
+    references: [tenants.id],
+  }),
+}));
+
+export const vgieAlertRulesRelations = relations(vgieAlertRules, ({ one }) => ({
+  tenant: one(tenants, {
+    fields: [vgieAlertRules.tenantId],
+    references: [tenants.id],
+  }),
+}));
+
+export const insertVgieRecommendationRuleSchema = createInsertSchema(vgieRecommendationRules);
+export const selectVgieRecommendationRuleSchema = createSelectSchema(vgieRecommendationRules);
+export type VgieRecommendationRule = typeof vgieRecommendationRules.$inferSelect;
+
+export const insertVgieAlertRuleSchema = createInsertSchema(vgieAlertRules);
+export const selectVgieAlertRuleSchema = createSelectSchema(vgieAlertRules);
+export type VgieAlertRule = typeof vgieAlertRules.$inferSelect;
