@@ -2815,7 +2815,7 @@ export default function Facilities() {
                 searchable
                 searchPlaceholder="Search facilities..."
                 searchKeys={["name", "hmisCode", "facilityType"]}
-                onRowClick={(item) => setSelectedFacilityId(selectedFacilityId === item.id ? null : item.id)}
+                onRowClick={(item) => handleEdit(item)}
               />
             </CardContent>
           </Card>

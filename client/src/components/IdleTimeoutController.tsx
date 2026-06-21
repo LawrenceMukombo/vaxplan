@@ -30,7 +30,7 @@ export function IdleTimeoutController() {
   const timeoutId = useRef<NodeJS.Timeout | null>(null);
   const warningId = useRef<NodeJS.Timeout | null>(null);
   const countdownId = useRef<NodeJS.Timeout | null>(null);
-  const pingTimeoutId = useRef<NodeJS.Timeout | null>(null);
+  const lastPingTime = useRef<number>(0);
   const channel = useRef<BroadcastChannel | null>(null);
 
   const getTimeoutMinutes = useCallback(() => {
@@ -96,12 +96,13 @@ export function IdleTimeoutController() {
       channel.current.postMessage({ type: "RESET_IDLE" });
     }
     
-    // Ping server to keep session alive, throttled to 1 minute
-    if (!pingTimeoutId.current) {
-      pingTimeoutId.current = setTimeout(() => {
-        fetch("/api/auth/ping", { method: "POST" }).catch(() => {});
-        pingTimeoutId.current = null;
-      }, 60000);
+    // Ping server to keep session alive based on actual elapsed time.
+    // This ensures that active users trigger the keep-alive even if the
+    // component or dependencies rapidly remount and clear timeouts.
+    const now = Date.now();
+    if (!lastPingTime.current || now - lastPingTime.current >= 60000) {
+      lastPingTime.current = now;
+      fetch("/api/auth/ping", { method: "POST" }).catch(() => {});
     }
 
   }, [getTimeoutMinutes, doLogout, sessionConfig]);
@@ -141,7 +142,6 @@ export function IdleTimeoutController() {
       if (warningId.current) clearTimeout(warningId.current);
       if (countdownId.current) clearInterval(countdownId.current);
       if (throttleTimeout) clearTimeout(throttleTimeout);
-      if (pingTimeoutId.current) clearTimeout(pingTimeoutId.current);
       events.forEach((e) => window.removeEventListener(e, handleActivity));
       channel.current?.close();
     };
