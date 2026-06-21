@@ -492,13 +492,6 @@ export default function Landing() {
               </Button>
             </div>
             
-            <div className="flex flex-wrap items-center justify-center gap-2 pt-8 text-xs text-muted-foreground">
-              {trustPoints.map((p) => (
-                <Badge key={p} variant="secondary" className="font-normal">
-                  {p}
-                </Badge>
-              ))}
-            </div>
           </div>
         </section>
 
@@ -751,6 +744,13 @@ export default function Landing() {
 
       <footer className="border-t py-8">
         <div className="container mx-auto px-4">
+          <div className="flex flex-wrap items-center justify-center gap-2 pb-8 mb-8 border-b text-xs text-muted-foreground">
+            {trustPoints.map((p) => (
+              <Badge key={p} variant="secondary" className="font-normal">
+                {p}
+              </Badge>
+            ))}
+          </div>
           <div className="flex flex-col md:flex-row items-center justify-between gap-4 text-sm text-muted-foreground">
             <div className="flex items-center gap-2">
               <div className="h-6 w-6 rounded bg-primary text-primary-foreground flex items-center justify-center">
