@@ -245,6 +245,7 @@ router.get("/dashboard/summary", async (req: any, res) => {
 });
 
 // ── /api/vgie/dashboard/district-stats ───────────────────────────────────────
+// ── /api/vgie/dashboard/district-stats ───────────────────────────────────────
 router.get("/dashboard/district-stats", async (req: any, res) => {
   try {
     const { provinceId, districtId, facilityId } = req.query as Record<string, string | undefined>;
@@ -277,6 +278,8 @@ router.get("/dashboard/district-stats", async (req: any, res) => {
 
     const allVillages = await db
       .select({
+        id: villages.id,
+        name: villages.name,
         districtId: villages.districtId,
         assignedFacilityId: villages.assignedFacilityId,
         distanceToFacility: villages.distanceToFacility,
@@ -287,6 +290,106 @@ router.get("/dashboard/district-stats", async (req: any, res) => {
       .leftJoin(districts, eq(villages.districtId, districts.id))
       .where(and(...villageConditions));
 
+    // Case 1: Facility is selected -> show individual communities/settlements assigned to this facility
+    if (facilityId && facilityId !== "all") {
+      const result = allVillages.map((v) => {
+        const isServed = v.assignedFacilityId && v.distanceToFacility && Number(v.distanceToFacility) <= 5;
+        return {
+          district: v.name, // using 'district' as key
+          totalSettlements: 1,
+          servedCount: isServed ? 1 : 0,
+          underservedCount: (v.assignedFacilityId && !isServed) ? 1 : 0,
+          unservedCount: !v.assignedFacilityId ? 1 : 0,
+          totalPopulation: Number(v.population || 0),
+          highRiskCount: v.highRisk ? 1 : 0,
+        };
+      });
+      return res.json(result);
+    }
+
+    // Case 2: District is selected -> show stats grouped by health facility inside the selected district
+    if (districtId && districtId !== "all") {
+      const allFacilities = await db
+        .select({ id: facilities.id, name: facilities.name })
+        .from(facilities)
+        .where(
+          and(
+            eq(facilities.tenantId, req.tenantId),
+            eq(facilities.districtId, Number(districtId)),
+            eq(facilities.isActive, true)
+          )
+        );
+      const facilityLookup = new Map(allFacilities.map((f) => [f.id, f.name]));
+
+      const groupMap = new Map<string, any>();
+      for (const f of allFacilities) {
+        groupMap.set(f.name, {
+          district: f.name, // using 'district' as key
+          totalSettlements: 0,
+          servedCount: 0,
+          underservedCount: 0,
+          unservedCount: 0,
+          totalPopulation: 0,
+          highRiskCount: 0,
+        });
+      }
+      groupMap.set("Unassigned", {
+        district: "Unassigned",
+        totalSettlements: 0,
+        servedCount: 0,
+        underservedCount: 0,
+        unservedCount: 0,
+        totalPopulation: 0,
+        highRiskCount: 0,
+      });
+
+      for (const v of allVillages) {
+        const facilityName = v.assignedFacilityId
+          ? (facilityLookup.get(v.assignedFacilityId) || "Unknown Facility")
+          : "Unassigned";
+
+        if (!groupMap.has(facilityName)) {
+          groupMap.set(facilityName, {
+            district: facilityName,
+            totalSettlements: 0,
+            servedCount: 0,
+            underservedCount: 0,
+            unservedCount: 0,
+            totalPopulation: 0,
+            highRiskCount: 0,
+          });
+        }
+        const entry = groupMap.get(facilityName)!;
+        entry.totalSettlements++;
+
+        if (v.assignedFacilityId) {
+          if (v.distanceToFacility && Number(v.distanceToFacility) <= 5) {
+            entry.servedCount++;
+          } else {
+            entry.underservedCount++;
+          }
+        } else {
+          entry.unservedCount++;
+        }
+        entry.totalPopulation += Number(v.population || 0);
+        if (v.highRisk) entry.highRiskCount++;
+      }
+
+      // Clean up empty entries
+      for (const [key, val] of Array.from(groupMap.entries())) {
+        if (val.totalSettlements === 0) {
+          groupMap.delete(key);
+        }
+      }
+
+      return res.json(
+        Array.from(groupMap.values()).sort(
+          (a, b) => b.highRiskCount - a.highRiskCount
+        )
+      );
+    }
+
+    // Case 3: Country or Province level -> group by district name
     const districtMap = new Map<string, any>();
 
     for (const v of allVillages) {
@@ -1171,16 +1274,15 @@ router.get("/recommendations", async (req: any, res) => {
 
     if (facilityId && facilityId !== "all") {
       const fId = Number(facilityId);
-      result = result.filter((_, idx) => {
-        const raw = rows[idx];
-        if (raw.entityType === "settlement" && raw.entityId) {
-          return villageLookup.get(raw.entityId)?.assignedFacilityId === fId;
+      result = result.filter((r) => {
+        if (r.entityType === "settlement" && r.entityId) {
+          return villageLookup.get(r.entityId)?.assignedFacilityId === fId;
         }
-        if (raw.entityType === "facility") {
-          return raw.entityId === fId;
+        if (r.entityType === "facility") {
+          return r.entityId === fId;
         }
-        if (raw.entityType === "session" && raw.entityId) {
-          return sessionLookup.get(raw.entityId)?.facilityId === fId;
+        if (r.entityType === "session" && r.entityId) {
+          return sessionLookup.get(r.entityId)?.facilityId === fId;
         }
         return false;
       });
@@ -1188,16 +1290,15 @@ router.get("/recommendations", async (req: any, res) => {
 
     if (districtId && districtId !== "all") {
       const dId = Number(districtId);
-      result = result.filter((_, idx) => {
-        const raw = rows[idx];
-        if (raw.entityType === "settlement" && raw.entityId) {
-          return villageLookup.get(raw.entityId)?.districtId === dId;
+      result = result.filter((r) => {
+        if (r.entityType === "settlement" && r.entityId) {
+          return villageLookup.get(r.entityId)?.districtId === dId;
         }
-        if (raw.entityType === "facility" && raw.entityId) {
-          return facilityLookup.get(raw.entityId)?.districtId === dId;
+        if (r.entityType === "facility" && r.entityId) {
+          return facilityLookup.get(r.entityId)?.districtId === dId;
         }
-        if (raw.entityType === "session" && raw.entityId) {
-          return sessionLookup.get(raw.entityId)?.districtId === dId;
+        if (r.entityType === "session" && r.entityId) {
+          return sessionLookup.get(r.entityId)?.districtId === dId;
         }
         return false;
       });
@@ -1205,15 +1306,14 @@ router.get("/recommendations", async (req: any, res) => {
 
     if (provinceId && provinceId !== "all") {
       const pId = Number(provinceId);
-      result = result.filter((_, idx) => {
-        const raw = rows[idx];
+      result = result.filter((r) => {
         let dId: number | undefined;
-        if (raw.entityType === "settlement" && raw.entityId) {
-          dId = villageLookup.get(raw.entityId)?.districtId;
-        } else if (raw.entityType === "facility" && raw.entityId) {
-          dId = facilityLookup.get(raw.entityId)?.districtId;
-        } else if (raw.entityType === "session" && raw.entityId) {
-          dId = sessionLookup.get(raw.entityId)?.districtId;
+        if (r.entityType === "settlement" && r.entityId) {
+          dId = villageLookup.get(r.entityId)?.districtId;
+        } else if (r.entityType === "facility" && r.entityId) {
+          dId = facilityLookup.get(r.entityId)?.districtId;
+        } else if (r.entityType === "session" && r.entityId) {
+          dId = sessionLookup.get(r.entityId)?.districtId;
         }
         return dId ? districtProvinceMap.get(dId) === pId : false;
       });

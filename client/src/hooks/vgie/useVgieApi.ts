@@ -138,7 +138,7 @@ export function useGetRecommendations(params?: Record<string, string>) {
   const cleanParams = params ? Object.fromEntries(Object.entries(params).filter(([_, v]) => v !== undefined)) : {};
   const qs = Object.keys(cleanParams).length ? "?" + new URLSearchParams(cleanParams as any).toString() : "";
   return useQuery<any[]>({
-    queryKey: ["/api/vgie/recommendations", params],
+    queryKey: ["/api/vgie/recommendations", cleanParams],
     queryFn: async () => {
       const res = await fetch(`/api/vgie/recommendations${qs}`);
       if (!res.ok) throw new Error("Failed to fetch recommendations");

@@ -10,9 +10,11 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
+import { useState } from "react";
+import { GeoCascadeFilter } from "@/components/GeoCascadeFilter";
 
 function StatCard({
-  title, value, subtitle, icon: Icon, color = "emerald", trend
+  title, value, subtitle, icon: Icon, color = "emerald", trend, scope
 }: {
   title: string;
   value: string | number;
@@ -20,24 +22,26 @@ function StatCard({
   icon: React.ComponentType<{ className?: string }>;
   color?: string;
   trend?: string;
+  scope?: string;
 }) {
   const colorMap: Record<string, string> = {
-    emerald: "text-emerald-400 bg-emerald-500/10",
-    red: "text-red-400 bg-red-500/10",
-    amber: "text-amber-400 bg-amber-500/10",
-    blue: "text-blue-400 bg-blue-500/10",
-    purple: "text-purple-400 bg-purple-500/10",
+    emerald: "text-emerald-500 bg-emerald-500/10 dark:text-emerald-400",
+    red: "text-red-500 bg-red-500/10 dark:text-red-400",
+    amber: "text-amber-500 bg-amber-500/10 dark:text-amber-400",
+    blue: "text-blue-500 bg-blue-500/10 dark:text-blue-400",
+    purple: "text-purple-500 bg-purple-500/10 dark:text-purple-400",
     slate: "text-muted-foreground bg-slate-500/10",
   };
   return (
-    <Card className="bg-background border-border">
+    <Card>
       <CardContent className="p-5">
         <div className="flex items-start justify-between">
           <div className="flex-1 min-w-0">
             <p className="text-xs text-muted-foreground font-medium uppercase tracking-wider truncate">{title}</p>
-            <p className="text-2xl font-bold text-slate-100 mt-1">{value}</p>
+            <p className="text-2xl font-bold text-foreground mt-1">{value}</p>
             {subtitle && <p className="text-xs text-muted-foreground mt-0.5 truncate">{subtitle}</p>}
-            {trend && <p className="text-xs text-emerald-400 mt-1">{trend}</p>}
+            {scope && <p className="text-[10px] text-primary/80 font-bold uppercase tracking-wider mt-1">{scope}</p>}
+            {trend && <p className="text-xs text-emerald-500 dark:text-emerald-400 mt-1">{trend}</p>}
           </div>
           <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ml-3 ${colorMap[color]}`}>
             <Icon className="w-4 h-4" />
@@ -49,26 +53,36 @@ function StatCard({
 }
 
 const severityColors: Record<string, string> = {
-  critical: "bg-red-500/10 text-red-400 border-red-500/20",
-  warning: "bg-amber-500/10 text-amber-400 border-amber-500/20",
-  info: "bg-blue-500/10 text-blue-400 border-blue-500/20",
+  critical: "bg-red-50 text-red-700 border-red-200 dark:bg-red-950/40 dark:text-red-400 dark:border-red-900/50",
+  warning: "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-400 dark:border-amber-900/50",
+  info: "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/40 dark:text-blue-400 dark:border-blue-900/50",
 };
 
 const priorityColors: Record<string, string> = {
-  high: "bg-red-500/10 text-red-400 border-red-500/20",
-  medium: "bg-amber-500/10 text-amber-400 border-amber-500/20",
-  low: "bg-slate-500/10 text-muted-foreground border-border/20",
+  high: "bg-red-50 text-red-700 border-red-200 dark:bg-red-950/40 dark:text-red-400 dark:border-red-900/50",
+  medium: "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-400 dark:border-amber-900/50",
+  low: "bg-slate-50 text-slate-700 border-slate-200 dark:bg-slate-900/40 dark:text-slate-400 dark:border-slate-800/50",
 };
 
 export default function Dashboard() {
-  const { data: summary, isLoading: loadingSummary } = useGetDashboardSummary();
-  const { data: districtStats, isLoading: loadingDistricts } = useGetDistrictStats();
-  const { data: alerts } = useGetAlerts();
-  const { data: recs } = useGetRecommendations({ status: "pending" });
-  const { data: outreachFeed, isLoading: loadingFeed } = useGetOutreachFeed();
-  const { data: outreachCoverage, isLoading: loadingCoverage } = useGetOutreachCoverage();
+  const [provinceId, setProvinceId] = useState<number | null>(null);
+  const [districtId, setDistrictId] = useState<number | null>(null);
+  const [facilityId, setFacilityId] = useState<number | null>(null);
 
-  const coverageRate = summary
+  const filters = {
+    provinceId: provinceId?.toString(),
+    districtId: districtId?.toString(),
+    facilityId: facilityId?.toString(),
+  } as any;
+
+  const { data: summary, isLoading: loadingSummary } = useGetDashboardSummary(filters);
+  const { data: districtStats, isLoading: loadingDistricts } = useGetDistrictStats(filters);
+  const { data: alerts } = useGetAlerts(filters);
+  const { data: recs } = useGetRecommendations({ status: "pending", ...filters });
+  const { data: outreachFeed, isLoading: loadingFeed } = useGetOutreachFeed(filters);
+  const { data: outreachCoverage, isLoading: loadingCoverage } = useGetOutreachCoverage(filters);
+
+  const coverageRate = summary && summary.totalSettlements > 0
     ? Math.round((summary.servedCount / summary.totalSettlements) * 100)
     : 0;
 
@@ -79,13 +93,43 @@ export default function Dashboard() {
     unserved: d.unservedCount,
   }));
 
+  const scopeLabel = facilityId
+    ? "Selected facility"
+    : districtId
+    ? "Selected district"
+    : provinceId
+    ? "Selected province"
+    : "Active country";
+
   return (
     <div className="p-6 space-y-6">
+      <div className="flex flex-wrap items-center gap-3">
+        <GeoCascadeFilter
+          provinceId={provinceId}
+          districtId={districtId}
+          facilityId={facilityId}
+          onProvinceChange={setProvinceId}
+          onDistrictChange={setDistrictId}
+          onFacilityChange={setFacilityId}
+          showFacility={true}
+        />
+        {(provinceId || districtId || facilityId) && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-8 text-xs text-muted-foreground hover:text-foreground"
+            onClick={() => { setProvinceId(null); setDistrictId(null); setFacilityId(null); }}
+          >
+            Clear filters
+          </Button>
+        )}
+      </div>
+
       {/* KPI Strip */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {loadingSummary ? (
           Array.from({ length: 4 }).map((_, i) => (
-            <Card key={i} className="bg-background border-border">
+            <Card key={i}>
               <CardContent className="p-5">
                 <Skeleton className="h-16 bg-muted" />
               </CardContent>
@@ -99,6 +143,7 @@ export default function Dashboard() {
               subtitle={`${summary?.newSettlementsCount ?? 0} newly detected`}
               icon={Building2}
               color="blue"
+              scope={scopeLabel}
             />
             <StatCard
               title="Unserved Population"
@@ -106,6 +151,7 @@ export default function Dashboard() {
               subtitle={`${summary?.unservedCount ?? 0} settlements`}
               icon={Users}
               color="red"
+              scope={scopeLabel}
             />
             <StatCard
               title="Coverage Rate"
@@ -113,6 +159,7 @@ export default function Dashboard() {
               subtitle={`${summary?.servedCount ?? 0} served settlements`}
               icon={CheckCircle}
               color="emerald"
+              scope={scopeLabel}
             />
             <StatCard
               title="Active Alerts"
@@ -120,6 +167,7 @@ export default function Dashboard() {
               subtitle={`${summary?.pendingRecommendationsCount ?? 0} recommendations pending`}
               icon={AlertTriangle}
               color="amber"
+              scope={scopeLabel}
             />
           </>
         )}
@@ -127,24 +175,29 @@ export default function Dashboard() {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* District Coverage Chart */}
-        <Card className="bg-background border-border lg:col-span-2">
+        <Card className="lg:col-span-2">
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-semibold text-foreground flex items-center gap-2">
-              <TrendingUp className="w-4 h-4 text-emerald-400" />
-              Coverage by District
+            <CardTitle className="text-sm font-bold text-foreground flex items-center gap-2">
+              <TrendingUp className="w-4 h-4 text-emerald-500" />
+              Coverage {districtId ? "by Facility" : provinceId ? "by District" : "by District"}
             </CardTitle>
           </CardHeader>
           <CardContent>
             {loadingDistricts ? (
               <Skeleton className="h-48 bg-muted rounded" />
+            ) : !chartData || chartData.length === 0 ? (
+              <div className="flex items-center justify-center h-[200px] text-muted-foreground text-sm">
+                No coverage data available for the selected filters
+              </div>
             ) : (
               <ResponsiveContainer width="100%" height={200}>
                 <BarChart data={chartData} barSize={20} barGap={4}>
                   <XAxis dataKey="name" tick={{ fill: "#64748b", fontSize: 11 }} axisLine={false} tickLine={false} />
                   <YAxis tick={{ fill: "#64748b", fontSize: 11 }} axisLine={false} tickLine={false} />
                   <Tooltip
-                    contentStyle={{ background: "#1e293b", border: "1px solid #334155", borderRadius: 8, fontSize: 12 }}
-                    labelStyle={{ color: "#cbd5e1" }}
+                    contentStyle={{ background: "hsl(var(--background))", border: "1px solid hsl(var(--border))", borderRadius: 8, fontSize: 12 }}
+                    labelStyle={{ color: "hsl(var(--foreground))" }}
+                    itemStyle={{ color: "hsl(var(--foreground))" }}
                   />
                   <Bar dataKey="served" stackId="a" fill="#10b981" name="Served" radius={[0,0,0,0]} />
                   <Bar dataKey="underserved" stackId="a" fill="#f59e0b" name="Underserved" />
@@ -165,10 +218,10 @@ export default function Dashboard() {
 
         {/* Quick Stats */}
         <div className="space-y-4">
-          <Card className="bg-background border-border">
+          <Card>
             <CardContent className="p-4">
               <div className="flex items-center justify-between mb-3">
-                <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Service Status</span>
+                <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Service Status</span>
               </div>
               <div className="space-y-2.5">
                 {[
@@ -179,30 +232,30 @@ export default function Dashboard() {
                   <div key={label} className="flex items-center gap-2.5">
                     <div className={`w-1.5 h-1.5 rounded-full ${color}`} />
                     <span className="text-sm text-muted-foreground flex-1">{label}</span>
-                    <span className="text-sm font-semibold text-foreground">{count}</span>
+                    <span className="text-sm font-bold text-foreground">{count}</span>
                   </div>
                 ))}
               </div>
             </CardContent>
           </Card>
 
-          <Card className="bg-background border-border">
+          <Card>
             <CardContent className="p-4">
               <div className="space-y-3">
                 <div className="flex items-center gap-2.5">
-                  <Hospital className="w-4 h-4 text-blue-400" />
+                  <Hospital className="w-4 h-4 text-blue-500 dark:text-blue-400" />
                   <span className="text-sm text-muted-foreground flex-1">Health Facilities</span>
-                  <span className="text-sm font-semibold text-foreground">{summary?.totalFacilities ?? 0}</span>
+                  <span className="text-sm font-bold text-foreground">{summary?.totalFacilities ?? 0}</span>
                 </div>
                 <div className="flex items-center gap-2.5">
-                  <MapPin className="w-4 h-4 text-purple-400" />
+                  <MapPin className="w-4 h-4 text-purple-500 dark:text-purple-400" />
                   <span className="text-sm text-muted-foreground flex-1">Total Population</span>
-                  <span className="text-sm font-semibold text-foreground">{(summary?.totalPopulation ?? 0).toLocaleString()}</span>
+                  <span className="text-sm font-bold text-foreground">{(summary?.totalPopulation ?? 0).toLocaleString()}</span>
                 </div>
                 <div className="flex items-center gap-2.5">
-                  <Zap className="w-4 h-4 text-amber-400" />
+                  <Zap className="w-4 h-4 text-amber-500 dark:text-amber-400" />
                   <span className="text-sm text-muted-foreground flex-1">New Settlements</span>
-                  <span className="text-sm font-semibold text-foreground">{summary?.newSettlementsCount ?? 0}</span>
+                  <span className="text-sm font-bold text-foreground">{summary?.newSettlementsCount ?? 0}</span>
                 </div>
               </div>
             </CardContent>
@@ -212,11 +265,11 @@ export default function Dashboard() {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Active Alerts */}
-        <Card className="bg-background border-border">
+        <Card>
           <CardHeader className="pb-2">
             <div className="flex items-center justify-between">
-              <CardTitle className="text-sm font-semibold text-foreground flex items-center gap-2">
-                <AlertTriangle className="w-4 h-4 text-amber-400" />
+              <CardTitle className="text-sm font-bold text-foreground flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-amber-500" />
                 Recent Alerts
               </CardTitle>
               <Link href="/vgie/alerts">
@@ -238,7 +291,7 @@ export default function Dashboard() {
               ))}
               {(!alerts || alerts.length === 0) && (
                 <div className="flex items-center justify-center py-6 text-muted-foreground text-sm">
-                  <Shield className="w-4 h-4 mr-2" /> No active alerts
+                  <Shield className="w-4 h-4 mr-2" /> No active alerts for the selected filters.
                 </div>
               )}
             </div>
@@ -246,11 +299,11 @@ export default function Dashboard() {
         </Card>
 
         {/* Pending Recommendations */}
-        <Card className="bg-background border-border">
+        <Card>
           <CardHeader className="pb-2">
             <div className="flex items-center justify-between">
-              <CardTitle className="text-sm font-semibold text-foreground flex items-center gap-2">
-                <Shield className="w-4 h-4 text-emerald-400" />
+              <CardTitle className="text-sm font-bold text-foreground flex items-center gap-2">
+                <Shield className="w-4 h-4 text-emerald-500" />
                 Pending Recommendations
               </CardTitle>
               <Link href="/vgie/recommendations">
@@ -275,7 +328,7 @@ export default function Dashboard() {
               ))}
               {(!recs || recs.length === 0) && (
                 <div className="flex items-center justify-center py-6 text-muted-foreground text-sm">
-                  <CheckCircle className="w-4 h-4 mr-2" /> All caught up!
+                  <CheckCircle className="w-4 h-4 mr-2" /> No pending recommendations for the selected filters.
                 </div>
               )}
             </div>
@@ -284,11 +337,11 @@ export default function Dashboard() {
       </div>
 
       {/* Outreach Coverage by District */}
-      <Card className="bg-background border-border">
+      <Card>
         <CardHeader className="pb-2">
           <div className="flex items-center justify-between">
-            <CardTitle className="text-sm font-semibold text-foreground flex items-center gap-2">
-              <Radio className="w-4 h-4 text-purple-400" />
+            <CardTitle className="text-sm font-bold text-foreground flex items-center gap-2">
+              <Radio className="w-4 h-4 text-purple-500 dark:text-purple-400" />
               Outreach Coverage by District
             </CardTitle>
             <span className="text-[10px] text-muted-foreground uppercase tracking-wider">sorted by most overdue</span>
@@ -310,18 +363,18 @@ export default function Dashboard() {
               <table className="w-full text-xs">
                 <thead>
                   <tr className="border-b border-border">
-                    <th className="text-left py-2 pr-4 font-medium text-muted-foreground uppercase tracking-wider">District</th>
-                    <th className="text-right py-2 pr-4 font-medium text-muted-foreground uppercase tracking-wider">Settlements</th>
-                    <th className="text-right py-2 pr-6 font-medium text-muted-foreground uppercase tracking-wider">
+                    <th className="text-left py-2 pr-4 font-semibold text-muted-foreground uppercase tracking-wider">District</th>
+                    <th className="text-right py-2 pr-4 font-semibold text-muted-foreground uppercase tracking-wider">Settlements</th>
+                    <th className="text-right py-2 pr-6 font-semibold text-muted-foreground uppercase tracking-wider">
                       <span className="text-emerald-500">Recent</span> <span className="text-muted-foreground">&lt;6 mo</span>
                     </th>
-                    <th className="text-right py-2 pr-4 font-medium text-muted-foreground uppercase tracking-wider">
+                    <th className="text-right py-2 pr-4 font-semibold text-muted-foreground uppercase tracking-wider">
                       <span className="text-red-500">Overdue</span> <span className="text-muted-foreground">&gt;12 mo / never</span>
                     </th>
                     <th className="py-2 w-8" />
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-800/60">
+                <tbody className="divide-y divide-border">
                   {outreachCoverage.map((row) => (
                     <tr key={row.district} className="hover:bg-muted transition-colors group">
                       <td className="py-2.5 pr-4 font-medium text-foreground">{row.district}</td>
@@ -370,10 +423,10 @@ export default function Dashboard() {
       </Card>
 
       {/* Recent Outreach Activity Feed */}
-      <Card className="bg-background border-border">
+      <Card>
         <CardHeader className="pb-2">
-          <CardTitle className="text-sm font-semibold text-foreground flex items-center gap-2">
-            <Activity className="w-4 h-4 text-emerald-400" />
+          <CardTitle className="text-sm font-bold text-foreground flex items-center gap-2">
+            <Activity className="w-4 h-4 text-emerald-500" />
             Recent Outreach
           </CardTitle>
         </CardHeader>
@@ -393,14 +446,14 @@ export default function Dashboard() {
               <table className="w-full text-xs">
                 <thead>
                   <tr className="border-b border-border">
-                    <th className="text-left py-2 pr-4 font-medium text-muted-foreground uppercase tracking-wider">Settlement</th>
-                    <th className="text-left py-2 pr-4 font-medium text-muted-foreground uppercase tracking-wider">District</th>
-                    <th className="text-left py-2 pr-4 font-medium text-muted-foreground uppercase tracking-wider">Date</th>
-                    <th className="text-left py-2 pr-4 font-medium text-muted-foreground uppercase tracking-wider">Vaccines</th>
-                    <th className="text-right py-2 font-medium text-muted-foreground uppercase tracking-wider">Children</th>
+                    <th className="text-left py-2 pr-4 font-semibold text-muted-foreground uppercase tracking-wider">Settlement</th>
+                    <th className="text-left py-2 pr-4 font-semibold text-muted-foreground uppercase tracking-wider">District</th>
+                    <th className="text-left py-2 pr-4 font-semibold text-muted-foreground uppercase tracking-wider">Date</th>
+                    <th className="text-left py-2 pr-4 font-semibold text-muted-foreground uppercase tracking-wider">Vaccines</th>
+                    <th className="text-right py-2 font-semibold text-muted-foreground uppercase tracking-wider">Children</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-800/60">
+                <tbody className="divide-y divide-border">
                   {outreachFeed.map((item) => (
                     <tr key={item.id} className="hover:bg-muted transition-colors group">
                       <td className="py-2.5 pr-4">

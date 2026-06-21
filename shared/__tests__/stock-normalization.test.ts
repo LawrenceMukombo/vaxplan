@@ -69,6 +69,7 @@ describe("Stock Vaccine Name Normalization", () => {
     const rawPayload = {
       tenantId: "test-tenant",
       facilityId: 1,
+      productId: 1,
       vaccineName: "Penta-1",
       transactionType: "receipt",
       quantityDoses: 100,

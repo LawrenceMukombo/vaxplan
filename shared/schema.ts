@@ -2457,7 +2457,7 @@ export const insertStockTransactionSchema = createInsertSchema(stockTransactions
 }).extend({
   productId: z.number().int().positive(),
   productCode: z.string().optional().nullable(),
-  vaccineName: z.string().optional().nullable(),
+  vaccineName: z.string().optional().nullable().transform((val) => val ? normalizeStockVaccineName(val) : val),
   expiryDate: z.coerce.date(),
   transactionDate: z.coerce.date().optional(),
 });
