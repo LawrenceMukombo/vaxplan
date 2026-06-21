@@ -37,6 +37,7 @@ import { applyNewUserRoles } from "./migrations/019-new-user-roles";
 import { up as applyColdChainEquipment } from "./migrations/020-cold-chain-equipment";
 import { up as applyStockNormalization } from "./migrations/021-normalize-stock-vaccine-names";
 import { up as applyResearchHubSchema } from "./migrations/022-research-hub-schema";
+import { applySafeGeometryFixes } from "./migrations/023-safe-geometry";
 
 
 const app = express();
@@ -351,6 +352,13 @@ async function backfillClientIds() {
       .then(() => log("research hub tables and seed data ensured", "db"))
       .catch((err) => log(`research hub migration warning: ${err?.message ?? err}`, "db"))
   ).catch((err) => log(`research hub migration db import failed: ${err?.message ?? err}`, "db"));
+
+  // Safe geometry and schema fixes (migration 023)
+  import("./db").then(({ db }) =>
+    applySafeGeometryFixes(db as any)
+      .then(() => log("geometry schema fixes applied", "db"))
+      .catch((err) => log(`geometry fixes warning: ${err?.message ?? err}`, "db"))
+  ).catch((err) => log(`geometry fixes db import failed: ${err?.message ?? err}`, "db"));
 
   setupRealtime(httpServer, getSession());
   startPopulationRefreshScheduler();
