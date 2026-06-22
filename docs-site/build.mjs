@@ -624,14 +624,12 @@ const html = `<!DOCTYPE html>
   let completedQuizzes = [];
   let quizSelectedAnswers = {};
 
-  const BADGES = [
+  let BADGES = [
     { id: "quickstart", name: "Quick-Start Pro", description: "Read the Facility Quick-Start guide.", icon: "⚡" },
-    { id: "gis_intel", name: "GIS Navigator", description: "Complete the Settlement Intelligence section and pass the quiz.", icon: "🛰️" },
-    { id: "routine_plan", name: "Field Commander", description: "Complete the Routine Microplanning section and pass the quiz.", icon: "🗺️" },
     { id: "scholar", name: "Wiki Scholar", description: "Mark all available wiki user guide sections as read.", icon: "🎓" },
   ];
 
-  const QUIZZES = {
+  let QUIZZES = {
     "11-settlement-intelligence-and-zero-dose-targeting": {
       id: "gis_intel",
       title: "Settlement Intelligence & Zero-Dose Quiz",
@@ -736,6 +734,28 @@ const html = `<!DOCTYPE html>
       PAGES = localPages.length ? localPages : FALLBACK_DATA.pages;
     }
 
+    function toSentenceCase(str) {
+      if (!str) return '';
+      return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
+    }
+
+    PAGES.forEach(p => {
+      p.title = toSentenceCase(p.title);
+      if (typeof p.gamification === 'string') {
+        try { p.gamification = JSON.parse(p.gamification); } catch(e) { p.gamification = {}; }
+      } else {
+        p.gamification = p.gamification || {};
+      }
+      if (p.gamification.badges && Array.isArray(p.gamification.badges)) {
+        p.gamification.badges.forEach(b => {
+          if (!BADGES.find(existing => existing.id === b.id)) BADGES.push(b);
+        });
+      }
+      if (p.gamification.quizzes && Array.isArray(p.gamification.quizzes) && p.gamification.quizzes.length > 0) {
+        QUIZZES[p.slug] = p.gamification.quizzes[0];
+      }
+    });
+
     renderSidebar();
     await renderAllContent(localCache);
     renderAchievements();
@@ -758,10 +778,19 @@ const html = `<!DOCTYPE html>
       nav.innerHTML = '<li style="padding:0.5rem 1rem;font-size:0.8rem;color:var(--text-muted)">No pages yet.</li>';
       return;
     }
+    const grouped = {};
+    PAGES.forEach(p => {
+      const cat = p.category || "General";
+      if (!grouped[cat]) grouped[cat] = [];
+      grouped[cat].push(p);
+    });
+    
     let navHtml = '';
-    for (let i = 0; i < PAGES.length; i++) {
-      const p = PAGES[i];
-      navHtml += '<li><a href="#' + p.slug + '" class="nav-link" onclick="navigate(' + String.fromCharCode(39) + p.slug + String.fromCharCode(39) + ')" id="nav-' + p.slug + '">' + escHtml(p.title) + '</a></li>';
+    for (const cat in grouped) {
+      navHtml += '<div style="margin-top:1rem; padding-left:0.75rem; font-size:0.65rem; font-weight:700; text-transform:uppercase; color:var(--primary);">' + escHtml(cat) + '</div>';
+      grouped[cat].forEach(p => {
+        navHtml += '<li><a href="#' + p.slug + '" class="nav-link" onclick="navigate(' + String.fromCharCode(39) + p.slug + String.fromCharCode(39) + ')" id="nav-' + p.slug + '">' + escHtml(p.title) + '</a></li>';
+      });
     }
     nav.innerHTML = navHtml;
   }
@@ -884,8 +913,12 @@ const html = `<!DOCTYPE html>
     
     const unlocked = [];
     if (readSections.includes('quickstart')) unlocked.push('quickstart');
-    if (completedQuizzes.includes('gis_intel')) unlocked.push('gis_intel');
-    if (completedQuizzes.includes('routine_plan')) unlocked.push('routine_plan');
+    
+    BADGES.forEach(b => {
+      if (b.id !== 'quickstart' && b.id !== 'scholar') {
+        if (completedQuizzes.includes(b.id)) unlocked.push(b.id);
+      }
+    });
     
     const allPagesRead = PAGES.length > 0 && PAGES.every(p => readSections.includes(p.slug));
     if (allPagesRead) unlocked.push('scholar');

@@ -598,6 +598,7 @@ export const villages = pgTable("villages", {
   detectionSource: varchar("detection_source", { length: 50 }),
   isMappedInHmis: boolean("is_mapped_in_hmis").default(false),
   lastVerified: timestamp("last_verified"),
+  linkedSettlementId: integer("linked_settlement_id"),
 
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
@@ -1909,7 +1910,28 @@ export const settlementsMaster = pgTable(
     estimatedTravelTime: integer("estimated_travel_time"), // minutes
     accessibilityScore: decimal("accessibility_score", { precision: 5, scale: 2 }), // 1.0 to 4.0
     hardToReach: boolean("hard_to_reach").default(false).notNull(),
-    validationStatus: varchar("validation_status", { length: 50 }).default("approved").notNull(), // approved, pending
+    validationStatus: varchar("validation_status", { length: 50 }).default("approved").notNull(), // approved, pending, needs_review, duplicate
+    
+    // Additive columns for Settlements GIS upgrade
+    provinceId: integer("province_id"),
+    districtId: integer("district_id"),
+    linkedCommunityId: integer("linked_community_id"),
+    linkedFacilityId: integer("linked_facility_id"),
+    nearestFacilityId: integer("nearest_facility_id"),
+    distanceToLinkedFacilityKm: decimal("distance_to_linked_facility_km", { precision: 8, scale: 2 }),
+    estimatedWalkingTimeMinutes: integer("estimated_walking_time_minutes"),
+    estimatedDrivingTimeMinutes: integer("estimated_driving_time_minutes"),
+    travelModePlanning: varchar("travel_mode_planning", { length: 50 }),
+    drySeasonTravelTimeMinutes: integer("dry_season_travel_time_minutes"),
+    rainySeasonTravelTimeMinutes: integer("rainy_season_travel_time_minutes"),
+    linkStatus: varchar("link_status", { length: 50 }).default("unassigned"),
+    linkMethod: varchar("link_method", { length: 50 }),
+    linkConfidence: decimal("link_confidence", { precision: 5, scale: 2 }),
+    linkNotes: text("link_notes"),
+    serviceStatus: varchar("service_status", { length: 50 }).default("unserved"),
+    riskLevel: varchar("risk_level", { length: 50 }).default("low"),
+    isActive: boolean("is_active").default(true),
+
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow(),
   },

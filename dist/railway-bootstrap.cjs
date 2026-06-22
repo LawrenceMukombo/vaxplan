@@ -159,7 +159,9 @@ __export(schema_exports, {
   insertUserSchema: () => insertUserSchema,
   insertVaccineConfigSchema: () => insertVaccineConfigSchema,
   insertVaccineRequirementSchema: () => insertVaccineRequirementSchema,
+  insertVgieAlertRuleSchema: () => insertVgieAlertRuleSchema,
   insertVgieAlertSchema: () => insertVgieAlertSchema,
+  insertVgieRecommendationRuleSchema: () => insertVgieRecommendationRuleSchema,
   insertVgieRecommendationSchema: () => insertVgieRecommendationSchema,
   insertVgieSettlementFacilityLinkSchema: () => insertVgieSettlementFacilityLinkSchema,
   insertVillageSchema: () => insertVillageSchema,
@@ -202,6 +204,8 @@ __export(schema_exports, {
   selectCatalogueVaccineSchema: () => selectCatalogueVaccineSchema,
   selectCatalogueWastageThresholdSchema: () => selectCatalogueWastageThresholdSchema,
   selectGisPolygonSchema: () => selectGisPolygonSchema,
+  selectVgieAlertRuleSchema: () => selectVgieAlertRuleSchema,
+  selectVgieRecommendationRuleSchema: () => selectVgieRecommendationRuleSchema,
   sessionDayPlans: () => sessionDayPlans,
   sessionDayPlansRelations: () => sessionDayPlansRelations,
   sessionPlanTypeEnum: () => sessionPlanTypeEnum,
@@ -238,7 +242,11 @@ __export(schema_exports, {
   vaccineConfigurations: () => vaccineConfigurations,
   vaccineConfigurationsRelations: () => vaccineConfigurationsRelations,
   vaccineRequirements: () => vaccineRequirements,
+  vgieAlertRules: () => vgieAlertRules,
+  vgieAlertRulesRelations: () => vgieAlertRulesRelations,
   vgieAlerts: () => vgieAlerts,
+  vgieRecommendationRules: () => vgieRecommendationRules,
+  vgieRecommendationRulesRelations: () => vgieRecommendationRulesRelations,
   vgieRecommendations: () => vgieRecommendations,
   vgieSettlementFacilityLinks: () => vgieSettlementFacilityLinks,
   villages: () => villages,
@@ -250,6 +258,50 @@ var import_drizzle_orm = require("drizzle-orm");
 var import_pg_core = require("drizzle-orm/pg-core");
 var import_drizzle_zod = require("drizzle-zod");
 var import_zod = require("zod");
+
+// shared/vaccineSchedule.ts
+function normalizeStockVaccineName(input) {
+  if (!input) return "";
+  let value = input.trim().toUpperCase();
+  value = value.replace(/DOSE\s*-?\s*([0-9]+)/g, "-$1");
+  value = value.replace(/\s+/g, "");
+  value = value.replace(/^([A-Z]+)-?([0-9]+)$/, "$1-$2");
+  const mapping = {
+    "BCG": "BCG",
+    "OPV": "OPV",
+    "OPV-0": "OPV",
+    "OPV-1": "OPV",
+    "OPV-2": "OPV",
+    "OPV-3": "OPV",
+    "IPV": "IPV",
+    "IPV-1": "IPV",
+    "IPV-2": "IPV",
+    "PCV": "PCV",
+    "PCV-1": "PCV",
+    "PCV-2": "PCV",
+    "PCV-3": "PCV",
+    "PENTA": "PENTA",
+    "PENTA-1": "PENTA",
+    "PENTA-2": "PENTA",
+    "PENTA-3": "PENTA",
+    "ROTA": "ROTAVIRUS",
+    "ROTA-1": "ROTAVIRUS",
+    "ROTA-2": "ROTAVIRUS",
+    "ROTAVIRUS": "ROTAVIRUS",
+    "MR": "MR",
+    "MR-1": "MR",
+    "MR-2": "MR",
+    "TT": "TT",
+    "TT-1": "TT",
+    "TT-2": "TT",
+    "HPV": "HPV",
+    "COVID-19": "COVID-19",
+    "TD": "TD"
+  };
+  return mapping[value] ?? input.trim();
+}
+
+// shared/schema.ts
 var tenantStatusEnum = (0, import_pg_core.pgEnum)("tenant_status", [
   "trial",
   "active",
@@ -633,9 +685,15 @@ var villages = (0, import_pg_core.pgTable)("villages", {
   detectionSource: (0, import_pg_core.varchar)("detection_source", { length: 50 }),
   isMappedInHmis: (0, import_pg_core.boolean)("is_mapped_in_hmis").default(false),
   lastVerified: (0, import_pg_core.timestamp)("last_verified"),
+  linkedSettlementId: (0, import_pg_core.integer)("linked_settlement_id"),
   createdAt: (0, import_pg_core.timestamp)("created_at").defaultNow(),
   updatedAt: (0, import_pg_core.timestamp)("updated_at").defaultNow()
-}, (table) => [(0, import_pg_core.index)("idx_villages_tenant").on(table.tenantId)]);
+}, (table) => [
+  (0, import_pg_core.index)("idx_villages_tenant").on(table.tenantId),
+  (0, import_pg_core.index)("idx_villages_district").on(table.districtId),
+  (0, import_pg_core.index)("idx_villages_facility").on(table.assignedFacilityId),
+  (0, import_pg_core.index)("idx_villages_name").on(table.name)
+]);
 var catchmentConflicts = (0, import_pg_core.pgTable)("catchment_conflicts", {
   id: (0, import_pg_core.integer)("id").primaryKey().generatedAlwaysAsIdentity(),
   tenantId: (0, import_pg_core.varchar)("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
@@ -691,6 +749,8 @@ var vgieAlerts = (0, import_pg_core.pgTable)("vgie_alerts", {
   message: (0, import_pg_core.text)("message"),
   status: (0, import_pg_core.varchar)("status", { length: 50 }).notNull().default("active"),
   // active, resolved
+  villageId: (0, import_pg_core.integer)("village_id").references(() => villages.id, { onDelete: "cascade" }),
+  facilityId: (0, import_pg_core.integer)("facility_id").references(() => facilities.id, { onDelete: "cascade" }),
   createdAt: (0, import_pg_core.timestamp)("created_at").defaultNow(),
   updatedAt: (0, import_pg_core.timestamp)("updated_at").defaultNow()
 });
@@ -1607,7 +1667,26 @@ var settlementsMaster = (0, import_pg_core.pgTable)(
     // 1.0 to 4.0
     hardToReach: (0, import_pg_core.boolean)("hard_to_reach").default(false).notNull(),
     validationStatus: (0, import_pg_core.varchar)("validation_status", { length: 50 }).default("approved").notNull(),
-    // approved, pending
+    // approved, pending, needs_review, duplicate
+    // Additive columns for Settlements GIS upgrade
+    provinceId: (0, import_pg_core.integer)("province_id"),
+    districtId: (0, import_pg_core.integer)("district_id"),
+    linkedCommunityId: (0, import_pg_core.integer)("linked_community_id"),
+    linkedFacilityId: (0, import_pg_core.integer)("linked_facility_id"),
+    nearestFacilityId: (0, import_pg_core.integer)("nearest_facility_id"),
+    distanceToLinkedFacilityKm: (0, import_pg_core.decimal)("distance_to_linked_facility_km", { precision: 8, scale: 2 }),
+    estimatedWalkingTimeMinutes: (0, import_pg_core.integer)("estimated_walking_time_minutes"),
+    estimatedDrivingTimeMinutes: (0, import_pg_core.integer)("estimated_driving_time_minutes"),
+    travelModePlanning: (0, import_pg_core.varchar)("travel_mode_planning", { length: 50 }),
+    drySeasonTravelTimeMinutes: (0, import_pg_core.integer)("dry_season_travel_time_minutes"),
+    rainySeasonTravelTimeMinutes: (0, import_pg_core.integer)("rainy_season_travel_time_minutes"),
+    linkStatus: (0, import_pg_core.varchar)("link_status", { length: 50 }).default("unassigned"),
+    linkMethod: (0, import_pg_core.varchar)("link_method", { length: 50 }),
+    linkConfidence: (0, import_pg_core.decimal)("link_confidence", { precision: 5, scale: 2 }),
+    linkNotes: (0, import_pg_core.text)("link_notes"),
+    serviceStatus: (0, import_pg_core.varchar)("service_status", { length: 50 }).default("unserved"),
+    riskLevel: (0, import_pg_core.varchar)("risk_level", { length: 50 }).default("low"),
+    isActive: (0, import_pg_core.boolean)("is_active").default(true),
     createdAt: (0, import_pg_core.timestamp)("created_at").defaultNow(),
     updatedAt: (0, import_pg_core.timestamp)("updated_at").defaultNow()
   },
@@ -2046,7 +2125,7 @@ var insertStockTransactionSchema = (0, import_drizzle_zod.createInsertSchema)(st
 }).extend({
   productId: import_zod.z.number().int().positive(),
   productCode: import_zod.z.string().optional().nullable(),
-  vaccineName: import_zod.z.string().optional().nullable(),
+  vaccineName: import_zod.z.string().optional().nullable().transform((val) => val ? normalizeStockVaccineName(val) : val),
   expiryDate: import_zod.z.coerce.date(),
   transactionDate: import_zod.z.coerce.date().optional()
 });
@@ -2860,6 +2939,57 @@ var gisPolygonsRelations = (0, import_drizzle_orm.relations)(gisPolygons, ({ one
 }));
 var insertGisPolygonSchema = (0, import_drizzle_zod.createInsertSchema)(gisPolygons);
 var selectGisPolygonSchema = (0, import_drizzle_zod.createSelectSchema)(gisPolygons);
+var vgieRecommendationRules = (0, import_pg_core.pgTable)("vgie_recommendation_rules", {
+  id: (0, import_pg_core.integer)("id").primaryKey().generatedAlwaysAsIdentity(),
+  tenantId: (0, import_pg_core.varchar)("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  name: (0, import_pg_core.varchar)("name", { length: 255 }).notNull(),
+  description: (0, import_pg_core.text)("description"),
+  category: (0, import_pg_core.varchar)("category", { length: 100 }).notNull(),
+  // 'accessibility', 'population', 'coverage', 'infrastructure'
+  conditionSql: (0, import_pg_core.text)("condition_sql").notNull(),
+  // Evaluated logic expression
+  recommendationText: (0, import_pg_core.text)("recommendation_text").notNull(),
+  priority: (0, import_pg_core.varchar)("priority", { length: 50 }).notNull().default("medium"),
+  // 'high', 'medium', 'low'
+  isActive: (0, import_pg_core.boolean)("is_active").default(true).notNull(),
+  createdByUserId: (0, import_pg_core.varchar)("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  createdAt: (0, import_pg_core.timestamp)("created_at").defaultNow(),
+  updatedAt: (0, import_pg_core.timestamp)("updated_at").defaultNow()
+}, (table) => ({
+  tenantIdx: (0, import_pg_core.index)("idx_vgie_rec_rules_tenant").on(table.tenantId)
+}));
+var vgieAlertRules = (0, import_pg_core.pgTable)("vgie_alert_rules", {
+  id: (0, import_pg_core.integer)("id").primaryKey().generatedAlwaysAsIdentity(),
+  tenantId: (0, import_pg_core.varchar)("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  name: (0, import_pg_core.varchar)("name", { length: 255 }).notNull(),
+  description: (0, import_pg_core.text)("description"),
+  severity: (0, import_pg_core.varchar)("severity", { length: 50 }).notNull().default("warning"),
+  // 'critical', 'warning', 'info'
+  triggerCondition: (0, import_pg_core.text)("trigger_condition").notNull(),
+  alertTemplate: (0, import_pg_core.text)("alert_template").notNull(),
+  isActive: (0, import_pg_core.boolean)("is_active").default(true).notNull(),
+  createdByUserId: (0, import_pg_core.varchar)("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  createdAt: (0, import_pg_core.timestamp)("created_at").defaultNow(),
+  updatedAt: (0, import_pg_core.timestamp)("updated_at").defaultNow()
+}, (table) => ({
+  tenantIdx: (0, import_pg_core.index)("idx_vgie_alert_rules_tenant").on(table.tenantId)
+}));
+var vgieRecommendationRulesRelations = (0, import_drizzle_orm.relations)(vgieRecommendationRules, ({ one }) => ({
+  tenant: one(tenants, {
+    fields: [vgieRecommendationRules.tenantId],
+    references: [tenants.id]
+  })
+}));
+var vgieAlertRulesRelations = (0, import_drizzle_orm.relations)(vgieAlertRules, ({ one }) => ({
+  tenant: one(tenants, {
+    fields: [vgieAlertRules.tenantId],
+    references: [tenants.id]
+  })
+}));
+var insertVgieRecommendationRuleSchema = (0, import_drizzle_zod.createInsertSchema)(vgieRecommendationRules);
+var selectVgieRecommendationRuleSchema = (0, import_drizzle_zod.createSelectSchema)(vgieRecommendationRules);
+var insertVgieAlertRuleSchema = (0, import_drizzle_zod.createInsertSchema)(vgieAlertRules);
+var selectVgieAlertRuleSchema = (0, import_drizzle_zod.createSelectSchema)(vgieAlertRules);
 
 // server/db.ts
 var { Pool } = import_pg.default;

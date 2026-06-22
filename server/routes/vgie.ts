@@ -12,6 +12,7 @@ import {
   provinces,
   vgieRecommendationRules,
   vgieAlertRules,
+  settlementsMaster,
 } from "../../shared/schema";
 import { eq, and, sql, count, desc, asc, ilike, or, inArray } from "drizzle-orm";
 
@@ -592,6 +593,30 @@ router.get("/dashboard/outreach-feed", async (req: any, res) => {
   }
 });
 
+// Helper for straight-line geodetic distance (Haversine formula)
+function getHaversineDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6371; // Radius of earth in km
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
+// Helper to estimate travel time in minutes based on distance and transport mode
+function estimateTravelTimeMinutes(distanceKm: number, mode: string): number {
+  let speedKmh = 4; // walking default
+  if (mode === "bicycle") speedKmh = 10;
+  else if (mode === "motorbike") speedKmh = 25;
+  else if (mode === "car" || mode === "road") speedKmh = 40;
+  else if (mode === "boat") speedKmh = 15;
+  else if (mode === "air" || mode === "chopper") speedKmh = 100;
+  return Math.max(5, Math.round((distanceKm / speedKmh) * 60));
+}
+
 // ── /api/vgie/settlements ─────────────────────────────────────────────────────
 router.get("/settlements", async (req: any, res) => {
   try {
@@ -613,56 +638,30 @@ router.get("/settlements", async (req: any, res) => {
     const offset = (pageNum - 1) * sizeNum;
 
     // Build conditions array
-    const conditions: any[] = [eq(villages.tenantId, req.tenantId)];
+    const conditions: any[] = [
+      eq(settlementsMaster.tenantId, req.tenantId),
+      eq(settlementsMaster.isActive, true)
+    ];
 
-    // 1. Status Filter
+    // 1. Service Status Filter
     if (status && status !== "all") {
-      if (status === "served") {
-        conditions.push(
-          and(
-            sql`${villages.assignedFacilityId} IS NOT NULL`,
-            sql`${villages.distanceToFacility} <= 5`
-          )
-        );
-      } else if (status === "underserved") {
-        conditions.push(
-          and(
-            sql`${villages.assignedFacilityId} IS NOT NULL`,
-            or(
-              sql`${villages.distanceToFacility} > 5`,
-              sql`${villages.distanceToFacility} IS NULL`
-            )
-          )
-        );
-      } else if (status === "unserved") {
-        conditions.push(sql`${villages.assignedFacilityId} IS NULL`);
-      }
+      conditions.push(eq(settlementsMaster.serviceStatus, status));
     }
 
-    // 2. Risk Level Filter (based on deterministic risk score computation)
-    // riskScore = CASE WHEN highRisk = true THEN 60 + (id % 31) ELSE id % 40 END
+    // 2. Risk Level Filter
     if (risk && risk !== "all") {
-      const riskScoreSql = sql`(CASE WHEN ${villages.highRisk} = true THEN 60 + (${villages.id} % 31) ELSE ${villages.id} % 40 END)`;
-      if (risk === "very_high") {
-        conditions.push(sql`${riskScoreSql} >= 75`);
-      } else if (risk === "high") {
-        conditions.push(sql`${riskScoreSql} >= 50 AND ${riskScoreSql} < 75`);
-      } else if (risk === "medium") {
-        conditions.push(sql`${riskScoreSql} >= 25 AND ${riskScoreSql} < 50`);
-      } else if (risk === "low") {
-        conditions.push(sql`${riskScoreSql} < 25`);
-      }
+      conditions.push(eq(settlementsMaster.riskLevel, risk));
     }
 
     // 3. Location Filters
     if (provinceId && provinceId !== "all") {
-      conditions.push(eq(districts.provinceId, Number(provinceId)));
+      conditions.push(eq(settlementsMaster.provinceId, Number(provinceId)));
     }
     if (districtId && districtId !== "all") {
-      conditions.push(eq(villages.districtId, Number(districtId)));
+      conditions.push(eq(settlementsMaster.districtId, Number(districtId)));
     }
     if (facilityId && facilityId !== "all") {
-      conditions.push(eq(villages.assignedFacilityId, Number(facilityId)));
+      conditions.push(eq(settlementsMaster.linkedFacilityId, Number(facilityId)));
     }
 
     // 4. Search Filter
@@ -670,79 +669,51 @@ router.get("/settlements", async (req: any, res) => {
       const q = `%${search.toLowerCase()}%`;
       conditions.push(
         or(
-          ilike(villages.name, q),
-          ilike(districts.name, q),
-          ilike(villages.code, q)
+          ilike(settlementsMaster.name, q),
+          ilike(settlementsMaster.provinceName, q),
+          ilike(settlementsMaster.districtName, q)
         )
       );
     }
 
     // Determine Sort Field
-    let orderByField: any = villages.name;
+    let orderByField: any = settlementsMaster.name;
     if (sortBy === "province") {
-      orderByField = provinces.name;
+      orderByField = settlementsMaster.provinceName;
     } else if (sortBy === "district") {
-      orderByField = districts.name;
+      orderByField = settlementsMaster.districtName;
     } else if (sortBy === "facility") {
-      orderByField = facilities.name;
+      orderByField = settlementsMaster.linkedFacilityId;
     } else if (sortBy === "population") {
-      orderByField = sql`COALESCE(${villages.griddedPopulation}, ${villages.totalCatchmentPopulation}, 0)`;
+      orderByField = settlementsMaster.populationEstimate;
     } else if (sortBy === "riskScore") {
-      orderByField = sql`CASE WHEN ${villages.highRisk} = true THEN 60 + (${villages.id} % 31) ELSE ${villages.id} % 40 END`;
+      orderByField = settlementsMaster.riskLevel;
+    } else if (sortBy === "distance") {
+      orderByField = settlementsMaster.distanceToLinkedFacilityKm;
+    } else if (sortBy === "travelTime") {
+      orderByField = settlementsMaster.estimatedWalkingTimeMinutes;
     }
 
     const sortOrderFunc = sortOrder === "desc" ? desc(orderByField) : asc(orderByField);
 
-    // Dynamic Select lightweight columns (excluding boundary / catchmentPolygon)
-    const selectColumns = {
-      id: villages.id,
-      name: villages.name,
-      code: villages.code,
-      districtId: villages.districtId,
-      districtName: districts.name,
-      provinceId: districts.provinceId,
-      provinceName: provinces.name,
-      assignedFacilityId: villages.assignedFacilityId,
-      facilityName: facilities.name,
-      latitude: villages.latitude,
-      longitude: villages.longitude,
-      griddedPopulation: villages.griddedPopulation,
-      totalCatchmentPopulation: villages.totalCatchmentPopulation,
-      distanceToFacility: villages.distanceToFacility,
-      isHardToReach: villages.isHardToReach,
-      highRisk: villages.highRisk,
-      settlementType: villages.settlementType,
-      isMappedInHmis: villages.isMappedInHmis,
-      lastVerified: villages.lastVerified,
-      under5Population: villages.under5Population,
-      createdAt: villages.createdAt,
-    };
-
     // Query Total Filtered Count for pagination
     const [countResult] = await db
       .select({ count: count() })
-      .from(villages)
-      .leftJoin(districts, eq(villages.districtId, districts.id))
+      .from(settlementsMaster)
       .where(and(...conditions));
     const total = countResult?.count ?? 0;
     const totalPages = Math.ceil(total / sizeNum);
 
-    // Query Paginated or Full Items based on page parameter
+    // Query Items
     const items = page === "all"
       ? await db
-          .select(selectColumns)
-          .from(villages)
-          .leftJoin(districts, eq(villages.districtId, districts.id))
-          .leftJoin(provinces, eq(districts.provinceId, provinces.id))
-          .leftJoin(facilities, eq(villages.assignedFacilityId, facilities.id))
+          .select()
+          .from(settlementsMaster)
           .where(and(...conditions))
           .orderBy(sortOrderFunc)
       : await db
-          .select(selectColumns)
-          .from(villages)
-          .leftJoin(districts, eq(villages.districtId, districts.id))
-          .leftJoin(provinces, eq(districts.provinceId, provinces.id))
-          .leftJoin(facilities, eq(villages.assignedFacilityId, facilities.id))
+          .select()
+          .from(settlementsMaster)
           .where(and(...conditions))
           .orderBy(sortOrderFunc)
           .limit(sizeNum)
@@ -751,14 +722,13 @@ router.get("/settlements", async (req: any, res) => {
     // Query Summary Counts for Tenant overall
     const countQuery = await db
       .select({
-        highRisk: villages.highRisk,
-        assignedFacilityId: villages.assignedFacilityId,
-        distanceToFacility: villages.distanceToFacility,
+        riskLevel: settlementsMaster.riskLevel,
+        serviceStatus: settlementsMaster.serviceStatus,
         count: count(),
       })
-      .from(villages)
-      .where(eq(villages.tenantId, req.tenantId))
-      .groupBy(villages.highRisk, villages.assignedFacilityId, villages.distanceToFacility);
+      .from(settlementsMaster)
+      .where(and(eq(settlementsMaster.tenantId, req.tenantId), eq(settlementsMaster.isActive, true)))
+      .groupBy(settlementsMaster.riskLevel, settlementsMaster.serviceStatus);
 
     let totalCount = 0;
     let servedCount = 0;
@@ -769,46 +739,36 @@ router.get("/settlements", async (req: any, res) => {
     for (const group of countQuery) {
       const c = Number(group.count || 0);
       totalCount += c;
-      if (group.highRisk) {
+      if (group.riskLevel === "high" || group.riskLevel === "very_high") {
         highRiskCount += c;
       }
-      if (!group.assignedFacilityId) {
-        unservedCount += c;
+      if (group.serviceStatus === "served") {
+        servedCount += c;
+      } else if (group.serviceStatus === "underserved") {
+        underservedCount += c;
       } else {
-        const dist = group.distanceToFacility ? Number(group.distanceToFacility) : null;
-        if (dist !== null && dist <= 5) {
-          servedCount += c;
-        } else {
-          underservedCount += c;
-        }
+        unservedCount += c;
       }
     }
 
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
+    const allFacilitiesForTenant = await db
+      .select({ id: facilities.id, name: facilities.name })
+      .from(facilities)
+      .where(eq(facilities.tenantId, req.tenantId));
+    const facilityNameMap = new Map(allFacilitiesForTenant.map(f => [f.id, f.name]));
+
+    const allVillagesForTenant = await db
+      .select({ id: villages.id, name: villages.name })
+      .from(villages)
+      .where(eq(villages.tenantId, req.tenantId));
+    const communityNameMap = new Map(allVillagesForTenant.map(v => [v.id, v.name]));
+
     const itemsMapped = items.map((v) => {
-      const pop = Number(v.griddedPopulation || v.totalCatchmentPopulation || 0);
-      let serviceStatus = "unserved";
-      if (v.assignedFacilityId) {
-        serviceStatus =
-          v.distanceToFacility && Number(v.distanceToFacility) <= 5
-            ? "served"
-            : "underserved";
-      }
-
-      const riskScore = v.highRisk
-        ? Math.min(95, 60 + (v.id % 31))
-        : v.id % 40;
-
-      const riskLevelComputed =
-        riskScore >= 75
-          ? "very_high"
-          : riskScore >= 50
-          ? "high"
-          : riskScore >= 25
-          ? "medium"
-          : "low";
+      const pop = Number(v.populationEstimate || 0);
+      const riskScore = v.riskLevel === "very_high" ? 85 : v.riskLevel === "high" ? 65 : v.riskLevel === "medium" ? 35 : 15;
 
       return {
         id: v.id,
@@ -817,25 +777,24 @@ router.get("/settlements", async (req: any, res) => {
         provinceId: v.provinceId,
         district: v.districtName || "Unknown",
         districtId: v.districtId,
-        facility: v.facilityName,
-        assignedFacilityId: v.assignedFacilityId,
+        facilityId: v.linkedFacilityId,
+        facility: v.linkedFacilityId ? facilityNameMap.get(v.linkedFacilityId) : null,
+        linkedCommunityId: v.linkedCommunityId,
+        linkedCommunityName: v.linkedCommunityId ? communityNameMap.get(v.linkedCommunityId) : null,
         latitude: v.latitude ? Number(v.latitude) : null,
         longitude: v.longitude ? Number(v.longitude) : null,
         population: pop,
-        serviceStatus,
-        riskLevel: riskLevelComputed,
+        serviceStatus: v.serviceStatus,
+        riskLevel: v.riskLevel,
         riskScore,
-        distanceToFacility: v.distanceToFacility
-          ? Number(v.distanceToFacility)
-          : null,
-        isHardToReach: v.isHardToReach,
-        highRisk: v.highRisk,
-        settlementType: v.settlementType,
-        isNewSettlement:
-          v.createdAt != null && new Date(v.createdAt) > thirtyDaysAgo,
+        distanceToFacility: v.distanceToLinkedFacilityKm ? Number(v.distanceToLinkedFacilityKm) : null,
+        estimatedWalkingTimeMinutes: v.estimatedWalkingTimeMinutes,
+        estimatedDrivingTimeMinutes: v.estimatedDrivingTimeMinutes,
+        travelModePlanning: v.travelModePlanning,
+        linkStatus: v.linkStatus,
+        isHardToReach: v.hardToReach,
+        isNewSettlement: v.createdAt != null && new Date(v.createdAt) > thirtyDaysAgo,
         under5Population: v.under5Population,
-        isMappedInHmis: v.isMappedInHmis,
-        lastVerified: v.lastVerified,
         createdAt: v.createdAt,
       };
     });
@@ -865,6 +824,313 @@ router.get("/settlements", async (req: any, res) => {
   }
 });
 
+// ── POST /api/vgie/settlements (Manually Add Settlement) ──────────────────────
+router.post("/settlements", async (req: any, res) => {
+  try {
+    const { name, placeType = "village", latitude, longitude, provinceId, districtId, populationEstimate = 120 } = req.body;
+    if (!name || latitude == null || longitude == null) {
+      return res.status(400).json({ error: "Missing required fields (name, latitude, longitude)" });
+    }
+
+    const [newSettlement] = await db
+      .insert(settlementsMaster)
+      .values({
+        tenantId: req.tenantId,
+        name,
+        placeType,
+        latitude: String(latitude),
+        longitude: String(longitude),
+        provinceId: provinceId ? Number(provinceId) : null,
+        districtId: districtId ? Number(districtId) : null,
+        populationEstimate: Number(populationEstimate),
+        under5Population: Math.round(Number(populationEstimate) * 0.18),
+        validationStatus: "pending",
+        source: "manual_input",
+        serviceStatus: "unserved",
+        linkStatus: "unassigned",
+      })
+      .returning();
+
+    res.status(201).json({ success: true, data: newSettlement });
+  } catch (err) {
+    console.error("Failed to create settlement:", err);
+    res.status(500).json({ error: "Failed to create settlement" });
+  }
+});
+
+// ── PUT /api/vgie/settlements/:id (Edit Settlement) ───────────────────────────
+router.put("/settlements/:id", async (req: any, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+
+    const [existing] = await db
+      .select()
+      .from(settlementsMaster)
+      .where(and(eq(settlementsMaster.id, id), eq(settlementsMaster.tenantId, req.tenantId)));
+
+    if (!existing) return res.status(404).json({ error: "Settlement not found" });
+
+    const updates = {
+      name: req.body.name ?? existing.name,
+      placeType: req.body.placeType ?? existing.placeType,
+      latitude: req.body.latitude != null ? String(req.body.latitude) : existing.latitude,
+      longitude: req.body.longitude != null ? String(req.body.longitude) : existing.longitude,
+      populationEstimate: req.body.populationEstimate != null ? Number(req.body.populationEstimate) : existing.populationEstimate,
+      under5Population: req.body.populationEstimate != null ? Math.round(Number(req.body.populationEstimate) * 0.18) : existing.under5Population,
+      validationStatus: req.body.validationStatus ?? existing.validationStatus,
+      serviceStatus: req.body.serviceStatus ?? existing.serviceStatus,
+      riskLevel: req.body.riskLevel ?? existing.riskLevel,
+      hardToReach: req.body.hardToReach ?? existing.hardToReach,
+      updatedAt: new Date(),
+    };
+
+    const [updated] = await db
+      .update(settlementsMaster)
+      .set(updates)
+      .where(eq(settlementsMaster.id, id))
+      .returning();
+
+    res.json({ success: true, data: updated });
+  } catch (err) {
+    console.error("Failed to update settlement:", err);
+    res.status(500).json({ error: "Failed to update settlement" });
+  }
+});
+
+// ── DELETE /api/vgie/settlements/:id (Archive/Deactivate Settlement) ───────────
+router.delete("/settlements/:id", async (req: any, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+
+    const [existing] = await db
+      .select()
+      .from(settlementsMaster)
+      .where(and(eq(settlementsMaster.id, id), eq(settlementsMaster.tenantId, req.tenantId)));
+
+    if (!existing) return res.status(404).json({ error: "Settlement not found" });
+
+    await db
+      .update(settlementsMaster)
+      .set({ isActive: false, validationStatus: "archived", updatedAt: new Date() })
+      .where(eq(settlementsMaster.id, id));
+
+    res.json({ success: true, message: "Settlement archived successfully" });
+  } catch (err) {
+    console.error("Failed to archive settlement:", err);
+    res.status(500).json({ error: "Failed to archive settlement" });
+  }
+});
+
+// ── POST /api/vgie/settlements/:id/link-facility ──────────────────────────────
+router.post("/settlements/:id/link-facility", async (req: any, res) => {
+  try {
+    const id = Number(req.params.id);
+    const { facilityId, transportMode = "walking", linkMethod = "manual", notes } = req.body;
+    if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+    if (!facilityId) return res.status(400).json({ error: "facilityId is required" });
+
+    const [settlement] = await db
+      .select()
+      .from(settlementsMaster)
+      .where(and(eq(settlementsMaster.id, id), eq(settlementsMaster.tenantId, req.tenantId)));
+    if (!settlement) return res.status(404).json({ error: "Settlement not found" });
+
+    const [facility] = await db
+      .select()
+      .from(facilities)
+      .where(and(eq(facilities.id, Number(facilityId)), eq(facilities.tenantId, req.tenantId)));
+    if (!facility) return res.status(404).json({ error: "Facility not found" });
+
+    const distance = getHaversineDistance(
+      Number(settlement.latitude),
+      Number(settlement.longitude),
+      Number(facility.latitude),
+      Number(facility.longitude)
+    );
+
+    const walkingTime = estimateTravelTimeMinutes(distance, "walking");
+    const drivingTime = estimateTravelTimeMinutes(distance, transportMode);
+
+    await db
+      .update(settlementsMaster)
+      .set({
+        linkedFacilityId: facility.id,
+        distanceToLinkedFacilityKm: String(distance.toFixed(2)),
+        estimatedWalkingTimeMinutes: walkingTime,
+        estimatedDrivingTimeMinutes: drivingTime,
+        travelModePlanning: transportMode,
+        drySeasonTravelTimeMinutes: walkingTime,
+        rainySeasonTravelTimeMinutes: Math.round(walkingTime * 1.5),
+        linkStatus: "linked",
+        linkMethod,
+        linkNotes: notes,
+        serviceStatus: distance <= 5 ? "served" : "underserved",
+        updatedAt: new Date(),
+      })
+      .where(eq(settlementsMaster.id, id));
+
+    res.json({ success: true, message: "Linked to facility successfully", data: { distance, travelTime: drivingTime } });
+  } catch (err) {
+    console.error("Failed to link facility:", err);
+    res.status(500).json({ error: "Failed to link facility" });
+  }
+});
+
+// ── POST /api/vgie/settlements/:id/link-community ─────────────────────────────
+router.post("/settlements/:id/link-community", async (req: any, res) => {
+  try {
+    const id = Number(req.params.id);
+    const { communityId } = req.body;
+    if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+    if (!communityId) return res.status(400).json({ error: "communityId is required" });
+
+    const [settlement] = await db
+      .select()
+      .from(settlementsMaster)
+      .where(and(eq(settlementsMaster.id, id), eq(settlementsMaster.tenantId, req.tenantId)));
+    if (!settlement) return res.status(404).json({ error: "Settlement not found" });
+
+    const [community] = await db
+      .select()
+      .from(villages)
+      .where(and(eq(villages.id, Number(communityId)), eq(villages.tenantId, req.tenantId)));
+    if (!community) return res.status(404).json({ error: "Community not found" });
+
+    await db
+      .update(settlementsMaster)
+      .set({
+        linkedCommunityId: community.id,
+        linkStatus: "linked",
+        updatedAt: new Date(),
+      })
+      .where(eq(settlementsMaster.id, id));
+
+    await db
+      .update(villages)
+      .set({
+        linkedSettlementId: settlement.id,
+        updatedAt: new Date(),
+      })
+      .where(eq(villages.id, community.id));
+
+    res.json({ success: true, message: "Linked to community successfully" });
+  } catch (err) {
+    console.error("Failed to link community:", err);
+    res.status(500).json({ error: "Failed to link community" });
+  }
+});
+
+// ── POST /api/vgie/settlements/:id/convert-to-community ───────────────────────
+router.post("/settlements/:id/convert-to-community", async (req: any, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+
+    const [settlement] = await db
+      .select()
+      .from(settlementsMaster)
+      .where(and(eq(settlementsMaster.id, id), eq(settlementsMaster.tenantId, req.tenantId)));
+    if (!settlement) return res.status(404).json({ error: "Settlement not found" });
+
+    // Generate code
+    const countQuery = await db.select({ count: count() }).from(villages).where(eq(villages.tenantId, req.tenantId));
+    const nextIdx = (countQuery[0]?.count ?? 0) + 1;
+
+    const [community] = await db
+      .insert(villages)
+      .values({
+        tenantId: req.tenantId,
+        name: settlement.name,
+        code: `COMM-${nextIdx}`,
+        districtId: settlement.districtId || 1, // Default or resolved district
+        latitude: settlement.latitude,
+        longitude: settlement.longitude,
+        assignedFacilityId: settlement.linkedFacilityId,
+        distanceToFacility: settlement.distanceToLinkedFacilityKm,
+        travelTimeMinutes: settlement.estimatedWalkingTimeMinutes || 30,
+        isHardToReach: settlement.hardToReach,
+        settlementType: settlement.placeType || "village",
+        totalCatchmentPopulation: settlement.populationEstimate || 120,
+        under5Population: settlement.under5Population || Math.round((settlement.populationEstimate || 120) * 0.18),
+        linkedSettlementId: settlement.id,
+      })
+      .returning();
+
+    await db
+      .update(settlementsMaster)
+      .set({
+        linkedCommunityId: community.id,
+        linkStatus: "linked",
+        validationStatus: "approved",
+        updatedAt: new Date(),
+      })
+      .where(eq(settlementsMaster.id, id));
+
+    res.json({ success: true, data: community });
+  } catch (err) {
+    console.error("Failed to convert settlement to community:", err);
+    res.status(500).json({ error: "Failed to convert settlement" });
+  }
+});
+
+// ── POST /api/vgie/settlements/bulk-assign-facility ──────────────────────────
+router.post("/settlements/bulk-assign-facility", async (req: any, res) => {
+  try {
+    const { settlementIds, facilityId, transportMode = "walking" } = req.body;
+    if (!Array.isArray(settlementIds) || settlementIds.length === 0 || !facilityId) {
+      return res.status(400).json({ error: "Missing required parameters (settlementIds array, facilityId)" });
+    }
+
+    const [facility] = await db
+      .select()
+      .from(facilities)
+      .where(and(eq(facilities.id, Number(facilityId)), eq(facilities.tenantId, req.tenantId)));
+    if (!facility) return res.status(404).json({ error: "Facility not found" });
+
+    for (const sid of settlementIds) {
+      const [settlement] = await db
+        .select()
+        .from(settlementsMaster)
+        .where(and(eq(settlementsMaster.id, sid), eq(settlementsMaster.tenantId, req.tenantId)));
+      if (!settlement) continue;
+
+      const distance = getHaversineDistance(
+        Number(settlement.latitude),
+        Number(settlement.longitude),
+        Number(facility.latitude),
+        Number(facility.longitude)
+      );
+
+      const walkingTime = estimateTravelTimeMinutes(distance, "walking");
+      const drivingTime = estimateTravelTimeMinutes(distance, transportMode);
+
+      await db
+        .update(settlementsMaster)
+        .set({
+          linkedFacilityId: facility.id,
+          distanceToLinkedFacilityKm: String(distance.toFixed(2)),
+          estimatedWalkingTimeMinutes: walkingTime,
+          estimatedDrivingTimeMinutes: drivingTime,
+          travelModePlanning: transportMode,
+          drySeasonTravelTimeMinutes: walkingTime,
+          rainySeasonTravelTimeMinutes: Math.round(walkingTime * 1.5),
+          linkStatus: "linked",
+          linkMethod: "bulk_assign",
+          serviceStatus: distance <= 5 ? "served" : "underserved",
+          updatedAt: new Date(),
+        })
+        .where(eq(settlementsMaster.id, sid));
+    }
+
+    res.json({ success: true, message: `Successfully linked ${settlementIds.length} settlements to facility` });
+  } catch (err) {
+    console.error("Failed to perform bulk link:", err);
+    res.status(500).json({ error: "Failed to perform bulk linkage" });
+  }
+});
+
 // ── /api/vgie/settlements/:id ─────────────────────────────────────────────────
 router.get("/settlements/:id", async (req: any, res) => {
   try {
@@ -873,8 +1139,8 @@ router.get("/settlements/:id", async (req: any, res) => {
 
     const [v] = await db
       .select()
-      .from(villages)
-      .where(and(eq(villages.id, id), eq(villages.tenantId, req.tenantId)));
+      .from(settlementsMaster)
+      .where(and(eq(settlementsMaster.id, id), eq(settlementsMaster.tenantId, req.tenantId)));
 
     if (!v) return res.status(404).json({ error: "Settlement not found" });
 
@@ -884,13 +1150,143 @@ router.get("/settlements/:id", async (req: any, res) => {
       .where(eq(districts.tenantId, req.tenantId));
     const districtLookup = new Map(allDistricts.map((d) => [d.id, d.name]));
 
-    let facility: any = null;
-    if (v.assignedFacilityId) {
+    let linkedFacility: any = null;
+    if (v.linkedFacilityId) {
       const [f] = await db
         .select({ id: facilities.id, name: facilities.name, hmisCode: facilities.hmisCode })
         .from(facilities)
-        .where(eq(facilities.id, v.assignedFacilityId));
-      facility = f || null;
+        .where(eq(facilities.id, v.linkedFacilityId));
+      linkedFacility = f || null;
+    }
+
+    let linkedCommunity: any = null;
+    if (v.linkedCommunityId) {
+      const [c] = await db
+        .select({ id: villages.id, name: villages.name, code: villages.code })
+        .from(villages)
+        .where(eq(villages.id, v.linkedCommunityId));
+      linkedCommunity = c || null;
+    }
+
+    // 1. Fetch nearest facility geocoded suggestion
+    const allFacilities = await db
+      .select({ id: facilities.id, name: facilities.name, latitude: facilities.latitude, longitude: facilities.longitude, hmisCode: facilities.hmisCode })
+      .from(facilities)
+      .where(eq(facilities.tenantId, req.tenantId));
+
+    let nearestFacility: any = null;
+    let nearestDistance = Infinity;
+
+    for (const fac of allFacilities) {
+      if (fac.latitude && fac.longitude && v.latitude && v.longitude) {
+        const dist = getHaversineDistance(
+          Number(v.latitude),
+          Number(v.longitude),
+          Number(fac.latitude),
+          Number(fac.longitude)
+        );
+        if (dist < nearestDistance) {
+          nearestDistance = dist;
+          nearestFacility = fac;
+        }
+      }
+    }
+
+    // 2. Fetch spatial containment (catchment polygon match)
+    let catchmentFacility: any = null;
+    try {
+      if (v.latitude && v.longitude) {
+        const [cf] = await db.execute(sql`
+          SELECT id, name FROM facilities 
+          WHERE tenant_id = ${req.tenantId} 
+            AND catchment_polygon IS NOT NULL 
+            AND ST_Contains(
+              ST_SetSRID(ST_GeomFromGeoJSON(catchment_polygon::text), 4326),
+              ST_SetSRID(ST_MakePoint(${v.longitude}::float, ${v.latitude}::float), 4326)
+            )
+          LIMIT 1
+        `) as any;
+        catchmentFacility = cf || null;
+      }
+    } catch (err) {
+      // Ignore geometry parse warnings
+    }
+
+    // 3. Duplicate checks & name similarity matches
+    let nearbyCommunity: any = null;
+    try {
+      if (v.latitude && v.longitude) {
+        const [nc] = await db.execute(sql`
+          SELECT id, name FROM villages
+          WHERE tenant_id = ${req.tenantId}
+            AND district_id = ${v.districtId || 0}
+            AND (ST_Distance(
+              ST_SetSRID(ST_MakePoint(longitude::float, latitude::float), 4326)::geography,
+              ST_SetSRID(ST_MakePoint(${v.longitude}::float, ${v.latitude}::float), 4326)::geography
+            ) / 1000.0) <= 0.5
+          LIMIT 1
+        `) as any;
+        nearbyCommunity = nc || null;
+      }
+    } catch (err) {
+      // Ignore spatial distance checks if not postgis-enabled
+    }
+
+    // 4. Construct Smart Suggestions (confidence & reason shapes)
+    const suggestions = [];
+    if (!v.linkedFacilityId && nearestFacility) {
+      suggestions.push({
+        type: "link_facility",
+        title: "Link to Health Facility",
+        description: `Settlement is currently unassigned. Nearest health facility is ${nearestFacility.name} (${nearestDistance.toFixed(2)} km).`,
+        confidence: 0.90,
+        actionable: true,
+        suggestedFacilityId: nearestFacility.id,
+        reason: "Calculated nearest straight-line distance to operational health post."
+      });
+    }
+    if (catchmentFacility && catchmentFacility.id !== v.linkedFacilityId) {
+      suggestions.push({
+        type: "catchment_polygon",
+        title: "Catchment Containment Match",
+        description: `Settlement lies inside the drawn catchment polygon of facility: ${catchmentFacility.name}.`,
+        confidence: 0.95,
+        actionable: true,
+        suggestedFacilityId: catchmentFacility.id,
+        reason: "Geographic intersection within facility service area boundaries."
+      });
+    }
+    if (nearestFacility && v.linkedFacilityId && nearestFacility.id !== v.linkedFacilityId) {
+      suggestions.push({
+        type: "reassign_facility",
+        title: "Optimized Catchment Suggestion",
+        description: `Linked to ${linkedFacility?.name || "another facility"}, but ${nearestFacility.name} is closer (${nearestDistance.toFixed(2)} km vs ${Number(v.distanceToLinkedFacilityKm || 0).toFixed(2)} km).`,
+        confidence: 0.75,
+        actionable: true,
+        suggestedFacilityId: nearestFacility.id,
+        reason: "Proximity checks reveal closer catchment options."
+      });
+    }
+    if (nearestDistance && nearestDistance >= 50.0) {
+      suggestions.push({
+        type: "htr_district",
+        title: "District Outreach Candidate",
+        description: `Extremely isolated settlement (${nearestDistance.toFixed(1)} km from facility). Suggest making it a district-level HTR responsibility.`,
+        confidence: 0.85,
+        actionable: false,
+        reason: "Exceeds extreme outreach isolation threshold (>= 50 km)."
+      });
+    }
+    if (nearbyCommunity) {
+      suggestions.push({
+        type: "merge_community",
+        title: "Duplicate Community Overlap",
+        description: `Physical overlap detected with registered community: ${nearbyCommunity.name} (within 500m). Suggest merging candidate records to resolve redundancy.`,
+        confidence: 0.90,
+        actionable: true,
+        suggestedCommunityId: nearbyCommunity.id,
+        reason: "Spatiotemporal proximity indicates duplicate candidate records."
+      });
     }
 
     // Fetch recent recommendations for this settlement
@@ -907,34 +1303,46 @@ router.get("/settlements/:id", async (req: any, res) => {
       .orderBy(desc(vgieRecommendations.createdAt))
       .limit(5);
 
-    const pop = Number(v.griddedPopulation || v.totalCatchmentPopulation || 0);
-    let serviceStatus = "unserved";
-    if (v.assignedFacilityId) {
-      serviceStatus =
-        v.distanceToFacility && Number(v.distanceToFacility) <= 5
-          ? "served"
-          : "underserved";
-    }
+    const pop = Number(v.populationEstimate || 0);
 
     res.json({
       id: v.id,
       name: v.name,
-      district: districtLookup.get(v.districtId) || "Unknown",
+      district: districtLookup.get(v.districtId || 0) || v.districtName || "Unknown",
       districtId: v.districtId,
       latitude: v.latitude ? Number(v.latitude) : null,
       longitude: v.longitude ? Number(v.longitude) : null,
       population: pop,
       under5Population: v.under5Population,
-      serviceStatus,
-      highRisk: v.highRisk,
-      highRiskReason: v.highRiskReason,
-      isHardToReach: v.isHardToReach,
-      settlementType: v.settlementType,
-      distanceToFacility: v.distanceToFacility ? Number(v.distanceToFacility) : null,
-      travelTimeMinutes: v.travelTimeMinutes,
-      isMappedInHmis: v.isMappedInHmis,
-      lastVerified: v.lastVerified,
-      assignedFacility: facility,
+      serviceStatus: v.serviceStatus,
+      highRisk: v.riskLevel === "high" || v.riskLevel === "very_high",
+      highRiskReason: v.riskLevel === "very_high" ? "very high risk classification" : "high risk classification",
+      isHardToReach: v.hardToReach,
+      settlementType: v.placeType || "village",
+      distanceToFacility: v.distanceToLinkedFacilityKm ? Number(v.distanceToLinkedFacilityKm) : null,
+      travelTimeMinutes: v.estimatedWalkingTimeMinutes || 30,
+      estimatedWalkingTimeMinutes: v.estimatedWalkingTimeMinutes,
+      estimatedDrivingTimeMinutes: v.estimatedDrivingTimeMinutes,
+      drySeasonTravelTimeMinutes: v.drySeasonTravelTimeMinutes,
+      rainySeasonTravelTimeMinutes: v.rainySeasonTravelTimeMinutes,
+      travelModePlanning: v.travelModePlanning,
+      linkStatus: v.linkStatus,
+      linkMethod: v.linkMethod,
+      linkConfidence: v.linkConfidence,
+      linkNotes: v.linkNotes,
+      isMappedInHmis: true,
+      lastVerified: v.updatedAt,
+      assignedFacility: linkedFacility,
+      linkedCommunity: linkedCommunity,
+      nearestFacility: nearestFacility ? {
+        id: nearestFacility.id,
+        name: nearestFacility.name,
+        distanceKm: nearestDistance,
+        travelTimeWalkingMin: Math.round(nearestDistance * 15),
+        travelTimeMotorcycleMin: Math.round(nearestDistance * 2.4),
+        travelTimeVehicleMin: Math.round(nearestDistance * 1.5)
+      } : null,
+      suggestions,
       recommendations: recs.map((r) => ({
         id: r.id,
         recommendationType: r.recommendationType,
