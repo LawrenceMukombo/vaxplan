@@ -195,6 +195,16 @@ const defaultFaqs = [
     answer:
       "All reports aggregate data in the chain: Facility → District → Province → National. When you open a report at national level, you see every province's total. Click a province row to expand it and see each district inside that province. Click a district to expand its facilities. Each level's total is the true arithmetic sum of everything beneath it — no double-counting. Your access scope is enforced automatically: if you are a Facility In-charge, you only see data for your own facility; District Managers see their district and its facilities; Provincial Coordinators see their province; National Admins see everything. The filters (province, district, facility dropdowns) let you narrow the view further, but they can never show you data outside your assigned scope.",
   },
+  {
+    question: "How do I map custom catchment areas and calculate population from them?",
+    answer:
+      "On the Facilities page, open the Communities tab. Click 'Add Community' or edit an existing one. Switch to 'Draw Polygon Mode' on the map using the drawing tools to trace your exact catchment boundary. When you save, VaxPlan uses Location Intelligence to intersect your polygon with WorldPop spatial data and calculate the estimated population inside that boundary automatically.",
+  },
+  {
+    question: "How are system updates safely applied to our data?",
+    answer:
+      "VaxPlan follows a strictly non-destructive, additive deployment protocol. Database updates use a safe-migration process that applies schema changes without dropping or truncating tables, ensuring all operational data is preserved safely during feature rollouts.",
+  },
 ];
 */
 
@@ -348,6 +358,16 @@ const defaultFaqs = [
     question: "How does the hierarchical aggregation work in reports?",
     answer:
       "All reports aggregate data in the chain: Facility → District → Province → National. When you open a report at national level, you see every province's total. Click a province row to expand it and see each district inside that province. Click a district to expand its facilities. Each level's total is the true arithmetic sum of everything beneath it — no double-counting. Your access scope is enforced automatically: if you are a Facility In-charge, you only see data for your own facility; District Managers see their district and its facilities; Provincial Coordinators see their province; National Admins see everything. The filters (province, district, facility dropdowns) let you narrow the view further, but they can never show you data outside your assigned scope.",
+  },
+  {
+    question: "How do I map custom catchment areas and calculate population from them?",
+    answer:
+      "On the Facilities page, open the Communities tab. Click 'Add Community' or edit an existing one. Switch to 'Draw Polygon Mode' on the map using the drawing tools to trace your exact catchment boundary. When you save, VaxPlan uses Location Intelligence to intersect your polygon with WorldPop spatial data and calculate the estimated population inside that boundary automatically.",
+  },
+  {
+    question: "How are system updates safely applied to our data?",
+    answer:
+      "VaxPlan follows a strictly non-destructive, additive deployment protocol. Database updates use a safe-migration process that applies schema changes without dropping or truncating tables, ensuring all operational data is preserved safely during feature rollouts.",
   },
   {
     question: "How do I use the new Global Search and command menu?",

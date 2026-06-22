@@ -90,13 +90,15 @@ function toGeoRing(coords: [number, number][]): [number, number][] {
 
 // ─── Population estimation (server-side + cascade) ───────────────────────────
 async function estimatePolygonPop(
-  coords: [number, number][]
+  coords: [number, number][],
+  ownerType?: "facility" | "village",
+  ownerId?: number
 ): Promise<IntelligenceResult | null> {
   const ring = toGeoRing(coords);
   const geojson = { type: "Polygon", coordinates: [ring] };
 
   try {
-    const r = await apiRequest<IntelligenceResult>("POST", "/api/gis/polygons/intelligence", { geometry: geojson });
+    const r = await apiRequest<IntelligenceResult>("POST", "/api/gis/polygons/intelligence", { geometry: geojson, ownerType, ownerId });
     return r;
   } catch (e) {
     console.error("Intelligence API failed:", e);
@@ -306,8 +308,12 @@ export function CatchmentMapPanel({
     const mode = drawMode;
     setDrawMode(null);
 
+    const type = mode === "catchment" ? "facility" : "village";
+    const village = communities.find(c => c.name === selectedCommunity);
+    const ownerId = mode === "catchment" ? facilityId : (village ? village.villageId : undefined);
+
     setLoadingPop(true);
-    const intel = await estimatePolygonPop(coords);
+    const intel = await estimatePolygonPop(coords, type, ownerId);
     setLoadingPop(false);
     
     if (intel) setIntelligenceData(intel);

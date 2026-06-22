@@ -3,9 +3,9 @@ import { Link } from "wouter";
 import {
   Search, ChevronRight, Users, Building2,
   CheckCircle, XCircle, Clock, ChevronsUpDown, ChevronUp, ChevronDown,
-  SlidersHorizontal, Filter, Download, AlertTriangle, X
+  SlidersHorizontal, Filter, Download, AlertTriangle, X, Plus
 } from "lucide-react";
-import { useGetSettlements } from "@/hooks/vgie/useVgieApi";
+import { useGetSettlements, useCreateSettlement } from "@/hooks/vgie/useVgieApi";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -18,6 +18,9 @@ import { GeoCascadeFilter } from "@/components/GeoCascadeFilter";
 import {
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuCheckboxItem, DropdownMenuSeparator
 } from "@/components/ui/dropdown-menu";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogTrigger
+} from "@/components/ui/dialog";
 
 const statusConfig = {
   served: { label: "Served", color: "text-emerald-400 bg-emerald-500/10 border-emerald-500/20", icon: CheckCircle },
@@ -32,7 +35,7 @@ const riskConfig = {
   very_high: { label: "Very High", color: "text-red-500 bg-red-600/10 border-red-500/20" },
 };
 
-type SortKey = "name" | "province" | "district" | "facility" | "population" | "riskScore";
+type SortKey = "name" | "province" | "district" | "facility" | "population" | "riskScore" | "distance" | "travelTime";
 type SortDir = "asc" | "desc";
 
 function SortIcon({ col, sortKey, sortDir }: { col: SortKey; sortKey: SortKey; sortDir: SortDir }) {
@@ -56,6 +59,44 @@ export default function Settlements() {
   const [districtId, setDistrictId] = useState<number | null>(null);
   const [facilityId, setFacilityId] = useState<number | null>(null);
 
+  // Add Settlement Modal State
+  const [isAddOpen, setIsAddOpen] = useState(false);
+  const [addName, setAddName] = useState("");
+  const [addLat, setAddLat] = useState("");
+  const [addLng, setAddLng] = useState("");
+  const [addPop, setAddPop] = useState("120");
+  const [addProvinceId, setAddProvinceId] = useState<number | null>(null);
+  const [addDistrictId, setAddDistrictId] = useState<number | null>(null);
+  const [addFacilityId, setAddFacilityId] = useState<number | null>(null);
+
+  const createSettlement = useCreateSettlement();
+
+  const handleAddSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!addName || !addLat || !addLng) return;
+    try {
+      await createSettlement.mutateAsync({
+        name: addName,
+        latitude: Number(addLat),
+        longitude: Number(addLng),
+        populationEstimate: Number(addPop),
+        provinceId: addProvinceId || undefined,
+        districtId: addDistrictId || undefined,
+      });
+      setIsAddOpen(false);
+      // Reset form
+      setAddName("");
+      setAddLat("");
+      setAddLng("");
+      setAddPop("120");
+      setAddProvinceId(null);
+      setAddDistrictId(null);
+      setAddFacilityId(null);
+    } catch (err) {
+      // toast is already handled inside hook
+    }
+  };
+
   // Sorting State
   const [sortKey, setSortKey] = useState<SortKey>("riskScore");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
@@ -67,6 +108,9 @@ export default function Settlements() {
     district: true,
     facility: true,
     population: true,
+    distance: true,
+    travelTime: true,
+    linkedCommunity: true,
     status: true,
     risk: true,
     riskScore: true,
@@ -161,6 +205,92 @@ export default function Settlements() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          {/* Add Settlement Button */}
+          <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
+            <DialogTrigger asChild>
+              <Button size="sm" className="h-8 text-xs font-semibold gap-1.5 bg-primary text-primary-foreground hover:bg-primary/90">
+                <Plus className="w-3.5 h-3.5" />
+                Add Settlement
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="bg-background border border-border sm:max-w-[425px]">
+              <DialogHeader>
+                <DialogTitle className="text-foreground font-bold">Add Manual Settlement</DialogTitle>
+                <DialogDescription className="text-muted-foreground text-xs">
+                  Create a new physical settlement candidate. You can link it to catchments/facilities afterwards.
+                </DialogDescription>
+              </DialogHeader>
+              <form onSubmit={handleAddSubmit} className="space-y-4 py-2">
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-xs font-semibold text-muted-foreground">Settlement Name *</label>
+                  <Input
+                    required
+                    placeholder="e.g. Mushitala B"
+                    value={addName}
+                    onChange={(e) => setAddName(e.target.value)}
+                    className="h-9 bg-background border-border text-foreground focus:ring-1 focus:ring-primary"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-xs font-semibold text-muted-foreground">Latitude *</label>
+                    <Input
+                      required
+                      type="number"
+                      step="any"
+                      placeholder="-12.1834"
+                      value={addLat}
+                      onChange={(e) => setAddLat(e.target.value)}
+                      className="h-9 bg-background border-border text-foreground focus:ring-1 focus:ring-primary"
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-xs font-semibold text-muted-foreground">Longitude *</label>
+                    <Input
+                      required
+                      type="number"
+                      step="any"
+                      placeholder="26.3814"
+                      value={addLng}
+                      onChange={(e) => setAddLng(e.target.value)}
+                      className="h-9 bg-background border-border text-foreground focus:ring-1 focus:ring-primary"
+                    />
+                  </div>
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-xs font-semibold text-muted-foreground">Population Estimate</label>
+                  <Input
+                    type="number"
+                    placeholder="120"
+                    value={addPop}
+                    onChange={(e) => setAddPop(e.target.value)}
+                    className="h-9 bg-background border-border text-foreground focus:ring-1 focus:ring-primary"
+                  />
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-xs font-semibold text-muted-foreground">Administrative Location</label>
+                  <GeoCascadeFilter
+                    provinceId={addProvinceId}
+                    districtId={addDistrictId}
+                    facilityId={addFacilityId}
+                    onProvinceChange={(id) => { setAddProvinceId(id); setAddDistrictId(null); setAddFacilityId(null); }}
+                    onDistrictChange={(id) => { setAddDistrictId(id); setAddFacilityId(null); }}
+                    onFacilityChange={(id) => { setAddFacilityId(id); }}
+                    showFacility={false}
+                  />
+                </div>
+                <DialogFooter className="pt-2">
+                  <Button type="button" variant="outline" onClick={() => setIsAddOpen(false)} className="h-9 text-xs border text-foreground">
+                    Cancel
+                  </Button>
+                  <Button type="submit" disabled={createSettlement.isPending} className="h-9 text-xs bg-primary text-primary-foreground hover:bg-primary/90">
+                    {createSettlement.isPending ? "Creating..." : "Save Settlement"}
+                  </Button>
+                </DialogFooter>
+              </form>
+            </DialogContent>
+          </Dialog>
+
           {/* Column Visibility Selector */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -340,6 +470,23 @@ export default function Settlements() {
                     </div>
                   </th>
                 )}
+                {visibleColumns.distance && (
+                  <th className={`${thClass} text-right`} onClick={() => handleSort("distance")}>
+                    <div className="flex items-center justify-end">
+                      Distance <SortIcon col="distance" sortKey={sortKey} sortDir={sortDir} />
+                    </div>
+                  </th>
+                )}
+                {visibleColumns.travelTime && (
+                  <th className={`${thClass} text-right`} onClick={() => handleSort("travelTime")}>
+                    <div className="flex items-center justify-end">
+                      Travel Time <SortIcon col="travelTime" sortKey={sortKey} sortDir={sortDir} />
+                    </div>
+                  </th>
+                )}
+                {visibleColumns.linkedCommunity && (
+                  <th className="px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider text-center align-middle">Linked Community</th>
+                )}
                 {visibleColumns.status && (
                   <th className="px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider text-center align-middle">Status</th>
                 )}
@@ -423,6 +570,27 @@ export default function Settlements() {
                             <Users className="w-3 h-3 text-muted-foreground" />
                             <span className="text-foreground">{s.population?.toLocaleString() ?? "0"}</span>
                           </div>
+                        </td>
+                      )}
+                      {visibleColumns.distance && (
+                        <td className="px-4 py-3 text-right text-muted-foreground">
+                          {s.distanceToFacility != null ? `${Number(s.distanceToFacility).toFixed(1)} km` : "—"}
+                        </td>
+                      )}
+                      {visibleColumns.travelTime && (
+                        <td className="px-4 py-3 text-right text-muted-foreground">
+                          {s.estimatedWalkingTimeMinutes != null ? `${s.estimatedWalkingTimeMinutes}m` : "—"}
+                        </td>
+                      )}
+                      {visibleColumns.linkedCommunity && (
+                        <td className="px-4 py-3 text-center">
+                          {s.linkedCommunityName ? (
+                            <Badge variant="outline" className="text-[10px] px-1.5 py-0 border font-semibold text-sky-400 bg-sky-500/10 border-sky-500/20">
+                              {s.linkedCommunityName}
+                            </Badge>
+                          ) : (
+                            <span className="text-muted-foreground text-xs">—</span>
+                          )}
                         </td>
                       )}
                       {visibleColumns.status && (

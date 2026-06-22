@@ -278,3 +278,144 @@ export function useDeleteRecommendationRule() {
   });
 }
 
+// Settlements Mutations
+export function useCreateSettlement() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  return useMutation({
+    mutationFn: async (payload: {
+      name: string;
+      placeType?: string;
+      latitude: number;
+      longitude: number;
+      provinceId?: number;
+      districtId?: number;
+      populationEstimate?: number;
+    }) => {
+      return await apiRequest<any>("POST", "/api/vgie/settlements", payload);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/vgie/settlements"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/vgie/dashboard/summary"] });
+      toast({ title: "Settlement created successfully" });
+    }
+  });
+}
+
+export function useUpdateSettlement() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  return useMutation({
+    mutationFn: async ({ id, ...payload }: {
+      id: number;
+      name?: string;
+      placeType?: string;
+      latitude?: number;
+      longitude?: number;
+      populationEstimate?: number;
+      validationStatus?: string;
+      serviceStatus?: string;
+      riskLevel?: string;
+      hardToReach?: boolean;
+    }) => {
+      return await apiRequest<any>("PUT", `/api/vgie/settlements/${id}`, payload);
+    },
+    onSuccess: (data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/vgie/settlements"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/vgie/settlements", variables.id] });
+      queryClient.invalidateQueries({ queryKey: ["/api/vgie/dashboard/summary"] });
+      toast({ title: "Settlement updated successfully" });
+    }
+  });
+}
+
+export function useDeleteSettlement() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  return useMutation({
+    mutationFn: async (id: number) => {
+      return await apiRequest<any>("DELETE", `/api/vgie/settlements/${id}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/vgie/settlements"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/vgie/dashboard/summary"] });
+      toast({ title: "Settlement archived successfully" });
+    }
+  });
+}
+
+export function useLinkFacility() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  return useMutation({
+    mutationFn: async ({ id, ...payload }: {
+      id: number;
+      facilityId: number;
+      transportMode?: string;
+      linkMethod?: string;
+      notes?: string;
+    }) => {
+      return await apiRequest<any>("POST", `/api/vgie/settlements/${id}/link-facility`, payload);
+    },
+    onSuccess: (data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/vgie/settlements"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/vgie/settlements", variables.id] });
+      queryClient.invalidateQueries({ queryKey: ["/api/vgie/dashboard/summary"] });
+      toast({ title: "Linked to facility successfully" });
+    }
+  });
+}
+
+export function useLinkCommunity() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  return useMutation({
+    mutationFn: async ({ id, communityId }: { id: number; communityId: number }) => {
+      return await apiRequest<any>("POST", `/api/vgie/settlements/${id}/link-community`, { communityId });
+    },
+    onSuccess: (data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/vgie/settlements"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/vgie/settlements", variables.id] });
+      queryClient.invalidateQueries({ queryKey: ["/api/villages"] });
+      toast({ title: "Linked to community successfully" });
+    }
+  });
+}
+
+export function useConvertToCommunity() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  return useMutation({
+    mutationFn: async (id: number) => {
+      return await apiRequest<any>("POST", `/api/vgie/settlements/${id}/convert-to-community`);
+    },
+    onSuccess: (data, id) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/vgie/settlements"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/vgie/settlements", id] });
+      queryClient.invalidateQueries({ queryKey: ["/api/villages"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/vgie/dashboard/summary"] });
+      toast({ title: "Settlement converted to community successfully" });
+    }
+  });
+}
+
+export function useBulkAssignFacility() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  return useMutation({
+    mutationFn: async (payload: {
+      settlementIds: number[];
+      facilityId: number;
+      transportMode?: string;
+    }) => {
+      return await apiRequest<any>("POST", "/api/vgie/settlements/bulk-assign-facility", payload);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/vgie/settlements"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/vgie/dashboard/summary"] });
+      toast({ title: "Bulk assigned settlements to facility successfully" });
+    }
+  });
+}
+
+

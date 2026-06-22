@@ -69,6 +69,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { CommunityPopulationIntelligence } from "@/components/ui/population/CommunityPopulationIntelligence";
+import { useLinkCommunity, useConvertToCommunity } from "@/hooks/vgie/useVgieApi";
 import {
   Tooltip,
   TooltipContent,
@@ -818,6 +819,9 @@ export function Step2({
     }
   }, [errorRowId]);
   const { toast } = useToast();
+  const linkCommunityMutation = useLinkCommunity();
+  const convertToCommunityMutation = useConvertToCommunity();
+  const [selectedLinkCommunityMap, setSelectedLinkCommunityMap] = useState<Record<number, number>>({});
   const [estimate, setEstimate] = useState<
     | {
         index: number;
@@ -1399,12 +1403,25 @@ export function Step2({
                           onClick={(e) => e.stopPropagation()}
                         />
                         */}
-                        <Input
-                          className="min-w-[150px] md:min-w-[200px]"
-                          value={c.name}
-                          onChange={(e) => update(i, { name: e.target.value })}
-                          onClick={(e) => e.stopPropagation()}
-                        />
+                        <div className="flex flex-col gap-1">
+                          <Input
+                            className="min-w-[150px] md:min-w-[200px]"
+                            value={c.name}
+                            onChange={(e) => update(i, { name: e.target.value })}
+                            onClick={(e) => e.stopPropagation()}
+                          />
+                          <div className="flex gap-1 items-center px-1">
+                            {c.villageId ? (
+                              <span className="text-[9px] font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/30 px-1 py-0.5 rounded">
+                                Registered Community
+                              </span>
+                            ) : (
+                              <span className="text-[9px] font-semibold text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/30 px-1 py-0.5 rounded">
+                                Draft/Unregistered
+                              </span>
+                            )}
+                          </div>
+                        </div>
                       </td>
                       <td className="p-1">
                         {/* Original code:
@@ -1719,60 +1736,197 @@ export function Step2({
         <Card className="border border-border shadow-sm bg-card">
           <CardHeader className="pb-3 border-b border-border/40">
             <CardTitle className="text-sm font-semibold flex items-center justify-between">
-              <span>Unmapped Settlements</span>
+              <span className="flex items-center gap-1.5">
+                <span>Unmapped Settlements</span>
+                <Badge variant="outline" className="text-[10px] py-0 px-1.5 font-normal bg-muted">
+                  GIS Sync
+                </Badge>
+              </span>
               <Button size="icon" variant="ghost" className="h-5 w-5" onClick={() => refetchUnmapped()} title="Refresh suggestions">
                 <Sparkles className="h-3.5 w-3.5 text-primary" />
               </Button>
             </CardTitle>
           </CardHeader>
-          <CardContent className="space-y-3 pt-4 max-h-[360px] overflow-y-auto">
+          <CardContent className="space-y-3 pt-4 max-h-[420px] overflow-y-auto">
             {unmappedSuggestions && unmappedSuggestions.length > 0 ? (
-              <div className="space-y-2">
-                {unmappedSuggestions.map((s: any) => (
-                  <div key={s.id} className="p-2.5 border rounded-lg text-xs hover:bg-accent/40 transition-colors">
-                    <div className="flex justify-between items-start">
-                      <div>
-                        <div className="font-semibold text-foreground">{s.name}</div>
-                        <div className="text-[10px] text-muted-foreground capitalize">{s.settlement_type ?? "settlement"}</div>
+              <div className="space-y-3">
+                {unmappedSuggestions.map((s: any) => {
+                  const registeredCommunities = communities.filter(c => c.villageId);
+                  const selectedCommunityId = selectedLinkCommunityMap[s.id] || "";
+                  const hasDryTime = s.dry_season_travel_time != null;
+                  const hasRainyTime = s.rainy_season_travel_time != null;
+                  const isHighRisk = s.risk_level === "high" || s.risk_level === "very_high";
+
+                  return (
+                    <div key={s.id} className="p-3 border rounded-lg text-xs hover:bg-accent/40 transition-colors space-y-2">
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <div className="font-semibold text-foreground flex items-center gap-1.5">
+                            {s.name}
+                            {isHighRisk && (
+                              <span className="text-[9px] font-semibold text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950/30 px-1 py-0.5 rounded">
+                                High Risk
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-[10px] text-muted-foreground capitalize">
+                            {s.settlement_type ?? s.placeType ?? "settlement"}
+                          </div>
+                        </div>
+                        <span className="text-[10px] text-muted-foreground font-mono bg-muted/80 px-1.5 py-0.5 rounded">
+                          {s.distance_km?.toFixed(1)} km
+                        </span>
                       </div>
-                      <span className="text-[10px] text-muted-foreground font-mono bg-muted/80 px-1.5 py-0.5 rounded">
-                        {s.distance_km?.toFixed(1)} km
-                      </span>
+
+                      {/* Travel Times & Mode */}
+                      {(s.travel_mode || hasDryTime || hasRainyTime) && (
+                        <div className="text-[10px] bg-muted/30 p-1.5 rounded space-y-0.5 text-muted-foreground">
+                          {s.travel_mode && (
+                            <div>
+                              <span>Planned travel mode: </span>
+                              <strong className="text-foreground capitalize">{s.travel_mode}</strong>
+                            </div>
+                          )}
+                          {(hasDryTime || hasRainyTime) && (
+                            <div className="flex gap-2">
+                              {hasDryTime && (
+                                <span>Dry season: <strong>{s.dry_season_travel_time}m</strong></span>
+                              )}
+                              {hasRainyTime && (
+                                <span>Rainy season: <strong>{s.rainy_season_travel_time}m</strong></span>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      <div className="grid grid-cols-2 gap-1 text-[10px] text-muted-foreground">
+                        <span>📋 Est. Population: <strong className="text-foreground">{s.population > 0 ? Number(s.population).toLocaleString() : "—"}</strong></span>
+                        <span>🔗 Status: <span className="capitalize">{s.link_status ?? "unassigned"}</span></span>
+                      </div>
+
+                      {/* Link to existing community action */}
+                      <div className="pt-1.5 border-t border-dashed space-y-1.5">
+                        <div className="text-[10px] font-medium text-muted-foreground">Link to existing community:</div>
+                        <div className="flex gap-1.5 items-center">
+                          <select
+                            className="bg-background border border-input text-[11px] rounded px-2 py-1 w-full focus:outline-none focus:ring-1 focus:ring-primary h-7 text-foreground"
+                            value={selectedCommunityId}
+                            onChange={(e) => {
+                              setSelectedLinkCommunityMap({
+                                ...selectedLinkCommunityMap,
+                                [s.id]: Number(e.target.value)
+                              });
+                            }}
+                            disabled={readOnly}
+                          >
+                            <option value="">Select community...</option>
+                            {registeredCommunities.map(c => (
+                              <option key={c.villageId} value={c.villageId}>
+                                {c.name} (ID: {c.villageId})
+                              </option>
+                            ))}
+                          </select>
+                          <Button
+                            size="sm"
+                            className="h-7 px-2.5 text-[10px]"
+                            disabled={readOnly || !selectedCommunityId || linkCommunityMutation.isPending}
+                            onClick={() => {
+                              linkCommunityMutation.mutate(
+                                { id: s.id, communityId: Number(selectedCommunityId) },
+                                {
+                                  onSuccess: () => {
+                                    refetchUnmapped();
+                                    refetchCatchment();
+                                    setSelectedLinkCommunityMap({
+                                      ...selectedLinkCommunityMap,
+                                      [s.id]: 0
+                                    });
+                                  }
+                                }
+                              );
+                            }}
+                          >
+                            {linkCommunityMutation.isPending && linkCommunityMutation.variables?.id === s.id ? (
+                              <Loader2 className="h-3 w-3 animate-spin" />
+                            ) : (
+                              "Link"
+                            )}
+                          </Button>
+                        </div>
+                      </div>
+
+                      {/* Convert or Local Add action */}
+                      <div className="flex gap-2 justify-end pt-1">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-7 px-2 text-[10px] text-muted-foreground hover:text-foreground"
+                          disabled={readOnly}
+                          onClick={() => {
+                            const bestPop = s.population || 120;
+                            const newRow = {
+                              name: s.name,
+                              type: s.settlement_type || "village",
+                              targetPopulation: String(bestPop),
+                              gridPop: "0",
+                              surveyPop: String(bestPop),
+                              source: "nso" as any,
+                              strategy: "outreach" as const,
+                              latitude: String(s.latitude),
+                              longitude: String(s.longitude),
+                              rowId: `new-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+                            };
+                            setCommunities([...communities, newRow]);
+                            setSelectedIdx(communities.length);
+                            toast({ title: "Draft Community Added", description: `Added "${s.name}" locally.` });
+                          }}
+                        >
+                          Add as Local Draft
+                        </Button>
+
+                        <Button
+                          size="sm"
+                          variant="default"
+                          className="h-7 px-2.5 text-[10px] bg-primary text-primary-foreground font-medium"
+                          disabled={readOnly || convertToCommunityMutation.isPending}
+                          onClick={() => {
+                            convertToCommunityMutation.mutate(s.id, {
+                              onSuccess: (data: any) => {
+                                const newCommunity = data.data || data;
+                                const bestPop = s.population || 120;
+                                const newRow = {
+                                  villageId: newCommunity.id,
+                                  name: newCommunity.name || s.name,
+                                  type: newCommunity.settlementType || s.settlement_type || "village",
+                                  targetPopulation: String(bestPop),
+                                  gridPop: String(newCommunity.griddedPopulation || 0),
+                                  surveyPop: String(newCommunity.totalCatchmentPopulation || bestPop),
+                                  source: "nso" as any,
+                                  strategy: newCommunity.isHardToReach ? "outreach" : "static" as any,
+                                  latitude: newCommunity.latitude ? String(newCommunity.latitude) : String(s.latitude),
+                                  longitude: newCommunity.longitude ? String(newCommunity.longitude) : String(s.longitude),
+                                  rowId: `v${newCommunity.id}`,
+                                  saved: true,
+                                };
+                                setCommunities([...communities, newRow]);
+                                setSelectedIdx(communities.length);
+                                refetchUnmapped();
+                                refetchCatchment();
+                              }
+                            });
+                          }}
+                        >
+                          {convertToCommunityMutation.isPending && convertToCommunityMutation.variables === s.id ? (
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                          ) : (
+                            "Convert to Registered"
+                          )}
+                        </Button>
+                      </div>
                     </div>
-                    <div className="grid grid-cols-2 gap-1 mt-1.5 text-[10px] text-muted-foreground">
-                      <span>🌐 Grid: <strong className="text-blue-600 dark:text-blue-400">{s.grid_pop > 0 ? s.grid_pop.toLocaleString() : "—"}</strong></span>
-                      <span>📋 HMIS/NSO: <strong className="text-green-600 dark:text-green-400">{s.population > 0 ? Number(s.population).toLocaleString() : "—"}</strong></span>
-                    </div>
-                    <div className="flex justify-end mt-2">
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="h-auto p-0 text-[10px] font-bold text-primary hover:underline"
-                        onClick={() => {
-                          const bestPop = Math.max(s.grid_pop || 0, s.population || 0);
-                          const newRow = {
-                            name: s.name,
-                            type: s.settlement_type || "village",
-                            targetPopulation: String(bestPop),
-                            gridPop: String(s.grid_pop || 0),
-                            surveyPop: String(s.population || 0),
-                            source: (s.grid_pop > 0 ? "worldpop" : "nso") as any,
-                            strategy: "outreach" as const,
-                            latitude: String(s.latitude),
-                            longitude: String(s.longitude),
-                            rowId: `new-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-                          };
-                          setCommunities([...communities, newRow]);
-                          setSelectedIdx(communities.length);
-                          toast({ title: "Settlement Added", description: `Added "${s.name}" to community list.` });
-                        }}
-                        disabled={readOnly}
-                      >
-                        + Add as Community
-                      </Button>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             ) : (
               <div className="text-center text-xs text-muted-foreground py-6">

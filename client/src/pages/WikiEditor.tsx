@@ -53,6 +53,7 @@ import {
   ChevronUp,
   ChevronDown,
   RefreshCw,
+  Trophy,
 } from "lucide-react";
 import { apiRequest } from "@/lib/queryClient";
 
@@ -62,6 +63,8 @@ interface WikiPage {
   id: number;
   slug: string;
   title: string;
+  category?: string;
+  gamification?: string | Record<string, any>;
   body?: string;
   sort_order: number;
   is_published: boolean;
@@ -115,10 +118,13 @@ async function fetchPageBody(slug: string): Promise<WikiPage> {
 
 // ── Main Component ─────────────────────────────────────────────────────────────
 
+import { getDomainLinks } from "@/lib/navigation";
+
 export default function WikiEditor() {
   const { user } = useAuth();
   const { toast } = useToast();
   const qc = useQueryClient();
+  const { docsUrl } = getDomainLinks();
 
   // ── Access guard ────────────────────────────────────────────────────────────
   const u = user as any;
@@ -133,15 +139,17 @@ export default function WikiEditor() {
   const [selectedSlug, setSelectedSlug] = useState<string | null>(null);
   const [editorOpen, setEditorOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<WikiPage | null>(null);
-  const [viewMode, setViewMode] = useState<"edit" | "preview" | "split">("edit");
   const [pageFilter, setPageFilter] = useState<"all" | "published" | "unpublished">("all");
 
   // Form fields
   const [editTitle, setEditTitle] = useState("");
   const [editSlug, setEditSlug] = useState("");
+  const [editCategory, setEditCategory] = useState("Uncategorized");
+  const [editGamification, setEditGamification] = useState("{\n  \"badges\": [],\n  \"quizzes\": []\n}");
   const [editBody, setEditBody] = useState("");
   const [slugEdited, setSlugEdited] = useState(false); // true once user manually edited slug
   const [isNewPage, setIsNewPage] = useState(false);
+  const [viewMode, setViewMode] = useState<"edit" | "preview" | "split" | "gamification">("edit");
 
   const bodyRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -284,7 +292,7 @@ export default function WikiEditor() {
   */
 
   const createMutation = useMutation({
-    mutationFn: async (data: { slug: string; title: string; body: string; sort_order: number }) => {
+    mutationFn: async (data: { slug: string; title: string; category?: string; gamification?: string; body: string; sort_order: number }) => {
       const res = await apiRequest("POST", "/api/wiki/pages", data);
       return res;
     },
@@ -302,7 +310,7 @@ export default function WikiEditor() {
       data,
     }: {
       slug: string;
-      data: Partial<{ title: string; body: string; sort_order: number; is_published: boolean }>;
+      data: Partial<{ title: string; category: string; gamification: string; body: string; sort_order: number; is_published: boolean }>;
     }) => {
       const res = await apiRequest("PUT", `/api/wiki/pages/${slug}`, data);
       return res;
@@ -352,6 +360,8 @@ export default function WikiEditor() {
     setIsNewPage(true);
     setEditTitle("");
     setEditSlug("");
+    setEditCategory("Uncategorized");
+    setEditGamification("{\n  \"badges\": [],\n  \"quizzes\": []\n}");
     setEditBody("");
     setSlugEdited(false);
     setViewMode("edit");
@@ -370,8 +380,12 @@ export default function WikiEditor() {
       try {
         const full = await fetchPageBody(page.slug);
         setEditBody(full.body ?? "");
+        setEditCategory(full.category || "Uncategorized");
+        setEditGamification(typeof full.gamification === 'string' ? full.gamification : JSON.stringify(full.gamification || { badges: [], quizzes: [] }, null, 2));
       } catch {
         setEditBody("");
+        setEditCategory("Uncategorized");
+        setEditGamification("{\n  \"badges\": [],\n  \"quizzes\": []\n}");
       }
       setEditorOpen(true);
     },
@@ -396,13 +410,15 @@ export default function WikiEditor() {
       createMutation.mutate({
         slug: editSlug,
         title: editTitle,
+        category: editCategory,
+        gamification: editGamification,
         body: editBody,
         sort_order: (pages.length + 1) * 10,
       });
     } else {
       updateMutation.mutate({
         slug: editSlug,
-        data: { title: editTitle, body: editBody },
+        data: { title: editTitle, category: editCategory, gamification: editGamification, body: editBody },
       });
     }
   };
@@ -477,12 +493,12 @@ export default function WikiEditor() {
           <p className="text-muted-foreground text-sm mt-0.5">
             Manage pages published at{" "}
             <a
-              href="https://docs.vaxplan.org"
+              href={docsUrl}
               target="_blank"
               rel="noopener noreferrer"
               className="text-primary hover:underline inline-flex items-center gap-1"
             >
-              docs.vaxplan.org <ExternalLink className="h-3 w-3" />
+              Documentation Site <ExternalLink className="h-3 w-3" />
             </a>
           </p>
         </div>
@@ -667,7 +683,7 @@ export default function WikiEditor() {
           </DialogHeader>
 
           {/* Meta fields */}
-          <div className="px-6 py-3 border-b flex-shrink-0 grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="px-6 py-3 border-b flex-shrink-0 grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div className="space-y-1">
               <label className="text-xs font-medium text-muted-foreground">Page Title *</label>
               <Input
@@ -696,6 +712,22 @@ export default function WikiEditor() {
                 disabled={!isNewPage}
                 className="h-8 text-sm font-mono"
               />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground">Category *</label>
+              <select
+                value={editCategory}
+                onChange={(e) => setEditCategory(e.target.value)}
+                className="flex h-8 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              >
+                <option value="Walkthroughs">Walkthroughs</option>
+                <option value="User Guides">User Guides</option>
+                <option value="Modules">Modules</option>
+                <option value="Deployment">Deployment</option>
+                <option value="Releases">Releases</option>
+                <option value="General">General</option>
+                <option value="Uncategorized">Uncategorized</option>
+              </select>
             </div>
           </div>
 
@@ -745,7 +777,7 @@ export default function WikiEditor() {
             />
 
             <div className="ml-auto flex items-center bg-muted p-0.5 rounded-lg border border-border">
-              {(["edit", "split", "preview"] as const).map((mode) => (
+              {(["edit", "split", "preview", "gamification"] as const).map((mode) => (
                 <button
                   key={mode}
                   type="button"
@@ -797,6 +829,22 @@ export default function WikiEditor() {
                 <div
                   className="w-1/2 h-full overflow-y-auto p-6 prose prose-sm dark:prose-invert max-w-none [&_h1]:text-xl [&_h2]:text-lg [&_h3]:text-base [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:rounded [&_pre]:bg-muted [&_pre]:p-4 [&_pre]:rounded-lg [&_blockquote]:border-l-4 [&_blockquote]:border-primary/40 [&_blockquote]:pl-4 [&_blockquote]:text-muted-foreground"
                   dangerouslySetInnerHTML={{ __html: renderMarkdown(editBody) }}
+                />
+              </div>
+            )}
+            {viewMode === "gamification" && (
+              <div className="h-full flex flex-col p-6 overflow-y-auto bg-slate-50 dark:bg-slate-900/50">
+                <h3 className="font-semibold text-lg mb-2 flex items-center gap-2">
+                  <Trophy className="h-5 w-5 text-amber-500" /> Gamification JSON Config
+                </h3>
+                <p className="text-sm text-muted-foreground mb-4">
+                  Configure badges and quizzes unlocked by this page. Use valid JSON format.
+                </p>
+                <textarea
+                  value={editGamification}
+                  onChange={(e) => setEditGamification(e.target.value)}
+                  className="flex-1 w-full resize-none p-4 font-mono text-sm bg-background text-foreground border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary leading-relaxed shadow-inner"
+                  spellCheck={false}
                 />
               </div>
             )}

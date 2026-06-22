@@ -15,6 +15,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { useQueryClient } from "@tanstack/react-query";
 import { formatDistanceToNow } from "date-fns";
+import { GeoCascadeFilter } from "@/components/GeoCascadeFilter";
 
 const severityConfig = {
   critical: {
@@ -48,12 +49,19 @@ const alertTypeIcons: Record<string, React.ComponentType<{ className?: string }>
 
 export default function Alerts() {
   const [severity, setSeverity] = useState<string>("all");
+  const [provinceId, setProvinceId] = useState<number | null>(null);
+  const [districtId, setDistrictId] = useState<number | null>(null);
+  const [facilityId, setFacilityId] = useState<number | null>(null);
+  
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
   const { data: alerts, isLoading } = useGetAlerts({
     severity: severity !== "all" ? (severity as any) : undefined,
-  });
+    provinceId: provinceId?.toString(),
+    districtId: districtId?.toString(),
+    facilityId: facilityId?.toString(),
+  } as any);
 
   const { mutate: dismiss, isPending } = useDismissAlert();
 
@@ -96,17 +104,38 @@ export default function Alerts() {
       </div>
 
       {/* Filters */}
-      <Select value={severity} onValueChange={setSeverity}>
-        <SelectTrigger className="w-40 h-8 text-sm bg-background border-border text-foreground">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent className="bg-background border-border">
-          <SelectItem value="all" className="text-foreground">All severities</SelectItem>
-          <SelectItem value="critical" className="text-foreground">Critical</SelectItem>
-          <SelectItem value="warning" className="text-foreground">Warning</SelectItem>
-          <SelectItem value="info" className="text-foreground">Info</SelectItem>
-        </SelectContent>
-      </Select>
+      <div className="flex flex-wrap items-center gap-3">
+        <Select value={severity} onValueChange={setSeverity}>
+          <SelectTrigger className="w-40 h-8 text-sm bg-background border-border text-foreground">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent className="bg-background border-border">
+            <SelectItem value="all" className="text-foreground">All severities</SelectItem>
+            <SelectItem value="critical" className="text-foreground">Critical</SelectItem>
+            <SelectItem value="warning" className="text-foreground">Warning</SelectItem>
+            <SelectItem value="info" className="text-foreground">Info</SelectItem>
+          </SelectContent>
+        </Select>
+        <GeoCascadeFilter
+          provinceId={provinceId}
+          districtId={districtId}
+          facilityId={facilityId}
+          onProvinceChange={setProvinceId}
+          onDistrictChange={setDistrictId}
+          onFacilityChange={setFacilityId}
+          showFacility={true}
+        />
+        {(severity !== "all" || provinceId || districtId || facilityId) && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-8 text-xs text-muted-foreground hover:text-foreground"
+            onClick={() => { setSeverity("all"); setProvinceId(null); setDistrictId(null); setFacilityId(null); }}
+          >
+            Clear filters
+          </Button>
+        )}
+      </div>
 
       <div className="space-y-2.5">
         {isLoading

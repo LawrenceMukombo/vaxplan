@@ -69,6 +69,7 @@ import "leaflet/dist/leaflet.css";
 // Dynamic basemap configuration
 const BASEMAP_URL = "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png";
 const BASEMAP_ATTRIBUTION = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>';
+import { getDomainLinks } from "@/lib/navigation";
 
 export default function ResearchHub() {
   const { toast } = useToast();
@@ -77,6 +78,7 @@ export default function ResearchHub() {
   const host = typeof window !== "undefined" ? window.location.hostname : "";
   const isResearchSubdomain = host.startsWith("research.");
   const adminLink = isResearchSubdomain ? "/admin" : "/research/admin";
+  const { vaxplanUrl, docsUrl } = getDomainLinks();
 
   // Sticky sub-nav highlighting
   useEffect(() => {
@@ -404,6 +406,12 @@ export default function ResearchHub() {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <Button size="sm" variant="ghost" asChild className="hidden md:flex text-muted-foreground hover:text-foreground">
+              <a href={docsUrl}>Documentation</a>
+            </Button>
+            <Button size="sm" variant="outline" asChild className="hidden sm:flex border-primary/30 text-primary hover:bg-primary/5">
+              <a href={vaxplanUrl}>Back to VaxPlan</a>
+            </Button>
             <Link href={adminLink}>
               <Button size="sm" variant="outline" className="text-xs border-primary/30 text-primary hover:bg-primary/5">
                 Admin Console

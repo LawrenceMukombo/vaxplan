@@ -1,9 +1,13 @@
 import { ThemeProvider } from "@/components/ThemeProvider";
 import UserGuideSection from "@/components/UserGuideSection";
 import { ThemeToggle } from "@/components/ThemeToggle";
-import { BookOpen } from "lucide-react";
+import { BookOpen, ArrowLeft, Beaker } from "lucide-react";
+import { getDomainLinks } from "@/lib/navigation";
+import { Button } from "@/components/ui/button";
 
 export default function PublicDocs() {
+  const { vaxplanUrl, researchUrl } = getDomainLinks();
+
   return (
     <ThemeProvider>
       <div className="min-h-screen bg-background text-foreground flex flex-col font-sans">
@@ -14,9 +18,18 @@ export default function PublicDocs() {
               <span className="font-bold text-lg hidden sm:inline-block">VaxPlan Documentation</span>
             </div>
             <div className="flex items-center gap-4">
-              <a href="https://vaxplan.org" className="text-sm font-medium hover:underline text-muted-foreground">
-                Back to VaxPlan
-              </a>
+              <Button variant="ghost" size="sm" asChild className="hidden md:flex gap-2 text-muted-foreground hover:text-foreground">
+                <a href={researchUrl}>
+                  <Beaker className="h-4 w-4" />
+                  Research Hub
+                </a>
+              </Button>
+              <Button variant="outline" size="sm" asChild className="gap-2">
+                <a href={vaxplanUrl}>
+                  <ArrowLeft className="h-4 w-4" />
+                  Back to VaxPlan
+                </a>
+              </Button>
               <ThemeToggle />
             </div>
           </div>

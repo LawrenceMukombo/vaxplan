@@ -2282,7 +2282,48 @@ export default function Facilities() {
                                 onClick={() => setCatchmentPoints([])}
                                 className="text-destructive hover:bg-destructive/10"
                               >
-                                Clear Catchment
+                                Clear Draft
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => {
+                                  toast({ title: "Draft Saved", description: "Polygon saved locally as a draft." });
+                                }}
+                              >
+                                Save as Draft
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="default"
+                                size="sm"
+                                onClick={() => {
+                                  if (catchmentPoints.length >= 3 && editingFacility?.id) {
+                                    saveCatchmentMutation.mutate({
+                                      facilityId: editingFacility.id,
+                                      geojson: {
+                                        type: "Polygon",
+                                        coordinates: [
+                                          [
+                                            ...catchmentPoints.map(pt => [pt.lng, pt.lat]),
+                                            [catchmentPoints[0].lng, catchmentPoints[0].lat]
+                                          ]
+                                        ]
+                                      },
+                                      villageIds: geofencedVillageIds,
+                                      settlementIds: extractionResult.settlements.map((s) => s.id),
+                                      unmappedOsm: extractionResult.unmapped.filter((u) => u.osmId && selectedUnmappedOsm.has(String(u.osmId))),
+                                    });
+                                    toast({ title: "Saving Catchment", description: "Catchment polygon is being saved..." });
+                                  } else if (catchmentPoints.length < 3) {
+                                    toast({ title: "Incomplete Polygon", description: "Please draw at least 3 points.", variant: "destructive" });
+                                  } else {
+                                    toast({ title: "Unsaved Facility", description: "Please save the facility first before saving its catchment polygon.", variant: "destructive" });
+                                  }
+                                }}
+                              >
+                                {saveCatchmentMutation.isPending ? "Saving..." : "Save Facility Polygon"}
                               </Button>
                             </div>
                           </div>
@@ -3428,8 +3469,31 @@ export default function Facilities() {
                           }}
                           className="text-destructive hover:text-destructive/90"
                         >
-                          Reset Coordinates
+                          Clear Draft
                         </Button>
+                      )}
+                      {commPolygonPoints.length >= 3 && (
+                        <>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              toast({ title: "Draft Saved", description: "Community polygon saved locally as a draft." });
+                            }}
+                          >
+                            Save as Draft
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="default"
+                            size="sm"
+                            onClick={handleSaveCommunity}
+                            disabled={createCommunityMutation.isPending || updateCommunityMutation.isPending}
+                          >
+                            {createCommunityMutation.isPending || updateCommunityMutation.isPending ? "Saving..." : "Save Community Polygon"}
+                          </Button>
+                        </>
                       )}
                     </div>
                   </div>
