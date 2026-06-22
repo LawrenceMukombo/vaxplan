@@ -7,13 +7,16 @@ import {
   Satellite, Sun, Calendar, ListChecks, Download, FileText, Loader2,
   Syringe, Plus,
 } from "lucide-react";
-import { useGetSettlements, useGetFacilities, useGetSettlement, useGetRecommendations, useGetFacility, useLogOutreach } from "@/hooks/vgie/useVgieApi";
+import { useGetSettlements, useGetFacilities, useGetSettlement, useGetRecommendations, useGetFacility, useLogOutreach, useUpdateSettlement, useBulkAssignFacility } from "@/hooks/vgie/useVgieApi";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter
+} from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { usePersistedBasemap, type Basemap, BasemapTileLayer, BASEMAP_ITEMS, BASEMAP_CONFIGS } from "@/components/map/BasemapToggle";
 
@@ -36,6 +39,7 @@ type SettlementItem = {
   riskScore?: number | null; riskLevel?: string | null;
   isNewSettlement: boolean; childrenUnderFive?: number | null; buildingCount?: number | null;
   lastOutreachDate?: string | null;
+  assignedFacilityId?: number | null;
 };
 
 type FacilityItem = {
@@ -502,6 +506,19 @@ export default function MapView() {
   const [isExporting, setIsExporting]       = useState<false | "png" | "pdf">(false);
   const [showExportMenu, setShowExportMenu] = useState(false);
 
+  // Bulk selection states
+  const [bulkSelectMode, setBulkSelectMode] = useState(false);
+  const [bulkSelectedIds, setBulkSelectedIds] = useState<number[]>([]);
+  const [bulkFacilityId, setBulkFacilityId] = useState("");
+  const [bulkTransportMode, setBulkTransportMode] = useState("walking");
+
+  // Coordinate correction states
+  const [confirmMove, setConfirmMove] = useState<{ id: number; lat: number; lng: number } | null>(null);
+
+  const updateSettlementMutation = useUpdateSettlement();
+  const bulkAssignMutation = useBulkAssignFacility();
+  const { toast } = useToast();
+
   const [showCountryOutline, setShowCountryOutline] = useState(true);
   const [showProvinces, setShowProvinces]           = useState(true);
   const [showDistricts, setShowDistricts]           = useState(false);
@@ -513,10 +530,12 @@ export default function MapView() {
   const districtListRef = useRef<string[]>([]);
   const mapContainerRef = useRef<HTMLDivElement>(null);
 
-  const { data: settlements } = useGetSettlements({
+  const { data: settlementsRes } = useGetSettlements({
     status: statusFilter !== "all" ? (statusFilter as any) : undefined,
     district: districtFilter !== "all" ? districtFilter : undefined,
+    page: "all",
   } as any);
+  const settlements = settlementsRes?.data?.items ?? [];
   const { data: facilities } = useGetFacilities();
 
   useEffect(() => {
@@ -959,6 +978,22 @@ export default function MapView() {
                     <span className="text-xs text-muted-foreground">District borders</span>
                   </label>
                 </div>
+                <div className="border-t border-border mt-1 pt-1.5">
+                  <button
+                    onClick={() => {
+                      setBulkSelectMode(!bulkSelectMode);
+                      setBulkSelectedIds([]);
+                    }}
+                    className={`w-full flex items-center justify-center gap-1.5 py-1.5 rounded border text-xs transition-colors font-semibold ${
+                      bulkSelectMode
+                        ? "bg-purple-600/20 text-purple-400 border-purple-500/30"
+                        : "bg-muted text-muted-foreground border-transparent hover:bg-accent/60"
+                    }`}
+                  >
+                    <Crosshair className="w-3.5 h-3.5" />
+                    {bulkSelectMode ? "Exit Bulk Select" : "Bulk Select Mode"}
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -1186,6 +1221,146 @@ export default function MapView() {
         </Card>
       </div>
 
+      {/* Move Confirmation Dialog */}
+      <Dialog open={confirmMove !== null} onOpenChange={(open) => { if (!open) setConfirmMove(null); }}>
+        <DialogContent className="bg-background border border-border sm:max-w-[400px] z-[9999]">
+          <DialogHeader>
+            <DialogTitle className="text-foreground font-bold flex items-center gap-2">
+              <AlertTriangle className="w-5 h-5 text-amber-500" /> Confirm Location Shift
+            </DialogTitle>
+            <DialogDescription className="text-muted-foreground text-xs">
+              You are about to modify the geographical coordinates of this settlement. This will re-estimate travel times and catchment calculations.
+            </DialogDescription>
+          </DialogHeader>
+          {confirmMove && (() => {
+            const s = settlements.find((x: any) => x.id === confirmMove.id);
+            if (!s) return null;
+            return (
+              <div className="space-y-3 py-2 text-sm text-foreground">
+                <p>Move settlement <span className="font-semibold">{s.name}</span>?</p>
+                <div className="p-2.5 rounded bg-muted border border-border text-xs space-y-1.5 font-mono">
+                  <p className="text-muted-foreground">Original Coordinates:</p>
+                  <p>{s.latitude ? Number(s.latitude).toFixed(6) : "—"}, {s.longitude ? Number(s.longitude).toFixed(6) : "—"}</p>
+                  <p className="text-muted-foreground mt-1.5">New Coordinates:</p>
+                  <p className="text-sky-400 font-bold">{confirmMove.lat.toFixed(6)}, {confirmMove.lng.toFixed(6)}</p>
+                </div>
+              </div>
+            );
+          })()}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmMove(null)} className="h-9 text-xs border text-foreground">
+              Cancel
+            </Button>
+            <Button
+              className="h-9 text-xs bg-primary text-primary-foreground font-semibold"
+              onClick={async () => {
+                if (!confirmMove) return;
+                try {
+                  await updateSettlementMutation.mutateAsync({
+                    id: confirmMove.id,
+                    latitude: confirmMove.lat,
+                    longitude: confirmMove.lng
+                  });
+                  toast({ title: "Settlement relocated successfully" });
+                  setConfirmMove(null);
+                  setSelectedId(confirmMove.id); // Keep selected
+                } catch (err) {
+                  // handled
+                }
+              }}
+              disabled={updateSettlementMutation.isPending}
+            >
+              {updateSettlementMutation.isPending ? "Updating..." : "Confirm Move"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Bulk Action Options Panel */}
+      {bulkSelectedIds.length > 0 && (
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[1000] w-96" data-export-ignore="true">
+          <Card className="bg-background border-purple-500/30 shadow-2xl border-2">
+            <CardContent className="p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-bold text-foreground">Bulk Action Mode</p>
+                <Badge className="bg-purple-600 text-white text-[10px] font-bold">
+                  {bulkSelectedIds.length} Selected
+                </Badge>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Select a health facility below to assign all {bulkSelectedIds.length} selected settlements to it.
+              </p>
+              <div className="space-y-2">
+                <div>
+                  <label className="text-[10px] text-muted-foreground block mb-1">Select Facility *</label>
+                  <Select value={bulkFacilityId} onValueChange={setBulkFacilityId}>
+                    <SelectTrigger className="h-8 bg-muted border border-border text-foreground text-xs">
+                      <SelectValue placeholder="Select target facility" />
+                    </SelectTrigger>
+                    <SelectContent className="bg-popover border border-border text-foreground">
+                      {facilities?.map((f: any) => (
+                        <SelectItem key={f.id} value={String(f.id)} className="text-xs text-foreground hover:bg-accent cursor-pointer">
+                          {f.name} ({f.district})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <label className="text-[10px] text-muted-foreground block mb-1">Transport Mode</label>
+                  <Select value={bulkTransportMode} onValueChange={setBulkTransportMode}>
+                    <SelectTrigger className="h-8 bg-muted border border-border text-foreground text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent className="bg-popover border border-border text-foreground text-xs">
+                      <SelectItem value="walking">Walking</SelectItem>
+                      <SelectItem value="bicycle">Bicycle</SelectItem>
+                      <SelectItem value="motorbike">Motorcycle</SelectItem>
+                      <SelectItem value="car">Vehicle / Car</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div className="flex gap-2 justify-end pt-1">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    setBulkSelectedIds([]);
+                    setBulkFacilityId("");
+                  }}
+                  className="h-8 text-xs text-foreground border"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  size="sm"
+                  className="h-8 bg-purple-600 hover:bg-purple-700 text-white font-semibold text-xs"
+                  onClick={async () => {
+                    if (!bulkFacilityId) return;
+                    try {
+                      await bulkAssignMutation.mutateAsync({
+                        settlementIds: bulkSelectedIds,
+                        facilityId: Number(bulkFacilityId),
+                        transportMode: bulkTransportMode
+                      });
+                      toast({ title: `Successfully assigned ${bulkSelectedIds.length} settlements` });
+                      setBulkSelectedIds([]);
+                      setBulkFacilityId("");
+                    } catch (err) {
+                      // handled
+                    }
+                  }}
+                  disabled={bulkAssignMutation.isPending}
+                >
+                  {bulkAssignMutation.isPending ? "Assigning..." : "Assign All"}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
       {/* ── Detail panels (mutually exclusive) ── */}
       {selectedId != null && (
         <SelectedPanel selectedId={selectedId} onClose={() => setSelectedId(null)} />
@@ -1226,6 +1401,9 @@ export default function MapView() {
             onBoundaryProvince={handleBoundaryProvince}
             onBoundaryDistrict={handleBoundaryDistrict}
             countryCode={tenantInfo?.countryCode}
+            onMoveSettlement={(sid, lat, lng) => setConfirmMove({ id: sid, lat, lng })}
+            bulkSelectMode={bulkSelectMode}
+            onBulkSelect={(ids) => setBulkSelectedIds(ids)}
           />
         ) : (
           <div className="w-full h-full flex items-center justify-center bg-slate-950">
@@ -1248,7 +1426,7 @@ function MapComponent({
   colorByRisk, colorByOutreach, onSelect, selectedId, highlightedSettlementIds, selectedFacilityId,
   onSelectFacility, facilityFlyTarget, onZoom, focusBounds,
   countryGeoJson, provinceGeoJson, districtGeoJson, onBoundaryProvince, onBoundaryDistrict,
-  countryCode,
+  countryCode, onMoveSettlement, bulkSelectMode, onBulkSelect,
 }: {
   L: any; RL: any;
   settlements: SettlementItem[];
@@ -1257,8 +1435,6 @@ function MapComponent({
   catchmentRadiusKm: number;
   center: [number, number];
   defaultZoom: number;
-  // Commented out original basemap type to support type Basemap string
-  // basemap: { url: string; attr: string };
   basemap: Basemap;
   showCatchment: boolean;
   showClusters: boolean;
@@ -1279,8 +1455,11 @@ function MapComponent({
   onBoundaryProvince: (name: string) => void;
   onBoundaryDistrict: (name: string) => void;
   countryCode?: string;
+  onMoveSettlement?: (id: number, lat: number, lng: number) => void;
+  bulkSelectMode?: boolean;
+  onBulkSelect?: (ids: number[]) => void;
 }) {
-  const { MapContainer, TileLayer, CircleMarker, Tooltip, Circle, useMap, useMapEvents, GeoJSON } = RL;
+  const { MapContainer, TileLayer, CircleMarker, Tooltip, Circle, useMap, useMapEvents, GeoJSON, Polyline, Marker } = RL;
 
   /* Force Leaflet to recalculate container size after DOM settles */
   function InvalidateOnMount() {
@@ -1375,6 +1554,80 @@ function MapComponent({
     );
   }
 
+  // Bulk drawing tracker component helper
+  function BulkSelectHandler() {
+    const map = useMap();
+    const rectRef = useRef<any>(null);
+    const startLatLngRef = useRef<any>(null);
+    const [isDrawing, setIsDrawing] = useState(false);
+
+    useEffect(() => {
+      if (!bulkSelectMode) {
+        if (rectRef.current) {
+          map.removeLayer(rectRef.current);
+          rectRef.current = null;
+        }
+        startLatLngRef.current = null;
+        setIsDrawing(false);
+        return;
+      }
+
+      map.dragging.disable();
+
+      const onMouseDown = (e: any) => {
+        startLatLngRef.current = e.latlng;
+        setIsDrawing(true);
+        if (rectRef.current) {
+          map.removeLayer(rectRef.current);
+        }
+        rectRef.current = L.rectangle([e.latlng, e.latlng], {
+          color: "#8b5cf6",
+          weight: 1.5,
+          fillColor: "#8b5cf6",
+          fillOpacity: 0.15,
+          dashArray: "4 4"
+        }).addTo(map);
+      };
+
+      const onMouseMove = (e: any) => {
+        if (!isDrawing || !startLatLngRef.current || !rectRef.current) return;
+        rectRef.current.setBounds([startLatLngRef.current, e.latlng]);
+      };
+
+      const onMouseUp = (e: any) => {
+        if (!isDrawing || !startLatLngRef.current || !rectRef.current) return;
+        setIsDrawing(false);
+        const bounds = rectRef.current.getBounds();
+        
+        const insideIds: number[] = [];
+        settlements.forEach((s: any) => {
+          if (s.latitude && s.longitude) {
+            const latlng = L.latLng(s.latitude, s.longitude);
+            if (bounds.contains(latlng)) {
+              insideIds.push(s.id);
+            }
+          }
+        });
+        
+        onBulkSelect?.(insideIds);
+        map.dragging.enable();
+      };
+
+      map.on("mousedown", onMouseDown);
+      map.on("mousemove", onMouseMove);
+      map.on("mouseup", onMouseUp);
+
+      return () => {
+        map.off("mousedown", onMouseDown);
+        map.off("mousemove", onMouseMove);
+        map.off("mouseup", onMouseUp);
+        map.dragging.enable();
+      };
+    }, [map, bulkSelectMode, isDrawing, settlements]);
+
+    return null;
+  }
+
   const tooltipStyle = {
     fontSize: 11, background: "#1e293b", color: "#e2e8f0",
     padding: "5px 9px", borderRadius: 6, border: "1px solid #334155",
@@ -1415,6 +1668,11 @@ function MapComponent({
       <FlyToFacility />
       <ZoomButtons />
       <ResetViewButton />
+
+      {/* Bulk drawing tracker component */}
+      {bulkSelectMode && (
+        <BulkSelectHandler />
+      )}
 
       {/* ── Administrative boundary overlays (rendered first — bottom of stack) ── */}
       {countryGeoJson && GeoJSON && (
@@ -1493,6 +1751,65 @@ function MapComponent({
           }}
         />
       ))}
+
+      {/* Connection polyline to assigned facility */}
+      {(() => {
+        const selectedSettlement = settlements.find(s => s.id === selectedId);
+        if (!selectedSettlement || !selectedSettlement.assignedFacilityId) return null;
+        const fac = facilities.find(f => f.id === selectedSettlement.assignedFacilityId);
+        if (!fac || !Polyline) return null;
+        return (
+          <Polyline
+            positions={[
+              [selectedSettlement.latitude, selectedSettlement.longitude],
+              [fac.latitude, fac.longitude]
+            ]}
+            pathOptions={{
+              color: "#38bdf8",
+              weight: 2.5,
+              dashArray: "6 6",
+              opacity: 0.8
+            }}
+          >
+            <Tooltip sticky={true}>
+              <div style={tooltipStyle}>
+                Linked to: <strong>{fac.name}</strong>
+              </div>
+            </Tooltip>
+          </Polyline>
+        );
+      })()}
+
+      {/* Selected Draggable Pin */}
+      {(() => {
+        const selectedSettlement = settlements.find(s => s.id === selectedId);
+        if (!selectedSettlement || !Marker) return null;
+        return (
+          <Marker
+            position={[selectedSettlement.latitude, selectedSettlement.longitude]}
+            draggable={true}
+            eventHandlers={{
+              dragend: (e: any) => {
+                const marker = e.target;
+                const position = marker.getLatLng();
+                onMoveSettlement?.(selectedSettlement.id, position.lat, position.lng);
+              }
+            }}
+            icon={L.divIcon({
+              html: `<div style="display:flex;align-items:center;justify-content:center;width:24px;height:24px;background:#ef4444;border:2px solid #fff;border-radius:50%;box-shadow:0 2px 10px rgba(0,0,0,0.5);cursor:move;"><div style="width:8px;height:8px;background:#fff;border-radius:50%;"></div></div>`,
+              className: "",
+              iconSize: [24, 24],
+              iconAnchor: [12, 12]
+            })}
+          >
+            <Tooltip permanent={true} direction="top" offset={[0, -10]}>
+              <div style={tooltipStyle}>
+                Drag pin to adjust location of {selectedSettlement.name}
+              </div>
+            </Tooltip>
+          </Marker>
+        );
+      })()}
 
       {/* Settlement markers */}
       {showClusters ? (

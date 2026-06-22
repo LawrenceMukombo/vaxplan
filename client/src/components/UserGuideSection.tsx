@@ -124,6 +124,11 @@ const QUIZZES: Record<string, QuizConfig> = {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+function toSentenceCase(str: string): string {
+  if (!str) return '';
+  return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
+}
+
 function slugify(text: string): string {
   return text
     .toLowerCase()
@@ -159,6 +164,7 @@ export default function UserGuideSection({ isFacilityRole }: Props) {
 
   // ── States ──────────────────────────────────────────────────────────────────
   const [query, setQuery] = useState("");
+  const [activeCategory, setActiveCategory] = useState<string>("All");
   const [openItem, setOpenItem] = useState<string | undefined>(undefined);
   const [readSections, setReadSections] = useState<string[]>([]);
   const [completedQuizzes, setCompletedQuizzes] = useState<string[]>([]);
@@ -194,7 +200,7 @@ export default function UserGuideSection({ isFacilityRole }: Props) {
       const res = await fetch("/api/wiki/pages");
       if (!res.ok) throw new Error("Failed to fetch wiki list");
       const json = await res.json();
-      return json.data as { id: number; slug: string; title: string; sort_order: number }[];
+      return json.data as { id: number; slug: string; title: string; category: string; gamification: any; sort_order: number }[];
     },
     retry: 1,
   });
@@ -214,30 +220,68 @@ export default function UserGuideSection({ isFacilityRole }: Props) {
   // Combine dynamic wiki pages with fallback static pages (offline-first architecture)
   const combinedSections = useMemo(() => {
     if (wikiPages.length === 0) {
-      return fallbackSections;
+      return fallbackSections.map(s => ({ ...s, category: "General", title: toSentenceCase(s.title), gamification: { quizzes: QUIZZES[s.id] ? [QUIZZES[s.id]] : [] } as { badges?: BadgeConfig[]; quizzes?: QuizConfig[] } }));
     }
     // Map list of dynamic pages
     return wikiPages.map(wp => {
       // Find fallback text in case dynamic body is loading or fails
       const fallback = fallbackSections.find(s => s.id === wp.slug);
+      let gami = {};
+      try {
+        gami = typeof wp.gamification === 'string' ? JSON.parse(wp.gamification) : (wp.gamification || {});
+      } catch { /* ignore */ }
+
       return {
         id: wp.slug,
-        title: wp.title,
+        title: toSentenceCase(wp.title),
+        category: wp.category || "Uncategorized",
+        gamification: gami as { badges?: BadgeConfig[]; quizzes?: QuizConfig[] },
         level: 2,
         body: wp.slug === openItem && activePageBody?.body ? activePageBody.body : (fallback?.body ?? ""),
       };
     });
   }, [wikiPages, fallbackSections, openItem, activePageBody]);
 
+  const dynamicBadges = useMemo(() => {
+    const badges: BadgeConfig[] = [...BADGES]; // include hardcoded fallback/quickstart
+    for (const s of combinedSections) {
+      if (s.gamification?.badges && Array.isArray(s.gamification.badges)) {
+        badges.push(...s.gamification.badges);
+      }
+    }
+    // Remove duplicates by ID
+    return Array.from(new Map(badges.map(b => [b.id, b])).values());
+  }, [combinedSections]);
+
+  const dynamicQuizzes = useMemo(() => {
+    const quizzes: Record<string, QuizConfig> = { ...QUIZZES }; // include hardcoded fallback
+    for (const s of combinedSections) {
+      if (s.gamification?.quizzes && Array.isArray(s.gamification.quizzes) && s.gamification.quizzes.length > 0) {
+        quizzes[s.id] = s.gamification.quizzes[0];
+      }
+    }
+    return quizzes;
+  }, [combinedSections]);
+
+  const categories = useMemo(() => {
+    const cats = new Set<string>();
+    combinedSections.forEach(s => cats.add(s.category));
+    return ["All", ...Array.from(cats)].sort();
+  }, [combinedSections]);
+
   // Filter sections by search query
   const filtered = useMemo(() => {
+    let result = combinedSections;
+    if (activeCategory !== "All") {
+      result = result.filter(s => s.category === activeCategory);
+    }
     const q = query.trim().toLowerCase();
-    if (!q) return combinedSections;
-    return combinedSections.filter(
+    if (!q) return result;
+    return result.filter(
       (s) =>
         s.title.toLowerCase().includes(q) || s.body.toLowerCase().includes(q),
     );
-  }, [combinedSections, query]);
+  }, [combinedSections, query, activeCategory]);
 
   // ── Reading progress stats ──────────────────────────────────────────────────
   const progressPercent = useMemo(() => {
@@ -255,18 +299,17 @@ export default function UserGuideSection({ isFacilityRole }: Props) {
     // 1. Quick-Start Badge
     if (readSections.includes("quickstart")) unlocked.push("quickstart");
 
-    // 2. GIS Intel Badge
-    if (completedQuizzes.includes("gis_intel")) unlocked.push("gis_intel");
+    // Dynamic Badges Check (if a quiz ID matches the badge ID and is completed)
+    for (const badge of dynamicBadges) {
+       if (completedQuizzes.includes(badge.id)) unlocked.push(badge.id);
+    }
 
-    // 3. Routine Plan Badge
-    if (completedQuizzes.includes("routine_plan")) unlocked.push("routine_plan");
-
-    // 4. Scholar Badge (all sections read)
+    // Scholar Badge (all sections read)
     const allRead = combinedSections.length > 0 && combinedSections.every(s => readSections.includes(s.id));
     if (allRead) unlocked.push("scholar");
 
-    return unlocked;
-  }, [readSections, completedQuizzes, combinedSections]);
+    return Array.from(new Set(unlocked));
+  }, [readSections, completedQuizzes, combinedSections, dynamicBadges]);
 
   const toggleSectionRead = (sectionId: string) => {
     let updated: string[];
@@ -329,10 +372,10 @@ export default function UserGuideSection({ isFacilityRole }: Props) {
 
             <div className="border-t md:border-t-0 md:border-l border-indigo-500/10 pt-4 md:pt-0 md:pl-6">
               <div className="text-xs font-semibold text-indigo-500 uppercase tracking-wider mb-2 flex items-center gap-1.5">
-                <Award className="h-4 w-4" /> Unlocked Badges ({unlockedBadges.length} / {BADGES.length})
+                <Award className="h-4 w-4" /> Unlocked Badges ({unlockedBadges.length} / {dynamicBadges.length})
               </div>
               <div className="flex gap-2 flex-wrap">
-                {BADGES.map((badge) => {
+                {dynamicBadges.map((badge) => {
                   const isUnlocked = unlockedBadges.includes(badge.id);
                   return (
                     <div
@@ -340,11 +383,11 @@ export default function UserGuideSection({ isFacilityRole }: Props) {
                       title={`${badge.name}: ${badge.description} (${isUnlocked ? "Unlocked" : "Locked"})`}
                       className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-xs font-medium select-none transition-all duration-300 ${
                         isUnlocked
-                          ? `bg-gradient-to-r ${badge.color} text-white border-transparent shadow-sm scale-100 hover:scale-105`
+                          ? `bg-gradient-to-r ${badge.color || 'from-indigo-400 to-blue-500'} text-white border-transparent shadow-sm scale-100 hover:scale-105`
                           : "bg-muted text-muted-foreground/60 border-muted-foreground/15 opacity-60"
                       }`}
                     >
-                      <span>{badge.icon}</span>
+                      <span>{badge.icon || "🏆"}</span>
                       <span>{badge.name}</span>
                       {!isUnlocked && <Lock className="h-3 w-3 ml-0.5 opacity-60" />}
                     </div>
@@ -455,20 +498,35 @@ export default function UserGuideSection({ isFacilityRole }: Props) {
           </div>
         </CardHeader>
         <CardContent className="space-y-3 pt-4">
-          {/* Search bar */}
-          <div className="relative">
-            <Search
-              aria-hidden="true"
-              className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground"
-            />
-            <Input
-              id="guide-search"
-              placeholder="Search guide pages..."
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              className="pl-8 h-9 text-sm"
-              data-testid="input-guide-search"
-            />
+          {/* Search and Category Filter */}
+          <div className="flex flex-col sm:flex-row gap-3">
+            <div className="relative flex-1">
+              <Search
+                aria-hidden="true"
+                className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground"
+              />
+              <Input
+                id="guide-search"
+                placeholder="Search guide pages..."
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                className="pl-8 h-9 text-sm"
+                data-testid="input-guide-search"
+              />
+            </div>
+            {categories.length > 1 && (
+              <select
+                value={activeCategory}
+                onChange={(e) => setActiveCategory(e.target.value)}
+                className="h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              >
+                {categories.map((cat) => (
+                  <option key={cat} value={cat}>
+                    {cat}
+                  </option>
+                ))}
+              </select>
+            )}
           </div>
 
           {wikiListLoading && filtered.length === 0 ? (
@@ -488,7 +546,7 @@ export default function UserGuideSection({ isFacilityRole }: Props) {
             >
               {filtered.map((s) => {
                 const isRead = readSections.includes(s.id);
-                const quiz = QUIZZES[s.id];
+                const quiz = dynamicQuizzes[s.id];
                 const isQuizCompleted = quiz && completedQuizzes.includes(quiz.id);
 
                 return (

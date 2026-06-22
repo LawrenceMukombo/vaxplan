@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { db } from "../db";
+import { VgieService } from "../services/vgieService";
 import {
   villages,
   facilities,
@@ -8,14 +9,37 @@ import {
   sessionPlans,
   sessionVillages,
   districts,
+  provinces,
+  vgieRecommendationRules,
+  vgieAlertRules,
+  settlementsMaster,
 } from "../../shared/schema";
-import { eq, and, sql, count, desc, ilike, or, inArray } from "drizzle-orm";
+import { eq, and, sql, count, desc, asc, ilike, or, inArray } from "drizzle-orm";
 
 const router = Router();
 
 // ── /api/vgie/dashboard/summary ──────────────────────────────────────────────
 router.get("/dashboard/summary", async (req: any, res) => {
   try {
+    const { provinceId, districtId, facilityId } = req.query as Record<string, string | undefined>;
+
+    const allDistricts = await db
+      .select({ id: districts.id, provinceId: districts.provinceId })
+      .from(districts)
+      .where(eq(districts.tenantId, req.tenantId));
+    const districtProvinceMap = new Map(allDistricts.map(d => [d.id, d.provinceId]));
+
+    const villageConditions = [eq(villages.tenantId, req.tenantId)];
+    if (facilityId && facilityId !== "all") {
+      villageConditions.push(eq(villages.assignedFacilityId, Number(facilityId)));
+    }
+    if (districtId && districtId !== "all") {
+      villageConditions.push(eq(villages.districtId, Number(districtId)));
+    }
+    if (provinceId && provinceId !== "all") {
+      villageConditions.push(eq(districts.provinceId, Number(provinceId)));
+    }
+
     const allVillages = await db
       .select({
         id: villages.id,
@@ -27,7 +51,8 @@ router.get("/dashboard/summary", async (req: any, res) => {
         createdAt: villages.createdAt,
       })
       .from(villages)
-      .where(eq(villages.tenantId, req.tenantId));
+      .leftJoin(districts, eq(villages.districtId, districts.id))
+      .where(and(...villageConditions));
 
     const totalSettlements = allVillages.length;
     let servedCount = 0;
@@ -62,9 +87,18 @@ router.get("/dashboard/summary", async (req: any, res) => {
       }
     }
 
-    const [{ activeAlertsCount }] = await db
-      .select({ activeAlertsCount: count() })
+    const alertsRows = await db
+      .select({
+        id: vgieAlerts.id,
+        villageId: vgieAlerts.villageId,
+        facilityId: vgieAlerts.facilityId,
+        villageDistrictId: villages.districtId,
+        villageAssignedFacilityId: villages.assignedFacilityId,
+        facilityDistrictId: facilities.districtId,
+      })
       .from(vgieAlerts)
+      .leftJoin(villages, eq(vgieAlerts.villageId, villages.id))
+      .leftJoin(facilities, eq(vgieAlerts.facilityId, facilities.id))
       .where(
         and(
           eq(vgieAlerts.status, "active"),
@@ -72,8 +106,38 @@ router.get("/dashboard/summary", async (req: any, res) => {
         )
       );
 
-    const [{ pendingRecommendationsCount }] = await db
-      .select({ pendingRecommendationsCount: count() })
+    let filteredAlerts = alertsRows;
+    if (facilityId && facilityId !== "all") {
+      const fId = Number(facilityId);
+      filteredAlerts = filteredAlerts.filter(r => 
+        r.facilityId === fId || 
+        r.villageAssignedFacilityId === fId
+      );
+    }
+    if (districtId && districtId !== "all") {
+      const dId = Number(districtId);
+      filteredAlerts = filteredAlerts.filter(r => 
+        r.villageDistrictId === dId || 
+        r.facilityDistrictId === dId
+      );
+    }
+    if (provinceId && provinceId !== "all") {
+      const pId = Number(provinceId);
+      filteredAlerts = filteredAlerts.filter(r => {
+        const vdId = r.villageDistrictId;
+        const fdId = r.facilityDistrictId;
+        return (vdId && districtProvinceMap.get(vdId) === pId) || 
+               (fdId && districtProvinceMap.get(fdId) === pId);
+      });
+    }
+    const activeAlertsCount = filteredAlerts.length;
+
+    const recsRows = await db
+      .select({
+        id: vgieRecommendations.id,
+        entityType: vgieRecommendations.entityType,
+        entityId: vgieRecommendations.entityId,
+      })
       .from(vgieRecommendations)
       .where(
         and(
@@ -82,10 +146,85 @@ router.get("/dashboard/summary", async (req: any, res) => {
         )
       );
 
+    // Resolve recommendation scopes:
+    const recVillageIds = recsRows.filter(r => r.entityType === "settlement").map(r => r.entityId);
+    let recVillagesLookup = new Map<number, { districtId: number; assignedFacilityId: number | null }>();
+    if (recVillageIds.length > 0) {
+      const vRecRows = await db
+        .select({ id: villages.id, districtId: villages.districtId, assignedFacilityId: villages.assignedFacilityId })
+        .from(villages)
+        .where(inArray(villages.id, recVillageIds));
+      recVillagesLookup = new Map(vRecRows.map(v => [v.id, v]));
+    }
+
+    const recFacilityIds = recsRows.filter(r => r.entityType === "facility").map(r => r.entityId);
+    let recFacilitiesLookup = new Map<number, { districtId: number }>();
+    if (recFacilityIds.length > 0) {
+      const fRecRows = await db
+        .select({ id: facilities.id, districtId: facilities.districtId })
+        .from(facilities)
+        .where(inArray(facilities.id, recFacilityIds));
+      recFacilitiesLookup = new Map(fRecRows.map(f => [f.id, f]));
+    }
+
+    const recSessionIds = recsRows.filter(r => r.entityType === "session").map(r => r.entityId);
+    let recSessionsLookup = new Map<number, { facilityId: number; districtId: number }>();
+    if (recSessionIds.length > 0) {
+      const sRecRows = await db
+        .select({ id: sessionPlans.id, facilityId: sessionPlans.facilityId, districtId: facilities.districtId })
+        .from(sessionPlans)
+        .innerJoin(facilities, eq(sessionPlans.facilityId, facilities.id))
+        .where(inArray(sessionPlans.id, recSessionIds));
+      recSessionsLookup = new Map(sRecRows.map(s => [s.id, s]));
+    }
+
+    let filteredRecs = recsRows;
+    if (facilityId && facilityId !== "all") {
+      const fId = Number(facilityId);
+      filteredRecs = filteredRecs.filter(r => {
+        if (r.entityType === "settlement") return recVillagesLookup.get(r.entityId)?.assignedFacilityId === fId;
+        if (r.entityType === "facility") return r.entityId === fId;
+        if (r.entityType === "session") return recSessionsLookup.get(r.entityId)?.facilityId === fId;
+        return false;
+      });
+    }
+    if (districtId && districtId !== "all") {
+      const dId = Number(districtId);
+      filteredRecs = filteredRecs.filter(r => {
+        if (r.entityType === "settlement") return recVillagesLookup.get(r.entityId)?.districtId === dId;
+        if (r.entityType === "facility") return recFacilitiesLookup.get(r.entityId)?.districtId === dId;
+        if (r.entityType === "session") return recSessionsLookup.get(r.entityId)?.districtId === dId;
+        return false;
+      });
+    }
+    if (provinceId && provinceId !== "all") {
+      const pId = Number(provinceId);
+      filteredRecs = filteredRecs.filter(r => {
+        let dId: number | undefined;
+        if (r.entityType === "settlement") dId = recVillagesLookup.get(r.entityId)?.districtId;
+        else if (r.entityType === "facility") dId = recFacilitiesLookup.get(r.entityId)?.districtId;
+        else if (r.entityType === "session") dId = recSessionsLookup.get(r.entityId)?.districtId;
+        return dId ? districtProvinceMap.get(dId) === pId : false;
+      });
+    }
+    const pendingRecommendationsCount = filteredRecs.length;
+
+    const facilityConditions = [eq(facilities.tenantId, req.tenantId)];
+    if (facilityId && facilityId !== "all") {
+      facilityConditions.push(eq(facilities.id, Number(facilityId)));
+    }
+    if (districtId && districtId !== "all") {
+      facilityConditions.push(eq(facilities.districtId, Number(districtId)));
+    }
+    if (provinceId && provinceId !== "all") {
+      facilityConditions.push(eq(districts.provinceId, Number(provinceId)));
+    }
+
     const [{ totalFacilities }] = await db
       .select({ totalFacilities: count() })
       .from(facilities)
-      .where(eq(facilities.tenantId, req.tenantId));
+      .leftJoin(districts, eq(facilities.districtId, districts.id))
+      .where(and(...facilityConditions));
 
     res.json({
       totalSettlements,
@@ -95,8 +234,8 @@ router.get("/dashboard/summary", async (req: any, res) => {
       highRiskCount,
       unservedPopulation,
       totalPopulation,
-      activeAlertsCount: Number(activeAlertsCount),
-      pendingRecommendationsCount: Number(pendingRecommendationsCount),
+      activeAlertsCount,
+      pendingRecommendationsCount,
       newSettlementsCount,
       totalFacilities: Number(totalFacilities),
     });
@@ -107,17 +246,41 @@ router.get("/dashboard/summary", async (req: any, res) => {
 });
 
 // ── /api/vgie/dashboard/district-stats ───────────────────────────────────────
+// ── /api/vgie/dashboard/district-stats ───────────────────────────────────────
 router.get("/dashboard/district-stats", async (req: any, res) => {
   try {
+    const { provinceId, districtId, facilityId } = req.query as Record<string, string | undefined>;
+
+    const districtConditions = [eq(districts.tenantId, req.tenantId)];
+    if (provinceId && provinceId !== "all") {
+      districtConditions.push(eq(districts.provinceId, Number(provinceId)));
+    }
+    if (districtId && districtId !== "all") {
+      districtConditions.push(eq(districts.id, Number(districtId)));
+    }
+
     const allDistricts = await db
       .select({ id: districts.id, name: districts.name })
       .from(districts)
-      .where(eq(districts.tenantId, req.tenantId));
+      .where(and(...districtConditions));
 
     const districtLookup = new Map(allDistricts.map((d) => [d.id, d.name]));
 
+    const villageConditions = [eq(villages.tenantId, req.tenantId)];
+    if (facilityId && facilityId !== "all") {
+      villageConditions.push(eq(villages.assignedFacilityId, Number(facilityId)));
+    }
+    if (districtId && districtId !== "all") {
+      villageConditions.push(eq(villages.districtId, Number(districtId)));
+    }
+    if (provinceId && provinceId !== "all") {
+      villageConditions.push(eq(districts.provinceId, Number(provinceId)));
+    }
+
     const allVillages = await db
       .select({
+        id: villages.id,
+        name: villages.name,
         districtId: villages.districtId,
         assignedFacilityId: villages.assignedFacilityId,
         distanceToFacility: villages.distanceToFacility,
@@ -125,12 +288,117 @@ router.get("/dashboard/district-stats", async (req: any, res) => {
         population: villages.griddedPopulation,
       })
       .from(villages)
-      .where(eq(villages.tenantId, req.tenantId));
+      .leftJoin(districts, eq(villages.districtId, districts.id))
+      .where(and(...villageConditions));
 
+    // Case 1: Facility is selected -> show individual communities/settlements assigned to this facility
+    if (facilityId && facilityId !== "all") {
+      const result = allVillages.map((v) => {
+        const isServed = v.assignedFacilityId && v.distanceToFacility && Number(v.distanceToFacility) <= 5;
+        return {
+          district: v.name, // using 'district' as key
+          totalSettlements: 1,
+          servedCount: isServed ? 1 : 0,
+          underservedCount: (v.assignedFacilityId && !isServed) ? 1 : 0,
+          unservedCount: !v.assignedFacilityId ? 1 : 0,
+          totalPopulation: Number(v.population || 0),
+          highRiskCount: v.highRisk ? 1 : 0,
+        };
+      });
+      return res.json(result);
+    }
+
+    // Case 2: District is selected -> show stats grouped by health facility inside the selected district
+    if (districtId && districtId !== "all") {
+      const allFacilities = await db
+        .select({ id: facilities.id, name: facilities.name })
+        .from(facilities)
+        .where(
+          and(
+            eq(facilities.tenantId, req.tenantId),
+            eq(facilities.districtId, Number(districtId)),
+            eq(facilities.isActive, true)
+          )
+        );
+      const facilityLookup = new Map(allFacilities.map((f) => [f.id, f.name]));
+
+      const groupMap = new Map<string, any>();
+      for (const f of allFacilities) {
+        groupMap.set(f.name, {
+          district: f.name, // using 'district' as key
+          totalSettlements: 0,
+          servedCount: 0,
+          underservedCount: 0,
+          unservedCount: 0,
+          totalPopulation: 0,
+          highRiskCount: 0,
+        });
+      }
+      groupMap.set("Unassigned", {
+        district: "Unassigned",
+        totalSettlements: 0,
+        servedCount: 0,
+        underservedCount: 0,
+        unservedCount: 0,
+        totalPopulation: 0,
+        highRiskCount: 0,
+      });
+
+      for (const v of allVillages) {
+        const facilityName = v.assignedFacilityId
+          ? (facilityLookup.get(v.assignedFacilityId) || "Unknown Facility")
+          : "Unassigned";
+
+        if (!groupMap.has(facilityName)) {
+          groupMap.set(facilityName, {
+            district: facilityName,
+            totalSettlements: 0,
+            servedCount: 0,
+            underservedCount: 0,
+            unservedCount: 0,
+            totalPopulation: 0,
+            highRiskCount: 0,
+          });
+        }
+        const entry = groupMap.get(facilityName)!;
+        entry.totalSettlements++;
+
+        if (v.assignedFacilityId) {
+          if (v.distanceToFacility && Number(v.distanceToFacility) <= 5) {
+            entry.servedCount++;
+          } else {
+            entry.underservedCount++;
+          }
+        } else {
+          entry.unservedCount++;
+        }
+        entry.totalPopulation += Number(v.population || 0);
+        if (v.highRisk) entry.highRiskCount++;
+      }
+
+      // Clean up empty entries
+      for (const [key, val] of Array.from(groupMap.entries())) {
+        if (val.totalSettlements === 0) {
+          groupMap.delete(key);
+        }
+      }
+
+      return res.json(
+        Array.from(groupMap.values()).sort(
+          (a, b) => b.highRiskCount - a.highRiskCount
+        )
+      );
+    }
+
+    // Case 3: Country or Province level -> group by district name
     const districtMap = new Map<string, any>();
 
     for (const v of allVillages) {
       const districtName = districtLookup.get(v.districtId) || "Unknown";
+      if (districtName === "Unknown" && (provinceId || districtId)) {
+        // If filtering by region/district, skip any that didn't match the selected region
+        continue;
+      }
       if (!districtMap.has(districtName)) {
         districtMap.set(districtName, {
           district: districtName,
@@ -174,10 +442,20 @@ router.get("/dashboard/district-stats", async (req: any, res) => {
 // Returns per-district outreach coverage metrics derived from session plans
 router.get("/dashboard/outreach-coverage", async (req: any, res) => {
   try {
+    const { provinceId, districtId, facilityId } = req.query as Record<string, string | undefined>;
+
+    const districtConditions = [eq(districts.tenantId, req.tenantId)];
+    if (provinceId && provinceId !== "all") {
+      districtConditions.push(eq(districts.provinceId, Number(provinceId)));
+    }
+    if (districtId && districtId !== "all") {
+      districtConditions.push(eq(districts.id, Number(districtId)));
+    }
+
     const allDistricts = await db
       .select({ id: districts.id, name: districts.name })
       .from(districts)
-      .where(eq(districts.tenantId, req.tenantId));
+      .where(and(...districtConditions));
 
     if (allDistricts.length === 0) {
       return res.json([]);
@@ -188,14 +466,25 @@ router.get("/dashboard/outreach-coverage", async (req: any, res) => {
     const twelveMonthsAgo = new Date();
     twelveMonthsAgo.setFullYear(twelveMonthsAgo.getFullYear() - 1);
 
-    // Count villages per district, and completed sessions in last 6 months
+    const villageConditions = [eq(villages.tenantId, req.tenantId)];
+    if (facilityId && facilityId !== "all") {
+      villageConditions.push(eq(villages.assignedFacilityId, Number(facilityId)));
+    }
+    if (districtId && districtId !== "all") {
+      villageConditions.push(eq(villages.districtId, Number(districtId)));
+    }
+    if (provinceId && provinceId !== "all") {
+      villageConditions.push(eq(districts.provinceId, Number(provinceId)));
+    }
+
     const villageRows = await db
       .select({
         districtId: villages.districtId,
         id: villages.id,
       })
       .from(villages)
-      .where(eq(villages.tenantId, req.tenantId));
+      .leftJoin(districts, eq(villages.districtId, districts.id))
+      .where(and(...villageConditions));
 
     const result: any[] = [];
 
@@ -207,11 +496,19 @@ router.get("/dashboard/outreach-coverage", async (req: any, res) => {
       const totalSettlements = districtVillageIds.length;
       if (totalSettlements === 0) continue;
 
-      // Find sessions that covered any village in this district recently
       let recentCount = 0;
       let overdueCount = 0;
 
       if (districtVillageIds.length > 0) {
+        const sessionConditions = [
+          inArray(sessionVillages.villageId, districtVillageIds),
+          eq(sessionPlans.tenantId, req.tenantId),
+          sql`${sessionPlans.scheduledDate} >= ${sixMonthsAgo.toISOString()}`
+        ];
+        if (facilityId && facilityId !== "all") {
+          sessionConditions.push(eq(sessionPlans.facilityId, Number(facilityId)));
+        }
+
         const recentSessions = await db
           .select({ villageId: sessionVillages.villageId })
           .from(sessionVillages)
@@ -219,13 +516,7 @@ router.get("/dashboard/outreach-coverage", async (req: any, res) => {
             sessionPlans,
             eq(sessionVillages.sessionId, sessionPlans.id)
           )
-          .where(
-            and(
-              inArray(sessionVillages.villageId, districtVillageIds),
-              eq(sessionPlans.tenantId, req.tenantId),
-              sql`${sessionPlans.scheduledDate} >= ${sixMonthsAgo.toISOString()}`
-            )
-          );
+          .where(and(...sessionConditions));
 
         const recentVillageIds = new Set(recentSessions.map((s) => s.villageId));
         recentCount = recentVillageIds.size;
@@ -252,6 +543,23 @@ router.get("/dashboard/outreach-coverage", async (req: any, res) => {
 // ── /api/vgie/dashboard/outreach-feed ────────────────────────────────────────
 router.get("/dashboard/outreach-feed", async (req: any, res) => {
   try {
+    const { provinceId, districtId, facilityId } = req.query as Record<string, string | undefined>;
+
+    const conditions = [
+      eq(sessionPlans.status, "completed"),
+      eq(sessionPlans.tenantId, req.tenantId)
+    ];
+
+    if (facilityId && facilityId !== "all") {
+      conditions.push(eq(sessionPlans.facilityId, Number(facilityId)));
+    }
+    if (districtId && districtId !== "all") {
+      conditions.push(eq(villages.districtId, Number(districtId)));
+    }
+    if (provinceId && provinceId !== "all") {
+      conditions.push(eq(districts.provinceId, Number(provinceId)));
+    }
+
     const feed = await db
       .select({
         id: sessionPlans.id,
@@ -265,12 +573,7 @@ router.get("/dashboard/outreach-feed", async (req: any, res) => {
       .innerJoin(sessionVillages, eq(sessionPlans.id, sessionVillages.sessionId))
       .innerJoin(villages, eq(sessionVillages.villageId, villages.id))
       .innerJoin(districts, eq(villages.districtId, districts.id))
-      .where(
-        and(
-          eq(sessionPlans.status, "completed"),
-          eq(sessionPlans.tenantId, req.tenantId)
-        )
-      )
+      .where(and(...conditions))
       .orderBy(desc(sessionPlans.scheduledDate))
       .limit(10);
 
@@ -290,103 +593,541 @@ router.get("/dashboard/outreach-feed", async (req: any, res) => {
   }
 });
 
+// Helper for straight-line geodetic distance (Haversine formula)
+function getHaversineDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6371; // Radius of earth in km
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
+// Helper to estimate travel time in minutes based on distance and transport mode
+function estimateTravelTimeMinutes(distanceKm: number, mode: string): number {
+  let speedKmh = 4; // walking default
+  if (mode === "bicycle") speedKmh = 10;
+  else if (mode === "motorbike") speedKmh = 25;
+  else if (mode === "car" || mode === "road") speedKmh = 40;
+  else if (mode === "boat") speedKmh = 15;
+  else if (mode === "air" || mode === "chopper") speedKmh = 100;
+  return Math.max(5, Math.round((distanceKm / speedKmh) * 60));
+}
+
 // ── /api/vgie/settlements ─────────────────────────────────────────────────────
 router.get("/settlements", async (req: any, res) => {
   try {
-    const { status, riskLevel, district, search } = req.query as Record<
-      string,
-      string | undefined
-    >;
+    const {
+      page = "1",
+      pageSize = "25",
+      search = "",
+      provinceId = "",
+      districtId = "",
+      facilityId = "",
+      status = "",
+      risk = "",
+      sortBy = "name",
+      sortOrder = "asc"
+    } = req.query as Record<string, string | undefined>;
 
-    const allDistricts = await db
-      .select({ id: districts.id, name: districts.name })
-      .from(districts)
-      .where(eq(districts.tenantId, req.tenantId));
+    const pageNum = Math.max(1, Number(page || 1));
+    const sizeNum = Math.max(1, Math.min(100, Number(pageSize || 25)));
+    const offset = (pageNum - 1) * sizeNum;
 
-    const districtLookup = new Map(allDistricts.map((d) => [d.id, d.name]));
+    // Build conditions array
+    const conditions: any[] = [
+      eq(settlementsMaster.tenantId, req.tenantId),
+      eq(settlementsMaster.isActive, true)
+    ];
 
-    const rows = await db
-      .select()
-      .from(villages)
-      .where(eq(villages.tenantId, req.tenantId));
+    // 1. Service Status Filter
+    if (status && status !== "all") {
+      conditions.push(eq(settlementsMaster.serviceStatus, status));
+    }
+
+    // 2. Risk Level Filter
+    if (risk && risk !== "all") {
+      conditions.push(eq(settlementsMaster.riskLevel, risk));
+    }
+
+    // 3. Location Filters
+    if (provinceId && provinceId !== "all") {
+      conditions.push(eq(settlementsMaster.provinceId, Number(provinceId)));
+    }
+    if (districtId && districtId !== "all") {
+      conditions.push(eq(settlementsMaster.districtId, Number(districtId)));
+    }
+    if (facilityId && facilityId !== "all") {
+      conditions.push(eq(settlementsMaster.linkedFacilityId, Number(facilityId)));
+    }
+
+    // 4. Search Filter
+    if (search) {
+      const q = `%${search.toLowerCase()}%`;
+      conditions.push(
+        or(
+          ilike(settlementsMaster.name, q),
+          ilike(settlementsMaster.provinceName, q),
+          ilike(settlementsMaster.districtName, q)
+        )
+      );
+    }
+
+    // Determine Sort Field
+    let orderByField: any = settlementsMaster.name;
+    if (sortBy === "province") {
+      orderByField = settlementsMaster.provinceName;
+    } else if (sortBy === "district") {
+      orderByField = settlementsMaster.districtName;
+    } else if (sortBy === "facility") {
+      orderByField = settlementsMaster.linkedFacilityId;
+    } else if (sortBy === "population") {
+      orderByField = settlementsMaster.populationEstimate;
+    } else if (sortBy === "riskScore") {
+      orderByField = settlementsMaster.riskLevel;
+    } else if (sortBy === "distance") {
+      orderByField = settlementsMaster.distanceToLinkedFacilityKm;
+    } else if (sortBy === "travelTime") {
+      orderByField = settlementsMaster.estimatedWalkingTimeMinutes;
+    }
+
+    const sortOrderFunc = sortOrder === "desc" ? desc(orderByField) : asc(orderByField);
+
+    // Query Total Filtered Count for pagination
+    const [countResult] = await db
+      .select({ count: count() })
+      .from(settlementsMaster)
+      .where(and(...conditions));
+    const total = countResult?.count ?? 0;
+    const totalPages = Math.ceil(total / sizeNum);
+
+    // Query Items
+    const items = page === "all"
+      ? await db
+          .select()
+          .from(settlementsMaster)
+          .where(and(...conditions))
+          .orderBy(sortOrderFunc)
+      : await db
+          .select()
+          .from(settlementsMaster)
+          .where(and(...conditions))
+          .orderBy(sortOrderFunc)
+          .limit(sizeNum)
+          .offset(offset);
+
+    // Query Summary Counts for Tenant overall
+    const countQuery = await db
+      .select({
+        riskLevel: settlementsMaster.riskLevel,
+        serviceStatus: settlementsMaster.serviceStatus,
+        count: count(),
+      })
+      .from(settlementsMaster)
+      .where(and(eq(settlementsMaster.tenantId, req.tenantId), eq(settlementsMaster.isActive, true)))
+      .groupBy(settlementsMaster.riskLevel, settlementsMaster.serviceStatus);
+
+    let totalCount = 0;
+    let servedCount = 0;
+    let underservedCount = 0;
+    let unservedCount = 0;
+    let highRiskCount = 0;
+
+    for (const group of countQuery) {
+      const c = Number(group.count || 0);
+      totalCount += c;
+      if (group.riskLevel === "high" || group.riskLevel === "very_high") {
+        highRiskCount += c;
+      }
+      if (group.serviceStatus === "served") {
+        servedCount += c;
+      } else if (group.serviceStatus === "underserved") {
+        underservedCount += c;
+      } else {
+        unservedCount += c;
+      }
+    }
 
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
-    let result = rows.map((v) => {
-      const pop = Number(v.griddedPopulation || v.totalCatchmentPopulation || 0);
-      let serviceStatus = "unserved";
-      if (v.assignedFacilityId) {
-        serviceStatus =
-          v.distanceToFacility && Number(v.distanceToFacility) <= 5
-            ? "served"
-            : "underserved";
-      }
+    const allFacilitiesForTenant = await db
+      .select({ id: facilities.id, name: facilities.name })
+      .from(facilities)
+      .where(eq(facilities.tenantId, req.tenantId));
+    const facilityNameMap = new Map(allFacilitiesForTenant.map(f => [f.id, f.name]));
 
-      const riskScore = v.highRisk
-        ? Math.min(95, 60 + Math.floor(Math.random() * 30))
-        : Math.floor(Math.random() * 40);
-      const riskLevelComputed =
-        riskScore >= 75
-          ? "very_high"
-          : riskScore >= 50
-          ? "high"
-          : riskScore >= 25
-          ? "medium"
-          : "low";
+    const allVillagesForTenant = await db
+      .select({ id: villages.id, name: villages.name })
+      .from(villages)
+      .where(eq(villages.tenantId, req.tenantId));
+    const communityNameMap = new Map(allVillagesForTenant.map(v => [v.id, v.name]));
+
+    const itemsMapped = items.map((v) => {
+      const pop = Number(v.populationEstimate || 0);
+      const riskScore = v.riskLevel === "very_high" ? 85 : v.riskLevel === "high" ? 65 : v.riskLevel === "medium" ? 35 : 15;
 
       return {
         id: v.id,
         name: v.name,
-        district: districtLookup.get(v.districtId) || "Unknown",
+        province: v.provinceName || "Unknown",
+        provinceId: v.provinceId,
+        district: v.districtName || "Unknown",
         districtId: v.districtId,
+        facilityId: v.linkedFacilityId,
+        facility: v.linkedFacilityId ? facilityNameMap.get(v.linkedFacilityId) : null,
+        linkedCommunityId: v.linkedCommunityId,
+        linkedCommunityName: v.linkedCommunityId ? communityNameMap.get(v.linkedCommunityId) : null,
         latitude: v.latitude ? Number(v.latitude) : null,
         longitude: v.longitude ? Number(v.longitude) : null,
         population: pop,
-        serviceStatus,
-        riskLevel: riskLevelComputed,
+        serviceStatus: v.serviceStatus,
+        riskLevel: v.riskLevel,
         riskScore,
-        assignedFacilityId: v.assignedFacilityId,
-        distanceToFacility: v.distanceToFacility
-          ? Number(v.distanceToFacility)
-          : null,
-        isHardToReach: v.isHardToReach,
-        highRisk: v.highRisk,
-        settlementType: v.settlementType,
-        isNewSettlement:
-          v.createdAt != null && new Date(v.createdAt) > thirtyDaysAgo,
+        distanceToFacility: v.distanceToLinkedFacilityKm ? Number(v.distanceToLinkedFacilityKm) : null,
+        estimatedWalkingTimeMinutes: v.estimatedWalkingTimeMinutes,
+        estimatedDrivingTimeMinutes: v.estimatedDrivingTimeMinutes,
+        travelModePlanning: v.travelModePlanning,
+        linkStatus: v.linkStatus,
+        isHardToReach: v.hardToReach,
+        isNewSettlement: v.createdAt != null && new Date(v.createdAt) > thirtyDaysAgo,
         under5Population: v.under5Population,
-        isMappedInHmis: v.isMappedInHmis,
-        lastVerified: v.lastVerified,
         createdAt: v.createdAt,
       };
     });
 
-    // Apply filters
-    if (status && status !== "all") {
-      result = result.filter((r) => r.serviceStatus === status);
-    }
-    if (riskLevel && riskLevel !== "all") {
-      result = result.filter((r) => r.riskLevel === riskLevel);
-    }
-    if (district && district !== "all") {
-      result = result.filter((r) =>
-        r.district.toLowerCase().includes(district.toLowerCase())
-      );
-    }
-    if (search) {
-      const q = search.toLowerCase();
-      result = result.filter(
-        (r) =>
-          r.name.toLowerCase().includes(q) ||
-          r.district.toLowerCase().includes(q)
-      );
-    }
-
-    res.json(result);
+    res.json({
+      success: true,
+      data: {
+        items: itemsMapped,
+        pagination: {
+          page: pageNum,
+          pageSize: sizeNum,
+          total,
+          totalPages,
+        },
+        counts: {
+          total: totalCount,
+          served: servedCount,
+          underserved: underservedCount,
+          unserved: unservedCount,
+          highRisk: highRiskCount,
+        },
+      },
+    });
   } catch (err) {
     console.error("VGIE settlements error:", err);
     res.status(500).json({ error: "Failed to fetch settlements" });
+  }
+});
+
+// ── POST /api/vgie/settlements (Manually Add Settlement) ──────────────────────
+router.post("/settlements", async (req: any, res) => {
+  try {
+    const { name, placeType = "village", latitude, longitude, provinceId, districtId, populationEstimate = 120 } = req.body;
+    if (!name || latitude == null || longitude == null) {
+      return res.status(400).json({ error: "Missing required fields (name, latitude, longitude)" });
+    }
+
+    const [newSettlement] = await db
+      .insert(settlementsMaster)
+      .values({
+        tenantId: req.tenantId,
+        name,
+        placeType,
+        latitude: String(latitude),
+        longitude: String(longitude),
+        provinceId: provinceId ? Number(provinceId) : null,
+        districtId: districtId ? Number(districtId) : null,
+        populationEstimate: Number(populationEstimate),
+        under5Population: Math.round(Number(populationEstimate) * 0.18),
+        validationStatus: "pending",
+        source: "manual_input",
+        serviceStatus: "unserved",
+        linkStatus: "unassigned",
+      })
+      .returning();
+
+    res.status(201).json({ success: true, data: newSettlement });
+  } catch (err) {
+    console.error("Failed to create settlement:", err);
+    res.status(500).json({ error: "Failed to create settlement" });
+  }
+});
+
+// ── PUT /api/vgie/settlements/:id (Edit Settlement) ───────────────────────────
+router.put("/settlements/:id", async (req: any, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+
+    const [existing] = await db
+      .select()
+      .from(settlementsMaster)
+      .where(and(eq(settlementsMaster.id, id), eq(settlementsMaster.tenantId, req.tenantId)));
+
+    if (!existing) return res.status(404).json({ error: "Settlement not found" });
+
+    const updates = {
+      name: req.body.name ?? existing.name,
+      placeType: req.body.placeType ?? existing.placeType,
+      latitude: req.body.latitude != null ? String(req.body.latitude) : existing.latitude,
+      longitude: req.body.longitude != null ? String(req.body.longitude) : existing.longitude,
+      populationEstimate: req.body.populationEstimate != null ? Number(req.body.populationEstimate) : existing.populationEstimate,
+      under5Population: req.body.populationEstimate != null ? Math.round(Number(req.body.populationEstimate) * 0.18) : existing.under5Population,
+      validationStatus: req.body.validationStatus ?? existing.validationStatus,
+      serviceStatus: req.body.serviceStatus ?? existing.serviceStatus,
+      riskLevel: req.body.riskLevel ?? existing.riskLevel,
+      hardToReach: req.body.hardToReach ?? existing.hardToReach,
+      updatedAt: new Date(),
+    };
+
+    const [updated] = await db
+      .update(settlementsMaster)
+      .set(updates)
+      .where(eq(settlementsMaster.id, id))
+      .returning();
+
+    res.json({ success: true, data: updated });
+  } catch (err) {
+    console.error("Failed to update settlement:", err);
+    res.status(500).json({ error: "Failed to update settlement" });
+  }
+});
+
+// ── DELETE /api/vgie/settlements/:id (Archive/Deactivate Settlement) ───────────
+router.delete("/settlements/:id", async (req: any, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+
+    const [existing] = await db
+      .select()
+      .from(settlementsMaster)
+      .where(and(eq(settlementsMaster.id, id), eq(settlementsMaster.tenantId, req.tenantId)));
+
+    if (!existing) return res.status(404).json({ error: "Settlement not found" });
+
+    await db
+      .update(settlementsMaster)
+      .set({ isActive: false, validationStatus: "archived", updatedAt: new Date() })
+      .where(eq(settlementsMaster.id, id));
+
+    res.json({ success: true, message: "Settlement archived successfully" });
+  } catch (err) {
+    console.error("Failed to archive settlement:", err);
+    res.status(500).json({ error: "Failed to archive settlement" });
+  }
+});
+
+// ── POST /api/vgie/settlements/:id/link-facility ──────────────────────────────
+router.post("/settlements/:id/link-facility", async (req: any, res) => {
+  try {
+    const id = Number(req.params.id);
+    const { facilityId, transportMode = "walking", linkMethod = "manual", notes } = req.body;
+    if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+    if (!facilityId) return res.status(400).json({ error: "facilityId is required" });
+
+    const [settlement] = await db
+      .select()
+      .from(settlementsMaster)
+      .where(and(eq(settlementsMaster.id, id), eq(settlementsMaster.tenantId, req.tenantId)));
+    if (!settlement) return res.status(404).json({ error: "Settlement not found" });
+
+    const [facility] = await db
+      .select()
+      .from(facilities)
+      .where(and(eq(facilities.id, Number(facilityId)), eq(facilities.tenantId, req.tenantId)));
+    if (!facility) return res.status(404).json({ error: "Facility not found" });
+
+    const distance = getHaversineDistance(
+      Number(settlement.latitude),
+      Number(settlement.longitude),
+      Number(facility.latitude),
+      Number(facility.longitude)
+    );
+
+    const walkingTime = estimateTravelTimeMinutes(distance, "walking");
+    const drivingTime = estimateTravelTimeMinutes(distance, transportMode);
+
+    await db
+      .update(settlementsMaster)
+      .set({
+        linkedFacilityId: facility.id,
+        distanceToLinkedFacilityKm: String(distance.toFixed(2)),
+        estimatedWalkingTimeMinutes: walkingTime,
+        estimatedDrivingTimeMinutes: drivingTime,
+        travelModePlanning: transportMode,
+        drySeasonTravelTimeMinutes: walkingTime,
+        rainySeasonTravelTimeMinutes: Math.round(walkingTime * 1.5),
+        linkStatus: "linked",
+        linkMethod,
+        linkNotes: notes,
+        serviceStatus: distance <= 5 ? "served" : "underserved",
+        updatedAt: new Date(),
+      })
+      .where(eq(settlementsMaster.id, id));
+
+    res.json({ success: true, message: "Linked to facility successfully", data: { distance, travelTime: drivingTime } });
+  } catch (err) {
+    console.error("Failed to link facility:", err);
+    res.status(500).json({ error: "Failed to link facility" });
+  }
+});
+
+// ── POST /api/vgie/settlements/:id/link-community ─────────────────────────────
+router.post("/settlements/:id/link-community", async (req: any, res) => {
+  try {
+    const id = Number(req.params.id);
+    const { communityId } = req.body;
+    if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+    if (!communityId) return res.status(400).json({ error: "communityId is required" });
+
+    const [settlement] = await db
+      .select()
+      .from(settlementsMaster)
+      .where(and(eq(settlementsMaster.id, id), eq(settlementsMaster.tenantId, req.tenantId)));
+    if (!settlement) return res.status(404).json({ error: "Settlement not found" });
+
+    const [community] = await db
+      .select()
+      .from(villages)
+      .where(and(eq(villages.id, Number(communityId)), eq(villages.tenantId, req.tenantId)));
+    if (!community) return res.status(404).json({ error: "Community not found" });
+
+    await db
+      .update(settlementsMaster)
+      .set({
+        linkedCommunityId: community.id,
+        linkStatus: "linked",
+        updatedAt: new Date(),
+      })
+      .where(eq(settlementsMaster.id, id));
+
+    await db
+      .update(villages)
+      .set({
+        linkedSettlementId: settlement.id,
+        updatedAt: new Date(),
+      })
+      .where(eq(villages.id, community.id));
+
+    res.json({ success: true, message: "Linked to community successfully" });
+  } catch (err) {
+    console.error("Failed to link community:", err);
+    res.status(500).json({ error: "Failed to link community" });
+  }
+});
+
+// ── POST /api/vgie/settlements/:id/convert-to-community ───────────────────────
+router.post("/settlements/:id/convert-to-community", async (req: any, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+
+    const [settlement] = await db
+      .select()
+      .from(settlementsMaster)
+      .where(and(eq(settlementsMaster.id, id), eq(settlementsMaster.tenantId, req.tenantId)));
+    if (!settlement) return res.status(404).json({ error: "Settlement not found" });
+
+    // Generate code
+    const countQuery = await db.select({ count: count() }).from(villages).where(eq(villages.tenantId, req.tenantId));
+    const nextIdx = (countQuery[0]?.count ?? 0) + 1;
+
+    const [community] = await db
+      .insert(villages)
+      .values({
+        tenantId: req.tenantId,
+        name: settlement.name,
+        code: `COMM-${nextIdx}`,
+        districtId: settlement.districtId || 1, // Default or resolved district
+        latitude: settlement.latitude,
+        longitude: settlement.longitude,
+        assignedFacilityId: settlement.linkedFacilityId,
+        distanceToFacility: settlement.distanceToLinkedFacilityKm,
+        travelTimeMinutes: settlement.estimatedWalkingTimeMinutes || 30,
+        isHardToReach: settlement.hardToReach,
+        settlementType: settlement.placeType || "village",
+        totalCatchmentPopulation: settlement.populationEstimate || 120,
+        under5Population: settlement.under5Population || Math.round((settlement.populationEstimate || 120) * 0.18),
+        linkedSettlementId: settlement.id,
+      })
+      .returning();
+
+    await db
+      .update(settlementsMaster)
+      .set({
+        linkedCommunityId: community.id,
+        linkStatus: "linked",
+        validationStatus: "approved",
+        updatedAt: new Date(),
+      })
+      .where(eq(settlementsMaster.id, id));
+
+    res.json({ success: true, data: community });
+  } catch (err) {
+    console.error("Failed to convert settlement to community:", err);
+    res.status(500).json({ error: "Failed to convert settlement" });
+  }
+});
+
+// ── POST /api/vgie/settlements/bulk-assign-facility ──────────────────────────
+router.post("/settlements/bulk-assign-facility", async (req: any, res) => {
+  try {
+    const { settlementIds, facilityId, transportMode = "walking" } = req.body;
+    if (!Array.isArray(settlementIds) || settlementIds.length === 0 || !facilityId) {
+      return res.status(400).json({ error: "Missing required parameters (settlementIds array, facilityId)" });
+    }
+
+    const [facility] = await db
+      .select()
+      .from(facilities)
+      .where(and(eq(facilities.id, Number(facilityId)), eq(facilities.tenantId, req.tenantId)));
+    if (!facility) return res.status(404).json({ error: "Facility not found" });
+
+    for (const sid of settlementIds) {
+      const [settlement] = await db
+        .select()
+        .from(settlementsMaster)
+        .where(and(eq(settlementsMaster.id, sid), eq(settlementsMaster.tenantId, req.tenantId)));
+      if (!settlement) continue;
+
+      const distance = getHaversineDistance(
+        Number(settlement.latitude),
+        Number(settlement.longitude),
+        Number(facility.latitude),
+        Number(facility.longitude)
+      );
+
+      const walkingTime = estimateTravelTimeMinutes(distance, "walking");
+      const drivingTime = estimateTravelTimeMinutes(distance, transportMode);
+
+      await db
+        .update(settlementsMaster)
+        .set({
+          linkedFacilityId: facility.id,
+          distanceToLinkedFacilityKm: String(distance.toFixed(2)),
+          estimatedWalkingTimeMinutes: walkingTime,
+          estimatedDrivingTimeMinutes: drivingTime,
+          travelModePlanning: transportMode,
+          drySeasonTravelTimeMinutes: walkingTime,
+          rainySeasonTravelTimeMinutes: Math.round(walkingTime * 1.5),
+          linkStatus: "linked",
+          linkMethod: "bulk_assign",
+          serviceStatus: distance <= 5 ? "served" : "underserved",
+          updatedAt: new Date(),
+        })
+        .where(eq(settlementsMaster.id, sid));
+    }
+
+    res.json({ success: true, message: `Successfully linked ${settlementIds.length} settlements to facility` });
+  } catch (err) {
+    console.error("Failed to perform bulk link:", err);
+    res.status(500).json({ error: "Failed to perform bulk linkage" });
   }
 });
 
@@ -398,8 +1139,8 @@ router.get("/settlements/:id", async (req: any, res) => {
 
     const [v] = await db
       .select()
-      .from(villages)
-      .where(and(eq(villages.id, id), eq(villages.tenantId, req.tenantId)));
+      .from(settlementsMaster)
+      .where(and(eq(settlementsMaster.id, id), eq(settlementsMaster.tenantId, req.tenantId)));
 
     if (!v) return res.status(404).json({ error: "Settlement not found" });
 
@@ -409,13 +1150,143 @@ router.get("/settlements/:id", async (req: any, res) => {
       .where(eq(districts.tenantId, req.tenantId));
     const districtLookup = new Map(allDistricts.map((d) => [d.id, d.name]));
 
-    let facility: any = null;
-    if (v.assignedFacilityId) {
+    let linkedFacility: any = null;
+    if (v.linkedFacilityId) {
       const [f] = await db
         .select({ id: facilities.id, name: facilities.name, hmisCode: facilities.hmisCode })
         .from(facilities)
-        .where(eq(facilities.id, v.assignedFacilityId));
-      facility = f || null;
+        .where(eq(facilities.id, v.linkedFacilityId));
+      linkedFacility = f || null;
+    }
+
+    let linkedCommunity: any = null;
+    if (v.linkedCommunityId) {
+      const [c] = await db
+        .select({ id: villages.id, name: villages.name, code: villages.code })
+        .from(villages)
+        .where(eq(villages.id, v.linkedCommunityId));
+      linkedCommunity = c || null;
+    }
+
+    // 1. Fetch nearest facility geocoded suggestion
+    const allFacilities = await db
+      .select({ id: facilities.id, name: facilities.name, latitude: facilities.latitude, longitude: facilities.longitude, hmisCode: facilities.hmisCode })
+      .from(facilities)
+      .where(eq(facilities.tenantId, req.tenantId));
+
+    let nearestFacility: any = null;
+    let nearestDistance = Infinity;
+
+    for (const fac of allFacilities) {
+      if (fac.latitude && fac.longitude && v.latitude && v.longitude) {
+        const dist = getHaversineDistance(
+          Number(v.latitude),
+          Number(v.longitude),
+          Number(fac.latitude),
+          Number(fac.longitude)
+        );
+        if (dist < nearestDistance) {
+          nearestDistance = dist;
+          nearestFacility = fac;
+        }
+      }
+    }
+
+    // 2. Fetch spatial containment (catchment polygon match)
+    let catchmentFacility: any = null;
+    try {
+      if (v.latitude && v.longitude) {
+        const [cf] = await db.execute(sql`
+          SELECT id, name FROM facilities 
+          WHERE tenant_id = ${req.tenantId} 
+            AND catchment_polygon IS NOT NULL 
+            AND ST_Contains(
+              ST_SetSRID(ST_GeomFromGeoJSON(catchment_polygon::text), 4326),
+              ST_SetSRID(ST_MakePoint(${v.longitude}::float, ${v.latitude}::float), 4326)
+            )
+          LIMIT 1
+        `) as any;
+        catchmentFacility = cf || null;
+      }
+    } catch (err) {
+      // Ignore geometry parse warnings
+    }
+
+    // 3. Duplicate checks & name similarity matches
+    let nearbyCommunity: any = null;
+    try {
+      if (v.latitude && v.longitude) {
+        const [nc] = await db.execute(sql`
+          SELECT id, name FROM villages
+          WHERE tenant_id = ${req.tenantId}
+            AND district_id = ${v.districtId || 0}
+            AND (ST_Distance(
+              ST_SetSRID(ST_MakePoint(longitude::float, latitude::float), 4326)::geography,
+              ST_SetSRID(ST_MakePoint(${v.longitude}::float, ${v.latitude}::float), 4326)::geography
+            ) / 1000.0) <= 0.5
+          LIMIT 1
+        `) as any;
+        nearbyCommunity = nc || null;
+      }
+    } catch (err) {
+      // Ignore spatial distance checks if not postgis-enabled
+    }
+
+    // 4. Construct Smart Suggestions (confidence & reason shapes)
+    const suggestions = [];
+    if (!v.linkedFacilityId && nearestFacility) {
+      suggestions.push({
+        type: "link_facility",
+        title: "Link to Health Facility",
+        description: `Settlement is currently unassigned. Nearest health facility is ${nearestFacility.name} (${nearestDistance.toFixed(2)} km).`,
+        confidence: 0.90,
+        actionable: true,
+        suggestedFacilityId: nearestFacility.id,
+        reason: "Calculated nearest straight-line distance to operational health post."
+      });
+    }
+    if (catchmentFacility && catchmentFacility.id !== v.linkedFacilityId) {
+      suggestions.push({
+        type: "catchment_polygon",
+        title: "Catchment Containment Match",
+        description: `Settlement lies inside the drawn catchment polygon of facility: ${catchmentFacility.name}.`,
+        confidence: 0.95,
+        actionable: true,
+        suggestedFacilityId: catchmentFacility.id,
+        reason: "Geographic intersection within facility service area boundaries."
+      });
+    }
+    if (nearestFacility && v.linkedFacilityId && nearestFacility.id !== v.linkedFacilityId) {
+      suggestions.push({
+        type: "reassign_facility",
+        title: "Optimized Catchment Suggestion",
+        description: `Linked to ${linkedFacility?.name || "another facility"}, but ${nearestFacility.name} is closer (${nearestDistance.toFixed(2)} km vs ${Number(v.distanceToLinkedFacilityKm || 0).toFixed(2)} km).`,
+        confidence: 0.75,
+        actionable: true,
+        suggestedFacilityId: nearestFacility.id,
+        reason: "Proximity checks reveal closer catchment options."
+      });
+    }
+    if (nearestDistance && nearestDistance >= 50.0) {
+      suggestions.push({
+        type: "htr_district",
+        title: "District Outreach Candidate",
+        description: `Extremely isolated settlement (${nearestDistance.toFixed(1)} km from facility). Suggest making it a district-level HTR responsibility.`,
+        confidence: 0.85,
+        actionable: false,
+        reason: "Exceeds extreme outreach isolation threshold (>= 50 km)."
+      });
+    }
+    if (nearbyCommunity) {
+      suggestions.push({
+        type: "merge_community",
+        title: "Duplicate Community Overlap",
+        description: `Physical overlap detected with registered community: ${nearbyCommunity.name} (within 500m). Suggest merging candidate records to resolve redundancy.`,
+        confidence: 0.90,
+        actionable: true,
+        suggestedCommunityId: nearbyCommunity.id,
+        reason: "Spatiotemporal proximity indicates duplicate candidate records."
+      });
     }
 
     // Fetch recent recommendations for this settlement
@@ -432,34 +1303,46 @@ router.get("/settlements/:id", async (req: any, res) => {
       .orderBy(desc(vgieRecommendations.createdAt))
       .limit(5);
 
-    const pop = Number(v.griddedPopulation || v.totalCatchmentPopulation || 0);
-    let serviceStatus = "unserved";
-    if (v.assignedFacilityId) {
-      serviceStatus =
-        v.distanceToFacility && Number(v.distanceToFacility) <= 5
-          ? "served"
-          : "underserved";
-    }
+    const pop = Number(v.populationEstimate || 0);
 
     res.json({
       id: v.id,
       name: v.name,
-      district: districtLookup.get(v.districtId) || "Unknown",
+      district: districtLookup.get(v.districtId || 0) || v.districtName || "Unknown",
       districtId: v.districtId,
       latitude: v.latitude ? Number(v.latitude) : null,
       longitude: v.longitude ? Number(v.longitude) : null,
       population: pop,
       under5Population: v.under5Population,
-      serviceStatus,
-      highRisk: v.highRisk,
-      highRiskReason: v.highRiskReason,
-      isHardToReach: v.isHardToReach,
-      settlementType: v.settlementType,
-      distanceToFacility: v.distanceToFacility ? Number(v.distanceToFacility) : null,
-      travelTimeMinutes: v.travelTimeMinutes,
-      isMappedInHmis: v.isMappedInHmis,
-      lastVerified: v.lastVerified,
-      assignedFacility: facility,
+      serviceStatus: v.serviceStatus,
+      highRisk: v.riskLevel === "high" || v.riskLevel === "very_high",
+      highRiskReason: v.riskLevel === "very_high" ? "very high risk classification" : "high risk classification",
+      isHardToReach: v.hardToReach,
+      settlementType: v.placeType || "village",
+      distanceToFacility: v.distanceToLinkedFacilityKm ? Number(v.distanceToLinkedFacilityKm) : null,
+      travelTimeMinutes: v.estimatedWalkingTimeMinutes || 30,
+      estimatedWalkingTimeMinutes: v.estimatedWalkingTimeMinutes,
+      estimatedDrivingTimeMinutes: v.estimatedDrivingTimeMinutes,
+      drySeasonTravelTimeMinutes: v.drySeasonTravelTimeMinutes,
+      rainySeasonTravelTimeMinutes: v.rainySeasonTravelTimeMinutes,
+      travelModePlanning: v.travelModePlanning,
+      linkStatus: v.linkStatus,
+      linkMethod: v.linkMethod,
+      linkConfidence: v.linkConfidence,
+      linkNotes: v.linkNotes,
+      isMappedInHmis: true,
+      lastVerified: v.updatedAt,
+      assignedFacility: linkedFacility,
+      linkedCommunity: linkedCommunity,
+      nearestFacility: nearestFacility ? {
+        id: nearestFacility.id,
+        name: nearestFacility.name,
+        distanceKm: nearestDistance,
+        travelTimeWalkingMin: Math.round(nearestDistance * 15),
+        travelTimeMotorcycleMin: Math.round(nearestDistance * 2.4),
+        travelTimeVehicleMin: Math.round(nearestDistance * 1.5)
+      } : null,
+      suggestions,
       recommendations: recs.map((r) => ({
         id: r.id,
         recommendationType: r.recommendationType,
@@ -595,18 +1478,43 @@ router.get("/facilities/:id", async (req: any, res) => {
 // ── /api/vgie/alerts ─────────────────────────────────────────────────────────
 router.get("/alerts", async (req: any, res) => {
   try {
-    const { severity } = req.query as { severity?: string };
+    const { severity, provinceId, districtId, facilityId } = req.query as Record<string, string | undefined>;
+
+    const conditions = [
+      eq(vgieAlerts.tenantId, req.tenantId),
+      eq(vgieAlerts.status, "active")
+    ];
+
+    if (severity && severity !== "all") {
+      conditions.push(eq(vgieAlerts.severity, severity));
+    }
 
     const rows = await db
-      .select()
+      .select({
+        id: vgieAlerts.id,
+        alertType: vgieAlerts.alertType,
+        severity: vgieAlerts.severity,
+        title: vgieAlerts.title,
+        message: vgieAlerts.message,
+        status: vgieAlerts.status,
+        createdAt: vgieAlerts.createdAt,
+        villageId: vgieAlerts.villageId,
+        facilityId: vgieAlerts.facilityId,
+        villageDistrictId: villages.districtId,
+        villageAssignedFacilityId: villages.assignedFacilityId,
+        facilityDistrictId: facilities.districtId,
+      })
       .from(vgieAlerts)
-      .where(
-        and(
-          eq(vgieAlerts.tenantId, req.tenantId),
-          eq(vgieAlerts.status, "active")
-        )
-      )
+      .leftJoin(villages, eq(vgieAlerts.villageId, villages.id))
+      .leftJoin(facilities, eq(vgieAlerts.facilityId, facilities.id))
+      .where(and(...conditions))
       .orderBy(desc(vgieAlerts.createdAt));
+
+    const allDistricts = await db
+      .select({ id: districts.id, provinceId: districts.provinceId })
+      .from(districts)
+      .where(eq(districts.tenantId, req.tenantId));
+    const districtProvinceMap = new Map(allDistricts.map(d => [d.id, d.provinceId]));
 
     let result = rows.map((a) => ({
       id: a.id,
@@ -617,10 +1525,35 @@ router.get("/alerts", async (req: any, res) => {
       status: a.status,
       dismissed: a.status !== "active",
       createdAt: a.createdAt,
+      villageId: a.villageId,
+      facilityId: a.facilityId,
+      villageDistrictId: a.villageDistrictId,
+      facilityDistrictId: a.facilityDistrictId,
+      villageAssignedFacilityId: a.villageAssignedFacilityId,
     }));
 
-    if (severity && severity !== "all") {
-      result = result.filter((a) => a.severity === severity);
+    if (facilityId && facilityId !== "all") {
+      const fId = Number(facilityId);
+      result = result.filter(r => 
+        r.facilityId === fId || 
+        r.villageAssignedFacilityId === fId
+      );
+    }
+    if (districtId && districtId !== "all") {
+      const dId = Number(districtId);
+      result = result.filter(r => 
+        r.villageDistrictId === dId || 
+        r.facilityDistrictId === dId
+      );
+    }
+    if (provinceId && provinceId !== "all") {
+      const pId = Number(provinceId);
+      result = result.filter(r => {
+        const vdId = r.villageDistrictId;
+        const fdId = r.facilityDistrictId;
+        return (vdId && districtProvinceMap.get(vdId) === pId) || 
+               (fdId && districtProvinceMap.get(fdId) === pId);
+      });
     }
 
     res.json(result);
@@ -653,15 +1586,26 @@ router.patch("/alerts/:id/dismiss", async (req: any, res) => {
 // ── /api/vgie/recommendations ─────────────────────────────────────────────────
 router.get("/recommendations", async (req: any, res) => {
   try {
-    const { priority, status } = req.query as {
+    const { priority, status, provinceId, districtId, facilityId } = req.query as {
       priority?: string;
       status?: string;
+      provinceId?: string;
+      districtId?: string;
+      facilityId?: string;
     };
+
+    const conditions = [eq(vgieRecommendations.tenantId, req.tenantId)];
+    if (priority && priority !== "all") {
+      conditions.push(eq(vgieRecommendations.priority, priority));
+    }
+    if (status && status !== "all") {
+      conditions.push(eq(vgieRecommendations.status, status));
+    }
 
     const rows = await db
       .select()
       .from(vgieRecommendations)
-      .where(eq(vgieRecommendations.tenantId, req.tenantId))
+      .where(and(...conditions))
       .orderBy(desc(vgieRecommendations.createdAt));
 
     // Join with village name when entityType is "settlement"
@@ -670,14 +1614,49 @@ router.get("/recommendations", async (req: any, res) => {
       .map((r) => r.entityId)
       .filter((id): id is number => id != null);
 
-    let villageLookup = new Map<number, { name: string; under5Population: number | null }>();
+    let villageLookup = new Map<number, { name: string; under5Population: number | null; districtId: number; assignedFacilityId: number | null }>();
     if (villageIds.length > 0) {
       const vRows = await db
-        .select({ id: villages.id, name: villages.name, under5Population: villages.under5Population })
+        .select({ id: villages.id, name: villages.name, under5Population: villages.under5Population, districtId: villages.districtId, assignedFacilityId: villages.assignedFacilityId })
         .from(villages)
         .where(inArray(villages.id, villageIds));
-      villageLookup = new Map(vRows.map((v) => [v.id, { name: v.name, under5Population: v.under5Population }]));
+      villageLookup = new Map(vRows.map((v) => [v.id, v]));
     }
+
+    const facilityIds = rows
+      .filter((r) => r.entityType === "facility")
+      .map((r) => r.entityId)
+      .filter((id): id is number => id != null);
+
+    let facilityLookup = new Map<number, { id: number; name: string; districtId: number }>();
+    if (facilityIds.length > 0) {
+      const fRows = await db
+        .select({ id: facilities.id, name: facilities.name, districtId: facilities.districtId })
+        .from(facilities)
+        .where(inArray(facilities.id, facilityIds));
+      facilityLookup = new Map(fRows.map((f) => [f.id, f]));
+    }
+
+    const sessionIds = rows
+      .filter((r) => r.entityType === "session")
+      .map((r) => r.entityId)
+      .filter((id): id is number => id != null);
+
+    let sessionLookup = new Map<number, { id: number; facilityId: number; districtId: number }>();
+    if (sessionIds.length > 0) {
+      const sRows = await db
+        .select({ id: sessionPlans.id, facilityId: sessionPlans.facilityId, districtId: facilities.districtId })
+        .from(sessionPlans)
+        .innerJoin(facilities, eq(sessionPlans.facilityId, facilities.id))
+        .where(inArray(sessionPlans.id, sessionIds));
+      sessionLookup = new Map(sRows.map((s) => [s.id, s]));
+    }
+
+    const allDistricts = await db
+      .select({ id: districts.id, provinceId: districts.provinceId })
+      .from(districts)
+      .where(eq(districts.tenantId, req.tenantId));
+    const districtProvinceMap = new Map(allDistricts.map(d => [d.id, d.provinceId]));
 
     let result = rows.map((r) => {
       const vData =
@@ -701,11 +1680,51 @@ router.get("/recommendations", async (req: any, res) => {
       };
     });
 
-    if (priority && priority !== "all") {
-      result = result.filter((r) => r.priority === priority);
+    if (facilityId && facilityId !== "all") {
+      const fId = Number(facilityId);
+      result = result.filter((r) => {
+        if (r.entityType === "settlement" && r.entityId) {
+          return villageLookup.get(r.entityId)?.assignedFacilityId === fId;
+        }
+        if (r.entityType === "facility") {
+          return r.entityId === fId;
+        }
+        if (r.entityType === "session" && r.entityId) {
+          return sessionLookup.get(r.entityId)?.facilityId === fId;
+        }
+        return false;
+      });
     }
-    if (status && status !== "all") {
-      result = result.filter((r) => r.status === status);
+
+    if (districtId && districtId !== "all") {
+      const dId = Number(districtId);
+      result = result.filter((r) => {
+        if (r.entityType === "settlement" && r.entityId) {
+          return villageLookup.get(r.entityId)?.districtId === dId;
+        }
+        if (r.entityType === "facility" && r.entityId) {
+          return facilityLookup.get(r.entityId)?.districtId === dId;
+        }
+        if (r.entityType === "session" && r.entityId) {
+          return sessionLookup.get(r.entityId)?.districtId === dId;
+        }
+        return false;
+      });
+    }
+
+    if (provinceId && provinceId !== "all") {
+      const pId = Number(provinceId);
+      result = result.filter((r) => {
+        let dId: number | undefined;
+        if (r.entityType === "settlement" && r.entityId) {
+          dId = villageLookup.get(r.entityId)?.districtId;
+        } else if (r.entityType === "facility" && r.entityId) {
+          dId = facilityLookup.get(r.entityId)?.districtId;
+        } else if (r.entityType === "session" && r.entityId) {
+          dId = sessionLookup.get(r.entityId)?.districtId;
+        }
+        return dId ? districtProvinceMap.get(dId) === pId : false;
+      });
     }
 
     res.json(result);
@@ -748,89 +1767,13 @@ router.patch("/recommendations/:id", async (req: any, res) => {
 // unserved or high-risk settlements that do not already have a pending rec.
 router.post("/analyze-catchment", async (req: any, res) => {
   try {
-    const unservedVillages = await db
-      .select({
-        id: villages.id,
-        name: villages.name,
-        highRisk: villages.highRisk,
-        isHardToReach: villages.isHardToReach,
-        distanceToFacility: villages.distanceToFacility,
-        under5Population: villages.under5Population,
-      })
-      .from(villages)
-      .where(
-        and(
-          eq(villages.tenantId, req.tenantId),
-          sql`${villages.assignedFacilityId} IS NULL`
-        )
-      )
-      .limit(100);
-
-    if (unservedVillages.length === 0) {
-      return res.json({ generated: 0, skipped: 0, message: "No unserved settlements found" });
-    }
-
-    // Check which already have a pending recommendation
-    const existingRecs = await db
-      .select({ entityId: vgieRecommendations.entityId })
-      .from(vgieRecommendations)
-      .where(
-        and(
-          eq(vgieRecommendations.tenantId, req.tenantId),
-          eq(vgieRecommendations.entityType, "settlement"),
-          eq(vgieRecommendations.status, "pending")
-        )
-      );
-    const existingEntityIds = new Set(existingRecs.map((r) => r.entityId));
-
-    let generated = 0;
-    let skipped = 0;
-    const toInsert: any[] = [];
-
-    for (const v of unservedVillages) {
-      if (existingEntityIds.has(v.id)) {
-        skipped++;
-        continue;
-      }
-
-      const priority = v.highRisk ? "high" : v.isHardToReach ? "medium" : "low";
-      const recType = v.highRisk
-        ? "Establish emergency outreach session"
-        : v.isHardToReach
-        ? "Plan quarterly outreach visit"
-        : "Add regular outreach visit";
-
-      toInsert.push({
-        tenantId: req.tenantId,
-        entityType: "settlement",
-        entityId: v.id,
-        recommendationType: recType,
-        priority,
-        title: `${recType}: ${v.name}`,
-        description: `Settlement "${v.name}" has no assigned health facility. Estimated ${v.under5Population ?? "unknown"} children under 5. ${v.highRisk ? "HIGH RISK: Immediate action required." : "Recommendation generated by rule-based analysis."}`,
-        status: "pending",
-      });
-      generated++;
-    }
-
-    if (toInsert.length > 0) {
-      await db.insert(vgieRecommendations).values(toInsert);
-    }
-
-    // Also generate an alert if any high-risk unserved settlements found
-    const highRiskCount = toInsert.filter((r) => r.priority === "high").length;
-    if (highRiskCount > 0) {
-      await db.insert(vgieAlerts).values({
-        tenantId: req.tenantId,
-        alertType: "unserved_population",
-        severity: "warning",
-        title: `${highRiskCount} high-risk settlements without facility coverage`,
-        message: `Catchment analysis identified ${highRiskCount} high-risk settlement(s) with no assigned health facility. Immediate outreach planning is recommended.`,
-        status: "active",
-      });
-    }
-
-    res.json({ generated, skipped });
+    const generatedRecs = await VgieService.generateRecommendations(req.tenantId);
+    const generatedAlerts = await VgieService.detectCoverageGaps(req.tenantId);
+    res.json({ 
+      generated: generatedRecs.length, 
+      alertsGenerated: generatedAlerts.length, 
+      skipped: 0 
+    });
   } catch (err) {
     console.error("VGIE analyze-catchment error:", err);
     res.status(500).json({ error: "Failed to run catchment analysis" });
@@ -1061,6 +2004,107 @@ Return a JSON object with these exact fields (no markdown, no explanation, raw J
   } catch (err) {
     console.error("VGIE AI recommendations error:", err);
     res.status(500).json({ error: "Failed to generate AI recommendations" });
+  }
+});
+
+// ── VGIE RECOMMENDATION RULES CRUD ──────────────────────────────────────────
+router.get("/recommendation-rules", async (req: any, res) => {
+  try {
+    const rules = await db
+      .select()
+      .from(vgieRecommendationRules)
+      .where(eq(vgieRecommendationRules.tenantId, req.tenantId))
+      .orderBy(vgieRecommendationRules.name);
+    res.json(rules);
+  } catch (err) {
+    console.error("Failed to fetch recommendation rules:", err);
+    res.status(500).json({ error: "Failed to fetch recommendation rules" });
+  }
+});
+
+router.post("/recommendation-rules", async (req: any, res) => {
+  try {
+    const { name, description, category, conditionSql, recommendationText, priority, isActive } = req.body;
+    if (!name || !category || !conditionSql || !recommendationText) {
+      return res.status(400).json({ error: "Missing required fields" });
+    }
+
+    const [rule] = await db
+      .insert(vgieRecommendationRules)
+      .values({
+        tenantId: req.tenantId,
+        name,
+        description: description ?? null,
+        category,
+        conditionSql,
+        recommendationText,
+        priority: priority ?? "medium",
+        isActive: isActive !== false,
+      })
+      .returning();
+
+    res.json(rule);
+  } catch (err) {
+    console.error("Failed to create recommendation rule:", err);
+    res.status(500).json({ error: "Failed to create recommendation rule" });
+  }
+});
+
+router.patch("/recommendation-rules/:id", async (req: any, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+
+    const { name, description, category, conditionSql, recommendationText, priority, isActive } = req.body;
+
+    const updateData: any = { updatedAt: new Date() };
+    if (name !== undefined) updateData.name = name;
+    if (description !== undefined) updateData.description = description;
+    if (category !== undefined) updateData.category = category;
+    if (conditionSql !== undefined) updateData.conditionSql = conditionSql;
+    if (recommendationText !== undefined) updateData.recommendationText = recommendationText;
+    if (priority !== undefined) updateData.priority = priority;
+    if (isActive !== undefined) updateData.isActive = isActive;
+
+    const [rule] = await db
+      .update(vgieRecommendationRules)
+      .set(updateData)
+      .where(
+        and(
+          eq(vgieRecommendationRules.id, id),
+          eq(vgieRecommendationRules.tenantId, req.tenantId)
+        )
+      )
+      .returning();
+
+    if (!rule) return res.status(404).json({ error: "Rule not found" });
+    res.json(rule);
+  } catch (err) {
+    console.error("Failed to update recommendation rule:", err);
+    res.status(500).json({ error: "Failed to update recommendation rule" });
+  }
+});
+
+router.delete("/recommendation-rules/:id", async (req: any, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+
+    const [rule] = await db
+      .delete(vgieRecommendationRules)
+      .where(
+        and(
+          eq(vgieRecommendationRules.id, id),
+          eq(vgieRecommendationRules.tenantId, req.tenantId)
+        )
+      )
+      .returning();
+
+    if (!rule) return res.status(404).json({ error: "Rule not found" });
+    res.json({ success: true, rule });
+  } catch (err) {
+    console.error("Failed to delete recommendation rule:", err);
+    res.status(500).json({ error: "Failed to delete recommendation rule" });
   }
 });
 

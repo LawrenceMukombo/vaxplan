@@ -149,13 +149,13 @@ gisPolygonsRouter.post("/suggest", async (req, res) => {
 });
 
 // POST /api/gis/polygons/intelligence
-// Expects: { geometry }
+// Expects: { geometry, ownerType, ownerId }
 gisPolygonsRouter.post("/intelligence", async (req, res) => {
   try {
     const tenantId = (req.user as any)?.tenantId;
-    const { geometry } = req.body;
+    const { geometry, ownerType, ownerId } = req.body;
     
-    const intelligence = await PopulationIntelligenceService.fetchPolygonPopulation(tenantId, geometry, "ZMB");
+    const intelligence = await PopulationIntelligenceService.fetchPolygonPopulation(tenantId, geometry, "ZMB", ownerType, ownerId);
     res.json(intelligence);
   } catch (err: any) {
     res.status(500).json({ message: "Failed to calculate intelligence", error: err.message });

@@ -598,10 +598,16 @@ export const villages = pgTable("villages", {
   detectionSource: varchar("detection_source", { length: 50 }),
   isMappedInHmis: boolean("is_mapped_in_hmis").default(false),
   lastVerified: timestamp("last_verified"),
+  linkedSettlementId: integer("linked_settlement_id"),
 
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
-}, (table) => [index("idx_villages_tenant").on(table.tenantId)]);
+}, (table) => [
+  index("idx_villages_tenant").on(table.tenantId),
+  index("idx_villages_district").on(table.districtId),
+  index("idx_villages_facility").on(table.assignedFacilityId),
+  index("idx_villages_name").on(table.name),
+]);
 
 
 // Catchment overlap conflicts: recorded when a newly drawn/edited community
@@ -659,6 +665,8 @@ export const vgieAlerts = pgTable("vgie_alerts", {
   title: varchar("title", { length: 255 }).notNull(),
   message: text("message"),
   status: varchar("status", { length: 50 }).notNull().default("active"), // active, resolved
+  villageId: integer("village_id").references(() => villages.id, { onDelete: "cascade" }),
+  facilityId: integer("facility_id").references(() => facilities.id, { onDelete: "cascade" }),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -1902,7 +1910,28 @@ export const settlementsMaster = pgTable(
     estimatedTravelTime: integer("estimated_travel_time"), // minutes
     accessibilityScore: decimal("accessibility_score", { precision: 5, scale: 2 }), // 1.0 to 4.0
     hardToReach: boolean("hard_to_reach").default(false).notNull(),
-    validationStatus: varchar("validation_status", { length: 50 }).default("approved").notNull(), // approved, pending
+    validationStatus: varchar("validation_status", { length: 50 }).default("approved").notNull(), // approved, pending, needs_review, duplicate
+    
+    // Additive columns for Settlements GIS upgrade
+    provinceId: integer("province_id"),
+    districtId: integer("district_id"),
+    linkedCommunityId: integer("linked_community_id"),
+    linkedFacilityId: integer("linked_facility_id"),
+    nearestFacilityId: integer("nearest_facility_id"),
+    distanceToLinkedFacilityKm: decimal("distance_to_linked_facility_km", { precision: 8, scale: 2 }),
+    estimatedWalkingTimeMinutes: integer("estimated_walking_time_minutes"),
+    estimatedDrivingTimeMinutes: integer("estimated_driving_time_minutes"),
+    travelModePlanning: varchar("travel_mode_planning", { length: 50 }),
+    drySeasonTravelTimeMinutes: integer("dry_season_travel_time_minutes"),
+    rainySeasonTravelTimeMinutes: integer("rainy_season_travel_time_minutes"),
+    linkStatus: varchar("link_status", { length: 50 }).default("unassigned"),
+    linkMethod: varchar("link_method", { length: 50 }),
+    linkConfidence: decimal("link_confidence", { precision: 5, scale: 2 }),
+    linkNotes: text("link_notes"),
+    serviceStatus: varchar("service_status", { length: 50 }).default("unserved"),
+    riskLevel: varchar("risk_level", { length: 50 }).default("low"),
+    isActive: boolean("is_active").default(true),
+
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow(),
   },
@@ -2450,7 +2479,7 @@ export const insertStockTransactionSchema = createInsertSchema(stockTransactions
 }).extend({
   productId: z.number().int().positive(),
   productCode: z.string().optional().nullable(),
-  vaccineName: z.string().optional().nullable(),
+  vaccineName: z.string().optional().nullable().transform((val) => val ? normalizeStockVaccineName(val) : val),
   expiryDate: z.coerce.date(),
   transactionDate: z.coerce.date().optional(),
 });
@@ -3615,3 +3644,62 @@ export const gisPolygonsRelations = relations(gisPolygons, ({ one }) => ({
 export const insertGisPolygonSchema = createInsertSchema(gisPolygons);
 export const selectGisPolygonSchema = createSelectSchema(gisPolygons);
 export type GisPolygon = typeof gisPolygons.$inferSelect;
+
+// ============================================================================
+// VGIE RECOMMENDATION & ALERT RULES
+// ============================================================================
+
+export const vgieRecommendationRules = pgTable("vgie_recommendation_rules", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  name: varchar("name", { length: 255 }).notNull(),
+  description: text("description"),
+  category: varchar("category", { length: 100 }).notNull(), // 'accessibility', 'population', 'coverage', 'infrastructure'
+  conditionSql: text("condition_sql").notNull(), // Evaluated logic expression
+  recommendationText: text("recommendation_text").notNull(), 
+  priority: varchar("priority", { length: 50 }).notNull().default("medium"), // 'high', 'medium', 'low'
+  isActive: boolean("is_active").default(true).notNull(),
+  createdByUserId: varchar("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => ({
+  tenantIdx: index("idx_vgie_rec_rules_tenant").on(table.tenantId),
+}));
+
+export const vgieAlertRules = pgTable("vgie_alert_rules", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  name: varchar("name", { length: 255 }).notNull(),
+  description: text("description"),
+  severity: varchar("severity", { length: 50 }).notNull().default("warning"), // 'critical', 'warning', 'info'
+  triggerCondition: text("trigger_condition").notNull(), 
+  alertTemplate: text("alert_template").notNull(), 
+  isActive: boolean("is_active").default(true).notNull(),
+  createdByUserId: varchar("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => ({
+  tenantIdx: index("idx_vgie_alert_rules_tenant").on(table.tenantId),
+}));
+
+export const vgieRecommendationRulesRelations = relations(vgieRecommendationRules, ({ one }) => ({
+  tenant: one(tenants, {
+    fields: [vgieRecommendationRules.tenantId],
+    references: [tenants.id],
+  }),
+}));
+
+export const vgieAlertRulesRelations = relations(vgieAlertRules, ({ one }) => ({
+  tenant: one(tenants, {
+    fields: [vgieAlertRules.tenantId],
+    references: [tenants.id],
+  }),
+}));
+
+export const insertVgieRecommendationRuleSchema = createInsertSchema(vgieRecommendationRules);
+export const selectVgieRecommendationRuleSchema = createSelectSchema(vgieRecommendationRules);
+export type VgieRecommendationRule = typeof vgieRecommendationRules.$inferSelect;
+
+export const insertVgieAlertRuleSchema = createInsertSchema(vgieAlertRules);
+export const selectVgieAlertRuleSchema = createSelectSchema(vgieAlertRules);
+export type VgieAlertRule = typeof vgieAlertRules.$inferSelect;

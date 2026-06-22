@@ -103,8 +103,31 @@ export const PopulationIntelligenceService = {
   /**
    * Fetches population inside a GeoJSON Polygon
    */
-  async fetchPolygonPopulation(tenantId: string, geojsonPolygon: any, countryCode: string = "ZMB"): Promise<IntelligenceResult> {
+  async fetchPolygonPopulation(tenantId: string, geojsonPolygon: any, countryCode: string = "ZMB", ownerType?: string, ownerId?: number): Promise<IntelligenceResult> {
     const sources: PopulationSourceData[] = [];
+    
+    if (ownerType && ownerId) {
+      let popDataQuery;
+      if (ownerType === "facility") {
+        popDataQuery = db.select().from(populationData).where(and(eq(populationData.facilityId, ownerId), eq(populationData.tenantId, tenantId)));
+      } else if (ownerType === "village") {
+        popDataQuery = db.select().from(populationData).where(and(eq(populationData.villageId, ownerId), eq(populationData.tenantId, tenantId)));
+      }
+      
+      if (popDataQuery) {
+        const popDataResult = await popDataQuery;
+        for (const pd of popDataResult) {
+          sources.push({
+            source: pd.source.toUpperCase(),
+            totalPopulation: pd.totalPopulation,
+            under5Population: pd.under5Population || Math.round(pd.totalPopulation * 0.17),
+            method: pd.metadata ? (pd.metadata as any).method || "Administrative" : "Administrative",
+            confidence: pd.confidenceScore ? (Number(pd.confidenceScore) > 0.8 ? "High" : Number(pd.confidenceScore) > 0.5 ? "Moderate" : "Low") : "Moderate",
+            year: pd.year || new Date().getFullYear()
+          });
+        }
+      }
+    }
     
     // Convert GeoJSON to PostGIS Geometry using raw SQL
     // We assume geojsonPolygon is a valid GeoJSON Feature or Geometry.
@@ -178,10 +201,22 @@ export const PopulationIntelligenceService = {
   async fetchFacilityPopulation(tenantId: string, facilityId: number, radiusKm: number): Promise<IntelligenceResult> {
     const sources: PopulationSourceData[] = [];
     
-    // Get official populations assigned to this facility
+    // Get official populations assigned to this facility from the populationData table
     const [facility] = await db.select().from(facilities).where(and(eq(facilities.id, facilityId), eq(facilities.tenantId, tenantId))).limit(1);
+    const popData = await db.select().from(populationData).where(and(eq(populationData.facilityId, facilityId), eq(populationData.tenantId, tenantId)));
     
-    if (facility) {
+    if (popData.length > 0) {
+      for (const pd of popData) {
+        sources.push({
+          source: pd.source.toUpperCase(),
+          totalPopulation: pd.totalPopulation,
+          under5Population: pd.under5Population || Math.round(pd.totalPopulation * 0.17),
+          method: pd.metadata ? (pd.metadata as any).method || "Administrative" : "Administrative",
+          confidence: pd.confidenceScore ? (Number(pd.confidenceScore) > 0.8 ? "High" : Number(pd.confidenceScore) > 0.5 ? "Moderate" : "Low") : "Moderate",
+          year: pd.year || new Date().getFullYear()
+        });
+      }
+    } else if (facility) {
       if (facility.catchmentGridPopulation && facility.catchmentGridPopulation > 0) {
         sources.push({
           source: "Official (HMIS/NSO)",
@@ -192,6 +227,9 @@ export const PopulationIntelligenceService = {
           year: new Date().getFullYear()
         });
       }
+    }
+
+    if (facility) {
 
       // Add spatial estimates based on facility coordinates
       if (facility.latitude && facility.longitude) {

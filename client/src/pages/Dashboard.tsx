@@ -2073,9 +2073,7 @@ export default function Dashboard() {
       </TabsContent>
 
       <TabsContent value="vgie" className="focus-visible:outline-none">
-        <div className="-mx-6 -mb-6 bg-slate-950">
-          <VgieDashboard />
-        </div>
+        <VgieDashboard />
       </TabsContent>
       </Tabs>
     </div>

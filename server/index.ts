@@ -38,6 +38,7 @@ import { up as applyColdChainEquipment } from "./migrations/020-cold-chain-equip
 import { up as applyStockNormalization } from "./migrations/021-normalize-stock-vaccine-names";
 import { up as applyResearchHubSchema } from "./migrations/022-research-hub-schema";
 import { applySafeGeometryFixes } from "./migrations/023-safe-geometry";
+import { applySettlementsGisMigration } from "./migrations/024-settlements-gis-microplanning";
 
 
 const app = express();
@@ -363,6 +364,13 @@ async function backfillClientIds() {
       .then(() => log("geometry schema fixes applied", "db"))
       .catch((err) => log(`geometry fixes warning: ${err?.message ?? err}`, "db"))
   ).catch((err) => log(`geometry fixes db import failed: ${err?.message ?? err}`, "db"));
+
+  // Settlements GIS and microplanning upgrade (migration 024)
+  import("./db").then(({ db }) =>
+    applySettlementsGisMigration(db as any)
+      .then(() => log("settlements GIS migration complete", "db"))
+      .catch((err) => log(`settlements GIS migration warning: ${err?.message ?? err}`, "db"))
+  ).catch((err) => log(`settlements GIS db import failed: ${err?.message ?? err}`, "db"));
 
   setupRealtime(httpServer, getSession());
   startPopulationRefreshScheduler();

@@ -27,6 +27,7 @@ import {
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { PageHead } from "@/components/PageHead";
 import { versionLabel } from "@/lib/version";
+import { getDomainLinks } from "@/lib/navigation";
 
 interface PublicTenant {
   id: string;
@@ -412,6 +413,7 @@ export default function Landing() {
   });
   const tenantCount = tenants?.length ?? 0;
   const [loginOpen, setLoginOpen] = useState(false);
+  const { researchUrl, docsUrl } = getDomainLinks();
 
   return (
     <div className="min-h-screen bg-background">
@@ -437,8 +439,8 @@ export default function Landing() {
 
           <div className="flex items-center gap-3">
             <ThemeToggle />
-            <a href="https://research.vaxplan.org" className="text-sm font-medium hover:underline text-muted-foreground">Research</a>
-            <a href="https://docs.vaxplan.org" className="text-sm font-medium hover:underline text-muted-foreground">Docs</a>
+            <a href={researchUrl} className="text-sm font-medium hover:underline text-muted-foreground">Research</a>
+            <a href={docsUrl} className="text-sm font-medium hover:underline text-muted-foreground">Docs</a>
             <Button variant="outline" asChild data-testid="button-request-access">
               <a href="/signup">Request access</a>
             </Button>
@@ -762,10 +764,10 @@ export default function Landing() {
               <a href="#features" className="text-primary hover:underline font-medium">
                 Features
               </a>
-              <a href="https://research.vaxplan.org" className="text-primary hover:underline font-medium">
+              <a href={researchUrl} className="text-primary hover:underline font-medium">
                 Research
               </a>
-              <a href="https://docs.vaxplan.org" className="text-primary hover:underline font-medium">
+              <a href={docsUrl} className="text-primary hover:underline font-medium">
                 Docs
               </a>
               <a href="/help" className="text-primary hover:underline font-medium">
