@@ -685,7 +685,11 @@ export function Step2({
   targetInfants?: number;
   readOnly?: boolean;
 }) {
-  const sumCommunityUnder1 = communities.reduce((acc, c) => acc + Math.round(parseFloat(c.targetPopulation || "0") * 0.04), 0);
+  const { data: tenant } = useQuery<any>({ queryKey: ["/api/me/tenant"] });
+  const settings = tenant?.settings?.demographics || {};
+  const under1Ratio = settings.under1 !== undefined ? Number(settings.under1) : 0.04;
+
+  const sumCommunityUnder1 = communities.reduce((acc, c) => acc + Math.round(parseFloat(c.targetPopulation || "0")), 0);
   const diffPercent = targetInfants > 0 ? Math.abs(sumCommunityUnder1 - targetInfants) / targetInfants : 0;
   const showMismatchWarning = targetInfants > 0 && diffPercent > 0.10;
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
@@ -874,7 +878,7 @@ export function Step2({
       const gridVal = parseInt(merged.gridPop || "0", 10);
       const surveyVal = parseInt(merged.surveyPop || "0", 10);
       const best = Math.max(gridVal, surveyVal);
-      if (best > 0) merged.targetPopulation = String(best);
+      if (best > 0) merged.targetPopulation = String(Math.round(best * under1Ratio));
     }
     next[i] = merged;
     setCommunities(next);
@@ -974,7 +978,7 @@ export function Step2({
         const gridPop = String(result.total);
         const surveyVal = parseInt(c.surveyPop || "0", 10);
         const gridVal = result.total;
-        const targetPop = String(Math.max(gridVal, surveyVal));
+        const targetPop = String(Math.round(Math.max(gridVal, surveyVal) * under1Ratio));
         update(index, {
           gridPop,
           targetPopulation: targetPop,
@@ -1020,8 +1024,8 @@ export function Step2({
     const current = communities[estimate.index];
     const surveyVal = parseInt(current?.surveyPop || "0", 10);
     const gridVal = estimate.result.total;
-    // Target = max of gridded estimate and survey/NSO pop (user can always override)
-    const targetPop = String(Math.max(gridVal, surveyVal));
+    // Target = max of gridded estimate and survey/NSO pop multiplied by infant ratio
+    const targetPop = String(Math.round(Math.max(gridVal, surveyVal) * under1Ratio));
     update(estimate.index, {
       gridPop,
       targetPopulation: targetPop,
@@ -1144,7 +1148,7 @@ export function Step2({
         const total = successes.get(i);
         if (total == null) return c;
         const surveyVal = parseInt(c.surveyPop || "0", 10);
-        const target = Math.max(total, surveyVal);
+        const target = Math.round(Math.max(total, surveyVal) * under1Ratio);
         return { ...c, gridPop: String(total), targetPopulation: String(target), source: "worldpop" as const };
       });
       setCommunities(next);
@@ -1370,7 +1374,7 @@ export function Step2({
                   <th className="p-2 w-28">Type</th>
                   <th className="p-2" title="WorldPop / gridded raster population estimate">Grid Pop 🌐</th>
                   <th className="p-2" title="NSO / HMIS / Survey / Census population (manual entry)">Survey/HMIS/NSO Pop 📋</th>
-                  <th className="p-2">Target Pop</th>
+                  <th className="p-2">Target Pop (&lt;1 yr)</th>
                   <th className="p-2 w-28">Source</th>
                   <th className="p-2 w-28">Strategy</th>
                   <th className="p-2 min-w-[150px]">Coordinates</th>
