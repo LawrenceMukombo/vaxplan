@@ -533,13 +533,14 @@ export default function Landing() {
             <div className="text-center mb-10">
               <div className="inline-flex items-center gap-2 text-sm text-primary mb-2">
                 <Globe className="h-4 w-4" />
-                Ministries already on the platform
+                Country workspaces configured for testing and demonstration
               </div>
               <h2 className="text-2xl md:text-3xl font-bold">
-                {tenantCount > 0
-                  ? `${tenantCount} National Health Programs · One Platform`
-                  : "National Health Programs on the Platform"}
+                Designed for multi-country and single-country implementation
               </h2>
+              <p className="mt-4 text-muted-foreground text-sm max-w-2xl mx-auto">
+                These workspaces are configured to demonstrate how VaxPlan can support either a single national implementation or a multi-country deployment model. They do not represent official national production use unless separately confirmed.
+              </p>
             </div>
 
             <div

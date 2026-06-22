@@ -2475,6 +2475,7 @@ export async function registerRoutes(
             isDemo: s.isDemo === true,
             mapCenter: Array.isArray(s.mapCenter) ? s.mapCenter : undefined,
             mapZoom: typeof s.mapZoom === "number" ? s.mapZoom : undefined,
+              workspaceStatus: typeof s.workspaceStatus === "string" ? s.workspaceStatus : undefined,
           },
         };
       }));
@@ -19189,7 +19190,22 @@ Instructions:
         .where(and(eq(facilities.id, facilityId), eq(facilities.tenantId, req.tenantId)))
         .limit(1);
       if (!row) return res.status(404).json({ message: "Facility not found" });
-      res.json(row);
+
+      const { gisPolygons } = await import("@shared/schema");
+      const [draftRow] = await db.select({
+        draftPolygon: gisPolygons.geometry
+      }).from(gisPolygons)
+        .where(and(
+          eq(gisPolygons.tenantId, req.tenantId),
+          eq(gisPolygons.ownerType, "facility"),
+          eq(gisPolygons.ownerId, facilityId),
+          eq(gisPolygons.status, "draft")
+        )).limit(1);
+
+      res.json({
+        ...row,
+        draftPolygon: draftRow?.draftPolygon || null
+      });
     } catch (err: any) {
       res.status(500).json({ message: err?.message || "Failed to load catchment polygon" });
     }
@@ -19208,16 +19224,74 @@ Instructions:
         });
       }
 
-      const { geojson, gridPopulation } = req.body;
+      const { geojson, gridPopulation, status = 'active' } = req.body;
+      const { gisPolygons } = await import("@shared/schema");
+
+      if (status === 'clear_draft') {
+        await db.delete(gisPolygons)
+          .where(and(
+            eq(gisPolygons.tenantId, req.tenantId),
+            eq(gisPolygons.ownerType, "facility"),
+            eq(gisPolygons.ownerId, facilityId),
+            eq(gisPolygons.status, "draft")
+          ));
+        return res.json({ ok: true, cleared: true });
+      }
+
       if (!geojson || typeof geojson !== "object") return res.status(400).json({ message: "geojson polygon required" });
-      const [updated] = await db.update(facilities).set({
-        catchmentPolygon: geojson as any,
-        catchmentGridPopulation: typeof gridPopulation === "number" ? gridPopulation : null,
-        updatedAt: new Date(),
-      }).where(and(eq(facilities.id, facilityId), eq(facilities.tenantId, req.tenantId))).returning();
-      if (!updated) return res.status(404).json({ message: "Facility not found" });
-      await logAudit(req, "update_catchment_polygon", "facility", facilityId, null, { facilityId, gridPopulation });
-      res.json({ ok: true, catchmentPolygon: (updated as any).catchmentPolygon, catchmentGridPopulation: (updated as any).catchmentGridPopulation });
+
+      // If active, save to primary table to retain backwards compatibility
+      let updatedCatchment = null;
+      let updatedPop = null;
+      if (status === 'active') {
+        const [updated] = await db.update(facilities).set({
+          catchmentPolygon: geojson as any,
+          catchmentGridPopulation: typeof gridPopulation === "number" ? gridPopulation : null,
+          updatedAt: new Date(),
+        }).where(and(eq(facilities.id, facilityId), eq(facilities.tenantId, req.tenantId))).returning();
+        if (!updated) return res.status(404).json({ message: "Facility not found" });
+        await logAudit(req, "update_catchment_polygon", "facility", facilityId, null, { facilityId, gridPopulation });
+        updatedCatchment = updated.catchmentPolygon;
+        updatedPop = updated.catchmentGridPopulation;
+      }
+
+      // Upsert into gis_polygons for this status
+      const existing = await db.select({ id: gisPolygons.id }).from(gisPolygons)
+        .where(and(
+           eq(gisPolygons.tenantId, req.tenantId),
+           eq(gisPolygons.ownerType, "facility"),
+           eq(gisPolygons.ownerId, facilityId),
+           eq(gisPolygons.status, status)
+        )).limit(1);
+
+      if (existing.length > 0) {
+        await db.update(gisPolygons).set({
+          geometry: geojson as any,
+          updatedAt: new Date()
+        }).where(eq(gisPolygons.id, existing[0].id));
+      } else {
+        await db.insert(gisPolygons).values({
+          tenantId: req.tenantId,
+          ownerType: "facility",
+          ownerId: facilityId,
+          polygonType: "catchment",
+          geometry: geojson as any,
+          status: status
+        } as any);
+      }
+
+      // If we saved an active polygon, clear any existing drafts
+      if (status === 'active') {
+         await db.delete(gisPolygons)
+          .where(and(
+            eq(gisPolygons.tenantId, req.tenantId),
+            eq(gisPolygons.ownerType, "facility"),
+            eq(gisPolygons.ownerId, facilityId),
+            eq(gisPolygons.status, "draft")
+          ));
+      }
+
+      res.json({ ok: true, catchmentPolygon: updatedCatchment || geojson, catchmentGridPopulation: updatedPop || gridPopulation, status });
     } catch (err: any) {
       res.status(500).json({ message: err?.message || "Failed to save catchment polygon" });
     }
@@ -19229,13 +19303,6 @@ Instructions:
       const villageId = parseInt(req.params.id, 10);
       if (isNaN(villageId)) return res.status(400).json({ message: "Invalid village id" });
 
-      /* Original Code commented out to fix property 'facilityId' not existing on villages table:
-      const [village] = await db
-        .select({ facilityId: villages.facilityId })
-        .from(villages)
-        .where(and(eq(villages.id, villageId), eq(villages.tenantId, req.tenantId)))
-        .limit(1);
-      */
       const [village] = await db
         .select({ facilityId: villages.assignedFacilityId })
         .from(villages)
@@ -19252,18 +19319,74 @@ Instructions:
         }
       }
 
-      const { geojson, griddedPopulation, polygonColor, populationSourceLabel } = req.body;
+      const { geojson, griddedPopulation, polygonColor, populationSourceLabel, status = 'active' } = req.body;
+      const { gisPolygons } = await import("@shared/schema");
+
+      if (status === 'clear_draft') {
+        await db.delete(gisPolygons)
+          .where(and(
+            eq(gisPolygons.tenantId, req.tenantId),
+            eq(gisPolygons.ownerType, "village"),
+            eq(gisPolygons.ownerId, villageId),
+            eq(gisPolygons.status, "draft")
+          ));
+        return res.json({ ok: true, cleared: true });
+      }
+
       if (!geojson || typeof geojson !== "object") return res.status(400).json({ message: "geojson polygon required" });
-      const [updated] = await db.update(villages).set({
-        catchmentPolygon: geojson as any,
-        griddedPopulation: typeof griddedPopulation === "number" ? griddedPopulation : null,
-        polygonColor: polygonColor || null,
-        populationSourceLabel: populationSourceLabel || null,
-        updatedAt: new Date(),
-      }).where(and(eq(villages.id, villageId), eq(villages.tenantId, req.tenantId))).returning();
-      if (!updated) return res.status(404).json({ message: "Village not found" });
-      await logAudit(req, "update_community_polygon", "village", villageId, null, { villageId, griddedPopulation });
-      res.json({ ok: true, catchmentPolygon: (updated as any).catchmentPolygon, griddedPopulation: (updated as any).griddedPopulation });
+
+      let updatedCatchment = null;
+      let updatedPop = null;
+
+      if (status === 'active') {
+        const [updated] = await db.update(villages).set({
+          catchmentPolygon: geojson as any,
+          griddedPopulation: typeof griddedPopulation === "number" ? griddedPopulation : null,
+          polygonColor: polygonColor || null,
+          populationSourceLabel: populationSourceLabel || null,
+          updatedAt: new Date(),
+        }).where(and(eq(villages.id, villageId), eq(villages.tenantId, req.tenantId))).returning();
+        if (!updated) return res.status(404).json({ message: "Village not found" });
+        await logAudit(req, "update_community_polygon", "village", villageId, null, { villageId, griddedPopulation });
+        updatedCatchment = updated.catchmentPolygon;
+        updatedPop = updated.griddedPopulation;
+      }
+
+      const existing = await db.select({ id: gisPolygons.id }).from(gisPolygons)
+        .where(and(
+           eq(gisPolygons.tenantId, req.tenantId),
+           eq(gisPolygons.ownerType, "village"),
+           eq(gisPolygons.ownerId, villageId),
+           eq(gisPolygons.status, status)
+        )).limit(1);
+
+      if (existing.length > 0) {
+        await db.update(gisPolygons).set({
+          geometry: geojson as any,
+          updatedAt: new Date()
+        }).where(eq(gisPolygons.id, existing[0].id));
+      } else {
+        await db.insert(gisPolygons).values({
+          tenantId: req.tenantId,
+          ownerType: "village",
+          ownerId: villageId,
+          polygonType: "catchment",
+          geometry: geojson as any,
+          status: status
+        } as any);
+      }
+
+      if (status === 'active') {
+         await db.delete(gisPolygons)
+          .where(and(
+            eq(gisPolygons.tenantId, req.tenantId),
+            eq(gisPolygons.ownerType, "village"),
+            eq(gisPolygons.ownerId, villageId),
+            eq(gisPolygons.status, "draft")
+          ));
+      }
+
+      res.json({ ok: true, catchmentPolygon: updatedCatchment || geojson, griddedPopulation: updatedPop || griddedPopulation, status });
     } catch (err: any) {
       res.status(500).json({ message: err?.message || "Failed to save community polygon" });
     }
