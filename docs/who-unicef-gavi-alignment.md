@@ -1,6 +1,6 @@
 # VaxPlan — Alignment with WHO, UNICEF, Gavi & MoH Standards for Microplanning and GIS-Microplanning
 
-> Living document. Mirrored in-app at **Settings → Standards Alignment** (`/standards-alignment`). Last refreshed: 2026-06-03.
+> Living document. Mirrored in-app at **Settings → Standards Alignment** (`/standards-alignment`). Last refreshed: 2026-06-28.
 >
 > **Grading scale**
 > - ✅ **Aligned** — implemented end-to-end and enforced.
@@ -220,7 +220,7 @@ WHO/UNICEF *Microplanning for Immunization Service Delivery using the RED Strate
 |---|---|---|
 | Authoritative basemap | ✅ Aligned | Leaflet OSM + Satellite Imagery persistent toggle |
 | Building / settlement enumeration (GRID3 / Microsoft / Ecopia) | ✅ Aligned | Footprints for ZMB, SSD, and PNG with Microsoft fallback |
-| WorldPop / GRID3 / LandScan gridded population | ✅ Aligned | Gridded WorldPop population dataset per tenant |
+| WorldPop / GRID3 / LandScan gridded population | ✅ Aligned | WorldPop population dataset with real-time radial query fallback API when local raster tiles are absent |
 | Catchment delineation (Voronoi / drive-time / walking isochrone) | ✅ Aligned | Walking travel-time isochrones using friction surfaces |
 | Facility geolocation accuracy (≥25m, MFL standard) | ✅ Aligned | Geolocation accuracy (m) and source metadata captured |
 | Hard-to-reach classification | ✅ Aligned | — |

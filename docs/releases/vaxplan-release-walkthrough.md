@@ -43,3 +43,15 @@ This document tracks major feature implementations and their architectural impac
   - Updated in-app FAQs.
 - **User Impact:** Clear transparency on how population denominators are calculated.
 - **Data Safety Confirmation:** Safe upsert of default indicator arrays.
+
+## Phase 5: API & Routing Hardening
+**Objective:** Fix routing priority, column mappings, and missing boundary polygon population fallbacks.
+- **Changes Made:**
+  - Swapped routing priority so `/api/population/worldpop-point` resolves correctly before `/api/population/:id`.
+  - Corrected database query column mappings for villages (`total_catchment_population`) and facilities (`facility_type`, `operational_status`).
+  - Standardized `SMTP_PASS` / `SMTP_PASSWORD` fallback configurations for production mailer and messaging modules.
+  - Implemented a warnings-guarded interactive verification prompt in the local Hostinger deploy script.
+  - Patched boundary polygon click events in [MapView.tsx](file:///c:/vaxplan/client/src/components/MapView.tsx) to execute the asynchronous radial population fallback fetch if the local raster has no data.
+- **User Impact:** No more 400 Bad Request or 500 Internal Server errors when navigating the map, and clicking administrative boundary polygons now correctly displays gridded population estimates.
+- **Data Safety Confirmation:** Backup generated on VPS, all database migrations applied safely, and data was upserted idempotently without dropping tables.
+

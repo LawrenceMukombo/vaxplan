@@ -688,7 +688,7 @@ const SECTIONS: Section[] = [
         status: "aligned",
         evidence: "GRID3 building footprint layers are integrated for active countries (ZMB, SSD, PNG), supplemented by Microsoft and Ecopia building counts as a digitized enumeration fallback.",
       },
-      { area: "WorldPop / GRID3 gridded population", status: "aligned", evidence: "WorldPop 100m R2025A per tenant + refresh job." },
+      { area: "WorldPop / GRID3 gridded population", status: "aligned", evidence: "WorldPop 100m R2025A per tenant + refresh job. Click intelligence fallback performs asynchronous queries to fetch 1km/2km/3km gridded population estimates from the backend worldpop-point proxy if local raster tiles are missing or empty." },
       {
         area: "Catchment delineation methods (Voronoi / walking isochrone)",
         status: "aligned",

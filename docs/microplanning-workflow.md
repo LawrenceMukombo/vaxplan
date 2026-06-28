@@ -1,6 +1,6 @@
 # Immunization Microplanning Workflow — WHO RED + Gavi RED-Q
 
-> Living reference. Mirrored in-app at **Develop Microplan → Guided Workflow**. Last refreshed: 2026-05-27.
+> Living reference. Mirrored in-app at **Develop Microplan → Guided Workflow**. Last refreshed: 2026-06-28.
 >
 > This document is the canonical end-to-end immunization microplanning process for VaxPlan tenants. It harmonizes:
 >

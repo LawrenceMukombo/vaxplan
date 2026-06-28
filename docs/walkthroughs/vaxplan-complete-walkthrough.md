@@ -2,7 +2,7 @@
 title: VaxPlan Complete Walkthrough and User Guide
 version: 1.0.0
 status: Final
-last_updated: 2026-06-21
+last_updated: 2026-06-28
 audience: Facility users, district users, national administrators, GIS specialists, developers, partners
 ---
 
