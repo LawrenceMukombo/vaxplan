@@ -1,4 +1,4 @@
-﻿import { Switch, Route, useParams, Redirect } from "wouter";
+import { Switch, Route, useParams, Redirect } from "wouter";
 import { navigate } from "wouter/use-browser-location";
 import { useEffect, lazy, Suspense } from "react";
 import { queryClient } from "./lib/queryClient";
@@ -385,6 +385,19 @@ function AuthenticatedLayout() {
   useDeviceTokenBootstrap(user);
   useRealtimeSync();
   useAnalyticsTracker(!!user);
+  
+  useEffect(() => {
+    if (user && typeof window !== "undefined") {
+      const userPref = localStorage.getItem("vaxplan_user_idle_timeout");
+      if (userPref) {
+        fetch("/api/auth/user-idle-timeout", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ idleTimeout: userPref }),
+        }).catch(() => {});
+      }
+    }
+  }, [user]);
   if (isLoading) {
     return (
       <div className="flex h-screen w-full items-center justify-center">

@@ -248,6 +248,13 @@ export default function Settings() {
   const [brandColor, setBrandColor] = useState<string>("#1e40af");
   const [idleTimeoutMinutes, setIdleTimeoutMinutes] = useState<string>("15");
   const [roleIdleTimeouts, setRoleIdleTimeouts] = useState<Record<string, string>>({});
+  const [userIdleTimeout, setUserIdleTimeout] = useState<string>("default");
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const val = localStorage.getItem("vaxplan_user_idle_timeout");
+      setUserIdleTimeout(val || "default");
+    }
+  }, []);
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -1407,6 +1414,56 @@ export default function Settings() {
                   <p className="text-xs text-muted-foreground">
                     Logged in via secure single sign-on
                   </p>
+                </div>
+                <div className="space-y-2 pt-2">
+                  <Label htmlFor="user-idle-timeout-select" className="text-xs font-semibold">Personal Idle Timeout</Label>
+                  <p className="text-[11px] text-muted-foreground leading-normal">
+                    Choose when to automatically log out due to inactivity on this device.
+                  </p>
+                  <Select
+                    value={userIdleTimeout}
+                    onValueChange={(val) => {
+                      setUserIdleTimeout(val);
+                      if (val === "default") {
+                        localStorage.removeItem("vaxplan_user_idle_timeout");
+                      } else {
+                        localStorage.setItem("vaxplan_user_idle_timeout", val);
+                      }
+
+                      // Notify the server
+                      fetch("/api/auth/user-idle-timeout", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ idleTimeout: val }),
+                      }).catch(() => {});
+
+                      // Broadcast activity to reset timer immediately
+                      const channel = new BroadcastChannel("vaxplan_session_sync");
+                      channel.postMessage({ type: "RESET_IDLE" });
+                      channel.close();
+
+                      toast({
+                        title: "Idle Timeout Updated",
+                        description: val === "default" 
+                          ? "Idle timeout reset to program defaults."
+                          : val === "0" 
+                            ? "Automatic idle timeout disabled on this device."
+                            : `Automatic idle timeout set to ${val} minute(s).`,
+                      });
+                    }}
+                  >
+                    <SelectTrigger id="user-idle-timeout-select" className="w-full text-xs font-semibold bg-background">
+                      <SelectValue placeholder="Select idle timeout" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="default">Use Program Default</SelectItem>
+                      <SelectItem value="5">5 Minutes</SelectItem>
+                      <SelectItem value="15">15 Minutes</SelectItem>
+                      <SelectItem value="30">30 Minutes</SelectItem>
+                      <SelectItem value="60">1 Hour</SelectItem>
+                      <SelectItem value="0">Never</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
                 <Button
                   variant="outline"

@@ -84,7 +84,6 @@ export function getSession() {
       // the cookie must be SameSite=None + Secure in production. In local dev
       // we fall back to "lax" (no HTTPS).
       sameSite: sameSiteCookie,
-      maxAge: sessionTtl,
     },
   });
 }
@@ -147,6 +146,20 @@ export async function setupAuth(app: Express, sessionMiddleware: RequestHandler 
       res.json({ success: true });
     } else {
       res.status(401).json({ error: "Unauthorized" });
+    }
+  });
+  app.post("/api/auth/user-idle-timeout", isAuthenticated, (req, res) => {
+    if (req.session) {
+      const { idleTimeout } = req.body;
+      const parsed = parseInt(idleTimeout, 10);
+      if (idleTimeout === "default") {
+        delete (req.session as any).userIdleTimeout;
+      } else if (!isNaN(parsed)) {
+        (req.session as any).userIdleTimeout = parsed;
+      }
+      res.json({ success: true });
+    } else {
+      res.status(400).json({ error: "No session active" });
     }
   });
   app.get("/api/auth/session-config", (req, res) => {
@@ -273,8 +286,14 @@ export const isAuthenticated: RequestHandler = async (req, res, next) => {
     }
   }
   // 2. Enforce server-side idle timeout (backend source of truth)
-  const idleTimeoutMinutes = parseInt(process.env.SESSION_IDLE_TIMEOUT_MINUTES || "15", 10);
-  if (session?.lastActive) {
+  let idleTimeoutMinutes = parseInt(process.env.SESSION_IDLE_TIMEOUT_MINUTES || "15", 10);
+  if (session && session.userIdleTimeout !== undefined) {
+    const customTimeout = parseInt(session.userIdleTimeout, 10);
+    if (!isNaN(customTimeout)) {
+      idleTimeoutMinutes = customTimeout;
+    }
+  }
+  if (idleTimeoutMinutes > 0 && session?.lastActive) {
     if (now - session.lastActive > idleTimeoutMinutes * 60) {
       if (typeof req.session?.destroy === "function") {
         req.session.destroy(() => {});

@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Map,
   Users,
@@ -104,6 +105,7 @@ function PasswordLoginDialog({ open, onOpenChange }: { open: boolean; onOpenChan
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [selectedTenantId, setSelectedTenantId] = useState("");
+  const [keepMeSignedIn, setKeepMeSignedIn] = useState(false);
 
   const { data: tenants } = useQuery<PublicTenant[]>({
     queryKey: ["/api/public/tenants"],
@@ -114,6 +116,7 @@ function PasswordLoginDialog({ open, onOpenChange }: { open: boolean; onOpenChan
     setNotice(null);
     setBusy(false);
     setSelectedTenantId("");
+    setKeepMeSignedIn(false);
   }
 
   async function submit(e: React.FormEvent) {
@@ -125,7 +128,13 @@ function PasswordLoginDialog({ open, onOpenChange }: { open: boolean; onOpenChan
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ email: email.trim(), password, tenantId: selectedTenantId }),
+        body: JSON.stringify({ 
+          email: email.trim(), 
+          password, 
+          tenantId: selectedTenantId, 
+          keepMeSignedIn,
+          userIdleTimeout: localStorage.getItem("vaxplan_user_idle_timeout") || "default"
+        }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -294,6 +303,20 @@ function PasswordLoginDialog({ open, onOpenChange }: { open: boolean; onOpenChan
                         {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                       </button>
                     </div>
+                  </div>
+                  <div className="flex items-center space-x-2 pt-1">
+                    <Checkbox
+                      id="keep-me-signed-in"
+                      checked={keepMeSignedIn}
+                      onCheckedChange={(checked: any) => setKeepMeSignedIn(!!checked)}
+                      data-testid="checkbox-keep-me-signed-in"
+                    />
+                    <Label
+                      htmlFor="keep-me-signed-in"
+                      className="text-xs font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer text-muted-foreground"
+                    >
+                      Keep me signed in on this computer
+                    </Label>
                   </div>
                   {error && (
                     <div className="text-sm text-destructive" data-testid="text-login-error">

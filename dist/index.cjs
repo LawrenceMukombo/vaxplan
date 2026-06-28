@@ -4551,8 +4551,7 @@ function getSession() {
       // Packaged native apps (Android/Windows) send cross-origin requests, so
       // the cookie must be SameSite=None + Secure in production. In local dev
       // we fall back to "lax" (no HTTPS).
-      sameSite: sameSiteCookie,
-      maxAge: sessionTtl
+      sameSite: sameSiteCookie
     }
   });
 }
@@ -4609,6 +4608,20 @@ async function setupAuth(app2, sessionMiddleware2 = getSession()) {
       res.json({ success: true });
     } else {
       res.status(401).json({ error: "Unauthorized" });
+    }
+  });
+  app2.post("/api/auth/user-idle-timeout", isAuthenticated, (req, res) => {
+    if (req.session) {
+      const { idleTimeout } = req.body;
+      const parsed = parseInt(idleTimeout, 10);
+      if (idleTimeout === "default") {
+        delete req.session.userIdleTimeout;
+      } else if (!isNaN(parsed)) {
+        req.session.userIdleTimeout = parsed;
+      }
+      res.json({ success: true });
+    } else {
+      res.status(400).json({ error: "No session active" });
     }
   });
   app2.get("/api/auth/session-config", (req, res) => {
@@ -4751,8 +4764,14 @@ var init_auth = __esm({
           return res.status(401).json({ message: "Session expired due to absolute timeout limit.", reason: "absolute_timeout" });
         }
       }
-      const idleTimeoutMinutes = parseInt(process.env.SESSION_IDLE_TIMEOUT_MINUTES || "15", 10);
-      if (session3?.lastActive) {
+      let idleTimeoutMinutes = parseInt(process.env.SESSION_IDLE_TIMEOUT_MINUTES || "15", 10);
+      if (session3 && session3.userIdleTimeout !== void 0) {
+        const customTimeout = parseInt(session3.userIdleTimeout, 10);
+        if (!isNaN(customTimeout)) {
+          idleTimeoutMinutes = customTimeout;
+        }
+      }
+      if (idleTimeoutMinutes > 0 && session3?.lastActive) {
         if (now - session3.lastActive > idleTimeoutMinutes * 60) {
           if (typeof req.session?.destroy === "function") {
             req.session.destroy(() => {
@@ -5419,6 +5438,20 @@ function registerPasswordAuthRoutes(app2) {
           if (reqAny.session) {
             reqAny.session.tenantId = tenantId || void 0;
             delete reqAny.session.viewTenantId;
+            const keepMeSignedIn = req.body && req.body.keepMeSignedIn === true;
+            if (keepMeSignedIn) {
+              const absoluteTimeoutMinutes = parseInt(process.env.SESSION_ABSOLUTE_TIMEOUT_MINUTES || "480", 10);
+              const sessionTtl = absoluteTimeoutMinutes * 60 * 1e3;
+              reqAny.session.cookie.maxAge = sessionTtl;
+            } else {
+              reqAny.session.cookie.maxAge = null;
+            }
+            if (req.body.userIdleTimeout !== void 0) {
+              const parsed = parseInt(req.body.userIdleTimeout, 10);
+              if (!isNaN(parsed)) {
+                reqAny.session.userIdleTimeout = parsed;
+              }
+            }
           }
           return res.json({
             ok: true,
@@ -9460,7 +9493,7 @@ async function runMissingSettlementDetection(tenantId, options = {}) {
         (0, import_drizzle_orm13.eq)(candidateUnmappedSettlements.validationStatus, "pending")
       )
     );
-    const sql26 = `
+    const sql27 = `
       WITH admin_polys AS MATERIALIZED (
         SELECT
           b.admin_level,
@@ -9611,7 +9644,7 @@ async function runMissingSettlementDetection(tenantId, options = {}) {
         'pending'
       FROM enriched e
     `;
-    const result = await pool.query(sql26, [
+    const result = await pool.query(sql27, [
       tenantId,
       popThreshold,
       radiusMeters,
@@ -12250,10 +12283,10 @@ async function flushBatch(tenantId, rows) {
       r.density
     );
   }
-  const sql26 = `INSERT INTO population_grids
+  const sql27 = `INSERT INTO population_grids
       (tenant_id, population_total, under5_population, geojson, raster_cell, density_classification)
     VALUES ${valuePlaceholders.join(",")}`;
-  await pool.query(sql26, params);
+  await pool.query(sql27, params);
 }
 async function ingestWorldPopRaster(opts) {
   const {
@@ -28855,7 +28888,7 @@ This response is powered by the local VaxPlan database query engine. You can que
       const radiusMeters = radiusKm * 1e3;
       const facQuery = `
         SELECT
-          id, name, facility_type AS type, operational_status AS status, latitude, longitude,
+          id, name, facility_type AS "facilityType", operational_status AS status, latitude, longitude,
           ST_Distance(
             ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography,
             ST_SetSRID(ST_MakePoint(longitude::float, latitude::float), 4326)::geography
@@ -34864,12 +34897,43 @@ var init_gisPolygons = __esm({
   }
 });
 
+// server/migrations/027-stock-ledger-columns.ts
+var stock_ledger_columns_exports = {};
+__export(stock_ledger_columns_exports, {
+  applyStockLedgerColumnsMigration: () => applyStockLedgerColumnsMigration
+});
+async function applyStockLedgerColumnsMigration(db2) {
+  try {
+    await db2.execute(import_drizzle_orm43.sql`
+      ALTER TABLE client_vaccinations 
+      ADD COLUMN IF NOT EXISTS schedule_dose_id integer,
+      ADD COLUMN IF NOT EXISTS stock_transaction_id integer;
+    `);
+    await db2.execute(import_drizzle_orm43.sql`
+      ALTER TABLE stock_transactions 
+      ADD COLUMN IF NOT EXISTS balance_before integer,
+      ADD COLUMN IF NOT EXISTS balance_after integer,
+      ADD COLUMN IF NOT EXISTS source_module varchar(100),
+      ADD COLUMN IF NOT EXISTS source_record_id varchar(100);
+    `);
+  } catch (err) {
+    console.error("Migration: failed to apply stock ledger columns:", err.message);
+  }
+}
+var import_drizzle_orm43;
+var init_stock_ledger_columns = __esm({
+  "server/migrations/027-stock-ledger-columns.ts"() {
+    "use strict";
+    import_drizzle_orm43 = require("drizzle-orm");
+  }
+});
+
 // server/services/uce/workers.ts
 var workers_exports = {};
 __export(workers_exports, {
   communicationWorker: () => communicationWorker
 });
-var import_bullmq2, import_drizzle_orm43, communicationWorker;
+var import_bullmq2, import_drizzle_orm44, communicationWorker;
 var init_workers = __esm({
   "server/services/uce/workers.ts"() {
     "use strict";
@@ -34878,7 +34942,7 @@ var init_workers = __esm({
     init_db();
     init_schema();
     init_messaging();
-    import_drizzle_orm43 = require("drizzle-orm");
+    import_drizzle_orm44 = require("drizzle-orm");
     communicationWorker = new import_bullmq2.Worker(
       "communication-queue",
       async (job) => {
@@ -34896,7 +34960,7 @@ var init_workers = __esm({
           let commConfig = null;
           if (tenantId) {
             const { tenants: tenants3 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
-            const [tenant] = await db.select().from(tenants3).where((0, import_drizzle_orm43.eq)(tenants3.id, tenantId)).limit(1);
+            const [tenant] = await db.select().from(tenants3).where((0, import_drizzle_orm44.eq)(tenants3.id, tenantId)).limit(1);
             if (tenant && tenant.settings && tenant.settings.communication) {
               commConfig = tenant.settings.communication[channel];
             }
@@ -34925,8 +34989,8 @@ var init_workers = __esm({
             response: dispatchResult.error || dispatchResult.messageId || "Success"
           });
           if (dispatchResult.success) {
-            await db.update(communicationChannels).set({ delivered: true, responseCode: dispatchResult.messageId }).where((0, import_drizzle_orm43.eq)(communicationChannels.id, channelRecord.id));
-            await db.update(communications).set({ status: "completed" }).where((0, import_drizzle_orm43.eq)(communications.id, communicationId));
+            await db.update(communicationChannels).set({ delivered: true, responseCode: dispatchResult.messageId }).where((0, import_drizzle_orm44.eq)(communicationChannels.id, channelRecord.id));
+            await db.update(communications).set({ status: "completed" }).where((0, import_drizzle_orm44.eq)(communications.id, communicationId));
             return { status: "delivered", channel };
           } else {
             throw new Error(dispatchResult.error || "Unknown error");
@@ -34957,7 +35021,7 @@ var init_workers = __esm({
               channel: nextChannel
             }, { delay: delayMs });
           } else {
-            await db.update(communications).set({ status: "failed" }).where((0, import_drizzle_orm43.eq)(communications.id, communicationId));
+            await db.update(communications).set({ status: "failed" }).where((0, import_drizzle_orm44.eq)(communications.id, communicationId));
           }
           throw err;
         }
@@ -35016,7 +35080,7 @@ async function backfillClientIds() {
   try {
     const { clients: clients2, facilities: facilities4, districts: districts3, provinces: provinces4 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
     const { db: db2 } = await Promise.resolve().then(() => (init_db(), db_exports));
-    const { sql: sql26, isNull: isNull7, eq: eq28, and: and21 } = await import("drizzle-orm");
+    const { sql: sql27, isNull: isNull7, eq: eq28, and: and21 } = await import("drizzle-orm");
     const { getInitials: getInitials2, computeCheckDigit: computeCheckDigit2 } = await Promise.resolve().then(() => (init_routes(), routes_exports));
     const pendingClients = await db2.select().from(clients2).where(isNull7(clients2.clientId));
     if (pendingClients.length === 0) {
@@ -35033,7 +35097,7 @@ async function backfillClientIds() {
       const distInit = getInitials2(facInfo?.districtName || "DST");
       const hfInit = getInitials2(facInfo?.facilityName || "FAC");
       const regYear = client3.createdAt ? new Date(client3.createdAt).getFullYear() : (/* @__PURE__ */ new Date()).getFullYear();
-      const [maxClient] = await db2.select({ maxSerial: sql26`MAX(${clients2.serialNumber})` }).from(clients2).where(
+      const [maxClient] = await db2.select({ maxSerial: sql27`MAX(${clients2.serialNumber})` }).from(clients2).where(
         and21(
           eq28(clients2.facilityId, client3.facilityId),
           eq28(clients2.registrationYear, regYear),
@@ -35209,6 +35273,11 @@ var init_index = __esm({
         Promise.resolve().then(() => (init_db(), db_exports)).then(
           ({ db: db2 }) => applyPolygonPlanningMigration(db2).then(() => log("polygon planning metadata migration complete", "db")).catch((err) => log(`polygon planning metadata migration warning: ${err?.message ?? err}`, "db"))
         ).catch((err) => log(`polygon planning metadata db import failed: ${err?.message ?? err}`, "db"));
+        Promise.resolve().then(() => (init_db(), db_exports)).then(
+          ({ db: db2 }) => Promise.resolve().then(() => (init_stock_ledger_columns(), stock_ledger_columns_exports)).then(
+            ({ applyStockLedgerColumnsMigration: applyStockLedgerColumnsMigration2 }) => applyStockLedgerColumnsMigration2(db2).then(() => log("stock ledger columns migration complete", "db")).catch((err) => log(`stock ledger columns migration warning: ${err?.message ?? err}`, "db"))
+          ).catch((err) => log(`stock ledger migration import failed: ${err?.message ?? err}`, "db"))
+        ).catch((err) => log(`stock ledger db import failed: ${err?.message ?? err}`, "db"));
       }
       setupRealtime(httpServer, sessionMiddleware);
       if (skipDbBootstrap) {

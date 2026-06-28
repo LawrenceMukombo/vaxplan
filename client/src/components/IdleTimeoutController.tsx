@@ -34,6 +34,11 @@ export function IdleTimeoutController() {
   const channel = useRef<BroadcastChannel | null>(null);
 
   const getTimeoutMinutes = useCallback(() => {
+    const userPref = localStorage.getItem("vaxplan_user_idle_timeout");
+    if (userPref && userPref !== "default") {
+      const parsed = parseInt(userPref, 10);
+      if (!isNaN(parsed)) return parsed;
+    }
     if (sessionConfig?.idleTimeoutMinutes) {
       return sessionConfig.idleTimeoutMinutes;
     }

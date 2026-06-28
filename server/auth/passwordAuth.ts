@@ -144,6 +144,20 @@ export function registerPasswordAuthRoutes(app: Express) {
           if (reqAny.session) {
             reqAny.session.tenantId = tenantId || undefined;
             delete reqAny.session.viewTenantId;
+            const keepMeSignedIn = req.body && req.body.keepMeSignedIn === true;
+            if (keepMeSignedIn) {
+              const absoluteTimeoutMinutes = parseInt(process.env.SESSION_ABSOLUTE_TIMEOUT_MINUTES || "480", 10);
+              const sessionTtl = absoluteTimeoutMinutes * 60 * 1000;
+              reqAny.session.cookie.maxAge = sessionTtl;
+            } else {
+              reqAny.session.cookie.maxAge = null; // Session-only cookie (expiring when tab/browser closes)
+            }
+            if (req.body.userIdleTimeout !== undefined) {
+              const parsed = parseInt(req.body.userIdleTimeout, 10);
+              if (!isNaN(parsed)) {
+                reqAny.session.userIdleTimeout = parsed;
+              }
+            }
           }
           return res.json({
             ok: true,
