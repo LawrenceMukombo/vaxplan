@@ -1,4 +1,4 @@
-﻿// Load .env file for local development (Node 20.12+ built-in, no dotenv package needed)
+// Load .env file for local development (Node 20.12+ built-in, no dotenv package needed)
 // This runs before any other imports that touch process.env (e.g. db.ts checks DATABASE_URL).
 try {
   // @ts-ignore - process.loadEnvFile is available in Node.js 20.12+
@@ -332,6 +332,15 @@ async function backfillClientIds() {
       .then(() => log("polygon planning metadata migration complete", "db"))
       .catch((err) => log(`polygon planning metadata migration warning: ${err?.message ?? err}`, "db"))
   ).catch((err) => log(`polygon planning metadata db import failed: ${err?.message ?? err}`, "db"));
+
+  // Stock ledger columns upgrade (migration 027)
+  import("./db").then(({ db }) =>
+    import("./migrations/027-stock-ledger-columns").then(({ applyStockLedgerColumnsMigration }) =>
+      applyStockLedgerColumnsMigration(db as any)
+        .then(() => log("stock ledger columns migration complete", "db"))
+        .catch((err) => log(`stock ledger columns migration warning: ${err?.message ?? err}`, "db"))
+    ).catch((err) => log(`stock ledger migration import failed: ${err?.message ?? err}`, "db"))
+  ).catch((err) => log(`stock ledger db import failed: ${err?.message ?? err}`, "db"));
   }
   setupRealtime(httpServer, sessionMiddleware);
   if (skipDbBootstrap) {
