@@ -1,15 +1,15 @@
 /**
- * CatchmentMapPanel — Interactive polygon drawing tool for HF catchments & communities
+ * CatchmentMapPanel - Interactive polygon drawing tool for HF catchments & communities
  *
  * Features:
  *  - Draw HF catchment polygon + community sub-polygons
  *  - Server-side population from population_grids (PostGIS/GeoTIFF)
- *    with 3-source cascade: local DB → WorldPop WOPR → WorldPop REST → area-density
+ *    with 3-source cascade: local DB -> WorldPop WOPR -> WorldPop REST -> area-density
  *  - Interactive controls: undo vertex (Ctrl+Z), Escape to cancel, satellite/OSM toggle,
  *    geolocation, fit-to-catchment zoom
- *  - Gap visualization — uncovered area within catchment rendered as red hatched overlay
- *  - Population balance panel — community sum vs catchment total
- *  - "Extract Communities" — aggressive OSM + settlements scraping
+ *  - Gap visualization - uncovered area within catchment rendered as red hatched overlay
+ *  - Population balance panel - community sum vs catchment total
+ *  - "Extract Communities" - aggressive OSM + settlements scraping
  *  - Flag uncovered communities to district officials
  *  - Save All in one click
  */
@@ -33,15 +33,42 @@ import { useToast } from "@/hooks/use-toast";
 import { PolygonIntelligenceCard, type IntelligenceResult } from "@/components/PolygonIntelligenceCard";
 import "leaflet/dist/leaflet.css";
 
-// ─── Colour palette for community polygons ────────────────────────────────────
+// --- Colour palette for community polygons ------------------------------------
 const PALETTE = [
   "#e74c3c","#3498db","#2ecc71","#f39c12","#9b59b6",
   "#1abc9c","#e67e22","#e91e63","#00bcd4","#8bc34a",
   "#ff5722","#607d8b","#795548","#ff9800","#4caf50",
 ];
 
-// ─── Types ───────────────────────────────────────────────────────────────────
-export interface CommunityPolygon {
+// --- Types -------------------------------------------------------------------
+type PolygonAccessMetrics = {
+  centroidDistanceKm?: number | null;
+  travelTimeWalkingMin?: number | null;
+  travelTimeMotorcycleMin?: number | null;
+  travelTimeVehicleMin?: number | null;
+};
+
+type PolygonPlanningMeta = {
+  areaSqKm?: number | null;
+  populationEstimate?: number;
+  centroid?: { latitude: number; longitude: number } | null;
+  targetInfants?: number;
+  underOne?: number;
+  underFive?: number;
+  womenOfChildbearingAge?: number;
+  populationSource?: string;
+  populationSourceYear?: number;
+  populationMethod?: string;
+  confidence?: string;
+  populationStatus?: string;
+  validationStatus?: string;
+  approvalStatus?: string;
+  calculatedAt?: string;
+  access?: PolygonAccessMetrics | null;
+  warnings?: string[];
+};
+
+export interface CommunityPolygon extends PolygonPlanningMeta {
   communityId?: number;
   communityName: string;
   color: string;
@@ -51,7 +78,7 @@ export interface CommunityPolygon {
   saved: boolean;
 }
 
-export interface CatchmentPolygon {
+export interface CatchmentPolygon extends PolygonPlanningMeta {
   coords: [number, number][];
   gridPopulation?: number;
   under5Population?: number;
@@ -75,20 +102,89 @@ interface Props {
   onExtractedCommunities?: (names: string[]) => void;
 }
 
-// ─── Tile layers ──────────────────────────────────────────────────────────────
+// --- Tile layers --------------------------------------------------------------
 /* Commented out original tile layers configuration for dynamic/persisted basemaps
 const TILES = {
-  positron: { url: "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", attr: "© OpenStreetMap contributors © CARTO" },
-  voyager: { url: "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png", attr: "© OpenStreetMap contributors © CARTO" },
+  positron: { url: "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", attr: "(c) OpenStreetMap contributors (c) CARTO" },
+  voyager: { url: "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png", attr: "(c) OpenStreetMap contributors (c) CARTO" },
 };
 */
 
-// ─── Convert [lat,lng] coords array to GeoJSON Polygon ring ──────────────────
+// --- Convert [lat,lng] coords array to GeoJSON Polygon ring ------------------
 function toGeoRing(coords: [number, number][]): [number, number][] {
   return [...coords.map(([lat, lng]) => [lng, lat] as [number, number]), [coords[0][1], coords[0][0]] as [number, number]];
 }
 
-// ─── Population estimation (server-side + cascade) ───────────────────────────
+function geometryFromGeoJson(input: any): any | null {
+  if (!input) return null;
+  if (input.type === "Feature") return input.geometry ?? null;
+  if (input.type === "Polygon" || input.type === "MultiPolygon") return input;
+  return null;
+}
+
+function polygonProps(input: any): PolygonPlanningMeta {
+  return input?.type === "Feature" && input.properties ? input.properties : {};
+}
+
+function coordsFromGeoJson(input: any): [number, number][] | null {
+  const geometry = geometryFromGeoJson(input);
+  if (!geometry?.coordinates) return null;
+  const ring = geometry.type === "MultiPolygon" ? geometry.coordinates?.[0]?.[0] : geometry.coordinates?.[0];
+  return Array.isArray(ring) ? ring.map(([lng, lat]: [number, number]) => [lat, lng] as [number, number]) : null;
+}
+
+function metaFromResponse(res: any): PolygonPlanningMeta {
+  const metadataProps = polygonProps(res?.metadata?.geometry);
+  const polygonMetaProps = polygonProps(res?.catchmentPolygon);
+  const props = Object.keys(metadataProps).length ? metadataProps : polygonMetaProps;
+  return {
+    ...props,
+    areaSqKm: res?.areaSqKm ?? props.areaSqKm ?? res?.metadata?.areaSqKm,
+    centroid: res?.centroid ?? props.centroid,
+    access: res?.access ?? props.access,
+    populationEstimate: res?.population?.totalPopulation ?? props.populationEstimate,
+    targetInfants: res?.population?.targetInfants ?? props.targetInfants,
+    underOne: res?.population?.underOne ?? props.underOne,
+    underFive: res?.population?.underFive ?? props.underFive,
+    womenOfChildbearingAge: res?.population?.womenOfChildbearingAge ?? props.womenOfChildbearingAge,
+    populationSource: res?.population?.source ?? props.populationSource,
+    populationSourceYear: res?.population?.sourceYear ?? props.populationSourceYear,
+    populationMethod: res?.population?.method ?? props.populationMethod,
+    confidence: res?.population?.confidence ?? props.confidence,
+    populationStatus: res?.population?.status ?? props.populationStatus,
+    calculatedAt: res?.population?.calculatedAt ?? props.calculatedAt,
+    validationStatus: res?.validationStatus ?? props.validationStatus,
+    approvalStatus: res?.approvalStatus ?? props.approvalStatus,
+    warnings: res?.warnings ?? props.warnings,
+  };
+}
+
+function localPolygonMeta(coords: [number, number][], facilityLat: number, facilityLng: number): PolygonPlanningMeta {
+  try {
+    const feature = turf.polygon([toGeoRing(coords)]);
+    const center = turf.centroid(feature);
+    const [longitude, latitude] = center.geometry.coordinates;
+    const distanceKm = turf.distance(turf.point([facilityLng, facilityLat]), turf.point([longitude, latitude]), { units: "kilometers" });
+    return {
+      areaSqKm: turf.area(feature) / 1_000_000,
+      centroid: { latitude, longitude },
+      access: {
+        centroidDistanceKm: Number(distanceKm.toFixed(2)),
+        travelTimeWalkingMin: Math.round((distanceKm / 4) * 60),
+        travelTimeMotorcycleMin: Math.round((distanceKm / 25) * 60),
+        travelTimeVehicleMin: Math.round((distanceKm / 40) * 60),
+      },
+      validationStatus: "draft",
+      approvalStatus: "draft",
+      populationMethod: "Pending server calculation",
+      confidence: "low",
+    };
+  } catch {
+    return { validationStatus: "draft", approvalStatus: "draft" };
+  }
+}
+
+// --- Population estimation (server-side + cascade) ---------------------------
 async function estimatePolygonPop(
   coords: [number, number][],
   ownerType?: "facility" | "village",
@@ -107,7 +203,7 @@ async function estimatePolygonPop(
 }
 
 
-// ─── Drawing controller — click to place vertices, dblclick to close ──────────
+// --- Drawing controller - click to place vertices, dblclick to close ----------
 function DrawingController({
   mode, onClose, onPolygonComplete,
 }: {
@@ -180,7 +276,7 @@ function DrawingController({
   return null;
 }
 
-// ─── Fit map to polygon after draw ───────────────────────────────────────────
+// --- Fit map to polygon after draw -------------------------------------------
 function FitToPolygon({ coords }: { coords: [number, number][] | null }) {
   const map = useMap();
   useEffect(() => {
@@ -190,7 +286,7 @@ function FitToPolygon({ coords }: { coords: [number, number][] | null }) {
   return null;
 }
 
-// ─── Geolocation button ───────────────────────────────────────────────────────
+// --- Geolocation button -------------------------------------------------------
 function GeolocateButton() {
   const map = useMap();
   return (
@@ -204,12 +300,41 @@ function GeolocateButton() {
       }
       className="absolute bottom-14 right-2 z-[1000] flex h-8 w-8 items-center justify-center rounded bg-white shadow border text-base hover:bg-gray-50"
     >
-      📍
+      
     </button>
   );
 }
 
-// ─── Main component ───────────────────────────────────────────────────────────
+function PolygonDetails({ title, meta, population }: { title: string; meta: PolygonPlanningMeta; population?: number }) {
+  const access = meta.access ?? undefined;
+  return (
+    <div className="rounded-lg border bg-card p-3 text-xs space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <span className="font-semibold text-foreground">{title}</span>
+        <span className={`rounded-full px-2 py-0.5 font-medium ${meta.validationStatus === "valid" ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>
+          {meta.validationStatus || "draft"}
+        </span>
+      </div>
+      <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-muted-foreground md:grid-cols-4">
+        <span>Total pop: <b className="text-foreground">{(population ?? meta.populationEstimate ?? 0).toLocaleString()}</b></span>
+        <span>Target infants: <b className="text-foreground">{(meta.targetInfants ?? meta.underOne ?? 0).toLocaleString()}</b></span>
+        <span>Under-five: <b className="text-foreground">{(meta.underFive ?? 0).toLocaleString()}</b></span>
+        <span>Area: <b className="text-foreground">{meta.areaSqKm != null ? Number(meta.areaSqKm).toFixed(2) : "-"} km²</b></span>
+        <span>Distance: <b className="text-foreground">{access?.centroidDistanceKm != null ? `${access.centroidDistanceKm} km` : "-"}</b></span>
+        <span>Walk: <b className="text-foreground">{access?.travelTimeWalkingMin != null ? `${access.travelTimeWalkingMin} min` : "-"}</b></span>
+        <span>Motorbike: <b className="text-foreground">{access?.travelTimeMotorcycleMin != null ? `${access.travelTimeMotorcycleMin} min` : "-"}</b></span>
+        <span>Vehicle: <b className="text-foreground">{access?.travelTimeVehicleMin != null ? `${access.travelTimeVehicleMin} min` : "-"}</b></span>
+      </div>
+      <p className="text-[11px] text-muted-foreground">
+        Source: {meta.populationSource || "Population source missing"}{meta.populationSourceYear ? ` ${meta.populationSourceYear}` : ""} · Method: {meta.populationMethod || "Pending calculation"} · Confidence: {meta.confidence || "low"}
+      </p>
+      {meta.warnings && meta.warnings.length > 0 && (
+        <p className="rounded border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] text-amber-700">{meta.warnings[0]}</p>
+      )}
+    </div>
+  );
+}
+// --- Main component -----------------------------------------------------------
 export function CatchmentMapPanel({
   facilityId, facilityName,
   facilityLat = -6.314, facilityLng = 143.956,
@@ -233,31 +358,41 @@ export function CatchmentMapPanel({
   const [suggesting, setSuggesting] = useState(false);
   const catchingRef = useRef(false);
 
-  // ─── Load existing polygons on mount ───────────────────────────────────────
+  // --- Load existing polygons on mount ---------------------------------------
   useEffect(() => {
     if (!facilityId) return;
     apiRequest<any>("GET", `/api/facilities/${facilityId}/catchment-polygon`)
       .then((r) => {
-        if (r?.catchmentPolygon?.coordinates) {
-          const coords = (r.catchmentPolygon.coordinates[0] as [number, number][])
-            .map(([lng, lat]) => [lat, lng] as [number, number]);
-          setCatchment({ coords, gridPopulation: r.catchmentGridPopulation ?? undefined, locked: true });
+        const coords = coordsFromGeoJson(r?.catchmentPolygon);
+        if (coords) {
+          const meta = metaFromResponse(r);
+          setCatchment({
+            coords,
+            gridPopulation: r.catchmentGridPopulation ?? meta.populationEstimate ?? undefined,
+            under5Population: meta.underFive ?? undefined,
+            locked: true,
+            ...meta,
+          });
         }
       }).catch(() => {});
     communities.forEach((c) => {
       if (!c.villageId) return;
       apiRequest<any>("GET", `/api/villages/${c.villageId}/community-polygon`)
         .then((r) => {
-          if (r?.catchmentPolygon?.coordinates) {
-            const coords = (r.catchmentPolygon.coordinates[0] as [number, number][])
-              .map(([lng, lat]) => [lat, lng] as [number, number]);
+          const coords = coordsFromGeoJson(r?.catchmentPolygon);
+          if (coords) {
+            const meta = metaFromResponse(r);
             setCommunityPolygons((prev) => {
               if (prev.some((p) => p.communityName === c.name)) return prev;
               return [...prev, {
                 communityName: c.name,
                 communityId: c.villageId,
-                color: PALETTE[prev.length % PALETTE.length],
-                coords, griddedPopulation: r.griddedPopulation ?? undefined, saved: true,
+                color: r.polygonColor || PALETTE[prev.length % PALETTE.length],
+                coords,
+                griddedPopulation: r.griddedPopulation ?? meta.populationEstimate ?? undefined,
+                under5Population: meta.underFive ?? undefined,
+                saved: true,
+                ...meta,
               }];
             });
           }
@@ -265,7 +400,7 @@ export function CatchmentMapPanel({
     });
   }, [facilityId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ─── Gap polygon = catchment minus union of community polygons ──────────────
+  // --- Gap polygon = catchment minus union of community polygons --------------
   const gapPolygons: [number, number][][] = (() => {
     if (!catchment || !showGap || communityPolygons.length === 0) return [];
     try {
@@ -293,7 +428,7 @@ export function CatchmentMapPanel({
     return [];
   })();
 
-  // ─── Overlap check ──────────────────────────────────────────────────────────
+  // --- Overlap check ----------------------------------------------------------
   const hasOverlap = useCallback((newCoords: [number, number][]): boolean => {
     const newPoly = turf.polygon([toGeoRing(newCoords)]);
     return communityPolygons.some((existing) => {
@@ -303,7 +438,7 @@ export function CatchmentMapPanel({
     });
   }, [communityPolygons, selectedCommunity]);
 
-  // ─── Handle completed polygon ───────────────────────────────────────────────
+  // --- Handle completed polygon -----------------------------------------------
   const handlePolygonComplete = useCallback(async (coords: [number, number][]) => {
     const mode = drawMode;
     setDrawMode(null);
@@ -319,15 +454,16 @@ export function CatchmentMapPanel({
     if (intel) setIntelligenceData(intel);
     const total = intel?.sources[0]?.totalPopulation || 0;
     const under5 = intel?.sources[0]?.under5Population || 0;
+    const localMeta = localPolygonMeta(coords, facilityLat, facilityLng);
 
     if (mode === "catchment") {
-      setCatchment({ coords, gridPopulation: total || undefined, under5Population: under5 || undefined, locked: false });
+      setCatchment({ coords, gridPopulation: total || undefined, under5Population: under5 || undefined, populationEstimate: total || undefined, underFive: under5 || undefined, locked: false, ...localMeta });
       setFitCoords(coords);
       toast({
         title: "Catchment drawn",
         description: total
-          ? `~${total.toLocaleString()} people · ${under5.toLocaleString()} under-5 (grid population)`
-          : "Polygon ready — click Save to persist.",
+          ? `~${total.toLocaleString()} people - ${under5.toLocaleString()} under-5 (grid population)`
+          : "Polygon ready - click Save to persist.",
       });
       return;
     }
@@ -350,55 +486,97 @@ export function CatchmentMapPanel({
 
     const existingIdx = communityPolygons.findIndex((p) => p.communityName === selectedCommunity);
     const color = existingIdx >= 0 ? communityPolygons[existingIdx].color : PALETTE[communityPolygons.length % PALETTE.length];
-    const entry: CommunityPolygon = { communityName: selectedCommunity, color, coords, griddedPopulation: total || undefined, under5Population: under5 || undefined, saved: false };
+    const entry: CommunityPolygon = { communityName: selectedCommunity, color, coords, griddedPopulation: total || undefined, under5Population: under5 || undefined, populationEstimate: total || undefined, underFive: under5 || undefined, saved: false, ...localMeta };
 
     setCommunityPolygons((prev) =>
       existingIdx >= 0 ? prev.map((p, i) => i === existingIdx ? entry : p) : [...prev, entry]
     );
     if (total) onCommunityPopUpdate(selectedCommunity, total);
-    toast({ title: `"${selectedCommunity}" drawn`, description: total ? `~${total.toLocaleString()} people · ${under5.toLocaleString()} under-5` : "Click Save to persist." });
+    toast({ title: `"${selectedCommunity}" drawn`, description: total ? `~${total.toLocaleString()} people - ${under5.toLocaleString()} under-5` : "Click Save to persist." });
   }, [drawMode, selectedCommunity, catchment, communityPolygons, hasOverlap, onCommunityPopUpdate, toast]);
 
-  // ─── Save catchment ─────────────────────────────────────────────────────────
+  // --- Save catchment ---------------------------------------------------------
   const saveCatchment = async () => {
     if (!catchment || catchingRef.current) return;
     catchingRef.current = true;
     setSaving(true);
     try {
-      await apiRequest("PATCH", `/api/facilities/${facilityId}/catchment-polygon`, {
+      const saved = await apiRequest<any>("PATCH", `/api/facilities/${facilityId}/catchment-polygon`, {
         geojson: { type: "Polygon", coordinates: [toGeoRing(catchment.coords)] },
-        gridPopulation: catchment.gridPopulation,
       });
-      setCatchment((p) => p ? { ...p, locked: true } : p);
-      toast({ title: "Catchment saved", description: `Grid pop: ~${(catchment.gridPopulation ?? 0).toLocaleString()} · U5: ~${(catchment.under5Population ?? 0).toLocaleString()}` });
+      const meta = metaFromResponse(saved);
+      setCatchment((p) => p ? {
+        ...p,
+        locked: true,
+        gridPopulation: saved.catchmentGridPopulation ?? saved.population?.totalPopulation ?? p.gridPopulation,
+        under5Population: saved.population?.underFive ?? p.under5Population,
+        ...meta,
+      } : p);
+      toast({
+        title: "Facility catchment saved",
+        description: `${(saved.population?.totalPopulation ?? catchment.gridPopulation ?? 0).toLocaleString()} people · ${saved.areaSqKm?.toFixed?.(2) ?? saved.areaSqKm ?? "?"} km²`,
+      });
     } catch (e: any) {
       toast({ title: "Save failed", description: e?.message, variant: "destructive" });
     } finally { setSaving(false); catchingRef.current = false; }
   };
-
-  // ─── Save community polygon ─────────────────────────────────────────────────
+  // Save community polygon -------------------------------------------------
   const saveCommunity = async (poly: CommunityPolygon) => {
     const comm = communities.find((c) => c.name === poly.communityName);
     if (!comm?.villageId) {
       toast({ title: "Register community first", description: "Save the community record before drawing its polygon.", variant: "destructive" });
       return;
     }
+
+    // Check if within facility catchment
+    let isWithin = true;
+    if (catchment) {
+      try {
+        const catchPoly = turf.polygon([toGeoRing(catchment.coords)]);
+        const childPoly = turf.polygon([toGeoRing(poly.coords)]);
+        isWithin = turf.booleanWithin(childPoly, catchPoly);
+      } catch (e) {
+        console.warn("Within check failed:", e);
+      }
+    }
+
+    let overrideReason: string | undefined = undefined;
+    if (!isWithin) {
+      const reason = window.prompt("This community is outside the facility catchment area. An override reason is required to save:");
+      if (reason === null) {
+        return; // User cancelled
+      }
+      if (!reason.trim()) {
+        toast({ title: "Save blocked", description: "An override reason is required to save a community outside the catchment area.", variant: "destructive" });
+        return;
+      }
+      overrideReason = reason;
+    }
+
     setSaving(true);
     try {
-      await apiRequest("PATCH", `/api/villages/${comm.villageId}/community-polygon`, {
+      const saved = await apiRequest<any>("PATCH", `/api/villages/${comm.villageId}/community-polygon`, {
         geojson: { type: "Polygon", coordinates: [toGeoRing(poly.coords)] },
-        griddedPopulation: poly.griddedPopulation,
         polygonColor: poly.color,
-        populationSourceLabel: "GridPop/WorldPop 2020",
+        overrideReason: overrideReason
       });
-      setCommunityPolygons((prev) => prev.map((p) => p.communityName === poly.communityName ? { ...p, saved: true } : p));
-      toast({ title: `"${poly.communityName}" saved` });
+      const meta = metaFromResponse(saved);
+      setCommunityPolygons((prev) => prev.map((p) => p.communityName === poly.communityName ? {
+        ...p,
+        saved: true,
+        griddedPopulation: saved.griddedPopulation ?? saved.population?.totalPopulation ?? p.griddedPopulation,
+        under5Population: saved.population?.underFive ?? p.under5Population,
+        ...meta,
+      } : p));
+      toast({
+        title: `"${poly.communityName}" saved`,
+        description: `${(saved.population?.totalPopulation ?? poly.griddedPopulation ?? 0).toLocaleString()} people · ${saved.areaSqKm?.toFixed?.(2) ?? saved.areaSqKm ?? "?"} km²`,
+      });
     } catch (e: any) {
       toast({ title: "Save failed", description: e?.message, variant: "destructive" });
     } finally { setSaving(false); }
   };
-
-  // ─── Save all ────────────────────────────────────────────────────────────────
+  // Save all ----------------------------------------------------------------
   const saveAll = async () => {
     let count = 0;
     if (catchment && !catchment.locked) { await saveCatchment(); count++; }
@@ -406,7 +584,7 @@ export function CatchmentMapPanel({
     if (count === 0) toast({ title: "Nothing to save", description: "All polygons are already saved." });
   };
 
-  // ─── Auto-suggest Catchment (Convex Hull) ───────────────────────────────────
+  // --- Auto-suggest Catchment (Convex Hull) -----------------------------------
   const autoSuggestCatchment = async () => {
     setSuggesting(true);
     try {
@@ -431,7 +609,7 @@ export function CatchmentMapPanel({
     }
   };
 
-  // ─── Extract communities (aggressive OSM scraping) ──────────────────────────
+  // --- Extract communities (aggressive OSM scraping) --------------------------
   const extractCommunities = async () => {
     if (!catchment) { toast({ title: "Draw catchment first", variant: "destructive" }); return; }
     setExtracting(true);
@@ -445,7 +623,7 @@ export function CatchmentMapPanel({
       const total = result.counts.villages + result.counts.settlements + result.counts.unmapped;
       toast({
         title: `${total} community places extracted`,
-        description: `${result.counts.villages} registered · ${result.counts.settlements} settlements · ${result.counts.unmapped} OSM places`,
+        description: `${result.counts.villages} registered - ${result.counts.settlements} settlements - ${result.counts.unmapped} OSM places`,
       });
       if (onExtractedCommunities) {
         onExtractedCommunities([
@@ -459,7 +637,7 @@ export function CatchmentMapPanel({
     } finally { setExtracting(false); }
   };
 
-  // ─── Flag uncovered communities to district ─────────────────────────────────
+  // --- Flag uncovered communities to district ---------------------------------
   const uncovered = communities.filter((c) => !communityPolygons.some((p) => p.communityName === c.name));
   const flagUncovered = async () => {
     if (!uncovered.length) return;
@@ -472,7 +650,7 @@ export function CatchmentMapPanel({
     } catch (e: any) { toast({ title: "Flag failed", description: e?.message, variant: "destructive" }); }
   };
 
-  // ─── Population balance ──────────────────────────────────────────────────────
+  // --- Population balance ------------------------------------------------------
   const communityPopSum = communityPolygons.reduce((s, p) => s + (p.griddedPopulation ?? 0), 0);
   const catchmentPop = catchment?.gridPopulation ?? 0;
   const balancePct = catchmentPop > 0 ? Math.min(100, Math.round((communityPopSum / catchmentPop) * 100)) : 0;
@@ -482,44 +660,44 @@ export function CatchmentMapPanel({
   return (
     <div className="flex flex-col gap-3">
 
-      {/* ── Controls bar ── */}
-      <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-card px-3 py-2.5 text-sm">
+      {/* -- Controls bar -- */}
+      <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-card px-3 py-2.5 text-sm [&_button]:min-h-9 [&_select]:min-h-9">
         <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Catchment:</span>
 
         {!catchment ? (
           <button type="button" disabled={!!drawMode} onClick={() => setDrawMode("catchment")}
             className="rounded-md bg-blue-600 px-3 py-1.5 text-white text-xs font-medium hover:bg-blue-700 disabled:opacity-50">
-            ✏️ Draw HF Catchment
+             Draw HF Catchment
           </button>
         ) : (
           <>
             <span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${catchment.locked ? "bg-green-100 text-green-700" : "bg-amber-100 text-amber-800"}`}>
-              {catchment.locked ? "🔒 Locked" : "📐 Unsaved"}
+              {catchment.locked ? " Locked" : " Unsaved"}
             </span>
             {catchment.gridPopulation != null && (
               <span className="text-xs text-muted-foreground">
                 ~{catchment.gridPopulation.toLocaleString()} people
-                {catchment.under5Population ? ` · ${catchment.under5Population.toLocaleString()} U5` : ""}
+                {catchment.under5Population ? ` - ${catchment.under5Population.toLocaleString()} U5` : ""}
               </span>
             )}
             {!catchment.locked && (
               <button type="button" onClick={saveCatchment} disabled={saving}
                 className="rounded-md bg-green-600 px-3 py-1.5 text-white text-xs font-medium hover:bg-green-700 disabled:opacity-50">
-                {saving ? "Saving…" : "💾 Save & Lock"}
+                {saving ? "Saving..." : " Save & Lock"}
               </button>
             )}
             {catchment.locked && (
               <>
                 <button type="button" onClick={() => setCatchment((p) => p ? { ...p, locked: false } : p)}
-                  className="rounded-md border px-2.5 py-1 text-xs hover:bg-muted">✏️ Edit</button>
+                  className="rounded-md border px-2.5 py-1 text-xs hover:bg-muted"> Edit</button>
                 <button type="button" onClick={() => setFitCoords(catchment.coords)}
-                  className="rounded-md border px-2.5 py-1 text-xs hover:bg-muted">🎯 Fit</button>
+                  className="rounded-md border px-2.5 py-1 text-xs hover:bg-muted"> Fit</button>
               </>
             )}
             {!catchment.locked && (
               <button type="button" onClick={autoSuggestCatchment} disabled={suggesting}
                   className="rounded-md border border-purple-300 bg-purple-50 px-2.5 py-1 text-xs font-medium text-purple-700 hover:bg-purple-100 disabled:opacity-50">
-                  {suggesting ? "⏳ Auto-suggesting…" : "✨ Auto-suggest"}
+                  {suggesting ? " Auto-suggesting..." : " Auto-suggest"}
               </button>
             )}
           </>
@@ -528,19 +706,19 @@ export function CatchmentMapPanel({
         <div className="h-4 w-px bg-border mx-1" />
         <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Community:</span>
 
-        <select className="rounded border px-2 py-1 text-xs max-w-[150px]" value={selectedCommunity}
+        <select className="min-w-0 max-w-full rounded border px-2 py-1 text-xs sm:max-w-[190px]" value={selectedCommunity}
           onChange={(e) => setSelectedCommunity(e.target.value)}>
-          <option value="">— select —</option>
+          <option value="">- select -</option>
           {communities.map((c) => (
             <option key={c.name} value={c.name}>
-              {c.name}{communityPolygons.some((p) => p.communityName === c.name) ? " ✓" : ""}
+              {c.name}{communityPolygons.some((p) => p.communityName === c.name) ? " Done" : ""}
             </option>
           ))}
         </select>
         <button type="button" disabled={!selectedCommunity || !!drawMode || !catchment}
           onClick={() => setDrawMode("community")}
           className="rounded-md bg-orange-500 px-3 py-1.5 text-white text-xs font-medium hover:bg-orange-600 disabled:opacity-50">
-          ✏️ Draw Polygon
+           Draw Polygon
         </button>
 
         <div className="h-4 w-px bg-border mx-1" />
@@ -548,24 +726,24 @@ export function CatchmentMapPanel({
         {/* Commented out original local toggle button in favor of floating BasemapSwitcher
         <button type="button" onClick={() => setTileLayer((t) => t === "positron" ? "voyager" : "positron")}
           className="rounded-md border px-2.5 py-1 text-xs hover:bg-muted">
-          {tileLayer === "positron" ? "🛰 Voyager" : "🗺 Positron"}
+          {tileLayer === "positron" ? " Voyager" : " Positron"}
         </button>
         */}
         <button type="button" disabled={!catchment || extracting} onClick={extractCommunities}
           className="rounded-md border border-sky-300 bg-sky-50 px-2.5 py-1 text-xs font-medium text-sky-700 hover:bg-sky-100 disabled:opacity-50">
-          {extracting ? "⏳ Extracting…" : "🔍 Extract Communities"}
+          {extracting ? " Extracting..." : " Extract Communities"}
         </button>
         <button type="button" onClick={saveAll} disabled={saving}
           className="rounded-md bg-emerald-600 px-3 py-1.5 text-white text-xs font-medium hover:bg-emerald-700 disabled:opacity-50">
-          💾 Save All
+           Save All
         </button>
       </div>
 
-      {/* ── Drawing instructions ── */}
+      {/* -- Drawing instructions -- */}
       {drawMode && (
         <div className="flex items-center gap-3 rounded-md border border-blue-200 bg-blue-50 px-3 py-2">
           <span className="flex-1 animate-pulse text-xs font-semibold text-blue-700">
-            🖱 Click to place vertices · Double-click to close · Ctrl+Z undo · Esc cancel
+             Click to place vertices - Double-click to close - Ctrl+Z undo - Esc cancel
           </span>
           <button type="button" onClick={() => setDrawMode(null)}
             className="rounded bg-blue-100 px-2 py-0.5 text-xs text-blue-700 hover:bg-blue-200">
@@ -575,12 +753,12 @@ export function CatchmentMapPanel({
       )}
       {loadingPop && (
         <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-700 animate-pulse">
-          ⏳ Estimating grid population from local GeoTIFF data / WorldPop cascade…
+           Estimating grid population from local GeoTIFF data / WorldPop cascade...
         </div>
       )}
 
-      {/* ── Map ── */}
-      <div className="relative h-[500px] w-full overflow-hidden rounded-xl border shadow-sm">
+      {/* -- Map -- */}
+      <div className="relative h-[420px] w-full overflow-hidden rounded-xl border shadow-sm sm:h-[500px]">
         <MapContainer center={center} zoom={13} style={{ height: "100%", width: "100%" }} doubleClickZoom={false}>
           {/* Commented out original static TileLayer in favor of dynamic BasemapTileLayer
           <TileLayer url={TILES[tileLayer].url} attribution={TILES[tileLayer].attr} maxNativeZoom={19} maxZoom={22} />
@@ -590,12 +768,12 @@ export function CatchmentMapPanel({
           {/* HF Catchment polygon */}
           {catchment && (
             <Polygon positions={catchment.coords}
-              pathOptions={{ color: "#1a56db", fillColor: "#1a56db", fillOpacity: 0.07, weight: 2.5, dashArray: catchment.locked ? undefined : "8,4" }}>
+              pathOptions={{ color: catchment.validationStatus === "invalid" ? "#ef4444" : "#1a56db", fillColor: "#1a56db", fillOpacity: catchment.locked ? 0.10 : 0.06, weight: catchment.locked ? 3 : 2.5, dashArray: catchment.locked ? undefined : "8,4" }}>
               <Popup>
-                <strong>{facilityName} — HF Catchment</strong><br />
+                <strong>{facilityName} - HF Catchment</strong><br />
                 Grid pop: ~{(catchment.gridPopulation ?? 0).toLocaleString()}<br />
                 Under-5: ~{(catchment.under5Population ?? 0).toLocaleString()}<br />
-                {catchment.locked ? "🔒 Locked" : "⚠️ Unsaved"}
+                {catchment.locked ? " Locked" : "Warning: Unsaved"}
               </Popup>
             </Polygon>
           )}
@@ -603,14 +781,14 @@ export function CatchmentMapPanel({
           {/* Community polygons */}
           {communityPolygons.map((poly) => (
             <Polygon key={poly.communityName} positions={poly.coords}
-              pathOptions={{ color: poly.color, fillColor: poly.color, fillOpacity: 0.22, weight: 2 }}>
+              pathOptions={{ color: poly.validationStatus === "invalid" ? "#ef4444" : poly.color, fillColor: poly.color, fillOpacity: poly.communityName === selectedCommunity ? 0.30 : 0.18, weight: poly.communityName === selectedCommunity ? 4 : 2, dashArray: poly.saved ? undefined : "7,4" }}>
               <Popup>
                 <strong>{poly.communityName}</strong><br />
                 Grid pop: ~{(poly.griddedPopulation ?? 0).toLocaleString()}<br />
                 Under-5: ~{(poly.under5Population ?? 0).toLocaleString()}<br />
-                {poly.saved ? "✅ Saved" : (
+                {poly.saved ? "Saved Saved" : (
                   <>
-                    <span>⚠️ Unsaved</span><br />
+                    <span>Warning: Unsaved</span><br />
                     <button onClick={() => saveCommunity(poly)} disabled={saving}
                       style={{ marginTop: 4, padding: "2px 10px", background: "#1a56db", color: "#fff", borderRadius: 4, border: "none", cursor: "pointer", fontSize: 11 }}>
                       Save
@@ -621,12 +799,12 @@ export function CatchmentMapPanel({
             </Polygon>
           ))}
 
-          {/* Gap overlay — red hatched uncovered area */}
+          {/* Gap overlay - red hatched uncovered area */}
           {gapPolygons.map((ring, i) => (
             <Polygon key={`gap-${i}`} positions={ring}
               pathOptions={{ color: "#ef4444", fillColor: "#ef4444", fillOpacity: 0.16, weight: 1.5, dashArray: "5,4" }}>
               <Popup>
-                <strong style={{ color: "#ef4444" }}>⚠️ Coverage Gap</strong><br />
+                <strong style={{ color: "#ef4444" }}>Warning: Coverage Gap</strong><br />
                 This area within the catchment is not yet covered by a community polygon.
               </Popup>
             </Polygon>
@@ -635,7 +813,7 @@ export function CatchmentMapPanel({
           {/* Extracted place markers */}
           {extractResult?.unmapped.map((u, i) => (
             <Marker key={`osm-${i}`} position={[u.latitude, u.longitude]}>
-              <Popup><strong>{u.name}</strong><br />{u.placeType} · OpenStreetMap</Popup>
+              <Popup><strong>{u.name}</strong><br />{u.placeType} - OpenStreetMap</Popup>
             </Marker>
           ))}
           {extractResult?.settlements.map((s) => (
@@ -654,19 +832,43 @@ export function CatchmentMapPanel({
           <GeolocateButton />
         </MapContainer>
         <BasemapSwitcher basemap={basemap} onChange={setBasemap} />
-
         {/* Map overlay controls (outside map, uses regular absolute positioning) */}
         <div className="absolute top-2 left-2 z-[1000] flex flex-col gap-1">
           <button type="button" onClick={() => setShowGap((v) => !v)}
             className={`rounded px-2 py-1 text-xs font-medium shadow border ${showGap ? "bg-red-50 border-red-200 text-red-700" : "bg-white border-gray-200 text-muted-foreground"}`}>
-            {showGap ? "🔴 Hide Gaps" : "⬜ Show Gaps"}
+            {showGap ? " Hide Gaps" : " Show Gaps"}
           </button>
+        </div>
+
+        {/* Map Legend (bottom-4 left-4 overlay) */}
+        <div className="absolute bottom-4 left-4 z-[1000] rounded-lg border bg-white/95 p-3 shadow-md backdrop-blur-sm text-[11px] font-medium space-y-1.5 min-w-[150px] pointer-events-auto">
+          <div className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-1">Map Legend</div>
+          <div className="flex items-center gap-2">
+            <span className="inline-block h-3 w-3 rounded-sm border border-[#1a56db] bg-[#1a56db]/10" />
+            <span>Facility Catchment</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="inline-block h-3 w-3 rounded-sm border border-[#e67e22] bg-[#e67e22]/20" />
+            <span>Community Catchment</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="inline-block h-3 w-3 rounded-sm border border-dashed border-gray-500 bg-gray-500/10" />
+            <span>Draft / Unsaved</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="inline-block h-3 w-3 rounded-sm border border-red-500 bg-red-500/10" />
+            <span>Invalid Geometry</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="inline-block h-3 w-3 rounded-sm border-2 border-slate-900 bg-slate-900/20" />
+            <span>Selected Polygon</span>
+          </div>
         </div>
       </div>
 
       <PolygonIntelligenceCard data={intelligenceData} />
 
-      {/* ── Population balance panel ── */}
+      {/* -- Population balance panel -- */}
       {catchment && (
         <div className="rounded-lg border bg-card p-3 space-y-1.5">
           <div className="flex items-center justify-between text-xs">
@@ -681,21 +883,21 @@ export function CatchmentMapPanel({
               style={{ width: `${balancePct}%` }} />
           </div>
           <p className="text-[11px] text-muted-foreground">
-            {communityPolygons.length} of {communities.length} community polygons drawn ·{" "}
+            {communityPolygons.length} of {communities.length} community polygons drawn -{" "}
             {catchmentPop > communityPopSum
               ? `~${(catchmentPop - communityPopSum).toLocaleString()} people not yet attributed to a community`
               : communityPolygons.length > 0
-                ? "✓ All catchment population attributed to communities"
+                ? "Done All catchment population attributed to communities"
                 : "Draw community polygons to attribute population"}
           </p>
         </div>
       )}
 
-      {/* ── Community checklist ── */}
+      {/* -- Community checklist -- */}
       {communities.length > 0 && (
         <div className="rounded-lg border bg-card p-3 space-y-2">
           <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            Community Coverage — {communityPolygons.length}/{communities.length} polygons drawn
+            Community Coverage - {communityPolygons.length}/{communities.length} polygons drawn
           </h4>
           <div className="flex flex-wrap gap-2">
             {communities.map((c, i) => {
@@ -707,10 +909,10 @@ export function CatchmentMapPanel({
                          : "border-orange-300 bg-orange-50 text-orange-700 hover:bg-orange-100"
                   }`}
                   onClick={() => setSelectedCommunity(c.name)}>
-                  {poly ? <span style={{ color: poly.color }}>■</span> : <span>○</span>}
+                  {poly ? <span style={{ color: poly.color }}>mapped</span> : <span>not mapped</span>}
                   {c.name}
                   {poly?.griddedPopulation ? ` (${poly.griddedPopulation.toLocaleString()})` : ""}
-                  {poly?.saved ? " ✓" : poly ? " ●" : ""}
+                  {poly?.saved ? " Done" : poly ? " mapped" : ""}
                 </button>
               );
             })}
@@ -720,12 +922,12 @@ export function CatchmentMapPanel({
           {extractResult && (
             <div className="rounded-md border border-sky-200 bg-sky-50 p-2.5 text-xs space-y-1">
               <p className="font-semibold text-sky-700">
-                📍 {extractResult.counts.villages + extractResult.counts.settlements + extractResult.counts.unmapped} places found inside catchment
+                 {extractResult.counts.villages + extractResult.counts.settlements + extractResult.counts.unmapped} places found inside catchment
               </p>
               <div className="flex flex-wrap gap-3 text-sky-600">
-                <span>✅ {extractResult.counts.villages} registered villages</span>
-                <span>🏘 {extractResult.counts.settlements} settlements</span>
-                <span>🗺 {extractResult.counts.unmapped} unmapped OSM places</span>
+                <span>Saved {extractResult.counts.villages} registered villages</span>
+                <span> {extractResult.counts.settlements} settlements</span>
+                <span> {extractResult.counts.unmapped} unmapped OSM places</span>
               </div>
               {extractResult.unmapped.length > 0 && (
                 <p className="text-[11px] text-sky-500 italic">
@@ -741,7 +943,7 @@ export function CatchmentMapPanel({
             <div className="flex items-start justify-between gap-3 rounded-md border border-red-200 bg-red-50 p-2.5">
               <div>
                 <p className="text-xs font-semibold text-red-700">
-                  ⚠️ {uncovered.length} communities without polygons — coverage gap
+                  Warning: {uncovered.length} communities without polygons - coverage gap
                 </p>
                 <p className="mt-0.5 text-[11px] text-red-600">
                   {uncovered.slice(0, 5).map((c) => c.name).join(", ")}
@@ -750,15 +952,27 @@ export function CatchmentMapPanel({
               </div>
               <button type="button" onClick={flagUncovered}
                 className="shrink-0 rounded bg-red-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-700">
-                🚩 Flag to District
+                 Flag to District
               </button>
             </div>
           )}
           {uncovered.length === 0 && communityPolygons.length === communities.length && communities.length > 0 && (
-            <p className="text-xs font-medium text-green-700">✅ All communities have polygons — no coverage gaps!</p>
+            <p className="text-xs font-medium text-green-700">Saved All communities have polygons - no coverage gaps!</p>
           )}
         </div>
       )}
     </div>
   );
 }
+
+
+
+
+
+
+
+
+
+
+
+

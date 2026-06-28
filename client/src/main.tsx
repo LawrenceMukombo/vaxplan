@@ -8,7 +8,9 @@ import "./index.css";
 // which shows up as a blank screen in the dev preview. In dev we proactively
 // unregister any leftover worker and purge its caches so the preview always
 // loads fresh. No-op when no worker is present.
-if (import.meta.env.DEV && "serviceWorker" in navigator) {
+const isLocalhost = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+
+if ((import.meta.env.DEV || isLocalhost) && "serviceWorker" in navigator) {
   navigator.serviceWorker
     .getRegistrations()
     .then((regs) => {
@@ -105,7 +107,7 @@ createRoot(document.getElementById("root")!).render(<App />);
 // Surface SW lifecycle to the rest of the app via window events so
 // components like InstallPrompt can offer a "Reload to update" action,
 // and the Background Sync handler can find a ready registration.
-if ("serviceWorker" in navigator && import.meta.env.PROD) {
+if ("serviceWorker" in navigator && import.meta.env.PROD && !isLocalhost) {
   window.addEventListener("load", () => {
     navigator.serviceWorker
       .register("/sw.js", { scope: "/" })

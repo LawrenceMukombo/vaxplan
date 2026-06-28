@@ -338,6 +338,8 @@ export default function Population() {
   const [selectedDistrict, setSelectedDistrict] = useState<string>("all");
   const [selectedFacility, setSelectedFacility] = useState<string>("all");
   const [selectedRecord, setSelectedRecord] = useState<(PopulationData & { metadata?: any }) | null>(null);
+  const initialPopulationParams = useMemo(() => new URLSearchParams(window.location.search), []);
+  const appliedInitialPopulationParamsRef = useRef(false);
 
   const [commentDialogOpen, setCommentDialogOpen] = useState(false);
   const [commentAction, setCommentAction] = useState<"return" | "reject" | "reopen" | null>(null);
@@ -683,6 +685,46 @@ export default function Population() {
     return map;
   }, [facilities]);
 
+
+  useEffect(() => {
+    if (appliedInitialPopulationParamsRef.current) return;
+    if (loadingProvinces || loadingDistricts || loadingFacilities) return;
+
+    const yearParam = initialPopulationParams.get("year");
+    const sourceParam = initialPopulationParams.get("source") as PopulationSource | null;
+    const facilityParam = initialPopulationParams.get("facilityId");
+    const districtParam = initialPopulationParams.get("districtId");
+    const provinceParam = initialPopulationParams.get("provinceId");
+
+    if (yearParam && YEARS.includes(Number(yearParam))) {
+      setSelectedYear(yearParam);
+    }
+    if (sourceParam && TAB_CONFIG.some((tab) => tab.value === sourceParam)) {
+      setActiveTab(sourceParam);
+    }
+
+    if (facilityParam) {
+      const facility = facilityMap.get(Number(facilityParam));
+      if (facility) {
+        setSelectedFacility(facilityParam);
+        if (facility.districtId) {
+          setSelectedDistrict(String(facility.districtId));
+          const district = districtMap.get(Number(facility.districtId));
+          if (district?.provinceId) setSelectedProvince(String(district.provinceId));
+        }
+      }
+    } else {
+      if (districtParam && districtMap.has(Number(districtParam))) {
+        setSelectedDistrict(districtParam);
+        const district = districtMap.get(Number(districtParam));
+        if (district?.provinceId) setSelectedProvince(String(district.provinceId));
+      } else if (provinceParam && provinceMap.has(Number(provinceParam))) {
+        setSelectedProvince(provinceParam);
+      }
+    }
+
+    appliedInitialPopulationParamsRef.current = true;
+  }, [districtMap, facilityMap, initialPopulationParams, loadingDistricts, loadingFacilities, loadingProvinces, provinceMap]);
   /* ORIGINAL CODE (Commented out to adhere to global rules):
   // Helper to trace geographic hierarchy for any population record.
   const getRecordHierarchy = useCallback((record: PopulationData) => {

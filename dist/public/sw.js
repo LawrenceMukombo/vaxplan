@@ -1,3 +1,28 @@
+﻿const IS_LOCAL_PREVIEW_SW = self.location.hostname === "localhost" || self.location.hostname === "127.0.0.1";
+
+if (IS_LOCAL_PREVIEW_SW) {
+  self.addEventListener("install", (event) => {
+    event.waitUntil(self.skipWaiting());
+  });
+
+  self.addEventListener("activate", (event) => {
+    event.waitUntil(
+      (async () => {
+        const keys = await caches.keys();
+        await Promise.all(keys.map((key) => caches.delete(key)));
+        await self.registration.unregister();
+        const clients = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+        for (const client of clients) {
+          client.navigate(client.url);
+        }
+      })(),
+    );
+  });
+
+  self.addEventListener("fetch", () => {
+    // Let the network handle all local preview traffic.
+  });
+} else {
 /**
  * VaxPlan Service Worker
  * Enables offline-first functionality, PWA installability, and
@@ -37,7 +62,7 @@ const BATCH_ENDPOINT = "/api/sync/batch";
 // eslint-disable-next-line no-undef
 const WB_MANIFEST = self.__WB_MANIFEST || [];
 
-// ─── Install: pre-cache critical assets ────────────────────────────────────
+// â”€â”€â”€ Install: pre-cache critical assets â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 self.addEventListener("install", (event) => {
   event.waitUntil(
     (async () => {
@@ -61,7 +86,7 @@ self.addEventListener("install", (event) => {
   );
 });
 
-// ─── Activate: clean up old cache versions ──────────────────────────────────
+// â”€â”€â”€ Activate: clean up old cache versions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 self.addEventListener("activate", (event) => {
   event.waitUntil(
     (async () => {
@@ -88,7 +113,7 @@ self.addEventListener("message", (event) => {
   }
 });
 
-// ─── Fetch: routing logic ────────────────────────────────────────────────────
+// â”€â”€â”€ Fetch: routing logic â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
   if (event.request.method !== "GET") return;
@@ -175,7 +200,7 @@ async function tileStrategy(request) {
   }
 }
 
-// ─── Background Sync: flush the offline outbox ──────────────────────────────
+// â”€â”€â”€ Background Sync: flush the offline outbox â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 self.addEventListener("sync", (event) => {
   if (event.tag === OUTBOX_SYNC_TAG) {
     event.waitUntil(drainOutbox());
@@ -189,7 +214,7 @@ async function notifyClients(type, payload = {}) {
 
 /**
  * Open the Dexie-managed IndexedDB without creating/upgrading it.
- * We rely on the page having already created the DB with its schema —
+ * We rely on the page having already created the DB with its schema â€”
  * the SW only reads/writes existing object stores.
  */
 function openOutboxDb() {
@@ -272,7 +297,7 @@ async function acquireLease(db, owner) {
     try {
       tx = db.transaction(SYNC_META_STORE, "readwrite");
     } catch (err) {
-      // syncMeta store missing — treat as no lease available rather than crash.
+      // syncMeta store missing â€” treat as no lease available rather than crash.
       resolve(false);
       return;
     }
@@ -339,7 +364,7 @@ async function drainOutbox() {
   }
 
   // Try to take the cross-context flush lease. If the page-side
-  // syncEngine.flush() currently holds it, bail — it will broadcast
+  // syncEngine.flush() currently holds it, bail â€” it will broadcast
   // its own completion and the SW will be re-triggered if anything
   // still needs flushing.
   const owner = `sw-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -387,7 +412,7 @@ async function drainOutbox() {
           body: JSON.stringify({ mutations: pending }),
         });
       } catch {
-        // Network died mid-flight — the browser will fire 'sync' again
+        // Network died mid-flight â€” the browser will fire 'sync' again
         // automatically when connectivity returns. Bail without bumping
         // retry counters so we don't burn the budget on transient errors.
         earlyExitReason = "network";
@@ -395,14 +420,14 @@ async function drainOutbox() {
       }
 
       if (resp.status === 401 || resp.status === 403) {
-        // Auth lost — leave items in place; user will log in and we
+        // Auth lost â€” leave items in place; user will log in and we
         // try again on the next sync trigger.
         earlyExitReason = "auth";
         break;
       }
 
       if (!resp.ok) {
-        // Server-side error — bump retries on the whole batch.
+        // Server-side error â€” bump retries on the whole batch.
         for (const item of pending) {
           if (item.id != null) {
             await idbUpdate(db, OUTBOX_STORE, item.id, {
@@ -479,3 +504,6 @@ async function drainOutbox() {
     });
   }
 }
+
+}
+

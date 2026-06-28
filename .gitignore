@@ -20,3 +20,9 @@ ios/
 .webpack/
 # Build scripts output
 script/
+# Runtime local configs, extracted zips, and server process IDs
+.env.runtime.local
+zip_extract/
+*.id
+*.pid
+

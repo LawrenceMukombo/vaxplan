@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ClipboardList, CheckCircle, Clock, Lock } from "lucide-react";
 import ReportTable, { defaultNumFormat } from "./ReportTable";
 import type { ReportFilters, ReportResponse } from "./types";
-import { buildReportQueryString } from "./types";
+import { buildReportQueryString, sanitizeReportRows } from "./types";
 import { PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer } from "recharts";
 
 interface Props { filters: ReportFilters }
@@ -25,10 +25,11 @@ export default function MicroplanReport({ filters }: Props) {
   const { data, isLoading } = useQuery<ReportResponse>({
     queryKey: ["/api/reports/microplans", qs],
     queryFn: () => fetch(`/api/reports/microplans${qs}`, { credentials: "include" }).then((r) => r.json()),
-    staleTime: 2 * 60 * 1000,
+    staleTime: 0,
+    refetchOnMount: "always",
   });
 
-  const rows = data?.data ?? [];
+  const rows = sanitizeReportRows(data?.data ?? [], data?.meta?.filters ?? filters);
   const kpi = rows
     .filter((r) => r.level === "province" || (rows.filter((x) => x.level === "province").length === 0))
     .reduce(
@@ -147,3 +148,4 @@ export default function MicroplanReport({ filters }: Props) {
     </div>
   );
 }
+

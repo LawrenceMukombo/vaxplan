@@ -380,6 +380,9 @@ async function writeToIndexedDB(method: string, url: string, data: any): Promise
   } else if (resource === "monthly-reports") {
     table = offlineDb.monthlyReports;
   } else if (resource === "population") {
+    if (segments[2] === "estimate-polygon" || segments[2] === "worldpop-point") {
+      return;
+    }
     table = offlineDb.populationData;
   } else if (resource === "vaccines") {
     if (segments[2] === "config") {
@@ -562,6 +565,13 @@ export async function apiRequest<T = unknown>(
   await throwIfResNotOk(res);
 
   if (res.status === 204) {
+    try {
+      if (method === "DELETE") {
+        await writeToIndexedDB(method, url, data);
+      }
+    } catch (e) {
+      console.warn("IndexedDB cache delete failed:", e);
+    }
     return undefined as T;
   }
   const resultData = await res.json();

@@ -81,6 +81,11 @@ if (-not $SkipDb) {
         
         # Drop and recreate schema to make sure it is clean
         Write-Host "Cleaning remote schemas (if exists)..." -ForegroundColor Yellow
+        $confirm = Read-Host "WARNING: This will drop the remote schema and ALL data on Hostinger ($dbHost). Type 'YES' to confirm"
+        if ($confirm -ne "YES") {
+            Write-Error "Database schema cleaning cancelled by user. Aborting."
+            exit
+        }
         $dropCmd = "DROP SCHEMA public CASCADE; CREATE SCHEMA public; AUTHORIZATION $dbUser; GRANT ALL ON SCHEMA public TO $dbUser; GRANT ALL ON SCHEMA public TO public;"
         & "C:\Program Files\PostgreSQL\18\bin\psql.exe" -h $dbHost -p $dbPort -U $dbUser -d $dbName -c $dropCmd
         

@@ -1,11 +1,11 @@
-/**
+﻿/**
  * Reports.tsx
  *
- * Main Reporting Engine hub — standalone module at /reports.
+ * Main Reporting Engine hub - standalone module at /reports.
  * Provides period + geo cascade filters, 8 report tabs, and export controls.
  */
 
-import { useState, lazy, Suspense } from "react";
+import { useEffect, useMemo, useState, lazy, Suspense } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   Tabs, TabsContent, TabsList, TabsTrigger,
@@ -24,7 +24,7 @@ import {
 } from "lucide-react";
 import { exportToCsv, exportToExcel } from "./reports/ReportExport";
 import type { ReportFilters, ReportResponse } from "./reports/types";
-import { buildReportQueryString } from "./reports/types";
+import { buildReportQueryString, sanitizeReportRows } from "./reports/types";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -59,6 +59,60 @@ const YEARS = [CURRENT_YEAR, CURRENT_YEAR - 1, CURRENT_YEAR - 2, CURRENT_YEAR - 
 
 interface GeoOption { id: number; name: string }
 
+function roleListFor(user: any): string[] {
+  return [user?.role, ...(Array.isArray(user?.roles) ? user.roles : [])].filter(Boolean);
+}
+
+function scopedIds(user: any, key: "provinces" | "districts" | "facilities", fallback?: unknown): number[] {
+  const scope = user?.dataAccessScope || {};
+  const values = Array.isArray(scope[key]) ? scope[key] : [];
+  const ids = [...values, fallback]
+    .map(Number)
+    .filter((value) => Number.isInteger(value) && value > 0);
+  return Array.from(new Set(ids));
+}
+
+function getLockedReportFilters(user: any): ReportFilters {
+  if (user?.isPlatformAdmin === true) return {};
+
+  const roles = roleListFor(user);
+  const facilityIds = scopedIds(user, "facilities", user?.facilityId);
+  const districtIds = scopedIds(user, "districts", user?.districtId);
+  const provinceIds = scopedIds(user, "provinces", user?.provinceId);
+
+  if (roles.includes("facility_clerk") || roles.includes("facility_in_charge") || facilityIds.length > 0) {
+    return {
+      ...(provinceIds.length === 1 ? { provinceId: provinceIds[0] } : {}),
+      ...(districtIds.length === 1 ? { districtId: districtIds[0] } : {}),
+      ...(facilityIds.length === 1 ? { facilityId: facilityIds[0] } : {}),
+    };
+  }
+  if (roles.includes("district_manager") || districtIds.length > 0) {
+    return {
+      ...(provinceIds.length === 1 ? { provinceId: provinceIds[0] } : {}),
+      ...(districtIds.length === 1 ? { districtId: districtIds[0] } : {}),
+    };
+  }
+  if (roles.includes("provincial_coordinator") || provinceIds.length > 0) {
+    return provinceIds.length === 1 ? { provinceId: provinceIds[0] } : {};
+  }
+  return {};
+}
+
+function hasScopedReportRole(user: any): boolean {
+  if (!user || user?.isPlatformAdmin === true) return false;
+  const roles = roleListFor(user);
+  return roles.includes("facility_clerk") ||
+    roles.includes("facility_in_charge") ||
+    roles.includes("district_manager") ||
+    roles.includes("provincial_coordinator") ||
+    scopedIds(user, "facilities", user?.facilityId).length > 0 ||
+    scopedIds(user, "districts", user?.districtId).length > 0 ||
+    scopedIds(user, "provinces", user?.provinceId).length > 0;
+}
+function applyLockedReportFilters(filters: ReportFilters, locked: ReportFilters): ReportFilters {
+  return { ...filters, ...locked };
+}
 function TabSkeleton() {
   return (
     <div className="space-y-4 p-2">
@@ -76,25 +130,14 @@ export default function Reports() {
   const [filters, setFilters] = useState<ReportFilters>({ year: CURRENT_YEAR });
   const { user } = useAuth();
 
-  // Smart Cascade initialization based on user role-based access scope
-  useState(() => {
-    if (user) {
-      const initial: ReportFilters = { year: CURRENT_YEAR };
-      const u = user as any;
-      if (u.role === "facility_clerk" || u.role === "facility_in_charge") {
-        initial.provinceId = u.provinceId;
-        initial.districtId = u.districtId;
-        initial.facilityId = u.facilityId;
-      } else if (u.role === "district_manager") {
-        initial.provinceId = u.provinceId;
-        initial.districtId = u.districtId;
-      } else if (u.role === "provincial_coordinator") {
-        initial.provinceId = u.provinceId;
-      }
-      setFilters(initial);
-    }
-  });
+  const lockedGeoFilters = useMemo(() => getLockedReportFilters(user), [user]);
+  const isReportScopeLocked = useMemo(() => hasScopedReportRole(user), [user]);
+  const canUseNationalOverview = !isReportScopeLocked && !lockedGeoFilters.provinceId && !lockedGeoFilters.districtId && !lockedGeoFilters.facilityId;
 
+  useEffect(() => {
+    if (!user) return;
+    setFilters((prev) => applyLockedReportFilters({ ...prev, year: prev.year ?? CURRENT_YEAR }, lockedGeoFilters));
+  }, [user, lockedGeoFilters]);
   // Fetch geo options for cascade filter
   const { data: provinces } = useQuery<GeoOption[]>({
     queryKey: ["/api/provinces"],
@@ -128,20 +171,22 @@ export default function Reports() {
     queryKey: [`/api/reports/${activeTab}`, qs],
     queryFn: () =>
       fetch(`/api/reports/${activeTab}${qs}`, { credentials: "include" }).then((r) => r.json()),
-    staleTime: 2 * 60 * 1000,
+    staleTime: 0,
+    refetchOnMount: "always",
   });
 
   const currentTab = REPORT_TABS.find((t) => t.id === activeTab)!;
+  const scopedExportRows = sanitizeReportRows(exportData?.data ?? [], exportData?.meta?.filters ?? filters);
 
   const handleExportCsv = () => {
-    if (!exportData?.data) return;
-    exportToCsv(exportData.data, `vaxplan_${activeTab}_${filters.year ?? "all"}`);
+    if (!scopedExportRows.length) return;
+    exportToCsv(scopedExportRows, `vaxplan_${activeTab}_${filters.year ?? "all"}`);
   };
 
   const handleExportExcel = async () => {
-    if (!exportData?.data) return;
+    if (!scopedExportRows.length) return;
     await exportToExcel(
-      exportData.data,
+      scopedExportRows,
       currentTab.label,
       `vaxplan_${activeTab}_${filters.year ?? "all"}`
     );
@@ -153,7 +198,7 @@ export default function Reports() {
       // Cascade reset
       if (key === "provinceId") { delete next.districtId; delete next.facilityId; }
       if (key === "districtId") { delete next.facilityId; }
-      return next;
+      return applyLockedReportFilters(next, lockedGeoFilters);
     });
   };
 
@@ -172,7 +217,7 @@ export default function Reports() {
       const p = provinces.find((item) => item.id === filters.provinceId);
       return p ? p.name : "Province Scope";
     }
-    return "National Overview";
+    return isReportScopeLocked ? "Assigned locations" : "National Overview";
   };
 
   const renderGeographicTree = () => {
@@ -181,11 +226,12 @@ export default function Reports() {
         {/* National level */}
         <button
           type="button"
+          disabled={!canUseNationalOverview}
           onClick={() => {
-            setFilters(prev => ({ year: prev.year, quarter: prev.quarter }));
+            if (canUseNationalOverview) setFilters(prev => ({ year: prev.year, quarter: prev.quarter }));
           }}
-          className={`w-full flex items-center justify-between text-left px-3 py-2 rounded-lg text-xs font-semibold transition-all duration-200 border ${
-            !filters.provinceId
+          className={`w-full flex items-center justify-between text-left px-3 py-2 rounded-lg text-xs font-semibold transition-all duration-200 border disabled:cursor-not-allowed disabled:opacity-60 ${
+            canUseNationalOverview && !filters.provinceId
               ? "bg-gradient-to-r from-sky-500/15 to-indigo-500/5 text-sky-700 dark:text-sky-400 border-sky-500/20 shadow-sm"
               : "hover:bg-accent border-transparent text-foreground"
           }`}
@@ -194,7 +240,7 @@ export default function Reports() {
             <Globe className="h-4 w-4 text-sky-500 shrink-0" />
             <span>National Overview</span>
           </div>
-          {!filters.provinceId && (
+          {canUseNationalOverview && !filters.provinceId && (
             <span className="h-1.5 w-1.5 rounded-full bg-sky-500 animate-pulse" />
           )}
         </button>
@@ -211,7 +257,7 @@ export default function Reports() {
                 type="button"
                 onClick={() => {
                   if (isProvSelected) {
-                    setFilters(prev => ({ year: prev.year, quarter: prev.quarter }));
+                    if (canUseNationalOverview) setFilters(prev => ({ year: prev.year, quarter: prev.quarter }));
                   } else {
                     setFilter("provinceId", p.id);
                   }
@@ -352,7 +398,7 @@ export default function Reports() {
             <div>
               <h1 className="text-xl font-bold text-foreground tracking-tight">Reporting Engine</h1>
               <p className="text-xs text-muted-foreground">
-                Aggregate &amp; cumulative · facility → district → province → national
+                Aggregate &amp; cumulative - facility - district - province - national
               </p>
             </div>
           </div>
@@ -363,7 +409,7 @@ export default function Reports() {
               <Button
                 variant="outline"
                 size="sm"
-                disabled={exportLoading || !exportData?.data?.length}
+                disabled={exportLoading || !scopedExportRows.length}
                 className="gap-2"
               >
                 <Download className="h-4 w-4" />
@@ -440,10 +486,9 @@ export default function Reports() {
                     value={String(filters.provinceId ?? "all")}
                     onValueChange={(v) => setFilter("provinceId", v === "all" ? undefined : Number(v))}
                     disabled={
-                      user?.role === "provincial_coordinator" ||
-                      user?.role === "district_manager" ||
-                      user?.role === "facility_in_charge" ||
-                      user?.role === "facility_clerk"
+                      !!lockedGeoFilters.provinceId ||
+                      !!lockedGeoFilters.districtId ||
+                      !!lockedGeoFilters.facilityId
                     }
                   >
                     <SelectTrigger className="h-8 text-sm">
@@ -466,9 +511,8 @@ export default function Reports() {
                     value={String(filters.districtId ?? "all")}
                     onValueChange={(v) => setFilter("districtId", v === "all" ? undefined : Number(v))}
                     disabled={
-                      user?.role === "district_manager" ||
-                      user?.role === "facility_in_charge" ||
-                      user?.role === "facility_clerk"
+                      !!lockedGeoFilters.districtId ||
+                      !!lockedGeoFilters.facilityId
                     }
                   >
                     <SelectTrigger className="h-8 text-sm">
@@ -491,8 +535,7 @@ export default function Reports() {
                     value={String(filters.facilityId ?? "all")}
                     onValueChange={(v) => setFilter("facilityId", v === "all" ? undefined : Number(v))}
                     disabled={
-                      user?.role === "facility_in_charge" ||
-                      user?.role === "facility_clerk"
+                      !!lockedGeoFilters.facilityId
                     }
                   >
                     <SelectTrigger className="h-8 text-sm">
@@ -520,7 +563,7 @@ export default function Reports() {
               <div className="hidden sm:flex flex-col gap-1 min-w-[200px] max-w-md ml-2">
                 <span className="text-[10px] uppercase font-semibold tracking-wide text-primary">Active Location Scope</span>
                 <div className="h-8 flex items-center px-3 rounded-md bg-primary/5 border border-primary/10 text-xs font-semibold text-primary truncate">
-                  📍 {getActiveLocationLabel()}
+                  {getActiveLocationLabel()}
                 </div>
               </div>
 
@@ -529,7 +572,7 @@ export default function Reports() {
                 variant="ghost"
                 size="sm"
                 className="h-8 gap-1.5 text-xs mt-auto"
-                onClick={() => setFilters({ year: CURRENT_YEAR })}
+                onClick={() => setFilters(applyLockedReportFilters({ year: CURRENT_YEAR }, lockedGeoFilters))}
               >
                 <RefreshCw className="h-3 w-3" />
                 Reset
@@ -608,37 +651,9 @@ export default function Reports() {
                 ))}
               </TabsList>
 
-              {/* Tab contents — each tab mounts on demand; class hides inactive ones from view */}
+              {/* Tab contents - each tab mounts on demand; class hides inactive ones from view */}
               <div className="mt-6">
                 <Suspense fallback={<TabSkeleton />}>
-                  /* Original Code: mounting sub-reports without setFilter
-                  <TabsContent value="sessions"           className={activeTab !== "sessions" ? "hidden" : ""}>
-                    <SessionReport filters={filters} />
-                  </TabsContent>
-                  <TabsContent value="microplans"         className={activeTab !== "microplans" ? "hidden" : ""}>
-                    <MicroplanReport filters={filters} />
-                  </TabsContent>
-                  <TabsContent value="zero-dose"          className={activeTab !== "zero-dose" ? "hidden" : ""}>
-                    <ZeroDoseReport filters={filters} />
-                  </TabsContent>
-                  <TabsContent value="missed-communities" className={activeTab !== "missed-communities" ? "hidden" : ""}>
-                    <MissedCommunitiesReport filters={filters} />
-                  </TabsContent>
-                  <TabsContent value="coverage"           className={activeTab !== "coverage" ? "hidden" : ""}>
-                    <CoverageReport filters={filters} />
-                  </TabsContent>
-                  <TabsContent value="htr"                className={activeTab !== "htr" ? "hidden" : ""}>
-                    <HtrReport filters={filters} />
-                  </TabsContent>
-                  <TabsContent value="budget"             className={activeTab !== "budget" ? "hidden" : ""}>
-                    <BudgetReport filters={filters} />
-                  </TabsContent>
-                  <TabsContent value="supervision"        className={activeTab !== "supervision" ? "hidden" : ""}>
-                    <SupervisionReport filters={filters} />
-                  </TabsContent>
-                  */
-
-                  // Updated Code: Mount sub-reports passing the setFilter callback to support interactive chart drilldowns
                   <TabsContent value="sessions"           className={activeTab !== "sessions" ? "hidden" : ""}>
                     <SessionReport filters={filters} setFilter={setFilter} />
                   </TabsContent>
@@ -673,3 +688,10 @@ export default function Reports() {
     </div>
   );
 }
+
+
+
+
+
+
+

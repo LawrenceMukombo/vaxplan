@@ -443,6 +443,76 @@ function MapController({
 }
 
 
+function coordinateToLatLng(coord: any): { lat: number; lng: number } | null {
+  if (!coord) return null;
+
+  if (Array.isArray(coord)) {
+    const lng = Number(coord[0]);
+    const lat = Number(coord[1]);
+    return Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null;
+  }
+
+  const lat = Number(coord.lat ?? coord.latitude);
+  const lng = Number(coord.lng ?? coord.longitude);
+  return Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null;
+}
+
+function isPointInGeoJSONRing(lat: number, lng: number, ring: any[]) {
+  if (!Array.isArray(ring) || ring.length < 3) return false;
+
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const current = coordinateToLatLng(ring[i]);
+    const previous = coordinateToLatLng(ring[j]);
+    if (!current || !previous) continue;
+
+    const crossesLatitude = current.lat > lat !== previous.lat > lat;
+    if (!crossesLatitude) continue;
+
+    const denominator = previous.lat - current.lat || Number.EPSILON;
+    const intersectionLng = ((previous.lng - current.lng) * (lat - current.lat)) / denominator + current.lng;
+    if (lng < intersectionLng) inside = !inside;
+  }
+
+  return inside;
+}
+
+function isPointInGeoJSONPolygon(lat: number, lng: number, coordinates: any[]) {
+  if (!Array.isArray(coordinates) || coordinates.length === 0) return false;
+  if (!isPointInGeoJSONRing(lat, lng, coordinates[0])) return false;
+
+  for (let i = 1; i < coordinates.length; i++) {
+    if (isPointInGeoJSONRing(lat, lng, coordinates[i])) return false;
+  }
+
+  return true;
+}
+
+function isPointInGeoJSONBoundary(lat: number, lng: number, geojson: any): boolean {
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || !geojson) return false;
+
+  if (geojson.type === "FeatureCollection") {
+    return Array.isArray(geojson.features) && geojson.features.some((feature: any) => isPointInGeoJSONBoundary(lat, lng, feature));
+  }
+
+  if (geojson.type === "Feature") {
+    return isPointInGeoJSONBoundary(lat, lng, geojson.geometry);
+  }
+
+  if (geojson.type === "Polygon") {
+    return isPointInGeoJSONPolygon(lat, lng, geojson.coordinates);
+  }
+
+  if (geojson.type === "MultiPolygon") {
+    return Array.isArray(geojson.coordinates) && geojson.coordinates.some((polygonCoordinates: any[]) => isPointInGeoJSONPolygon(lat, lng, polygonCoordinates));
+  }
+
+  return false;
+}
+
+function isPointInAnyGeoJSONBoundary(lat: number, lng: number, geojsons: any[]) {
+  return geojsons.some((geojson) => isPointInGeoJSONBoundary(lat, lng, geojson));
+}
 interface MapLegendProps {
   leftOffset?: boolean;
   hiddenCategories: Set<string>;
@@ -491,8 +561,6 @@ function MapLegend({
     // It reflects the currently-filtered facility count (province/district/search aware).
     { key: "facility", label: "Health Facility", color: "bg-blue-500", count: facilityCount ?? null },
     { key: "planned", label: "Planned Community", color: "bg-emerald-500", count: planningStats.planned },
-    { key: "missingStandard", label: "Missing Standard", color: "bg-amber-500", count: planningStats.missingStandard },
-    { key: "missingHtr", label: "Missing HTR", color: "bg-rose-500", count: planningStats.missingHtr },
     // Session plan pins on the live map (Task #47). Status-driven styling.
     { key: "sessionPlanned", label: "Session • Planned", color: "bg-blue-600", count: (planningStats as any).sessionPlanned ?? 0 },
     { key: "sessionInProgress", label: "Session • In Progress", color: "bg-amber-500", count: (planningStats as any).sessionInProgress ?? 0 },
@@ -1612,11 +1680,19 @@ function GeoTIFFOverlay({ url, opacity = 0.65, onRasterLoaded, cacheScope, autoF
       // Layer 2: HTTP fetch (cache miss path — runs once per device)
       if (!arrayBuffer) {
         const res = await fetch(url, { credentials: "include" });
+        if (res.status === 204) {
+          console.info("[GeoTIFF] No raster configured for this tenant; population overlay skipped.");
+          return;
+        }
         if (!res.ok) {
           if (res.status === 404) throw new Error("No population GeoTIFF file found in resources.");
           throw new Error(`HTTP Error ${res.status}`);
         }
         arrayBuffer = await res.arrayBuffer();
+        if (!arrayBuffer || arrayBuffer.byteLength === 0) {
+          console.info("[GeoTIFF] Empty raster response; population overlay skipped.");
+          return;
+        }
 
         // Layer 3: Persist to IndexedDB asynchronously — do not block the map render
         offlineDb.gisCache.put({ key: cacheKey, tenantId, rasterBuffer: arrayBuffer, cachedAt: Date.now() })
@@ -1732,7 +1808,7 @@ function GeoTIFFOverlay({ url, opacity = 0.65, onRasterLoaded, cacheScope, autoF
         errMsg.includes("not found in resources") ||
         errMsg.includes("GeoTIFF population file")
       ) {
-        console.info("[GeoTIFF] No raster available for this tenant — population overlay skipped.");
+        console.info("[GeoTIFF] No raster available for this tenant - population overlay skipped.");
         return;
       }
       console.error("[GeoTIFF] Layer load failed:", { url, cacheScope, tenantId, error: errMsg });
@@ -2499,6 +2575,19 @@ export function MapView({
     queryKey: ["/api/me/tenant"],
   });
 
+  // Country boundary GeoJSON is loaded early because unserved places are clipped to the active country's polygons.
+  const { data: boundaryList } = useQuery<Array<{ id: string; adminLevel: number; levelName: string; isActive: boolean }>>({
+    queryKey: ["/api/boundaries", tenantInfo?.id],
+    queryFn: async () => {
+      const res = await fetch("/api/boundaries", { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to fetch boundaries");
+      return res.json();
+    },
+    enabled: !!tenantInfo?.id,
+  });
+
+  const [boundaryGeoJSONs, setBoundaryGeoJSONs] = useState<Record<string, any>>({});
+
   // Reset all geographic filters on tenant/country switch to prevent cross-tenant ID bleed
   /* Original Reset Effect (without resetting map selected raster):
   useEffect(() => {
@@ -3237,7 +3326,31 @@ export function MapView({
 
   const filteredUnservedPlaces = useMemo(() => {
     if (mode === "surveillance") return [];
+
+    const countryBoundaryGeoJSONs = (() => {
+      const list = boundaryList || [];
+      const activeLevelOne = list
+        .filter((b: any) => b.isActive !== false && Number(b.adminLevel) === 1)
+        .map((b: any) => boundaryGeoJSONs?.[b.id])
+        .filter((geojson: any) => geojson);
+
+      if (activeLevelOne.length > 0) return activeLevelOne;
+
+      return list
+        .filter((b: any) => b.isActive !== false)
+        .map((b: any) => boundaryGeoJSONs?.[b.id])
+        .filter((geojson: any) => geojson);
+    })();
+
     return unservedPlaces.filter((p: any) => {
+      if (p.latitude == null || p.longitude == null) return false;
+
+      const lat = Number(p.latitude);
+      const lng = Number(p.longitude);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return false;
+      if (countryBoundaryGeoJSONs.length === 0) return false;
+      if (!isPointInAnyGeoJSONBoundary(lat, lng, countryBoundaryGeoJSONs)) return false;
+
       if (selectedProvinceId !== "all") {
         if (districtLookup.size === 0) return true;
         const dist = districtLookup.get(Number(p.districtId));
@@ -3253,7 +3366,7 @@ export function MapView({
       if (villageCategory === "standard" && p.isHardToReach) return false;
       return true;
     });
-  }, [unservedPlaces, selectedProvinceId, selectedDistrictId, searchQuery, villageCategory, districtLookup, mode]);
+  }, [unservedPlaces, selectedProvinceId, selectedDistrictId, searchQuery, villageCategory, districtLookup, mode, boundaryList, boundaryGeoJSONs]);
 
   // Original Code commented out to preserve backward compatibility:
   /*
@@ -3880,19 +3993,7 @@ export function MapView({
 
   // ─── Queries for boundary and catchment data ──────────────────────────
 
-  // Updated Code: Always fetch boundaries (not gated on toggle) so the data is instantly ready when any boundary
-  // overlay is enabled. The query still requires an authenticated tenant session.
-  const { data: boundaryList } = useQuery<Array<{ id: string; adminLevel: number; levelName: string; isActive: boolean }>>({
-    queryKey: ["/api/boundaries", tenantInfo?.id],
-    queryFn: async () => {
-      const res = await fetch("/api/boundaries", { credentials: "include" });
-      if (!res.ok) throw new Error("Failed to fetch boundaries");
-      return res.json();
-    },
-    enabled: !!tenantInfo?.id,
-  });
-
-  const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
+const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
     queryKey: ["/api/catchments", tenantInfo?.id],
     queryFn: async () => {
       const res = await fetch("/api/catchments", { credentials: "include" });
@@ -3903,9 +4004,7 @@ export function MapView({
   });
 
   // Fetch full GeoJSON for each active boundary
-  const [boundaryGeoJSONs, setBoundaryGeoJSONs] = useState<Record<string, any>>({});
-
-  // Population choropleth source toggle
+// Population choropleth source toggle
   const [popChoroplethSource, setPopChoroplethSource] = useState<"nso" | "hmis">("nso");
   const { data: choroplethData = [] } = useQuery<Array<{ districtId: number; population: number }>>(
     {
@@ -6233,15 +6332,15 @@ export function MapView({
                               <div class="grid grid-cols-3 gap-1 text-center font-mono text-[10px]">
                                 <div class="bg-muted p-1 rounded">
                                   <span class="text-[8px] text-muted-foreground block">1km</span>
-                                  <strong class="text-xs text-foreground">${ctx.pop1k.toLocaleString()}</strong>
+                                  <strong class="text-xs text-foreground pop-1k-val">${ctx.pop1k.toLocaleString()}</strong>
                                 </div>
                                 <div class="bg-muted p-1 rounded">
                                   <span class="text-[8px] text-muted-foreground block">2km</span>
-                                  <strong class="text-xs text-foreground">${ctx.pop2k.toLocaleString()}</strong>
+                                  <strong class="text-xs text-foreground pop-2k-val">${ctx.pop2k.toLocaleString()}</strong>
                                 </div>
                                 <div class="bg-muted p-1 rounded">
                                   <span class="text-[8px] text-muted-foreground block">3km</span>
-                                  <strong class="text-xs text-foreground">${ctx.pop3k.toLocaleString()}</strong>
+                                  <strong class="text-xs text-foreground pop-3k-val">${ctx.pop3k.toLocaleString()}</strong>
                                 </div>
                               </div>
                             </div>
@@ -6284,6 +6383,24 @@ export function MapView({
                         `;
 
                         layer.setPopupContent(container);
+
+                        // Asynchronous Fallback for radial population in boundary popup
+                        if (density === 0) {
+                          Promise.all([
+                            fetch(`/api/population/worldpop-point?lat=${lat}&lng=${lng}&radiusKm=1`).then(r => r.json()).catch(() => ({ gridPop: 0 })),
+                            fetch(`/api/population/worldpop-point?lat=${lat}&lng=${lng}&radiusKm=2`).then(r => r.json()).catch(() => ({ gridPop: 0 })),
+                            fetch(`/api/population/worldpop-point?lat=${lat}&lng=${lng}&radiusKm=3`).then(r => r.json()).catch(() => ({ gridPop: 0 }))
+                          ]).then(([r1, r2, r3]) => {
+                            const pop1kEl = container.querySelector(".pop-1k-val");
+                            const pop2kEl = container.querySelector(".pop-2k-val");
+                            const pop3kEl = container.querySelector(".pop-3k-val");
+                            if (pop1kEl) pop1kEl.textContent = (r1.gridPop || 0).toLocaleString();
+                            if (pop2kEl) pop2kEl.textContent = (r2.gridPop || 0).toLocaleString();
+                            if (pop3kEl) pop3kEl.textContent = (r3.gridPop || 0).toLocaleString();
+                          }).catch(err => {
+                            console.error("Async boundary pop fetch failed", err);
+                          });
+                        }
                       },
                       mouseover: (e) => {
                         const l = e.target;
@@ -8485,146 +8602,6 @@ export function MapView({
       {!isPrinting && panelVis.tools && (
         <div className="absolute right-4 top-4 z-[1000] flex gap-2 items-center flex-wrap" ref={disableLeafletPropagation}>
           <BasemapSwitcher basemap={basemap} onChange={setBasemap} className="relative top-auto right-auto" />
-          {mode !== "surveillance" && rasterListData?.success && rasterListData?.files && (
-            <Select
-              value={selectedRasterFile || "default"}
-              onValueChange={(val) => {
-                if (val === "default") {
-                  setSelectedRasterFile("");
-                  localStorage.removeItem("vaxplan_selected_raster");
-                } else {
-                  setSelectedRasterFile(val);
-                  localStorage.setItem("vaxplan_selected_raster", val);
-                  // Locate target coordinate profile and adjust active Leaflet map center
-                  const activeRaster = rasterListData.files.find(f => f.fileName === val);
-                  if (activeRaster) {
-                    if (countryCenters[activeRaster.country] && mapRef.current) {
-                      const profile = countryCenters[activeRaster.country];
-                      mapRef.current.setView(profile.center, profile.zoom);
-                    }
-                    
-                    // Automatically trigger tenant switch to align the active facilities and planning context
-                    const countryMap: Record<string, string> = {
-                      "Zambia": "ZMB",
-                      "South Sudan": "SSD",
-                      "Papua New Guinea": "PNG"
-                    };
-                    const targetCode = countryMap[activeRaster.country];
-                    if (targetCode && tenantInfo && tenantInfo.code !== targetCode) {
-                      const matchingTenant = publicTenants.find((t: any) => t.code === targetCode);
-                      if (matchingTenant) {
-                        switchTenantMutation.mutate(matchingTenant.id);
-                      }
-                    }
-                  }
-                }
-              }}
-            >
-              <SelectTrigger className="h-8 text-xs bg-background/95 backdrop-blur border border-border shadow-md w-48 font-semibold">
-                <Globe className="h-3.5 w-3.5 mr-1.5 text-primary opacity-80" />
-                <SelectValue placeholder="Gridded Population..." />
-              </SelectTrigger>
-              <SelectContent className="bg-background/95 backdrop-blur-md">
-                <SelectItem value="default" className="text-xs font-semibold">
-                  Default Population Grid
-                </SelectItem>
-                {rasterListData.files.map((file) => (
-                  <SelectItem key={file.fileName} value={file.fileName} className="text-xs font-semibold">
-                    {file.country} ({file.resolution})
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          )}
-
-          {mode !== "surveillance" && (
-          <Button
-            size="sm"
-            variant={isMeasuring ? "default" : "secondary"}
-            onClick={() => {
-              setIsMeasuring(!isMeasuring);
-              if (!isMeasuring) {
-                setIsDrawingCatchment(false);
-                setDrawPoints([]);
-              } else {
-                setMeasurementPoints([]);
-              }
-            }}
-            data-testid="button-measure"
-            className="shadow-md"
-          >
-            <Ruler className="h-4 w-4 mr-1" />
-            {isMeasuring ? "Measuring..." : "Measure"}
-          </Button>
-          )}
-
-          {mode !== "surveillance" && (
-          <Button
-            size="sm"
-            variant={isDrawingCatchment ? "default" : "secondary"}
-            onClick={() => {
-              setIsDrawingCatchment(!isDrawingCatchment);
-              if (!isDrawingCatchment) {
-                setDrawPoints([]);
-              } else {
-                setIsMeasuring(false);
-                setMeasurementPoints([]);
-              }
-            }}
-            data-testid="button-draw-catchment"
-            className={`shadow-md ${
-              isDrawingCatchment
-                ? "bg-emerald-600 hover:bg-emerald-700 text-white"
-                : "bg-background text-foreground hover:bg-muted"
-            }`}
-          >
-            <PenLine className="h-4 w-4 mr-1" />
-            {isDrawingCatchment ? "Drawing..." : "Draw Catchment"}
-          </Button>
-          )}
-
-          {mode !== "surveillance" && (
-          <Button
-            size="sm"
-            variant={isDrawingSessionPolygon ? "default" : "secondary"}
-            onClick={() => {
-              setIsDrawingSessionPolygon(!isDrawingSessionPolygon);
-              if (!isDrawingSessionPolygon) {
-                setSessionPolygonPoints([]);
-              } else {
-                setIsMeasuring(false);
-                setIsDrawingCatchment(false);
-                setDrawPoints([]);
-                setMeasurementPoints([]);
-                toast({
-                  title: "Drawing Mode Active",
-                  description: "Click multiple points on the map to plot your geofence. Click 'Save Geofence' when done.",
-                  variant: "default",
-                });
-              }
-            }}
-            className={`shadow-md ${
-              isDrawingSessionPolygon
-                ? "bg-amber-600 hover:bg-amber-700 text-white"
-                : "bg-background text-foreground hover:bg-muted"
-            }`}
-          >
-            <PenLine className="h-4 w-4 mr-1" />
-            {isDrawingSessionPolygon ? "Drawing Path..." : "Draw Geofence"}
-          </Button>
-          )}
-
-          {showFacilityList && (
-            <Button
-              size="sm"
-              variant={panelVis.facilities ? "default" : "secondary"}
-              onClick={() => togglePanel("facilities")}
-              className="shadow-md"
-            >
-              <Building2 className="h-4 w-4 mr-1" />
-              {panelVis.facilities ? "Hide Facilities" : "Facilities"}
-            </Button>
-          )}
 
           <Button
             size="sm"
@@ -10570,7 +10547,7 @@ export function MapView({
           </DialogFooter>
         </DialogContent>
       </Dialog>
-      <LocationIntelligenceDrawer point={intelligencePoint} onClose={() => setIntelligencePoint(null)} />
+      <LocationIntelligenceDrawer point={intelligencePoint} context={mapClickDetails} onClose={() => setIntelligencePoint(null)} />
     </div>
   );
 }

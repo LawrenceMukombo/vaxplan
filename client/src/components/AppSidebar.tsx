@@ -1,4 +1,4 @@
-import { useLocation, Link } from "wouter";
+﻿import { useLocation, Link } from "wouter";
 import { useState } from "react";
 import { versionLabel } from "@/lib/version";
 import {
@@ -56,13 +56,10 @@ import { Badge } from "@/components/ui/badge";
 import { useQuery } from "@tanstack/react-query";
 import type { User, ApprovalRequest } from "@shared/schema";
 import { DEFAULT_MODULES } from "@/lib/modules";
-
 interface TenantSummary { id: string; name: string; code: string }
-
 interface AppSidebarProps {
   user: User;
 }
-
 const mainNavItems = [
   { title: "Dashboard", path: "/", icon: LayoutDashboard },
   { title: "Map View", path: "/map", icon: Map },
@@ -71,14 +68,14 @@ const mainNavItems = [
   { title: "Recommendations", path: "/vgie/recommendations", icon: ClipboardList },
   { title: "Research Module", path: "/research", icon: BookOpen },
   { title: "Alerts", path: "/vgie/alerts", icon: Bell },
+  { title: "Notifications", path: "/notifications", icon: Bell },
   { title: "Population Hub", path: "/population", icon: Users },
   { title: "Client Logbook", path: "/clients", icon: ClipboardList },
   { title: "Defaulter List", path: "/clients/defaulters", icon: AlertTriangle },
   { title: "Dropout Rates", path: "/indicators/dropout", icon: TrendingUp },
   { title: "Missed Communities", path: "/missed-communities", icon: Target },
 ];
-
-// Planning sidebar — slimmed down. Budget / Vaccine Calculator / Social
+// Planning sidebar - slimmed down. Budget / Vaccine Calculator / Social
 // Mobilization used to be standalone pages but are now Steps 9, 6, and 7 of
 // the Microplan Wizard, so their sidebar entries were removed (the routes
 // now redirect to the wizard). "Microplan Builder" was a duplicate entry
@@ -86,6 +83,7 @@ const mainNavItems = [
 /* Commented out old planningNavItems definition to restructure SIA Campaigns collapsible section
 const planningNavItems = [
   { title: "Routine Microplan", path: "/microplans/routine", icon: Calendar },
+  { title: "Plan Health", path: "/plan-health", icon: ClipboardCheck },
   { title: "SIA Campaigns", path: "/microplans/campaigns", icon: Sparkles },
   { title: "Supervision Tools", path: "/supervision-tools", icon: ClipboardCheck },
   { title: "PCE", path: "/pce", icon: Activity },
@@ -94,30 +92,27 @@ const planningNavItems = [
   { title: "Stock Ledger", path: "/stock", icon: Package },
   { title: "Hard-to-Reach", path: "/htr", icon: AlertTriangle },
   { title: "HIS Integrations", path: "/his-integrations", icon: Share2, adminOnly: true },
+  { title: "Field Readiness", path: "/field-readiness", icon: Radio },
 ];
 */
-
 const planningNavItems = [
   { title: "Routine Microplan", path: "/microplans/routine", icon: Calendar },
+  { title: "Plan Health", path: "/plan-health", icon: ClipboardCheck },
   { title: "Sessions", path: "/all-sessions", icon: CalendarDays },
   { title: "Stock Ledger", path: "/stock", icon: Package },
   { title: "Hard-to-Reach", path: "/htr", icon: AlertTriangle },
   { title: "HIS Integrations", path: "/his-integrations", icon: Share2, adminOnly: true },
+  { title: "Field Readiness", path: "/field-readiness", icon: Radio },
 ];
-
 const siaNavItems = [
   { title: "Microplan", path: "/microplans/campaigns", icon: Sparkles },
   { title: "Supervision Tools", path: "/supervision-tools", icon: ClipboardCheck },
   { title: "PCE", path: "/pce", icon: Activity },
   { title: "House-to-House", path: "/house-to-house", icon: Home },
 ];
-
 const workflowNavItems = [
   { title: "Approvals", path: "/approvals", icon: CheckCircle },
 ];
-
-
-
 const adminNavItems = [
   { title: "User Management", path: "/admin/users", icon: Users },
   { title: "Access Requests", path: "/admin/signups", icon: UserPlus },
@@ -129,7 +124,6 @@ const adminNavItems = [
   { title: "Catalogue", path: "/admin/catalogue", icon: Package },
   { title: "Wiki / Docs", path: "/admin/wiki", icon: BookOpen, wikiAdminOnly: true },
 ];
-
 const systemNavItems = [
   { title: "Surveillance", path: "/surveillance", icon: ShieldCheck },
   { title: "Supervision", path: "/supervision", icon: ClipboardCheck },
@@ -140,7 +134,6 @@ const systemNavItems = [
   { title: "Settings", path: "/settings", icon: Settings },
   { title: "Help", path: "/help", icon: HelpCircle },
 ];
-
 /**
  * A SidebarGroup whose label acts as a chevron toggle to collapse the
  * section vertically. When the whole sidebar is in icon-collapse mode the
@@ -168,7 +161,7 @@ function CollapsibleSection({
       const raw = window.localStorage.getItem(`vaxplan.sidebar.section.${storageKey}`);
       return raw === null ? true : raw === "1";
     } catch {
-      // Private mode / restricted storage — default to open.
+      // Private mode / restricted storage - default to open.
       return true;
     }
   });
@@ -222,10 +215,8 @@ function CollapsibleSection({
     </SidebarGroup>
   );
 }
-
 export function AppSidebar({ user }: AppSidebarProps) {
   const [location] = useLocation();
-
   const canAccessApprovals = ["district_manager", "provincial_coordinator", "national_admin"].includes(user.role || "");
   const isNationalAdmin = user.role === "national_admin";
   const isPlatformAdmin = (user as any).isPlatformAdmin === true;
@@ -241,7 +232,6 @@ export function AppSidebar({ user }: AppSidebarProps) {
     ...DEFAULT_MODULES,
     ...((tenant as any)?.settings?.modules || {})
   };
-
   const visibleMainNavItems = mainNavItems.filter((item) => {
     if (item.path === "/") return true;
     /* Commented out duplicate flow check:
@@ -257,7 +247,6 @@ export function AppSidebar({ user }: AppSidebarProps) {
     if (item.path === "/missed-communities") return modules.missedCommunities !== false;
     return true;
   });
-
   const visiblePlanningNavItems = planningNavItems
     .filter((item) => !(item as any).adminOnly || canAccessHis)
     .filter((item) => {
@@ -266,9 +255,10 @@ export function AppSidebar({ user }: AppSidebarProps) {
       if (item.path === "/stock") return modules.stock !== false;
       if (item.path === "/htr") return modules.htr !== false;
       if (item.path === "/his-integrations") return modules.interop !== false;
+      if (item.path === "/field-readiness") return true;
+      if (item.path === "/plan-health") return modules.routine !== false;
       return true;
     });
-
   const visibleSiaNavItems = siaNavItems.filter((item) => {
     if (item.path === "/microplans/campaigns") return modules.campaigns !== false;
     if (item.path === "/supervision-tools" || item.path === "/pce" || item.path === "/house-to-house") {
@@ -276,7 +266,6 @@ export function AppSidebar({ user }: AppSidebarProps) {
     }
     return true;
   });
-
   const visibleSystemNavItems = systemNavItems
     .filter((item) => !(item as any).reconcileOnly || canReconcile)
     .filter((item) => {
@@ -284,7 +273,6 @@ export function AppSidebar({ user }: AppSidebarProps) {
       if (item.path === "/supervision") return modules.supervision !== false;
       return true;
     });
-
   // Real pending-approvals count for the Workflow section badge. Only
   // fetched for users who can actually see the Approvals page; falls back
   // to undefined (no badge) for everyone else.
@@ -296,7 +284,6 @@ export function AppSidebar({ user }: AppSidebarProps) {
   const pendingApprovalsCount = approvalRequests
     ? approvalRequests.filter((r) => r.status === "pending").length
     : undefined;
-
   return (
     <Sidebar collapsible="icon">
       <SidebarHeader className="p-4">
@@ -312,7 +299,6 @@ export function AppSidebar({ user }: AppSidebarProps) {
           </div>
         </div>
       </SidebarHeader>
-
       <SidebarContent>
         {visibleMainNavItems.length > 0 && (
           <CollapsibleSection label="Main" storageKey="main" colorClass="text-sky-600 dark:text-sky-400" bgClass="bg-sky-500/10 hover:bg-sky-500/15 dark:bg-sky-400/10 dark:hover:bg-sky-400/15">
@@ -334,7 +320,6 @@ export function AppSidebar({ user }: AppSidebarProps) {
             </SidebarMenu>
           </CollapsibleSection>
         )}
-
         {visiblePlanningNavItems.length > 0 && (
           <CollapsibleSection label="Planning" storageKey="planning" colorClass="text-emerald-600 dark:text-emerald-400" bgClass="bg-emerald-500/10 hover:bg-emerald-500/15 dark:bg-emerald-400/10 dark:hover:bg-emerald-400/15">
             <SidebarMenu>
@@ -355,7 +340,6 @@ export function AppSidebar({ user }: AppSidebarProps) {
             </SidebarMenu>
           </CollapsibleSection>
         )}
-
         {visibleSiaNavItems.length > 0 && (
           <CollapsibleSection
             label="SIA Campaigns"
@@ -381,10 +365,7 @@ export function AppSidebar({ user }: AppSidebarProps) {
             </SidebarMenu>
           </CollapsibleSection>
         )}
-
-
-
-        {/* Analytics — visible to all authenticated roles (RBAC scoping happens server-side) */}
+        {/* Analytics - visible to all authenticated roles (RBAC scoping happens server-side) */}
         <CollapsibleSection
           label="Analytics"
           storageKey="analytics"
@@ -418,7 +399,6 @@ export function AppSidebar({ user }: AppSidebarProps) {
             </SidebarMenuItem>
           </SidebarMenu>
         </CollapsibleSection>
-
         {canAccessApprovals && (
           <CollapsibleSection
             label="Workflow"
@@ -450,13 +430,12 @@ export function AppSidebar({ user }: AppSidebarProps) {
             </SidebarMenu>
           </CollapsibleSection>
         )}
-
         {canAccessAdmin && (
           <CollapsibleSection label="Administration" storageKey="admin" colorClass="text-violet-600 dark:text-violet-400" bgClass="bg-violet-500/10 hover:bg-violet-500/15 dark:bg-violet-400/10 dark:hover:bg-violet-400/15">
             <SidebarMenu>
               {adminNavItems
                 .filter((item) => {
-                  // Country Onboarding is reserved for platform Super Admins —
+                  // Country Onboarding is reserved for platform Super Admins -
                   // country-specific admins can never create new countries.
                   if ((item as any).superAdminOnly) {
                     return isPlatformAdmin;
@@ -496,11 +475,10 @@ export function AppSidebar({ user }: AppSidebarProps) {
             </SidebarMenu>
           </CollapsibleSection>
         )}
-
         {(visibleSystemNavItems.length > 0 || (canAccessFieldTeams && modules.fieldTeams !== false)) && (
           <CollapsibleSection label="System" storageKey="system" colorClass="text-rose-600 dark:text-rose-400" bgClass="bg-rose-500/10 hover:bg-rose-500/15 dark:bg-rose-400/10 dark:hover:bg-rose-400/15">
             <SidebarMenu>
-              {/* Field Teams — only visible to district_manager and above */}
+              {/* Field Teams - only visible to district_manager and above */}
               {canAccessFieldTeams && modules.fieldTeams !== false && (
                 <SidebarMenuItem>
                   <SidebarMenuButton
@@ -533,7 +511,6 @@ export function AppSidebar({ user }: AppSidebarProps) {
           </CollapsibleSection>
         )}
       </SidebarContent>
-
       <SidebarFooter className="p-4">
         <div className="group-data-[collapsible=icon]:hidden space-y-1.5">
           <div className="text-xs text-muted-foreground text-center">

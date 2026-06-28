@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { CalendarDays, CheckCircle, Target, Activity } from "lucide-react";
 import ReportTable, { defaultNumFormat } from "./ReportTable";
 import type { ReportFilters, ReportResponse } from "./types";
-import { buildReportQueryString } from "./types";
+import { buildReportQueryString, sanitizeReportRows } from "./types";
 import {
   BarChart, Bar, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from "recharts";
@@ -24,10 +24,11 @@ export default function SessionReport({ filters, setFilter }: Props) {
   const { data, isLoading } = useQuery<ReportResponse>({
     queryKey: ["/api/reports/sessions", qs],
     queryFn: () => fetch(`/api/reports/sessions${qs}`, { credentials: "include" }).then((r) => r.json()),
-    staleTime: 2 * 60 * 1000,
+    staleTime: 0,
+    refetchOnMount: "always",
   });
 
-  const rows = data?.data ?? [];
+  const rows = sanitizeReportRows(data?.data ?? [], data?.meta?.filters ?? filters);
   const provinceRows = rows.filter((r) => r.level === "province");
 
   // KPI totals from province level (or facility if only one facility)
@@ -231,3 +232,4 @@ export default function SessionReport({ filters, setFilter }: Props) {
     </div>
   );
 }
+

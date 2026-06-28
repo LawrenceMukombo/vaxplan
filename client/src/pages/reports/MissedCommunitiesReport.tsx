@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Target, XCircle, CheckCircle2, CalendarX } from "lucide-react";
 import ReportTable, { defaultNumFormat } from "./ReportTable";
 import type { ReportFilters, ReportResponse } from "./types";
-import { buildReportQueryString } from "./types";
+import { buildReportQueryString, sanitizeReportRows } from "./types";
 import {
   BarChart, Bar, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from "recharts";
@@ -23,10 +23,11 @@ export default function MissedCommunitiesReport({ filters, setFilter }: Props) {
   const { data, isLoading } = useQuery<ReportResponse>({
     queryKey: ["/api/reports/missed-communities", qs],
     queryFn: () => fetch(`/api/reports/missed-communities${qs}`, { credentials: "include" }).then((r) => r.json()),
-    staleTime: 2 * 60 * 1000,
+    staleTime: 0,
+    refetchOnMount: "always",
   });
 
-  const rows = data?.data ?? [];
+  const rows = sanitizeReportRows(data?.data ?? [], data?.meta?.filters ?? filters);
   const topRows = rows.filter((r) => r.level === "province");
   const kpi = (topRows.length ? topRows : rows).reduce(
     (acc, r) => ({
@@ -191,3 +192,4 @@ export default function MissedCommunitiesReport({ filters, setFilter }: Props) {
     </div>
   );
 }
+

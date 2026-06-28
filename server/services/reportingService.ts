@@ -22,8 +22,45 @@ export interface ReportFilters {
   provinceId?: number;
   districtId?: number;
   facilityId?: number;
+  provinceIds?: number[];
+  districtIds?: number[];
+  facilityIds?: number[];
   year?: number;
   quarter?: number;
+}
+
+function intList(values?: number[]): number[] {
+  return Array.from(new Set((values || []).map(Number).filter((v) => Number.isInteger(v) && v > 0)));
+}
+
+function idInClause(column: string, values?: number[]) {
+  const ids = intList(values);
+  if (ids.length === 0) return sql``;
+  return sql.raw(` AND ${column} IN (${ids.join(",")})`);
+}
+
+function facilityScopeClause(filters: ReportFilters) {
+  return filters.facilityIds?.length
+    ? idInClause("f.id", filters.facilityIds)
+    : filters.facilityId
+      ? sql` AND f.id = ${filters.facilityId}`
+      : sql``;
+}
+
+function districtScopeClause(filters: ReportFilters) {
+  return filters.districtIds?.length
+    ? idInClause("d.id", filters.districtIds)
+    : filters.districtId
+      ? sql` AND d.id = ${filters.districtId}`
+      : sql``;
+}
+
+function provinceScopeClause(filters: ReportFilters) {
+  return filters.provinceIds?.length
+    ? idInClause("p.id", filters.provinceIds)
+    : filters.provinceId
+      ? sql` AND p.id = ${filters.provinceId}`
+      : sql``;
 }
 
 // ---------------------------------------------------------------------------
@@ -36,19 +73,6 @@ export interface HierarchyRow {
   parentId?: number | string;
   parent_id?: number | string | null;
   [key: string]: unknown; // report-specific metric columns
-}
-
-// ---------------------------------------------------------------------------
-// Deterministic hash helper for unseeded facility fallbacks
-// ---------------------------------------------------------------------------
-function getFacilityHash(facilityId: number, salt: string): number {
-  let hash = 0;
-  const str = `${facilityId}-${salt}`;
-  for (let i = 0; i < str.length; i++) {
-    hash = (hash << 5) - hash + str.charCodeAt(i);
-    hash |= 0; // Convert to 32bit integer
-  }
-  return Math.abs(hash);
 }
 
 // ---------------------------------------------------------------------------
@@ -217,9 +241,9 @@ function rollupHierarchy(
 export async function getSessionReport(filters: ReportFilters): Promise<HierarchyRow[]> {
   const yearClause    = filters.year    ? sql` AND sp.year = ${filters.year}`    : sql``;
   const quarterClause = filters.quarter ? sql` AND sp.quarter = ${filters.quarter}` : sql``;
-  const facilityFilter = filters.facilityId ? sql` AND f.id = ${filters.facilityId}` : sql``;
-  const districtFilter = filters.districtId ? sql` AND d.id = ${filters.districtId}` : sql``;
-  const provinceFilter = filters.provinceId ? sql` AND p.id = ${filters.provinceId}` : sql``;
+  const facilityFilter = facilityScopeClause(filters);
+  const districtFilter = districtScopeClause(filters);
+  const provinceFilter = provinceScopeClause(filters);
 
 
   // Query all facilities in scope, left joined with session plans
@@ -250,21 +274,19 @@ export async function getSessionReport(filters: ReportFilters): Promise<Hierarch
     ORDER BY f.name
   `);
 
-  // Map database rows and generate deterministic fallback for unseeded facilities
+  // Map database rows without synthetic fallback metrics.
   const facilities = (dbRows.rows as any[]).map((row) => {
     const fId = Number(row.id);
-    const hasRealData = Number(row.db_total_sessions ?? 0) > 0;
-
-    const total_sessions = hasRealData ? Number(row.db_total_sessions) : (8 + (getFacilityHash(fId, "tot-sess") % 17));
-    const static_sessions = hasRealData ? Number(row.static_sessions) : Math.round(total_sessions * 0.2);
-    const mobile_sessions = hasRealData ? Number(row.mobile_sessions) : Math.round(total_sessions * 0.3);
-    const outreach_sessions = hasRealData ? Number(row.outreach_sessions) : (total_sessions - static_sessions - mobile_sessions);
-    const planned = total_sessions;
-    const completed = hasRealData ? Number(row.completed) : Math.round(total_sessions * (0.8 + (getFacilityHash(fId, "comp-sess") % 21) / 100));
-    const achieved = hasRealData ? Number(row.achieved) : completed;
-    const approved = total_sessions;
-    const target_population = hasRealData ? Number(row.target_population) : (100 + (getFacilityHash(fId, "target-pop") % 901));
-    const vaccinated_totals = hasRealData ? Number(row.vaccinated_totals) : Math.round(target_population * (0.75 + (getFacilityHash(fId, "vac-sess") % 24) / 100));
+    const total_sessions = Number(row.db_total_sessions ?? 0);
+    const static_sessions = Number(row.static_sessions ?? 0);
+    const mobile_sessions = Number(row.mobile_sessions ?? 0);
+    const outreach_sessions = Number(row.outreach_sessions ?? 0);
+    const planned = Number(row.planned ?? 0);
+    const completed = Number(row.completed ?? 0);
+    const achieved = Number(row.achieved ?? 0);
+    const approved = Number(row.approved ?? 0);
+    const target_population = Number(row.target_population ?? 0);
+    const vaccinated_totals = Number(row.vaccinated_totals ?? 0);
 
     return {
       level: "facility",
@@ -312,9 +334,9 @@ export async function getSessionReport(filters: ReportFilters): Promise<Hierarch
 export async function getMicroplanReport(filters: ReportFilters): Promise<HierarchyRow[]> {
   const yearClause    = filters.year    ? sql` AND m.year = ${filters.year}`    : sql``;
   const quarterClause = filters.quarter ? sql` AND m.quarter = ${filters.quarter}` : sql``;
-  const facilityFilter = filters.facilityId ? sql` AND f.id = ${filters.facilityId}` : sql``;
-  const districtFilter = filters.districtId ? sql` AND d.id = ${filters.districtId}` : sql``;
-  const provinceFilter = filters.provinceId ? sql` AND p.id = ${filters.provinceId}` : sql``;
+  const facilityFilter = facilityScopeClause(filters);
+  const districtFilter = districtScopeClause(filters);
+  const provinceFilter = provinceScopeClause(filters);
 
   const dbRows = await db.execute(sql`
     SELECT
@@ -342,15 +364,13 @@ export async function getMicroplanReport(filters: ReportFilters): Promise<Hierar
 
   const facilities = (dbRows.rows as any[]).map((row) => {
     const fId = Number(row.id);
-    const hasRealData = Number(row.db_total_microplans ?? 0) > 0;
-
-    const total_microplans = hasRealData ? Number(row.db_total_microplans) : (1 + (getFacilityHash(fId, "mp-tot") % 2));
-    const routine = hasRealData ? Number(row.routine) : 1;
-    const campaigns = hasRealData ? Number(row.campaigns) : (total_microplans - routine);
-    const draft = hasRealData ? Number(row.draft) : 0;
-    const pending = hasRealData ? Number(row.pending) : 0;
-    const approved = hasRealData ? Number(row.approved) : total_microplans;
-    const locked = hasRealData ? Number(row.locked) : approved;
+    const total_microplans = Number(row.db_total_microplans ?? 0);
+    const routine = Number(row.routine ?? 0);
+    const campaigns = Number(row.campaigns ?? 0);
+    const draft = Number(row.draft ?? 0);
+    const pending = Number(row.pending ?? 0);
+    const approved = Number(row.approved ?? 0);
+    const locked = Number(row.locked ?? 0);
 
     return {
       level: "facility",
@@ -382,9 +402,9 @@ export async function getMicroplanReport(filters: ReportFilters): Promise<Hierar
 // R3 — Zero-Dose Communities
 // ---------------------------------------------------------------------------
 export async function getZeroDoseReport(filters: ReportFilters): Promise<HierarchyRow[]> {
-  const facilityFilter = filters.facilityId ? sql` AND f.id = ${filters.facilityId}` : sql``;
-  const districtFilter = filters.districtId ? sql` AND d.id = ${filters.districtId}` : sql``;
-  const provinceFilter = filters.provinceId ? sql` AND p.id = ${filters.provinceId}` : sql``;
+  const facilityFilter = facilityScopeClause(filters);
+  const districtFilter = districtScopeClause(filters);
+  const provinceFilter = provinceScopeClause(filters);
 
   const dbRows = await db.execute(sql`
     SELECT
@@ -422,27 +442,11 @@ export async function getZeroDoseReport(filters: ReportFilters): Promise<Hierarc
   const facilities = (dbRows.rows as any[]).map((row) => {
     const fId = Number(row.id);
     const dbTotalVillages = Number(row.db_total_villages ?? 0);
-    const total_villages = dbTotalVillages > 0 ? dbTotalVillages : (3 + (getFacilityHash(fId, "vill-tot") % 8));
-
-    const isUnseeded = dbTotalVillages > 0 && Number(row.db_zero_dose_villages) === dbTotalVillages;
-    
-    let zero_dose_villages = Number(row.db_zero_dose_villages ?? 0);
-    let zero_dose_htr = Number(row.db_zero_dose_htr ?? 0);
-    
-    if (dbTotalVillages === 0 || isUnseeded) {
-      const rate = 0.05 + (getFacilityHash(fId, "zd-rate") % 21) / 100;
-      zero_dose_villages = Math.max(1, Math.round(total_villages * rate));
-      const htrRate = 0.2 + (getFacilityHash(fId, "zd-htr-rate") % 31) / 100;
-      zero_dose_htr = Math.min(zero_dose_villages, Math.round(zero_dose_villages * htrRate));
-    }
-
-    const under1_at_risk = Number(row.under1_at_risk ?? 0) > 0 
-      ? Number(row.under1_at_risk) 
-      : zero_dose_villages * (10 + (getFacilityHash(fId, "u1-risk") % 41));
-      
-    const under5_at_risk = Number(row.under5_at_risk ?? 0) > 0 
-      ? Number(row.under5_at_risk) 
-      : under1_at_risk * 4;
+    const total_villages = dbTotalVillages;
+    const zero_dose_villages = Number(row.db_zero_dose_villages ?? 0);
+    const zero_dose_htr = Number(row.db_zero_dose_htr ?? 0);
+    const under1_at_risk = Number(row.under1_at_risk ?? 0);
+    const under5_at_risk = Number(row.under5_at_risk ?? 0);
 
     return {
       level: "facility",
@@ -474,9 +478,9 @@ export async function getZeroDoseReport(filters: ReportFilters): Promise<Hierarc
 export async function getMissedCommunitiesReport(filters: ReportFilters): Promise<HierarchyRow[]> {
   const yearClause    = filters.year    ? sql` AND sp.year = ${filters.year}`    : sql``;
   const quarterClause = filters.quarter ? sql` AND sp.quarter = ${filters.quarter}` : sql``;
-  const facilityFilter = filters.facilityId ? sql` AND f.id = ${filters.facilityId}` : sql``;
-  const districtFilter = filters.districtId ? sql` AND d.id = ${filters.districtId}` : sql``;
-  const provinceFilter = filters.provinceId ? sql` AND p.id = ${filters.provinceId}` : sql``;
+  const facilityFilter = facilityScopeClause(filters);
+  const districtFilter = districtScopeClause(filters);
+  const provinceFilter = provinceScopeClause(filters);
 
 
   const dbRows = await db.execute(sql`
@@ -503,12 +507,10 @@ export async function getMissedCommunitiesReport(filters: ReportFilters): Promis
 
   const facilities = (dbRows.rows as any[]).map((row) => {
     const fId = Number(row.id);
-    const hasRealData = Number(row.db_villages_planned ?? 0) > 0;
-
-    const villages_planned = hasRealData ? Number(row.db_villages_planned) : (3 + (getFacilityHash(fId, "plan-vill") % 8));
-    const sessions_not_achieved = hasRealData ? Number(row.db_sessions_not_achieved) : (getFacilityHash(fId, "fail-sess") % 3);
-    const missed_villages = hasRealData ? Number(row.db_missed_villages) : Math.round(villages_planned * (0.05 + (getFacilityHash(fId, "miss-vill") % 11) / 100));
-    const reached_villages = villages_planned - missed_villages;
+    const villages_planned = Number(row.db_villages_planned ?? 0);
+    const sessions_not_achieved = Number(row.db_sessions_not_achieved ?? 0);
+    const missed_villages = Number(row.db_missed_villages ?? 0);
+    const reached_villages = Number(row.db_reached_villages ?? 0);
 
     return {
       level: "facility",
@@ -539,9 +541,9 @@ export async function getMissedCommunitiesReport(filters: ReportFilters): Promis
 export async function getCoverageReport(filters: ReportFilters): Promise<HierarchyRow[]> {
   const yearClause    = filters.year    ? sql` AND sp.year = ${filters.year}`    : sql``;
   const quarterClause = filters.quarter ? sql` AND sp.quarter = ${filters.quarter}` : sql``;
-  const facilityFilter = filters.facilityId ? sql` AND f.id = ${filters.facilityId}` : sql``;
-  const districtFilter = filters.districtId ? sql` AND d.id = ${filters.districtId}` : sql``;
-  const provinceFilter = filters.provinceId ? sql` AND p.id = ${filters.provinceId}` : sql``;
+  const facilityFilter = facilityScopeClause(filters);
+  const districtFilter = districtScopeClause(filters);
+  const provinceFilter = provinceScopeClause(filters);
 
 
   const dbRows = await db.execute(sql`
@@ -567,12 +569,10 @@ export async function getCoverageReport(filters: ReportFilters): Promise<Hierarc
 
   const facilities = (dbRows.rows as any[]).map((row) => {
     const fId = Number(row.id);
-    const hasRealData = Number(row.db_total_sessions ?? 0) > 0;
-
-    const target_population = hasRealData ? Number(row.db_target_population) : (100 + (getFacilityHash(fId, "target-pop") % 901));
-    const vaccinated_total = hasRealData ? Number(row.db_vaccinated_total) : Math.round(target_population * (0.75 + (getFacilityHash(fId, "vac-sess") % 21) / 100));
-    const total_sessions = hasRealData ? Number(row.db_total_sessions) : (8 + (getFacilityHash(fId, "tot-sess") % 17));
-    const completed_sessions = hasRealData ? Number(row.db_completed_sessions) : Math.round(total_sessions * (0.8 + (getFacilityHash(fId, "comp-sess") % 21) / 100));
+    const target_population = Number(row.db_target_population ?? 0);
+    const vaccinated_total = Number(row.db_vaccinated_total ?? 0);
+    const total_sessions = Number(row.db_total_sessions ?? 0);
+    const completed_sessions = Number(row.db_completed_sessions ?? 0);
     const coverage_pct = target_population > 0 ? Number(((vaccinated_total / target_population) * 100).toFixed(1)) : 0;
 
     return {
@@ -609,9 +609,9 @@ export async function getCoverageReport(filters: ReportFilters): Promise<Hierarc
 // R6 — Hard-to-Reach Status
 // ---------------------------------------------------------------------------
 export async function getHtrReport(filters: ReportFilters): Promise<HierarchyRow[]> {
-  const facilityFilter = filters.facilityId ? sql` AND f.id = ${filters.facilityId}` : sql``;
-  const districtFilter = filters.districtId ? sql` AND d.id = ${filters.districtId}` : sql``;
-  const provinceFilter = filters.provinceId ? sql` AND p.id = ${filters.provinceId}` : sql``;
+  const facilityFilter = facilityScopeClause(filters);
+  const districtFilter = districtScopeClause(filters);
+  const provinceFilter = provinceScopeClause(filters);
 
   const dbRows = await db.execute(sql`
     SELECT
@@ -641,28 +641,14 @@ export async function getHtrReport(filters: ReportFilters): Promise<HierarchyRow
   const facilities = (dbRows.rows as any[]).map((row) => {
     const fId = Number(row.id);
     const dbTotalVillages = Number(row.db_total_villages ?? 0);
-    const total_villages = dbTotalVillages > 0 ? dbTotalVillages : (3 + (getFacilityHash(fId, "vill-tot") % 8));
+    const total_villages = dbTotalVillages;
 
-    const isUnseeded = dbTotalVillages > 0 && Number(row.db_htr_villages) === 0;
-
-    let htr_villages = Number(row.db_htr_villages ?? 0);
-    let critical = Number(row.db_critical ?? 0);
-    let high_priority = Number(row.db_high_priority ?? 0);
-    let medium_priority = Number(row.db_medium_priority ?? 0);
-    let low_priority = Number(row.db_low_priority ?? 0);
-    let avg_htr_score = row.db_avg_htr_score != null ? Number(row.db_avg_htr_score) : 0;
-
-    if (dbTotalVillages === 0 || isUnseeded) {
-      const rate = 0.2 + (getFacilityHash(fId, "htr-rate") % 21) / 100;
-      htr_villages = Math.max(1, Math.round(total_villages * rate));
-      
-      critical = Math.round(htr_villages * 0.1);
-      high_priority = Math.round(htr_villages * 0.2);
-      medium_priority = Math.round(htr_villages * 0.4);
-      low_priority = htr_villages - critical - high_priority - medium_priority;
-      
-      avg_htr_score = 45 + (getFacilityHash(fId, "htr-score") % 41);
-    }
+    const htr_villages = Number(row.db_htr_villages ?? 0);
+    const critical = Number(row.db_critical ?? 0);
+    const high_priority = Number(row.db_high_priority ?? 0);
+    const medium_priority = Number(row.db_medium_priority ?? 0);
+    const low_priority = Number(row.db_low_priority ?? 0);
+    const avg_htr_score = row.db_avg_htr_score != null ? Number(row.db_avg_htr_score) : 0;
 
     return {
       level: "facility",
@@ -697,9 +683,9 @@ export async function getHtrReport(filters: ReportFilters): Promise<HierarchyRow
 export async function getBudgetReport(filters: ReportFilters): Promise<HierarchyRow[]> {
   const yearClause    = filters.year    ? sql` AND bi.year = ${filters.year}`    : sql``;
   const quarterClause = filters.quarter ? sql` AND bi.quarter = ${filters.quarter}` : sql``;
-  const facilityFilter = filters.facilityId ? sql` AND f.id = ${filters.facilityId}` : sql``;
-  const districtFilter = filters.districtId ? sql` AND d.id = ${filters.districtId}` : sql``;
-  const provinceFilter = filters.provinceId ? sql` AND p.id = ${filters.provinceId}` : sql``;
+  const facilityFilter = facilityScopeClause(filters);
+  const districtFilter = districtScopeClause(filters);
+  const provinceFilter = provinceScopeClause(filters);
 
 
   const dbRows = await db.execute(sql`
@@ -729,16 +715,14 @@ export async function getBudgetReport(filters: ReportFilters): Promise<Hierarchy
 
   const facilities = (dbRows.rows as any[]).map((row) => {
     const fId = Number(row.id);
-    const hasRealData = Number(row.db_budget_line_count ?? 0) > 0;
-
-    const total_budget = hasRealData ? Number(row.db_total_budget) : (15000 + (getFacilityHash(fId, "budget-tot") % 65001));
-    const approved_budget = hasRealData ? Number(row.db_approved_budget) : total_budget;
-    const government_funding = hasRealData ? Number(row.db_government_funding) : Math.round(total_budget * 0.3);
-    const gavi_funding = hasRealData ? Number(row.db_gavi_funding) : Math.round(total_budget * 0.5);
-    const unicef_funding = hasRealData ? Number(row.db_unicef_funding) : Math.round(total_budget * 0.12);
-    const who_funding = hasRealData ? Number(row.db_who_funding) : Math.round(total_budget * 0.05);
-    const other_funding = hasRealData ? Number(row.db_other_funding) : (total_budget - government_funding - gavi_funding - unicef_funding - who_funding);
-    const budget_line_count = hasRealData ? Number(row.db_budget_line_count) : (6 + (getFacilityHash(fId, "lines-tot") % 10));
+    const total_budget = Number(row.db_total_budget ?? 0);
+    const approved_budget = Number(row.db_approved_budget ?? 0);
+    const government_funding = Number(row.db_government_funding ?? 0);
+    const gavi_funding = Number(row.db_gavi_funding ?? 0);
+    const unicef_funding = Number(row.db_unicef_funding ?? 0);
+    const who_funding = Number(row.db_who_funding ?? 0);
+    const other_funding = Number(row.db_other_funding ?? 0);
+    const budget_line_count = Number(row.db_budget_line_count ?? 0);
 
     return {
       level: "facility",
@@ -786,9 +770,9 @@ export async function getSupervisionReport(filters: ReportFilters): Promise<Hier
   const quarterClause = filters.quarter
     ? sql` AND CEIL(EXTRACT(MONTH FROM sv.scheduled_date) / 3.0) = ${filters.quarter}`
     : sql``;
-  const facilityFilter = filters.facilityId ? sql` AND f.id = ${filters.facilityId}` : sql``;
-  const districtFilter = filters.districtId ? sql` AND d.id = ${filters.districtId}` : sql``;
-  const provinceFilter = filters.provinceId ? sql` AND p.id = ${filters.provinceId}` : sql``;
+  const facilityFilter = facilityScopeClause(filters);
+  const districtFilter = districtScopeClause(filters);
+  const provinceFilter = provinceScopeClause(filters);
 
 
   const dbRows = await db.execute(sql`
@@ -816,14 +800,12 @@ export async function getSupervisionReport(filters: ReportFilters): Promise<Hier
 
   const facilities = (dbRows.rows as any[]).map((row) => {
     const fId = Number(row.id);
-    const hasRealData = Number(row.db_total_visits ?? 0) > 0;
-
-    const total_visits = hasRealData ? Number(row.db_total_visits) : (2 + (getFacilityHash(fId, "sup-tot") % 4));
-    const conducted = hasRealData ? Number(row.db_conducted) : Math.round(total_visits * (0.75 + (getFacilityHash(fId, "sup-cond") % 26) / 100));
-    const scheduled = hasRealData ? Number(row.db_scheduled) : 0;
-    const missed = total_visits - conducted;
-    const cancelled = hasRealData ? Number(row.db_cancelled) : 0;
-    const avg_score = hasRealData && row.db_avg_score != null ? Number(row.db_avg_score) : (72 + (getFacilityHash(fId, "sup-score") % 21));
+    const total_visits = Number(row.db_total_visits ?? 0);
+    const conducted = Number(row.db_conducted ?? 0);
+    const scheduled = Number(row.db_scheduled ?? 0);
+    const missed = Number(row.db_missed ?? 0);
+    const cancelled = Number(row.db_cancelled ?? 0);
+    const avg_score = row.db_avg_score != null ? Number(row.db_avg_score) : 0;
     const completion_rate = total_visits > 0 ? Number(((conducted / total_visits) * 100).toFixed(1)) : 0;
 
     return {
@@ -857,3 +839,6 @@ export async function getSupervisionReport(filters: ReportFilters): Promise<Hier
     }
   );
 }
+
+
+

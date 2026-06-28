@@ -87,14 +87,14 @@ Each step lists: **Purpose · What to do · Required output · VaxPlan module ·
 - **What to do.** Per session-day assign vaccinator(s), recorder, supervisor, volunteers; for SIA add team type (house-to-house / fixed post) and per-team daily target.
 - **Required output.** Staffing plan tied to the session calendar.
 - **VaxPlan module.** `Session Day Plans` (per-session staffing fields).
-- **Done when.** Every scheduled session-day has at least one named vaccinator. *(Structured staffing roster — counts + roles + per-diem — is still pending; tracked as **"Staffing + funding source on microplan"**.)*
+- **Done when.** Every scheduled session-day has at least one named vaccinator and the roster is visible in session-day planning.
 
 ### Step 6 — Vaccine, supplies & cold-chain forecast *(WHO core element 4, EVM 2.0)*
 - **Purpose.** Forecast doses, diluents, AD syringes, safety boxes, and cold-chain capacity for the plan period.
 - **What to do.** Apply wastage factors (BCG ~40%, MR/OPV ~25%, Penta/PCV ~11%, IPV/Rota ~5%) per antigen; size cold boxes, ice packs, carriers per session; verify storage capacity at facility level.
 - **Required output.** Forecast table (doses + vials + supplies + cold-chain capacity).
 - **VaxPlan module.** `Vaccine Calculator`, `Stock Ledger`.
-- **Done when.** Vaccine forecast exists for every active antigen for the plan period. *(Cold-chain inventory and temperature logs are still pending; tracked as **"Cold-chain inventory, temperature logs, stockout/wastage, GTIN-lot-expiry"**.)*
+- **Done when.** Vaccine forecast exists for every active antigen for the plan period, with cold-chain and stock readiness visible in Stock Ledger and Plan Health.
 
 ### Step 7 — Demand generation & social mobilization *(RED 3, RED-Q "Reach")*
 - **Purpose.** Plan how communities are informed and mobilized for every session.
@@ -115,7 +115,7 @@ Each step lists: **Purpose · What to do · Required output · VaxPlan module ·
 - **What to do.** Itemize Personnel / Transport / Supplies / Per Diem / Cold Chain / Training / Communication; tag each line with funding source (Govt, Gavi, WHO, UNICEF, Other).
 - **Required output.** Quarterly budget with at least one line per category and an explicit funding source.
 - **VaxPlan module.** `Budget Planning`.
-- **Done when.** Budget items exist for the quarter and at least Personnel + Transport + Supplies categories are populated. *(The structured funding-source enum is still pending; tracked as **"Staffing + funding source on microplan"**.)*
+- **Done when.** Budget items exist for the quarter and at least Personnel + Transport + Supplies categories are populated with funding-source evidence where required by tenant policy.
 
 ### Step 10 — Supportive supervision plan *(RED 2)*
 - **Purpose.** Schedule quarterly supervisory visits using a standard checklist.
@@ -136,7 +136,7 @@ Each step lists: **Purpose · What to do · Required output · VaxPlan module ·
 - **What to do.** Record doses given per session (`Client Logbook`); update wall chart; review defaulters and dropout monthly; re-rank missed communities every quarter; trigger a coverage survey after every SIA.
 - **Required output.** Monthly tally + defaulter list + quarterly review note; trigger Step 1 again for next year.
 - **VaxPlan module.** `Client Logbook`, `Dashboard`, `Reports`.
-- **Done when.** At least one session this quarter has actual doses recorded *and* a defaulter review has been run. *(Defaulter list + zero-dose indicator + dropout view are still pending; tracked as **"Zero-dose children indicator + defaulter list + DTP dropout rates"**.)*
+- **Done when.** At least one session this quarter has actual doses recorded, a defaulter review has been run, and a quarterly review note is saved.
 
 ---
 
@@ -178,7 +178,7 @@ A microplan is **complete** (ready for approval submission) when **all twelve** 
 11. The approval has reached the tenant's terminal review level (Step 11).
 12. At least one session this quarter has actual doses recorded *and* a defaulter review has been run (Step 12).
 
-VaxPlan's guided stepper computes 1–4, 6, 7, 9, 10, 11 from existing data today; 5, 8, 12 are marked **"Pending — tracked in [task title]"** until the underlying features ship.
+VaxPlan now surfaces the full cycle through the guided workflow, dashboard Plan Health score, supervision, defaulters/dropout, and quarterly review coverage. Items that require tenant configuration remain visible as maturity recommendations in Standards Alignment.
 
 ---
 
@@ -197,7 +197,7 @@ VaxPlan's guided stepper computes 1–4, 6, 7, 9, 10, 11 from existing data toda
 | 9    | Budget Planning                                        | `/budget`                                 |
 | 10   | Supportive Supervision                                 | `/supervision`                            |
 | 11   | Approvals                                              | `/approvals`                              |
-| 12   | Client Logbook, Dashboard                              | `/clients`, `/`                           |
+| 12   | Client Logbook, Dashboard, Reports                     | `/clients`, `/`, `/reports`              |
 
 ---
 

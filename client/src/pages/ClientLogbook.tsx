@@ -152,6 +152,8 @@ import {
   type InsertClient,
   type ClientVaccination,
   type VaccineConfig,
+  type CatalogueScheduleDose,
+  type StockTransaction,
   type Village,
   type Facility
 } from "@shared/schema";
@@ -168,9 +170,12 @@ import {
   type InsertClient,
   type ClientVaccination,
   type VaccineConfig,
+  type CatalogueScheduleDose,
+  type StockTransaction,
   type Village,
   type Facility
 } from "@shared/schema";
+import { normalizeStockVaccineName } from "@shared/vaccineSchedule";
 import { z } from "zod";
 
 const clientFormSchema = insertClientSchema.extend({
@@ -193,11 +198,14 @@ import {
   type InsertClient,
   type ClientVaccination,
   type VaccineConfig,
+  type CatalogueScheduleDose,
+  type StockTransaction,
   type Village,
   type Facility,
   type Province,
   type District
 } from "@shared/schema";
+import { normalizeStockVaccineName } from "@shared/vaccineSchedule";
 import { z } from "zod";
 
 // Original Code:
@@ -627,15 +635,15 @@ const getVaccinationDueStatus = (client: any, vaccinations: any[]) => {
   return { dueToday, dueNextWeek };
 };
 
+
+
 const getAntigenStatus = (config: any, client: any, vaccinations: any[]) => {
   const today = new Date();
   today.setHours(0,0,0,0);
 
   // 1. Check if already given
   const givenRecord = vaccinations.find(
-    v => v.vaccineConfigId === config.id || 
-         v.vaccineName?.toLowerCase() === config.name?.toLowerCase() ||
-         v.vaccineName?.toLowerCase().replace(/\s/g, "") === config.name?.toLowerCase().replace(/\s/g, "")
+    v => canonicalDoseCode(v.vaccineName) === canonicalDoseCode(config.name)
   );
 
   if (givenRecord) {
@@ -764,6 +772,202 @@ const getAntigenStatus = (config: any, client: any, vaccinations: any[]) => {
   }
 };
 
+type BatchStockOption = {
+  key: string;
+  batchNumber: string;
+  expiryDate: string;
+  availableQuantity: number;
+  vvmStatus: string;
+};
+
+const compactDoseToken = (value: string | null | undefined) =>
+  String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/PENTAVALENT/g, "PENTA")
+    .replace(/ROTAVIRUS/g, "ROTA")
+    .replace(/MEASLES[-_\s]*RUBELLA/g, "MR")
+    .replace(/[^A-Z0-9]+/g, "");
+
+const canonicalDoseCode = (name: string | null | undefined, fallback?: string | null) => {
+  const raw = compactDoseToken(name) || compactDoseToken(fallback);
+  if (!raw) return "";
+  const singleDose = ["BCG", "YF", "HEPBBD", "HEPB", "COVID19", "CHOLERA", "TCV"];
+  for (const code of singleDose) {
+    if (raw === code || raw.startsWith(code)) return code;
+  }
+  const prefixMatch = raw.match(/^(OPV|IPV|PCV|PENTA|ROTA|MR|HPV|MALARIA|TD|TT)(\d+)$/);
+  if (prefixMatch) return `${prefixMatch[1]}_${prefixMatch[2]}`;
+  return raw;
+};
+
+const displayDoseName = (name: string | null | undefined, code?: string | null) => {
+  const canonical = canonicalDoseCode(name, code);
+  if (canonical === "BCG") return "BCG";
+  if (canonical === "HEPBBD") return "HepB-BD";
+  const m = canonical.match(/^(OPV|IPV|PCV|PENTA|ROTA|MR|HPV|MALARIA|TD|TT)_(\d+)$/);
+  if (!m) return String(name || code || "Dose").trim();
+  const labelMap: Record<string, string> = {
+    PENTA: "Penta",
+    ROTA: "Rota",
+    MALARIA: "Malaria",
+    OPV: "OPV",
+    IPV: "IPV",
+    PCV: "PCV",
+    MR: "MR",
+    HPV: "HPV",
+    TD: "Td",
+    TT: "TT",
+  };
+  return `${labelMap[m[1]] || m[1]}-${m[2]}`;
+};
+
+const stockProductNameForDose = (doseName: string) => normalizeStockVaccineName(doseName);
+
+const doseWeeksFromCatalogue = (dose: CatalogueScheduleDose, displayName: string) => {
+  const text = `${dose.targetAge || ""} ${dose.name || ""} ${dose.doseCode || ""}`.toLowerCase();
+  const explicitWeeks = text.match(/(\d+)\s*w/);
+  if (explicitWeeks) return Number(explicitWeeks[1]);
+  const explicitMonths = text.match(/(\d+)\s*m/);
+  if (explicitMonths) return Math.round(Number(explicitMonths[1]) * 4.345);
+  const fallback = VACCINE_SCHEDULE.find((s) => canonicalDoseCode(s.name, s.code) === canonicalDoseCode(displayName, dose.doseCode));
+  return fallback?.weeks ?? 0;
+};
+
+const findLegacyVaccineConfig = (displayName: string, configs: VaccineConfig[] | undefined) => {
+  const productName = stockProductNameForDose(displayName);
+  return (configs || []).find((config) => normalizeStockVaccineName(config.name) === productName)
+    || (configs || []).find((config) => compactDoseToken(displayName).startsWith(compactDoseToken(config.name)))
+    || (configs || []).find((config) => compactDoseToken(config.name).startsWith(compactDoseToken(productName)));
+};
+
+const getAvailableBatchOptions = (transactions: StockTransaction[] | undefined, displayName: string): BatchStockOption[] => {
+  const productName = stockProductNameForDose(displayName);
+  const batches = new Map<string, { batchNumber: string; expiryDate: string; vvmStatus: string; balance: number }>();
+  for (const tx of transactions || []) {
+    if (normalizeStockVaccineName((tx as any).vaccineName || "") !== productName) continue;
+    const batchNumber = String((tx as any).batchNumber || "").trim();
+    if (!batchNumber) continue;
+    const key = `${productName}::${batchNumber}`;
+    const qty = Number((tx as any).quantityDoses || 0);
+    const type = String((tx as any).transactionType || "").toLowerCase();
+    const current = batches.get(key) || {
+      batchNumber,
+      expiryDate: (tx as any).expiryDate ? new Date((tx as any).expiryDate).toISOString().substring(0, 10) : "",
+      vvmStatus: (tx as any).vvmStatus != null ? String((tx as any).vvmStatus) : "1",
+      balance: 0,
+    };
+    if ((tx as any).expiryDate) {
+      const nextExpiry = new Date((tx as any).expiryDate).toISOString().substring(0, 10);
+      if (!current.expiryDate || new Date(nextExpiry) < new Date(current.expiryDate)) current.expiryDate = nextExpiry;
+    }
+    if ((tx as any).vvmStatus != null) current.vvmStatus = String((tx as any).vvmStatus);
+    if (["receipt", "adjustment"].includes(type)) current.balance += qty;
+    if (["issue", "loss", "administered", "wasted", "expired", "transfer", "transfer_out"].includes(type)) current.balance -= qty;
+    batches.set(key, current);
+  }
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return Array.from(batches.entries())
+    .map(([key, b]) => ({
+      key,
+      batchNumber: b.batchNumber,
+      expiryDate: b.expiryDate,
+      availableQuantity: b.balance,
+      vvmStatus: b.vvmStatus,
+    }))
+    .filter((b) => b.availableQuantity > 0)
+    .filter((b) => !b.expiryDate || new Date(b.expiryDate) >= today)
+    .filter((b) => Number(b.vvmStatus || 1) <= 2)
+    .sort((a, b) => new Date(a.expiryDate || "2999-12-31").getTime() - new Date(b.expiryDate || "2999-12-31").getTime());
+};
+
+const buildBatchDoseRows = ({
+  client,
+  vaccinations,
+  vaccineConfigs,
+  scheduleDoses,
+  stockTransactions,
+  preselectedVaccineName,
+}: {
+  client: Client;
+  vaccinations: ClientVaccination[];
+  vaccineConfigs?: VaccineConfig[];
+  scheduleDoses?: CatalogueScheduleDose[];
+  stockTransactions?: StockTransaction[];
+  preselectedVaccineName?: string;
+}) => {
+  const todayStr = new Date().toISOString().substring(0, 10);
+  const scheduleRows = (scheduleDoses || [])
+    .filter((dose) => dose.active !== false)
+    .filter((dose) => {
+      const group = String(dose.targetPopulationGroup || "infants").toLowerCase();
+      return client.clientType === "child"
+        ? ["infant", "infants", "under1", "under_1", "children", "child"].some((x) => group.includes(x))
+        : ["pregnant", "women", "maternal", "adult"].some((x) => group.includes(x));
+    })
+    .map((dose) => {
+      const displayName = displayDoseName(dose.name, dose.doseCode);
+      const legacyConfig = findLegacyVaccineConfig(displayName, vaccineConfigs);
+      if (!legacyConfig) return null;
+      const weeks = doseWeeksFromCatalogue(dose, displayName);
+      return {
+        scheduleDoseId: dose.id,
+        vaccineConfigId: legacyConfig.id,
+        vaccineName: displayName,
+        recommendedAgeWeeks: weeks,
+      };
+    })
+    .filter(Boolean) as Array<{ scheduleDoseId?: number; vaccineConfigId: number; vaccineName: string; recommendedAgeWeeks: number }>;
+
+  const fallbackRows = VACCINE_SCHEDULE
+    .filter((dose) => client.clientType === "child" || /^(TD|TT)/.test(canonicalDoseCode(dose.name, dose.code)))
+    .map((dose) => {
+      const displayName = displayDoseName(dose.name, dose.code);
+      const legacyConfig = findLegacyVaccineConfig(displayName, vaccineConfigs);
+      if (!legacyConfig) return null;
+      return { vaccineConfigId: legacyConfig.id, vaccineName: displayName, recommendedAgeWeeks: dose.weeks };
+    })
+    .filter(Boolean) as Array<{ vaccineConfigId: number; vaccineName: string; recommendedAgeWeeks: number }>;
+
+  const sourceRows = scheduleRows.length > 0 ? scheduleRows : fallbackRows;
+  const seen = new Set<string>();
+  return sourceRows
+    .filter((row) => {
+      const code = canonicalDoseCode(row.vaccineName);
+      if (!code || seen.has(code)) return false;
+      seen.add(code);
+      return true;
+    })
+    .map((row) => {
+      const statusInfo = getAntigenStatus({
+        id: row.vaccineConfigId,
+        name: row.vaccineName,
+        recommendedAgeWeeks: row.recommendedAgeWeeks,
+      }, client, vaccinations);
+      const isDue = statusInfo.status === "due";
+      const availableBatches = getAvailableBatchOptions(stockTransactions, row.vaccineName);
+      const selectedBatch = availableBatches[0];
+      const checked = isDue && preselectedVaccineName
+        ? canonicalDoseCode(row.vaccineName) === canonicalDoseCode(preselectedVaccineName)
+        : false;
+      const stockWarning = isDue && availableBatches.length === 0
+        ? "No available stock for this vaccine at this facility."
+        : "";
+      return {
+        ...row,
+        checked: checked && availableBatches.length > 0,
+        administeredDate: todayStr,
+        batchNumber: selectedBatch?.batchNumber || "",
+        expiryDate: selectedBatch?.expiryDate || "",
+        vvmStatus: selectedBatch?.vvmStatus || "",
+        availableQuantity: selectedBatch?.availableQuantity ?? null,
+        availableBatches,
+        stockWarning,
+        statusInfo: stockWarning ? { ...statusInfo, disabled: true, label: "No stock" } : statusInfo,
+      };
+    });
+};
 // Custom react-leaflet map control to reactively update view center
 function ChangeMapView({ center }: { center: [number, number] }) {
   const map = useMap();
@@ -995,56 +1199,42 @@ export default function ClientLogbook() {
     },
   });
 
+  const { data: scheduleDoses } = useQuery<CatalogueScheduleDose[]>({
+    queryKey: ["/api/catalogue/schedules"],
+    queryFn: async () => {
+      if (!navigator.onLine) return [];
+      const res = await fetch("/api/catalogue/schedules", { credentials: "include" });
+      if (!res.ok) return [];
+      return res.json();
+    },
+  });
+
+  const { data: vaccinationStockRows } = useQuery<StockTransaction[]>({
+    queryKey: ["/api/stock/ledger", { facilityId: activeFacilityId, forBatchLog: true }],
+    queryFn: async () => {
+      if (!navigator.onLine || !activeFacilityId) return [];
+      const res = await fetch(`/api/stock/ledger?facilityId=${activeFacilityId}`, { credentials: "include" });
+      if (!res.ok) return [];
+      return res.json();
+    },
+    enabled: isVaccinateOpen && !!activeFacilityId,
+  });
+
   useEffect(() => {
     if (isVaccinateOpen && vaccinateClient && vaccineConfigs) {
       const clientVax = (vaccinateClient as any).vaccinations || [];
-      const filteredConfigs = vaccineConfigs.filter((c) => {
-        return vaccinateClient.clientType === "child"
-          ? c.targetGroup === "under1" || c.targetGroup === "births"
-          : c.targetGroup === "pregnant";
-      });
-
-      const todayStr = new Date().toISOString().substring(0, 10);
-
-      const rows = filteredConfigs.map((config) => {
-        const statusInfo = getAntigenStatus(config, vaccinateClient, clientVax);
-        
-        let checked = false;
-        let administeredDate = todayStr;
-        let batchNumber = "";
-        let expiryDate = "";
-        let vvmStatus = "";
-
-        if (statusInfo.status === "given" && statusInfo.record) {
-          const r = statusInfo.record;
-          administeredDate = r.administeredDate ? new Date(r.administeredDate).toISOString().substring(0, 10) : "";
-          batchNumber = r.batchNumber || "";
-          expiryDate = r.expiryDate ? new Date(r.expiryDate).toISOString().substring(0, 10) : "";
-          vvmStatus = r.vvmStatus ? String(r.vvmStatus) : "";
-        }
-
-        if (statusInfo.status === "due" && preselectedVaccineName && config.name.toUpperCase() === preselectedVaccineName.toUpperCase()) {
-          checked = true;
-        }
-
-        return {
-          vaccineConfigId: config.id,
-          vaccineName: config.name,
-          checked,
-          administeredDate,
-          batchNumber,
-          expiryDate,
-          vvmStatus,
-          statusInfo,
-        };
-      });
-
-      setGridRows(rows);
+      setGridRows(buildBatchDoseRows({
+        client: vaccinateClient,
+        vaccinations: clientVax,
+        vaccineConfigs,
+        scheduleDoses,
+        stockTransactions: vaccinationStockRows,
+        preselectedVaccineName,
+      }));
     } else {
       setGridRows([]);
     }
-  }, [isVaccinateOpen, vaccinateClient, vaccineConfigs, preselectedVaccineName]);
-
+  }, [isVaccinateOpen, vaccinateClient, vaccineConfigs, scheduleDoses, vaccinationStockRows, preselectedVaccineName]);
   const { data: tenant } = useQuery<any>({
     queryKey: ["/api/me/tenant"],
     queryFn: async () => {
@@ -4033,11 +4223,12 @@ export default function ClientLogbook() {
                   <thead className="bg-muted/80 sticky top-0 backdrop-blur z-10 border-b border-border/80">
                     <tr>
                       <th className="p-3 font-bold text-xs text-muted-foreground uppercase tracking-wider w-[50px]">Select</th>
-                      <th className="p-3 font-bold text-xs text-muted-foreground uppercase tracking-wider w-[120px]">Antigen</th>
+                      <th className="p-3 font-bold text-xs text-muted-foreground uppercase tracking-wider w-[140px]">Scheduled Dose</th>
                       <th className="p-3 font-bold text-xs text-muted-foreground uppercase tracking-wider w-[100px]">Status</th>
                       <th className="p-3 font-bold text-xs text-muted-foreground uppercase tracking-wider w-[140px]">Date Administered</th>
                       <th className="p-3 font-bold text-xs text-muted-foreground uppercase tracking-wider w-[120px]">Batch Number</th>
                       <th className="p-3 font-bold text-xs text-muted-foreground uppercase tracking-wider w-[130px]">Expiry Date</th>
+                      <th className="p-3 font-bold text-xs text-muted-foreground uppercase tracking-wider w-[110px]">Available</th>
                       <th className="p-3 font-bold text-xs text-muted-foreground uppercase tracking-wider w-[160px]">VVM Status</th>
                     </tr>
                   </thead>
@@ -4049,7 +4240,7 @@ export default function ClientLogbook() {
                       
                       return (
                         <tr 
-                          key={row.vaccineConfigId} 
+                          key={`${row.vaccineConfigId}-${row.vaccineName}`} 
                           className={`hover:bg-muted/30 transition-colors ${
                             isGiven ? "bg-green-500/5 dark:bg-green-500/2 font-medium" : isLater ? "opacity-75" : ""
                           }`}
@@ -4090,27 +4281,48 @@ export default function ClientLogbook() {
                               className="h-8 text-xs rounded-lg border-border/80 bg-background"
                             />
                           </td>
-                          <td className="p-3">
-                            <Input
-                              placeholder="Batch No."
+                          <td className="p-3 min-w-[150px]">
+                            <Select
                               value={row.batchNumber || ""}
-                              disabled={isDisabled || !row.checked}
-                              onChange={(e) => {
-                                setGridRows(prev => prev.map((r, i) => i === idx ? { ...r, batchNumber: e.target.value } : r));
+                              disabled={isDisabled || !row.checked || !row.availableBatches?.length}
+                              onValueChange={(val) => {
+                                setGridRows(prev => prev.map((r, i) => {
+                                  if (i !== idx) return r;
+                                  const selected = (r.availableBatches || []).find((b: BatchStockOption) => b.batchNumber === val);
+                                  return {
+                                    ...r,
+                                    batchNumber: val,
+                                    expiryDate: selected?.expiryDate || r.expiryDate,
+                                    vvmStatus: selected?.vvmStatus || r.vvmStatus,
+                                    availableQuantity: selected?.availableQuantity ?? r.availableQuantity,
+                                  };
+                                }));
                               }}
-                              className="h-8 text-xs rounded-lg border-border/80 bg-background"
-                            />
+                            >
+                              <SelectTrigger className="h-8 text-xs rounded-lg border-border/80 bg-background">
+                                <SelectValue placeholder={row.availableBatches?.length ? "Select batch" : "No stock"} />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {(row.availableBatches || []).map((batch: BatchStockOption) => (
+                                  <SelectItem key={batch.key} value={batch.batchNumber}>
+                                    {batch.batchNumber} - {batch.availableQuantity} doses - exp {batch.expiryDate || "unknown"}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                            {row.stockWarning && <p className="mt-1 text-[10px] font-semibold text-destructive">{row.stockWarning}</p>}
                           </td>
                           <td className="p-3">
                             <Input
                               type="date"
                               value={row.expiryDate || ""}
-                              disabled={isDisabled || !row.checked}
-                              onChange={(e) => {
-                                setGridRows(prev => prev.map((r, i) => i === idx ? { ...r, expiryDate: e.target.value } : r));
-                              }}
-                              className="h-8 text-xs rounded-lg border-border/80 bg-background"
+                              disabled
+                              readOnly
+                              className="h-8 text-xs rounded-lg border-border/80 bg-muted/40"
                             />
+                          </td>
+                          <td className="p-3 text-xs font-bold text-foreground">
+                            {row.availableQuantity != null ? `${row.availableQuantity} doses` : "-"}
                           </td>
                           <td className="p-3">
                             <Select
@@ -4149,7 +4361,7 @@ export default function ClientLogbook() {
                 </Button>
                 <Button 
                   type="button" 
-                  disabled={vaccinateBatchMutation.isPending || !gridRows.some(r => r.checked && !r.statusInfo.disabled)}
+                  disabled={vaccinateBatchMutation.isPending || !gridRows.some(r => r.checked && !r.statusInfo.disabled) || gridRows.some(r => r.checked && (!r.batchNumber || !r.expiryDate || !r.vvmStatus || Number(r.vvmStatus) > 2))}
                   onClick={() => {
                     const selectedRows = gridRows.filter(r => r.checked && !r.statusInfo.disabled);
                     const payload = selectedRows.map(r => ({
@@ -4292,8 +4504,7 @@ export default function ClientLogbook() {
             const findVaccination = (code: string, name: string) => {
               return clientVaccinations?.find(
                 (v: any) => 
-                  v.vaccineCode?.toUpperCase() === code.toUpperCase() || 
-                  v.vaccineName?.toLowerCase().includes(name.toLowerCase())
+                  canonicalDoseCode(v.vaccineName) === canonicalDoseCode(name, code)
               );
             };
 

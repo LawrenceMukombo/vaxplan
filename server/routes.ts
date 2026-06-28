@@ -1,3 +1,4 @@
+import { DenominatorHarmonisationService } from "./services/denominatorHarmonisationService.js";
 import express, { type Express, type Request } from "express";
 import { createServer, type Server } from "http";
 import PDFDocument from "pdfkit";
@@ -78,9 +79,7 @@ import {
   populationGrids,
   vaccineRequirements,
   budgetItems,
-  /* Original Code commented out for backward-compatibility:
-  clients,
-  */
+  // [Cleaned up legacy commented-out code block, lines 82-84]
   clients,
   mobilizationActivities,
   clientVaccinations,
@@ -269,21 +268,30 @@ function resolveRoleScopeIds(dbUser: any): {
   const sFac = Array.isArray(scope.facilities) ? scope.facilities.map(Number) : [];
   const sDist = Array.isArray(scope.districts) ? scope.districts.map(Number) : [];
   const sProv = Array.isArray(scope.provinces) ? scope.provinces.map(Number) : [];
-  // Consider the primary role plus any secondary roles, and grant the BROADEST
-  // granularity among them (a user who is both a clerk and a district manager
-  // sees their whole district).
-  const roleList: string[] = [
-    dbUser?.role,
-    ...(Array.isArray(dbUser?.roles) ? (dbUser.roles as string[]) : []),
-  ].filter(Boolean);
-  const has = (r: string) => roleList.includes(r);
+  // Consider the primary role plus any secondary roles, and cap access at the PRIMARY role. Secondary roles may grant actions, but must not widen row-level data visibility for facility staff.
+  const primaryRole = String(dbUser?.role || "");
+  const secondaryRoles: string[] = Array.isArray(dbUser?.roles) ? (dbUser.roles as string[]) : [];
+  const has = (r: string) => primaryRole === r || secondaryRoles.includes(r);
+  const primaryIs = (r: string) => primaryRole === r;
 
   let provinceIds: number[] = [];
   let districtIds: number[] = [];
   let facilityIds: number[] = [];
   let isScopedRole = false;
 
-  if (has("provincial_coordinator")) {
+  if (primaryIs("facility_clerk") || primaryIs("facility_in_charge") || primaryIs("facility_partner")) {
+    isScopedRole = true;
+    facilityIds = dbUser?.facilityId ? [Number(dbUser.facilityId)] : sFac;
+  } else if (primaryIs("district_manager")) {
+    isScopedRole = true;
+    districtIds = dbUser?.districtId ? [Number(dbUser.districtId)] : sDist;
+    facilityIds = sFac;
+  } else if (primaryIs("provincial_coordinator")) {
+    isScopedRole = true;
+    provinceIds = dbUser?.provinceId ? [Number(dbUser.provinceId)] : sProv;
+    districtIds = sDist;
+    facilityIds = sFac;
+  } else if (has("provincial_coordinator")) {
     isScopedRole = true;
     provinceIds = sProv.length
       ? sProv
@@ -299,14 +307,7 @@ function resolveRoleScopeIds(dbUser: any): {
       : dbUser?.districtId
         ? [Number(dbUser.districtId)]
         : [];
-    facilityIds = sFac; // honour any extra cross-district facility grants
-  } else if (has("facility_clerk") || has("facility_in_charge")) {
-    isScopedRole = true;
-    facilityIds = sFac.length
-      ? sFac
-      : dbUser?.facilityId
-        ? [Number(dbUser.facilityId)]
-        : [];
+    facilityIds = sFac;
   } else {
     // Unknown / custom role (e.g. a national-level reviewer): fall back to the
     // legacy precedence — explicit multi-scope union, else the most-specific
@@ -337,13 +338,16 @@ async function userCanAccessGeo(
   // Platform super-admin, national admins and GIS specialists keep full read
   // access in their tenant — mirrors hasPermission / isAdmin's role bypass.
   if (dbUser?.isPlatformAdmin === true) return true;
+  const primaryRole = String(dbUser?.role || "");
+  const isPrimaryFacilityStaff = primaryRole === "facility_clerk" || primaryRole === "facility_in_charge" || primaryRole === "facility_partner";
   const seesWholeTenant =
-    dbUser?.role === "national_admin" ||
-    dbUser?.role === "gis_specialist" ||
-    (Array.isArray(dbUser?.roles) &&
-      (dbUser.roles as string[]).some(
-        (r) => r === "national_admin" || r === "gis_specialist",
-      ));
+    !isPrimaryFacilityStaff &&
+    (dbUser?.role === "national_admin" ||
+      dbUser?.role === "gis_specialist" ||
+      (Array.isArray(dbUser?.roles) &&
+        (dbUser.roles as string[]).some(
+          (r) => r === "national_admin" || r === "gis_specialist",
+        )));
   if (seesWholeTenant) return true;
 
   // Cross-tenant browsing: dbUser.facilityId / districtId / provinceId and
@@ -453,13 +457,16 @@ async function getGeoScope(dbUser: any, tenantId: string): Promise<GeoScope> {
     facilityIds: new Set<number>(),
   };
   if (dbUser?.isPlatformAdmin === true) return allScope;
+  const primaryRole = String(dbUser?.role || "");
+  const isPrimaryFacilityStaff = primaryRole === "facility_clerk" || primaryRole === "facility_in_charge" || primaryRole === "facility_partner";
   const seesWholeTenant =
-    dbUser?.role === "national_admin" ||
-    dbUser?.role === "gis_specialist" ||
-    (Array.isArray(dbUser?.roles) &&
-      (dbUser.roles as string[]).some(
-        (r) => r === "national_admin" || r === "gis_specialist",
-      ));
+    !isPrimaryFacilityStaff &&
+    (dbUser?.role === "national_admin" ||
+      dbUser?.role === "gis_specialist" ||
+      (Array.isArray(dbUser?.roles) &&
+        (dbUser.roles as string[]).some(
+          (r) => r === "national_admin" || r === "gis_specialist",
+        )));
   if (seesWholeTenant) return allScope;
 
   // Cross-tenant browsing: home-tenant IDs are meaningless in a visited tenant,
@@ -1034,14 +1041,18 @@ export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
-  // Initialize outside-Zambia cache check
-  await initOutsideVillagesCache();
+  // Initialize outside-Zambia cache check unless disabled for local startup.
+  if (process.env.SKIP_OUTSIDE_VILLAGES_CACHE === "1") {
+    console.log("[GeoCache] Outside-Zambia cache initialization skipped.");
+  } else {
+    await initOutsideVillagesCache();
+  }
 
   await setupAuth(app);
   registerSsoRoutes(app);
   registerPasswordAuthRoutes(app);
 
-  // ── App version (used by web/Electron/Android update checks) ──────────
+  // App version used by web/Electron/Android update checks.
   const APP_VERSION = (() => {
     try {
       const pkg = JSON.parse(_readFileSync(process.cwd() + "/package.json", "utf8"));
@@ -1896,45 +1907,7 @@ export async function registerRoutes(
       const activeTenants = await storage.listActiveTenants();
 
       // Original Code (PNG and ZMB demographics check only):
-      /*
-      // PNG demographics update
-      const png = activeTenants.find(t => t.code === "PNG");
-      if (png) {
-        const settings = (png.settings || {}) as Record<string, any>;
-        if (!settings.demographics) {
-          settings.demographics = {
-            births: 0.032,
-            under1: 0.030,
-            pregnant: 0.032,
-            schoolEntry: 0.027,
-            schoolExit: 0.022,
-          };
-          await db.update(tenants)
-            .set({ settings })
-            .where(eq(tenants.id, png.id));
-          console.log("[Self-Healing] Stamped default PNG demographics settings.");
-        }
-      }
-
-      // Zambia demographics update
-      const zmb = activeTenants.find(t => t.code === "ZMB");
-      if (zmb) {
-        const settings = (zmb.settings || {}) as Record<string, any>;
-        if (!settings.demographics) {
-          settings.demographics = {
-            births: 0.038,
-            under1: 0.035,
-            pregnant: 0.040,
-            schoolEntry: 0.032,
-            schoolExit: 0.028,
-          };
-          await db.update(tenants)
-            .set({ settings })
-            .where(eq(tenants.id, zmb.id));
-          console.log("[Self-Healing] Stamped default Zambia demographics settings.");
-        }
-      }
-      */
+  // [Cleaned up legacy commented-out code block, lines 1900-1938]
       // Updated Code: Demographics + Dynamic Organization Hierarchy alignment
       // Stamps skipRegionLevel: true and correct level labels to guarantee uniform hierarchy layout at start
       const png = activeTenants.find(t => t.code === "PNG");
@@ -1991,51 +1964,7 @@ export async function registerRoutes(
         }
       }
 
-      /*
-      // Original Code: South Sudan demographics update
-      // Source: WHO Global Health Observatory / UNICEF 2023 South Sudan country statistics
-      // SSD has one of the world's highest birth rates (CBR ~40/1,000) and very high MMR.
-      const ssd = activeTenants.find(t => t.code === "SSD");
-      if (ssd) {
-        const settings = (ssd.settings || {}) as Record<string, any>;
-        const needsUpdate = !settings.demographics || !settings.adminLevelLabels;
-        if (needsUpdate) {
-          // Merge — preserve any existing keys while adding missing ones
-          settings.demographics = settings.demographics ?? {
-            births: 0.042,       // ~4.2% crude birth rate — one of highest globally (WHO 2023)
-            under1: 0.040,       // ~4.0% under-1 cohort (UNICEF SS 2023)
-            pregnant: 0.045,     // ~4.5% pregnant women (high MMR context, priority EPI group)
-            schoolEntry: 0.036,  // school-entry cohort (6-year-olds) — low enrollment context
-            schoolExit: 0.030,   // school-exit cohort (12-year-olds)
-          };
-          settings.adminLevelLabels = settings.adminLevelLabels ?? {
-            level1: "State",     // 10 Administrative States
-            level2: "County",    // 78 Counties (OCHA 2023)
-            level3: "Payam",     // Sub-county administrative unit
-            level4: "Boma",      // Village-cluster / lowest administrative unit
-          };
-          settings.mapCenter = settings.mapCenter ?? [7.87, 29.69]; // geographic centre of South Sudan
-          settings.mapZoom = settings.mapZoom ?? 6;
-          settings.currency = settings.currency ?? "SSP";
-          settings.currencySymbol = settings.currencySymbol ?? "£";
-          settings.epiSchedule = settings.epiSchedule ?? "SSD_2024";
-          settings.fiscalYearStart = settings.fiscalYearStart ?? "01-01";
-          settings.languages = settings.languages ?? ["en", "ar"];
-          settings.defaultLanguage = settings.defaultLanguage ?? "en";
-          settings.populationSources = settings.populationSources ?? [
-            { code: "nbs", label: "NBS Census (2008 projected)" },
-            { code: "unicef", label: "UNICEF / WHO Estimates" },
-            { code: "worldpop", label: "WorldPop Gridded" },
-            { code: "survey", label: "MICS / SMART Survey" },
-            { code: "community_census", label: "Community CHW Census" },
-          ];
-          await db.update(tenants)
-            .set({ settings })
-            .where(eq(tenants.id, ssd.id));
-          console.log("[Self-Healing] Stamped default South Sudan demographics, admin hierarchy, and GIS settings.");
-        }
-      }
-      */
+  // [Cleaned up legacy commented-out code block, lines 1995-2039]
 
       // Updated Code:
       // South Sudan demographics & dynamic onboarding bootstrap.
@@ -3508,7 +3437,7 @@ export async function registerRoutes(
       const districtId = req.query.districtId ? parseInt(req.query.districtId as string) : undefined;
       // Cache stable geo-reference lists in the browser for 5 minutes so
       // navigating between pages doesn't re-fetch the same data.
-      res.set("Cache-Control", "private, max-age=300, stale-while-revalidate=60");
+      res.set("Cache-Control", "no-store, max-age=0, must-revalidate");
       res.json(await storage.getLlgs(req.tenantId, districtId));
     } catch (error) {
       console.error("Error fetching LLGs:", error);
@@ -3560,7 +3489,7 @@ export async function registerRoutes(
       const scope = await getGeoScope(dbUser, req.tenantId);
       const regionId = req.query.regionId ? parseInt(req.query.regionId as string) : undefined;
       // Cache stable geo-reference lists in the browser for 5 minutes.
-      res.set("Cache-Control", "private, max-age=300, stale-while-revalidate=60");
+      res.set("Cache-Control", "no-store, max-age=0, must-revalidate");
       const all = await storage.getProvinces(req.tenantId, regionId);
 
       if (scope.all) return res.json(all);
@@ -3649,7 +3578,7 @@ export async function registerRoutes(
       const scope = await getGeoScope(dbUser, req.tenantId);
       const provinceId = req.query.provinceId ? parseInt(req.query.provinceId as string) : undefined;
       // Cache stable geo-reference lists in the browser for 5 minutes.
-      res.set("Cache-Control", "private, max-age=300, stale-while-revalidate=60");
+      res.set("Cache-Control", "no-store, max-age=0, must-revalidate");
       const all = await storage.getDistricts(req.tenantId, provinceId);
       
       const visibleDistrictIds = new Set<number>(scope.districtIds);
@@ -3724,7 +3653,7 @@ export async function registerRoutes(
       const dbUser = req.dbUser!;
       const districtId = req.query.districtId ? parseInt(req.query.districtId as string) : undefined;
       
-      res.set("Cache-Control", "private, max-age=300, stale-while-revalidate=60");
+      res.set("Cache-Control", "no-store, max-age=0, must-revalidate");
 
       // getGeoScope handles all role tiers and respects dataAccessScope:
       //   national_admin / gis_specialist / platform_admin → scope.all = true
@@ -5636,7 +5565,7 @@ export async function registerRoutes(
       const districtId = req.query.districtId ? parseInt(req.query.districtId as string) : undefined;
       const facilityId = req.query.facilityId ? parseInt(req.query.facilityId as string) : undefined;
       
-      res.set("Cache-Control", "private, max-age=300, stale-while-revalidate=60");
+      res.set("Cache-Control", "no-store, max-age=0, must-revalidate");
 
       const scope = await getGeoScope(dbUser, req.tenantId);
       const all = await storage.getVillages(req.tenantId, districtId, facilityId);
@@ -5655,7 +5584,7 @@ export async function registerRoutes(
             }),
           );
       result = result.filter((v) => !outsideVillageIds.has(Number(v.id)));
-      setCacheHeaders(res, 600); // 10 min — village list changes rarely
+      res.set("Pragma", "no-cache");
       res.json(result);
     } catch (error) {
       console.error("Error fetching villages:", error);
@@ -5683,20 +5612,7 @@ export async function registerRoutes(
     }
   });
 
-  /*
-  // Original Code: Standard village creation without district auto-resolution or distance calculation
-  app.post("/api/villages", ...auth, async (req: any, res) => {
-    try {
-      const data = insertVillageSchema.parse(req.body);
-      const village = await storage.createVillage(req.tenantId, data);
-      await logAudit(req, "create", "village", village.id, null, village);
-      res.status(201).json(village);
-    } catch (error) {
-      console.error("Error creating village:", error);
-      res.status(400).json({ message: "Invalid village data" });
-    }
-  });
-  */
+  // [Cleaned up legacy commented-out code block, lines 5687-5700]
 
   // Updated Code:
   // We refactored POST /api/villages to automatically resolve the parent `districtId`
@@ -6195,138 +6111,7 @@ export async function registerRoutes(
   });
 
   // Bulk JSON import of communities parsed from CSV/Excel files (Non-destructive update/upsert)
-  /*
-  // Original Code: Endpoint only supporting basic inserts and failing on duplicate names
-  app.post("/api/villages/import", ...auth, async (req: any, res) => {
-    try {
-      const schema = z.object({
-        villages: z.array(z.object({
-          name: z.string().min(1),
-          districtName: z.string().optional().nullable(),
-          isHardToReach: z.boolean().optional(),
-          latitude: z.union([z.number(), z.string()]).optional().nullable(),
-          longitude: z.union([z.number(), z.string()]).optional().nullable(),
-          facilityHmisCode: z.string().optional().nullable(),
-        }))
-      });
-
-      const { villages: importedVillages } = schema.parse(req.body);
-
-      const allDistricts = await storage.getDistricts(req.tenantId);
-      const allFacilities = await storage.getFacilities(req.tenantId);
-      const existingVillages = await storage.getVillages(req.tenantId);
-
-      const existingNames = new Set(existingVillages.map(v => v.name.toLowerCase().trim()));
-
-      const villagesToInsert: any[] = [];
-      let skippedCount = 0;
-
-      for (const item of importedVillages) {
-        const name = item.name.trim();
-        if (!name) {
-          skippedCount++;
-          continue;
-        }
-
-        const normName = name.toLowerCase();
-        if (existingNames.has(normName)) {
-          skippedCount++;
-          continue;
-        }
-
-        if (villagesToInsert.some(v => v.name.toLowerCase() === normName)) {
-          skippedCount++;
-          continue;
-        }
-
-        let districtId: number | null = null;
-        if (item.districtName) {
-          const matchedDistrict = allDistricts.find(d => d.name.toLowerCase() === item.districtName!.trim().toLowerCase());
-          if (matchedDistrict) {
-            districtId = matchedDistrict.id;
-          }
-        }
-
-        let assignedFacilityId: number | null = null;
-        if (item.facilityHmisCode) {
-          const matchedFac = allFacilities.find(f => f.hmisCode.toLowerCase() === item.facilityHmisCode!.trim().toLowerCase());
-          if (matchedFac) {
-            assignedFacilityId = matchedFac.id;
-            if (!districtId) {
-              districtId = matchedFac.districtId;
-            }
-          }
-        }
-
-        if (!districtId) {
-          if (allDistricts.length > 0) {
-            districtId = allDistricts[0].id;
-          } else {
-            skippedCount++;
-            continue;
-          }
-        }
-
-        let distanceToFacility: string | null = null;
-        let travelTimeMinutes: number | null = null;
-        const latVal = item.latitude !== null && item.latitude !== undefined ? parseFloat(item.latitude.toString()) : null;
-        const lngVal = item.longitude !== null && item.longitude !== undefined ? parseFloat(item.longitude.toString()) : null;
-
-        if (assignedFacilityId && latVal !== null && lngVal !== null && !isNaN(latVal) && !isNaN(lngVal)) {
-          const facility = allFacilities.find(f => f.id === assignedFacilityId);
-          if (facility && facility.latitude !== null && facility.longitude !== null) {
-            const dist = calculateHaversineDistance(
-              latVal,
-              lngVal,
-              parseFloat(facility.latitude.toString()),
-              parseFloat(facility.longitude.toString())
-            );
-            distanceToFacility = dist.toFixed(2);
-
-            const isHtr = item.isHardToReach ?? false;
-            const minutesPerKm = isHtr ? 15 : 2;
-            const terrainFactor = isHtr ? 1.25 : 1.15;
-            travelTimeMinutes = Math.max(5, Math.round(dist * minutesPerKm * terrainFactor));
-          }
-        }
-
-        villagesToInsert.push({
-          tenantId: req.tenantId,
-          name: name,
-          districtId: districtId,
-          assignedFacilityId: assignedFacilityId,
-          latitude: latVal !== null && !isNaN(latVal) ? latVal.toFixed(7) : null,
-          longitude: lngVal !== null && !isNaN(lngVal) ? lngVal.toFixed(7) : null,
-          distanceToFacility: distanceToFacility,
-          travelTimeMinutes: travelTimeMinutes,
-          isHardToReach: item.isHardToReach ?? false,
-        });
-      }
-
-      if (villagesToInsert.length > 0) {
-        await db.insert(villages).values(villagesToInsert);
-      }
-
-      await logAudit(req, "import_csv_villages", "village", null, null, {
-        importedCount: villagesToInsert.length,
-        skippedCount,
-      });
-
-      res.status(201).json({
-        success: true,
-        message: `Successfully imported ${villagesToInsert.length} villages.`,
-        count: villagesToInsert.length,
-        skipped: skippedCount,
-      });
-    } catch (error: any) {
-      if (error?.name === "ZodError") {
-        return res.status(400).json({ success: false, message: "Invalid CSV JSON data format.", errors: error.errors });
-      }
-      console.error("Error importing villages:", error);
-      res.status(500).json({ success: false, message: "Failed to import villages from CSV." });
-    }
-  });
-  */
+  // [Cleaned up legacy commented-out code block, lines 6199-6330]
 
   // Updated Code: Secure transactional non-destructive upsert endpoint for Excel and CSV village data seeding.
   app.post("/api/villages/import", isAuthenticated, requireTenant, loadRole, requireAdmin, async (req: any, res) => {
@@ -6900,7 +6685,7 @@ export async function registerRoutes(
         if (existsSync(parentDir)) {
           resourcesDir = parentDir;
         } else {
-          return res.status(404).json({ message: "Resources directory not found in server root or parent directory." });
+          return res.status(204).end();
         }
       }
 
@@ -6954,7 +6739,7 @@ export async function registerRoutes(
         if (existsSync(parentDir)) {
           resourcesDir = parentDir;
         } else {
-          return res.status(404).json({ message: "Resources directory not found in server root or parent directory." });
+          return res.status(204).end();
         }
       }
       */
@@ -6976,7 +6761,7 @@ export async function registerRoutes(
       }
 
       if (!existsSync(resourcesDir)) {
-        return res.status(404).json({ message: "Resources directory not found in server root or parent directory." });
+        return res.status(204).end();
       }
 
       const reqFile = req.query.file as string | undefined;
@@ -7004,7 +6789,7 @@ export async function registerRoutes(
         // Fallback to active tenant's country profile auto-detection
         const tenant = await storage.getTenant(req.tenantId!);
         if (!tenant) {
-          return res.status(404).json({ message: "Active country tenant not found." });
+          return res.status(204).end();
         }
 
         const tenantCode = tenant.code.toLowerCase();
@@ -7052,7 +6837,7 @@ export async function registerRoutes(
       }
 
       if (!geotiffFile) {
-        return res.status(404).json({ message: "No GeoTIFF population raster file found." });
+        return res.status(204).end();
       }
 
       const filePath = join(resourcesDir, geotiffFile);
@@ -7528,101 +7313,6 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/population/:id", ...auth, async (req: any, res) => {
-    try {
-      const dbUser = req.dbUser!;
-      const parsedId = parseInt(req.params.id);
-      if (isNaN(parsedId)) return res.status(400).json({ message: "Invalid population data id" });
-      const pop = await storage.getPopulationDataById(req.tenantId, parsedId);
-      if (!pop) return res.status(404).json({ message: "Population data not found" });
-      if (!(await userCanAccessGeo(dbUser, req.tenantId, {
-        facilityId: (pop as any).facilityId,
-        districtId: (pop as any).districtId,
-        provinceId: (pop as any).provinceId,
-      }))) {
-        return res.status(404).json({ message: "Population data not found" });
-      }
-      res.json(pop);
-    } catch (error) {
-      console.error("Error fetching population data:", error);
-      res.status(500).json({ message: "Failed to fetch population data" });
-    }
-  });
-
-  /* Original Code commented out for backward-compatibility:
-  app.post("/api/population/estimate-polygon", ...auth, async (req: any, res) => {
-    try {
-      const { boundary, latitude, longitude } = req.body;
-      if (!boundary && (latitude === undefined || longitude === undefined)) {
-        return res.status(400).json({ message: "Boundary or coordinates are required" });
-      }
-
-      let totalPop = 0;
-      let under5Pop = 0;
-
-      if (boundary) {
-        let geomJson = typeof boundary === "string" ? boundary : JSON.stringify(boundary);
-        if (typeof boundary === "object" && boundary.geometry) {
-          geomJson = JSON.stringify(boundary.geometry);
-        }
-
-        const result = await pool.query(
-          `
-          SELECT 
-            COALESCE(SUM(population_total), 0)::int AS total_pop,
-            COALESCE(SUM(under5_population), 0)::int AS under5_pop
-          FROM population_grids
-          WHERE tenant_id = $1
-            AND geometry IS NOT NULL
-            AND ST_Intersects(
-              geometry,
-              ST_SetSRID(ST_GeomFromGeoJSON($2), 4326)
-            )
-          `,
-          [req.tenantId, geomJson]
-        );
-        if (result.rows[0]) {
-          totalPop = result.rows[0].total_pop || 0;
-          under5Pop = result.rows[0].under5_pop || 0;
-        }
-      } else if (latitude !== undefined && longitude !== undefined) {
-        const latVal = parseFloat(latitude);
-        const lngVal = parseFloat(longitude);
-        if (!isNaN(latVal) && !isNaN(lngVal)) {
-          const result = await pool.query(
-            `
-            SELECT 
-              COALESCE(population_total, 0)::int AS total_pop,
-              COALESCE(under5_population, 0)::int AS under5_pop
-            FROM population_grids
-            WHERE tenant_id = $1
-              AND geometry IS NOT NULL
-              AND ST_Contains(
-                geometry,
-                ST_SetSRID(ST_MakePoint($2, $3), 4326)
-              )
-            LIMIT 1
-            `,
-            [req.tenantId, lngVal, latVal]
-          );
-          if (result.rows[0]) {
-            totalPop = result.rows[0].total_pop || 0;
-            under5Pop = result.rows[0].under5_pop || 0;
-          }
-        }
-      }
-
-      res.json({
-        totalPopulation: totalPop,
-        under5Population: under5Pop,
-      });
-    } catch (error: any) {
-      console.error("Error estimating polygon population:", error);
-      res.status(500).json({ message: "Failed to estimate polygon population: " + error.message });
-    }
-  });
-  */
-
   // ── WorldPop Point-Population Proxy ────────────────────────────────────────
   // GET /api/population/worldpop-point?lat=&lng=&radiusKm=&iso3=ZMB
   // Strategy (aggressive):
@@ -7746,6 +7436,29 @@ export async function registerRoutes(
     );
   }
 
+  // [Cleaned up legacy commented-out code block, lines 7553-7625]
+
+  app.get("/api/population/:id", ...auth, async (req: any, res) => {
+    try {
+      const dbUser = req.dbUser!;
+      const parsedId = parseInt(req.params.id);
+      if (isNaN(parsedId)) return res.status(400).json({ message: "Invalid population data id" });
+      const pop = await storage.getPopulationDataById(req.tenantId, parsedId);
+      if (!pop) return res.status(404).json({ message: "Population data not found" });
+      if (!(await userCanAccessGeo(dbUser, req.tenantId, {
+        facilityId: (pop as any).facilityId,
+        districtId: (pop as any).districtId,
+        provinceId: (pop as any).provinceId,
+      }))) {
+        return res.status(404).json({ message: "Population data not found" });
+      }
+      res.json(pop);
+    } catch (error) {
+      console.error("Error fetching population data:", error);
+      res.status(500).json({ message: "Failed to fetch population data" });
+    }
+  });
+
   // ── Uncovered Communities in Catchment ─────────────────────────────────────
   // GET /api/spatial/uncovered-communities?facilityId=&radiusKm=&microplanId=
   // Returns all villages in the facility catchment that are NOT in the given microplan.
@@ -7808,10 +7521,9 @@ export async function registerRoutes(
       }
 
       // Query all villages within catchment radius
-      /* Original Code commented out for backward-compatibility and strict traceability:
       const villagesInCatchment = await pool.query(
         `SELECT v.id, v.name, v.settlement_type, v.latitude, v.longitude,
-                v.high_risk, v.population AS hmis_pop, v.total_catchment_population, v.under5_population,
+                v.high_risk, v.total_catchment_population AS hmis_pop, v.total_catchment_population, v.under5_population,
                 ST_Distance(
                   ST_SetSRID(ST_MakePoint($2, $3), 4326)::geography,
                   ST_SetSRID(ST_MakePoint(v.longitude::double precision, v.latitude::double precision), 4326)::geography
@@ -7819,36 +7531,8 @@ export async function registerRoutes(
                 COALESCE(
                   (SELECT SUM(g.population_total) FROM population_grids g
                    WHERE g.tenant_id = $1
-                     AND ST_DWithin(g.geometry::geography,
-                       ST_SetSRID(ST_MakePoint(v.longitude::double precision, v.latitude::double precision), 4326)::geography,
-                       1000)
-                   LIMIT 1), 0
-                ) AS grid_pop
-         FROM villages v
-         WHERE v.tenant_id = $1
-           AND v.latitude IS NOT NULL
-           AND v.longitude IS NOT NULL
-           AND v.latitude::text != ''
-           AND v.longitude::text != ''
-           AND ST_DWithin(
-             ST_SetSRID(ST_MakePoint($2, $3), 4326)::geography,
-             ST_SetSRID(ST_MakePoint(v.longitude::double precision, v.latitude::double precision), 4326)::geography,
-             $4 * 1000
-           )
-         ORDER BY distance_km`,
-        [req.tenantId, fLng, fLat, radiusKm]
-      );
-      */
-      const villagesInCatchment = await pool.query(
-        `SELECT v.id, v.name, v.settlement_type, v.latitude, v.longitude,
-                v.high_risk, v.population AS hmis_pop, v.total_catchment_population, v.under5_population,
-                ST_Distance(
-                  ST_SetSRID(ST_MakePoint($2, $3), 4326)::geography,
-                  ST_SetSRID(ST_MakePoint(v.longitude::double precision, v.latitude::double precision), 4326)::geography
-                ) / 1000 AS distance_km,
-                COALESCE(
-                  (SELECT SUM(g.population_total) FROM population_grids g
-                   WHERE g.tenant_id = $1
+                     AND g.geometry IS NOT NULL
+                     AND ST_IsValid(g.geometry)
                      AND ST_DWithin(g.geometry::geography,
                        ST_SetSRID(ST_MakePoint(v.longitude::double precision, v.latitude::double precision), 4326)::geography,
                        1000)
@@ -7870,6 +7554,7 @@ export async function registerRoutes(
          ORDER BY distance_km`,
         [req.tenantId, fLng, fLat, radiusKm]
       );
+
 
       const all = villagesInCatchment.rows.map((r: any) => ({
         id: r.id,
@@ -8876,6 +8561,41 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error deleting master microplan:", error);
       res.status(500).json({ message: "Failed to delete master microplan" });
+    }
+  });
+
+
+  // ─── Denominator Harmonisation ──────────────────────────
+  app.get('/api/microplans/:id/denominator-scenario', ...auth, async (req, res) => {
+    try {
+      const scenario = await DenominatorHarmonisationService.getActiveScenario(parseInt(req.params.id));
+      if (!scenario) return res.status(404).json({ message: 'No active scenario found' });
+      res.json(scenario);
+    } catch (e) {
+      console.error(e);
+      res.status(500).json({ message: 'Error fetching scenario' });
+    }
+  });
+
+  app.post('/api/microplans/:id/denominator-scenario', ...auth, async (req, res) => {
+    try {
+      const userId = (req as any).dbUser?.id;
+      const microplanId = parseInt(req.params.id);
+      const { facilityId, selectedSource, parentTotalPopulation } = req.body;
+      if (!selectedSource || !facilityId) return res.status(400).json({ message: 'Missing required fields' });
+      
+      const scenario = await DenominatorHarmonisationService.generateScenario({
+        microplanId,
+        tenantId: (req as any).tenantId,
+        facilityId,
+        selectedSource,
+        parentTotalPopulation,
+        userId
+      });
+      res.json(scenario);
+    } catch (e) {
+      console.error('Generate Scenario Error:', e);
+      res.status(500).json({ message: 'Error generating scenario' });
     }
   });
 
@@ -11231,7 +10951,7 @@ export async function registerRoutes(
 
       // Add Cache-Control so the browser and TanStack Query honour the 5-min
       // staleTime without needing per-component configuration.
-      res.set("Cache-Control", "private, max-age=300, stale-while-revalidate=60");
+      res.set("Cache-Control", "no-store, max-age=0, must-revalidate");
       res.json({
         totalFacilities: scopedFacilities.length,
         totalVillages: scopedVillages.length,
@@ -11250,26 +10970,55 @@ export async function registerRoutes(
     try {
       const tenantId = req.tenantId as string;
 
+      let scope = await getGeoScope(req.dbUser, tenantId);
+      const requestedFacilityId = req.query.facilityId ? Number(req.query.facilityId) : null;
+      if (requestedFacilityId && Number.isFinite(requestedFacilityId)) {
+        const allowed = await userCanAccessGeo(req.dbUser, tenantId, { facilityId: requestedFacilityId });
+        if (!allowed) {
+          return res.status(403).json({ message: "Forbidden: facility is outside your assigned scope." });
+        }
+        scope = {
+          all: false,
+          provinceIds: new Set<number>(),
+          districtIds: new Set<number>(),
+          facilityIds: new Set<number>([requestedFacilityId]),
+        };
+      }
+      if (!scope.all && scope.facilityIds.size === 0 && scope.districtIds.size === 0 && scope.provinceIds.size === 0) {
+        return res.json({
+          totalFacilities: 0, activeFacilities: 0, totalVillages: 0, assignedVillages: 0,
+          htrVillages: 0, totalSessions: 0, totalPopulation: 0, submittedPlans: 0,
+          approvedPlans: 0, autoApprovedPlans: 0, facilitiesWithApprovedPlans: 0,
+        });
+      }
+
+      const facList = scope.all ? "" : (Array.from(scope.facilityIds).join(",") || "0");
+      const distList = scope.all ? "" : (Array.from(scope.districtIds).join(",") || "0");
+
+      const facCond = scope.all ? dsql`` : dsql`AND id = ANY(ARRAY[${dsql.raw(facList)}]::int[])`;
+      const facRefCond = scope.all ? dsql`` : dsql`AND facility_id = ANY(ARRAY[${dsql.raw(facList)}]::int[])`;
+      const villCond = scope.all ? dsql`` : dsql`AND (assigned_facility_id = ANY(ARRAY[${dsql.raw(facList)}]::int[]) OR district_id = ANY(ARRAY[${dsql.raw(distList)}]::int[]))`;
+
       const result = await db.execute(dsql`
         SELECT
-          (SELECT COUNT(*)::int          FROM facilities      WHERE tenant_id = ${tenantId})                            AS "totalFacilities",
-          (SELECT COUNT(*)::int          FROM facilities      WHERE tenant_id = ${tenantId} AND is_active = true)       AS "activeFacilities",
-          (SELECT COUNT(*)::int          FROM villages        WHERE tenant_id = ${tenantId})                            AS "totalVillages",
-          (SELECT COUNT(*)::int          FROM villages        WHERE tenant_id = ${tenantId} AND assigned_facility_id IS NOT NULL AND CAST(distance_to_facility AS numeric) <= 5) AS "assignedVillages",
-          (SELECT COUNT(*)::int          FROM villages        WHERE tenant_id = ${tenantId} AND is_hard_to_reach = true) AS "htrVillages",
-          (SELECT COUNT(*)::int          FROM session_plans   WHERE tenant_id = ${tenantId})                            AS "totalSessions",
-          (SELECT COALESCE(SUM(total_population), 0)::bigint FROM population_data WHERE tenant_id = ${tenantId})       AS "totalPopulation",
-          (SELECT COUNT(*)::int          FROM microplans      WHERE tenant_id = ${tenantId} AND status = 'pending')     AS "submittedPlans",
-          (SELECT COUNT(*)::int          FROM microplans      WHERE tenant_id = ${tenantId} AND status = 'approved')    AS "approvedPlans",
-          (SELECT COUNT(*)::int          FROM microplans      WHERE tenant_id = ${tenantId} AND status = 'auto_approved') AS "autoApprovedPlans",
-          (SELECT COUNT(DISTINCT facility_id)::int FROM microplans WHERE tenant_id = ${tenantId} AND (status = 'approved' OR status = 'auto_approved')) AS "facilitiesWithApprovedPlans"
+          (SELECT COUNT(*)::int          FROM facilities      WHERE tenant_id = ${tenantId} ${facCond})                            AS "totalFacilities",
+          (SELECT COUNT(*)::int          FROM facilities      WHERE tenant_id = ${tenantId} AND is_active = true ${facCond})       AS "activeFacilities",
+          (SELECT COUNT(*)::int          FROM villages        WHERE tenant_id = ${tenantId} ${villCond})                            AS "totalVillages",
+          (SELECT COUNT(*)::int          FROM villages        WHERE tenant_id = ${tenantId} AND assigned_facility_id IS NOT NULL AND CAST(distance_to_facility AS numeric) <= 5 ${villCond}) AS "assignedVillages",
+          (SELECT COUNT(*)::int          FROM villages        WHERE tenant_id = ${tenantId} AND is_hard_to_reach = true ${villCond}) AS "htrVillages",
+          (SELECT COUNT(*)::int          FROM session_plans   WHERE tenant_id = ${tenantId} ${facRefCond})                            AS "totalSessions",
+          (SELECT COALESCE(SUM(total_population), 0)::bigint FROM population_data WHERE tenant_id = ${tenantId} ${facRefCond})       AS "totalPopulation",
+          (SELECT COUNT(*)::int          FROM microplans      WHERE tenant_id = ${tenantId} AND status = 'pending' ${facRefCond})     AS "submittedPlans",
+          (SELECT COUNT(*)::int          FROM microplans      WHERE tenant_id = ${tenantId} AND status = 'approved' ${facRefCond})    AS "approvedPlans",
+          (SELECT COUNT(*)::int          FROM microplans      WHERE tenant_id = ${tenantId} AND status = 'auto_approved' ${facRefCond}) AS "autoApprovedPlans",
+          (SELECT COUNT(DISTINCT facility_id)::int FROM microplans WHERE tenant_id = ${tenantId} AND (status = 'approved' OR status = 'auto_approved') ${facRefCond}) AS "facilitiesWithApprovedPlans"
       `);
 
       const row = (result.rows?.[0] ?? {}) as Record<string, unknown>;
 
       // Add Cache-Control so the browser and TanStack Query honour the 5-min
       // staleTime without needing per-component configuration.
-      res.set("Cache-Control", "private, max-age=300, stale-while-revalidate=60");
+      res.set("Cache-Control", "no-store, max-age=0, must-revalidate");
       res.json({
         totalFacilities:  Number(row.totalFacilities  ?? 0),
         activeFacilities: Number(row.activeFacilities ?? 0),
@@ -12705,9 +12454,9 @@ export async function registerRoutes(
       const doc = new PDFDocument({ size: "A4", margin: 40 });
       doc.pipe(res);
 
-      // ---------------------------------------------------------
+      // ---
       // PAGE 1: COVER & DEMOGRAPHICS
-      // ---------------------------------------------------------
+      // ---
       
       // Top color border
       doc.rect(40, 40, 515, 8).fill(BRAND.primary);
@@ -12816,9 +12565,9 @@ export async function registerRoutes(
       doc.fillColor(BRAND.muted).fontSize(7).font("Helvetica")
          .text(`Registry Sync Date: ${new Date().toLocaleDateString()}  •  System ID: ${client.id}  •  VaxPlan Platform v1.4.0`, 40, 770, { align: "center", width: 515 });
 
-      // ---------------------------------------------------------
+      // ---
       // PAGE 2: SCHEDULE TABLE & GRID
-      // ---------------------------------------------------------
+      // ---
       doc.addPage();
       
       // Top color border
@@ -13429,6 +13178,11 @@ export async function registerRoutes(
     }
   });
 
+  function isInvalidGenericImmunizationDoseName(value: unknown): boolean {
+    const normalized = String(value || "").trim().toUpperCase().replace(/[^A-Z0-9]+/g, "");
+    return ["PENTA", "PENTAVALENT", "OPV", "IPV", "PCV", "ROTA", "ROTAVIRUS", "MR", "MEASLESRUBELLA"].includes(normalized);
+  }
+
   // POST /api/clients/:id/vaccinate — Administer a vaccine dose to client
   app.post("/api/clients/:id/vaccinate", isAuthenticated, requireTenant, requireDbUser, async (req: any, res) => {
     try {
@@ -13439,10 +13193,14 @@ export async function registerRoutes(
         return res.status(403).json({ message: "Forbidden: no access to this client's geographic scope." });
       }
 
-      const schema = insertClientVaccinationSchema.omit({ clientId: true });
+      const schema = insertClientVaccinationSchema.omit({ clientId: true, tenantId: true, administeredByUserId: true });
       const parsed = schema.parse(req.body);
+      if (isInvalidGenericImmunizationDoseName((parsed as any).vaccineName)) {
+        return res.status(400).json({ message: "Please select a scheduled dose such as Penta-1, OPV-0, PCV-2, or MR-1 instead of a generic vaccine series." });
+      }
       const vaccination = await storage.createClientVaccination(req.tenantId, {
         ...parsed,
+        tenantId: req.tenantId,
         clientId: req.params.id,
         administeredByUserId: req.user?.id ?? req.user?.claims?.sub ?? null,
       });
@@ -13472,12 +13230,16 @@ export async function registerRoutes(
         return res.status(403).json({ message: "Forbidden: no access to this client's geographic scope." });
       }
 
-      const schema = z.array(insertClientVaccinationSchema.omit({ clientId: true }));
+      const schema = z.array(insertClientVaccinationSchema.omit({ clientId: true, tenantId: true, administeredByUserId: true }));
       const parsed = schema.parse(req.body);
+      const genericDose = parsed.find((item: any) => isInvalidGenericImmunizationDoseName(item.vaccineName));
+      if (genericDose) {
+        return res.status(400).json({ message: "Please select scheduled doses such as Penta-1, OPV-0, PCV-2, or MR-1 instead of generic vaccine series." });
+      }
       
-      const results = await db.transaction(async (tx) => {
+      const results = await db.transaction(async (tx: any) => {
         const rows = [];
-        for (const item of parsed) {
+        for (const item of parsed as any[]) {
           const cleanItem = {
             ...item,
             clientId: req.params.id,
@@ -14677,9 +14439,41 @@ export async function registerRoutes(
   // 1. Active Master Settlement Registry - GET /api/settlements
   app.get("/api/settlements", isAuthenticated, requireTenant, async (req: any, res) => {
     try {
+      const scope = await getGeoScope(req.dbUser, req.tenantId);
       const { province, district, ward, hardToReach, status } = req.query;
-      
+
       const queryConditions: any[] = [eq(settlementsMaster.tenantId, req.tenantId)];
+
+      if (!scope.all) {
+        let allowedDistrictNames: string[] = [];
+
+        if (scope.districtIds.size > 0 || scope.provinceIds.size > 0) {
+          // District/province-level users: resolve allowed district names from scope
+          const allDistricts = await storage.getDistricts(req.tenantId);
+          allowedDistrictNames = allDistricts
+            .filter(d => scope.districtIds.has(d.id) || (scope.provinceIds.size > 0 && scope.provinceIds.has(d.provinceId as number)))
+            .map(d => d.name);
+        } else if (scope.facilityIds.size > 0) {
+          // Facility-level users (facility_clerk, facility_in_charge): scope to the district(s)
+          // of their assigned facilities so they see settlements in their own district.
+          const facilityIdArr = Array.from(scope.facilityIds);
+          const facilityRows = await db
+            .select({ districtId: facilities.districtId })
+            .from(facilities)
+            .where(inArray(facilities.id, facilityIdArr));
+          const districtIdSet = new Set(facilityRows.map(f => f.districtId).filter(Boolean) as number[]);
+          if (districtIdSet.size > 0) {
+            const allDistricts = await storage.getDistricts(req.tenantId);
+            allowedDistrictNames = allDistricts
+              .filter(d => districtIdSet.has(d.id))
+              .map(d => d.name);
+          }
+        }
+
+        if (allowedDistrictNames.length === 0) return res.json([]);
+        queryConditions.push(inArray(settlementsMaster.districtName, allowedDistrictNames));
+      }
+
       if (province) queryConditions.push(eq(settlementsMaster.provinceName, province as string));
       if (district) queryConditions.push(eq(settlementsMaster.districtName, district as string));
       if (ward) queryConditions.push(eq(settlementsMaster.wardName, ward as string));
@@ -15327,7 +15121,7 @@ export async function registerRoutes(
   ];
   const GRACE_WEEKS = 4; // days overdue counted past dueDate + grace
 
-  // --- Indicator cache (monthly close refresh) ------------------------------
+  // --- Indicator cache (monthly close refresh) ---
   // Cache key includes YYYY-MM so entries auto-invalidate on month rollover —
   // i.e. results refresh at monthly close without an explicit cron job.
   const indicatorCache = new Map<string, { month: string; data: any }>();
@@ -18713,16 +18507,29 @@ export async function registerRoutes(
         const tenantId = req.tenantId;
 
         // 1. Gather live database stats for the tenant context
-        const statsRes = await db.execute(dsql`
-          SELECT
-            (SELECT COUNT(*)::int FROM facilities WHERE tenant_id = ${tenantId}) AS "totalFacilities",
-            (SELECT COUNT(*)::int FROM facilities WHERE tenant_id = ${tenantId} AND is_active = true) AS "activeFacilities",
-            (SELECT COUNT(*)::int FROM villages WHERE tenant_id = ${tenantId}) AS "totalVillages",
-            (SELECT COUNT(*)::int FROM villages WHERE tenant_id = ${tenantId} AND is_hard_to_reach = true) AS "htrVillages",
-            (SELECT COUNT(*)::int FROM session_plans WHERE tenant_id = ${tenantId}) AS "totalSessions",
-            (SELECT COALESCE(SUM(total_population), 0)::bigint FROM population_data WHERE tenant_id = ${tenantId}) AS "totalPopulation"
-        `);
-        const statsRow = (statsRes.rows?.[0] ?? {}) as Record<string, any>;
+        const scope = await getGeoScope(req.dbUser, tenantId);
+        
+        let statsRow: Record<string, any> = { totalFacilities: 0, activeFacilities: 0, totalVillages: 0, htrVillages: 0, totalSessions: 0, totalPopulation: 0 };
+        
+        if (scope.all || scope.facilityIds.size > 0 || scope.districtIds.size > 0 || scope.provinceIds.size > 0) {
+          const facList = scope.all ? "" : (Array.from(scope.facilityIds).join(",") || "0");
+          const distList = scope.all ? "" : (Array.from(scope.districtIds).join(",") || "0");
+          
+          const facCond = scope.all ? dsql`` : dsql`AND id = ANY(ARRAY[${dsql.raw(facList)}]::int[])`;
+          const facRefCond = scope.all ? dsql`` : dsql`AND facility_id = ANY(ARRAY[${dsql.raw(facList)}]::int[])`;
+          const villCond = scope.all ? dsql`` : dsql`AND (assigned_facility_id = ANY(ARRAY[${dsql.raw(facList)}]::int[]) OR district_id = ANY(ARRAY[${dsql.raw(distList)}]::int[]))`;
+
+          const statsRes = await db.execute(dsql`
+            SELECT
+              (SELECT COUNT(*)::int FROM facilities WHERE tenant_id = ${tenantId} ${facCond}) AS "totalFacilities",
+              (SELECT COUNT(*)::int FROM facilities WHERE tenant_id = ${tenantId} AND is_active = true ${facCond}) AS "activeFacilities",
+              (SELECT COUNT(*)::int FROM villages WHERE tenant_id = ${tenantId} ${villCond}) AS "totalVillages",
+              (SELECT COUNT(*)::int FROM villages WHERE tenant_id = ${tenantId} AND is_hard_to_reach = true ${villCond}) AS "htrVillages",
+              (SELECT COUNT(*)::int FROM session_plans WHERE tenant_id = ${tenantId} ${facRefCond}) AS "totalSessions",
+              (SELECT COALESCE(SUM(total_population), 0)::bigint FROM population_data WHERE tenant_id = ${tenantId} ${facRefCond}) AS "totalPopulation"
+          `);
+          statsRow = (statsRes.rows?.[0] ?? {}) as Record<string, any>;
+        }
 
         const budgetRes = await db.execute(dsql`
           SELECT COALESCE(SUM(total_cost::float), 0) as "totalBudget"
@@ -18913,6 +18720,9 @@ Instructions:
             SELECT 1 FROM facility_catchments fc
             WHERE fc.tenant_id = s.tenant_id
               AND fc.is_official = true
+              AND fc.geojson IS NOT NULL
+              AND fc.geojson::text != 'null'
+              AND ST_IsValid(ST_SetSRID(ST_GeomFromGeoJSON(fc.geojson::text), 4326))
               AND ST_Contains(
                 ST_SetSRID(ST_GeomFromGeoJSON(fc.geojson::text), 4326),
                 ST_SetSRID(ST_MakePoint(s.longitude::float, s.latitude::float), 4326)
@@ -19192,9 +19002,17 @@ Instructions:
       if (!row) return res.status(404).json({ message: "Facility not found" });
 
       const { gisPolygons } = await import("@shared/schema");
-      const [draftRow] = await db.select({
-        draftPolygon: gisPolygons.geometry
-      }).from(gisPolygons)
+      
+      // Get the active polygon from gisPolygons table
+      const [activeGeo] = await db.select().from(gisPolygons)
+        .where(and(
+          eq(gisPolygons.tenantId, req.tenantId),
+          eq(gisPolygons.ownerType, "facility"),
+          eq(gisPolygons.ownerId, facilityId),
+          eq(gisPolygons.status, "active")
+        )).limit(1);
+
+      const [draftRow] = await db.select().from(gisPolygons)
         .where(and(
           eq(gisPolygons.tenantId, req.tenantId),
           eq(gisPolygons.ownerType, "facility"),
@@ -19203,8 +19021,34 @@ Instructions:
         )).limit(1);
 
       res.json({
-        ...row,
-        draftPolygon: draftRow?.draftPolygon || null
+        catchmentPolygon: activeGeo?.geometry || row.catchmentPolygon || null,
+        catchmentGridPopulation: activeGeo?.populationEstimate || row.catchmentGridPopulation || null,
+        areaSqKm: activeGeo?.areaSqKm ? Number(activeGeo.areaSqKm) : null,
+        centroid: activeGeo?.centroid || null,
+        populationEstimate: activeGeo?.populationEstimate || null,
+        populationSource: activeGeo?.populationSource || null,
+        populationSourceYear: activeGeo?.populationSourceYear || null,
+        populationMethod: activeGeo?.populationMethod || null,
+        confidence: activeGeo?.confidence || null,
+        validationStatus: activeGeo?.validationStatus || "draft",
+        approvalStatus: activeGeo?.approvalStatus || "draft",
+        createdBy: activeGeo?.createdBy || null,
+        updatedAt: activeGeo?.updatedAt || null,
+        draftPolygon: draftRow?.geometry || null,
+        draftPolygonDetails: draftRow || null,
+        population: activeGeo ? {
+          totalPopulation: activeGeo.populationEstimate,
+          targetInfants: Math.round((activeGeo.populationEstimate || 0) * 0.04),
+          underOne: Math.round((activeGeo.populationEstimate || 0) * 0.04),
+          underFive: Math.round((activeGeo.populationEstimate || 0) * 0.17),
+          womenOfChildbearingAge: Math.round((activeGeo.populationEstimate || 0) * 0.22),
+          source: activeGeo.populationSource,
+          sourceYear: activeGeo.populationSourceYear,
+          method: activeGeo.populationMethod,
+          confidence: activeGeo.confidence,
+          status: activeGeo.status,
+          calculatedAt: activeGeo.updatedAt?.toISOString()
+        } : null
       });
     } catch (err: any) {
       res.status(500).json({ message: err?.message || "Failed to load catchment polygon" });
@@ -19240,17 +19084,79 @@ Instructions:
 
       if (!geojson || typeof geojson !== "object") return res.status(400).json({ message: "geojson polygon required" });
 
+      // Run Turf.js validations & calculations
+      const {
+        validatePolygonGeometry,
+        polygonCentroid,
+        pointInsidePolygon
+      } = await import("./services/microplanPrefillService");
+      const { PopulationIntelligenceService } = await import("./services/populationIntelligenceService");
+
+      const validation = validatePolygonGeometry(geojson);
+      if (!validation.valid) {
+        return res.status(400).json({
+          message: "Invalid polygon geometry: " + validation.errors.join(", ")
+        });
+      }
+
+      const areaSqKm = validation.areaSqKm;
+      const centroid = polygonCentroid(geojson);
+
+      // Estimate population
+      const intel = await PopulationIntelligenceService.fetchPolygonPopulation(req.tenantId, geojson, "ZMB", "facility", facilityId);
+      const bestSource = intel?.sources?.[0];
+      const popEst = bestSource?.totalPopulation ?? 0;
+      const popSource = bestSource?.source ?? "WorldPop";
+      const popSourceYear = bestSource?.year ?? new Date().getFullYear();
+      const popMethod = bestSource?.method ?? "ST_Intersects";
+      const confidence = bestSource?.confidence ?? "Low";
+
+      // Check warnings (facility point coordinates outside drawn polygon)
+      const [facInfo] = await db.select({
+        latitude: facilities.latitude,
+        longitude: facilities.longitude
+      }).from(facilities).where(eq(facilities.id, facilityId)).limit(1);
+
+      const warnings = [...validation.warnings];
+      if (facInfo?.latitude && facInfo?.longitude) {
+        const isInside = pointInsidePolygon(facInfo.latitude, facInfo.longitude, geojson);
+        if (!isInside) {
+          warnings.push("Warning: The facility point coordinates lie outside the drawn catchment polygon.");
+        }
+      }
+
+      const createdBy = (req.user as any)?.username || "system";
+      const polyData = {
+        tenantId: req.tenantId,
+        ownerType: "facility",
+        ownerId: facilityId,
+        polygonType: "catchment" as "custom" | "catchment" | "outreach_area" | "administrative_boundary",
+        geometry: geojson as any,
+        centroid: centroid as any,
+        areaSqKm: areaSqKm ? String(areaSqKm) : null,
+        populationEstimate: popEst,
+        populationSource: popSource,
+        populationSourceYear: popSourceYear,
+        populationMethod: popMethod,
+        confidence: confidence,
+        status: status,
+        validationStatus: "valid",
+        approvalStatus: status === "active" ? "approved" : "draft",
+        createdBy: createdBy,
+        updatedAt: new Date()
+      };
+
       // If active, save to primary table to retain backwards compatibility
       let updatedCatchment = null;
       let updatedPop = null;
       if (status === 'active') {
         const [updated] = await db.update(facilities).set({
           catchmentPolygon: geojson as any,
-          catchmentGridPopulation: typeof gridPopulation === "number" ? gridPopulation : null,
+          catchmentGridPopulation: popEst,
           updatedAt: new Date(),
         }).where(and(eq(facilities.id, facilityId), eq(facilities.tenantId, req.tenantId))).returning();
         if (!updated) return res.status(404).json({ message: "Facility not found" });
-        await logAudit(req, "update_catchment_polygon", "facility", facilityId, null, { facilityId, gridPopulation });
+        await logAudit(req, "update_catchment_polygon", "facility", facilityId, null, { facilityId, gridPopulation: popEst });
         updatedCatchment = updated.catchmentPolygon;
         updatedPop = updated.catchmentGridPopulation;
       }
@@ -19265,19 +19171,9 @@ Instructions:
         )).limit(1);
 
       if (existing.length > 0) {
-        await db.update(gisPolygons).set({
-          geometry: geojson as any,
-          updatedAt: new Date()
-        }).where(eq(gisPolygons.id, existing[0].id));
+        await db.update(gisPolygons).set(polyData).where(eq(gisPolygons.id, existing[0].id));
       } else {
-        await db.insert(gisPolygons).values({
-          tenantId: req.tenantId,
-          ownerType: "facility",
-          ownerId: facilityId,
-          polygonType: "catchment",
-          geometry: geojson as any,
-          status: status
-        } as any);
+        await db.insert(gisPolygons).values(polyData as any);
       }
 
       // If we saved an active polygon, clear any existing drafts
@@ -19291,9 +19187,103 @@ Instructions:
           ));
       }
 
-      res.json({ ok: true, catchmentPolygon: updatedCatchment || geojson, catchmentGridPopulation: updatedPop || gridPopulation, status });
+      res.json({
+        ok: true,
+        catchmentPolygon: updatedCatchment || geojson,
+        catchmentGridPopulation: updatedPop || popEst,
+        areaSqKm: areaSqKm,
+        centroid: centroid,
+        population: {
+          totalPopulation: popEst,
+          targetInfants: Math.round(popEst * 0.04),
+          underOne: Math.round(popEst * 0.04),
+          underFive: Math.round(popEst * 0.17),
+          womenOfChildbearingAge: Math.round(popEst * 0.22),
+          source: popSource,
+          sourceYear: popSourceYear,
+          method: popMethod,
+          confidence: confidence,
+          status: status,
+          calculatedAt: new Date().toISOString()
+        },
+        validationStatus: "valid",
+        approvalStatus: status === "active" ? "approved" : "draft",
+        warnings,
+        status
+      });
     } catch (err: any) {
       res.status(500).json({ message: err?.message || "Failed to save catchment polygon" });
+    }
+  });
+
+  // GET /api/villages/:id/community-polygon — return stored polygon + pop estimate
+  app.get("/api/villages/:id/community-polygon", isAuthenticated, requireTenant, async (req: any, res) => {
+    try {
+      const villageId = parseInt(req.params.id, 10);
+      if (isNaN(villageId)) return res.status(400).json({ message: "Invalid village id" });
+      const [row] = await db.select({
+        catchmentPolygon: villages.catchmentPolygon,
+        griddedPopulation: villages.griddedPopulation,
+        polygonColor: villages.polygonColor,
+        populationSourceLabel: villages.populationSourceLabel
+      }).from(villages)
+        .where(and(eq(villages.id, villageId), eq(villages.tenantId, req.tenantId)))
+        .limit(1);
+      if (!row) return res.status(404).json({ message: "Village not found" });
+
+      const { gisPolygons } = await import("@shared/schema");
+      
+      // Get the active polygon from gisPolygons table
+      const [activeGeo] = await db.select().from(gisPolygons)
+        .where(and(
+          eq(gisPolygons.tenantId, req.tenantId),
+          eq(gisPolygons.ownerType, "village"),
+          eq(gisPolygons.ownerId, villageId),
+          eq(gisPolygons.status, "active")
+        )).limit(1);
+
+      const [draftRow] = await db.select().from(gisPolygons)
+        .where(and(
+          eq(gisPolygons.tenantId, req.tenantId),
+          eq(gisPolygons.ownerType, "village"),
+          eq(gisPolygons.ownerId, villageId),
+          eq(gisPolygons.status, "draft")
+        )).limit(1);
+
+      res.json({
+        catchmentPolygon: activeGeo?.geometry || row.catchmentPolygon || null,
+        griddedPopulation: activeGeo?.populationEstimate || row.griddedPopulation || null,
+        polygonColor: row.polygonColor || null,
+        populationSourceLabel: activeGeo?.populationSource || row.populationSourceLabel || null,
+        areaSqKm: activeGeo?.areaSqKm ? Number(activeGeo.areaSqKm) : null,
+        centroid: activeGeo?.centroid || null,
+        populationEstimate: activeGeo?.populationEstimate || null,
+        populationSource: activeGeo?.populationSource || null,
+        populationSourceYear: activeGeo?.populationSourceYear || null,
+        populationMethod: activeGeo?.populationMethod || null,
+        confidence: activeGeo?.confidence || null,
+        validationStatus: activeGeo?.validationStatus || "draft",
+        approvalStatus: activeGeo?.approvalStatus || "draft",
+        createdBy: activeGeo?.createdBy || null,
+        updatedAt: activeGeo?.updatedAt || null,
+        draftPolygon: draftRow?.geometry || null,
+        draftPolygonDetails: draftRow || null,
+        population: activeGeo ? {
+          totalPopulation: activeGeo.populationEstimate,
+          targetInfants: Math.round((activeGeo.populationEstimate || 0) * 0.04),
+          underOne: Math.round((activeGeo.populationEstimate || 0) * 0.04),
+          underFive: Math.round((activeGeo.populationEstimate || 0) * 0.17),
+          womenOfChildbearingAge: Math.round((activeGeo.populationEstimate || 0) * 0.22),
+          source: activeGeo.populationSource,
+          sourceYear: activeGeo.populationSourceYear,
+          method: activeGeo.populationMethod,
+          confidence: activeGeo.confidence,
+          status: activeGeo.status,
+          calculatedAt: activeGeo.updatedAt?.toISOString()
+        } : null
+      });
+    } catch (err: any) {
+      res.status(500).json({ message: err?.message || "Failed to load community polygon" });
     }
   });
 
@@ -19304,7 +19294,10 @@ Instructions:
       if (isNaN(villageId)) return res.status(400).json({ message: "Invalid village id" });
 
       const [village] = await db
-        .select({ facilityId: villages.assignedFacilityId })
+        .select({
+          facilityId: villages.assignedFacilityId,
+          name: villages.name
+        })
         .from(villages)
         .where(and(eq(villages.id, villageId), eq(villages.tenantId, req.tenantId)))
         .limit(1);
@@ -19319,7 +19312,7 @@ Instructions:
         }
       }
 
-      const { geojson, griddedPopulation, polygonColor, populationSourceLabel, status = 'active' } = req.body;
+      const { geojson, griddedPopulation, polygonColor, populationSourceLabel, status = 'active', overrideReason } = req.body;
       const { gisPolygons } = await import("@shared/schema");
 
       if (status === 'clear_draft') {
@@ -19335,19 +19328,120 @@ Instructions:
 
       if (!geojson || typeof geojson !== "object") return res.status(400).json({ message: "geojson polygon required" });
 
+      // Run Turf.js validations
+      const {
+        validatePolygonGeometry,
+        polygonCentroid,
+        polygonInsidePolygon,
+        polygonsOverlap,
+        canOverrideDenominator
+      } = await import("./services/microplanPrefillService");
+      const { PopulationIntelligenceService } = await import("./services/populationIntelligenceService");
+
+      const validation = validatePolygonGeometry(geojson);
+      if (!validation.valid) {
+        return res.status(400).json({
+          message: "Invalid polygon geometry: " + validation.errors.join(", ")
+        });
+      }
+
+      const areaSqKm = validation.areaSqKm;
+      const centroid = polygonCentroid(geojson);
+
+      // Parent facility catchment constraint check
+      if (status === 'active' && village.facilityId) {
+        const [facility] = await db.select({
+          catchmentPolygon: facilities.catchmentPolygon,
+          name: facilities.name
+        }).from(facilities).where(eq(facilities.id, village.facilityId)).limit(1);
+
+        if (facility?.catchmentPolygon) {
+          const isInside = polygonInsidePolygon(geojson, facility.catchmentPolygon);
+          if (!isInside) {
+            // Check if user has permission to override
+            const canOverride = canOverrideDenominator(req.user);
+            if (!canOverride) {
+              return res.status(400).json({
+                message: `This community is outside the catchment area of parent facility "${facility.name}". Only authorized coordinators or admins may override this restriction.`
+              });
+            }
+            if (!overrideReason || !overrideReason.trim()) {
+              return res.status(400).json({
+                code: "OUTSIDE_CATCHMENT_OVERRIDABLE",
+                message: `This community is outside the catchment area of parent facility "${facility.name}". An override reason is required to proceed.`
+              });
+            }
+          }
+        }
+      }
+
+      // Check community overlaps
+      if (status === 'active' && village.facilityId) {
+        const otherVillages = await db.select({
+          id: villages.id,
+          name: villages.name,
+          catchmentPolygon: villages.catchmentPolygon
+        }).from(villages).where(and(
+          eq(villages.assignedFacilityId, village.facilityId),
+          ne(villages.id, villageId),
+          eq(villages.tenantId, req.tenantId)
+        ));
+
+        for (const other of otherVillages) {
+          if (other.catchmentPolygon) {
+            if (polygonsOverlap(geojson, other.catchmentPolygon)) {
+              return res.status(400).json({
+                message: `Overlap detected: this community polygon overlaps with "${other.name}". Please adjust the boundary.`
+              });
+            }
+          }
+        }
+      }
+
+      // Estimate population
+      const intel = await PopulationIntelligenceService.fetchPolygonPopulation(req.tenantId, geojson, "ZMB", "village", villageId);
+      const bestSource = intel?.sources?.[0];
+      const popEst = bestSource?.totalPopulation ?? 0;
+      const popSource = bestSource?.source ?? "WorldPop";
+      const popSourceYear = bestSource?.year ?? new Date().getFullYear();
+      const popMethod = bestSource?.method ?? "ST_Intersects";
+      const confidence = bestSource?.confidence ?? "Low";
+
+      const createdBy = (req.user as any)?.username || "system";
+      const polyData = {
+        tenantId: req.tenantId,
+        ownerType: "village",
+        ownerId: villageId,
+        polygonType: "catchment" as "custom" | "catchment" | "outreach_area" | "administrative_boundary",
+        geometry: geojson as any,
+        centroid: centroid as any,
+        areaSqKm: areaSqKm ? String(areaSqKm) : null,
+        populationEstimate: popEst,
+        populationSource: popSource,
+        populationSourceYear: popSourceYear,
+        populationMethod: popMethod,
+        confidence: confidence,
+        status: status,
+        validationStatus: "valid",
+        approvalStatus: status === "active" ? "approved" : "draft",
+        overrideReason: overrideReason || null,
+        createdBy: createdBy,
+        updatedAt: new Date()
+      };
+
       let updatedCatchment = null;
       let updatedPop = null;
 
       if (status === 'active') {
         const [updated] = await db.update(villages).set({
           catchmentPolygon: geojson as any,
-          griddedPopulation: typeof griddedPopulation === "number" ? griddedPopulation : null,
+          griddedPopulation: popEst,
           polygonColor: polygonColor || null,
-          populationSourceLabel: populationSourceLabel || null,
+          populationSourceLabel: popSource || null,
           updatedAt: new Date(),
         }).where(and(eq(villages.id, villageId), eq(villages.tenantId, req.tenantId))).returning();
         if (!updated) return res.status(404).json({ message: "Village not found" });
-        await logAudit(req, "update_community_polygon", "village", villageId, null, { villageId, griddedPopulation });
+        await logAudit(req, "update_community_polygon", "village", villageId, null, { villageId, griddedPopulation: popEst });
         updatedCatchment = updated.catchmentPolygon;
         updatedPop = updated.griddedPopulation;
       }
@@ -19361,19 +19455,9 @@ Instructions:
         )).limit(1);
 
       if (existing.length > 0) {
-        await db.update(gisPolygons).set({
-          geometry: geojson as any,
-          updatedAt: new Date()
-        }).where(eq(gisPolygons.id, existing[0].id));
+        await db.update(gisPolygons).set(polyData).where(eq(gisPolygons.id, existing[0].id));
       } else {
-        await db.insert(gisPolygons).values({
-          tenantId: req.tenantId,
-          ownerType: "village",
-          ownerId: villageId,
-          polygonType: "catchment",
-          geometry: geojson as any,
-          status: status
-        } as any);
+        await db.insert(gisPolygons).values(polyData as any);
       }
 
       if (status === 'active') {
@@ -19386,7 +19470,29 @@ Instructions:
           ));
       }
 
-      res.json({ ok: true, catchmentPolygon: updatedCatchment || geojson, griddedPopulation: updatedPop || griddedPopulation, status });
+      res.json({
+        ok: true,
+        catchmentPolygon: updatedCatchment || geojson,
+        griddedPopulation: updatedPop || popEst,
+        areaSqKm: areaSqKm,
+        centroid: centroid,
+        population: {
+          totalPopulation: popEst,
+          targetInfants: Math.round(popEst * 0.04),
+          underOne: Math.round(popEst * 0.04),
+          underFive: Math.round(popEst * 0.17),
+          womenOfChildbearingAge: Math.round(popEst * 0.22),
+          source: popSource,
+          sourceYear: popSourceYear,
+          method: popMethod,
+          confidence: confidence,
+          status: status,
+          calculatedAt: new Date().toISOString()
+        },
+        validationStatus: "valid",
+        approvalStatus: status === "active" ? "approved" : "draft",
+        status
+      });
     } catch (err: any) {
       res.status(500).json({ message: err?.message || "Failed to save community polygon" });
     }
@@ -19422,7 +19528,7 @@ Instructions:
           facilityId,
           villageId: c.villageId || null,
           villageName: c.villageName || null,
-          estimatedPopulation: c.estimatedPopulation || null,
+          estimatedPopulation: c.estimatedPopulation || 0,
           flaggedLevel: flaggedLevel || "district",
           note: c.note || null,
         } as any).returning();
@@ -19452,6 +19558,34 @@ Instructions:
     }
   });
 
+
+  // Fetch prefill bundle for microplan wizard
+  app.get("/api/microplans/prefill", ...auth, async (req: any, res) => {
+    try {
+      const facilityId = parseInt(req.query.facilityId as string);
+      const year = parseInt(req.query.year as string);
+      const quarter = parseInt(req.query.quarter as string);
+      const source = (req.query.populationSource as string) || "worldpop";
+      
+      if (!facilityId || !year || !quarter) {
+        return res.status(400).json({ message: "Missing required query parameters: facilityId, year, quarter" });
+      }
+      
+      const { MicroplanPrefillService } = await import("./services/microplanPrefillService.js");
+      const bundle = await MicroplanPrefillService.buildBundle(
+        req.tenantId,
+        facilityId,
+        year,
+        quarter,
+        source as any
+      );
+      
+      res.json(bundle);
+    } catch (e) {
+      console.error("[Prefill API Error]", e);
+      res.status(500).json({ message: "Failed to generate prefill bundle" });
+    }
+  });
 
   // ─── Microplan Map Print (Phase 5H) ────────────────────────────────────────
   // GET /api/microplans/:id/print-map?format=A4&lat=...&lng=...&zoom=...
@@ -19563,7 +19697,7 @@ Instructions:
   app.get("/api/wiki/pages", async (req: any, res: any) => {
     try {
       let showUnpublished = false;
-      if (req.query.all === "true" && req.session?.userId) {
+      if (req.session?.userId) {
         const u = await storage.getUser(req.session.userId);
         if (u) {
           const adminRoles = ["national_admin", "gis_specialist"];
@@ -19574,14 +19708,15 @@ Instructions:
         }
       }
 
-      const whereClause = showUnpublished ? "" : "WHERE is_published = TRUE";
       const result = await db.execute(
-        dsql.raw(
-          `SELECT id, slug, title, category, gamification, sort_order, is_published, updated_at
-           FROM wiki_pages
-           ${whereClause}
-           ORDER BY sort_order ASC, id ASC`
-        )
+        showUnpublished
+          ? dsql`SELECT id, slug, title, category, gamification, sort_order, is_published, updated_at
+                 FROM wiki_pages
+                 ORDER BY sort_order ASC, id ASC`
+          : dsql`SELECT id, slug, title, category, gamification, sort_order, is_published, updated_at
+                 FROM wiki_pages
+                 WHERE is_published = TRUE
+                 ORDER BY sort_order ASC, id ASC`
       );
       return res.json({ success: true, data: result.rows });
     } catch (err: any) {
@@ -19610,14 +19745,16 @@ Instructions:
         }
       }
 
-      const publishedCondition = showUnpublished ? "" : "AND is_published = TRUE";
       const result = await db.execute(
-        dsql.raw(
-          `SELECT id, slug, title, category, body, gamification, sort_order, is_published, updated_by, updated_at
-           FROM wiki_pages
-           WHERE slug = '${slug.replace(/'/g, "''")}' ${publishedCondition}
-           LIMIT 1`
-        )
+        showUnpublished
+          ? dsql`SELECT id, slug, title, category, body, gamification, sort_order, is_published, updated_by, updated_at
+                 FROM wiki_pages
+                 WHERE slug = ${slug}
+                 LIMIT 1`
+          : dsql`SELECT id, slug, title, category, body, gamification, sort_order, is_published, updated_by, updated_at
+                 FROM wiki_pages
+                 WHERE slug = ${slug} AND is_published = TRUE
+                 LIMIT 1`
       );
       if (!result.rows.length) {
         return res.status(404).json({ message: "Page not found." });
@@ -19643,21 +19780,19 @@ Instructions:
       const safeSlug = String(slug).toLowerCase().replace(/[^a-z0-9-]/g, "-").slice(0, 120);
       const userId = getCurrentUserId(req);
       const result = await db.execute(
-        dsql.raw(
-          `INSERT INTO wiki_pages (slug, title, body, category, gamification, sort_order, is_published, created_by, updated_by)
-           VALUES (
-             '${safeSlug.replace(/'/g, "''")}',
-             '${String(title).replace(/'/g, "''")}',
-             '${String(body).replace(/'/g, "''")}',
-             '${String(category).replace(/'/g, "''")}',
-             '${String(gamification).replace(/'/g, "''")}'::jsonb,
-             ${Number(sort_order) || 0},
-             TRUE,
-             '${String(userId).replace(/'/g, "''")}',
-             '${String(userId).replace(/'/g, "''")}'
-           )
-           RETURNING *`
-        )
+        dsql`INSERT INTO wiki_pages (slug, title, body, category, gamification, sort_order, is_published, created_by, updated_by)
+             VALUES (
+               ${safeSlug},
+               ${String(title)},
+               ${String(body)},
+               ${String(category)},
+               ${String(gamification)}::jsonb,
+               ${Number(sort_order) || 0},
+               TRUE,
+               ${userId},
+               ${userId}
+             )
+             RETURNING *`
       );
       return res.status(201).json({ success: true, data: result.rows[0] });
     } catch (err: any) {
@@ -19680,24 +19815,22 @@ Instructions:
       const userId = getCurrentUserId(req);
       const { title, body, category, gamification, sort_order, is_published } = req.body ?? {};
 
-      const setClauses: string[] = [
-        `updated_at = NOW()`,
-        `updated_by = '${String(userId).replace(/'/g, "''")}'`,
-      ];
-      if (title !== undefined)       setClauses.push(`title = '${String(title).replace(/'/g, "''")}'`);
-      if (body !== undefined)        setClauses.push(`body = '${String(body).replace(/'/g, "''")}'`);
-      if (category !== undefined)    setClauses.push(`category = '${String(category).replace(/'/g, "''")}'`);
-      if (gamification !== undefined) setClauses.push(`gamification = '${String(gamification).replace(/'/g, "''")}'::jsonb`);
-      if (sort_order !== undefined)  setClauses.push(`sort_order = ${Number(sort_order) || 0}`);
-      if (is_published !== undefined) setClauses.push(`is_published = ${Boolean(is_published)}`);
+      const setParts = [];
+      setParts.push(dsql`updated_at = NOW()`);
+      setParts.push(dsql`updated_by = ${userId}`);
+      if (title !== undefined)       setParts.push(dsql`title = ${String(title)}`);
+      if (body !== undefined)        setParts.push(dsql`body = ${String(body)}`);
+      if (category !== undefined)    setParts.push(dsql`category = ${String(category)}`);
+      if (gamification !== undefined) setParts.push(dsql`gamification = ${String(gamification)}::jsonb`);
+      if (sort_order !== undefined)  setParts.push(dsql`sort_order = ${Number(sort_order) || 0}`);
+      if (is_published !== undefined) setParts.push(dsql`is_published = ${Boolean(is_published)}`);
 
+      const setClause = dsql.join(setParts, dsql`, `);
       const result = await db.execute(
-        dsql.raw(
-          `UPDATE wiki_pages
-           SET ${setClauses.join(", ")}
-           WHERE slug = '${slug.replace(/'/g, "''")}'
-           RETURNING *`
-        )
+        dsql`UPDATE wiki_pages
+             SET ${setClause}
+             WHERE slug = ${slug}
+             RETURNING *`
       );
       if (!result.rows.length) {
         return res.status(404).json({ message: "Page not found." });
@@ -19718,12 +19851,10 @@ Instructions:
       const { slug } = req.params;
       const userId = getCurrentUserId(req);
       const result = await db.execute(
-        dsql.raw(
-          `UPDATE wiki_pages
-           SET is_published = FALSE, updated_at = NOW(), updated_by = '${String(userId).replace(/'/g, "''")}'
-           WHERE slug = '${slug.replace(/'/g, "''")}'
-           RETURNING slug, title`
-        )
+        dsql`UPDATE wiki_pages
+             SET is_published = FALSE, updated_at = NOW(), updated_by = ${userId}
+             WHERE slug = ${slug}
+             RETURNING slug, title`
       );
       if (!result.rows.length) {
         return res.status(404).json({ message: "Page not found." });
@@ -19864,7 +19995,7 @@ Instructions:
       // 1. Nearby Facilities
       const facQuery = `
         SELECT
-          id, name, type, status, latitude, longitude,
+          id, name, facility_type AS "facilityType", operational_status AS status, latitude, longitude,
           ST_Distance(
             ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography,
             ST_SetSRID(ST_MakePoint(longitude::float, latitude::float), 4326)::geography
@@ -19885,7 +20016,7 @@ Instructions:
       // 2. Nearby Communities/Villages
       const commQuery = `
         SELECT
-          id, name, population, assigned_facility_id, is_hard_to_reach, latitude, longitude,
+          id, name, total_catchment_population AS population, assigned_facility_id, is_hard_to_reach, latitude, longitude,
           ST_Distance(
             ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography,
             ST_SetSRID(ST_MakePoint(longitude::float, latitude::float), 4326)::geography

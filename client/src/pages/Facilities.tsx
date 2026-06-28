@@ -149,7 +149,7 @@ function MapResizer() {
 
 export default function Facilities() {
   const { toast } = useToast();
-  const [, setLocation] = useLocation();
+  const [location, setLocation] = useLocation();
   const [basemap] = usePersistedBasemap("positron");
 
   // Whether the current tenant has any administrative boundary maps seeded.
@@ -412,11 +412,14 @@ export default function Facilities() {
     actionFn: (village: Village) => Promise<void>
   ) => {
     if (selectedCommIds.length === 0) return;
+    const selectedVillages = (villages || []).filter((v) => selectedCommIds.includes(v.id) && canManageCommunity(v));
+    if (selectedVillages.length === 0) {
+      toast({ title: "No editable communities selected", description: "Select communities assigned to your facility or scope.", variant: "destructive" });
+      return;
+    }
     setCommBulkProcessing(true);
-    const total = selectedCommIds.length;
+    const total = selectedVillages.length;
     setCommBulkProgress({ current: 0, total, percentage: 0 });
-
-    const selectedVillages = (villages || []).filter((v) => selectedCommIds.includes(v.id));
     const batchSize = 10;
     let successCount = 0;
     let failCount = 0;
@@ -454,7 +457,12 @@ export default function Facilities() {
   };
 
   const handleCommBulkDelete = () => {
-    if (confirm(`Are you sure you want to permanently delete the ${selectedCommIds.length} selected communities? This cannot be undone.`)) {
+    const manageableCount = (villages || []).filter((v) => selectedCommIds.includes(v.id) && canManageCommunity(v)).length;
+    if (manageableCount === 0) {
+      toast({ title: "No communities selected", description: "Select communities assigned to your facility before deleting.", variant: "destructive" });
+      return;
+    }
+    if (confirm(`Are you sure you want to permanently delete ${manageableCount} selected ${manageableCount === 1 ? "community" : "communities"}? This cannot be undone.`)) {
       void runCommBulkAction(
         "Bulk Delete Communities",
         async (v) => {
@@ -531,6 +539,20 @@ export default function Facilities() {
     queryKey: ["/api/facilities"],
   });
 
+  useEffect(() => {
+    const search = typeof window !== "undefined" ? window.location.search : "";
+    const facilityIdParam = new URLSearchParams(search).get("facilityId");
+    const facilityId = facilityIdParam ? Number(facilityIdParam) : NaN;
+    if (!Number.isFinite(facilityId) || facilityId <= 0 || !facilities) return;
+
+    const facility = facilities.find((item) => Number(item.id) === facilityId);
+    if (!facility) return;
+
+    setSelectedFacilityId(facility.id);
+    setTimeout(() => {
+      document.querySelector('[data-selected-facility-panel="true"]')?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 100);
+  }, [location, facilities]);
   const { data: villages, isLoading: loadingVillages } = useQuery<Village[]>({
     queryKey: ["/api/villages"],
   });
@@ -548,6 +570,52 @@ export default function Facilities() {
       Math.sin(dLon / 2) * Math.sin(dLon / 2);
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     return R * c;
+  };
+
+  const normalizeCommunityName = (name: string | null | undefined) =>
+    String(name || "").trim().replace(/\s+/g, " ").toLowerCase();
+
+  const canManageCommunity = (community: Village | null | undefined) => {
+    if (!user || !community) return false;
+    if (user.role === "facility_clerk" || user.role === "facility_in_charge") {
+      return !!user.facilityId && Number(community.assignedFacilityId) === Number(user.facilityId);
+    }
+    return canEditFacility(
+      user,
+      Number(community.districtId),
+      Number(community.assignedFacilityId || 0),
+      allDistricts,
+      provinces,
+      tenantInfo?.id,
+    );
+  };
+
+
+  const invalidateCommunityCaches = () => {
+    queryClient.invalidateQueries({
+      predicate: (query) => {
+        const key = query.queryKey;
+        const first = key[0];
+        if (first === "/api/villages" || first === "/api/facilities") return true;
+        if (typeof first === "string" && (first.includes("/api/villages") || first.includes("/api/facilities/"))) return true;
+        return key.some((part) => part === "community-routes" || (typeof part === "string" && part.includes("community-routes")));
+      },
+    });
+  };
+  const findDuplicateCommunity = (
+    name: string,
+    assignedFacilityId: number | null,
+    districtId: number | null,
+    ignoreId?: number,
+  ) => {
+    const normalized = normalizeCommunityName(name);
+    if (!normalized) return null;
+    return (villages || []).find((v) => {
+      if (ignoreId && Number(v.id) === Number(ignoreId)) return false;
+      if (normalizeCommunityName(v.name) !== normalized) return false;
+      if (assignedFacilityId) return Number(v.assignedFacilityId) === Number(assignedFacilityId);
+      return districtId ? Number(v.districtId) === Number(districtId) : false;
+    }) || null;
   };
 
   const getClosestFacilities = (village: Village) => {
@@ -608,10 +676,8 @@ export default function Facilities() {
       return apiRequest("POST", "/api/villages", data);
     },
     onSuccess: (res: any) => {
-      // Original onSuccess callbacks commented out for safety:
-      // queryClient.invalidateQueries({ queryKey: ["/api/villages"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/villages"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/facilities"] });
+      queryClient.setQueryData<Village[]>(["/api/villages"], (old) => old ? [...old.filter((v) => Number(v.id) !== Number(res.id)), res] : old);
+      invalidateCommunityCaches();
       setCommunityDialogOpen(false);
       setNewCommName("");
       setNewCommDistrictId("");
@@ -640,10 +706,8 @@ export default function Facilities() {
       return apiRequest("PATCH", `/api/villages/${id}`, data);
     },
     onSuccess: (res: any) => {
-      // Original onSuccess callbacks commented out for safety:
-      // queryClient.invalidateQueries({ queryKey: ["/api/villages"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/villages"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/facilities"] });
+      queryClient.setQueryData<Village[]>(["/api/villages"], (old) => old ? [...old.filter((v) => Number(v.id) !== Number(res.id)), res] : old);
+      invalidateCommunityCaches();
       setCommunityDialogOpen(false);
       setEditingCommunity(null);
       setNewCommName("");
@@ -672,11 +736,9 @@ export default function Facilities() {
     mutationFn: async (id: number) => {
       return apiRequest("DELETE", `/api/villages/${id}`);
     },
-    onSuccess: () => {
-      // Original onSuccess callbacks commented out for safety:
-      // queryClient.invalidateQueries({ queryKey: ["/api/villages"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/villages"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/facilities"] });
+    onSuccess: (_res, id) => {
+      queryClient.setQueryData<Village[]>(["/api/villages"], (old) => old?.filter((v) => Number(v.id) !== Number(id)));
+      invalidateCommunityCaches();
       setDeletingCommunity(null);
       toast({
         title: "Community deleted",
@@ -876,10 +938,8 @@ export default function Facilities() {
       return apiRequest("POST", `/api/facilities/${facilityId}/communities/extract-aggressive`, {});
     },
     onSuccess: (res: any) => {
-      // Original onSuccess callbacks commented out for safety:
-      // queryClient.invalidateQueries({ queryKey: ["/api/villages"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/villages"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/facilities"] });
+      queryClient.setQueryData<Village[]>(["/api/villages"], (old) => old ? [...old.filter((v) => Number(v.id) !== Number(res.id)), res] : old);
+      invalidateCommunityCaches();
       toast({
         title: "Extraction Successful",
         description: res.message || "Communities successfully linked to this facility.",
@@ -1146,10 +1206,7 @@ export default function Facilities() {
       });
     },
     onSuccess: () => {
-      // Original onSuccess callbacks commented out for safety:
-      // queryClient.invalidateQueries({ queryKey: ["/api/villages"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/villages"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/facilities"] });
+      invalidateCommunityCaches();
       if (editingFacility?.id) {
         queryClient.invalidateQueries({ queryKey: [`/api/facilities/${editingFacility.id}/catchments`] });
       }
@@ -1604,6 +1661,23 @@ export default function Facilities() {
         );
       },
     },
+    {
+      key: "actions",
+      header: "Actions",
+      render: (item: Village) => {
+        if (!canManageCommunity(item)) return null;
+        return (
+          <div className="flex gap-1">
+            <Button variant="ghost" size="icon" onClick={(e) => { e.stopPropagation(); handleEditCommunity(item); }} data-testid={`button-edit-assigned-community-${item.id}`}>
+              <Pencil className="h-4 w-4" />
+            </Button>
+            <Button variant="ghost" size="icon" onClick={(e) => { e.stopPropagation(); setDeletingCommunity(item); }} data-testid={`button-delete-assigned-community-${item.id}`}>
+              <Trash2 className="h-4 w-4 text-destructive" />
+            </Button>
+          </div>
+        );
+      },
+    },
   ];
 
   const onSubmit = (data: InsertFacility) => {
@@ -1654,10 +1728,14 @@ export default function Facilities() {
     // to their own facility (and its district); district staff start in their
     // district; everyone else starts blank.
     const role = user?.role;
+    const panelFacility = selectedFacilityId ? facilities?.find((f) => Number(f.id) === Number(selectedFacilityId)) : null;
     if ((role === "facility_clerk" || role === "facility_in_charge") && user?.facilityId) {
       const fac = facilities?.find((f) => Number(f.id) === Number(user.facilityId));
       setNewCommFacilityId(String(user.facilityId));
       setNewCommDistrictId(fac?.districtId ? String(fac.districtId) : "");
+    } else if (panelFacility) {
+      setNewCommFacilityId(String(panelFacility.id));
+      setNewCommDistrictId(panelFacility.districtId ? String(panelFacility.districtId) : "");
     } else if (role === "district_manager" && user?.districtId) {
       setNewCommFacilityId("");
       setNewCommDistrictId(String(user.districtId));
@@ -1687,12 +1765,24 @@ export default function Facilities() {
     }
 
     const boundary = polygonPointsToBoundary(commPolygonPoints);
+    const assignedFacilityId = newCommFacilityId ? parseInt(newCommFacilityId) : null;
+    const districtId = parseInt(newCommDistrictId);
+    const duplicate = findDuplicateCommunity(newCommName, assignedFacilityId, districtId, editingCommunity?.id);
+    if (duplicate) {
+      const facilityName = facilities?.find((f) => Number(f.id) === Number(duplicate.assignedFacilityId))?.name;
+      toast({
+        title: "Duplicate community name",
+        description: `"${duplicate.name}" already exists${facilityName ? ` under ${facilityName}` : " in this district"}. Edit the existing row or use a clearer unique name.`,
+        variant: "destructive",
+      });
+      return;
+    }
 
     const payload: any = {
       name: newCommName.trim(),
-      districtId: parseInt(newCommDistrictId),
+      districtId,
       isHardToReach: newCommHTR,
-      assignedFacilityId: newCommFacilityId ? parseInt(newCommFacilityId) : null,
+      assignedFacilityId,
       latitude: newCommLat ? parseFloat(newCommLat) : null,
       longitude: newCommLng ? parseFloat(newCommLng) : null,
       transportMode: newCommTransportMode,
@@ -1863,8 +1953,8 @@ export default function Facilities() {
       key: "actions",
       header: "Actions",
       render: (item: Village) => {
-        const canEdit = canEditFacility(user, item.districtId, item.assignedFacilityId || 0, allDistricts, provinces, tenantInfo?.id);
-        const canDelete = canDeleteData(user);
+        const canEdit = canManageCommunity(item);
+        const canDelete = canManageCommunity(item);
         if (!canEdit && !canDelete) return null;
         return (
           <div className="flex gap-1">
@@ -2880,7 +2970,7 @@ export default function Facilities() {
                   <Button
                     variant="ghost"
                     size="sm"
-                    onClick={() => setSelectedFacilityId(null)}
+                    onClick={() => { setSelectedFacilityId(null); if (new URLSearchParams(window.location.search).has("facilityId")) setLocation("/facilities"); }}
                     data-testid="button-close-communities"
                   >
                     <X className="h-4 w-4" />
@@ -2902,7 +2992,7 @@ export default function Facilities() {
 
           {/* Updated Code: Render a rich, side-by-side card when a facility is selected, showing assigned communities (if any) and a map of their locations. Draggable village pins enable direct coordination editing. If 0 communities are assigned, an explicit "Extract Communities" button triggers active centroid extraction. */}
           {selectedFacilityId && (
-            <Card className="border border-primary/20 shadow-xl overflow-hidden">
+            <Card className="border border-primary/20 shadow-xl overflow-hidden" data-selected-facility-panel="true">
               <CardHeader className="pb-4 border-b bg-muted/20">
                 <div className="flex items-center justify-between gap-4 flex-wrap">
                   <div>
@@ -2915,7 +3005,17 @@ export default function Facilities() {
                     </p>
                   </div>
                   <div className="flex items-center gap-2">
-                    <Button
+                    {canCreate && (
+                      <Button
+                        size="sm"
+                        onClick={handleAddCommunity}
+                        className="gap-1"
+                        data-testid="button-add-community-for-selected-facility"
+                      >
+                        <Plus className="h-4 w-4" />
+                        Add Community
+                      </Button>
+                    )}                    <Button
                       size="sm"
                       variant="outline"
                       disabled={aggressiveExtractMutation.isPending}
@@ -2929,7 +3029,7 @@ export default function Facilities() {
                     <Button
                       variant="ghost"
                       size="icon"
-                      onClick={() => setSelectedFacilityId(null)}
+                      onClick={() => { setSelectedFacilityId(null); if (new URLSearchParams(window.location.search).has("facilityId")) setLocation("/facilities"); }}
                       data-testid="button-close-communities"
                     >
                       <X className="h-4 w-4" />
@@ -4661,5 +4761,8 @@ function CommunityWorkerRosterManager({
     </div>
   );
 }
+
+
+
 
 

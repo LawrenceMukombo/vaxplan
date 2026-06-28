@@ -164,6 +164,45 @@ function parseAutoCancel(findings: string | null | undefined): { reason: string;
   return { reason: reason || "Parent microplan was removed.", rest: before };
 }
 
+
+
+type CorrectiveActionMeta = {
+  owner: string;
+  dueDate: string;
+  severity: "low" | "medium" | "high" | "critical";
+  category: string;
+  repeatFinding: boolean;
+  evidencePhoto?: string | null;
+  escalated: boolean;
+  escalationReason?: string | null;
+  actionText: string;
+};
+
+const CORRECTIVE_ACTION_MARKER = "[[vaxplan-corrective-action]]";
+
+function parseCorrectiveAction(raw: string | null | undefined): CorrectiveActionMeta | null {
+  if (!raw) return null;
+  const idx = raw.indexOf(CORRECTIVE_ACTION_MARKER);
+  if (idx === -1) return null;
+  try {
+    const json = raw.slice(idx + CORRECTIVE_ACTION_MARKER.length).trim();
+    return JSON.parse(json) as CorrectiveActionMeta;
+  } catch {
+    return null;
+  }
+}
+
+function serializeCorrectiveAction(meta: CorrectiveActionMeta): string {
+  return `${meta.actionText.trim()}\n\n${CORRECTIVE_ACTION_MARKER}\n${JSON.stringify(meta)}`;
+}
+
+function correctiveSeverityClass(severity: CorrectiveActionMeta["severity"]) {
+  if (severity === "critical") return "border-rose-600 text-rose-700 bg-rose-500/10";
+  if (severity === "high") return "border-orange-500 text-orange-700 bg-orange-500/10";
+  if (severity === "medium") return "border-amber-500 text-amber-700 bg-amber-500/10";
+  return "border-sky-500 text-sky-700 bg-sky-500/10";
+}
+
 function computeScore(checklist: ChecklistItem[]): number {
   return computeChecklistScore(checklist);
 }
@@ -693,6 +732,16 @@ export default function Supervision() {
                                   Score {v.score}%
                                 </Badge>
                               )}
+                              {parseCorrectiveAction(v.followUpActions)?.escalated && (
+                                <Badge variant="outline" className="border-rose-600 text-rose-700 bg-rose-500/10">
+                                  <AlertCircle className="h-3 w-3 mr-1" /> Escalated
+                                </Badge>
+                              )}
+                              {parseCorrectiveAction(v.followUpActions) && !parseCorrectiveAction(v.followUpActions)?.escalated && (
+                                <Badge variant="outline" className={correctiveSeverityClass(parseCorrectiveAction(v.followUpActions)!.severity)}>
+                                  Corrective action
+                                </Badge>
+                              )}
                             </div>
                             <div className="mt-1 text-sm font-medium flex items-center gap-2">
                               <Building2 className="h-3.5 w-3.5 text-muted-foreground" />
@@ -1137,7 +1186,14 @@ function ConductDialog({ visit, facility, onClose, onSave, isSaving }: { visit: 
   const initialChecklist = (visit.checklist && visit.checklist.length ? visit.checklist : DEFAULT_CHECKLIST).map((c) => ({ ...c }));
   const [checklist, setChecklist] = useState<ChecklistItem[]>(initialChecklist);
   const [findings, setFindings] = useState<string>(visit.findings || "");
-  const [followUp, setFollowUp] = useState<string>(visit.followUpActions || "");
+  const existingCorrective = parseCorrectiveAction(visit.followUpActions);
+  const [followUp, setFollowUp] = useState<string>(existingCorrective?.actionText || visit.followUpActions || "");
+  const [actionOwner, setActionOwner] = useState(existingCorrective?.owner || "Facility in-charge");
+  const [actionDueDate, setActionDueDate] = useState(existingCorrective?.dueDate || "");
+  const [actionSeverity, setActionSeverity] = useState<CorrectiveActionMeta["severity"]>(existingCorrective?.severity || "medium");
+  const [actionCategory, setActionCategory] = useState(existingCorrective?.category || "service_delivery");
+  const [repeatFinding, setRepeatFinding] = useState(Boolean(existingCorrective?.repeatFinding));
+  const [evidencePhoto, setEvidencePhoto] = useState<string | null>(existingCorrective?.evidencePhoto || null);
   const [nextVisitDate, setNextVisitDate] = useState<string>(visit.nextVisitDate ? visit.nextVisitDate.slice(0, 10) : "");
   const [status, setStatus] = useState<string>(visit.status === "scheduled" ? "conducted" : visit.status);
   const [facilityId, setFacilityId] = useState<number | null>(visit.facilityId ?? null);
@@ -1147,6 +1203,22 @@ function ConductDialog({ visit, facility, onClose, onSave, isSaving }: { visit: 
       : null,
   );
   const score = computeScore(checklist);
+  const dueTime = actionDueDate ? new Date(actionDueDate).getTime() : null;
+  const nextVisitTime = visit.nextVisitDate ? new Date(visit.nextVisitDate).getTime() : null;
+  const escalated = Boolean(
+    followUp.trim() && (
+      actionSeverity === "critical" ||
+      (dueTime !== null && dueTime < Date.now()) ||
+      (dueTime !== null && nextVisitTime !== null && dueTime < nextVisitTime)
+    )
+  );
+  const escalationReason = escalated
+    ? actionSeverity === "critical"
+      ? "Critical finding requires immediate district escalation."
+      : dueTime !== null && dueTime < Date.now()
+        ? "Corrective action is overdue."
+        : "Corrective action is unresolved before the next scheduled visit."
+    : null;
 
   // Progress = how many of the visible questions have an answer.
   const visibleItems = checklist.filter((c) => isAnswerVisible(c, checklist));
@@ -1310,9 +1382,80 @@ function ConductDialog({ visit, facility, onClose, onSave, isSaving }: { visit: 
               <Label>Findings / observations</Label>
               <Textarea value={findings} onChange={(e) => setFindings(e.target.value)} rows={4} placeholder="What did you observe? What worked well?" data-testid="input-findings" />
             </div>
-            <div>
-              <Label>Follow-up actions</Label>
-              <Textarea value={followUp} onChange={(e) => setFollowUp(e.target.value)} rows={4} placeholder="Who does what, by when?" data-testid="input-followup" />
+            <div className="rounded-xl border bg-muted/20 p-4 space-y-3">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <div>
+                  <Label>Corrective action lifecycle</Label>
+                  <p className="text-xs text-muted-foreground">Capture who owns the action, by when, and whether this is a repeat or escalated finding.</p>
+                </div>
+                {escalated && (
+                  <Badge variant="outline" className="border-rose-600 text-rose-700 bg-rose-500/10">
+                    <AlertCircle className="h-3.5 w-3.5 mr-1" /> Auto-escalated
+                  </Badge>
+                )}
+              </div>
+              <Textarea value={followUp} onChange={(e) => setFollowUp(e.target.value)} rows={3} placeholder="Corrective action: who does what, by when?" data-testid="input-followup" />
+              <div className="grid md:grid-cols-2 gap-3">
+                <div>
+                  <Label>Owner</Label>
+                  <Input value={actionOwner} onChange={(e) => setActionOwner(e.target.value)} placeholder="Facility in-charge, district EPI, storekeeper..." data-testid="input-corrective-owner" />
+                </div>
+                <div>
+                  <Label>Due date</Label>
+                  <Input type="date" value={actionDueDate} onChange={(e) => setActionDueDate(e.target.value)} data-testid="input-corrective-due-date" />
+                </div>
+                <div>
+                  <Label>Severity</Label>
+                  <Select value={actionSeverity} onValueChange={(v) => setActionSeverity(v as CorrectiveActionMeta["severity"])}>
+                    <SelectTrigger data-testid="select-corrective-severity"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="low">Low</SelectItem>
+                      <SelectItem value="medium">Medium</SelectItem>
+                      <SelectItem value="high">High</SelectItem>
+                      <SelectItem value="critical">Critical</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label>Issue category</Label>
+                  <Select value={actionCategory} onValueChange={setActionCategory}>
+                    <SelectTrigger data-testid="select-corrective-category"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="cold_chain">Cold chain / EVM</SelectItem>
+                      <SelectItem value="stock">Stock availability</SelectItem>
+                      <SelectItem value="service_delivery">Service delivery</SelectItem>
+                      <SelectItem value="data_quality">Data quality</SelectItem>
+                      <SelectItem value="community_demand">Community demand</SelectItem>
+                      <SelectItem value="safety">Safety / AEFI</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-3">
+                <label className="flex items-center gap-2 text-sm">
+                  <input type="checkbox" checked={repeatFinding} onChange={(e) => setRepeatFinding(e.target.checked)} />
+                  Repeat finding from a previous visit
+                </label>
+                <label className="inline-flex items-center gap-2 rounded-md border px-3 py-2 text-sm cursor-pointer hover:bg-muted">
+                  <Camera className="h-4 w-4 text-primary" />
+                  Evidence photo
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    data-testid="input-corrective-evidence-photo"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      const reader = new FileReader();
+                      reader.onload = () => setEvidencePhoto(String(reader.result || ""));
+                      reader.readAsDataURL(file);
+                    }}
+                  />
+                </label>
+                {evidencePhoto && <Badge variant="secondary">Photo attached</Badge>}
+              </div>
+              {escalationReason && <p className="text-xs text-rose-700">{escalationReason}</p>}
             </div>
             <div>
               <Label>Next visit date (optional)</Label>
@@ -1328,7 +1471,19 @@ function ConductDialog({ visit, facility, onClose, onSave, isSaving }: { visit: 
             onClick={() => onSave({
               checklist,
               findings: findings || null,
-              followUpActions: followUp || null,
+              followUpActions: followUp.trim()
+                ? serializeCorrectiveAction({
+                    owner: actionOwner.trim() || "Unassigned",
+                    dueDate: actionDueDate || "",
+                    severity: actionSeverity,
+                    category: actionCategory,
+                    repeatFinding,
+                    evidencePhoto,
+                    escalated,
+                    escalationReason,
+                    actionText: followUp.trim(),
+                  })
+                : null,
               status,
               score,
               facilityId: facilityId ?? visit.facilityId,

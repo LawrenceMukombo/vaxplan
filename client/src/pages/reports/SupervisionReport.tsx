@@ -7,7 +7,7 @@ import { useLocation } from "wouter";
 import { ClipboardCheck, CheckCircle2, XCircle, Star } from "lucide-react";
 import ReportTable, { defaultNumFormat, pctFormat } from "./ReportTable";
 import type { ReportFilters, ReportResponse } from "./types";
-import { buildReportQueryString } from "./types";
+import { buildReportQueryString, sanitizeReportRows } from "./types";
 import {
   BarChart, Bar, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ReferenceLine, ResponsiveContainer,
 } from "recharts";
@@ -23,10 +23,11 @@ export default function SupervisionReport({ filters, setFilter }: Props) {
   const { data, isLoading } = useQuery<ReportResponse>({
     queryKey: ["/api/reports/supervision", qs],
     queryFn: () => fetch(`/api/reports/supervision${qs}`, { credentials: "include" }).then((r) => r.json()),
-    staleTime: 2 * 60 * 1000,
+    staleTime: 0,
+    refetchOnMount: "always",
   });
 
-  const rows = data?.data ?? [];
+  const rows = sanitizeReportRows(data?.data ?? [], data?.meta?.filters ?? filters);
   const topRows = rows.filter((r) => r.level === "province");
   const kpi = (topRows.length ? topRows : rows).reduce(
     (acc, r) => ({
@@ -228,3 +229,4 @@ export default function SupervisionReport({ filters, setFilter }: Props) {
     </div>
   );
 }
+

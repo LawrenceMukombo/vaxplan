@@ -1,4 +1,4 @@
-import { Switch, Route, useParams, Redirect } from "wouter";
+﻿import { Switch, Route, useParams, Redirect } from "wouter";
 import { navigate } from "wouter/use-browser-location";
 import { useEffect, lazy, Suspense } from "react";
 import { queryClient } from "./lib/queryClient";
@@ -17,11 +17,11 @@ import { useAnalyticsTracker } from "@/hooks/useAnalyticsTracker";
 import { UserMenu } from "@/components/UserMenu";
 import { GlobalSearch } from "@/components/GlobalSearch";
 import { OnlinePresence } from "@/components/OnlinePresence";
+import { NotificationBell } from "@/components/NotificationBell";
 import { useAuth } from "@/hooks/useAuth";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useQuery } from "@tanstack/react-query";
 import { IdleTimeoutController } from "@/components/IdleTimeoutController";
-
 import Landing from "@/pages/Landing";
 import Dashboard from "@/pages/Dashboard";
 import NotFound from "@/pages/not-found";
@@ -32,7 +32,6 @@ import { OfflineBanner } from "@/components/OfflineBanner";
 import { useUnmappedAntigenWarnings } from "@/hooks/useUnmappedAntigenWarnings";
 import { useProximityConflictWarnings } from "@/hooks/useProximityConflictWarnings";
 import { HeartPulse } from "lucide-react";
-
 const MapPage = lazy(() => import("@/pages/MapPage"));
 const Facilities = lazy(() => import("@/pages/Facilities"));
 const Population = lazy(() => import("@/pages/Population"));
@@ -40,7 +39,7 @@ const SessionPlanning = lazy(() => import("@/pages/SessionPlanning"));
 const SessionsHub = lazy(() => import("@/pages/SessionsHub"));
 const HardToReach = lazy(() => import("@/pages/HardToReach"));
 // BudgetPlanning / VaccineCalculator / SocialMobilization are no longer
-// mounted as standalone pages — those concerns are now Steps 9 / 6 / 7 of the
+// mounted as standalone pages - those concerns are now Steps 9 / 6 / 7 of the
 // Microplan Wizard. The /budget, /vaccines, /mobilization routes redirect to
 // the wizard (see <PreserveQueryRedirect> below).
 const Approvals = lazy(() => import("@/pages/Approvals"));
@@ -64,6 +63,9 @@ const HisIntegrations = lazy(() => import("@/pages/HisIntegrations"));
 const MissedCommunities = lazy(() => import("@/pages/MissedCommunities"));
 const MicroplanWizard = lazy(() => import("@/pages/MicroplanWizard"));
 const MicroplanList = lazy(() => import("@/pages/MicroplanList"));
+const PlanHealth = lazy(() => import("@/pages/PlanHealth"));
+const FieldReadiness = lazy(() => import("@/pages/FieldReadiness"));
+const Notifications = lazy(() => import("@/pages/Notifications"));
 const VgieDashboard = lazy(() => import("@/pages/vgie/Dashboard"));
 const VgieMapView = lazy(() => import("@/pages/vgie/MapView"));
 const VgieSettlements = lazy(() => import("@/pages/vgie/Settlements"));
@@ -90,26 +92,23 @@ const WikiEditor = lazy(() => import("@/pages/WikiEditor"));
 const CatalogueAdmin = lazy(() => import("@/pages/CatalogueAdmin"));
 const ResearchHubPage = lazy(() => import("@/pages/ResearchHub"));
 import { DEFAULT_MODULES } from "@/lib/modules";
-
-// Task #50 — Small wrapper that reads :id from the route and passes it to
+// Task #50 - Small wrapper that reads :id from the route and passes it to
 // SessionPlanning as `lockedMicroplanId`, so the unserved-prefill auto-open
 // flow has a real routed home.
 // Small wrapper around wouter <Redirect> that carries the current URL's query
 // string along to the destination. This matters because some legacy in-app
-// links pass `?facility=…&microplan=…` and the destination route (the wizard)
+// links pass `?facility=...&microplan=...` and the destination route (the wizard)
 // reads those params to keep context.
 function PreserveQueryRedirect({ to }: { to: string }) {
   const search = typeof window !== "undefined" ? window.location.search : "";
   return <Redirect to={`${to}${search}`} />;
 }
-
 function SessionPlanningDetailRoute({ planTypeFilter }: { planTypeFilter: "routine" | "campaign" }) {
   const params = useParams<{ id: string }>();
   const id = params?.id ? Number(params.id) : NaN;
   if (!Number.isFinite(id)) return <NotFound />;
   return <SessionPlanning planTypeFilter={planTypeFilter} lockedMicroplanId={id} />;
 }
-
 function RouteFallback() {
   return (
     <div className="flex h-full w-full items-center justify-center p-8">
@@ -120,7 +119,6 @@ function RouteFallback() {
     </div>
   );
 }
-
 // Public, unauthenticated chrome for pages that are meant to be viewable
 // without signing in (e.g. the Data Sources & Acknowledgements page). Provides
 // a slim header that links back to the landing page and a small footer.
@@ -147,7 +145,7 @@ function PublicPageShell({ children }: { children: React.ReactNode }) {
               className="text-sm text-primary hover:underline"
               data-testid="link-public-back-home"
             >
-              ← Back to home
+              {"<- Back to home"}
             </a>
           </div>
         </div>
@@ -156,13 +154,11 @@ function PublicPageShell({ children }: { children: React.ReactNode }) {
     </div>
   );
 }
-
 // Gate for the public Data Sources route. Authenticated users get the full
 // in-app shell (so the sidebar link keeps working), while signed-out visitors
 // get a public, read-only version inside the slim public chrome.
 function DataSourcesGate() {
   const { user, isLoading } = useAuth();
-
   if (isLoading) {
     return (
       <div className="flex h-screen w-full items-center justify-center">
@@ -173,11 +169,9 @@ function DataSourcesGate() {
       </div>
     );
   }
-
   if (user) {
     return <AuthenticatedLayout />;
   }
-
   return (
     <PublicPageShell>
       <Suspense fallback={<RouteFallback />}>
@@ -186,14 +180,12 @@ function DataSourcesGate() {
     </PublicPageShell>
   );
 }
-
 // Gate for the public Help route. Authenticated users get the full in-app
 // shell (sidebar, etc.) so the Help link in the sidebar still works, while
-// non-signed-in visitors see the same page inside the slim public chrome —
+// non-signed-in visitors see the same page inside the slim public chrome -
 // no login required.
 function HelpGate() {
   const { user, isLoading } = useAuth();
-
   if (isLoading) {
     return (
       <div className="flex h-screen w-full items-center justify-center">
@@ -204,11 +196,9 @@ function HelpGate() {
       </div>
     );
   }
-
   if (user) {
     return <AuthenticatedLayout />;
   }
-
   return (
     <PublicPageShell>
       <Suspense fallback={<RouteFallback />}>
@@ -217,23 +207,18 @@ function HelpGate() {
     </PublicPageShell>
   );
 }
-
 // VgieGate removed: VGIE routes now render within the main AuthenticatedRouter shell.
-
 function AuthenticatedRouter() {
   const { data: tenant } = useQuery<any>({ queryKey: ["/api/me/tenant"], retry: false });
-
   useEffect(() => {
     if (tenant) {
       localStorage.setItem("vaxplan_active_tenant", JSON.stringify(tenant));
     }
   }, [tenant]);
-
   const modules = {
     ...DEFAULT_MODULES,
     ...(tenant?.settings?.modules || {})
   };
-
   return (
     <Suspense fallback={<RouteFallback />}>
     <Switch>
@@ -288,7 +273,7 @@ function AuthenticatedRouter() {
       <Route path="/sessions">
         {modules.sessions !== false ? <SessionPlanning planTypeFilter="routine" /> : <ModuleDisabled moduleName="Sessions Hub" />}
       </Route>
-      {/* Task #50 — Routed detail mode for SessionPlanning so the unserved-place
+      {/* Task #50 - Routed detail mode for SessionPlanning so the unserved-place
           one-click "Plan a session here" flow lands on the New Session dialog
           with the village prefilled. */}
       <Route path="/sessions/microplan/:id">
@@ -300,6 +285,9 @@ function AuthenticatedRouter() {
       <Route path="/all-sessions">
         {modules.sessions !== false ? <SessionsHub /> : <ModuleDisabled moduleName="Sessions Hub" />}
       </Route>
+      <Route path="/plan-health" component={PlanHealth} />
+      <Route path="/field-readiness" component={FieldReadiness} />
+      <Route path="/notifications" component={Notifications} />
       <Route path="/sessions/history">
         {modules.sessions !== false ? <SessionHistory /> : <ModuleDisabled moduleName="Sessions Hub" />}
       </Route>
@@ -380,27 +368,23 @@ function AuthenticatedRouter() {
       <Route path="/settings" component={Settings} />
       <Route path="/help" component={Help} />
       <Route path="/research/admin" component={lazy(() => import("@/pages/ResearchAdmin"))} />
-      
       <Route path="/vgie/recommendations" component={VgieRecommendations} />
       <Route path="/vgie/alerts" component={VgieAlerts} />
-
       <Route path="/sync/conflicts" component={lazy(() => import("@/pages/SyncConflicts"))} />
       <Route component={NotFound} />
     </Switch>
     </Suspense>
   );
 }
-
 function AuthenticatedLayout() {
   const { user, isLoading } = useAuth();
-  // Task #106 — surface a toast when the offline outbox replays a mark-done
+  // Task #106 - surface a toast when the offline outbox replays a mark-done
   // and the server reports antigen codes outside the tenant's vaccine schedule.
   useUnmappedAntigenWarnings();
   useProximityConflictWarnings();
   useDeviceTokenBootstrap(user);
   useRealtimeSync();
   useAnalyticsTracker(!!user);
-
   if (isLoading) {
     return (
       <div className="flex h-screen w-full items-center justify-center">
@@ -411,16 +395,13 @@ function AuthenticatedLayout() {
       </div>
     );
   }
-
   if (!user) {
     return <Landing />;
   }
-
   const style = {
     "--sidebar-width": "16rem",
     "--sidebar-width-icon": "3.5rem",
   };
-
   return (
     <SidebarProvider style={style as React.CSSProperties}>
       <IdleTimeoutController />
@@ -436,6 +417,7 @@ function AuthenticatedLayout() {
                 <GlobalSearch user={user} />
               </div>
               <div className="flex items-center gap-2">
+                <NotificationBell />
                 <ConflictBadge />
                 <SyncStatus />
                 <OnlinePresence />
@@ -455,13 +437,11 @@ function AuthenticatedLayout() {
     </SidebarProvider>
   );
 }
-
 function App() {
   const host = typeof window !== "undefined" ? window.location.hostname : "";
   const isResearch = host.startsWith("research.") || host.startsWith("reasearch.");
   const isDocs = host.startsWith("doc.") || host.startsWith("docs.");
-
-  // Task #276 — the basemap attribution credit on every Leaflet map ends with a
+  // Task #276 - the basemap attribution credit on every Leaflet map ends with a
   // "Data sources" link (see CARTO_POSITRON_ATTRIBUTION / CARTO_VOYAGER_ATTRIBUTION).
   // Leaflet renders attribution as raw HTML outside React, so a delegated click
   // handler intercepts that link and routes within the SPA instead of doing a
@@ -491,9 +471,7 @@ function App() {
     document.addEventListener("click", handleClick);
     return () => document.removeEventListener("click", handleClick);
   }, []);
-  
   let content;
-
   if (isResearch) {
     content = (
       <ThemeProvider forceTheme="light">
@@ -553,12 +531,10 @@ function App() {
       </ThemeProvider>
     );
   }
-
   return (
     <QueryClientProvider client={queryClient}>
       {content}
     </QueryClientProvider>
   );
 }
-
 export default App;

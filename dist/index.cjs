@@ -30,6 +30,32 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
 ));
 var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 
+// server/services/denominatorHarmonisationService.ts
+var DenominatorHarmonisationService;
+var init_denominatorHarmonisationService = __esm({
+  "server/services/denominatorHarmonisationService.ts"() {
+    "use strict";
+    DenominatorHarmonisationService = {
+      async getActiveScenario(microplanId) {
+        return null;
+      },
+      async generateScenario(input) {
+        return {
+          id: `scenario:${input.microplanId}:${Date.now()}`,
+          microplanId: input.microplanId,
+          tenantId: input.tenantId ?? null,
+          facilityId: input.facilityId,
+          selectedSource: input.selectedSource,
+          parentTotalPopulation: input.parentTotalPopulation ?? null,
+          status: "draft",
+          createdBy: input.userId ?? null,
+          generatedAt: (/* @__PURE__ */ new Date()).toISOString()
+        };
+      }
+    };
+  }
+});
+
 // shared/vaccineSchedule.ts
 function stripDoseListSuffix(name) {
   const m = name.match(DOSE_LIST_SUFFIX);
@@ -1592,6 +1618,8 @@ var init_schema = __esm({
       vvmStatus: (0, import_pg_core.integer)("vvm_status"),
       // 1, 2, 3, 4
       administeredByUserId: (0, import_pg_core.varchar)("administered_by_user_id").references(() => users.id, { onDelete: "set null" }),
+      scheduleDoseId: (0, import_pg_core.integer)("schedule_dose_id"),
+      stockTransactionId: (0, import_pg_core.integer)("stock_transaction_id"),
       createdAt: (0, import_pg_core.timestamp)("created_at").defaultNow()
     }, (table) => ({
       tenantIdx: (0, import_pg_core.index)("client_vac_tenant_idx").on(table.tenantId),
@@ -1669,6 +1697,10 @@ var init_schema = __esm({
       transactionDate: (0, import_pg_core.timestamp)("transaction_date").defaultNow().notNull(),
       notes: (0, import_pg_core.text)("notes"),
       recordedByUserId: (0, import_pg_core.varchar)("recorded_by_user_id").references(() => users.id, { onDelete: "set null" }),
+      balanceBefore: (0, import_pg_core.integer)("balance_before"),
+      balanceAfter: (0, import_pg_core.integer)("balance_after"),
+      sourceModule: (0, import_pg_core.varchar)("source_module", { length: 100 }),
+      sourceRecordId: (0, import_pg_core.varchar)("source_record_id", { length: 100 }),
       createdAt: (0, import_pg_core.timestamp)("created_at").defaultNow()
     }, (table) => ({
       tenantIdx: (0, import_pg_core.index)("stock_txn_tenant_idx").on(table.tenantId),
@@ -2989,7 +3021,19 @@ var init_schema = __esm({
       version: (0, import_pg_core.integer)("version").default(1),
       isActive: (0, import_pg_core.boolean)("is_active").default(true),
       createdAt: (0, import_pg_core.timestamp)("created_at").defaultNow(),
-      updatedAt: (0, import_pg_core.timestamp)("updated_at").defaultNow()
+      updatedAt: (0, import_pg_core.timestamp)("updated_at").defaultNow(),
+      centroid: (0, import_pg_core.jsonb)("centroid"),
+      populationEstimate: (0, import_pg_core.integer)("population_estimate"),
+      populationSource: (0, import_pg_core.varchar)("population_source", { length: 100 }),
+      populationSourceYear: (0, import_pg_core.integer)("population_source_year"),
+      populationMethod: (0, import_pg_core.varchar)("population_method", { length: 100 }),
+      confidence: (0, import_pg_core.varchar)("confidence", { length: 50 }),
+      validationStatus: (0, import_pg_core.varchar)("validation_status", { length: 50 }).default("draft"),
+      approvalStatus: (0, import_pg_core.varchar)("approval_status", { length: 50 }).default("draft"),
+      overrideReason: (0, import_pg_core.text)("override_reason"),
+      createdBy: (0, import_pg_core.varchar)("created_by", { length: 255 }),
+      approvedBy: (0, import_pg_core.varchar)("approved_by", { length: 255 }),
+      approvedAt: (0, import_pg_core.timestamp)("approved_at")
     }, (table) => ({
       tenantIdx: (0, import_pg_core.index)("idx_gis_polygons_tenant").on(table.tenantId),
       ownerIdx: (0, import_pg_core.index)("idx_gis_polygons_owner").on(table.ownerType, table.ownerId)
@@ -3460,8 +3504,13 @@ var init_storage = __esm({
         return v;
       }
       async deleteVillage(tenantId, id) {
-        const result = await db.delete(villages).where((0, import_drizzle_orm2.and)((0, import_drizzle_orm2.eq)(villages.id, id), (0, import_drizzle_orm2.eq)(villages.tenantId, tenantId)));
-        return (result.rowCount ?? 0) > 0;
+        return await db.transaction(async (tx) => {
+          await tx.delete(htrScores).where((0, import_drizzle_orm2.eq)(htrScores.villageId, id));
+          await tx.delete(sessionVillages).where((0, import_drizzle_orm2.eq)(sessionVillages.villageId, id));
+          await tx.delete(populationData).where((0, import_drizzle_orm2.eq)(populationData.villageId, id));
+          const result = await tx.delete(villages).where((0, import_drizzle_orm2.and)((0, import_drizzle_orm2.eq)(villages.id, id), (0, import_drizzle_orm2.eq)(villages.tenantId, tenantId)));
+          return (result.rowCount ?? 0) > 0;
+        });
       }
       async createCatchmentConflict(tenantId, data) {
         const { tenantId: _drop, ...rest } = data;
@@ -4447,6 +4496,11 @@ var init_storage = __esm({
 });
 
 // server/auth.ts
+function envFlag(name) {
+  const raw = process.env[name];
+  if (raw == null || raw === "") return void 0;
+  return ["1", "true", "yes", "on"].includes(raw.toLowerCase());
+}
 function getSession() {
   const absoluteTimeoutMinutes = parseInt(process.env.SESSION_ABSOLUTE_TIMEOUT_MINUTES || "480", 10);
   const sessionTtl = absoluteTimeoutMinutes * 60 * 1e3;
@@ -4458,11 +4512,14 @@ function getSession() {
         "CRITICAL: SESSION_SECRET is not set in production environment!"
       );
     }
-    console.warn("[auth] SESSION_SECRET not set \u2014 using temporary dev secret.");
+    console.warn("[auth] SESSION_SECRET not set - using temporary dev secret.");
     secret = "temporary_dev_session_secret_for_vaxplan";
   }
+  const localHttpSession = envFlag("LOCAL_HTTP_SESSION") === true;
+  const allowInsecureLocalCookie = IS_LOCAL_DEV || localHttpSession;
   let store;
-  if (IS_LOCAL_DEV) {
+  const useMemorySessionStore = IS_LOCAL_DEV || localHttpSession || process.env.SESSION_STORE === "memory" && process.env.NODE_ENV !== "production";
+  if (useMemorySessionStore) {
     const MemStore = (0, import_memorystore.default)(import_express_session.default);
     store = new MemStore({ checkPeriod: 864e5 });
     console.log("[session] Using in-memory session store (local dev)");
@@ -4476,6 +4533,9 @@ function getSession() {
       tableName: "sessions"
     });
   }
+  const explicitSecureCookie = envFlag("SESSION_SECURE_COOKIE");
+  const secureCookie = allowInsecureLocalCookie ? explicitSecureCookie ?? false : true;
+  const sameSiteCookie = secureCookie ? "none" : "lax";
   return (0, import_express_session.default)({
     name: cookieName,
     secret,
@@ -4487,18 +4547,18 @@ function getSession() {
     cookie: {
       httpOnly: true,
       // Require secure cookies in production unless overridden
-      secure: process.env.SESSION_SECURE_COOKIE === "true" || !IS_LOCAL_DEV,
+      secure: secureCookie,
       // Packaged native apps (Android/Windows) send cross-origin requests, so
       // the cookie must be SameSite=None + Secure in production. In local dev
       // we fall back to "lax" (no HTTPS).
-      sameSite: IS_LOCAL_DEV ? "lax" : "none",
+      sameSite: sameSiteCookie,
       maxAge: sessionTtl
     }
   });
 }
-async function setupAuth(app2) {
+async function setupAuth(app2, sessionMiddleware2 = getSession()) {
   app2.set("trust proxy", 1);
-  app2.use(getSession());
+  app2.use(sessionMiddleware2);
   app2.use(import_passport.default.initialize());
   app2.use(import_passport.default.session());
   import_passport.default.serializeUser((user, cb) => cb(null, user));
@@ -4536,7 +4596,7 @@ async function setupAuth(app2) {
       });
     }
   });
-  app2.post("/api/auth/ping", (req, res) => {
+  app2.post("/api/auth/ping", isAuthenticated, (req, res) => {
     if (req.isAuthenticated?.() && req.session) {
       const now = Math.floor(Date.now() / 1e3);
       const session3 = req.session;
@@ -4559,10 +4619,10 @@ async function setupAuth(app2) {
     });
   });
   if (!IS_LOCAL_DEV) {
-    console.log("[auth] Production mode \u2014 mock login routes disabled.");
+    console.log("[auth] Production mode - mock login routes disabled.");
     return;
   }
-  console.log("[auth] Local dev mode \u2014 mock login available at /api/login");
+  console.log("[auth] Local dev mode - mock login available at /api/login");
   app2.get("/api/login", async (req, res) => {
     let tenant = await storage.getTenantByCode("ZMB");
     if (!tenant) tenant = await storage.getTenantByCode("PNG");
@@ -4618,7 +4678,7 @@ async function setupAuth(app2) {
       },
       access_token: "mock-access-token",
       refresh_token: null,
-      // explicitly null — no OIDC refresh in local dev
+      // explicitly null - no OIDC refresh in local dev
       expires_at: Math.floor(Date.now() / 1e3) + 60 * 60 * 24 * 30
       // 30 days
     };
@@ -4706,7 +4766,7 @@ var init_auth = __esm({
         return next();
       }
       if (IS_LOCAL_DEV || !user.refresh_token) {
-        return res.status(401).json({ message: "Session expired \u2014 please log in again." });
+        return res.status(401).json({ message: "Session expired - please log in again." });
       }
       return res.status(401).json({ message: "Session expired." });
     };
@@ -5641,7 +5701,8 @@ async function sendViaSmtp(input, sender) {
   }
   const port = parseInt(process.env.SMTP_PORT || "587", 10);
   const secure = typeof process.env.SMTP_SECURE === "string" ? process.env.SMTP_SECURE === "true" || process.env.SMTP_SECURE === "1" : port === 465;
-  const auth2 = process.env.SMTP_USER && process.env.SMTP_PASSWORD ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASSWORD } : void 0;
+  const pass = process.env.SMTP_PASSWORD || process.env.SMTP_PASS;
+  const auth2 = process.env.SMTP_USER && pass ? { user: process.env.SMTP_USER, pass } : void 0;
   const transport = nodemailer2.createTransport({
     host: process.env.SMTP_HOST,
     port,
@@ -5861,7 +5922,7 @@ async function sendEmail2(options) {
     const host = config?.host || process.env.SMTP_HOST || "smtp.gmail.com";
     const port = config?.port || Number(process.env.SMTP_PORT) || 465;
     const user = config?.user || process.env.SMTP_USER;
-    const pass = config?.pass || process.env.SMTP_PASS;
+    const pass = config?.pass || process.env.SMTP_PASS || process.env.SMTP_PASSWORD;
     const from = config?.from || process.env.SMTP_FROM || `"VaxPlan Notifications" <${user}>`;
     if (!user || !pass) {
       console.log(`[Mock Email] SMTP config missing. Mocking email to: ${to} | Subject: ${subject}`);
@@ -6553,6 +6614,79 @@ var init_vgieService = __esm({
 });
 
 // server/routes/vgie.ts
+function roleListFor(user) {
+  return [user?.role, ...Array.isArray(user?.roles) ? user.roles : []].filter(Boolean);
+}
+async function getVgieGeoScope(req) {
+  const user = req.dbUser;
+  if (!user) return { all: false, provinceIds: [], districtIds: [], facilityIds: [] };
+  const roles = roleListFor(user);
+  if (user.isPlatformAdmin || roles.includes("national_admin") || roles.includes("gis_specialist")) {
+    return { all: true, provinceIds: [], districtIds: [], facilityIds: [] };
+  }
+  const scopedRole = roles.some(
+    (role) => ["facility_clerk", "facility_in_charge", "district_manager", "provincial_coordinator"].includes(role)
+  );
+  if (user.tenantId && req.tenantId && user.tenantId !== req.tenantId && scopedRole) {
+    return { all: false, provinceIds: [], districtIds: [], facilityIds: [] };
+  }
+  const scope = user.dataAccessScope || {};
+  const provinces4 = /* @__PURE__ */ new Set();
+  const districtsSet = /* @__PURE__ */ new Set();
+  const facilitiesSet = /* @__PURE__ */ new Set();
+  const addNums = (set, values) => {
+    if (!Array.isArray(values)) return;
+    for (const value of values) {
+      const n = Number(value);
+      if (Number.isFinite(n)) set.add(n);
+    }
+  };
+  if (roles.includes("provincial_coordinator")) {
+    addNums(provinces4, scope.provinces);
+    if (user.provinceId) provinces4.add(Number(user.provinceId));
+    addNums(districtsSet, scope.districts);
+    addNums(facilitiesSet, scope.facilities);
+  } else if (roles.includes("district_manager")) {
+    addNums(districtsSet, scope.districts);
+    if (user.districtId) districtsSet.add(Number(user.districtId));
+    addNums(facilitiesSet, scope.facilities);
+  } else if (roles.includes("facility_clerk") || roles.includes("facility_in_charge")) {
+    addNums(facilitiesSet, scope.facilities);
+    if (user.facilityId) facilitiesSet.add(Number(user.facilityId));
+  } else {
+    addNums(provinces4, scope.provinces);
+    addNums(districtsSet, scope.districts);
+    addNums(facilitiesSet, scope.facilities);
+    if (facilitiesSet.size === 0 && districtsSet.size === 0 && provinces4.size === 0) {
+      return { all: true, provinceIds: [], districtIds: [], facilityIds: [] };
+    }
+  }
+  for (const provinceId of Array.from(provinces4)) {
+    const rows = await storage.getDistricts(req.tenantId, provinceId);
+    rows.forEach((district) => districtsSet.add(Number(district.id)));
+  }
+  for (const districtId of Array.from(districtsSet)) {
+    const rows = await storage.getFacilities(req.tenantId, districtId);
+    rows.forEach((facility) => facilitiesSet.add(Number(facility.id)));
+  }
+  return {
+    all: false,
+    provinceIds: Array.from(provinces4),
+    districtIds: Array.from(districtsSet),
+    facilityIds: Array.from(facilitiesSet)
+  };
+}
+function vgieSettlementScopeCondition(scope) {
+  if (scope.all) return null;
+  const parts = [];
+  if (scope.facilityIds.length > 0) {
+    parts.push((0, import_drizzle_orm10.inArray)(settlementsMaster.linkedFacilityId, scope.facilityIds));
+    parts.push((0, import_drizzle_orm10.inArray)(settlementsMaster.nearestFacilityId, scope.facilityIds));
+  }
+  if (scope.districtIds.length > 0) parts.push((0, import_drizzle_orm10.inArray)(settlementsMaster.districtId, scope.districtIds));
+  if (scope.provinceIds.length > 0) parts.push((0, import_drizzle_orm10.inArray)(settlementsMaster.provinceId, scope.provinceIds));
+  return parts.length === 0 ? import_drizzle_orm10.sql`false` : (0, import_drizzle_orm10.or)(...parts);
+}
 function getHaversineDistance(lat1, lon1, lat2, lon2) {
   const R = 6371;
   const dLat = (lat2 - lat1) * Math.PI / 180;
@@ -6577,6 +6711,7 @@ var init_vgie = __esm({
     import_express2 = require("express");
     init_db();
     init_vgieService();
+    init_storage();
     init_schema();
     import_drizzle_orm10 = require("drizzle-orm");
     router = (0, import_express2.Router)();
@@ -7010,7 +7145,7 @@ var init_vgie = __esm({
           feed.map((item) => ({
             ...item,
             vaccineTypes: "OPV,BCG",
-            visitDate: item.visitDate ? new Date(item.visitDate).toLocaleDateString() : "\u2014",
+            visitDate: item.visitDate ? new Date(item.visitDate).toLocaleDateString() : "-",
             childrenVaccinated: Number(item.childrenVaccinated || 0)
           }))
         );
@@ -7036,10 +7171,14 @@ var init_vgie = __esm({
         const pageNum = Math.max(1, Number(page || 1));
         const sizeNum = Math.max(1, Math.min(100, Number(pageSize || 25)));
         const offset = (pageNum - 1) * sizeNum;
-        const conditions = [
+        const scope = await getVgieGeoScope(req);
+        const scopedCondition = vgieSettlementScopeCondition(scope);
+        const baseConditions = [
           (0, import_drizzle_orm10.eq)(settlementsMaster.tenantId, req.tenantId),
           (0, import_drizzle_orm10.eq)(settlementsMaster.isActive, true)
         ];
+        if (scopedCondition) baseConditions.push(scopedCondition);
+        const conditions = [...baseConditions];
         if (status && status !== "all") {
           conditions.push((0, import_drizzle_orm10.eq)(settlementsMaster.serviceStatus, status));
         }
@@ -7090,7 +7229,7 @@ var init_vgie = __esm({
           riskLevel: settlementsMaster.riskLevel,
           serviceStatus: settlementsMaster.serviceStatus,
           count: (0, import_drizzle_orm10.count)()
-        }).from(settlementsMaster).where((0, import_drizzle_orm10.and)((0, import_drizzle_orm10.eq)(settlementsMaster.tenantId, req.tenantId), (0, import_drizzle_orm10.eq)(settlementsMaster.isActive, true))).groupBy(settlementsMaster.riskLevel, settlementsMaster.serviceStatus);
+        }).from(settlementsMaster).where((0, import_drizzle_orm10.and)(...baseConditions)).groupBy(settlementsMaster.riskLevel, settlementsMaster.serviceStatus);
         let totalCount = 0;
         let servedCount = 0;
         let underservedCount = 0;
@@ -7415,9 +7554,9 @@ var init_vgie = __esm({
         try {
           if (v.latitude && v.longitude) {
             const [cf] = await db.execute(import_drizzle_orm10.sql`
-          SELECT id, name FROM facilities 
-          WHERE tenant_id = ${req.tenantId} 
-            AND catchment_polygon IS NOT NULL 
+          SELECT id, name FROM facilities
+          WHERE tenant_id = ${req.tenantId}
+            AND catchment_polygon IS NOT NULL
             AND ST_Contains(
               ST_SetSRID(ST_GeomFromGeoJSON(catchment_polygon::text), 4326),
               ST_SetSRID(ST_MakePoint(${v.longitude}::float, ${v.latitude}::float), 4326)
@@ -7884,7 +8023,7 @@ var init_vgie = __esm({
           tenantId: req.tenantId,
           facilityId: Number(facilityId),
           microplanId: Number(microplanId),
-          name: `Outreach \u2014 ${village.name}`,
+          name: `Outreach - ${village.name}`,
           sessionType: "outreach",
           quarter: Math.ceil(((/* @__PURE__ */ new Date()).getMonth() + 1) / 3),
           year: (/* @__PURE__ */ new Date()).getFullYear(),
@@ -7944,13 +8083,11 @@ var init_vgie = __esm({
         if (apiKey) {
           for (const v of toProcess) {
             const prompt = `You are a public health vaccination planning expert. Generate a concise, actionable vaccination outreach recommendation for the following unserved settlement.
-
 Settlement: ${v.name}
 Population (under 5): ${v.under5Population ?? v.griddedPopulation ?? "unknown"}
 High risk: ${v.highRisk ? "Yes" : "No"}
 Hard to reach: ${v.isHardToReach ? "Yes" : "No"}
 Distance to nearest facility (km): ${v.distanceToFacility ?? "unknown"}
-
 Return a JSON object with these exact fields (no markdown, no explanation, raw JSON only):
 {
   "recommendationType": "short action title (max 60 chars)",
@@ -9323,7 +9460,7 @@ async function runMissingSettlementDetection(tenantId, options = {}) {
         (0, import_drizzle_orm13.eq)(candidateUnmappedSettlements.validationStatus, "pending")
       )
     );
-    const sql25 = `
+    const sql26 = `
       WITH admin_polys AS MATERIALIZED (
         SELECT
           b.admin_level,
@@ -9474,7 +9611,7 @@ async function runMissingSettlementDetection(tenantId, options = {}) {
         'pending'
       FROM enriched e
     `;
-    const result = await pool.query(sql25, [
+    const result = await pool.query(sql26, [
       tenantId,
       popThreshold,
       radiusMeters,
@@ -12113,10 +12250,10 @@ async function flushBatch(tenantId, rows) {
       r.density
     );
   }
-  const sql25 = `INSERT INTO population_grids
+  const sql26 = `INSERT INTO population_grids
       (tenant_id, population_total, under5_population, geojson, raster_cell, density_classification)
     VALUES ${valuePlaceholders.join(",")}`;
-  await pool.query(sql25, params);
+  await pool.query(sql26, params);
 }
 async function ingestWorldPopRaster(opts) {
   const {
@@ -12617,7 +12754,7 @@ async function computeOverdueFacilities(tenantId, scope = {}, now = /* @__PURE__
   };
   const scoped = enriched.filter(inScope);
   if (scoped.length === 0) return [];
-  const scopedIds = scoped.map((f) => f.id);
+  const scopedIds2 = scoped.map((f) => f.id);
   const visits = await db.select({
     facilityId: supervisionVisits.facilityId,
     conductedDate: supervisionVisits.conductedDate,
@@ -12628,7 +12765,7 @@ async function computeOverdueFacilities(tenantId, scope = {}, now = /* @__PURE__
     (0, import_drizzle_orm18.and)(
       (0, import_drizzle_orm18.eq)(supervisionVisits.tenantId, tenantId),
       (0, import_drizzle_orm18.eq)(supervisionVisits.status, "conducted"),
-      (0, import_drizzle_orm18.inArray)(supervisionVisits.facilityId, scopedIds)
+      (0, import_drizzle_orm18.inArray)(supervisionVisits.facilityId, scopedIds2)
     )
   );
   const lastByFac = /* @__PURE__ */ new Map();
@@ -13374,6 +13511,224 @@ var init_coverageImportService = __esm({
   }
 });
 
+// server/services/microplanPrefillService.ts
+var microplanPrefillService_exports = {};
+__export(microplanPrefillService_exports, {
+  MicroplanPrefillService: () => MicroplanPrefillService,
+  buildPopulationScenarios: () => buildPopulationScenarios,
+  canOverrideDenominator: () => canOverrideDenominator,
+  confidenceFromScore: () => confidenceFromScore,
+  featureFromGeometry: () => featureFromGeometry,
+  geometryFromGeoJson: () => geometryFromGeoJson,
+  methodForSource: () => methodForSource,
+  pointInsidePolygon: () => pointInsidePolygon,
+  polygonCentroid: () => polygonCentroid,
+  polygonInsidePolygon: () => polygonInsidePolygon,
+  polygonVertexCount: () => polygonVertexCount,
+  polygonsOverlap: () => polygonsOverlap,
+  sourceLabel: () => sourceLabel,
+  summarizeReadiness: () => summarizeReadiness,
+  validatePolygonGeometry: () => validatePolygonGeometry
+});
+function sourceLabel(source) {
+  return SOURCE_LABELS[source] ?? source.replace(/_/g, " ");
+}
+function methodForSource(source) {
+  if (source === "worldpop") return "Spatial population estimate";
+  if (source === "hmis") return "Imported programme denominator";
+  if (source === "survey" || source === "community_census") return "Direct community count";
+  return "Authoritative total";
+}
+function confidenceFromScore(score, source) {
+  const n = Number(score);
+  if (Number.isFinite(n)) {
+    if (n >= 80) return "high";
+    if (n >= 50) return "medium";
+    return "low";
+  }
+  if (source === "nso" || source === "hmis") return "high";
+  if (source === "worldpop") return "medium";
+  return "medium";
+}
+function buildPopulationScenarios(records, fallbackYear) {
+  const groups = /* @__PURE__ */ new Map();
+  for (const record of records ?? []) {
+    const source = String(record.source ?? "unknown");
+    const year = Number(record.year ?? fallbackYear);
+    const key = `${source}:${year}`;
+    groups.set(key, [...groups.get(key) ?? [], record]);
+  }
+  return Array.from(groups.entries()).map(([key, rows]) => {
+    const first = rows[0] ?? {};
+    const source = String(first.source ?? key.split(":")[0]);
+    const year = Number(first.year ?? fallbackYear);
+    const totalPopulation = rows.reduce((sum, row) => sum + (Number(row.totalPopulation) || 0), 0);
+    const targetInfants = rows.reduce((sum, row) => sum + (Number(row.under1Population) || 0), 0);
+    const underFive = rows.reduce((sum, row) => sum + (Number(row.under5Population) || 0), 0);
+    const pregnantWomen = rows.reduce((sum, row) => sum + (Number(row.pregnantWomen) || 0), 0);
+    const updatedDates = rows.map((row) => row.updatedAt || row.createdAt).filter(Boolean).map((d) => new Date(d));
+    const latest = updatedDates.length ? new Date(Math.max(...updatedDates.map((d) => d.getTime()))) : null;
+    const flags = [];
+    if (totalPopulation <= 0) flags.push("Population value is missing");
+    if (targetInfants <= 0) flags.push("Target infants not available");
+    if (rows.some((row) => String(row.approvalStatus ?? "draft") !== "approved")) flags.push("Some rows are not approved yet");
+    return {
+      id: `population:${source}:${year}`,
+      sourceType: source,
+      sourceName: sourceLabel(source),
+      method: methodForSource(source),
+      scenarioYear: year,
+      confidence: confidenceFromScore(first.confidenceScore, source),
+      status: rows.every((row) => String(row.approvalStatus ?? "draft") === "approved") ? "approved" : "draft",
+      version: String(first.metadata?.version ?? `v${year}`),
+      totalPopulation,
+      targetInfants: targetInfants || Math.round(totalPopulation * 0.035),
+      underFive,
+      pregnantWomen,
+      metadataSource: sourceLabel(source),
+      lastUpdated: latest ? latest.toISOString() : null,
+      createdBy: first.createdByUserId ?? null,
+      approvedBy: first.approvedByUserId ?? null,
+      dataQualityFlags: flags,
+      populationRecordIds: rows.map((row) => Number(row.id)).filter(Number.isFinite)
+    };
+  }).sort((a, b) => {
+    const approvedRank = Number(b.status === "approved") - Number(a.status === "approved");
+    if (approvedRank !== 0) return approvedRank;
+    return b.scenarioYear - a.scenarioYear;
+  });
+}
+function summarizeReadiness(items) {
+  const blocking = items.filter((item) => item.status === "blocking").length;
+  const warning = items.filter((item) => item.status === "warning").length;
+  return {
+    status: blocking > 0 ? "blocking" : warning > 0 ? "warning" : "ready",
+    blocking,
+    warning,
+    ready: items.filter((item) => item.status === "ready").length,
+    total: items.length
+  };
+}
+function geometryFromGeoJson(input) {
+  if (!input) return null;
+  if (input.type === "Feature") return input.geometry ?? null;
+  if (input.type === "Polygon" || input.type === "MultiPolygon") return input;
+  return null;
+}
+function featureFromGeometry(geometry) {
+  return { type: "Feature", properties: {}, geometry };
+}
+function polygonVertexCount(geometry) {
+  if (!geometry) return 0;
+  if (geometry.type === "Polygon") return geometry.coordinates?.[0]?.length ?? 0;
+  if (geometry.type === "MultiPolygon") return geometry.coordinates?.reduce((sum, poly) => sum + (poly?.[0]?.length ?? 0), 0) ?? 0;
+  return 0;
+}
+function validatePolygonGeometry(geojson) {
+  const geometry = geometryFromGeoJson(geojson);
+  const warnings = [];
+  const errors = [];
+  if (!geometry) {
+    return { valid: false, areaSqKm: null, warnings, errors: ["Map area is missing or invalid."] };
+  }
+  if (geometry.type !== "Polygon" && geometry.type !== "MultiPolygon") {
+    errors.push("Map area must be a polygon.");
+  }
+  if (polygonVertexCount(geometry) < 4) {
+    errors.push("Map area needs at least 3 valid points.");
+  }
+  let areaSqKm = null;
+  try {
+    const feature = featureFromGeometry(geometry);
+    const kinked = (0, import_turf.kinks)(feature);
+    if (kinked?.features?.length > 0) errors.push("Map area cannot self-intersect.");
+    areaSqKm = (0, import_turf.area)(feature) / 1e6;
+    if (areaSqKm <= 0) errors.push("Map area is too small to use.");
+    if (areaSqKm > 5e3) warnings.push("Map area is unusually large. Please review before approval.");
+  } catch {
+    errors.push("Map area needs correction before saving.");
+  }
+  return { valid: errors.length === 0, areaSqKm, warnings, errors };
+}
+function polygonCentroid(geojson) {
+  const geometry = geometryFromGeoJson(geojson);
+  if (!geometry) return null;
+  try {
+    const center = (0, import_turf.centroid)(featureFromGeometry(geometry));
+    const [longitude, latitude] = center.geometry.coordinates;
+    return { latitude, longitude };
+  } catch {
+    return null;
+  }
+}
+function polygonInsidePolygon(childGeoJson, parentGeoJson) {
+  const child = geometryFromGeoJson(childGeoJson);
+  const parent = geometryFromGeoJson(parentGeoJson);
+  if (!child || !parent) return null;
+  try {
+    return (0, import_turf.booleanWithin)(featureFromGeometry(child), featureFromGeometry(parent));
+  } catch {
+    return null;
+  }
+}
+function pointInsidePolygon(lat, lng, polygonGeoJson) {
+  const latNum = Number(lat);
+  const lngNum = Number(lng);
+  const geometry = geometryFromGeoJson(polygonGeoJson);
+  if (!Number.isFinite(latNum) || !Number.isFinite(lngNum) || !geometry) return null;
+  try {
+    return (0, import_turf.booleanPointInPolygon)((0, import_turf.point)([lngNum, latNum]), featureFromGeometry(geometry));
+  } catch {
+    return null;
+  }
+}
+function polygonsOverlap(a, b) {
+  const geomA = geometryFromGeoJson(a);
+  const geomB = geometryFromGeoJson(b);
+  if (!geomA || !geomB) return false;
+  try {
+    const intersection = (0, import_turf.intersect)({ type: "FeatureCollection", features: [featureFromGeometry(geomA), featureFromGeometry(geomB)] });
+    return !!intersection && (0, import_turf.area)(intersection) > 0;
+  } catch {
+    return false;
+  }
+}
+function canOverrideDenominator(user) {
+  const roles = new Set([user?.role, ...Array.isArray(user?.roles) ? user.roles : []].filter(Boolean));
+  return ["district_manager", "provincial_coordinator", "national_admin", "gis_specialist"].some((role) => roles.has(role));
+}
+var import_turf, SOURCE_LABELS, MicroplanPrefillService;
+var init_microplanPrefillService = __esm({
+  "server/services/microplanPrefillService.ts"() {
+    "use strict";
+    import_turf = require("@turf/turf");
+    SOURCE_LABELS = {
+      nso: "NSO authoritative total",
+      hmis: "Imported DHIS2/HMIS denominator",
+      worldpop: "WorldPop raster estimate",
+      survey: "Local survey",
+      community_census: "Community census"
+    };
+    MicroplanPrefillService = {
+      async buildBundle(tenantId, facilityId, year, quarter, populationSource = "worldpop") {
+        return {
+          tenantId,
+          facilityId,
+          year,
+          quarter,
+          populationSource,
+          facility: null,
+          communities: [],
+          populationScenarios: [],
+          selectedScenario: null,
+          readiness: summarizeReadiness([]),
+          canOverrideDenominator: false
+        };
+      }
+    };
+  }
+});
+
 // server/services/populationIntelligenceService.ts
 var populationIntelligenceService_exports = {};
 __export(populationIntelligenceService_exports, {
@@ -13698,16 +14053,27 @@ function resolveRoleScopeIds(dbUser) {
   const sFac = Array.isArray(scope.facilities) ? scope.facilities.map(Number) : [];
   const sDist = Array.isArray(scope.districts) ? scope.districts.map(Number) : [];
   const sProv = Array.isArray(scope.provinces) ? scope.provinces.map(Number) : [];
-  const roleList = [
-    dbUser?.role,
-    ...Array.isArray(dbUser?.roles) ? dbUser.roles : []
-  ].filter(Boolean);
-  const has = (r) => roleList.includes(r);
+  const primaryRole = String(dbUser?.role || "");
+  const secondaryRoles = Array.isArray(dbUser?.roles) ? dbUser.roles : [];
+  const has = (r) => primaryRole === r || secondaryRoles.includes(r);
+  const primaryIs = (r) => primaryRole === r;
   let provinceIds = [];
   let districtIds = [];
   let facilityIds = [];
   let isScopedRole = false;
-  if (has("provincial_coordinator")) {
+  if (primaryIs("facility_clerk") || primaryIs("facility_in_charge") || primaryIs("facility_partner")) {
+    isScopedRole = true;
+    facilityIds = dbUser?.facilityId ? [Number(dbUser.facilityId)] : sFac;
+  } else if (primaryIs("district_manager")) {
+    isScopedRole = true;
+    districtIds = dbUser?.districtId ? [Number(dbUser.districtId)] : sDist;
+    facilityIds = sFac;
+  } else if (primaryIs("provincial_coordinator")) {
+    isScopedRole = true;
+    provinceIds = dbUser?.provinceId ? [Number(dbUser.provinceId)] : sProv;
+    districtIds = sDist;
+    facilityIds = sFac;
+  } else if (has("provincial_coordinator")) {
     isScopedRole = true;
     provinceIds = sProv.length ? sProv : dbUser?.provinceId ? [Number(dbUser.provinceId)] : [];
     districtIds = sDist;
@@ -13716,9 +14082,6 @@ function resolveRoleScopeIds(dbUser) {
     isScopedRole = true;
     districtIds = sDist.length ? sDist : dbUser?.districtId ? [Number(dbUser.districtId)] : [];
     facilityIds = sFac;
-  } else if (has("facility_clerk") || has("facility_in_charge")) {
-    isScopedRole = true;
-    facilityIds = sFac.length ? sFac : dbUser?.facilityId ? [Number(dbUser.facilityId)] : [];
   } else {
     if (sFac.length || sDist.length || sProv.length) {
       provinceIds = sProv;
@@ -13737,9 +14100,11 @@ function resolveRoleScopeIds(dbUser) {
 }
 async function userCanAccessGeo(dbUser, tenantId, geo) {
   if (dbUser?.isPlatformAdmin === true) return true;
-  const seesWholeTenant = dbUser?.role === "national_admin" || dbUser?.role === "gis_specialist" || Array.isArray(dbUser?.roles) && dbUser.roles.some(
+  const primaryRole = String(dbUser?.role || "");
+  const isPrimaryFacilityStaff = primaryRole === "facility_clerk" || primaryRole === "facility_in_charge" || primaryRole === "facility_partner";
+  const seesWholeTenant = !isPrimaryFacilityStaff && (dbUser?.role === "national_admin" || dbUser?.role === "gis_specialist" || Array.isArray(dbUser?.roles) && dbUser.roles.some(
     (r) => r === "national_admin" || r === "gis_specialist"
-  );
+  ));
   if (seesWholeTenant) return true;
   const isVisitingOtherTenant = !!dbUser?.tenantId && !!tenantId && tenantId !== dbUser.tenantId;
   if (isVisitingOtherTenant) return true;
@@ -13787,9 +14152,11 @@ async function getGeoScope(dbUser, tenantId) {
     facilityIds: /* @__PURE__ */ new Set()
   };
   if (dbUser?.isPlatformAdmin === true) return allScope;
-  const seesWholeTenant = dbUser?.role === "national_admin" || dbUser?.role === "gis_specialist" || Array.isArray(dbUser?.roles) && dbUser.roles.some(
+  const primaryRole = String(dbUser?.role || "");
+  const isPrimaryFacilityStaff = primaryRole === "facility_clerk" || primaryRole === "facility_in_charge" || primaryRole === "facility_partner";
+  const seesWholeTenant = !isPrimaryFacilityStaff && (dbUser?.role === "national_admin" || dbUser?.role === "gis_specialist" || Array.isArray(dbUser?.roles) && dbUser.roles.some(
     (r) => r === "national_admin" || r === "gis_specialist"
-  );
+  ));
   if (seesWholeTenant) return allScope;
   const isVisitingOtherTenant = !!dbUser?.tenantId && !!tenantId && tenantId !== dbUser.tenantId;
   if (isVisitingOtherTenant) return allScope;
@@ -14118,9 +14485,9 @@ function loadZambiaGeoJSON() {
 function isLocationOutsideZambia(lat, lng) {
   const geojson = loadZambiaGeoJSON();
   if (!geojson) return false;
-  const pt = (0, import_turf.point)([lng, lat]);
+  const pt = (0, import_turf2.point)([lng, lat]);
   for (const feature of geojson.features) {
-    if ((0, import_turf.booleanPointInPolygon)(pt, feature)) {
+    if ((0, import_turf2.booleanPointInPolygon)(pt, feature)) {
       return false;
     }
   }
@@ -14148,7 +14515,11 @@ async function initOutsideVillagesCache() {
   }
 }
 async function registerRoutes(httpServer2, app2) {
-  await initOutsideVillagesCache();
+  if (process.env.SKIP_OUTSIDE_VILLAGES_CACHE === "1") {
+    console.log("[GeoCache] Outside-Zambia cache initialization skipped.");
+  } else {
+    await initOutsideVillagesCache();
+  }
   await setupAuth(app2);
   registerSsoRoutes(app2);
   registerPasswordAuthRoutes(app2);
@@ -15155,7 +15526,8 @@ async function registerRoutes(httpServer2, app2) {
           settings: {
             isDemo: s.isDemo === true,
             mapCenter: Array.isArray(s.mapCenter) ? s.mapCenter : void 0,
-            mapZoom: typeof s.mapZoom === "number" ? s.mapZoom : void 0
+            mapZoom: typeof s.mapZoom === "number" ? s.mapZoom : void 0,
+            workspaceStatus: typeof s.workspaceStatus === "string" ? s.workspaceStatus : void 0
           }
         };
       }));
@@ -15972,7 +16344,7 @@ async function registerRoutes(httpServer2, app2) {
   app2.get("/api/llgs", ...auth, async (req, res) => {
     try {
       const districtId = req.query.districtId ? parseInt(req.query.districtId) : void 0;
-      res.set("Cache-Control", "private, max-age=300, stale-while-revalidate=60");
+      res.set("Cache-Control", "no-store, max-age=0, must-revalidate");
       res.json(await storage.getLlgs(req.tenantId, districtId));
     } catch (error) {
       console.error("Error fetching LLGs:", error);
@@ -16018,7 +16390,7 @@ async function registerRoutes(httpServer2, app2) {
       const dbUser = req.dbUser;
       const scope = await getGeoScope(dbUser, req.tenantId);
       const regionId = req.query.regionId ? parseInt(req.query.regionId) : void 0;
-      res.set("Cache-Control", "private, max-age=300, stale-while-revalidate=60");
+      res.set("Cache-Control", "no-store, max-age=0, must-revalidate");
       const all = await storage.getProvinces(req.tenantId, regionId);
       if (scope.all) return res.json(all);
       const visibleProvinceIds = new Set(scope.provinceIds);
@@ -16093,7 +16465,7 @@ async function registerRoutes(httpServer2, app2) {
       const dbUser = req.dbUser;
       const scope = await getGeoScope(dbUser, req.tenantId);
       const provinceId = req.query.provinceId ? parseInt(req.query.provinceId) : void 0;
-      res.set("Cache-Control", "private, max-age=300, stale-while-revalidate=60");
+      res.set("Cache-Control", "no-store, max-age=0, must-revalidate");
       const all = await storage.getDistricts(req.tenantId, provinceId);
       const visibleDistrictIds = new Set(scope.districtIds);
       if (scope.facilityIds.size > 0) {
@@ -16160,7 +16532,7 @@ async function registerRoutes(httpServer2, app2) {
     try {
       const dbUser = req.dbUser;
       const districtId = req.query.districtId ? parseInt(req.query.districtId) : void 0;
-      res.set("Cache-Control", "private, max-age=300, stale-while-revalidate=60");
+      res.set("Cache-Control", "no-store, max-age=0, must-revalidate");
       const scope = await getGeoScope(dbUser, req.tenantId);
       const all = await storage.getFacilities(req.tenantId, districtId);
       const result = scope.all ? all : all.filter((f) => scope.facilityIds.has(f.id));
@@ -17486,7 +17858,7 @@ async function registerRoutes(httpServer2, app2) {
       if (!geojson) {
         return res.status(400).json({ message: "GeoJSON is required" });
       }
-      const areaSqM = (0, import_turf.area)(geojson);
+      const areaSqM = (0, import_turf2.area)(geojson);
       const areaSqKm = String((areaSqM / 1e6).toFixed(4));
       let geom = geojson;
       if (geojson.type === "Feature") {
@@ -17702,7 +18074,7 @@ async function registerRoutes(httpServer2, app2) {
       const dbUser = req.dbUser;
       const districtId = req.query.districtId ? parseInt(req.query.districtId) : void 0;
       const facilityId = req.query.facilityId ? parseInt(req.query.facilityId) : void 0;
-      res.set("Cache-Control", "private, max-age=300, stale-while-revalidate=60");
+      res.set("Cache-Control", "no-store, max-age=0, must-revalidate");
       const scope = await getGeoScope(dbUser, req.tenantId);
       const all = await storage.getVillages(req.tenantId, districtId, facilityId);
       let result = scope.all ? all : all.filter(
@@ -17712,7 +18084,7 @@ async function registerRoutes(httpServer2, app2) {
         })
       );
       result = result.filter((v) => !outsideVillageIds.has(Number(v.id)));
-      setCacheHeaders(res, 600);
+      res.set("Pragma", "no-cache");
       res.json(result);
     } catch (error) {
       console.error("Error fetching villages:", error);
@@ -17774,7 +18146,7 @@ async function registerRoutes(httpServer2, app2) {
     if (!feat) return [];
     let newArea = 0;
     try {
-      newArea = (0, import_turf.area)(feat);
+      newArea = (0, import_turf2.area)(feat);
     } catch {
       return [];
     }
@@ -17788,14 +18160,14 @@ async function registerRoutes(httpServer2, app2) {
       if (!otherFeat) continue;
       let inter = null;
       try {
-        inter = (0, import_turf.intersect)((0, import_turf.featureCollection)([feat, otherFeat]));
+        inter = (0, import_turf2.intersect)((0, import_turf2.featureCollection)([feat, otherFeat]));
       } catch {
         continue;
       }
       if (!inter) continue;
       let interArea = 0;
       try {
-        interArea = (0, import_turf.area)(inter);
+        interArea = (0, import_turf2.area)(inter);
       } catch {
         continue;
       }
@@ -18313,8 +18685,8 @@ async function registerRoutes(httpServer2, app2) {
       if (ownFeat && otherFeat) {
         let intersects = false;
         try {
-          const inter = (0, import_turf.intersect)((0, import_turf.featureCollection)([ownFeat, otherFeat]));
-          intersects = !!inter && (0, import_turf.area)(inter) > 0;
+          const inter = (0, import_turf2.intersect)((0, import_turf2.featureCollection)([ownFeat, otherFeat]));
+          intersects = !!inter && (0, import_turf2.area)(inter) > 0;
         } catch {
           intersects = false;
         }
@@ -18504,7 +18876,7 @@ Note from the requester: ${conflict.note}` : ""}`,
         }
       }
       if (!(0, import_fs5.existsSync)(resourcesDir)) {
-        return res.status(404).json({ message: "Resources directory not found in server root or parent directory." });
+        return res.status(204).end();
       }
       const reqFile = req.query.file;
       let geotiffFile = "";
@@ -18520,7 +18892,7 @@ Note from the requester: ${conflict.note}` : ""}`,
       if (!geotiffFile) {
         const tenant = await storage.getTenant(req.tenantId);
         if (!tenant) {
-          return res.status(404).json({ message: "Active country tenant not found." });
+          return res.status(204).end();
         }
         const tenantCode = tenant.code.toLowerCase();
         const countryCode = (tenant.countryCode || "").toLowerCase();
@@ -18553,7 +18925,7 @@ Note from the requester: ${conflict.note}` : ""}`,
         }
       }
       if (!geotiffFile) {
-        return res.status(404).json({ message: "No GeoTIFF population raster file found." });
+        return res.status(204).end();
       }
       const filePath = (0, import_path4.join)(resourcesDir, geotiffFile);
       const { statSync } = await import("fs");
@@ -18897,26 +19269,6 @@ Note from the requester: ${conflict.note}` : ""}`,
       res.status(500).json({ message: "Failed to fetch population data" });
     }
   });
-  app2.get("/api/population/:id", ...auth, async (req, res) => {
-    try {
-      const dbUser = req.dbUser;
-      const parsedId = parseInt(req.params.id);
-      if (isNaN(parsedId)) return res.status(400).json({ message: "Invalid population data id" });
-      const pop = await storage.getPopulationDataById(req.tenantId, parsedId);
-      if (!pop) return res.status(404).json({ message: "Population data not found" });
-      if (!await userCanAccessGeo(dbUser, req.tenantId, {
-        facilityId: pop.facilityId,
-        districtId: pop.districtId,
-        provinceId: pop.provinceId
-      })) {
-        return res.status(404).json({ message: "Population data not found" });
-      }
-      res.json(pop);
-    } catch (error) {
-      console.error("Error fetching population data:", error);
-      res.status(500).json({ message: "Failed to fetch population data" });
-    }
-  });
   app2.get("/api/population/worldpop-point", ...auth, async (req, res) => {
     const lat = parseFloat(req.query.lat);
     const lng = parseFloat(req.query.lng);
@@ -19010,6 +19362,26 @@ Note from the requester: ${conflict.note}` : ""}`,
       [tenantId, pop, Math.round(pop * 0.17), bbox]
     );
   }
+  app2.get("/api/population/:id", ...auth, async (req, res) => {
+    try {
+      const dbUser = req.dbUser;
+      const parsedId = parseInt(req.params.id);
+      if (isNaN(parsedId)) return res.status(400).json({ message: "Invalid population data id" });
+      const pop = await storage.getPopulationDataById(req.tenantId, parsedId);
+      if (!pop) return res.status(404).json({ message: "Population data not found" });
+      if (!await userCanAccessGeo(dbUser, req.tenantId, {
+        facilityId: pop.facilityId,
+        districtId: pop.districtId,
+        provinceId: pop.provinceId
+      })) {
+        return res.status(404).json({ message: "Population data not found" });
+      }
+      res.json(pop);
+    } catch (error) {
+      console.error("Error fetching population data:", error);
+      res.status(500).json({ message: "Failed to fetch population data" });
+    }
+  });
   app2.get("/api/spatial/uncovered-communities", ...auth, async (req, res) => {
     try {
       const facilityId = req.query.facilityId ? parseInt(req.query.facilityId) : null;
@@ -19042,7 +19414,7 @@ Note from the requester: ${conflict.note}` : ""}`,
       }
       const villagesInCatchment = await pool.query(
         `SELECT v.id, v.name, v.settlement_type, v.latitude, v.longitude,
-                v.high_risk, v.population AS hmis_pop, v.total_catchment_population, v.under5_population,
+                v.high_risk, v.total_catchment_population AS hmis_pop, v.total_catchment_population, v.under5_population,
                 ST_Distance(
                   ST_SetSRID(ST_MakePoint($2, $3), 4326)::geography,
                   ST_SetSRID(ST_MakePoint(v.longitude::double precision, v.latitude::double precision), 4326)::geography
@@ -19050,6 +19422,8 @@ Note from the requester: ${conflict.note}` : ""}`,
                 COALESCE(
                   (SELECT SUM(g.population_total) FROM population_grids g
                    WHERE g.tenant_id = $1
+                     AND g.geometry IS NOT NULL
+                     AND ST_IsValid(g.geometry)
                      AND ST_DWithin(g.geometry::geography,
                        ST_SetSRID(ST_MakePoint(v.longitude::double precision, v.latitude::double precision), 4326)::geography,
                        1000)
@@ -19873,6 +20247,36 @@ Note from the requester: ${conflict.note}` : ""}`,
     } catch (error) {
       console.error("Error deleting master microplan:", error);
       res.status(500).json({ message: "Failed to delete master microplan" });
+    }
+  });
+  app2.get("/api/microplans/:id/denominator-scenario", ...auth, async (req, res) => {
+    try {
+      const scenario = await DenominatorHarmonisationService.getActiveScenario(parseInt(req.params.id));
+      if (!scenario) return res.status(404).json({ message: "No active scenario found" });
+      res.json(scenario);
+    } catch (e) {
+      console.error(e);
+      res.status(500).json({ message: "Error fetching scenario" });
+    }
+  });
+  app2.post("/api/microplans/:id/denominator-scenario", ...auth, async (req, res) => {
+    try {
+      const userId = req.dbUser?.id;
+      const microplanId = parseInt(req.params.id);
+      const { facilityId, selectedSource, parentTotalPopulation } = req.body;
+      if (!selectedSource || !facilityId) return res.status(400).json({ message: "Missing required fields" });
+      const scenario = await DenominatorHarmonisationService.generateScenario({
+        microplanId,
+        tenantId: req.tenantId,
+        facilityId,
+        selectedSource,
+        parentTotalPopulation,
+        userId
+      });
+      res.json(scenario);
+    } catch (e) {
+      console.error("Generate Scenario Error:", e);
+      res.status(500).json({ message: "Error generating scenario" });
     }
   });
   async function overlayCampaignFromParent(tenantId, sessions2) {
@@ -21602,22 +22006,56 @@ Note from the requester: ${conflict.note}` : ""}`,
   app2.get("/api/stats", ...auth, async (req, res) => {
     try {
       const tenantId = req.tenantId;
+      let scope = await getGeoScope(req.dbUser, tenantId);
+      const requestedFacilityId = req.query.facilityId ? Number(req.query.facilityId) : null;
+      if (requestedFacilityId && Number.isFinite(requestedFacilityId)) {
+        const allowed = await userCanAccessGeo(req.dbUser, tenantId, { facilityId: requestedFacilityId });
+        if (!allowed) {
+          return res.status(403).json({ message: "Forbidden: facility is outside your assigned scope." });
+        }
+        scope = {
+          all: false,
+          provinceIds: /* @__PURE__ */ new Set(),
+          districtIds: /* @__PURE__ */ new Set(),
+          facilityIds: /* @__PURE__ */ new Set([requestedFacilityId])
+        };
+      }
+      if (!scope.all && scope.facilityIds.size === 0 && scope.districtIds.size === 0 && scope.provinceIds.size === 0) {
+        return res.json({
+          totalFacilities: 0,
+          activeFacilities: 0,
+          totalVillages: 0,
+          assignedVillages: 0,
+          htrVillages: 0,
+          totalSessions: 0,
+          totalPopulation: 0,
+          submittedPlans: 0,
+          approvedPlans: 0,
+          autoApprovedPlans: 0,
+          facilitiesWithApprovedPlans: 0
+        });
+      }
+      const facList = scope.all ? "" : Array.from(scope.facilityIds).join(",") || "0";
+      const distList = scope.all ? "" : Array.from(scope.districtIds).join(",") || "0";
+      const facCond = scope.all ? import_drizzle_orm21.sql`` : import_drizzle_orm21.sql`AND id = ANY(ARRAY[${import_drizzle_orm21.sql.raw(facList)}]::int[])`;
+      const facRefCond = scope.all ? import_drizzle_orm21.sql`` : import_drizzle_orm21.sql`AND facility_id = ANY(ARRAY[${import_drizzle_orm21.sql.raw(facList)}]::int[])`;
+      const villCond = scope.all ? import_drizzle_orm21.sql`` : import_drizzle_orm21.sql`AND (assigned_facility_id = ANY(ARRAY[${import_drizzle_orm21.sql.raw(facList)}]::int[]) OR district_id = ANY(ARRAY[${import_drizzle_orm21.sql.raw(distList)}]::int[]))`;
       const result = await db.execute(import_drizzle_orm21.sql`
         SELECT
-          (SELECT COUNT(*)::int          FROM facilities      WHERE tenant_id = ${tenantId})                            AS "totalFacilities",
-          (SELECT COUNT(*)::int          FROM facilities      WHERE tenant_id = ${tenantId} AND is_active = true)       AS "activeFacilities",
-          (SELECT COUNT(*)::int          FROM villages        WHERE tenant_id = ${tenantId})                            AS "totalVillages",
-          (SELECT COUNT(*)::int          FROM villages        WHERE tenant_id = ${tenantId} AND assigned_facility_id IS NOT NULL AND CAST(distance_to_facility AS numeric) <= 5) AS "assignedVillages",
-          (SELECT COUNT(*)::int          FROM villages        WHERE tenant_id = ${tenantId} AND is_hard_to_reach = true) AS "htrVillages",
-          (SELECT COUNT(*)::int          FROM session_plans   WHERE tenant_id = ${tenantId})                            AS "totalSessions",
-          (SELECT COALESCE(SUM(total_population), 0)::bigint FROM population_data WHERE tenant_id = ${tenantId})       AS "totalPopulation",
-          (SELECT COUNT(*)::int          FROM microplans      WHERE tenant_id = ${tenantId} AND status = 'pending')     AS "submittedPlans",
-          (SELECT COUNT(*)::int          FROM microplans      WHERE tenant_id = ${tenantId} AND status = 'approved')    AS "approvedPlans",
-          (SELECT COUNT(*)::int          FROM microplans      WHERE tenant_id = ${tenantId} AND status = 'auto_approved') AS "autoApprovedPlans",
-          (SELECT COUNT(DISTINCT facility_id)::int FROM microplans WHERE tenant_id = ${tenantId} AND (status = 'approved' OR status = 'auto_approved')) AS "facilitiesWithApprovedPlans"
+          (SELECT COUNT(*)::int          FROM facilities      WHERE tenant_id = ${tenantId} ${facCond})                            AS "totalFacilities",
+          (SELECT COUNT(*)::int          FROM facilities      WHERE tenant_id = ${tenantId} AND is_active = true ${facCond})       AS "activeFacilities",
+          (SELECT COUNT(*)::int          FROM villages        WHERE tenant_id = ${tenantId} ${villCond})                            AS "totalVillages",
+          (SELECT COUNT(*)::int          FROM villages        WHERE tenant_id = ${tenantId} AND assigned_facility_id IS NOT NULL AND CAST(distance_to_facility AS numeric) <= 5 ${villCond}) AS "assignedVillages",
+          (SELECT COUNT(*)::int          FROM villages        WHERE tenant_id = ${tenantId} AND is_hard_to_reach = true ${villCond}) AS "htrVillages",
+          (SELECT COUNT(*)::int          FROM session_plans   WHERE tenant_id = ${tenantId} ${facRefCond})                            AS "totalSessions",
+          (SELECT COALESCE(SUM(total_population), 0)::bigint FROM population_data WHERE tenant_id = ${tenantId} ${facRefCond})       AS "totalPopulation",
+          (SELECT COUNT(*)::int          FROM microplans      WHERE tenant_id = ${tenantId} AND status = 'pending' ${facRefCond})     AS "submittedPlans",
+          (SELECT COUNT(*)::int          FROM microplans      WHERE tenant_id = ${tenantId} AND status = 'approved' ${facRefCond})    AS "approvedPlans",
+          (SELECT COUNT(*)::int          FROM microplans      WHERE tenant_id = ${tenantId} AND status = 'auto_approved' ${facRefCond}) AS "autoApprovedPlans",
+          (SELECT COUNT(DISTINCT facility_id)::int FROM microplans WHERE tenant_id = ${tenantId} AND (status = 'approved' OR status = 'auto_approved') ${facRefCond}) AS "facilitiesWithApprovedPlans"
       `);
       const row = result.rows?.[0] ?? {};
-      res.set("Cache-Control", "private, max-age=300, stale-while-revalidate=60");
+      res.set("Cache-Control", "no-store, max-age=0, must-revalidate");
       res.json({
         totalFacilities: Number(row.totalFacilities ?? 0),
         activeFacilities: Number(row.activeFacilities ?? 0),
@@ -22033,7 +22471,7 @@ Note from the requester: ${conflict.note}` : ""}`,
       const rawGeom = parsed.data.geojson.type === "Feature" ? parsed.data.geojson.geometry : parsed.data.geojson;
       let areaSqKm;
       try {
-        const areaM2 = (0, import_turf.area)({ type: "Feature", properties: {}, geometry: rawGeom });
+        const areaM2 = (0, import_turf2.area)({ type: "Feature", properties: {}, geometry: rawGeom });
         areaSqKm = (areaM2 / 1e6).toFixed(4);
       } catch {
       }
@@ -23183,6 +23621,10 @@ Note from the requester: ${conflict.note}` : ""}`,
       res.status(500).json({ message: "Failed to fetch client vaccinations" });
     }
   });
+  function isInvalidGenericImmunizationDoseName(value) {
+    const normalized = String(value || "").trim().toUpperCase().replace(/[^A-Z0-9]+/g, "");
+    return ["PENTA", "PENTAVALENT", "OPV", "IPV", "PCV", "ROTA", "ROTAVIRUS", "MR", "MEASLESRUBELLA"].includes(normalized);
+  }
   app2.post("/api/clients/:id/vaccinate", isAuthenticated, requireTenant, requireDbUser, async (req, res) => {
     try {
       const client3 = await storage.getClient(req.tenantId, req.params.id);
@@ -23190,10 +23632,14 @@ Note from the requester: ${conflict.note}` : ""}`,
       if (client3.facilityId && !await userCanAccessGeo(req.dbUser, req.tenantId, { facilityId: Number(client3.facilityId) })) {
         return res.status(403).json({ message: "Forbidden: no access to this client's geographic scope." });
       }
-      const schema = insertClientVaccinationSchema.omit({ clientId: true });
+      const schema = insertClientVaccinationSchema.omit({ clientId: true, tenantId: true, administeredByUserId: true });
       const parsed = schema.parse(req.body);
+      if (isInvalidGenericImmunizationDoseName(parsed.vaccineName)) {
+        return res.status(400).json({ message: "Please select a scheduled dose such as Penta-1, OPV-0, PCV-2, or MR-1 instead of a generic vaccine series." });
+      }
       const vaccination = await storage.createClientVaccination(req.tenantId, {
         ...parsed,
+        tenantId: req.tenantId,
         clientId: req.params.id,
         administeredByUserId: req.user?.id ?? req.user?.claims?.sub ?? null
       });
@@ -23219,8 +23665,12 @@ Note from the requester: ${conflict.note}` : ""}`,
       if (client3.facilityId && !await userCanAccessGeo(req.dbUser, req.tenantId, { facilityId: Number(client3.facilityId) })) {
         return res.status(403).json({ message: "Forbidden: no access to this client's geographic scope." });
       }
-      const schema = import_zod3.z.array(insertClientVaccinationSchema.omit({ clientId: true }));
+      const schema = import_zod3.z.array(insertClientVaccinationSchema.omit({ clientId: true, tenantId: true, administeredByUserId: true }));
       const parsed = schema.parse(req.body);
+      const genericDose = parsed.find((item) => isInvalidGenericImmunizationDoseName(item.vaccineName));
+      if (genericDose) {
+        return res.status(400).json({ message: "Please select scheduled doses such as Penta-1, OPV-0, PCV-2, or MR-1 instead of generic vaccine series." });
+      }
       const results = await db.transaction(async (tx) => {
         const rows = [];
         for (const item of parsed) {
@@ -24151,8 +24601,26 @@ Note from the requester: ${conflict.note}` : ""}`,
   });
   app2.get("/api/settlements", isAuthenticated, requireTenant, async (req, res) => {
     try {
+      const scope = await getGeoScope(req.dbUser, req.tenantId);
       const { province, district, ward, hardToReach, status } = req.query;
       const queryConditions = [(0, import_drizzle_orm21.eq)(settlementsMaster.tenantId, req.tenantId)];
+      if (!scope.all) {
+        let allowedDistrictNames = [];
+        if (scope.districtIds.size > 0 || scope.provinceIds.size > 0) {
+          const allDistricts = await storage.getDistricts(req.tenantId);
+          allowedDistrictNames = allDistricts.filter((d) => scope.districtIds.has(d.id) || scope.provinceIds.size > 0 && scope.provinceIds.has(d.provinceId)).map((d) => d.name);
+        } else if (scope.facilityIds.size > 0) {
+          const facilityIdArr = Array.from(scope.facilityIds);
+          const facilityRows = await db.select({ districtId: facilities.districtId }).from(facilities).where((0, import_drizzle_orm21.inArray)(facilities.id, facilityIdArr));
+          const districtIdSet = new Set(facilityRows.map((f) => f.districtId).filter(Boolean));
+          if (districtIdSet.size > 0) {
+            const allDistricts = await storage.getDistricts(req.tenantId);
+            allowedDistrictNames = allDistricts.filter((d) => districtIdSet.has(d.id)).map((d) => d.name);
+          }
+        }
+        if (allowedDistrictNames.length === 0) return res.json([]);
+        queryConditions.push((0, import_drizzle_orm21.inArray)(settlementsMaster.districtName, allowedDistrictNames));
+      }
       if (province) queryConditions.push((0, import_drizzle_orm21.eq)(settlementsMaster.provinceName, province));
       if (district) queryConditions.push((0, import_drizzle_orm21.eq)(settlementsMaster.districtName, district));
       if (ward) queryConditions.push((0, import_drizzle_orm21.eq)(settlementsMaster.wardName, ward));
@@ -25321,7 +25789,7 @@ Note from the requester: ${conflict.note}` : ""}`,
         const withReview = facilitiesOut.filter((f) => f.hasReview).length;
         let trend;
         if (includeTrend) {
-          const scopedIds = new Set(scoped.map((f) => f.facilityId));
+          const scopedIds2 = new Set(scoped.map((f) => f.facilityId));
           const periods = [];
           let py = year;
           let pq = quarter;
@@ -25341,9 +25809,9 @@ Note from the requester: ${conflict.note}` : ""}`,
                 quarter: p.quarter
               });
               const reviewed = rrows.filter(
-                (r) => scopedIds.has(r.facilityId)
+                (r) => scopedIds2.has(r.facilityId)
               ).length;
-              const t = scopedIds.size;
+              const t = scopedIds2.size;
               return {
                 year: p.year,
                 quarter: p.quarter,
@@ -27154,16 +27622,25 @@ Note from the requester: ${conflict.note}` : ""}`,
         }
         const { message } = parsed.data;
         const tenantId = req.tenantId;
-        const statsRes = await db.execute(import_drizzle_orm21.sql`
-          SELECT
-            (SELECT COUNT(*)::int FROM facilities WHERE tenant_id = ${tenantId}) AS "totalFacilities",
-            (SELECT COUNT(*)::int FROM facilities WHERE tenant_id = ${tenantId} AND is_active = true) AS "activeFacilities",
-            (SELECT COUNT(*)::int FROM villages WHERE tenant_id = ${tenantId}) AS "totalVillages",
-            (SELECT COUNT(*)::int FROM villages WHERE tenant_id = ${tenantId} AND is_hard_to_reach = true) AS "htrVillages",
-            (SELECT COUNT(*)::int FROM session_plans WHERE tenant_id = ${tenantId}) AS "totalSessions",
-            (SELECT COALESCE(SUM(total_population), 0)::bigint FROM population_data WHERE tenant_id = ${tenantId}) AS "totalPopulation"
-        `);
-        const statsRow = statsRes.rows?.[0] ?? {};
+        const scope = await getGeoScope(req.dbUser, tenantId);
+        let statsRow = { totalFacilities: 0, activeFacilities: 0, totalVillages: 0, htrVillages: 0, totalSessions: 0, totalPopulation: 0 };
+        if (scope.all || scope.facilityIds.size > 0 || scope.districtIds.size > 0 || scope.provinceIds.size > 0) {
+          const facList = scope.all ? "" : Array.from(scope.facilityIds).join(",") || "0";
+          const distList = scope.all ? "" : Array.from(scope.districtIds).join(",") || "0";
+          const facCond = scope.all ? import_drizzle_orm21.sql`` : import_drizzle_orm21.sql`AND id = ANY(ARRAY[${import_drizzle_orm21.sql.raw(facList)}]::int[])`;
+          const facRefCond = scope.all ? import_drizzle_orm21.sql`` : import_drizzle_orm21.sql`AND facility_id = ANY(ARRAY[${import_drizzle_orm21.sql.raw(facList)}]::int[])`;
+          const villCond = scope.all ? import_drizzle_orm21.sql`` : import_drizzle_orm21.sql`AND (assigned_facility_id = ANY(ARRAY[${import_drizzle_orm21.sql.raw(facList)}]::int[]) OR district_id = ANY(ARRAY[${import_drizzle_orm21.sql.raw(distList)}]::int[]))`;
+          const statsRes = await db.execute(import_drizzle_orm21.sql`
+            SELECT
+              (SELECT COUNT(*)::int FROM facilities WHERE tenant_id = ${tenantId} ${facCond}) AS "totalFacilities",
+              (SELECT COUNT(*)::int FROM facilities WHERE tenant_id = ${tenantId} AND is_active = true ${facCond}) AS "activeFacilities",
+              (SELECT COUNT(*)::int FROM villages WHERE tenant_id = ${tenantId} ${villCond}) AS "totalVillages",
+              (SELECT COUNT(*)::int FROM villages WHERE tenant_id = ${tenantId} AND is_hard_to_reach = true ${villCond}) AS "htrVillages",
+              (SELECT COUNT(*)::int FROM session_plans WHERE tenant_id = ${tenantId} ${facRefCond}) AS "totalSessions",
+              (SELECT COALESCE(SUM(total_population), 0)::bigint FROM population_data WHERE tenant_id = ${tenantId} ${facRefCond}) AS "totalPopulation"
+          `);
+          statsRow = statsRes.rows?.[0] ?? {};
+        }
         const budgetRes = await db.execute(import_drizzle_orm21.sql`
           SELECT COALESCE(SUM(total_cost::float), 0) as "totalBudget"
           FROM budget_items
@@ -27355,6 +27832,9 @@ This response is powered by the local VaxPlan database query engine. You can que
             SELECT 1 FROM facility_catchments fc
             WHERE fc.tenant_id = s.tenant_id
               AND fc.is_official = true
+              AND fc.geojson IS NOT NULL
+              AND fc.geojson::text != 'null'
+              AND ST_IsValid(ST_SetSRID(ST_GeomFromGeoJSON(fc.geojson::text), 4326))
               AND ST_Contains(
                 ST_SetSRID(ST_GeomFromGeoJSON(fc.geojson::text), 4326),
                 ST_SetSRID(ST_MakePoint(s.longitude::float, s.latitude::float), 4326)
@@ -27580,7 +28060,49 @@ This response is powered by the local VaxPlan database query engine. You can que
         catchmentGridPopulation: facilities.catchmentGridPopulation
       }).from(facilities).where((0, import_drizzle_orm21.and)((0, import_drizzle_orm21.eq)(facilities.id, facilityId), (0, import_drizzle_orm21.eq)(facilities.tenantId, req.tenantId))).limit(1);
       if (!row) return res.status(404).json({ message: "Facility not found" });
-      res.json(row);
+      const { gisPolygons: gisPolygons2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
+      const [activeGeo] = await db.select().from(gisPolygons2).where((0, import_drizzle_orm21.and)(
+        (0, import_drizzle_orm21.eq)(gisPolygons2.tenantId, req.tenantId),
+        (0, import_drizzle_orm21.eq)(gisPolygons2.ownerType, "facility"),
+        (0, import_drizzle_orm21.eq)(gisPolygons2.ownerId, facilityId),
+        (0, import_drizzle_orm21.eq)(gisPolygons2.status, "active")
+      )).limit(1);
+      const [draftRow] = await db.select().from(gisPolygons2).where((0, import_drizzle_orm21.and)(
+        (0, import_drizzle_orm21.eq)(gisPolygons2.tenantId, req.tenantId),
+        (0, import_drizzle_orm21.eq)(gisPolygons2.ownerType, "facility"),
+        (0, import_drizzle_orm21.eq)(gisPolygons2.ownerId, facilityId),
+        (0, import_drizzle_orm21.eq)(gisPolygons2.status, "draft")
+      )).limit(1);
+      res.json({
+        catchmentPolygon: activeGeo?.geometry || row.catchmentPolygon || null,
+        catchmentGridPopulation: activeGeo?.populationEstimate || row.catchmentGridPopulation || null,
+        areaSqKm: activeGeo?.areaSqKm ? Number(activeGeo.areaSqKm) : null,
+        centroid: activeGeo?.centroid || null,
+        populationEstimate: activeGeo?.populationEstimate || null,
+        populationSource: activeGeo?.populationSource || null,
+        populationSourceYear: activeGeo?.populationSourceYear || null,
+        populationMethod: activeGeo?.populationMethod || null,
+        confidence: activeGeo?.confidence || null,
+        validationStatus: activeGeo?.validationStatus || "draft",
+        approvalStatus: activeGeo?.approvalStatus || "draft",
+        createdBy: activeGeo?.createdBy || null,
+        updatedAt: activeGeo?.updatedAt || null,
+        draftPolygon: draftRow?.geometry || null,
+        draftPolygonDetails: draftRow || null,
+        population: activeGeo ? {
+          totalPopulation: activeGeo.populationEstimate,
+          targetInfants: Math.round((activeGeo.populationEstimate || 0) * 0.04),
+          underOne: Math.round((activeGeo.populationEstimate || 0) * 0.04),
+          underFive: Math.round((activeGeo.populationEstimate || 0) * 0.17),
+          womenOfChildbearingAge: Math.round((activeGeo.populationEstimate || 0) * 0.22),
+          source: activeGeo.populationSource,
+          sourceYear: activeGeo.populationSourceYear,
+          method: activeGeo.populationMethod,
+          confidence: activeGeo.confidence,
+          status: activeGeo.status,
+          calculatedAt: activeGeo.updatedAt?.toISOString()
+        } : null
+      });
     } catch (err) {
       res.status(500).json({ message: err?.message || "Failed to load catchment polygon" });
     }
@@ -27595,25 +28117,198 @@ This response is powered by the local VaxPlan database query engine. You can que
           message: "Facility's catchment area editing is locked because there is a submitted microplan."
         });
       }
-      const { geojson, gridPopulation } = req.body;
+      const { geojson, gridPopulation, status = "active" } = req.body;
+      const { gisPolygons: gisPolygons2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
+      if (status === "clear_draft") {
+        await db.delete(gisPolygons2).where((0, import_drizzle_orm21.and)(
+          (0, import_drizzle_orm21.eq)(gisPolygons2.tenantId, req.tenantId),
+          (0, import_drizzle_orm21.eq)(gisPolygons2.ownerType, "facility"),
+          (0, import_drizzle_orm21.eq)(gisPolygons2.ownerId, facilityId),
+          (0, import_drizzle_orm21.eq)(gisPolygons2.status, "draft")
+        ));
+        return res.json({ ok: true, cleared: true });
+      }
       if (!geojson || typeof geojson !== "object") return res.status(400).json({ message: "geojson polygon required" });
-      const [updated] = await db.update(facilities).set({
-        catchmentPolygon: geojson,
-        catchmentGridPopulation: typeof gridPopulation === "number" ? gridPopulation : null,
+      const {
+        validatePolygonGeometry: validatePolygonGeometry2,
+        polygonCentroid: polygonCentroid2,
+        pointInsidePolygon: pointInsidePolygon2
+      } = await Promise.resolve().then(() => (init_microplanPrefillService(), microplanPrefillService_exports));
+      const { PopulationIntelligenceService: PopulationIntelligenceService2 } = await Promise.resolve().then(() => (init_populationIntelligenceService(), populationIntelligenceService_exports));
+      const validation = validatePolygonGeometry2(geojson);
+      if (!validation.valid) {
+        return res.status(400).json({
+          message: "Invalid polygon geometry: " + validation.errors.join(", ")
+        });
+      }
+      const areaSqKm = validation.areaSqKm;
+      const centroid = polygonCentroid2(geojson);
+      const intel = await PopulationIntelligenceService2.fetchPolygonPopulation(req.tenantId, geojson, "ZMB", "facility", facilityId);
+      const bestSource = intel?.sources?.[0];
+      const popEst = bestSource?.totalPopulation ?? 0;
+      const popSource = bestSource?.source ?? "WorldPop";
+      const popSourceYear = bestSource?.year ?? (/* @__PURE__ */ new Date()).getFullYear();
+      const popMethod = bestSource?.method ?? "ST_Intersects";
+      const confidence = bestSource?.confidence ?? "Low";
+      const [facInfo] = await db.select({
+        latitude: facilities.latitude,
+        longitude: facilities.longitude
+      }).from(facilities).where((0, import_drizzle_orm21.eq)(facilities.id, facilityId)).limit(1);
+      const warnings = [...validation.warnings];
+      if (facInfo?.latitude && facInfo?.longitude) {
+        const isInside = pointInsidePolygon2(facInfo.latitude, facInfo.longitude, geojson);
+        if (!isInside) {
+          warnings.push("Warning: The facility point coordinates lie outside the drawn catchment polygon.");
+        }
+      }
+      const createdBy = req.user?.username || "system";
+      const polyData = {
+        tenantId: req.tenantId,
+        ownerType: "facility",
+        ownerId: facilityId,
+        polygonType: "catchment",
+        geometry: geojson,
+        centroid,
+        areaSqKm: areaSqKm ? String(areaSqKm) : null,
+        populationEstimate: popEst,
+        populationSource: popSource,
+        populationSourceYear: popSourceYear,
+        populationMethod: popMethod,
+        confidence,
+        status,
+        validationStatus: "valid",
+        approvalStatus: status === "active" ? "approved" : "draft",
+        createdBy,
         updatedAt: /* @__PURE__ */ new Date()
-      }).where((0, import_drizzle_orm21.and)((0, import_drizzle_orm21.eq)(facilities.id, facilityId), (0, import_drizzle_orm21.eq)(facilities.tenantId, req.tenantId))).returning();
-      if (!updated) return res.status(404).json({ message: "Facility not found" });
-      await logAudit(req, "update_catchment_polygon", "facility", facilityId, null, { facilityId, gridPopulation });
-      res.json({ ok: true, catchmentPolygon: updated.catchmentPolygon, catchmentGridPopulation: updated.catchmentGridPopulation });
+      };
+      let updatedCatchment = null;
+      let updatedPop = null;
+      if (status === "active") {
+        const [updated] = await db.update(facilities).set({
+          catchmentPolygon: geojson,
+          catchmentGridPopulation: popEst,
+          updatedAt: /* @__PURE__ */ new Date()
+        }).where((0, import_drizzle_orm21.and)((0, import_drizzle_orm21.eq)(facilities.id, facilityId), (0, import_drizzle_orm21.eq)(facilities.tenantId, req.tenantId))).returning();
+        if (!updated) return res.status(404).json({ message: "Facility not found" });
+        await logAudit(req, "update_catchment_polygon", "facility", facilityId, null, { facilityId, gridPopulation: popEst });
+        updatedCatchment = updated.catchmentPolygon;
+        updatedPop = updated.catchmentGridPopulation;
+      }
+      const existing = await db.select({ id: gisPolygons2.id }).from(gisPolygons2).where((0, import_drizzle_orm21.and)(
+        (0, import_drizzle_orm21.eq)(gisPolygons2.tenantId, req.tenantId),
+        (0, import_drizzle_orm21.eq)(gisPolygons2.ownerType, "facility"),
+        (0, import_drizzle_orm21.eq)(gisPolygons2.ownerId, facilityId),
+        (0, import_drizzle_orm21.eq)(gisPolygons2.status, status)
+      )).limit(1);
+      if (existing.length > 0) {
+        await db.update(gisPolygons2).set(polyData).where((0, import_drizzle_orm21.eq)(gisPolygons2.id, existing[0].id));
+      } else {
+        await db.insert(gisPolygons2).values(polyData);
+      }
+      if (status === "active") {
+        await db.delete(gisPolygons2).where((0, import_drizzle_orm21.and)(
+          (0, import_drizzle_orm21.eq)(gisPolygons2.tenantId, req.tenantId),
+          (0, import_drizzle_orm21.eq)(gisPolygons2.ownerType, "facility"),
+          (0, import_drizzle_orm21.eq)(gisPolygons2.ownerId, facilityId),
+          (0, import_drizzle_orm21.eq)(gisPolygons2.status, "draft")
+        ));
+      }
+      res.json({
+        ok: true,
+        catchmentPolygon: updatedCatchment || geojson,
+        catchmentGridPopulation: updatedPop || popEst,
+        areaSqKm,
+        centroid,
+        population: {
+          totalPopulation: popEst,
+          targetInfants: Math.round(popEst * 0.04),
+          underOne: Math.round(popEst * 0.04),
+          underFive: Math.round(popEst * 0.17),
+          womenOfChildbearingAge: Math.round(popEst * 0.22),
+          source: popSource,
+          sourceYear: popSourceYear,
+          method: popMethod,
+          confidence,
+          status,
+          calculatedAt: (/* @__PURE__ */ new Date()).toISOString()
+        },
+        validationStatus: "valid",
+        approvalStatus: status === "active" ? "approved" : "draft",
+        warnings,
+        status
+      });
     } catch (err) {
       res.status(500).json({ message: err?.message || "Failed to save catchment polygon" });
+    }
+  });
+  app2.get("/api/villages/:id/community-polygon", isAuthenticated, requireTenant, async (req, res) => {
+    try {
+      const villageId = parseInt(req.params.id, 10);
+      if (isNaN(villageId)) return res.status(400).json({ message: "Invalid village id" });
+      const [row] = await db.select({
+        catchmentPolygon: villages.catchmentPolygon,
+        griddedPopulation: villages.griddedPopulation,
+        polygonColor: villages.polygonColor,
+        populationSourceLabel: villages.populationSourceLabel
+      }).from(villages).where((0, import_drizzle_orm21.and)((0, import_drizzle_orm21.eq)(villages.id, villageId), (0, import_drizzle_orm21.eq)(villages.tenantId, req.tenantId))).limit(1);
+      if (!row) return res.status(404).json({ message: "Village not found" });
+      const { gisPolygons: gisPolygons2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
+      const [activeGeo] = await db.select().from(gisPolygons2).where((0, import_drizzle_orm21.and)(
+        (0, import_drizzle_orm21.eq)(gisPolygons2.tenantId, req.tenantId),
+        (0, import_drizzle_orm21.eq)(gisPolygons2.ownerType, "village"),
+        (0, import_drizzle_orm21.eq)(gisPolygons2.ownerId, villageId),
+        (0, import_drizzle_orm21.eq)(gisPolygons2.status, "active")
+      )).limit(1);
+      const [draftRow] = await db.select().from(gisPolygons2).where((0, import_drizzle_orm21.and)(
+        (0, import_drizzle_orm21.eq)(gisPolygons2.tenantId, req.tenantId),
+        (0, import_drizzle_orm21.eq)(gisPolygons2.ownerType, "village"),
+        (0, import_drizzle_orm21.eq)(gisPolygons2.ownerId, villageId),
+        (0, import_drizzle_orm21.eq)(gisPolygons2.status, "draft")
+      )).limit(1);
+      res.json({
+        catchmentPolygon: activeGeo?.geometry || row.catchmentPolygon || null,
+        griddedPopulation: activeGeo?.populationEstimate || row.griddedPopulation || null,
+        polygonColor: row.polygonColor || null,
+        populationSourceLabel: activeGeo?.populationSource || row.populationSourceLabel || null,
+        areaSqKm: activeGeo?.areaSqKm ? Number(activeGeo.areaSqKm) : null,
+        centroid: activeGeo?.centroid || null,
+        populationEstimate: activeGeo?.populationEstimate || null,
+        populationSource: activeGeo?.populationSource || null,
+        populationSourceYear: activeGeo?.populationSourceYear || null,
+        populationMethod: activeGeo?.populationMethod || null,
+        confidence: activeGeo?.confidence || null,
+        validationStatus: activeGeo?.validationStatus || "draft",
+        approvalStatus: activeGeo?.approvalStatus || "draft",
+        createdBy: activeGeo?.createdBy || null,
+        updatedAt: activeGeo?.updatedAt || null,
+        draftPolygon: draftRow?.geometry || null,
+        draftPolygonDetails: draftRow || null,
+        population: activeGeo ? {
+          totalPopulation: activeGeo.populationEstimate,
+          targetInfants: Math.round((activeGeo.populationEstimate || 0) * 0.04),
+          underOne: Math.round((activeGeo.populationEstimate || 0) * 0.04),
+          underFive: Math.round((activeGeo.populationEstimate || 0) * 0.17),
+          womenOfChildbearingAge: Math.round((activeGeo.populationEstimate || 0) * 0.22),
+          source: activeGeo.populationSource,
+          sourceYear: activeGeo.populationSourceYear,
+          method: activeGeo.populationMethod,
+          confidence: activeGeo.confidence,
+          status: activeGeo.status,
+          calculatedAt: activeGeo.updatedAt?.toISOString()
+        } : null
+      });
+    } catch (err) {
+      res.status(500).json({ message: err?.message || "Failed to load community polygon" });
     }
   });
   app2.patch("/api/villages/:id/community-polygon", isAuthenticated, requireTenant, async (req, res) => {
     try {
       const villageId = parseInt(req.params.id, 10);
       if (isNaN(villageId)) return res.status(400).json({ message: "Invalid village id" });
-      const [village] = await db.select({ facilityId: villages.assignedFacilityId }).from(villages).where((0, import_drizzle_orm21.and)((0, import_drizzle_orm21.eq)(villages.id, villageId), (0, import_drizzle_orm21.eq)(villages.tenantId, req.tenantId))).limit(1);
+      const [village] = await db.select({
+        facilityId: villages.assignedFacilityId,
+        name: villages.name
+      }).from(villages).where((0, import_drizzle_orm21.and)((0, import_drizzle_orm21.eq)(villages.id, villageId), (0, import_drizzle_orm21.eq)(villages.tenantId, req.tenantId))).limit(1);
       if (!village) return res.status(404).json({ message: "Village not found" });
       if (village.facilityId) {
         const locked = await isFacilityMicroplanLocked(req.tenantId, village.facilityId);
@@ -27623,18 +28318,162 @@ This response is powered by the local VaxPlan database query engine. You can que
           });
         }
       }
-      const { geojson, griddedPopulation, polygonColor, populationSourceLabel } = req.body;
+      const { geojson, griddedPopulation, polygonColor, populationSourceLabel, status = "active", overrideReason } = req.body;
+      const { gisPolygons: gisPolygons2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
+      if (status === "clear_draft") {
+        await db.delete(gisPolygons2).where((0, import_drizzle_orm21.and)(
+          (0, import_drizzle_orm21.eq)(gisPolygons2.tenantId, req.tenantId),
+          (0, import_drizzle_orm21.eq)(gisPolygons2.ownerType, "village"),
+          (0, import_drizzle_orm21.eq)(gisPolygons2.ownerId, villageId),
+          (0, import_drizzle_orm21.eq)(gisPolygons2.status, "draft")
+        ));
+        return res.json({ ok: true, cleared: true });
+      }
       if (!geojson || typeof geojson !== "object") return res.status(400).json({ message: "geojson polygon required" });
-      const [updated] = await db.update(villages).set({
-        catchmentPolygon: geojson,
-        griddedPopulation: typeof griddedPopulation === "number" ? griddedPopulation : null,
-        polygonColor: polygonColor || null,
-        populationSourceLabel: populationSourceLabel || null,
+      const {
+        validatePolygonGeometry: validatePolygonGeometry2,
+        polygonCentroid: polygonCentroid2,
+        polygonInsidePolygon: polygonInsidePolygon2,
+        polygonsOverlap: polygonsOverlap2,
+        canOverrideDenominator: canOverrideDenominator2
+      } = await Promise.resolve().then(() => (init_microplanPrefillService(), microplanPrefillService_exports));
+      const { PopulationIntelligenceService: PopulationIntelligenceService2 } = await Promise.resolve().then(() => (init_populationIntelligenceService(), populationIntelligenceService_exports));
+      const validation = validatePolygonGeometry2(geojson);
+      if (!validation.valid) {
+        return res.status(400).json({
+          message: "Invalid polygon geometry: " + validation.errors.join(", ")
+        });
+      }
+      const areaSqKm = validation.areaSqKm;
+      const centroid = polygonCentroid2(geojson);
+      if (status === "active" && village.facilityId) {
+        const [facility] = await db.select({
+          catchmentPolygon: facilities.catchmentPolygon,
+          name: facilities.name
+        }).from(facilities).where((0, import_drizzle_orm21.eq)(facilities.id, village.facilityId)).limit(1);
+        if (facility?.catchmentPolygon) {
+          const isInside = polygonInsidePolygon2(geojson, facility.catchmentPolygon);
+          if (!isInside) {
+            const canOverride = canOverrideDenominator2(req.user);
+            if (!canOverride) {
+              return res.status(400).json({
+                message: `This community is outside the catchment area of parent facility "${facility.name}". Only authorized coordinators or admins may override this restriction.`
+              });
+            }
+            if (!overrideReason || !overrideReason.trim()) {
+              return res.status(400).json({
+                code: "OUTSIDE_CATCHMENT_OVERRIDABLE",
+                message: `This community is outside the catchment area of parent facility "${facility.name}". An override reason is required to proceed.`
+              });
+            }
+          }
+        }
+      }
+      if (status === "active" && village.facilityId) {
+        const otherVillages = await db.select({
+          id: villages.id,
+          name: villages.name,
+          catchmentPolygon: villages.catchmentPolygon
+        }).from(villages).where((0, import_drizzle_orm21.and)(
+          (0, import_drizzle_orm21.eq)(villages.assignedFacilityId, village.facilityId),
+          (0, import_drizzle_orm21.ne)(villages.id, villageId),
+          (0, import_drizzle_orm21.eq)(villages.tenantId, req.tenantId)
+        ));
+        for (const other of otherVillages) {
+          if (other.catchmentPolygon) {
+            if (polygonsOverlap2(geojson, other.catchmentPolygon)) {
+              return res.status(400).json({
+                message: `Overlap detected: this community polygon overlaps with "${other.name}". Please adjust the boundary.`
+              });
+            }
+          }
+        }
+      }
+      const intel = await PopulationIntelligenceService2.fetchPolygonPopulation(req.tenantId, geojson, "ZMB", "village", villageId);
+      const bestSource = intel?.sources?.[0];
+      const popEst = bestSource?.totalPopulation ?? 0;
+      const popSource = bestSource?.source ?? "WorldPop";
+      const popSourceYear = bestSource?.year ?? (/* @__PURE__ */ new Date()).getFullYear();
+      const popMethod = bestSource?.method ?? "ST_Intersects";
+      const confidence = bestSource?.confidence ?? "Low";
+      const createdBy = req.user?.username || "system";
+      const polyData = {
+        tenantId: req.tenantId,
+        ownerType: "village",
+        ownerId: villageId,
+        polygonType: "catchment",
+        geometry: geojson,
+        centroid,
+        areaSqKm: areaSqKm ? String(areaSqKm) : null,
+        populationEstimate: popEst,
+        populationSource: popSource,
+        populationSourceYear: popSourceYear,
+        populationMethod: popMethod,
+        confidence,
+        status,
+        validationStatus: "valid",
+        approvalStatus: status === "active" ? "approved" : "draft",
+        overrideReason: overrideReason || null,
+        createdBy,
         updatedAt: /* @__PURE__ */ new Date()
-      }).where((0, import_drizzle_orm21.and)((0, import_drizzle_orm21.eq)(villages.id, villageId), (0, import_drizzle_orm21.eq)(villages.tenantId, req.tenantId))).returning();
-      if (!updated) return res.status(404).json({ message: "Village not found" });
-      await logAudit(req, "update_community_polygon", "village", villageId, null, { villageId, griddedPopulation });
-      res.json({ ok: true, catchmentPolygon: updated.catchmentPolygon, griddedPopulation: updated.griddedPopulation });
+      };
+      let updatedCatchment = null;
+      let updatedPop = null;
+      if (status === "active") {
+        const [updated] = await db.update(villages).set({
+          catchmentPolygon: geojson,
+          griddedPopulation: popEst,
+          polygonColor: polygonColor || null,
+          populationSourceLabel: popSource || null,
+          updatedAt: /* @__PURE__ */ new Date()
+        }).where((0, import_drizzle_orm21.and)((0, import_drizzle_orm21.eq)(villages.id, villageId), (0, import_drizzle_orm21.eq)(villages.tenantId, req.tenantId))).returning();
+        if (!updated) return res.status(404).json({ message: "Village not found" });
+        await logAudit(req, "update_community_polygon", "village", villageId, null, { villageId, griddedPopulation: popEst });
+        updatedCatchment = updated.catchmentPolygon;
+        updatedPop = updated.griddedPopulation;
+      }
+      const existing = await db.select({ id: gisPolygons2.id }).from(gisPolygons2).where((0, import_drizzle_orm21.and)(
+        (0, import_drizzle_orm21.eq)(gisPolygons2.tenantId, req.tenantId),
+        (0, import_drizzle_orm21.eq)(gisPolygons2.ownerType, "village"),
+        (0, import_drizzle_orm21.eq)(gisPolygons2.ownerId, villageId),
+        (0, import_drizzle_orm21.eq)(gisPolygons2.status, status)
+      )).limit(1);
+      if (existing.length > 0) {
+        await db.update(gisPolygons2).set(polyData).where((0, import_drizzle_orm21.eq)(gisPolygons2.id, existing[0].id));
+      } else {
+        await db.insert(gisPolygons2).values(polyData);
+      }
+      if (status === "active") {
+        await db.delete(gisPolygons2).where((0, import_drizzle_orm21.and)(
+          (0, import_drizzle_orm21.eq)(gisPolygons2.tenantId, req.tenantId),
+          (0, import_drizzle_orm21.eq)(gisPolygons2.ownerType, "village"),
+          (0, import_drizzle_orm21.eq)(gisPolygons2.ownerId, villageId),
+          (0, import_drizzle_orm21.eq)(gisPolygons2.status, "draft")
+        ));
+      }
+      res.json({
+        ok: true,
+        catchmentPolygon: updatedCatchment || geojson,
+        griddedPopulation: updatedPop || popEst,
+        areaSqKm,
+        centroid,
+        population: {
+          totalPopulation: popEst,
+          targetInfants: Math.round(popEst * 0.04),
+          underOne: Math.round(popEst * 0.04),
+          underFive: Math.round(popEst * 0.17),
+          womenOfChildbearingAge: Math.round(popEst * 0.22),
+          source: popSource,
+          sourceYear: popSourceYear,
+          method: popMethod,
+          confidence,
+          status,
+          calculatedAt: (/* @__PURE__ */ new Date()).toISOString()
+        },
+        validationStatus: "valid",
+        approvalStatus: status === "active" ? "approved" : "draft",
+        status
+      });
     } catch (err) {
       res.status(500).json({ message: err?.message || "Failed to save community polygon" });
     }
@@ -27664,7 +28503,7 @@ This response is powered by the local VaxPlan database query engine. You can que
           facilityId,
           villageId: c.villageId || null,
           villageName: c.villageName || null,
-          estimatedPopulation: c.estimatedPopulation || null,
+          estimatedPopulation: c.estimatedPopulation || 0,
           flaggedLevel: flaggedLevel || "district",
           note: c.note || null
         }).returning();
@@ -27691,6 +28530,29 @@ This response is powered by the local VaxPlan database query engine. You can que
       res.status(201).json({ ok: true, flagged: created.length, items: created });
     } catch (err) {
       res.status(500).json({ message: err?.message || "Failed to flag uncovered communities" });
+    }
+  });
+  app2.get("/api/microplans/prefill", ...auth, async (req, res) => {
+    try {
+      const facilityId = parseInt(req.query.facilityId);
+      const year = parseInt(req.query.year);
+      const quarter = parseInt(req.query.quarter);
+      const source = req.query.populationSource || "worldpop";
+      if (!facilityId || !year || !quarter) {
+        return res.status(400).json({ message: "Missing required query parameters: facilityId, year, quarter" });
+      }
+      const { MicroplanPrefillService: MicroplanPrefillService2 } = await Promise.resolve().then(() => (init_microplanPrefillService(), microplanPrefillService_exports));
+      const bundle = await MicroplanPrefillService2.buildBundle(
+        req.tenantId,
+        facilityId,
+        year,
+        quarter,
+        source
+      );
+      res.json(bundle);
+    } catch (e) {
+      console.error("[Prefill API Error]", e);
+      res.status(500).json({ message: "Failed to generate prefill bundle" });
     }
   });
   app2.get("/api/microplans/:id/print-map", ...auth, async (req, res) => {
@@ -27783,7 +28645,7 @@ This response is powered by the local VaxPlan database query engine. You can que
   app2.get("/api/wiki/pages", async (req, res) => {
     try {
       let showUnpublished = false;
-      if (req.query.all === "true" && req.session?.userId) {
+      if (req.session?.userId) {
         const u = await storage.getUser(req.session.userId);
         if (u) {
           const adminRoles = ["national_admin", "gis_specialist"];
@@ -27793,14 +28655,13 @@ This response is powered by the local VaxPlan database query engine. You can que
           }
         }
       }
-      const whereClause = showUnpublished ? "" : "WHERE is_published = TRUE";
       const result = await db.execute(
-        import_drizzle_orm21.sql.raw(
-          `SELECT id, slug, title, category, gamification, sort_order, is_published, updated_at
-           FROM wiki_pages
-           ${whereClause}
-           ORDER BY sort_order ASC, id ASC`
-        )
+        showUnpublished ? import_drizzle_orm21.sql`SELECT id, slug, title, category, gamification, sort_order, is_published, updated_at
+                 FROM wiki_pages
+                 ORDER BY sort_order ASC, id ASC` : import_drizzle_orm21.sql`SELECT id, slug, title, category, gamification, sort_order, is_published, updated_at
+                 FROM wiki_pages
+                 WHERE is_published = TRUE
+                 ORDER BY sort_order ASC, id ASC`
       );
       return res.json({ success: true, data: result.rows });
     } catch (err) {
@@ -27822,14 +28683,14 @@ This response is powered by the local VaxPlan database query engine. You can que
           }
         }
       }
-      const publishedCondition = showUnpublished ? "" : "AND is_published = TRUE";
       const result = await db.execute(
-        import_drizzle_orm21.sql.raw(
-          `SELECT id, slug, title, category, body, gamification, sort_order, is_published, updated_by, updated_at
-           FROM wiki_pages
-           WHERE slug = '${slug.replace(/'/g, "''")}' ${publishedCondition}
-           LIMIT 1`
-        )
+        showUnpublished ? import_drizzle_orm21.sql`SELECT id, slug, title, category, body, gamification, sort_order, is_published, updated_by, updated_at
+                 FROM wiki_pages
+                 WHERE slug = ${slug}
+                 LIMIT 1` : import_drizzle_orm21.sql`SELECT id, slug, title, category, body, gamification, sort_order, is_published, updated_by, updated_at
+                 FROM wiki_pages
+                 WHERE slug = ${slug} AND is_published = TRUE
+                 LIMIT 1`
       );
       if (!result.rows.length) {
         return res.status(404).json({ message: "Page not found." });
@@ -27849,21 +28710,19 @@ This response is powered by the local VaxPlan database query engine. You can que
       const safeSlug = String(slug).toLowerCase().replace(/[^a-z0-9-]/g, "-").slice(0, 120);
       const userId = getCurrentUserId(req);
       const result = await db.execute(
-        import_drizzle_orm21.sql.raw(
-          `INSERT INTO wiki_pages (slug, title, body, category, gamification, sort_order, is_published, created_by, updated_by)
-           VALUES (
-             '${safeSlug.replace(/'/g, "''")}',
-             '${String(title).replace(/'/g, "''")}',
-             '${String(body).replace(/'/g, "''")}',
-             '${String(category).replace(/'/g, "''")}',
-             '${String(gamification).replace(/'/g, "''")}'::jsonb,
-             ${Number(sort_order) || 0},
-             TRUE,
-             '${String(userId).replace(/'/g, "''")}',
-             '${String(userId).replace(/'/g, "''")}'
-           )
-           RETURNING *`
-        )
+        import_drizzle_orm21.sql`INSERT INTO wiki_pages (slug, title, body, category, gamification, sort_order, is_published, created_by, updated_by)
+             VALUES (
+               ${safeSlug},
+               ${String(title)},
+               ${String(body)},
+               ${String(category)},
+               ${String(gamification)}::jsonb,
+               ${Number(sort_order) || 0},
+               TRUE,
+               ${userId},
+               ${userId}
+             )
+             RETURNING *`
       );
       return res.status(201).json({ success: true, data: result.rows[0] });
     } catch (err) {
@@ -27879,23 +28738,21 @@ This response is powered by the local VaxPlan database query engine. You can que
       const { slug } = req.params;
       const userId = getCurrentUserId(req);
       const { title, body, category, gamification, sort_order, is_published } = req.body ?? {};
-      const setClauses = [
-        `updated_at = NOW()`,
-        `updated_by = '${String(userId).replace(/'/g, "''")}'`
-      ];
-      if (title !== void 0) setClauses.push(`title = '${String(title).replace(/'/g, "''")}'`);
-      if (body !== void 0) setClauses.push(`body = '${String(body).replace(/'/g, "''")}'`);
-      if (category !== void 0) setClauses.push(`category = '${String(category).replace(/'/g, "''")}'`);
-      if (gamification !== void 0) setClauses.push(`gamification = '${String(gamification).replace(/'/g, "''")}'::jsonb`);
-      if (sort_order !== void 0) setClauses.push(`sort_order = ${Number(sort_order) || 0}`);
-      if (is_published !== void 0) setClauses.push(`is_published = ${Boolean(is_published)}`);
+      const setParts = [];
+      setParts.push(import_drizzle_orm21.sql`updated_at = NOW()`);
+      setParts.push(import_drizzle_orm21.sql`updated_by = ${userId}`);
+      if (title !== void 0) setParts.push(import_drizzle_orm21.sql`title = ${String(title)}`);
+      if (body !== void 0) setParts.push(import_drizzle_orm21.sql`body = ${String(body)}`);
+      if (category !== void 0) setParts.push(import_drizzle_orm21.sql`category = ${String(category)}`);
+      if (gamification !== void 0) setParts.push(import_drizzle_orm21.sql`gamification = ${String(gamification)}::jsonb`);
+      if (sort_order !== void 0) setParts.push(import_drizzle_orm21.sql`sort_order = ${Number(sort_order) || 0}`);
+      if (is_published !== void 0) setParts.push(import_drizzle_orm21.sql`is_published = ${Boolean(is_published)}`);
+      const setClause = import_drizzle_orm21.sql.join(setParts, import_drizzle_orm21.sql`, `);
       const result = await db.execute(
-        import_drizzle_orm21.sql.raw(
-          `UPDATE wiki_pages
-           SET ${setClauses.join(", ")}
-           WHERE slug = '${slug.replace(/'/g, "''")}'
-           RETURNING *`
-        )
+        import_drizzle_orm21.sql`UPDATE wiki_pages
+             SET ${setClause}
+             WHERE slug = ${slug}
+             RETURNING *`
       );
       if (!result.rows.length) {
         return res.status(404).json({ message: "Page not found." });
@@ -27911,12 +28768,10 @@ This response is powered by the local VaxPlan database query engine. You can que
       const { slug } = req.params;
       const userId = getCurrentUserId(req);
       const result = await db.execute(
-        import_drizzle_orm21.sql.raw(
-          `UPDATE wiki_pages
-           SET is_published = FALSE, updated_at = NOW(), updated_by = '${String(userId).replace(/'/g, "''")}'
-           WHERE slug = '${slug.replace(/'/g, "''")}'
-           RETURNING slug, title`
-        )
+        import_drizzle_orm21.sql`UPDATE wiki_pages
+             SET is_published = FALSE, updated_at = NOW(), updated_by = ${userId}
+             WHERE slug = ${slug}
+             RETURNING slug, title`
       );
       if (!result.rows.length) {
         return res.status(404).json({ message: "Page not found." });
@@ -28000,7 +28855,7 @@ This response is powered by the local VaxPlan database query engine. You can que
       const radiusMeters = radiusKm * 1e3;
       const facQuery = `
         SELECT
-          id, name, type, status, latitude, longitude,
+          id, name, facility_type AS type, operational_status AS status, latitude, longitude,
           ST_Distance(
             ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography,
             ST_SetSRID(ST_MakePoint(longitude::float, latitude::float), 4326)::geography
@@ -28019,7 +28874,7 @@ This response is powered by the local VaxPlan database query engine. You can que
       const facilitiesRes = await pool.query(facQuery, [lng, lat, tenantId, radiusMeters]);
       const commQuery = `
         SELECT
-          id, name, population, assigned_facility_id, is_hard_to_reach, latitude, longitude,
+          id, name, total_catchment_population AS population, assigned_facility_id, is_hard_to_reach, latitude, longitude,
           ST_Distance(
             ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography,
             ST_SetSRID(ST_MakePoint(longitude::float, latitude::float), 4326)::geography
@@ -28150,10 +29005,11 @@ This response is powered by the local VaxPlan database query engine. You can que
   });
   return httpServer2;
 }
-var import_express5, import_pdfkit, import_child_process, import_crypto, import_fs4, import_zod3, import_fs5, import_path4, import_drizzle_orm21, import_turf, _geoScopeCache, GEO_SCOPE_TTL_MS, auth, DEFAULT_SUPERVISION_CHECKLIST, outsideVillageIds, zambiaGeoJSON;
+var import_express5, import_pdfkit, import_child_process, import_crypto, import_fs4, import_zod3, import_fs5, import_path4, import_drizzle_orm21, import_turf2, _geoScopeCache, GEO_SCOPE_TTL_MS, auth, DEFAULT_SUPERVISION_CHECKLIST, outsideVillageIds, zambiaGeoJSON;
 var init_routes = __esm({
   "server/routes.ts"() {
     "use strict";
+    init_denominatorHarmonisationService();
     import_express5 = __toESM(require("express"), 1);
     import_pdfkit = __toESM(require("pdfkit"), 1);
     init_storage();
@@ -28184,7 +29040,7 @@ var init_routes = __esm({
     import_drizzle_orm21 = require("drizzle-orm");
     init_geoBoundariesService();
     init_bundledBoundaries();
-    import_turf = require("@turf/turf");
+    import_turf2 = require("@turf/turf");
     init_hisInteropService();
     init_syncService();
     init_geo();
@@ -28272,7 +29128,7 @@ function broadcastTenantChange(tenantId, info = {}) {
     }, POKE_DEBOUNCE_MS)
   );
 }
-function setupRealtime(httpServer2, sessionMiddleware) {
+function setupRealtime(httpServer2, sessionMiddleware2) {
   wss = new import_ws.WebSocketServer({ noServer: true });
   httpServer2.on("upgrade", (req, socket, head) => {
     let pathname = "";
@@ -28298,7 +29154,7 @@ function setupRealtime(httpServer2, sessionMiddleware) {
       }
     };
     try {
-      sessionMiddleware(req, stubRes, () => {
+      sessionMiddleware2(req, stubRes, () => {
         const session3 = req.session;
         const passportUser = session3?.passport?.user;
         if (!passportUser) {
@@ -32692,6 +33548,36 @@ var init_settlements_gis_microplanning = __esm({
   }
 });
 
+// server/migrations/026-polygon-planning.ts
+async function applyPolygonPlanningMigration(db2) {
+  try {
+    await db2.execute(import_drizzle_orm39.sql`
+      ALTER TABLE gis_polygons 
+      ADD COLUMN IF NOT EXISTS centroid jsonb,
+      ADD COLUMN IF NOT EXISTS population_estimate integer,
+      ADD COLUMN IF NOT EXISTS population_source varchar(100),
+      ADD COLUMN IF NOT EXISTS population_source_year integer,
+      ADD COLUMN IF NOT EXISTS population_method varchar(100),
+      ADD COLUMN IF NOT EXISTS confidence varchar(50),
+      ADD COLUMN IF NOT EXISTS validation_status varchar(50) DEFAULT 'draft',
+      ADD COLUMN IF NOT EXISTS approval_status varchar(50) DEFAULT 'draft',
+      ADD COLUMN IF NOT EXISTS override_reason text,
+      ADD COLUMN IF NOT EXISTS created_by varchar(255),
+      ADD COLUMN IF NOT EXISTS approved_by varchar(255),
+      ADD COLUMN IF NOT EXISTS approved_at timestamp
+    `);
+  } catch (err) {
+    console.error("Migration: failed to add columns to gis_polygons:", err.message);
+  }
+}
+var import_drizzle_orm39;
+var init_polygon_planning = __esm({
+  "server/migrations/026-polygon-planning.ts"() {
+    "use strict";
+    import_drizzle_orm39 = require("drizzle-orm");
+  }
+});
+
 // server/services/remoteSensingService.ts
 var remoteSensingService_exports = {};
 __export(remoteSensingService_exports, {
@@ -32703,19 +33589,19 @@ __export(remoteSensingService_exports, {
 });
 async function calculateSpatialGaps(districtId, radiusKm = 5) {
   try {
-    const [districtRow] = await db.select().from(districts).where((0, import_drizzle_orm39.eq)(districts.id, districtId)).limit(1);
+    const [districtRow] = await db.select().from(districts).where((0, import_drizzle_orm40.eq)(districts.id, districtId)).limit(1);
     if (!districtRow) {
       return { gaps: [], totalSettlements: 0, servedSettlements: 0 };
     }
-    const allSettlements = await db.select().from(settlementsMaster).where((0, import_drizzle_orm39.eq)(settlementsMaster.districtName, districtRow.name));
+    const allSettlements = await db.select().from(settlementsMaster).where((0, import_drizzle_orm40.eq)(settlementsMaster.districtName, districtRow.name));
     if (allSettlements.length === 0) {
       return { gaps: [], totalSettlements: 0, servedSettlements: 0 };
     }
-    const activeFacilities = await db.select().from(facilities).where((0, import_drizzle_orm39.eq)(facilities.districtId, districtId));
+    const activeFacilities = await db.select().from(facilities).where((0, import_drizzle_orm40.eq)(facilities.districtId, districtId));
     const plannedOutposts = await db.select().from(sessionPlans).where(
-      (0, import_drizzle_orm39.and)(
-        (0, import_drizzle_orm39.eq)(sessionPlans.facilityId, activeFacilities[0]?.id || 0),
-        (0, import_drizzle_orm39.eq)(sessionPlans.status, "planned")
+      (0, import_drizzle_orm40.and)(
+        (0, import_drizzle_orm40.eq)(sessionPlans.facilityId, activeFacilities[0]?.id || 0),
+        (0, import_drizzle_orm40.eq)(sessionPlans.status, "planned")
       )
     );
     const servedSet = /* @__PURE__ */ new Set();
@@ -32924,7 +33810,7 @@ function registerRemoteSensingRoutes(app2) {
         const result2 = await calculateSpatialGaps(firstDistrict.id, 5);
         return res.json({ ...result2, districtId: firstDistrict.id, districtName: firstDistrict.name });
       }
-      const [districtRow] = await db.select().from(districts).where((0, import_drizzle_orm39.eq)(districts.id, districtId)).limit(1);
+      const [districtRow] = await db.select().from(districts).where((0, import_drizzle_orm40.eq)(districts.id, districtId)).limit(1);
       if (!districtRow) return res.status(404).json({ message: "District not found" });
       const result = await calculateSpatialGaps(districtId, 5);
       res.json({ ...result, districtId, districtName: districtRow.name });
@@ -32945,7 +33831,7 @@ function registerRemoteSensingRoutes(app2) {
         targetDistrictId = firstDistrict.id;
         targetDistrictName = firstDistrict.name;
       } else {
-        const [districtRow] = await db.select().from(districts).where((0, import_drizzle_orm39.eq)(districts.id, targetDistrictId)).limit(1);
+        const [districtRow] = await db.select().from(districts).where((0, import_drizzle_orm40.eq)(districts.id, targetDistrictId)).limit(1);
         if (!districtRow) return res.status(404).json({ message: "District not found" });
         targetDistrictName = districtRow.name;
       }
@@ -32981,12 +33867,12 @@ function registerRemoteSensingRoutes(app2) {
     }
   });
 }
-var import_drizzle_orm39;
+var import_drizzle_orm40;
 var init_remoteSensingService = __esm({
   "server/services/remoteSensingService.ts"() {
     "use strict";
     init_db();
-    import_drizzle_orm39 = require("drizzle-orm");
+    import_drizzle_orm40 = require("drizzle-orm");
     init_schema();
     init_index();
     init_replitAuth();
@@ -32995,17 +33881,25 @@ var init_remoteSensingService = __esm({
 });
 
 // server/services/reportingService.ts
-function getFacilityHash(facilityId, salt) {
-  let hash = 0;
-  const str = `${facilityId}-${salt}`;
-  for (let i = 0; i < str.length; i++) {
-    hash = (hash << 5) - hash + str.charCodeAt(i);
-    hash |= 0;
-  }
-  return Math.abs(hash);
+function intList(values) {
+  return Array.from(new Set((values || []).map(Number).filter((v) => Number.isInteger(v) && v > 0)));
+}
+function idInClause(column, values) {
+  const ids = intList(values);
+  if (ids.length === 0) return import_drizzle_orm41.sql``;
+  return import_drizzle_orm41.sql.raw(` AND ${column} IN (${ids.join(",")})`);
+}
+function facilityScopeClause(filters) {
+  return filters.facilityIds?.length ? idInClause("f.id", filters.facilityIds) : filters.facilityId ? import_drizzle_orm41.sql` AND f.id = ${filters.facilityId}` : import_drizzle_orm41.sql``;
+}
+function districtScopeClause(filters) {
+  return filters.districtIds?.length ? idInClause("d.id", filters.districtIds) : filters.districtId ? import_drizzle_orm41.sql` AND d.id = ${filters.districtId}` : import_drizzle_orm41.sql``;
+}
+function provinceScopeClause(filters) {
+  return filters.provinceIds?.length ? idInClause("p.id", filters.provinceIds) : filters.provinceId ? import_drizzle_orm41.sql` AND p.id = ${filters.provinceId}` : import_drizzle_orm41.sql``;
 }
 async function getProvincesMap(tenantId) {
-  const provincesList = await db.execute(import_drizzle_orm40.sql`
+  const provincesList = await db.execute(import_drizzle_orm41.sql`
     SELECT id, name FROM provinces WHERE tenant_id = ${tenantId}
   `);
   const provincesMap = /* @__PURE__ */ new Map();
@@ -33015,7 +33909,7 @@ async function getProvincesMap(tenantId) {
   return provincesMap;
 }
 async function getDistrictsMap(tenantId) {
-  const districtsList = await db.execute(import_drizzle_orm40.sql`
+  const districtsList = await db.execute(import_drizzle_orm41.sql`
     SELECT id, name, province_id FROM districts WHERE tenant_id = ${tenantId}
   `);
   const districtsMap = /* @__PURE__ */ new Map();
@@ -33132,12 +34026,12 @@ function rollupHierarchy(facilities4, provincesMap, districtsMap, sumKeys, avgKe
   ];
 }
 async function getSessionReport(filters) {
-  const yearClause = filters.year ? import_drizzle_orm40.sql` AND sp.year = ${filters.year}` : import_drizzle_orm40.sql``;
-  const quarterClause = filters.quarter ? import_drizzle_orm40.sql` AND sp.quarter = ${filters.quarter}` : import_drizzle_orm40.sql``;
-  const facilityFilter = filters.facilityId ? import_drizzle_orm40.sql` AND f.id = ${filters.facilityId}` : import_drizzle_orm40.sql``;
-  const districtFilter = filters.districtId ? import_drizzle_orm40.sql` AND d.id = ${filters.districtId}` : import_drizzle_orm40.sql``;
-  const provinceFilter = filters.provinceId ? import_drizzle_orm40.sql` AND p.id = ${filters.provinceId}` : import_drizzle_orm40.sql``;
-  const dbRows = await db.execute(import_drizzle_orm40.sql`
+  const yearClause = filters.year ? import_drizzle_orm41.sql` AND sp.year = ${filters.year}` : import_drizzle_orm41.sql``;
+  const quarterClause = filters.quarter ? import_drizzle_orm41.sql` AND sp.quarter = ${filters.quarter}` : import_drizzle_orm41.sql``;
+  const facilityFilter = facilityScopeClause(filters);
+  const districtFilter = districtScopeClause(filters);
+  const provinceFilter = provinceScopeClause(filters);
+  const dbRows = await db.execute(import_drizzle_orm41.sql`
     SELECT
       f.id                                     AS id,
       f.name                                   AS name,
@@ -33165,17 +34059,16 @@ async function getSessionReport(filters) {
   `);
   const facilities4 = dbRows.rows.map((row) => {
     const fId = Number(row.id);
-    const hasRealData = Number(row.db_total_sessions ?? 0) > 0;
-    const total_sessions = hasRealData ? Number(row.db_total_sessions) : 8 + getFacilityHash(fId, "tot-sess") % 17;
-    const static_sessions = hasRealData ? Number(row.static_sessions) : Math.round(total_sessions * 0.2);
-    const mobile_sessions = hasRealData ? Number(row.mobile_sessions) : Math.round(total_sessions * 0.3);
-    const outreach_sessions = hasRealData ? Number(row.outreach_sessions) : total_sessions - static_sessions - mobile_sessions;
-    const planned = total_sessions;
-    const completed = hasRealData ? Number(row.completed) : Math.round(total_sessions * (0.8 + getFacilityHash(fId, "comp-sess") % 21 / 100));
-    const achieved = hasRealData ? Number(row.achieved) : completed;
-    const approved = total_sessions;
-    const target_population = hasRealData ? Number(row.target_population) : 100 + getFacilityHash(fId, "target-pop") % 901;
-    const vaccinated_totals = hasRealData ? Number(row.vaccinated_totals) : Math.round(target_population * (0.75 + getFacilityHash(fId, "vac-sess") % 24 / 100));
+    const total_sessions = Number(row.db_total_sessions ?? 0);
+    const static_sessions = Number(row.static_sessions ?? 0);
+    const mobile_sessions = Number(row.mobile_sessions ?? 0);
+    const outreach_sessions = Number(row.outreach_sessions ?? 0);
+    const planned = Number(row.planned ?? 0);
+    const completed = Number(row.completed ?? 0);
+    const achieved = Number(row.achieved ?? 0);
+    const approved = Number(row.approved ?? 0);
+    const target_population = Number(row.target_population ?? 0);
+    const vaccinated_totals = Number(row.vaccinated_totals ?? 0);
     return {
       level: "facility",
       id: fId,
@@ -33214,12 +34107,12 @@ async function getSessionReport(filters) {
   );
 }
 async function getMicroplanReport(filters) {
-  const yearClause = filters.year ? import_drizzle_orm40.sql` AND m.year = ${filters.year}` : import_drizzle_orm40.sql``;
-  const quarterClause = filters.quarter ? import_drizzle_orm40.sql` AND m.quarter = ${filters.quarter}` : import_drizzle_orm40.sql``;
-  const facilityFilter = filters.facilityId ? import_drizzle_orm40.sql` AND f.id = ${filters.facilityId}` : import_drizzle_orm40.sql``;
-  const districtFilter = filters.districtId ? import_drizzle_orm40.sql` AND d.id = ${filters.districtId}` : import_drizzle_orm40.sql``;
-  const provinceFilter = filters.provinceId ? import_drizzle_orm40.sql` AND p.id = ${filters.provinceId}` : import_drizzle_orm40.sql``;
-  const dbRows = await db.execute(import_drizzle_orm40.sql`
+  const yearClause = filters.year ? import_drizzle_orm41.sql` AND m.year = ${filters.year}` : import_drizzle_orm41.sql``;
+  const quarterClause = filters.quarter ? import_drizzle_orm41.sql` AND m.quarter = ${filters.quarter}` : import_drizzle_orm41.sql``;
+  const facilityFilter = facilityScopeClause(filters);
+  const districtFilter = districtScopeClause(filters);
+  const provinceFilter = provinceScopeClause(filters);
+  const dbRows = await db.execute(import_drizzle_orm41.sql`
     SELECT
       f.id                                                                AS id,
       f.name                                                              AS name,
@@ -33244,14 +34137,13 @@ async function getMicroplanReport(filters) {
   `);
   const facilities4 = dbRows.rows.map((row) => {
     const fId = Number(row.id);
-    const hasRealData = Number(row.db_total_microplans ?? 0) > 0;
-    const total_microplans = hasRealData ? Number(row.db_total_microplans) : 1 + getFacilityHash(fId, "mp-tot") % 2;
-    const routine = hasRealData ? Number(row.routine) : 1;
-    const campaigns = hasRealData ? Number(row.campaigns) : total_microplans - routine;
-    const draft = hasRealData ? Number(row.draft) : 0;
-    const pending = hasRealData ? Number(row.pending) : 0;
-    const approved = hasRealData ? Number(row.approved) : total_microplans;
-    const locked = hasRealData ? Number(row.locked) : approved;
+    const total_microplans = Number(row.db_total_microplans ?? 0);
+    const routine = Number(row.routine ?? 0);
+    const campaigns = Number(row.campaigns ?? 0);
+    const draft = Number(row.draft ?? 0);
+    const pending = Number(row.pending ?? 0);
+    const approved = Number(row.approved ?? 0);
+    const locked = Number(row.locked ?? 0);
     return {
       level: "facility",
       id: fId,
@@ -33276,10 +34168,10 @@ async function getMicroplanReport(filters) {
   );
 }
 async function getZeroDoseReport(filters) {
-  const facilityFilter = filters.facilityId ? import_drizzle_orm40.sql` AND f.id = ${filters.facilityId}` : import_drizzle_orm40.sql``;
-  const districtFilter = filters.districtId ? import_drizzle_orm40.sql` AND d.id = ${filters.districtId}` : import_drizzle_orm40.sql``;
-  const provinceFilter = filters.provinceId ? import_drizzle_orm40.sql` AND p.id = ${filters.provinceId}` : import_drizzle_orm40.sql``;
-  const dbRows = await db.execute(import_drizzle_orm40.sql`
+  const facilityFilter = facilityScopeClause(filters);
+  const districtFilter = districtScopeClause(filters);
+  const provinceFilter = provinceScopeClause(filters);
+  const dbRows = await db.execute(import_drizzle_orm41.sql`
     SELECT
       f.id                              AS id,
       f.name                            AS name,
@@ -33314,18 +34206,11 @@ async function getZeroDoseReport(filters) {
   const facilities4 = dbRows.rows.map((row) => {
     const fId = Number(row.id);
     const dbTotalVillages = Number(row.db_total_villages ?? 0);
-    const total_villages = dbTotalVillages > 0 ? dbTotalVillages : 3 + getFacilityHash(fId, "vill-tot") % 8;
-    const isUnseeded = dbTotalVillages > 0 && Number(row.db_zero_dose_villages) === dbTotalVillages;
-    let zero_dose_villages = Number(row.db_zero_dose_villages ?? 0);
-    let zero_dose_htr = Number(row.db_zero_dose_htr ?? 0);
-    if (dbTotalVillages === 0 || isUnseeded) {
-      const rate = 0.05 + getFacilityHash(fId, "zd-rate") % 21 / 100;
-      zero_dose_villages = Math.max(1, Math.round(total_villages * rate));
-      const htrRate = 0.2 + getFacilityHash(fId, "zd-htr-rate") % 31 / 100;
-      zero_dose_htr = Math.min(zero_dose_villages, Math.round(zero_dose_villages * htrRate));
-    }
-    const under1_at_risk = Number(row.under1_at_risk ?? 0) > 0 ? Number(row.under1_at_risk) : zero_dose_villages * (10 + getFacilityHash(fId, "u1-risk") % 41);
-    const under5_at_risk = Number(row.under5_at_risk ?? 0) > 0 ? Number(row.under5_at_risk) : under1_at_risk * 4;
+    const total_villages = dbTotalVillages;
+    const zero_dose_villages = Number(row.db_zero_dose_villages ?? 0);
+    const zero_dose_htr = Number(row.db_zero_dose_htr ?? 0);
+    const under1_at_risk = Number(row.under1_at_risk ?? 0);
+    const under5_at_risk = Number(row.under5_at_risk ?? 0);
     return {
       level: "facility",
       id: fId,
@@ -33348,12 +34233,12 @@ async function getZeroDoseReport(filters) {
   );
 }
 async function getMissedCommunitiesReport(filters) {
-  const yearClause = filters.year ? import_drizzle_orm40.sql` AND sp.year = ${filters.year}` : import_drizzle_orm40.sql``;
-  const quarterClause = filters.quarter ? import_drizzle_orm40.sql` AND sp.quarter = ${filters.quarter}` : import_drizzle_orm40.sql``;
-  const facilityFilter = filters.facilityId ? import_drizzle_orm40.sql` AND f.id = ${filters.facilityId}` : import_drizzle_orm40.sql``;
-  const districtFilter = filters.districtId ? import_drizzle_orm40.sql` AND d.id = ${filters.districtId}` : import_drizzle_orm40.sql``;
-  const provinceFilter = filters.provinceId ? import_drizzle_orm40.sql` AND p.id = ${filters.provinceId}` : import_drizzle_orm40.sql``;
-  const dbRows = await db.execute(import_drizzle_orm40.sql`
+  const yearClause = filters.year ? import_drizzle_orm41.sql` AND sp.year = ${filters.year}` : import_drizzle_orm41.sql``;
+  const quarterClause = filters.quarter ? import_drizzle_orm41.sql` AND sp.quarter = ${filters.quarter}` : import_drizzle_orm41.sql``;
+  const facilityFilter = facilityScopeClause(filters);
+  const districtFilter = districtScopeClause(filters);
+  const provinceFilter = provinceScopeClause(filters);
+  const dbRows = await db.execute(import_drizzle_orm41.sql`
     SELECT
       f.id                               AS id,
       f.name                             AS name,
@@ -33376,11 +34261,10 @@ async function getMissedCommunitiesReport(filters) {
   `);
   const facilities4 = dbRows.rows.map((row) => {
     const fId = Number(row.id);
-    const hasRealData = Number(row.db_villages_planned ?? 0) > 0;
-    const villages_planned = hasRealData ? Number(row.db_villages_planned) : 3 + getFacilityHash(fId, "plan-vill") % 8;
-    const sessions_not_achieved = hasRealData ? Number(row.db_sessions_not_achieved) : getFacilityHash(fId, "fail-sess") % 3;
-    const missed_villages = hasRealData ? Number(row.db_missed_villages) : Math.round(villages_planned * (0.05 + getFacilityHash(fId, "miss-vill") % 11 / 100));
-    const reached_villages = villages_planned - missed_villages;
+    const villages_planned = Number(row.db_villages_planned ?? 0);
+    const sessions_not_achieved = Number(row.db_sessions_not_achieved ?? 0);
+    const missed_villages = Number(row.db_missed_villages ?? 0);
+    const reached_villages = Number(row.db_reached_villages ?? 0);
     return {
       level: "facility",
       id: fId,
@@ -33402,12 +34286,12 @@ async function getMissedCommunitiesReport(filters) {
   );
 }
 async function getCoverageReport(filters) {
-  const yearClause = filters.year ? import_drizzle_orm40.sql` AND sp.year = ${filters.year}` : import_drizzle_orm40.sql``;
-  const quarterClause = filters.quarter ? import_drizzle_orm40.sql` AND sp.quarter = ${filters.quarter}` : import_drizzle_orm40.sql``;
-  const facilityFilter = filters.facilityId ? import_drizzle_orm40.sql` AND f.id = ${filters.facilityId}` : import_drizzle_orm40.sql``;
-  const districtFilter = filters.districtId ? import_drizzle_orm40.sql` AND d.id = ${filters.districtId}` : import_drizzle_orm40.sql``;
-  const provinceFilter = filters.provinceId ? import_drizzle_orm40.sql` AND p.id = ${filters.provinceId}` : import_drizzle_orm40.sql``;
-  const dbRows = await db.execute(import_drizzle_orm40.sql`
+  const yearClause = filters.year ? import_drizzle_orm41.sql` AND sp.year = ${filters.year}` : import_drizzle_orm41.sql``;
+  const quarterClause = filters.quarter ? import_drizzle_orm41.sql` AND sp.quarter = ${filters.quarter}` : import_drizzle_orm41.sql``;
+  const facilityFilter = facilityScopeClause(filters);
+  const districtFilter = districtScopeClause(filters);
+  const provinceFilter = provinceScopeClause(filters);
+  const dbRows = await db.execute(import_drizzle_orm41.sql`
     SELECT
       f.id                               AS id,
       f.name                             AS name,
@@ -33429,11 +34313,10 @@ async function getCoverageReport(filters) {
   `);
   const facilities4 = dbRows.rows.map((row) => {
     const fId = Number(row.id);
-    const hasRealData = Number(row.db_total_sessions ?? 0) > 0;
-    const target_population = hasRealData ? Number(row.db_target_population) : 100 + getFacilityHash(fId, "target-pop") % 901;
-    const vaccinated_total = hasRealData ? Number(row.db_vaccinated_total) : Math.round(target_population * (0.75 + getFacilityHash(fId, "vac-sess") % 21 / 100));
-    const total_sessions = hasRealData ? Number(row.db_total_sessions) : 8 + getFacilityHash(fId, "tot-sess") % 17;
-    const completed_sessions = hasRealData ? Number(row.db_completed_sessions) : Math.round(total_sessions * (0.8 + getFacilityHash(fId, "comp-sess") % 21 / 100));
+    const target_population = Number(row.db_target_population ?? 0);
+    const vaccinated_total = Number(row.db_vaccinated_total ?? 0);
+    const total_sessions = Number(row.db_total_sessions ?? 0);
+    const completed_sessions = Number(row.db_completed_sessions ?? 0);
     const coverage_pct = target_population > 0 ? Number((vaccinated_total / target_population * 100).toFixed(1)) : 0;
     return {
       level: "facility",
@@ -33463,10 +34346,10 @@ async function getCoverageReport(filters) {
   );
 }
 async function getHtrReport(filters) {
-  const facilityFilter = filters.facilityId ? import_drizzle_orm40.sql` AND f.id = ${filters.facilityId}` : import_drizzle_orm40.sql``;
-  const districtFilter = filters.districtId ? import_drizzle_orm40.sql` AND d.id = ${filters.districtId}` : import_drizzle_orm40.sql``;
-  const provinceFilter = filters.provinceId ? import_drizzle_orm40.sql` AND p.id = ${filters.provinceId}` : import_drizzle_orm40.sql``;
-  const dbRows = await db.execute(import_drizzle_orm40.sql`
+  const facilityFilter = facilityScopeClause(filters);
+  const districtFilter = districtScopeClause(filters);
+  const provinceFilter = provinceScopeClause(filters);
+  const dbRows = await db.execute(import_drizzle_orm41.sql`
     SELECT
       f.id AS id,
       f.name AS name,
@@ -33493,23 +34376,13 @@ async function getHtrReport(filters) {
   const facilities4 = dbRows.rows.map((row) => {
     const fId = Number(row.id);
     const dbTotalVillages = Number(row.db_total_villages ?? 0);
-    const total_villages = dbTotalVillages > 0 ? dbTotalVillages : 3 + getFacilityHash(fId, "vill-tot") % 8;
-    const isUnseeded = dbTotalVillages > 0 && Number(row.db_htr_villages) === 0;
-    let htr_villages = Number(row.db_htr_villages ?? 0);
-    let critical = Number(row.db_critical ?? 0);
-    let high_priority = Number(row.db_high_priority ?? 0);
-    let medium_priority = Number(row.db_medium_priority ?? 0);
-    let low_priority = Number(row.db_low_priority ?? 0);
-    let avg_htr_score = row.db_avg_htr_score != null ? Number(row.db_avg_htr_score) : 0;
-    if (dbTotalVillages === 0 || isUnseeded) {
-      const rate = 0.2 + getFacilityHash(fId, "htr-rate") % 21 / 100;
-      htr_villages = Math.max(1, Math.round(total_villages * rate));
-      critical = Math.round(htr_villages * 0.1);
-      high_priority = Math.round(htr_villages * 0.2);
-      medium_priority = Math.round(htr_villages * 0.4);
-      low_priority = htr_villages - critical - high_priority - medium_priority;
-      avg_htr_score = 45 + getFacilityHash(fId, "htr-score") % 41;
-    }
+    const total_villages = dbTotalVillages;
+    const htr_villages = Number(row.db_htr_villages ?? 0);
+    const critical = Number(row.db_critical ?? 0);
+    const high_priority = Number(row.db_high_priority ?? 0);
+    const medium_priority = Number(row.db_medium_priority ?? 0);
+    const low_priority = Number(row.db_low_priority ?? 0);
+    const avg_htr_score = row.db_avg_htr_score != null ? Number(row.db_avg_htr_score) : 0;
     return {
       level: "facility",
       id: fId,
@@ -33535,12 +34408,12 @@ async function getHtrReport(filters) {
   );
 }
 async function getBudgetReport(filters) {
-  const yearClause = filters.year ? import_drizzle_orm40.sql` AND bi.year = ${filters.year}` : import_drizzle_orm40.sql``;
-  const quarterClause = filters.quarter ? import_drizzle_orm40.sql` AND bi.quarter = ${filters.quarter}` : import_drizzle_orm40.sql``;
-  const facilityFilter = filters.facilityId ? import_drizzle_orm40.sql` AND f.id = ${filters.facilityId}` : import_drizzle_orm40.sql``;
-  const districtFilter = filters.districtId ? import_drizzle_orm40.sql` AND d.id = ${filters.districtId}` : import_drizzle_orm40.sql``;
-  const provinceFilter = filters.provinceId ? import_drizzle_orm40.sql` AND p.id = ${filters.provinceId}` : import_drizzle_orm40.sql``;
-  const dbRows = await db.execute(import_drizzle_orm40.sql`
+  const yearClause = filters.year ? import_drizzle_orm41.sql` AND bi.year = ${filters.year}` : import_drizzle_orm41.sql``;
+  const quarterClause = filters.quarter ? import_drizzle_orm41.sql` AND bi.quarter = ${filters.quarter}` : import_drizzle_orm41.sql``;
+  const facilityFilter = facilityScopeClause(filters);
+  const districtFilter = districtScopeClause(filters);
+  const provinceFilter = provinceScopeClause(filters);
+  const dbRows = await db.execute(import_drizzle_orm41.sql`
     SELECT
       f.id AS id,
       f.name AS name,
@@ -33566,15 +34439,14 @@ async function getBudgetReport(filters) {
   `);
   const facilities4 = dbRows.rows.map((row) => {
     const fId = Number(row.id);
-    const hasRealData = Number(row.db_budget_line_count ?? 0) > 0;
-    const total_budget = hasRealData ? Number(row.db_total_budget) : 15e3 + getFacilityHash(fId, "budget-tot") % 65001;
-    const approved_budget = hasRealData ? Number(row.db_approved_budget) : total_budget;
-    const government_funding = hasRealData ? Number(row.db_government_funding) : Math.round(total_budget * 0.3);
-    const gavi_funding = hasRealData ? Number(row.db_gavi_funding) : Math.round(total_budget * 0.5);
-    const unicef_funding = hasRealData ? Number(row.db_unicef_funding) : Math.round(total_budget * 0.12);
-    const who_funding = hasRealData ? Number(row.db_who_funding) : Math.round(total_budget * 0.05);
-    const other_funding = hasRealData ? Number(row.db_other_funding) : total_budget - government_funding - gavi_funding - unicef_funding - who_funding;
-    const budget_line_count = hasRealData ? Number(row.db_budget_line_count) : 6 + getFacilityHash(fId, "lines-tot") % 10;
+    const total_budget = Number(row.db_total_budget ?? 0);
+    const approved_budget = Number(row.db_approved_budget ?? 0);
+    const government_funding = Number(row.db_government_funding ?? 0);
+    const gavi_funding = Number(row.db_gavi_funding ?? 0);
+    const unicef_funding = Number(row.db_unicef_funding ?? 0);
+    const who_funding = Number(row.db_who_funding ?? 0);
+    const other_funding = Number(row.db_other_funding ?? 0);
+    const budget_line_count = Number(row.db_budget_line_count ?? 0);
     return {
       level: "facility",
       id: fId,
@@ -33609,12 +34481,12 @@ async function getBudgetReport(filters) {
   );
 }
 async function getSupervisionReport(filters) {
-  const yearClause = filters.year ? import_drizzle_orm40.sql` AND EXTRACT(YEAR FROM sv.scheduled_date) = ${filters.year}` : import_drizzle_orm40.sql``;
-  const quarterClause = filters.quarter ? import_drizzle_orm40.sql` AND CEIL(EXTRACT(MONTH FROM sv.scheduled_date) / 3.0) = ${filters.quarter}` : import_drizzle_orm40.sql``;
-  const facilityFilter = filters.facilityId ? import_drizzle_orm40.sql` AND f.id = ${filters.facilityId}` : import_drizzle_orm40.sql``;
-  const districtFilter = filters.districtId ? import_drizzle_orm40.sql` AND d.id = ${filters.districtId}` : import_drizzle_orm40.sql``;
-  const provinceFilter = filters.provinceId ? import_drizzle_orm40.sql` AND p.id = ${filters.provinceId}` : import_drizzle_orm40.sql``;
-  const dbRows = await db.execute(import_drizzle_orm40.sql`
+  const yearClause = filters.year ? import_drizzle_orm41.sql` AND EXTRACT(YEAR FROM sv.scheduled_date) = ${filters.year}` : import_drizzle_orm41.sql``;
+  const quarterClause = filters.quarter ? import_drizzle_orm41.sql` AND CEIL(EXTRACT(MONTH FROM sv.scheduled_date) / 3.0) = ${filters.quarter}` : import_drizzle_orm41.sql``;
+  const facilityFilter = facilityScopeClause(filters);
+  const districtFilter = districtScopeClause(filters);
+  const provinceFilter = provinceScopeClause(filters);
+  const dbRows = await db.execute(import_drizzle_orm41.sql`
     SELECT
       f.id AS id,
       f.name AS name,
@@ -33638,13 +34510,12 @@ async function getSupervisionReport(filters) {
   `);
   const facilities4 = dbRows.rows.map((row) => {
     const fId = Number(row.id);
-    const hasRealData = Number(row.db_total_visits ?? 0) > 0;
-    const total_visits = hasRealData ? Number(row.db_total_visits) : 2 + getFacilityHash(fId, "sup-tot") % 4;
-    const conducted = hasRealData ? Number(row.db_conducted) : Math.round(total_visits * (0.75 + getFacilityHash(fId, "sup-cond") % 26 / 100));
-    const scheduled = hasRealData ? Number(row.db_scheduled) : 0;
-    const missed = total_visits - conducted;
-    const cancelled = hasRealData ? Number(row.db_cancelled) : 0;
-    const avg_score = hasRealData && row.db_avg_score != null ? Number(row.db_avg_score) : 72 + getFacilityHash(fId, "sup-score") % 21;
+    const total_visits = Number(row.db_total_visits ?? 0);
+    const conducted = Number(row.db_conducted ?? 0);
+    const scheduled = Number(row.db_scheduled ?? 0);
+    const missed = Number(row.db_missed ?? 0);
+    const cancelled = Number(row.db_cancelled ?? 0);
+    const avg_score = row.db_avg_score != null ? Number(row.db_avg_score) : 0;
     const completion_rate = total_visits > 0 ? Number((conducted / total_visits * 100).toFixed(1)) : 0;
     return {
       level: "facility",
@@ -33675,12 +34546,12 @@ async function getSupervisionReport(filters) {
     }
   );
 }
-var import_drizzle_orm40;
+var import_drizzle_orm41;
 var init_reportingService = __esm({
   "server/services/reportingService.ts"() {
     "use strict";
     init_db();
-    import_drizzle_orm40 = require("drizzle-orm");
+    import_drizzle_orm41 = require("drizzle-orm");
   }
 });
 
@@ -33689,46 +34560,109 @@ var reports_exports = {};
 __export(reports_exports, {
   reportsRouter: () => reportsRouter
 });
+function roleListFor2(user) {
+  return [
+    user?.role,
+    ...Array.isArray(user?.roles) ? user.roles : []
+  ].filter(Boolean);
+}
+function scopedIds(user, key, fallback) {
+  const scope = user?.dataAccessScope || {};
+  const values = Array.isArray(scope[key]) ? scope[key] : [];
+  const ids = [...values, fallback].map(Number).filter((value) => Number.isInteger(value) && value > 0);
+  return Array.from(new Set(ids));
+}
+function singleId(ids) {
+  return ids.length === 1 ? ids[0] : void 0;
+}
 function buildScopedFilters(req, query) {
-  const u = req.user;
+  const u = req.dbUser ?? req.user;
+  const tenantId = req.tenantId || u?.tenantId;
   const base = {
-    tenantId: req.tenantId || u.tenantId,
+    tenantId,
     year: query.year,
     quarter: query.quarter,
     provinceId: query.provinceId,
     districtId: query.districtId,
     facilityId: query.facilityId
   };
-  const role = u.role ?? "";
-  if (role === "facility_clerk" || role === "facility_in_charge") {
-    return { ...base, facilityId: u.facilityId, districtId: void 0, provinceId: void 0 };
+  if (u?.isPlatformAdmin === true) return base;
+  const roles = roleListFor2(u);
+  const facilityIds = scopedIds(u, "facilities", u?.facilityId);
+  const districtIds = scopedIds(u, "districts", u?.districtId);
+  const provinceIds = scopedIds(u, "provinces", u?.provinceId);
+  const hasFacilityRole = roles.includes("facility_clerk") || roles.includes("facility_in_charge");
+  const hasDistrictRole = roles.includes("district_manager");
+  const hasProvinceRole = roles.includes("provincial_coordinator");
+  const isScopedRole = hasFacilityRole || hasDistrictRole || hasProvinceRole || facilityIds.length > 0 || districtIds.length > 0 || provinceIds.length > 0;
+  const isVisitingOtherTenant = !!u?.tenantId && !!tenantId && u.tenantId !== tenantId;
+  if (isScopedRole && isVisitingOtherTenant) {
+    return { ...base, provinceId: void 0, districtId: void 0, facilityId: void 0, denied: true, scopeApplied: true };
   }
-  if (role === "district_manager") {
-    const scopedDistrictId = u.districtId;
+  if (hasFacilityRole || facilityIds.length > 0) {
+    if (facilityIds.length === 0) return { ...base, provinceId: void 0, districtId: void 0, facilityId: void 0, denied: true, scopeApplied: true };
     return {
       ...base,
-      districtId: query.districtId ?? scopedDistrictId,
       provinceId: void 0,
-      // only allow facilityId if it's within their district — let DB handle this
-      facilityId: query.facilityId
+      districtId: void 0,
+      facilityId: singleId(facilityIds),
+      facilityIds: facilityIds.length > 1 ? facilityIds : void 0,
+      scopeApplied: true
     };
   }
-  if (role === "provincial_coordinator") {
-    const scopedProvinceId = u.provinceId;
+  if (hasDistrictRole || districtIds.length > 0) {
+    if (districtIds.length === 0) return { ...base, provinceId: void 0, districtId: void 0, facilityId: void 0, denied: true, scopeApplied: true };
     return {
       ...base,
-      provinceId: query.provinceId ?? scopedProvinceId,
-      districtId: query.districtId,
-      facilityId: query.facilityId
+      provinceId: void 0,
+      districtId: singleId(districtIds),
+      districtIds: districtIds.length > 1 ? districtIds : void 0,
+      facilityId: query.facilityId,
+      scopeApplied: true
     };
+  }
+  if (hasProvinceRole || provinceIds.length > 0) {
+    if (provinceIds.length === 0) return { ...base, provinceId: void 0, districtId: void 0, facilityId: void 0, denied: true, scopeApplied: true };
+    return {
+      ...base,
+      provinceId: singleId(provinceIds),
+      provinceIds: provinceIds.length > 1 ? provinceIds : void 0,
+      districtId: query.districtId,
+      facilityId: query.facilityId,
+      scopeApplied: true
+    };
+  }
+  if (roles.includes("national_admin") || roles.includes("gis_specialist") || roles.includes("national_manager")) {
+    return base;
   }
   return base;
 }
-function requireAuth(req, res, next) {
-  if (!req.isAuthenticated || !req.isAuthenticated()) {
-    return res.status(401).json({ success: false, message: "Not authenticated" });
+function sanitizeScopedRows(rows, filters) {
+  const data = Array.isArray(rows) ? rows : [];
+  if (filters.denied) return [];
+  if (filters.facilityIds?.length || filters.districtIds?.length || filters.provinceIds?.length) {
+    return data.filter((row) => row?.level !== "national");
   }
-  next();
+  if (filters.facilityId) {
+    const facilityId = Number(filters.facilityId);
+    return data.filter((row) => row?.level === "facility" && Number(row?.id) === facilityId);
+  }
+  if (filters.districtId) {
+    const districtId = Number(filters.districtId);
+    return data.filter(
+      (row) => row?.level === "district" && Number(row?.id) === districtId || row?.level === "facility" && Number(row?.parent_id ?? row?.parentId) === districtId
+    );
+  }
+  if (filters.provinceId) {
+    const provinceId = Number(filters.provinceId);
+    const districtIds = new Set(
+      data.filter((row) => row?.level === "district" && Number(row?.parent_id ?? row?.parentId) === provinceId).map((row) => Number(row.id))
+    );
+    return data.filter(
+      (row) => row?.level === "province" && Number(row?.id) === provinceId || row?.level === "district" && Number(row?.parent_id ?? row?.parentId) === provinceId || row?.level === "facility" && districtIds.has(Number(row?.parent_id ?? row?.parentId))
+    );
+  }
+  return data.filter((row) => row?.level !== "national");
 }
 function makeReportHandler(queryFn) {
   return async (req, res) => {
@@ -33741,19 +34675,25 @@ function makeReportHandler(queryFn) {
       if (!filters.tenantId) {
         return res.status(400).json({ success: false, message: "No tenant context" });
       }
-      const data = await queryFn(filters);
+      const rawData = filters.denied ? [] : await queryFn(filters);
+      const data = sanitizeScopedRows(rawData, filters);
       res.setHeader("Cache-Control", CACHE_HEADER);
       return res.json({
         success: true,
         data,
         meta: {
           generatedAt: (/* @__PURE__ */ new Date()).toISOString(),
+          scopeApplied: filters.scopeApplied === true,
+          scopeDenied: filters.denied === true,
           filters: {
             year: filters.year ?? null,
             quarter: filters.quarter ?? null,
             provinceId: filters.provinceId ?? null,
             districtId: filters.districtId ?? null,
-            facilityId: filters.facilityId ?? null
+            facilityId: filters.facilityId ?? null,
+            provinceIds: filters.provinceIds ?? null,
+            districtIds: filters.districtIds ?? null,
+            facilityIds: filters.facilityIds ?? null
           }
         }
       });
@@ -33769,6 +34709,9 @@ var init_reports = __esm({
     "use strict";
     import_express7 = require("express");
     import_zod4 = require("zod");
+    init_auth();
+    init_loadDbUser();
+    init_tenantResolver();
     init_reportingService();
     reportsRouter = (0, import_express7.Router)();
     filterSchema = import_zod4.z.object({
@@ -33778,8 +34721,8 @@ var init_reports = __esm({
       districtId: import_zod4.z.coerce.number().int().positive().optional(),
       facilityId: import_zod4.z.coerce.number().int().positive().optional()
     });
-    CACHE_HEADER = "private, max-age=120, stale-while-revalidate=60";
-    reportsRouter.use(requireAuth);
+    CACHE_HEADER = "no-store, max-age=0";
+    reportsRouter.use(isAuthenticated, requireTenant, requireDbUser);
     reportsRouter.get("/sessions", makeReportHandler(getSessionReport));
     reportsRouter.get("/microplans", makeReportHandler(getMicroplanReport));
     reportsRouter.get("/zero-dose", makeReportHandler(getZeroDoseReport));
@@ -33796,12 +34739,12 @@ var gisPolygons_exports = {};
 __export(gisPolygons_exports, {
   gisPolygonsRouter: () => gisPolygonsRouter
 });
-var import_express8, import_drizzle_orm41, gisPolygonsRouter;
+var import_express8, import_drizzle_orm42, gisPolygonsRouter;
 var init_gisPolygons = __esm({
   "server/routes/gisPolygons.ts"() {
     "use strict";
     import_express8 = require("express");
-    import_drizzle_orm41 = require("drizzle-orm");
+    import_drizzle_orm42 = require("drizzle-orm");
     init_db();
     init_schema();
     init_populationIntelligenceService();
@@ -33812,13 +34755,13 @@ var init_gisPolygons = __esm({
       try {
         const tenantId = req.user?.tenantId;
         const { ownerType, ownerId } = req.query;
-        let query = db.select().from(gisPolygons).where((0, import_drizzle_orm41.eq)(gisPolygons.tenantId, tenantId));
+        let query = db.select().from(gisPolygons).where((0, import_drizzle_orm42.eq)(gisPolygons.tenantId, tenantId));
         if (ownerType && ownerId) {
           query = db.select().from(gisPolygons).where(
-            (0, import_drizzle_orm41.and)(
-              (0, import_drizzle_orm41.eq)(gisPolygons.tenantId, tenantId),
-              (0, import_drizzle_orm41.eq)(gisPolygons.ownerType, String(ownerType)),
-              (0, import_drizzle_orm41.eq)(gisPolygons.ownerId, parseInt(String(ownerId), 10))
+            (0, import_drizzle_orm42.and)(
+              (0, import_drizzle_orm42.eq)(gisPolygons.tenantId, tenantId),
+              (0, import_drizzle_orm42.eq)(gisPolygons.ownerType, String(ownerType)),
+              (0, import_drizzle_orm42.eq)(gisPolygons.ownerId, parseInt(String(ownerId), 10))
             )
           );
         }
@@ -33846,7 +34789,7 @@ var init_gisPolygons = __esm({
         const tenantId = req.user?.tenantId;
         const id = parseInt(req.params.id, 10);
         const data = req.body;
-        const [updated] = await db.update(gisPolygons).set({ ...data, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm41.and)((0, import_drizzle_orm41.eq)(gisPolygons.id, id), (0, import_drizzle_orm41.eq)(gisPolygons.tenantId, tenantId))).returning();
+        const [updated] = await db.update(gisPolygons).set({ ...data, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm42.and)((0, import_drizzle_orm42.eq)(gisPolygons.id, id), (0, import_drizzle_orm42.eq)(gisPolygons.tenantId, tenantId))).returning();
         if (!updated) return res.status(404).json({ message: "Polygon not found" });
         res.json(updated);
       } catch (err) {
@@ -33857,7 +34800,7 @@ var init_gisPolygons = __esm({
       try {
         const tenantId = req.user?.tenantId;
         const id = parseInt(req.params.id, 10);
-        await db.delete(gisPolygons).where((0, import_drizzle_orm41.and)((0, import_drizzle_orm41.eq)(gisPolygons.id, id), (0, import_drizzle_orm41.eq)(gisPolygons.tenantId, tenantId)));
+        await db.delete(gisPolygons).where((0, import_drizzle_orm42.and)((0, import_drizzle_orm42.eq)(gisPolygons.id, id), (0, import_drizzle_orm42.eq)(gisPolygons.tenantId, tenantId)));
         res.json({ success: true });
       } catch (err) {
         res.status(500).json({ message: "Failed to delete polygon", error: err.message });
@@ -33926,7 +34869,7 @@ var workers_exports = {};
 __export(workers_exports, {
   communicationWorker: () => communicationWorker
 });
-var import_bullmq2, import_drizzle_orm42, communicationWorker;
+var import_bullmq2, import_drizzle_orm43, communicationWorker;
 var init_workers = __esm({
   "server/services/uce/workers.ts"() {
     "use strict";
@@ -33935,7 +34878,7 @@ var init_workers = __esm({
     init_db();
     init_schema();
     init_messaging();
-    import_drizzle_orm42 = require("drizzle-orm");
+    import_drizzle_orm43 = require("drizzle-orm");
     communicationWorker = new import_bullmq2.Worker(
       "communication-queue",
       async (job) => {
@@ -33953,7 +34896,7 @@ var init_workers = __esm({
           let commConfig = null;
           if (tenantId) {
             const { tenants: tenants3 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
-            const [tenant] = await db.select().from(tenants3).where((0, import_drizzle_orm42.eq)(tenants3.id, tenantId)).limit(1);
+            const [tenant] = await db.select().from(tenants3).where((0, import_drizzle_orm43.eq)(tenants3.id, tenantId)).limit(1);
             if (tenant && tenant.settings && tenant.settings.communication) {
               commConfig = tenant.settings.communication[channel];
             }
@@ -33982,8 +34925,8 @@ var init_workers = __esm({
             response: dispatchResult.error || dispatchResult.messageId || "Success"
           });
           if (dispatchResult.success) {
-            await db.update(communicationChannels).set({ delivered: true, responseCode: dispatchResult.messageId }).where((0, import_drizzle_orm42.eq)(communicationChannels.id, channelRecord.id));
-            await db.update(communications).set({ status: "completed" }).where((0, import_drizzle_orm42.eq)(communications.id, communicationId));
+            await db.update(communicationChannels).set({ delivered: true, responseCode: dispatchResult.messageId }).where((0, import_drizzle_orm43.eq)(communicationChannels.id, channelRecord.id));
+            await db.update(communications).set({ status: "completed" }).where((0, import_drizzle_orm43.eq)(communications.id, communicationId));
             return { status: "delivered", channel };
           } else {
             throw new Error(dispatchResult.error || "Unknown error");
@@ -34014,7 +34957,7 @@ var init_workers = __esm({
               channel: nextChannel
             }, { delay: delayMs });
           } else {
-            await db.update(communications).set({ status: "failed" }).where((0, import_drizzle_orm42.eq)(communications.id, communicationId));
+            await db.update(communications).set({ status: "failed" }).where((0, import_drizzle_orm43.eq)(communications.id, communicationId));
           }
           throw err;
         }
@@ -34073,7 +35016,7 @@ async function backfillClientIds() {
   try {
     const { clients: clients2, facilities: facilities4, districts: districts3, provinces: provinces4 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
     const { db: db2 } = await Promise.resolve().then(() => (init_db(), db_exports));
-    const { sql: sql25, isNull: isNull7, eq: eq28, and: and21 } = await import("drizzle-orm");
+    const { sql: sql26, isNull: isNull7, eq: eq28, and: and21 } = await import("drizzle-orm");
     const { getInitials: getInitials2, computeCheckDigit: computeCheckDigit2 } = await Promise.resolve().then(() => (init_routes(), routes_exports));
     const pendingClients = await db2.select().from(clients2).where(isNull7(clients2.clientId));
     if (pendingClients.length === 0) {
@@ -34090,7 +35033,7 @@ async function backfillClientIds() {
       const distInit = getInitials2(facInfo?.districtName || "DST");
       const hfInit = getInitials2(facInfo?.facilityName || "FAC");
       const regYear = client3.createdAt ? new Date(client3.createdAt).getFullYear() : (/* @__PURE__ */ new Date()).getFullYear();
-      const [maxClient] = await db2.select({ maxSerial: sql25`MAX(${clients2.serialNumber})` }).from(clients2).where(
+      const [maxClient] = await db2.select({ maxSerial: sql26`MAX(${clients2.serialNumber})` }).from(clients2).where(
         and21(
           eq28(clients2.facilityId, client3.facilityId),
           eq28(clients2.registrationYear, regYear),
@@ -34113,7 +35056,7 @@ async function backfillClientIds() {
     log(`Client ID backfill failed: ${error}`, "backfill");
   }
 }
-var import_express9, import_compression, import_http, app, httpServer, NATIVE_ALLOWED_ORIGINS;
+var import_express9, import_compression, import_http, app, httpServer, skipDbBootstrap, sessionMiddleware, NATIVE_ALLOWED_ORIGINS;
 var init_index = __esm({
   "server/index.ts"() {
     import_express9 = __toESM(require("express"), 1);
@@ -34143,12 +35086,15 @@ var init_index = __esm({
     init_research_hub_schema();
     init_safe_geometry();
     init_settlements_gis_microplanning();
+    init_polygon_planning();
     try {
       process.loadEnvFile?.();
     } catch {
     }
     app = (0, import_express9.default)();
     httpServer = (0, import_http.createServer)(app);
+    skipDbBootstrap = process.env.SKIP_DB_BOOTSTRAP === "1";
+    sessionMiddleware = getSession();
     app.set("trust proxy", 1);
     app.use((req, res, next) => {
       if (process.env.NODE_ENV === "production" && req.headers["x-forwarded-proto"] && req.headers["x-forwarded-proto"] !== "https") {
@@ -34173,7 +35119,7 @@ var init_index = __esm({
       // Capacitor (iOS / alt scheme)
       "app://local",
       // Electron packaged app (custom secure scheme)
-      // Electron dev (loadURL to dev server) — development only, never expand the
+      // Electron dev (loadURL to dev server) - development only, never expand the
       // credentialed CORS surface to a localhost origin in production.
       ...process.env.NODE_ENV === "production" ? [] : ["http://localhost:5000"]
     ]);
@@ -34221,7 +35167,11 @@ var init_index = __esm({
     app.use(realtimeBroadcastMiddleware);
     (async () => {
       await registerRoutes(httpServer, app);
-      backfillClientIds().catch((err) => log(`Background backfill failed: ${err}`, "backfill"));
+      if (skipDbBootstrap) {
+        log("DB bootstrap disabled: skipping client ID backfill", "db");
+      } else {
+        backfillClientIds().catch((err) => log(`Background backfill failed: ${err}`, "backfill"));
+      }
       const { registerRemoteSensingRoutes: registerRemoteSensingRoutes2 } = await Promise.resolve().then(() => (init_remoteSensingService(), remoteSensingService_exports));
       registerRemoteSensingRoutes2(app);
       const { reportsRouter: reportsRouter2 } = await Promise.resolve().then(() => (init_reports(), reports_exports));
@@ -34230,52 +35180,65 @@ var init_index = __esm({
       app.use("/api/surveillance", surveillanceRouter2);
       const { gisPolygonsRouter: gisPolygonsRouter2 } = await Promise.resolve().then(() => (init_gisPolygons(), gisPolygons_exports));
       app.use("/api/gis/polygons", gisPolygonsRouter2);
-      applyPerfIndexes().then(() => log("perf indexes applied", "db")).catch((err) => log(`perf indexes warning: ${err?.message ?? err}`, "db"));
-      applyVillageColumns().then(() => log("village route columns migration complete", "db")).catch((err) => log(`village columns warning: ${err?.message ?? err}`, "db"));
-      applyOutreachColumns().then(() => log("outreach columns migration complete", "db")).catch((err) => log(`outreach columns warning: ${err?.message ?? err}`, "db"));
-      applyMicroplanApprovalColumns().then(() => log("microplan approval columns migration complete", "db")).catch((err) => log(`microplan approval columns warning: ${err?.message ?? err}`, "db"));
-      applySessionsTable().then(() => log("sessions table ensured", "db")).catch((err) => log(`sessions table warning: ${err?.message ?? err}`, "db"));
-      applyWikiPages().then(() => log("wiki pages table ensured", "db")).catch((err) => log(`wiki pages warning: ${err?.message ?? err}`, "db"));
-      promoteAdminUser().then(() => log("admin user promotion check complete", "db")).catch((err) => log(`admin promotion warning: ${err?.message ?? err}`, "db"));
-      applyNewUserRoles().then(() => log("new user roles migration complete", "db")).catch((err) => log(`new user roles warning: ${err?.message ?? err}`, "db"));
-      Promise.resolve().then(() => (init_db(), db_exports)).then(
-        ({ db: db2 }) => up(db2).then(() => log("cold chain equipment table ensured", "db")).catch((err) => log(`cold chain equipment migration warning: ${err?.message ?? err}`, "db"))
-      ).catch((err) => log(`cold chain migration db import failed: ${err?.message ?? err}`, "db"));
-      Promise.resolve().then(() => (init_db(), db_exports)).then(
-        ({ db: db2 }) => up2(db2).then(() => log("stock transaction vaccine names normalized", "db")).catch((err) => log(`stock normalization migration warning: ${err?.message ?? err}`, "db"))
-      ).catch((err) => log(`stock normalization migration db import failed: ${err?.message ?? err}`, "db"));
-      Promise.resolve().then(() => (init_db(), db_exports)).then(
-        ({ db: db2 }) => up3(db2).then(() => log("research hub tables and seed data ensured", "db")).catch((err) => log(`research hub migration warning: ${err?.message ?? err}`, "db"))
-      ).catch((err) => log(`research hub migration db import failed: ${err?.message ?? err}`, "db"));
-      Promise.resolve().then(() => (init_db(), db_exports)).then(
-        ({ db: db2 }) => applySafeGeometryFixes(db2).then(() => log("geometry schema fixes applied", "db")).catch((err) => log(`geometry fixes warning: ${err?.message ?? err}`, "db"))
-      ).catch((err) => log(`geometry fixes db import failed: ${err?.message ?? err}`, "db"));
-      Promise.resolve().then(() => (init_db(), db_exports)).then(
-        ({ db: db2 }) => applySettlementsGisMigration(db2).then(() => log("settlements GIS migration complete", "db")).catch((err) => log(`settlements GIS migration warning: ${err?.message ?? err}`, "db"))
-      ).catch((err) => log(`settlements GIS db import failed: ${err?.message ?? err}`, "db"));
-      setupRealtime(httpServer, getSession());
-      startPopulationRefreshScheduler();
-      startSessionArchiveScheduler();
-      startStockAlertDigestScheduler();
-      startSupervisionDigestScheduler();
-      startApprovalScheduler();
-      startMicroplanApprovalCron();
-      Promise.resolve().then(() => (init_workers(), workers_exports)).catch((err) => log(`Failed to load UCE worker: ${err}`));
-      const isProduction = process.env.NODE_ENV === "production";
-      const demoSeedEnabled = process.env.SKIP_DEMO_SEED !== "1" && (!isProduction || process.env.ENABLE_DEMO_SEED === "1");
-      if (demoSeedEnabled) {
-        seedDemoOperational().then(() => log("demo operational seed complete", "seed")).catch((err) => log(`demo operational seed failed: ${err?.message ?? err}`, "seed"));
+      if (skipDbBootstrap) {
+        log("DB bootstrap disabled: skipping startup migrations and schema/data ensure jobs", "db");
       } else {
-        log(
-          `demo operational seed skipped (NODE_ENV=${process.env.NODE_ENV ?? "unset"}, set ENABLE_DEMO_SEED=1 to opt in)`,
-          "seed"
-        );
+        applyPerfIndexes().then(() => log("perf indexes applied", "db")).catch((err) => log(`perf indexes warning: ${err?.message ?? err}`, "db"));
+        applyVillageColumns().then(() => log("village route columns migration complete", "db")).catch((err) => log(`village columns warning: ${err?.message ?? err}`, "db"));
+        applyOutreachColumns().then(() => log("outreach columns migration complete", "db")).catch((err) => log(`outreach columns warning: ${err?.message ?? err}`, "db"));
+        applyMicroplanApprovalColumns().then(() => log("microplan approval columns migration complete", "db")).catch((err) => log(`microplan approval columns warning: ${err?.message ?? err}`, "db"));
+        applySessionsTable().then(() => log("sessions table ensured", "db")).catch((err) => log(`sessions table warning: ${err?.message ?? err}`, "db"));
+        applyWikiPages().then(() => log("wiki pages table ensured", "db")).catch((err) => log(`wiki pages warning: ${err?.message ?? err}`, "db"));
+        promoteAdminUser().then(() => log("admin user promotion check complete", "db")).catch((err) => log(`admin promotion warning: ${err?.message ?? err}`, "db"));
+        applyNewUserRoles().then(() => log("new user roles migration complete", "db")).catch((err) => log(`new user roles warning: ${err?.message ?? err}`, "db"));
+        Promise.resolve().then(() => (init_db(), db_exports)).then(
+          ({ db: db2 }) => up(db2).then(() => log("cold chain equipment table ensured", "db")).catch((err) => log(`cold chain equipment migration warning: ${err?.message ?? err}`, "db"))
+        ).catch((err) => log(`cold chain migration db import failed: ${err?.message ?? err}`, "db"));
+        Promise.resolve().then(() => (init_db(), db_exports)).then(
+          ({ db: db2 }) => up2(db2).then(() => log("stock transaction vaccine names normalized", "db")).catch((err) => log(`stock normalization migration warning: ${err?.message ?? err}`, "db"))
+        ).catch((err) => log(`stock normalization migration db import failed: ${err?.message ?? err}`, "db"));
+        Promise.resolve().then(() => (init_db(), db_exports)).then(
+          ({ db: db2 }) => up3(db2).then(() => log("research hub tables and seed data ensured", "db")).catch((err) => log(`research hub migration warning: ${err?.message ?? err}`, "db"))
+        ).catch((err) => log(`research hub migration db import failed: ${err?.message ?? err}`, "db"));
+        Promise.resolve().then(() => (init_db(), db_exports)).then(
+          ({ db: db2 }) => applySafeGeometryFixes(db2).then(() => log("geometry schema fixes applied", "db")).catch((err) => log(`geometry fixes warning: ${err?.message ?? err}`, "db"))
+        ).catch((err) => log(`geometry fixes db import failed: ${err?.message ?? err}`, "db"));
+        Promise.resolve().then(() => (init_db(), db_exports)).then(
+          ({ db: db2 }) => applySettlementsGisMigration(db2).then(() => log("settlements GIS migration complete", "db")).catch((err) => log(`settlements GIS migration warning: ${err?.message ?? err}`, "db"))
+        ).catch((err) => log(`settlements GIS db import failed: ${err?.message ?? err}`, "db"));
+        Promise.resolve().then(() => (init_db(), db_exports)).then(
+          ({ db: db2 }) => applyPolygonPlanningMigration(db2).then(() => log("polygon planning metadata migration complete", "db")).catch((err) => log(`polygon planning metadata migration warning: ${err?.message ?? err}`, "db"))
+        ).catch((err) => log(`polygon planning metadata db import failed: ${err?.message ?? err}`, "db"));
+      }
+      setupRealtime(httpServer, sessionMiddleware);
+      if (skipDbBootstrap) {
+        log("DB bootstrap disabled: skipping background schedulers, workers, and demo seed", "db");
+      } else {
+        startPopulationRefreshScheduler();
+        startSessionArchiveScheduler();
+        startStockAlertDigestScheduler();
+        startSupervisionDigestScheduler();
+        startApprovalScheduler();
+        startMicroplanApprovalCron();
+        Promise.resolve().then(() => (init_workers(), workers_exports)).catch((err) => log(`Failed to load UCE worker: ${err}`));
+        const isProduction = process.env.NODE_ENV === "production";
+        const demoSeedEnabled = process.env.SKIP_DEMO_SEED !== "1" && (!isProduction || process.env.ENABLE_DEMO_SEED === "1");
+        if (demoSeedEnabled) {
+          seedDemoOperational().then(() => log("demo operational seed complete", "seed")).catch((err) => log(`demo operational seed failed: ${err?.message ?? err}`, "seed"));
+        } else {
+          log(
+            `demo operational seed skipped (NODE_ENV=${process.env.NODE_ENV ?? "unset"}, set ENABLE_DEMO_SEED=1 to opt in)`,
+            "seed"
+          );
+        }
       }
       app.use((err, _req, res, _next) => {
         const status = err.status || err.statusCode || 500;
         const message = err.message || "Internal Server Error";
+        if (status === 500) {
+          console.error("[Server Error]", err);
+        }
         res.status(status).json({ message });
-        throw err;
       });
       if (process.env.NODE_ENV === "production") {
         serveStatic(app);

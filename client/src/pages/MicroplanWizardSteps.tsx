@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+﻿import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useRoute } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -173,6 +173,233 @@ export function Step1({
   const [historicalData, setHistoricalData] = useState<any>(null);
   const [hasFetchedHistory, setHasFetchedHistory] = useState(false);
   const [historyStatus, setHistoryStatus] = useState<"none" | "filled" | "error">("none");
+  const { user } = useAuth();
+  const canOverrideDenominator = ["district_manager", "provincial_coordinator", "national_admin", "gis_specialist"].includes(String(user?.role || ""));
+  const { data: prefillBundle, isLoading: loadingPrefill } = useQuery<any>({
+    queryKey: ["/api/microplans/prefill", facilityId, year],
+    queryFn: async () => {
+      const res = await fetch(`/api/microplans/prefill/${facilityId}?year=${year}`, { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to load microplanning prefills");
+      return res.json();
+    },
+    enabled: !!facilityId,
+    staleTime: 60_000,
+  });
+  const populationScenarios = prefillBundle?.populationScenarios ?? [];
+  const { data: populationHubRows = [] } = useQuery<PopulationData[]>({
+    queryKey: ["/api/population", "wizard-denominator-sources", facilityId],
+    queryFn: async () => {
+      const res = await fetch(`/api/population?facilityId=${facilityId}`, { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to load Population Hub sources");
+      return res.json();
+    },
+    enabled: !!facilityId,
+    staleTime: 60_000,
+  });
+
+  const getScenarioTargetInfants = (scenario: any) => {
+    const explicitTarget = Number(scenario?.targetInfants ?? 0);
+    if (Number.isFinite(explicitTarget) && explicitTarget > 0) return explicitTarget;
+    const totalPopulation = Number(scenario?.totalPopulation ?? 0);
+    return Number.isFinite(totalPopulation) && totalPopulation > 0 ? Math.round(totalPopulation * 0.035) : 0;
+  };
+
+  const populationHubScenarios = useMemo(() => {
+    const sourceLabels: Record<string, string> = {
+      nso: "NSO authoritative total",
+      hmis: "Imported DHIS2/HMIS denominator",
+      worldpop: "WorldPop raster estimate",
+      survey: "Local survey",
+      community_census: "Community census",
+    };
+    const methodForSource = (source: string) => {
+      if (source === "worldpop") return "Spatial population estimate";
+      if (source === "hmis") return "Imported programme denominator";
+      if (source === "survey" || source === "community_census") return "Direct community count";
+      return "Authoritative total";
+    };
+    const specificity = (row: any) => {
+      if (row?.facilityId && !row?.villageId) return 5;
+      if (row?.villageId) return 4;
+      if (row?.districtId) return 3;
+      if (row?.provinceId) return 2;
+      return 1;
+    };
+    const grouped = new Map<string, any[]>();
+    for (const row of populationHubRows ?? []) {
+      const rowYear = Number(row.year ?? 0);
+      if (!Number.isFinite(rowYear) || rowYear > year) continue;
+      const source = String(row.source ?? "unknown");
+      grouped.set(source, [...(grouped.get(source) ?? []), row]);
+    }
+
+    return Array.from(grouped.entries()).flatMap(([source, rows]) => {
+      const latestYear = Math.max(...rows.map((row) => Number(row.year ?? 0)).filter(Number.isFinite));
+      const latestRows = rows.filter((row) => Number(row.year ?? 0) === latestYear);
+      const bestLevel = Math.max(...latestRows.map(specificity));
+      const selectedRows = latestRows.filter((row) => specificity(row) === bestLevel);
+      if (selectedRows.length === 0) return [];
+      const totalPopulation = selectedRows.reduce((sum, row) => sum + (Number(row.totalPopulation) || 0), 0);
+      const targetInfants = selectedRows.reduce((sum, row) => sum + (Number(row.under1Population) || 0), 0);
+      const underFive = selectedRows.reduce((sum, row) => sum + (Number(row.under5Population) || 0), 0);
+      const pregnantWomen = selectedRows.reduce((sum, row) => sum + (Number(row.pregnantWomen) || 0), 0);
+      const flags = selectedRows.some((row) => String(row.approvalStatus ?? "draft") !== "approved")
+        ? ["Some Population Hub rows are not approved yet"]
+        : [];
+      if (bestLevel < 5) flags.push("Best available source is not a facility-level aggregate");
+      return [{
+        id: `population:${source}:${latestYear}`,
+        sourceType: source,
+        sourceName: sourceLabels[source] ?? source.replace(/_/g, " "),
+        method: methodForSource(source),
+        scenarioYear: latestYear,
+        confidence: source === "nso" || source === "hmis" ? "high" : "medium",
+        status: selectedRows.every((row) => String(row.approvalStatus ?? "draft") === "approved") ? "approved" : "draft",
+        version: `v${latestYear}`,
+        totalPopulation,
+        targetInfants: targetInfants || Math.round(totalPopulation * 0.035),
+        underFive,
+        pregnantWomen,
+        metadataSource: sourceLabels[source] ?? source,
+        lastUpdated: selectedRows.map((row) => row.updatedAt || row.createdAt).filter(Boolean).sort().pop() ?? null,
+        dataQualityFlags: flags,
+        populationRecordIds: selectedRows.map((row) => Number(row.id)).filter(Number.isFinite),
+      }];
+    });
+  }, [populationHubRows, year]);
+
+  const derivedPopulationSources = useMemo(() => {
+    if (!facilityId || !prefillBundle) return [];
+    const sources: any[] = [];
+    const communities = Array.isArray(prefillBundle.communities) ? prefillBundle.communities : [];
+    const communityTotal = communities.reduce((sum: number, community: any) => {
+      const value = [
+        community.totalCatchmentPopulation,
+        community.griddedPopulation,
+        community.population,
+        community.estimatedPopulation,
+      ]
+        .map((v) => Number(v))
+        .find((v) => Number.isFinite(v) && v > 0);
+      return sum + (value ?? 0);
+    }, 0);
+    const communityUnderFive = communities.reduce((sum: number, community: any) => {
+      const value = Number(community.under5Population ?? community.underFivePopulation ?? 0);
+      return sum + (Number.isFinite(value) && value > 0 ? value : 0);
+    }, 0);
+    if (communityTotal > 0) {
+      sources.push({
+        id: `derived:linked-communities:${year}`,
+        sourceType: "community_census",
+        sourceName: "Linked community records",
+        method: "Sum of linked community population",
+        scenarioYear: year,
+        confidence: "medium",
+        status: "ready",
+        version: "current",
+        totalPopulation: communityTotal,
+        targetInfants: communityTotal,
+        underFive: communityUnderFive,
+        pregnantWomen: Math.round(communityTotal * 0.04),
+        metadataSource: "Linked community records",
+        lastUpdated: null,
+        dataQualityFlags: ["Derived from communities linked to this facility"],
+        populationRecordIds: [],
+      });
+    }
+
+    const catchmentPopulation = Number(
+      prefillBundle.officialCatchment?.populationEstimate ??
+      prefillBundle.catchment?.populationEstimate ??
+      prefillBundle.facility?.catchmentGridPopulation ??
+      0
+    );
+    if (Number.isFinite(catchmentPopulation) && catchmentPopulation > 0) {
+      sources.push({
+        id: `derived:facility-catchment:${year}`,
+        sourceType: "worldpop",
+        sourceName: "Facility catchment estimate",
+        method: "Catchment population estimate",
+        scenarioYear: year,
+        confidence: "medium",
+        status: "ready",
+        version: "current",
+        totalPopulation: catchmentPopulation,
+        targetInfants: catchmentPopulation,
+        underFive: Number(prefillBundle.officialCatchment?.under5Population ?? 0),
+        pregnantWomen: Math.round(catchmentPopulation * 0.04),
+        metadataSource: "Facility catchment estimate",
+        lastUpdated: prefillBundle.officialCatchment?.updatedAt ?? null,
+        dataQualityFlags: ["Derived from the facility catchment estimate"],
+        populationRecordIds: [],
+      });
+    }
+
+    const currentDenominator = Number(coverage.targetInfants ?? 0);
+    if (sources.length === 0 && Number.isFinite(currentDenominator) && currentDenominator > 0) {
+      sources.push({
+        id: `derived:current-denominator:${year}`,
+        sourceType: "survey",
+        sourceName: "Current prefilled denominator",
+        method: "Current wizard prefill",
+        scenarioYear: year,
+        confidence: "low",
+        status: "review",
+        version: "current",
+        totalPopulation: currentDenominator,
+        targetInfants: currentDenominator,
+        underFive: 0,
+        pregnantWomen: 0,
+        metadataSource: "Current wizard prefill",
+        lastUpdated: null,
+        dataQualityFlags: ["Review this source before submission"],
+        populationRecordIds: [],
+      });
+    }
+
+    return sources;
+  }, [coverage.targetInfants, facilityId, prefillBundle, year]);
+
+  const availablePopulationSources = useMemo(() => {
+    const byId = new Map<string, any>();
+    [...populationScenarios, ...populationHubScenarios, ...derivedPopulationSources].forEach((scenario: any) => {
+      if (scenario?.id && !byId.has(scenario.id)) byId.set(scenario.id, scenario);
+    });
+    return Array.from(byId.values());
+  }, [derivedPopulationSources, populationHubScenarios, populationScenarios]);
+
+  const selectedScenario =
+    availablePopulationSources.find((s: any) => s.id === coverage.denominatorScenarioId) ??
+    availablePopulationSources.find((s: any) => s.id === prefillBundle?.selectedPopulationScenario?.id) ??
+    availablePopulationSources[0] ??
+    null;
+  const populationHubHref = facilityId
+    ? `/population?facilityId=${facilityId}&year=${year}&returnTo=${encodeURIComponent("/microplans/routine/new")}`
+    : "/population";
+
+  const applyPopulationScenario = (scenario: any) => {
+    if (!scenario) return;
+    const scenarioTargetInfants = getScenarioTargetInfants(scenario);
+    setCoverage((prev: any) => ({
+      ...prev,
+      denominatorScenarioId: scenario.id,
+      denominatorSource: scenario.sourceType,
+      denominatorMethod: scenario.method,
+      denominatorYear: String(scenario.scenarioYear || year),
+      denominatorConfidence: scenario.confidence || "medium",
+      denominatorStatus: scenario.status || "draft",
+      denominatorVersion: scenario.version || "v1",
+      denominatorOverrideReason: scenario.dataQualityFlags?.length ? scenario.dataQualityFlags.join("; ") : "",
+      targetInfants: scenarioTargetInfants > 0 ? String(scenarioTargetInfants) : prev.targetInfants || "",
+    }));
+  };
+
+  useEffect(() => {
+    if (!selectedScenario) return;
+    if (coverage.denominatorScenarioId) return;
+    applyPopulationScenario(selectedScenario);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedScenario?.id]);
 
   useEffect(() => {
     if (!facilityId) {
@@ -193,9 +420,9 @@ export function Step1({
           if (data.hasHistoricalData || data.targetInfants > 0) {
             setHistoryStatus("filled");
             if (isCoverageEmpty) {
-              setCoverage({
-                ...coverage,
-                targetInfants: String(data.targetInfants || ""),
+              setCoverage((prev: any) => ({
+                ...prev,
+                targetInfants: prev.denominatorScenarioId || prev.targetInfants ? prev.targetInfants : String(data.targetInfants || ""),
                 dtp1Doses: String(data.dosesByAntigen?.DTP1 || ""),
                 dtp3Doses: String(data.dosesByAntigen?.DTP3 || ""),
                 mcv1Doses: String(data.dosesByAntigen?.MCV1 || ""),
@@ -204,7 +431,7 @@ export function Step1({
                 dtp3: String(data.coverageRates?.DTP3 || "0"),
                 mcv1: String(data.coverageRates?.MCV1 || "0"),
                 mcv2: String(data.coverageRates?.MCV2 || "0"),
-              });
+              }));
             }
           } else {
             setHistoryStatus("none");
@@ -231,7 +458,7 @@ export function Step1({
   const dropMcv = dtp1 > 0 ? Math.round(((dtp1 - mcv1) / dtp1) * 100) : 0;
   const set = (k: string, v: string) => setCoverage({ ...coverage, [k]: v });
 
-  // ── Scope details: fetch provinces + districts ───────────────────────────
+  // -- Scope details: fetch provinces + districts ---------------------------
   const needsScopeDetails = planType === "campaign" && campaignScope !== "National";
 
   const { data: provinces = [] } = useQuery<{ id: number; name: string }[]>({
@@ -289,15 +516,15 @@ export function Step1({
     <div className="space-y-3">
       {historyStatus === "filled" && (
         <div className="p-3 bg-blue-50 dark:bg-blue-950/30 text-blue-800 dark:text-blue-300 rounded border border-blue-200 dark:border-blue-800 text-xs flex items-center gap-2">
-          <span>ℹ️ Historical coverage data for last year ({year - 1}) has been auto-filled (target: {historicalData?.targetInfants} infants). You may review and override these values.</span>
+          <span>Info: Historical coverage data for last year ({year - 1}) has been auto-filled (target: {historicalData?.targetInfants} infants). You may review and override these values.</span>
         </div>
       )}
       {historyStatus === "none" && hasFetchedHistory && (
         <div className="p-3 bg-amber-50 dark:bg-amber-950/30 text-amber-800 dark:text-amber-300 rounded border border-amber-200 dark:border-amber-800 text-xs flex items-center gap-2">
-          <span>⚠️ No historical coverage found for this facility in the database. Please enter baseline numbers manually.</span>
+          <span>Warning: No historical coverage found for this facility in the database. Please enter baseline numbers manually.</span>
         </div>
       )}
-      {/* Plan type chooser — same template, two flavours. Locked when the
+      {/* Plan type chooser - same template, two flavours. Locked when the
           user entered via /microplans/routine or /microplans/campaigns. */}
       <div className="rounded-md border bg-muted/30 p-3 space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -360,15 +587,15 @@ export function Step1({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="National">🌍 National</SelectItem>
-                    <SelectItem value="Sub-national">🗺️ Sub-national (Provinces / Districts)</SelectItem>
-                    <SelectItem value="Targeted">🎯 Targeted (Specific facilities)</SelectItem>
+                    <SelectItem value="National"> National</SelectItem>
+                    <SelectItem value="Sub-national"> Sub-national (Provinces / Districts)</SelectItem>
+                    <SelectItem value="Targeted"> Targeted (Specific facilities)</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
             </div>
 
-            {/* ── Sub-national / Targeted scope picker ──────────────── */}
+            {/* -- Sub-national / Targeted scope picker ---------------- */}
             {campaignScope !== "National" && (
               <div className="rounded-md border border-dashed border-primary/30 bg-primary/5 p-3 space-y-3">
                 <p className="text-xs font-semibold text-primary uppercase tracking-wide">
@@ -415,7 +642,7 @@ export function Step1({
                     onValueChange={(v) => toggleId("provinceIds", Number(v))}
                   >
                     <SelectTrigger className="h-8 text-xs" data-testid="select-province">
-                      <SelectValue placeholder={provinces.length === 0 ? "Loading…" : "Add province…"} />
+                      <SelectValue placeholder={provinces.length === 0 ? "Loading..." : "Add province..."} />
                     </SelectTrigger>
                     <SelectContent>
                       {provinces
@@ -429,7 +656,7 @@ export function Step1({
                   </Select>
                 </div>
 
-                {/* District multi-select — cascades from province selection */}
+                {/* District multi-select - cascades from province selection */}
                 <div>
                   <div className="flex items-center justify-between mb-1">
                     <Label className="text-xs">
@@ -473,7 +700,7 @@ export function Step1({
                     onValueChange={(v) => toggleId("districtIds", Number(v))}
                   >
                     <SelectTrigger className="h-8 text-xs" data-testid="select-district">
-                      <SelectValue placeholder={visibleDistricts.length === 0 ? "Loading…" : "Add district…"} />
+                      <SelectValue placeholder={visibleDistricts.length === 0 ? "Loading..." : "Add district..."} />
                     </SelectTrigger>
                     <SelectContent>
                       {visibleDistricts
@@ -509,6 +736,105 @@ export function Step1({
           </>
         )}
       </div>
+      <div className="rounded-md border bg-blue-50/60 p-3 text-sm dark:bg-blue-950/20">
+        <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
+          <div>
+            <p className="font-semibold">Population Source</p>
+            <p className="text-xs text-muted-foreground">
+              Choose the population source this plan will use. VaxPlan can offer Population Hub records, linked community totals, or facility catchment estimates.
+            </p>
+          </div>
+          <Badge variant={selectedScenario?.status === "approved" ? "default" : selectedScenario ? "outline" : "destructive"}>
+            {loadingPrefill ? "Loading" : selectedScenario?.status === "approved" ? "Approved" : selectedScenario ? "Selected" : "Missing"}
+          </Badge>
+        </div>
+        {!facilityId ? (
+          <div className="rounded-md border bg-background p-3 text-xs text-muted-foreground">
+            Select a facility first so VaxPlan can load available population sources.
+          </div>
+        ) : loadingPrefill ? (
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Skeleton className="h-10" />
+            <Skeleton className="h-24" />
+          </div>
+        ) : availablePopulationSources.length === 0 ? (
+          <div className="space-y-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
+            <p>
+              No population source was found for this facility. Open Population Hub to enter or approve all available source data before final submission.
+            </p>
+            <Button asChild size="sm" variant="outline" className="bg-background">
+              <Link href={populationHubHref}>Open Population Hub</Link>
+            </Button>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <div>
+              <Label className="text-xs">Select population source</Label>
+              <Select
+                value={selectedScenario?.id || coverage.denominatorScenarioId || ""}
+                onValueChange={(id) => {
+                  const scenario = availablePopulationSources.find((s: any) => s.id === id);
+                  applyPopulationScenario(scenario);
+                }}
+              >
+                <SelectTrigger data-testid="select-denominator-source"><SelectValue placeholder="Select population source" /></SelectTrigger>
+                <SelectContent>
+                  {availablePopulationSources.map((scenario: any) => (
+                    <SelectItem key={scenario.id} value={scenario.id}>
+                      {scenario.sourceName} · {scenario.scenarioYear}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {selectedScenario && (
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                {[
+                  ["Source", selectedScenario.sourceName],
+                  ["Method", selectedScenario.method],
+                  ["Year", selectedScenario.scenarioYear],
+                  ["Confidence", selectedScenario.confidence],
+                  ["Status", selectedScenario.status],
+                  ["Version", selectedScenario.version],
+                  ["Updated", selectedScenario.lastUpdated ? new Date(selectedScenario.lastUpdated).toLocaleDateString() : "Not recorded"],
+                  ["Target infants", Number(selectedScenario.targetInfants || 0).toLocaleString()],
+                  ["Total population", Number(selectedScenario.totalPopulation || 0).toLocaleString()],
+                  ["Under 5", Number(selectedScenario.underFive || 0).toLocaleString()],
+                ].map(([label, value]) => (
+                  <div key={String(label)} className="rounded-md border bg-background p-2">
+                    <p className="text-[11px] uppercase text-muted-foreground">{label}</p>
+                    <p className="mt-1 font-medium capitalize">{value}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {selectedScenario?.dataQualityFlags?.length > 0 && (
+              <div className="rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
+                {selectedScenario.dataQualityFlags.join("; ")}
+              </div>
+            )}
+
+            {canOverrideDenominator ? (
+              <div className="rounded-md border bg-background p-3">
+                <Label className="text-xs">Override note</Label>
+                <Textarea
+                  value={coverage.denominatorOverrideReason || ""}
+                  onChange={(e) => setCoverage({ ...coverage, denominatorOverrideReason: e.target.value })}
+                  placeholder="Explain why this population source was changed or corrected."
+                  className="min-h-[64px]"
+                  data-testid="textarea-denominator-note"
+                />
+              </div>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                Official population details are managed in Population Hub. Facility users can select a source and add planning notes, but metadata changes require district or national review.
+              </p>
+            )}
+          </div>
+        )}
+      </div>
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <NumberField label="DTP1 %" value={coverage.dtp1} onChange={(v) => set("dtp1", v)} testId="input-dtp1" suffix="%" />
         <NumberField label="DTP3 %" value={coverage.dtp3} onChange={(v) => set("dtp3", v)} testId="input-dtp3" suffix="%" />
@@ -516,11 +842,11 @@ export function Step1({
         <NumberField label="MCV2 %" value={coverage.mcv2} onChange={(v) => set("mcv2", v)} testId="input-mcv2" suffix="%" />
       </div>
 
-      {/* Raw Numbers section — enter doses + denominator, auto-calculates coverage % */}
+      {/* Raw Numbers section - enter doses + denominator, auto-calculates coverage % */}
       <div className="rounded-md border bg-muted/30 p-3 space-y-3">
         <div className="flex items-center justify-between">
           <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-            Raw Numbers (optional — auto-calculates coverage %)
+            Raw Numbers (optional - auto-calculates coverage %)
           </p>
           <Button
             type="button"
@@ -550,7 +876,7 @@ export function Step1({
               if (Object.keys(updates).length > 0) setCoverage({ ...coverage, ...updates });
             }}
           >
-            ⚡ Calculate Coverage %
+             Calculate Coverage %
           </Button>
         </div>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
@@ -638,11 +964,11 @@ export function Step1({
 
       <div className="grid grid-cols-2 gap-3 rounded-md border bg-muted/30 p-3">
         <div className="text-sm">
-          Dropout DTP1→DTP3
+          Dropout DTP1-&gt;DTP3
           <div className={`text-lg font-semibold ${dropDtp > 10 ? "text-amber-600" : ""}`}>{dropDtp}%</div>
         </div>
         <div className="text-sm">
-          Dropout DTP1→MCV1
+          Dropout DTP1-&gt;MCV1
           <div className={`text-lg font-semibold ${dropMcv > 10 ? "text-amber-600" : ""}`}>{dropMcv}%</div>
         </div>
       </div>
@@ -690,8 +1016,16 @@ export function Step2({
   const under1Ratio = settings.under1 !== undefined ? Number(settings.under1) : 0.04;
 
   const sumCommunityUnder1 = communities.reduce((acc, c) => acc + Math.round(parseFloat(c.targetPopulation || "0")), 0);
-  const diffPercent = targetInfants > 0 ? Math.abs(sumCommunityUnder1 - targetInfants) / targetInfants : 0;
+  const denominatorGap = targetInfants - sumCommunityUnder1;
+  const diffPercent = targetInfants > 0 ? Math.abs(denominatorGap) / targetInfants : 0;
   const showMismatchWarning = targetInfants > 0 && diffPercent > 0.10;
+  const denominatorStatus = targetInfants <= 0
+    ? "No Step 1 denominator"
+    : denominatorGap === 0
+      ? "Balanced"
+      : denominatorGap > 0
+        ? `${denominatorGap.toLocaleString()} infants not allocated`
+        : `${Math.abs(denominatorGap).toLocaleString()} infants over allocated`;
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
   const errorRowRef = useRef<HTMLInputElement | null>(null);
 
@@ -747,13 +1081,36 @@ export function Step2({
         if (!res.ok) return null;
         return res.json();
       } catch {
-        // Network error or timeout — return null so the UI shows "failed to load"
+        // Network error or timeout - return null so the UI shows "failed to load"
         return null;
       } finally {
         clearTimeout(timeoutId);
       }
     },
   });
+
+  const localCoverageCommunities = useMemo(() => {
+    return communities.map((c, index) => ({
+      id: c.villageId ?? c.rowId ?? `local-${index}`,
+      name: c.name || `Community ${index + 1}`,
+      settlementType: c.settlementType || c.type || "village",
+      distanceKm: null,
+      gridPop: Number(c.gridPop || 0),
+      hmisNsoPop: Number(c.surveyPop || c.totalCatchmentPopulation || 0),
+      targetPopulation: Number(c.targetPopulation || 0),
+      highRisk: !!c.highRisk,
+      covered: true,
+      latitude: c.latitude != null ? Number(c.latitude) : null,
+      longitude: c.longitude != null ? Number(c.longitude) : null,
+      localFallback: true,
+    }));
+  }, [communities]);
+  const coverageRows = catchmentCommunities?.communities?.length > 0
+    ? catchmentCommunities.communities
+    : localCoverageCommunities;
+  const coverageTotal = catchmentCommunities?.total ?? coverageRows.length;
+  const coverageUncovered = catchmentCommunities?.uncoveredCount ?? coverageRows.filter((c: any) => !c.covered).length;
+  const usingLocalCoverageFallback = !catchmentCommunities?.communities?.length && localCoverageCommunities.length > 0;
 
   useEffect(() => {
     if (showGaps && facility?.id) {
@@ -976,9 +1333,8 @@ export function Step2({
 
       if (result.status === "ok") {
         const gridPop = String(result.total);
-        const surveyVal = parseInt(c.surveyPop || "0", 10);
         const gridVal = result.total;
-        const targetPop = String(Math.round(Math.max(gridVal, surveyVal) * under1Ratio));
+        const targetPop = String(Math.round(gridVal * under1Ratio));
         update(index, {
           gridPop,
           targetPopulation: targetPop,
@@ -1021,11 +1377,8 @@ export function Step2({
   const acceptEstimate = () => {
     if (!estimate || estimate.result?.status !== "ok") return;
     const gridPop = String(estimate.result.total);
-    const current = communities[estimate.index];
-    const surveyVal = parseInt(current?.surveyPop || "0", 10);
     const gridVal = estimate.result.total;
-    // Target = max of gridded estimate and survey/NSO pop multiplied by infant ratio
-    const targetPop = String(Math.round(Math.max(gridVal, surveyVal) * under1Ratio));
+    const targetPop = String(Math.round(gridVal * under1Ratio));
     update(estimate.index, {
       gridPop,
       targetPopulation: targetPop,
@@ -1147,8 +1500,7 @@ export function Step2({
       const next = communities.map((c, i) => {
         const total = successes.get(i);
         if (total == null) return c;
-        const surveyVal = parseInt(c.surveyPop || "0", 10);
-        const target = Math.round(Math.max(total, surveyVal) * under1Ratio);
+        const target = Math.round(total * under1Ratio);
         return { ...c, gridPop: String(total), targetPopulation: String(target), source: "worldpop" as const };
       });
       setCommunities(next);
@@ -1161,7 +1513,7 @@ export function Step2({
         : errorCount > 0
         ? "Bulk estimate finished with errors"
         : "Bulk estimate complete",
-      description: `${okCount} updated · ${nodataCount} no-data · ${errorCount} failed`,
+      description: `${okCount} updated - ${nodataCount} no-data - ${errorCount} failed`,
       variant: allFailed ? "destructive" : undefined,
     });
   };
@@ -1189,11 +1541,11 @@ export function Step2({
     <div className="space-y-4">
       {showMismatchWarning && (
         <div className="p-3 bg-amber-50 dark:bg-amber-950/30 text-amber-800 dark:text-amber-300 rounded border border-amber-200 dark:border-amber-800 text-xs flex items-center gap-2">
-          <span>⚠️ Sum of community under-1 targets ({sumCommunityUnder1} infants) differs from facility target infants in Step 1 ({targetInfants} infants) by more than 10%. Please verify targets.</span>
+          <span>Warning: Sum of community under-1 targets ({sumCommunityUnder1} infants) differs from facility target infants in Step 1 ({targetInfants} infants) by more than 10%. Please verify targets.</span>
         </div>
       )}
       <div className="grid grid-cols-1 xl:grid-cols-4 gap-4">
-        {/* Map + Table — 3 columns */}
+        {/* Map + Table - 3 columns */}
         <div className="xl:col-span-3 space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <p className="text-xs text-muted-foreground">
@@ -1361,8 +1713,8 @@ export function Step2({
                   <th className="p-2 w-8">#</th>
                   <th className="p-2">Name</th>
                   <th className="p-2">Type</th>
-                  <th className="p-2" title="WorldPop / gridded raster population estimate">Grid Pop 🌐</th>
-                  <th className="p-2" title="NSO / HMIS / Survey / Census population (manual entry)">Survey/HMIS/NSO Pop 📋</th>
+                  <th className="p-2" title="WorldPop / gridded raster population estimate">WorldPop</th>
+                  <th className="p-2" title="NSO / HMIS / Survey / Census population (manual entry)">Survey/HMIS/NSO Pop </th>
                   <th className="p-2">Target Pop</th>
                   <th className="p-2">Source</th>
                   <th className="p-2">Strategy</th>
@@ -1372,8 +1724,8 @@ export function Step2({
                   <th className="p-2 w-8">#</th>
                   <th className="p-2 min-w-[150px] md:min-w-[200px]">Name</th>
                   <th className="p-2 w-28">Type</th>
-                  <th className="p-2" title="WorldPop / gridded raster population estimate">Grid Pop 🌐</th>
-                  <th className="p-2" title="NSO / HMIS / Survey / Census population (manual entry)">Survey/HMIS/NSO Pop 📋</th>
+                  <th className="p-2" title="WorldPop / gridded raster population estimate">WorldPop</th>
+                  <th className="p-2" title="NSO / HMIS / Survey / Census population (manual entry)">Survey/HMIS/NSO Pop </th>
                   <th className="p-2">Target Pop (&lt;1 yr)</th>
                   <th className="p-2 w-28">Source</th>
                   <th className="p-2 w-28">Strategy</th>
@@ -1442,12 +1794,12 @@ export function Step2({
                           </SelectContent>
                         </Select>
                       </td>
-                      {/* Grid Pop — WorldPop/gridded estimate */}
+                      {/* Grid Pop - WorldPop/gridded estimate */}
                       <td className="p-1">
                         <div className="flex items-center gap-1">
                           {inlineLoadingIndex === i ? (
                             <span className="flex items-center gap-1 text-[10px] text-muted-foreground font-mono px-2 py-1 bg-muted rounded">
-                              <Loader2 className="h-3 w-3 animate-spin" /> Fetching…
+                              <Loader2 className="h-3 w-3 animate-spin" /> Fetching...
                             </span>
                           ) : (
                             <>
@@ -1456,7 +1808,7 @@ export function Step2({
                                   ? "bg-blue-500/10 text-blue-700 dark:text-blue-300 border border-blue-500/20"
                                   : "text-muted-foreground"
                               }`}>
-                                {c.gridPop && c.gridPop !== "0" ? Number(c.gridPop).toLocaleString() : "—"}
+                                {c.gridPop && c.gridPop !== "0" ? Number(c.gridPop).toLocaleString() : "-"}
                               </span>
                               <Button
                                 type="button"
@@ -1477,7 +1829,7 @@ export function Step2({
                           )}
                         </div>
                       </td>
-                      {/* Survey Pop — NSO / HMIS / Census manual entry */}
+                      {/* Survey Pop - NSO / HMIS / Census manual entry */}
                       <td className="p-1">
                         <Input
                           ref={isError ? errorRowRef : undefined}
@@ -1493,7 +1845,7 @@ export function Step2({
                           <p className="mt-1 text-xs text-destructive" data-testid="community-row-error">{errorMessage}</p>
                         )}
                       </td>
-                      {/* Target Pop — best available: manual override, else max(gridPop, surveyPop) */}
+                      {/* Target Pop - best available: manual override, else max(gridPop, surveyPop) */}
                       <td className="p-1">
                         <Input
                           type="number"
@@ -1563,7 +1915,7 @@ export function Step2({
                 {communities.length === 0 && (
                   <tr>
                     <td colSpan={10} className="p-4 text-center text-sm text-muted-foreground">
-                      No communities yet — click on the map to drop one, or use Add community.
+                      No communities yet - click on the map to drop one, or use Add community.
                     </td>
                   </tr>
                 )}
@@ -1574,15 +1926,15 @@ export function Step2({
 
         {/* Sidebar Column */}
         <div className="space-y-4">
-          {/* Coverage Gap Panel — full community list */}
+          {/* Coverage Gap Panel - full community list */}
         <Card className="border border-border shadow-sm bg-card">
           <CardHeader className="pb-3 border-b border-border/40">
             <CardTitle className="text-sm font-semibold flex items-center justify-between">
               <span className="flex items-center gap-2">
                 Coverage Gap Analysis
-                {catchmentCommunities && (
+                {coverageTotal > 0 && (
                   <span className="text-[10px] font-normal text-muted-foreground">
-                    ({catchmentCommunities.uncoveredCount ?? 0} uncovered / {catchmentCommunities.total ?? 0} total)
+                    ({coverageUncovered} uncovered / {coverageTotal} total)
                   </span>
                 )}
               </span>
@@ -1628,9 +1980,26 @@ export function Step2({
                 }}
                 disabled={flaggingUncovered || readOnly}
               >
-                {flaggingUncovered ? <><Loader2 className="mr-1 h-3 w-3 animate-spin" />Flagging…</> : "Flag to District"}
+                {flaggingUncovered ? <><Loader2 className="mr-1 h-3 w-3 animate-spin" />Flagging...</> : "Flag to District"}
               </Button>
             </div>
+
+            <div className={`rounded-md border p-2 text-[11px] ${denominatorGap === 0 ? "border-emerald-200 bg-emerald-50/70 text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/20 dark:text-emerald-300" : "border-amber-200 bg-amber-50/70 text-amber-800 dark:border-amber-900 dark:bg-amber-950/20 dark:text-amber-300"}`}>
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-semibold">Denominator reconciliation</span>
+                <span>{denominatorStatus}</span>
+              </div>
+              <div className="mt-1 grid grid-cols-3 gap-2 text-muted-foreground">
+                <span>Step 1: {targetInfants.toLocaleString()}</span>
+                <span>Allocated: {sumCommunityUnder1.toLocaleString()}</span>
+                <span>Communities: {communities.length.toLocaleString()}</span>
+              </div>
+            </div>
+            {usingLocalCoverageFallback && (
+              <div className="rounded-md border border-border/60 bg-muted/30 p-2 text-[11px] text-muted-foreground">
+                Showing planned communities from this microplan while spatial gap results load or are unavailable.
+              </div>
+            )}
 
             {/* Full community table */}
             <div className="overflow-x-auto max-h-[420px] overflow-y-auto rounded border border-border/40">
@@ -1639,19 +2008,19 @@ export function Step2({
                   <tr>
                     <th className="p-1.5 text-left font-semibold">Community</th>
                     <th className="p-1.5 text-right font-semibold">Dist (km)</th>
-                    <th className="p-1.5 text-right font-semibold">Grid Pop 🌐</th>
-                    <th className="p-1.5 text-right font-semibold">HMIS/NSO 📋</th>
+                    <th className="p-1.5 text-right font-semibold">WorldPop</th>
+                    <th className="p-1.5 text-right font-semibold">Official pop</th>
                     <th className="p-1.5 text-center font-semibold">Status</th>
                     <th className="p-1.5 text-center font-semibold">Action</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {catchmentCommunities?.communities?.length > 0 ? (
-                    catchmentCommunities.communities.map((c: any, idx: number) => (
+                  {coverageRows.length > 0 ? (
+                    coverageRows.map((c: any, idx: number) => (
                       <tr key={c.id ?? idx} className={`border-b border-border/20 ${c.covered ? "opacity-60" : "bg-destructive/5 hover:bg-destructive/10"} transition-colors`}>
                         <td className="p-1.5">
                           <div className="flex items-start gap-1">
-                            {c.highRisk && <span className="text-destructive font-bold" title="High risk">⚠</span>}
+                            {c.highRisk && <span className="text-destructive font-bold" title="High risk">Warning:</span>}
                             <div>
                               <div className="font-semibold text-foreground leading-tight">{c.name}</div>
                               <div className="text-muted-foreground capitalize">{c.settlementType}</div>
@@ -1663,21 +2032,21 @@ export function Step2({
                           {c.gridPop > 0 ? (
                             <span className="text-blue-600 dark:text-blue-400">{c.gridPop.toLocaleString()}</span>
                           ) : (
-                            <span className="text-muted-foreground">—</span>
+                            <span className="text-muted-foreground">-</span>
                           )}
                         </td>
                         <td className="p-1.5 text-right font-mono">
                           {c.hmisNsoPop > 0 ? (
                             <span className="text-green-600 dark:text-green-400">{c.hmisNsoPop.toLocaleString()}</span>
                           ) : (
-                            <span className="text-muted-foreground">—</span>
+                            <span className="text-muted-foreground">-</span>
                           )}
                         </td>
                         <td className="p-1.5 text-center">
                           {c.covered ? (
-                            <span className="text-green-600 dark:text-green-400 font-bold">✓ Planned</span>
+                            <span className="text-green-600 dark:text-green-400 font-bold">Done Planned</span>
                           ) : (
-                            <span className="text-destructive font-bold">⚠ Not planned</span>
+                            <span className="text-destructive font-bold">Warning: Not planned</span>
                           )}
                         </td>
                         <td className="p-1.5 text-center">
@@ -1687,14 +2056,14 @@ export function Step2({
                               variant="ghost"
                               className="h-5 px-1.5 text-[9px] font-bold text-primary hover:text-primary hover:underline"
                               onClick={() => {
-                                const bestPop = Math.max(c.gridPop || 0, c.hmisNsoPop || 0);
+                                const worldPop = Number(c.gridPop || 0);
                                 const newRow = {
                                   name: c.name,
                                   type: c.settlementType || "village",
-                                  targetPopulation: String(bestPop),
-                                  gridPop: String(c.gridPop || 0),
-                                  surveyPop: String(c.hmisNsoPop || 0),
-                                  source: c.gridPop > 0 ? "worldpop" : "nso",
+                                  targetPopulation: worldPop > 0 ? String(Math.round(worldPop * under1Ratio)) : "0",
+                                  gridPop: String(worldPop || 0),
+                                  surveyPop: c.hmisNsoPop > 0 ? String(c.hmisNsoPop) : undefined,
+                                  source: "worldpop",
                                   strategy: "outreach",
                                   latitude: String(c.latitude),
                                   longitude: String(c.longitude),
@@ -1718,14 +2087,14 @@ export function Step2({
                       <td colSpan={6} className="p-4 text-center text-muted-foreground">
                         {loadingCatchment ? (
                           <span className="flex items-center justify-center gap-1.5">
-                            <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading catchment communities…
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading catchment communities...
                           </span>
                         ) : catchmentCommunities === null ? (
-                          <span className="flex items-center justify-center gap-1.5 text-destructive/70">
-                            <X className="h-3.5 w-3.5" /> Failed to load — click Refresh to retry.
+                          <span className="flex items-center justify-center gap-1.5 text-muted-foreground">
+                            <X className="h-3.5 w-3.5" /> Spatial gap results unavailable. Planned communities remain listed when available.
                           </span>
                         ) : (
-                          "No communities found within 25 km of this facility."
+                          "No planned or nearby communities found for this facility."
                         )}
                       </td>
                     </tr>
@@ -1736,7 +2105,7 @@ export function Step2({
           </CardContent>
         </Card>
 
-        {/* Unmapped Suggestions Panel — enhanced */}
+        {/* Unmapped Suggestions Panel - enhanced */}
         <Card className="border border-border shadow-sm bg-card">
           <CardHeader className="pb-3 border-b border-border/40">
             <CardTitle className="text-sm font-semibold flex items-center justify-between">
@@ -1805,8 +2174,8 @@ export function Step2({
                       )}
 
                       <div className="grid grid-cols-2 gap-1 text-[10px] text-muted-foreground">
-                        <span>📋 Est. Population: <strong className="text-foreground">{s.population > 0 ? Number(s.population).toLocaleString() : "—"}</strong></span>
-                        <span>🔗 Status: <span className="capitalize">{s.link_status ?? "unassigned"}</span></span>
+                        <span> Est. Population: <strong className="text-foreground">{s.population > 0 ? Number(s.population).toLocaleString() : "-"}</strong></span>
+                        <span>Link Status: <span className="capitalize">{s.link_status ?? "unassigned"}</span></span>
                       </div>
 
                       {/* Link to existing community action */}
@@ -2064,7 +2433,7 @@ export function Step2({
               )}
             </div>
           </div>
-          {/* Settlement Classification & Population — Sheet 1.0 */}
+          {/* Settlement Classification & Population - Sheet 1.0 */}
           <div className="border-t border-border/40 px-4 py-3 space-y-3">
             <p className="text-xs font-semibold uppercase text-muted-foreground tracking-wide">Settlement Classification &amp; Population (Sheet 1.0)</p>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -2123,7 +2492,7 @@ export function Step2({
               )}
             </div>
           </div>
-          {/* Border Village Inter-Country Coordination — Sheet 1.1 */}
+          {/* Border Village Inter-Country Coordination - Sheet 1.1 */}
           {communities[selectedIdx].isCrossBorder && (
             <div className="border-t border-border/40 px-4 py-3 space-y-3">
               <p className="text-xs font-semibold uppercase text-muted-foreground tracking-wide">Border Village Coordination (Sheet 1.1)</p>
@@ -2179,9 +2548,7 @@ export function Step2({
               lng={estimate.lng}
               initialRadiusKm={2}
               onAcceptEstimate={(total) => {
-                const current = communities[estimate.index];
-                const surveyVal = parseInt(current?.surveyPop || "0", 10);
-                const targetPop = String(Math.max(total, surveyVal));
+                const targetPop = String(Math.round(total * under1Ratio));
                 update(estimate.index, {
                   gridPop: String(total),
                   targetPopulation: targetPop,
@@ -2228,14 +2595,14 @@ export function Step2({
                 </>
               )}
               {bulkEstimate && bulkEstimate.phase === "running" && (
-                <>Sampling WorldPop cells for each community…</>
+                <>Sampling WorldPop cells for each community...</>
               )}
               {bulkEstimate && bulkEstimate.phase === "done" && (() => {
                 const okN = bulkEstimate.rows.filter((r) => r.status.state === "ok").length;
                 const errN = bulkEstimate.rows.filter((r) => r.status.state === "error").length;
                 if (okN === 0 && errN > 0) {
                   return (
-                    <>No rows could be estimated. See the per-row reason below — you can enter populations manually for now.</>
+                    <>No rows could be estimated. See the per-row reason below - you can enter populations manually for now.</>
                   );
                 }
                 if (okN === 0) {
@@ -2243,7 +2610,7 @@ export function Step2({
                 }
                 if (errN > 0) {
                   return (
-                    <>Done — {okN} row{okN === 1 ? "" : "s"} updated from WorldPop. {errN} failed (see below).</>
+                    <>Done - {okN} row{okN === 1 ? "" : "s"} updated from WorldPop. {errN} failed (see below).</>
                   );
                 }
                 return <>Done. Successful rows now use WorldPop as their source.</>;
@@ -2302,25 +2669,25 @@ export function Step2({
                         <td className="p-2 text-xs">
                           {r.status.state === "skipped" && (
                             <span className="text-muted-foreground">
-                              No pin — skipped
+                              No pin - skipped
                             </span>
                           )}
                           {r.status.state === "pending" && (
                             <span className="text-muted-foreground">
                               {bulkEstimate.phase === "running"
-                                ? "Waiting…"
+                                ? "Waiting..."
                                 : "Ready"}
                             </span>
                           )}
                           {r.status.state === "running" && (
                             <span className="flex items-center gap-1 text-muted-foreground">
                               <Loader2 className="h-3 w-3 animate-spin" />
-                              Sampling…
+                              Sampling...
                             </span>
                           )}
                           {r.status.state === "ok" && (
                             <span className="text-foreground" data-testid={`text-bulk-ok-${r.index}`}>
-                              ≈ {r.status.total.toLocaleString()} people
+                              ~ {r.status.total.toLocaleString()} people
                             </span>
                           )}
                           {r.status.state === "nodata" && (
@@ -2343,17 +2710,17 @@ export function Step2({
               {bulkEstimate.phase === "done" && (
                 <div className="text-xs text-muted-foreground">
                   {bulkEstimate.rows.filter((r) => r.status.state === "ok").length}{" "}
-                  updated ·{" "}
+                  updated -{" "}
                   {
                     bulkEstimate.rows.filter((r) => r.status.state === "nodata")
                       .length
                   }{" "}
-                  no-data ·{" "}
+                  no-data -{" "}
                   {
                     bulkEstimate.rows.filter((r) => r.status.state === "error")
                       .length
                   }{" "}
-                  failed ·{" "}
+                  failed -{" "}
                   {
                     bulkEstimate.rows.filter((r) => r.status.state === "skipped")
                       .length
@@ -2390,7 +2757,7 @@ export function Step2({
                         (r) => r.status.state !== "skipped",
                       ).length
                     } row(s)`
-                  : "Running…"}
+                  : "Running..."}
               </Button>
             )}
           </DialogFooter>
@@ -2400,7 +2767,7 @@ export function Step2({
   );
 }
 
-// ─── Step 2 Map ───────────────────────────────────────────────────────────
+// --- Step 2 Map -----------------------------------------------------------
 export function Step2Map({
   facility,
   communities,
@@ -2450,7 +2817,7 @@ export function Step2Map({
   // Lazy-load Leaflet so the wizard's earlier steps don't pay the bundle cost.
   const [leaflet, setLeaflet] = useState<any>(null);
   const [showPopulation, setShowPopulation] = useState(false);
-  // WorldPop proxy is now live — server-side route tries WOPR → Stats API → local DB.
+  // WorldPop proxy is now live - server-side route tries WOPR -> Stats API -> local DB.
   const [populationUnavailable, setPopulationUnavailable] = useState(false);
   const [localGridCells, setLocalGridCells] = useState<any[] | null>(null);
   const [loadingLocalGrid, setLoadingLocalGrid] = useState(false);
@@ -2539,7 +2906,7 @@ export function Step2Map({
 
   // Reset draw vertices when draw mode changes.
   // IMPORTANT: must be declared here (before the early return below) so the
-  // hook call count is the same on every render — React's rules of hooks.
+  // hook call count is the same on every render - React's rules of hooks.
   useEffect(() => {
     if (drawMode !== "facility") setDrawVertices([]);
   }, [drawMode]);
@@ -2547,7 +2914,7 @@ export function Step2Map({
   if (!leaflet) {
     return (
       <div className="h-[360px] w-full rounded-xl border border-dashed border-border bg-muted/30 flex items-center justify-center text-sm text-muted-foreground">
-        <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Loading map…
+        <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Loading map...
       </div>
     );
   }
@@ -2799,7 +3166,7 @@ export function Step2Map({
   }
 
   // (drawMode reset effect moved above the leaflet early-return to comply with
-  // the Rules of Hooks — hooks must be called unconditionally on every render.)
+  // the Rules of Hooks - hooks must be called unconditionally on every render.)
 
   // Build a numbered DivIcon for each community
   const buildNumberedIcon = (n: number, color: string, highlighted: boolean) =>
@@ -2880,7 +3247,7 @@ export function Step2Map({
               >
                 <LTooltip direction="top" sticky>
                   <div className="text-xs">
-                    <strong>{Math.round(val).toLocaleString()}</strong> people/km²
+                    <strong>{Math.round(val).toLocaleString()}</strong> people/km2
                     <div className="text-[10px] text-muted-foreground">Local Population Grid</div>
                   </div>
                 </LTooltip>
@@ -2904,12 +3271,12 @@ export function Step2Map({
               </div>
               {infoPopup.status === "loading" && (
                 <div className="mt-1 flex items-center gap-1">
-                  <Loader2 className="h-3 w-3 animate-spin" /> Looking up…
+                  <Loader2 className="h-3 w-3 animate-spin" /> Looking up...
                 </div>
               )}
               {infoPopup.status === "ok" && infoPopup.value != null && (
                 <div className="mt-1">
-                  ≈ <strong>{Math.round(infoPopup.value).toLocaleString()}</strong> people/km²
+                  ~ <strong>{Math.round(infoPopup.value).toLocaleString()}</strong> people/km2
                   <div className="text-muted-foreground">
                     WorldPop 2020, 1&nbsp;km grid
                   </div>
@@ -2917,7 +3284,7 @@ export function Step2Map({
                     <div className="text-muted-foreground italic" data-testid="text-population-cached">
                       cached
                       {infoPopup.cachedAt
-                        ? ` · ${new Date(infoPopup.cachedAt).toLocaleDateString()}`
+                        ? ` - ${new Date(infoPopup.cachedAt).toLocaleDateString()}`
                         : ""}
                     </div>
                   )}
@@ -2938,8 +3305,8 @@ export function Step2Map({
         )}
 
         {catchmentPreview?.cells && catchmentPreview.cells.length > 0 && (() => {
-          // Fixed people/km² buckets (WorldPop 1km grid). Using absolute
-          // thresholds keeps streamed cells stable as new samples arrive —
+          // Fixed people/km2 buckets (WorldPop 1km grid). Using absolute
+          // thresholds keeps streamed cells stable as new samples arrive -
           // a cell never gets recoloured just because a higher-valued cell
           // showed up later in the run.
           const ramp = ["#fee5d9", "#fcae91", "#fb6a4a", "#de2d26", "#a50f15"];
@@ -2981,7 +3348,7 @@ export function Step2Map({
                     {isOk ? (
                       <>
                         <strong>{Math.round(c.value as number).toLocaleString()}</strong>{" "}
-                        people/km²
+                        people/km2
                       </>
                     ) : isError ? (
                       <span>Lookup failed</span>
@@ -3324,7 +3691,7 @@ export function Step2Map({
                 className="absolute bottom-2 right-2 z-[400] rounded-lg bg-background/90 px-2 py-1 text-[10px] shadow"
                 data-testid="legend-catchment-cells"
               >
-                <div className="mb-1 font-medium">Catchment cells (people/km²)</div>
+                <div className="mb-1 font-medium">Catchment cells (people/km2)</div>
                 {minV != null && maxV != null ? (
                   <>
                     <div
@@ -3622,7 +3989,7 @@ export function Step4({
           className="text-right text-xs text-amber-600 dark:text-amber-500"
           data-testid="text-start-month-past-warning"
         >
-          This start month is in the past — some sessions may fail the lead-time
+          This start month is in the past - some sessions may fail the lead-time
           check.
         </p>
       )}
@@ -3643,9 +4010,9 @@ export function Step4({
             {calendar.map((c, i) => {
               const isError = errorRowId != null && c.rowId === errorRowId;
               const matched = communities.find(comm => comm.name === c.name || comm.villageId === c.villageId);
-              const targetPop = matched?.targetPopulation ?? "—";
-              const distance = matched?.distanceToFacility != null ? `${Number(matched.distanceToFacility).toFixed(1)} km` : "—";
-              const strategy = matched?.strategy ?? "—";
+              const targetPop = matched?.targetPopulation ?? "-";
+              const distance = matched?.distanceToFacility != null ? `${Number(matched.distanceToFacility).toFixed(1)} km` : "-";
+              const strategy = matched?.strategy ?? "-";
               return (
                 <tr key={c.rowId} className="border-b">
                   <td className="p-1">{c.name}</td>
@@ -3691,7 +4058,7 @@ export function Step4({
             {calendar.length === 0 && (
               <tr>
                 <td colSpan={7} className="p-4 text-center text-muted-foreground">
-                  No sessions yet — choose a period and click "Generate calendar" to start.
+                  No sessions yet - choose a period and click "Generate calendar" to start.
                 </td>
               </tr>
             )}
@@ -3922,7 +4289,7 @@ export function Step5({ staffing, setStaffing, facilityId }: { staffing: any[]; 
               </td>
               <td className="p-1"><Input type="number" value={s.target} onChange={(e) => upd(i, { target: e.target.value })} /></td>
               <td className="p-1"><Input type="number" value={s.perDiem} onChange={(e) => upd(i, { perDiem: e.target.value })} /></td>
-              {/* Sheet 3 — Vitamin A + Scissors */}
+              {/* Sheet 3 - Vitamin A + Scissors */}
               <td className="p-1"><Input type="number" min={0} placeholder="0" className="w-16" value={s.vitaminABlueCaps ?? ""} onChange={(e) => upd(i, { vitaminABlueCaps: e.target.value })} title="Vitamin A Blue Caps (6-11 months)" /></td>
               <td className="p-1"><Input type="number" min={0} placeholder="0" className="w-16" value={s.vitaminARedCaps ?? ""} onChange={(e) => upd(i, { vitaminARedCaps: e.target.value })} title="Vitamin A Red Caps (12-59 months)" /></td>
               <td className="p-1"><Input type="number" min={0} placeholder="0" className="w-16" value={s.scissorsCount ?? ""} onChange={(e) => upd(i, { scissorsCount: e.target.value })} title="Scissors / Sharps" /></td>
@@ -4162,9 +4529,9 @@ export function Step6({
   const facilityDistrict = allDistricts?.find((d) => d.id === facility?.districtId);
   const facilityProvince = allProvinces?.find((p) => p.id === facilityDistrict?.provinceId);
 
-  const districtName = facilityDistrict?.name || "—";
-  const provinceName = facilityProvince?.name || "—";
-  const countryName = tenant?.name || "—";
+  const districtName = facilityDistrict?.name || "-";
+  const provinceName = facilityProvince?.name || "-";
+  const countryName = tenant?.name || "-";
 
   const { data: stockBalance } = useQuery<any>({
     queryKey: ["/api/facilities", facilityId, "stock-balance"],
@@ -4324,7 +4691,7 @@ export function Step6({
             className="text-xs h-7"
             onClick={handleSyncTargets}
           >
-            ⚡ Sync Targets with Step 1/2 ({targetInfants > 0 ? targetInfants : sumCommunityUnder1} infants)
+             Sync Targets with Step 1/2 ({targetInfants > 0 ? targetInfants : sumCommunityUnder1} infants)
           </Button>
         </div>
         <div className="overflow-x-auto">
@@ -4393,7 +4760,7 @@ export function Step6({
               <span>Inventory: <strong>{availableColdBoxes}</strong> functional cold boxes.</span>
               {coldBoxWarning && (
                 <span className="text-destructive font-medium">
-                  ⚠️ Required cold boxes exceed inventory ({availableColdBoxes} available).
+                  Warning: Required cold boxes exceed inventory ({availableColdBoxes} available).
                 </span>
               )}
             </div>
@@ -4410,7 +4777,7 @@ export function Step6({
               <span>Inventory: <strong>{availableCarriers}</strong> functional carriers.</span>
               {carrierWarning && (
                 <span className="text-destructive font-medium">
-                  ⚠️ Required carriers exceed inventory ({availableCarriers} available).
+                  Warning: Required carriers exceed inventory ({availableCarriers} available).
                 </span>
               )}
             </div>
@@ -4432,7 +4799,7 @@ export function Step6({
             {/* Header */}
             <div className="text-center space-y-1 pb-4 border-b">
               <h2 className="text-lg font-bold uppercase tracking-wider">Vaccine Requisition Slip</h2>
-              <p className="text-xs text-muted-foreground">National Immunization Programme · Microplanning Logistics</p>
+              <p className="text-xs text-muted-foreground">National Immunization Programme - Microplanning Logistics</p>
             </div>
 
             {/* Original Info Grid */}
@@ -4456,11 +4823,11 @@ export function Step6({
               <div className="space-y-2 text-right">
                 <div>
                   <span className="font-semibold text-muted-foreground block uppercase text-[10px]">Health Facility</span>
-                  <span className="font-medium text-foreground text-sm">{facility?.name || "—"}</span>
+                  <span className="font-medium text-foreground text-sm">{facility?.name || "-"}</span>
                 </div>
                 <div>
                   <span className="font-semibold text-muted-foreground block uppercase text-[10px]">Prepared By</span>
-                  <span className="font-medium text-foreground text-sm">{user?.firstName && user?.lastName ? `${user.firstName} ${user.lastName}` : "—"}</span>
+                  <span className="font-medium text-foreground text-sm">{user?.firstName && user?.lastName ? `${user.firstName} ${user.lastName}` : "-"}</span>
                 </div>
                 <div>
                   <span className="font-semibold text-muted-foreground block uppercase text-[10px]">Requisition Date</span>
@@ -4495,7 +4862,7 @@ export function Step6({
             <div className="grid grid-cols-2 gap-8 pt-12 text-center text-xs mt-8 border-t border-dashed">
               <div className="space-y-2">
                 <div className="border-b border-black h-8 w-48 mx-auto flex items-end justify-center pb-1 font-medium text-foreground">
-                  {user?.firstName && user?.lastName ? `${user.firstName} ${user.lastName}` : "—"}
+                  {user?.firstName && user?.lastName ? `${user.firstName} ${user.lastName}` : "-"}
                 </div>
                 <span className="font-medium text-muted-foreground uppercase text-[10px]">Prepared By (Logged In User)</span>
               </div>
@@ -4686,7 +5053,7 @@ export function Step7({
   );
 }
 
-// ─── Step HFC Board (Sheet 9) ─────────────────────────────────────────────
+// --- Step HFC Board (Sheet 9) ---------------------------------------------
 export function StepHfcBoard({ facilityId }: { facilityId: number | null }) {
   const { toast } = useToast();
   const { data: members = [], isLoading } = useQuery<any[]>({
@@ -4819,8 +5186,8 @@ export function StepHfcBoard({ facilityId }: { facilityId: number | null }) {
                   <td className="px-3 py-2 font-medium">{m.memberName}{m.isChairperson && <Badge className="ml-1 text-[10px] h-4" variant="secondary">Chair</Badge>}</td>
                   <td className="px-3 py-2 capitalize">{m.gender}</td>
                   <td className="px-3 py-2">{m.position}</td>
-                  <td className="px-3 py-2">{m.yearsOfService ?? "—"}</td>
-                  <td className="px-3 py-2">{m.contactPhone || "—"}</td>
+                  <td className="px-3 py-2">{m.yearsOfService ?? "-"}</td>
+                  <td className="px-3 py-2">{m.contactPhone || "-"}</td>
                   <td className="px-3 py-2">
                     <div className="flex gap-1">
                       <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => { setEditId(m.id); setForm({ memberName: m.memberName, gender: m.gender||"female", position: m.position||"Member", yearsOfService: m.yearsOfService??"", isChairperson: !!m.isChairperson, contactPhone: m.contactPhone||"", committeeEstablishedDate: m.committeeEstablishedDate||"" }); }}>
@@ -4841,7 +5208,7 @@ export function StepHfcBoard({ facilityId }: { facilityId: number | null }) {
   );
 }
 
-// ─── Step CHV Profile (Sheet 10) ──────────────────────────────────────────
+// --- Step CHV Profile (Sheet 10) ------------------------------------------
 const CHV_CAMPAIGN_ROLES = [
   { value: "social_mobilizer", label: "Social Mobilizer" },
   { value: "community_guide", label: "Community Guide" },
@@ -4973,7 +5340,7 @@ export function StepChvProfile({ facilityId, villages, planType = "routine" }: {
             <Select value={String(form.villageId || "")} onValueChange={(v) => setForm({ ...form, villageId: v === "__none__" ? "" : v })}>
               <SelectTrigger><SelectValue placeholder="Select village" /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="__none__">— None —</SelectItem>
+                <SelectItem value="__none__">- None -</SelectItem>
                 {safeVillages.filter((v) => v && v.villageId).map((v) => (
                   <SelectItem key={v.villageId} value={String(v.villageId)}>{v.name || ""}</SelectItem>
                 ))}
@@ -5011,7 +5378,7 @@ export function StepChvProfile({ facilityId, villages, planType = "routine" }: {
                       {c.trainingStatus === "trained" ? "Trained" : "Untrained"}
                     </Badge>
                   </td>
-                  <td className="px-3 py-2">{c.villageId ? (villageMap[String(c.villageId)] ?? `ID ${c.villageId}`) : "—"}</td>
+                  <td className="px-3 py-2">{c.villageId ? (villageMap[String(c.villageId)] ?? `ID ${c.villageId}`) : "-"}</td>
                   <td className="px-3 py-2">
                     <div className="flex gap-1">
                       <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => { setEditId(c.id); setForm({ name: c.name, gender: c.gender||"female", yearsOfService: c.yearsOfService??"", educationLevel: c.educationLevel||"Secondary", trainingStatus: c.trainingStatus||"trained", communityUnit: c.communityUnit||"", campaignRole: c.campaignRole||"social_mobilizer", villageId: c.villageId??"", active: c.active }); }}>
@@ -5396,7 +5763,7 @@ export function SummaryCard({
           <span className="flex items-center gap-2 text-left">
             <Tick ok={filled} />
             <span className="text-sm font-medium">
-              Step {step} · {title}
+              Step {step} - {title}
             </span>
             {filled ? (
               <Badge variant="outline" className="ml-2 text-xs">
@@ -5556,7 +5923,7 @@ export function Step11({
           <CardTitle className="text-sm">{facilityLabel}</CardTitle>
         </CardHeader>
         <CardContent className="text-xs text-muted-foreground">
-          Review every step below before submitting. Click <b>Edit</b> on any card to fix it — use the
+          Review every step below before submitting. Click <b>Edit</b> on any card to fix it - use the
           "Back to summary" button at the top of the step to return here.
         </CardContent>
       </Card>
@@ -5584,10 +5951,10 @@ export function Step11({
                 </tbody>
               </table>
               <div className="text-xs text-muted-foreground">
-                Dropout DTP1→DTP3: <b>{dropDtp}%</b> · DTP1→MCV1: <b>{dropMcv}%</b>
+                Dropout DTP1-&gt;DTP3: <b>{dropDtp}%</b> - DTP1-&gt;MCV1: <b>{dropMcv}%</b>
               </div>
               <div className="text-xs text-muted-foreground">
-                Stockouts: <b>{coverage.stockouts || "0"}</b> · AEFI: <b>{coverage.aefi || "0"}</b> ·
+                Stockouts: <b>{coverage.stockouts || "0"}</b> - AEFI: <b>{coverage.aefi || "0"}</b> -
                 Sessions planned/held: <b>{coverage.sessionsPlanned || "0"}</b>/
                 <b>{coverage.sessionsHeld || "0"}</b>
               </div>
@@ -5651,7 +6018,7 @@ export function Step11({
                       <td className="p-1">{r.season}</td>
                       <td className="p-1">{r.insecurity}</td>
                       <td className="p-1">
-                        {[r.missed && "missed", r.zeroDose && "zero-dose"].filter(Boolean).join(", ") || "—"}
+                        {[r.missed && "missed", r.zeroDose && "zero-dose"].filter(Boolean).join(", ") || "-"}
                       </td>
                     </tr>
                   ))}
@@ -5667,10 +6034,10 @@ export function Step11({
           {filledStep4 ? (
             <div className="space-y-2 text-sm">
               <div className="text-xs text-muted-foreground">
-                <b>{calendar.length}</b> sessions across <b>{monthsCovered}</b> months ·{" "}
+                <b>{calendar.length}</b> sessions across <b>{monthsCovered}</b> months -{" "}
                 {Object.entries(sessionsByType)
                   .map(([t, n]) => `${t}: ${n}`)
-                  .join(" · ")}
+                  .join(" - ")}
               </div>
               <div className="max-h-48 overflow-y-auto">
                 <table className="w-full text-xs">
@@ -5716,9 +6083,9 @@ export function Step11({
                   {staffing.map((s, i) => (
                     <tr key={s.rowId || i} className="border-b">
                       <td className="p-1">{s.sessionLabel}</td>
-                      <td className="p-1">{s.vaccinator || "—"}</td>
-                      <td className="p-1">{s.recorder || "—"}</td>
-                      <td className="p-1">{s.supervisor || "—"}</td>
+                      <td className="p-1">{s.vaccinator || "-"}</td>
+                      <td className="p-1">{s.recorder || "-"}</td>
+                      <td className="p-1">{s.supervisor || "-"}</td>
                       <td className="p-1">{s.teamType}</td>
                       <td className="p-1">{s.target}</td>
                     </tr>
@@ -5759,9 +6126,9 @@ export function Step11({
                         <tr key={v.name} className="border-b">
                           <td className="p-1 font-medium">{v.name}</td>
                           <td className="p-1">{tgt}</td>
-                          <td className="p-1">{isFinite(total) ? total.toLocaleString() : "—"}</td>
-                          <td className="p-1">{isFinite(safeW) ? `${safeW}%` : "—"}</td>
-                          <td className="p-1">{isFinite(vials) ? vials.toLocaleString() : "—"}</td>
+                          <td className="p-1">{isFinite(total) ? total.toLocaleString() : "-"}</td>
+                          <td className="p-1">{isFinite(safeW) ? `${safeW}%` : "-"}</td>
+                          <td className="p-1">{isFinite(vials) ? vials.toLocaleString() : "-"}</td>
                         </tr>
                       );
                     })}
@@ -5769,7 +6136,7 @@ export function Step11({
                 </table>
               </div>
               <div className="text-xs text-muted-foreground">
-                Cold chain — boxes: <b>{coldChain.coldBoxes}</b> · ice packs: <b>{coldChain.icePacks}</b> ·
+                Cold chain - boxes: <b>{coldChain.coldBoxes}</b> - ice packs: <b>{coldChain.icePacks}</b> -
                 carriers/session: <b>{coldChain.carriers}</b>
               </div>
             </div>
@@ -5795,10 +6162,10 @@ export function Step11({
                   {mobilization.map((m, i) => (
                     <tr key={m.rowId || i} className="border-b">
                       <td className="p-1">{m.sessionLabel}</td>
-                      <td className="p-1">{(m.channels || []).join(", ") || "—"}</td>
-                      <td className="p-1">{m.focalPoint || "—"}</td>
-                      <td className="p-1">{m.focalPhone || "—"}</td>
-                      <td className="p-1">{(m.iec || []).join(", ") || "—"}</td>
+                      <td className="p-1">{(m.channels || []).join(", ") || "-"}</td>
+                      <td className="p-1">{m.focalPoint || "-"}</td>
+                      <td className="p-1">{m.focalPhone || "-"}</td>
+                      <td className="p-1">{(m.iec || []).join(", ") || "-"}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -5830,7 +6197,7 @@ export function Step11({
                       <td className="p-1">{t.mode}</td>
                       <td className="p-1">{t.distanceKm}</td>
                       <td className="p-1">{t.fuelLitres}</td>
-                      <td className="p-1">{t.vehicle || "—"}</td>
+                      <td className="p-1">{t.vehicle || "-"}</td>
                       <td className="p-1">{t.cleared ? "yes" : "no"}</td>
                     </tr>
                   ))}
@@ -5863,7 +6230,7 @@ export function Step11({
                     {budget.map((b, i) => (
                       <tr key={b.rowId || i} className="border-b">
                         <td className="p-1">{b.category}</td>
-                        <td className="p-1">{b.description || "—"}</td>
+                        <td className="p-1">{b.description || "-"}</td>
                         <td className="p-1">{b.quantity}</td>
                         <td className="p-1">{b.unitCost}</td>
                         <td className="p-1">{b.fundingSource}</td>
@@ -5896,9 +6263,9 @@ export function Step11({
                     <tr key={v.rowId || i} className="border-b align-top">
                       <td className="p-1">Q{v.quarter}</td>
                       <td className="p-1">{v.scheduledDate}</td>
-                      <td className="p-1">{v.supervisorName || "—"}</td>
+                      <td className="p-1">{v.supervisorName || "-"}</td>
                       <td className="p-1">{v.checklist}</td>
-                      <td className="p-1">{v.followUp || "—"}</td>
+                      <td className="p-1">{v.followUp || "-"}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -5933,6 +6300,23 @@ export function Step11({
   );
 }
 
+function formatSavedMicroplanCreatedDate(value: unknown): string {
+  if (!value) return "Not recorded";
+  const date = new Date(String(value));
+  if (Number.isNaN(date.getTime())) return "Not recorded";
+  return new Intl.DateTimeFormat(undefined, { year: "numeric", month: "short", day: "2-digit" }).format(date);
+}
+
+function isSavedMicroplanSessionCompleted(session: SessionPlan): boolean {
+  const status = String((session as any).status ?? "").toLowerCase();
+  return Boolean(
+    session.completedAt ||
+      (session as any).isAchieved ||
+      status === "conducted" ||
+      status === "completed" ||
+      status === "done"
+  );
+}
 // Listing of saved microplans for the current planType, with a per-plan count
 // of planned / completed sessions. Renders only when the wizard is in "list
 // mode" (no microplanId selected). Clicking Open navigates to the path-param
@@ -5972,6 +6356,7 @@ export function SavedMicroplansPanel({
     try {
       await apiRequest("DELETE", `/api/microplans/${id}`);
       queryClient.invalidateQueries({ queryKey: ["/api/microplans"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/sessions"] });
       toast({
         title: "Microplan deleted",
         description: "The microplan has been permanently deleted.",
@@ -5990,12 +6375,27 @@ export function SavedMicroplansPanel({
 
   // The DB column `plan_type` uses values like "facility_routine" /
   // "sia_campaign" while this page thinks in "routine" / "campaign". Map both.
-  const filtered = (microplans ?? []).filter((m) => {
-    const pt = String(m.planType ?? "");
-    return planType === "campaign"
-      ? pt.includes("campaign")
-      : !pt.includes("campaign");
-  });
+  const filtered = useMemo(() => {
+    return (microplans ?? [])
+      .filter((m) => {
+        const pt = String(m.planType ?? "");
+        return planType === "campaign"
+          ? pt.includes("campaign")
+          : !pt.includes("campaign");
+      })
+      .map((m) => {
+        const rows = sessionsByPlan.get(Number(m.id)) ?? [];
+        const createdAtMs = m.createdAt ? new Date(String(m.createdAt)).getTime() : null;
+        return {
+          ...m,
+          period: `Q${m.quarter} ${m.year}`,
+          createdAtMs: Number.isFinite(createdAtMs) ? createdAtMs : null,
+          createdDateLabel: formatSavedMicroplanCreatedDate(m.createdAt),
+          plannedSessionCount: rows.length,
+          completedSessionCount: rows.filter(isSavedMicroplanSessionCompleted).length,
+        };
+      });
+  }, [microplans, planType, sessionsByPlan]);
 
   const columns = useMemo(() => [
     {
@@ -6016,7 +6416,13 @@ export function SavedMicroplansPanel({
       key: "period",
       header: "Period",
       sortable: true,
-      render: (m: any) => `Q${m.quarter} ${m.year}`,
+      render: (m: any) => m.period,
+    },
+    {
+      key: "createdAtMs",
+      header: "Created",
+      sortable: true,
+      render: (m: any) => <span className="text-xs text-muted-foreground">{m.createdDateLabel}</span>,
     },
     {
       key: "status",
@@ -6042,35 +6448,26 @@ export function SavedMicroplansPanel({
       },
     },
     {
-      key: "planned",
+      key: "plannedSessionCount",
       header: "Planned Sessions",
       sortable: true,
-      render: (m: any) => {
-        const rows = sessionsByPlan.get(m.id) ?? [];
-        const completed = rows.filter((s) => s.completedAt || (s as any).isAchieved).length;
-        const planned = rows.length - completed;
-        return (
-          <Badge variant="secondary" className="gap-1">
-            <Calendar className="h-3 w-3" />
-            {planned} planned
-          </Badge>
-        );
-      },
+      render: (m: any) => (
+        <Badge variant="secondary" className="gap-1">
+          <Calendar className="h-3 w-3" />
+          {m.plannedSessionCount} planned
+        </Badge>
+      ),
     },
     {
-      key: "completed",
+      key: "completedSessionCount",
       header: "Completed Sessions",
       sortable: true,
-      render: (m: any) => {
-        const rows = sessionsByPlan.get(m.id) ?? [];
-        const completed = rows.filter((s) => s.completedAt || (s as any).isAchieved).length;
-        return (
-          <Badge variant="outline" className="gap-1">
-            <CheckCircle2 className="h-3 w-3 text-emerald-600" />
-            {completed} done
-          </Badge>
-        );
-      },
+      render: (m: any) => (
+        <Badge variant="outline" className="gap-1">
+          <CheckCircle2 className="h-3 w-3 text-emerald-600" />
+          {m.completedSessionCount} done
+        </Badge>
+      ),
     },
     {
       key: "actions",
@@ -6212,3 +6609,12 @@ export function Step12({
     </div>
   );
 }
+
+
+
+
+
+
+
+
+

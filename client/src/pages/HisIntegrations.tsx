@@ -629,6 +629,62 @@ export default function HisIntegrations() {
       </Card>
 
       {/* ─── Integration Cards ───────────────────────────────────────── */}
+      <Card data-testid="card-interop-implementation-packages">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-lg flex items-center gap-2">
+            <ServerCog className="h-5 w-5 text-primary" />
+            Interoperability implementation packages
+          </CardTitle>
+          <p className="text-xs text-muted-foreground">
+            Tenant-configurable mappings and validation checks before any production sync is allowed.
+          </p>
+        </CardHeader>
+        <CardContent className="grid gap-3 md:grid-cols-2">
+          {[
+            { name: "DHIS2 Aggregate", target: "dataValueSets", status: status?.integrations?.some((i) => i.type === "dhis2" && i.enabled) ? "Configured" : "Needs tenant mapping", checks: ["Org unit", "period", "data element", "category option combo"] },
+            { name: "DHIS2 Tracker", target: "tracked entities + events", status: "Mapping package", checks: ["TEI attributes", "program stage", "event date", "vaccine dose"] },
+            { name: "FHIR R4", target: "Patient / Immunization / Encounter / Location", status: status?.integrations?.some((i) => i.type === "fhir_r4" && i.enabled) ? "Configured" : "Needs endpoint", checks: ["identifier", "vaccineCode", "occurrenceDateTime", "performer/location"] },
+            { name: "WHO SMART IMMZ", target: "logic tables", status: "Validation pack", checks: ["CVX/ATC codes", "dose intervals", "age eligibility", "contraindication flags"] },
+          ].map((pkg) => (
+            <div key={pkg.name} className="rounded-lg border bg-muted/20 p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="font-semibold text-foreground">{pkg.name}</div>
+                  <div className="text-xs text-muted-foreground">{pkg.target}</div>
+                </div>
+                <Badge variant="outline" className={pkg.status === "Configured" ? "border-emerald-500 text-emerald-700 bg-emerald-500/10" : "border-amber-500 text-amber-700 bg-amber-500/10"}>
+                  {pkg.status}
+                </Badge>
+              </div>
+              <div className="mt-3 grid grid-cols-2 gap-1.5">
+                {pkg.checks.map((check) => (
+                  <div key={check} className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                    <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
+                    {check}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+          <div className="md:col-span-2 rounded-lg border border-dashed p-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div>
+              <div className="font-semibold">Pre-production payload harness</div>
+              <p className="text-sm text-muted-foreground">
+                Validate payload shape, identifiers, terminology, and required tenant mappings before enabling production sync.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button size="sm" variant="outline" onClick={() => { setCoveragePullResult(null); setCoveragePullOpen(true); }} disabled={enabledIntegrations.filter((i) => i.type === "dhis2").length === 0}>
+                Preview DHIS2 pull
+              </Button>
+              <Button size="sm" onClick={() => { setTestBundleResult(null); setTestBundleDialog(true); }} disabled={enabledIntegrations.filter((i) => i.type === "fhir_r4").length === 0}>
+                Validate FHIR bundle
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
       <div>
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-base font-semibold flex items-center gap-2 text-foreground">

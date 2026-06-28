@@ -172,9 +172,10 @@ async function sendViaSmtp(
     typeof process.env.SMTP_SECURE === "string"
       ? process.env.SMTP_SECURE === "true" || process.env.SMTP_SECURE === "1"
       : port === 465;
+  const pass = process.env.SMTP_PASSWORD || process.env.SMTP_PASS;
   const auth =
-    process.env.SMTP_USER && process.env.SMTP_PASSWORD
-      ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASSWORD }
+    process.env.SMTP_USER && pass
+      ? { user: process.env.SMTP_USER, pass }
       : undefined;
   const transport = nodemailer.createTransport({
     host: process.env.SMTP_HOST,

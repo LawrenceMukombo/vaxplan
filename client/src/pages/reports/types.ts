@@ -20,6 +20,9 @@ export interface ReportMeta {
     provinceId: number | null;
     districtId: number | null;
     facilityId: number | null;
+    provinceIds?: number[] | null;
+    districtIds?: number[] | null;
+    facilityIds?: number[] | null;
   };
 }
 
@@ -35,6 +38,45 @@ export interface ReportFilters {
   provinceId?: number;
   districtId?: number;
   facilityId?: number;
+  provinceIds?: number[];
+  districtIds?: number[];
+  facilityIds?: number[];
+}
+
+
+export function sanitizeReportRows(rows: HierarchyRow[], filters: Partial<ReportFilters> | ReportMeta["filters"] | null | undefined): HierarchyRow[] {
+  const scope = filters || {};
+  if ((scope as any).facilityIds?.length || (scope as any).districtIds?.length || (scope as any).provinceIds?.length) {
+    return rows.filter((row) => row.level !== "national");
+  }
+  const facilityId = Number(scope.facilityId || 0);
+  if (facilityId > 0) {
+    return rows.filter((row) => row.level === "facility" && Number(row.id) === facilityId);
+  }
+
+  const districtId = Number(scope.districtId || 0);
+  if (districtId > 0) {
+    return rows.filter((row) =>
+      (row.level === "district" && Number(row.id) === districtId) ||
+      (row.level === "facility" && Number(row.parent_id ?? row.parentId) === districtId)
+    );
+  }
+
+  const provinceId = Number(scope.provinceId || 0);
+  if (provinceId > 0) {
+    const districtIds = new Set(
+      rows
+        .filter((row) => row.level === "district" && Number(row.parent_id ?? row.parentId) === provinceId)
+        .map((row) => Number(row.id))
+    );
+    return rows.filter((row) =>
+      (row.level === "province" && Number(row.id) === provinceId) ||
+      (row.level === "district" && Number(row.parent_id ?? row.parentId) === provinceId) ||
+      (row.level === "facility" && districtIds.has(Number(row.parent_id ?? row.parentId)))
+    );
+  }
+
+  return rows.filter((row) => row.level !== "national");
 }
 
 export function buildReportQueryString(filters: ReportFilters): string {
@@ -68,3 +110,4 @@ export const LEVEL_BADGE: Record<ReportLevel, string> = {
   district: "bg-green-500/10 text-green-700 border-green-200",
   facility: "bg-orange-500/10 text-orange-700 border-orange-200",
 };
+

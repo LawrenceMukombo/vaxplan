@@ -1,19 +1,17 @@
-// Load .env file for local development (Node 20.12+ built-in, no dotenv package needed)
+﻿// Load .env file for local development (Node 20.12+ built-in, no dotenv package needed)
 // This runs before any other imports that touch process.env (e.g. db.ts checks DATABASE_URL).
 try {
-  // @ts-ignore — process.loadEnvFile is available in Node.js 20.12+
+  // @ts-ignore - process.loadEnvFile is available in Node.js 20.12+
   process.loadEnvFile?.();
 } catch {
-  // .env file is optional — silently skip if not present (e.g. production with real env vars)
+  // .env file is optional - silently skip if not present (e.g. production with real env vars)
 }
-
 import express, { type Request, Response, NextFunction } from "express";
 import compression from "compression";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
 import { getSession } from "./auth";
-
 import { setupRealtime, realtimeBroadcastMiddleware } from "./services/realtime";
 import { startPopulationRefreshScheduler } from "./jobs/populationRefresh";
 import { startSessionArchiveScheduler } from "./jobs/sessionArchive";
@@ -29,7 +27,6 @@ import { applyPerfIndexes } from "./migrations/011-perf-indexes";
 import { applyVillageColumns } from "./migrations/013-village-route-columns";
 import { applyOutreachColumns } from "./migrations/014-outreach-columns";
 import { applyMicroplanApprovalColumns } from "./migrations/015-microplan-approval-columns";
-
 import { applySessionsTable } from "./migrations/016-sessions-table";
 import { applyWikiPages } from "./migrations/017-wiki-pages";
 import { promoteAdminUser } from "./migrations/018-promote-admin";
@@ -39,19 +36,17 @@ import { up as applyStockNormalization } from "./migrations/021-normalize-stock-
 import { up as applyResearchHubSchema } from "./migrations/022-research-hub-schema";
 import { applySafeGeometryFixes } from "./migrations/023-safe-geometry";
 import { applySettlementsGisMigration } from "./migrations/024-settlements-gis-microplanning";
-
-
+import { applyPolygonPlanningMigration } from "./migrations/026-polygon-planning";
 const app = express();
 const httpServer = createServer(app);
-
+const skipDbBootstrap = process.env.SKIP_DB_BOOTSTRAP === '1';
+const sessionMiddleware = getSession();
 declare module "http" {
   interface IncomingMessage {
     rawBody: unknown;
   }
 }
-
 app.set("trust proxy", 1);
-
 // Enforce HTTPS in production
 app.use((req, res, next) => {
   if (process.env.NODE_ENV === "production" && req.headers["x-forwarded-proto"] && req.headers["x-forwarded-proto"] !== "https") {
@@ -59,13 +54,11 @@ app.use((req, res, next) => {
   }
   next();
 });
-
-// ── Gzip compression ─────────────────────────────────────────────────────────────
+// --- Gzip compression ---
 // Must be the FIRST middleware so every response (API + static) is compressed.
 // On a slow mobile connection (MTN hotspot) this can reduce sync/pull payloads
-// from 1–2 MB down to 80–200 KB — a 5-10× speed improvement on large datasets.
+// from 1-2 MB down to 80-200 KB - a 5-10x speed improvement on large datasets.
 app.use(compression({ level: 6, threshold: 1024 }));
-
 app.use(
   express.json({
     limit: "50mb",
@@ -74,10 +67,8 @@ app.use(
     },
   }),
 );
-
 app.use(express.urlencoded({ extended: false, limit: "50mb" }));
-
-// ─── CORS for packaged native apps ───────────────────────────────────────────
+// --- CORS for packaged native apps ---
 // The web app is same-origin and needs no CORS. The packaged Android
 // (Capacitor) and Windows (Electron) shells, however, load their UI from a
 // local origin and call this server cross-origin, so we must explicitly allow
@@ -90,15 +81,13 @@ const NATIVE_ALLOWED_ORIGINS = new Set<string>([
   "https://localhost", // Capacitor Android (androidScheme: "https")
   "capacitor://localhost", // Capacitor (iOS / alt scheme)
   "app://local", // Electron packaged app (custom secure scheme)
-  // Electron dev (loadURL to dev server) — development only, never expand the
+  // Electron dev (loadURL to dev server) - development only, never expand the
   // credentialed CORS surface to a localhost origin in production.
   ...(process.env.NODE_ENV === "production" ? [] : ["http://localhost:5000"]),
 ]);
-
 function isAllowedCorsOrigin(origin: string): boolean {
   return NATIVE_ALLOWED_ORIGINS.has(origin);
 }
-
 app.use((req, res, next) => {
   const origin = req.headers.origin;
   if (origin && isAllowedCorsOrigin(origin)) {
@@ -119,7 +108,6 @@ app.use((req, res, next) => {
   }
   next();
 });
-
 export function log(message: string, source = "express") {
   const formattedTime = new Date().toLocaleTimeString("en-US", {
     hour: "numeric",
@@ -127,10 +115,8 @@ export function log(message: string, source = "express") {
     second: "2-digit",
     hour12: true,
   });
-
   console.log(`${formattedTime} [${source}] ${message}`);
 }
-
 // Helper to inspect payloads without blocking the Event Loop or stdout with large JSON strings
 function inspectPayload(payload: any): string {
   if (payload === null || payload === undefined) return "";
@@ -147,16 +133,13 @@ function inspectPayload(payload: any): string {
       return `[Object with ${keys.length} keys]`;
     }
   }
-  
   const str = JSON.stringify(payload);
   return str.length > 300 ? `[Payload of ${str.length} chars]` : str;
 }
-
 /* Original middleware commented out to prevent event loop blocks and comply with Rule 2:
 app.use((req, res, next) => {
   const start = Date.now();
   const path = req.path;
-
   res.on("finish", () => {
     const duration = Date.now() - start;
     if (path.startsWith("/api")) {
@@ -170,23 +153,19 @@ app.use((req, res, next) => {
         : logLine);
     }
   });
-
   next();
 });
 */
-
 // Updated high-performance request logging middleware
 app.use((req, res, next) => {
   const start = Date.now();
   const path = req.path;
   let capturedJsonResponse: Record<string, any> | undefined = undefined;
-
   const originalResJson = res.json;
   res.json = function (bodyJson, ...args) {
     capturedJsonResponse = bodyJson;
     return originalResJson.apply(res, [bodyJson, ...args]);
   };
-
   res.on("finish", () => {
     const duration = Date.now() - start;
     if (path.startsWith("/api")) {
@@ -194,36 +173,28 @@ app.use((req, res, next) => {
       if (capturedJsonResponse) {
         logLine += ` :: ${inspectPayload(capturedJsonResponse)}`;
       }
-
       log(logLine);
     }
   });
-
   next();
 });
-
 // Broadcast a tenant-scoped "changed" poke after any successful mutating /api
 // request so other connected clients can pull immediately (see services/realtime).
 app.use(realtimeBroadcastMiddleware);
-
 async function backfillClientIds() {
   try {
     const { clients, facilities, districts, provinces } = await import("../shared/schema");
     const { db } = await import("./db");
     const { sql, isNull, eq, and } = await import("drizzle-orm");
     const { getInitials, computeCheckDigit } = await import("./routes");
-
     const pendingClients = await db
       .select()
       .from(clients)
       .where(isNull(clients.clientId));
-
     if (pendingClients.length === 0) {
       return;
     }
-
     log(`Found ${pendingClients.length} clients needing Client ID backfill.`, "backfill");
-
     for (const client of pendingClients) {
       const [facInfo] = await db
         .select({
@@ -236,12 +207,10 @@ async function backfillClientIds() {
         .innerJoin(provinces, eq(districts.provinceId, provinces.id))
         .where(eq(facilities.id, client.facilityId))
         .limit(1);
-
       const provInit = getInitials(facInfo?.provinceName || "PRV");
       const distInit = getInitials(facInfo?.districtName || "DST");
       const hfInit = getInitials(facInfo?.facilityName || "FAC");
       const regYear = client.createdAt ? new Date(client.createdAt).getFullYear() : new Date().getFullYear();
-
       const [maxClient] = await db
         .select({ maxSerial: sql<number>`MAX(${clients.serialNumber})` })
         .from(clients)
@@ -252,13 +221,11 @@ async function backfillClientIds() {
             eq(clients.tenantId, client.tenantId)
           )
         );
-
       const serialNum = (maxClient?.maxSerial ?? 0) + 1;
       const serialStr = String(serialNum).padStart(4, "0");
       const prefix = `${provInit}-${distInit}-${hfInit}-${regYear}-${serialStr}`;
       const checkDigit = computeCheckDigit(prefix);
       const generatedClientId = `${prefix}-${checkDigit}`;
-
       await db
         .update(clients)
         .set({
@@ -268,35 +235,34 @@ async function backfillClientIds() {
         })
         .where(eq(clients.id, client.id));
     }
-
     log(`Successfully backfilled ${pendingClients.length} Client IDs.`, "backfill");
   } catch (error) {
     log(`Client ID backfill failed: ${error}`, "backfill");
   }
 }
-
 (async () => {
   await registerRoutes(httpServer, app);
-  
   // Run backfill asynchronously in the background so as not to block startup
-  backfillClientIds().catch((err) => log(`Background backfill failed: ${err}`, "backfill"));
-
+  if (skipDbBootstrap) {
+    log("DB bootstrap disabled: skipping client ID backfill", "db");
+  } else {
+    backfillClientIds().catch((err) => log(`Background backfill failed: ${err}`, "backfill"));
+  }
   // Additive remote sensing routes (zero-touch to routes.ts)
   const { registerRemoteSensingRoutes } = await import("./services/remoteSensingService");
   registerRemoteSensingRoutes(app);
-
-  // Reporting Engine — standalone module at /api/reports
+  // Reporting Engine - standalone module at /api/reports
   const { reportsRouter } = await import("./routes/reports");
   app.use("/api/reports", reportsRouter);
-
   // VPD Surveillance Engine
   const { surveillanceRouter } = await import("./routes/surveillance");
   app.use("/api/surveillance", surveillanceRouter);
-
   // GIS Advanced Polygons
   const { gisPolygonsRouter } = await import("./routes/gisPolygons");
   app.use("/api/gis/polygons", gisPolygonsRouter);
-
+  if (skipDbBootstrap) {
+    log("DB bootstrap disabled: skipping startup migrations and schema/data ensure jobs", "db");
+  } else {
   /* Original Code commented out for backward-compatibility:
   applyPerfIndexes()
     .then(() => log("perf indexes applied", "db"))
@@ -305,66 +271,54 @@ async function backfillClientIds() {
   applyPerfIndexes()
     .then(() => log("perf indexes applied", "db"))
     .catch((err) => log(`perf indexes warning: ${err?.message ?? err}`, "db"));
-
   applyVillageColumns()
     .then(() => log("village route columns migration complete", "db"))
     .catch((err) => log(`village columns warning: ${err?.message ?? err}`, "db"));
-
   applyOutreachColumns()
     .then(() => log("outreach columns migration complete", "db"))
     .catch((err) => log(`outreach columns warning: ${err?.message ?? err}`, "db"));
-
   applyMicroplanApprovalColumns()
     .then(() => log("microplan approval columns migration complete", "db"))
     .catch((err) => log(`microplan approval columns warning: ${err?.message ?? err}`, "db"));
-
   applySessionsTable()
     .then(() => log("sessions table ensured", "db"))
     .catch((err) => log(`sessions table warning: ${err?.message ?? err}`, "db"));
-
   applyWikiPages()
     .then(() => log("wiki pages table ensured", "db"))
     .catch((err) => log(`wiki pages warning: ${err?.message ?? err}`, "db"));
-
   // Self-healing: ensure the primary platform administrator has the correct
-  // role and flags on every startup. Idempotent — no-op if already correct.
+  // role and flags on every startup. Idempotent - no-op if already correct.
   promoteAdminUser()
     .then(() => log("admin user promotion check complete", "db"))
     .catch((err) => log(`admin promotion warning: ${err?.message ?? err}`, "db"));
-
   // Add new implementing-partner and national-manager enum values to user_role.
   applyNewUserRoles()
     .then(() => log("new user roles migration complete", "db"))
     .catch((err) => log(`new user roles warning: ${err?.message ?? err}`, "db"));
-
   // Cold chain equipment inventory table (migration 020)
   import("./db").then(({ db }) =>
     applyColdChainEquipment(db as any)
       .then(() => log("cold chain equipment table ensured", "db"))
       .catch((err) => log(`cold chain equipment migration warning: ${err?.message ?? err}`, "db"))
   ).catch((err) => log(`cold chain migration db import failed: ${err?.message ?? err}`, "db"));
-
   // Normalize stock vaccine names (migration 021)
   import("./db").then(({ db }) =>
     applyStockNormalization(db as any)
       .then(() => log("stock transaction vaccine names normalized", "db"))
       .catch((err) => log(`stock normalization migration warning: ${err?.message ?? err}`, "db"))
   ).catch((err) => log(`stock normalization migration db import failed: ${err?.message ?? err}`, "db"));
-
   // Research hub tables (migration 022)
   import("./db").then(({ db }) =>
     applyResearchHubSchema(db as any)
       .then(() => log("research hub tables and seed data ensured", "db"))
       .catch((err) => log(`research hub migration warning: ${err?.message ?? err}`, "db"))
   ).catch((err) => log(`research hub migration db import failed: ${err?.message ?? err}`, "db"));
-
   // Safe geometry and schema fixes (migration 023)
   import("./db").then(({ db }) =>
     applySafeGeometryFixes(db as any)
       .then(() => log("geometry schema fixes applied", "db"))
       .catch((err) => log(`geometry fixes warning: ${err?.message ?? err}`, "db"))
   ).catch((err) => log(`geometry fixes db import failed: ${err?.message ?? err}`, "db"));
-
   // Settlements GIS and microplanning upgrade (migration 024)
   import("./db").then(({ db }) =>
     applySettlementsGisMigration(db as any)
@@ -372,17 +326,25 @@ async function backfillClientIds() {
       .catch((err) => log(`settlements GIS migration warning: ${err?.message ?? err}`, "db"))
   ).catch((err) => log(`settlements GIS db import failed: ${err?.message ?? err}`, "db"));
 
-  setupRealtime(httpServer, getSession());
+  // Polygon planning metadata upgrade (migration 026)
+  import("./db").then(({ db }) =>
+    applyPolygonPlanningMigration(db as any)
+      .then(() => log("polygon planning metadata migration complete", "db"))
+      .catch((err) => log(`polygon planning metadata migration warning: ${err?.message ?? err}`, "db"))
+  ).catch((err) => log(`polygon planning metadata db import failed: ${err?.message ?? err}`, "db"));
+  }
+  setupRealtime(httpServer, sessionMiddleware);
+  if (skipDbBootstrap) {
+    log("DB bootstrap disabled: skipping background schedulers, workers, and demo seed", "db");
+  } else {
   startPopulationRefreshScheduler();
   startSessionArchiveScheduler();
   startStockAlertDigestScheduler();
   startSupervisionDigestScheduler();
   startApprovalScheduler();
   startMicroplanApprovalCron();
-
   // Initialize UCE queue worker
   import("./services/uce/workers").catch((err) => log(`Failed to load UCE worker: ${err}`));
-
   // Auto-run the demo operational seed on startup. Idempotent: every step
   // skips/upserts so subsequent boots are a no-op once data is in place.
   // Runs in the background so a slow seed never blocks the HTTP listener.
@@ -396,7 +358,6 @@ async function backfillClientIds() {
   const demoSeedEnabled =
     process.env.SKIP_DEMO_SEED !== "1" &&
     (!isProduction || process.env.ENABLE_DEMO_SEED === "1");
-
   if (demoSeedEnabled) {
     seedDemoOperational()
       .then(() => log("demo operational seed complete", "seed"))
@@ -407,15 +368,15 @@ async function backfillClientIds() {
       "seed",
     );
   }
-
+  }
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
     const message = err.message || "Internal Server Error";
-
+    if (status === 500) {
+      console.error("[Server Error]", err);
+    }
     res.status(status).json({ message });
-    throw err;
   });
-
   // importantly only setup vite in development and after
   // setting up all the other routes so the catch-all route
   // doesn't interfere with the other routes
@@ -425,14 +386,12 @@ async function backfillClientIds() {
     const { setupVite } = await import("./vite");
     await setupVite(httpServer, app);
   }
-
   // ALWAYS serve the app on the port specified in the environment variable PORT
   // Other ports are firewalled. Default to 5000 if not specified.
   // this serves both the API and the client.
   // It is the only port that is not firewalled.
   const portVal = process.env.PORT || "5000";
   const port = /^\d+$/.test(portVal) ? parseInt(portVal, 10) : portVal;
-
   if (typeof port === "number") {
     // Removed reusePort as it is a POSIX-specific flag that throws ENOTSUP on Windows.
     httpServer.listen(

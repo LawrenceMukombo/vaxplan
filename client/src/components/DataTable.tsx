@@ -1,4 +1,4 @@
-import {
+﻿import {
   Table,
   TableBody,
   TableCell,
@@ -15,10 +15,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { ChevronLeft, ChevronRight, Search, Download } from "lucide-react";
+import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Search, Download } from "lucide-react";
 import { useState, useMemo } from "react";
 // XLSX is loaded lazily on-demand (only when the user clicks Export) to keep
-// it out of the main JS bundle — the library is 424 kB raw / 142 kB gzipped.
+// it out of the main JS bundle - the library is 424 kB raw / 142 kB gzipped.
 import { useToast } from "@/hooks/use-toast";
 import { Checkbox } from "@/components/ui/checkbox";
 
@@ -228,6 +228,30 @@ export function DataTable<T extends { id?: number | string }>({
         </div>
       </div>
 
+      {sortedData.length > 0 && (
+        <div className="flex items-center justify-between gap-3 rounded-md border bg-muted/20 px-3 py-2 text-sm">
+          <span className="text-muted-foreground">
+            Showing {(currentPage - 1) * limit + 1}-{Math.min(currentPage * limit, sortedData.length)} of {sortedData.length}
+            {enableSelection && selectedIds.length > 0 ? `, ${selectedIds.length} selected` : ""}
+          </span>
+          <div className="flex items-center gap-1">
+            <Button variant="outline" size="sm" onClick={() => setCurrentPage(1)} disabled={currentPage === 1} aria-label="First page">
+              <ChevronsLeft className="h-4 w-4" />
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => setCurrentPage((p) => Math.max(1, p - 1))} disabled={currentPage === 1} aria-label="Previous page">
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+            <span className="px-2 text-xs text-muted-foreground">Page {currentPage} of {totalPages || 1}</span>
+            <Button variant="outline" size="sm" onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages || totalPages === 0} aria-label="Next page">
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => setCurrentPage(totalPages)} disabled={currentPage === totalPages || totalPages === 0} aria-label="Last page">
+              <ChevronsRight className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+      )}
+
       <div className="rounded-md border overflow-auto sticky-table-container max-h-[600px] custom-scrollbar">
         <Table>
           <TableHeader>
@@ -246,17 +270,17 @@ export function DataTable<T extends { id?: number | string }>({
                 return (
                   <TableHead
                     key={String(col.key)}
-                    className={isSortable ? "cursor-pointer select-none" : ""}
+                    className={isSortable ? "cursor-pointer select-none sticky top-0 bg-muted z-10" : "sticky top-0 bg-muted z-10"}
                     onClick={() => isSortable && handleSort(String(col.key))}
                   >
                     <div className="flex items-center gap-1">
                       {col.header}
                       {sortConfig?.key === col.key ? (
                         <span className="text-xs">
-                          {sortConfig.direction === "asc" ? "▲" : "▼"}
+                          {sortConfig.direction === "asc" ? "^" : "v"}
                         </span>
                       ) : (
-                        isSortable && <span className="text-xs opacity-30">⇅</span>
+                        isSortable && <span className="text-xs opacity-30">sort</span>
                       )}
                     </div>
                   </TableHead>
@@ -390,3 +414,4 @@ export function DataTable<T extends { id?: number | string }>({
     </div>
   );
 }
+

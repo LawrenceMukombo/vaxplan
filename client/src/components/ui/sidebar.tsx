@@ -1,4 +1,4 @@
-"use client"
+﻿"use client"
 
 import * as React from "react"
 import { Slot } from "@radix-ui/react-slot"
@@ -31,6 +31,20 @@ const SIDEBAR_WIDTH = "16rem"
 const SIDEBAR_WIDTH_MOBILE = "18rem"
 const SIDEBAR_WIDTH_ICON = "3rem"
 const SIDEBAR_KEYBOARD_SHORTCUT = "b"
+function readStoredSidebarOpen(defaultOpen: boolean) {
+  if (typeof document === "undefined") return defaultOpen
+
+  const cookieMatch = document.cookie.match(/(?:^|; )sidebar_state=(true|false)/)
+  if (cookieMatch) return cookieMatch[1] === "true"
+
+  try {
+    const stored = window.localStorage.getItem("vaxplan.sidebar.open")
+    if (stored === "true") return true
+    if (stored === "false") return false
+  } catch {}
+
+  return defaultOpen
+}
 
 type SidebarContextProps = {
   state: "expanded" | "collapsed"
@@ -71,7 +85,7 @@ function SidebarProvider({
 
   // This is the internal state of the sidebar.
   // We use openProp and setOpenProp for control from outside the component.
-  const [_open, _setOpen] = React.useState(defaultOpen)
+  const [_open, _setOpen] = React.useState(() => readStoredSidebarOpen(defaultOpen))
   const open = openProp ?? _open
   const setOpen = React.useCallback(
     (value: boolean | ((value: boolean) => boolean)) => {
@@ -84,6 +98,9 @@ function SidebarProvider({
 
       // This sets the cookie to keep the sidebar state.
       document.cookie = `${SIDEBAR_COOKIE_NAME}=${openState}; path=/; max-age=${SIDEBAR_COOKIE_MAX_AGE}`
+      try {
+        window.localStorage.setItem("vaxplan.sidebar.open", String(openState))
+      } catch {}
     },
     [setOpenProp, open]
   )
@@ -258,7 +275,8 @@ function SidebarTrigger({
   onClick,
   ...props
 }: React.ComponentProps<typeof Button>) {
-  const { toggleSidebar } = useSidebar()
+  const { toggleSidebar, state, isMobile } = useSidebar()
+  const label = isMobile ? "Open menu" : state === "expanded" ? "Collapse menu" : "Expand menu"
 
   return (
     <Button
@@ -271,10 +289,12 @@ function SidebarTrigger({
         onClick?.(event)
         toggleSidebar()
       }}
+      aria-label={label}
+      title={label}
       {...props}
     >
       <PanelLeftIcon />
-      <span className="sr-only">Toggle Sidebar</span>
+      <span className="sr-only">{label}</span>
     </Button>
   )
 }
@@ -725,3 +745,6 @@ export {
   SidebarTrigger,
   useSidebar,
 }
+
+
+

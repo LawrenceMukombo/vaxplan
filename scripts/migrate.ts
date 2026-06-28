@@ -176,6 +176,27 @@ async function run() {
       }
     }
     
+    
+    console.log('Applying custom schema upgrades for Batch Log Immunizations & Stock Ledger...');
+    const customUpgrades = [
+      "ALTER TABLE client_vaccinations ADD COLUMN IF NOT EXISTS schedule_dose_id integer;",
+      "ALTER TABLE client_vaccinations ADD COLUMN IF NOT EXISTS stock_transaction_id integer;",
+      "ALTER TABLE stock_transactions ADD COLUMN IF NOT EXISTS balance_before integer;",
+      "ALTER TABLE stock_transactions ADD COLUMN IF NOT EXISTS balance_after integer;",
+      "ALTER TABLE stock_transactions ADD COLUMN IF NOT EXISTS source_module varchar(100);",
+      "ALTER TABLE stock_transactions ADD COLUMN IF NOT EXISTS source_record_id varchar(100);"
+    ];
+    for (const sql of customUpgrades) {
+      try {
+        await client.query(sql);
+      } catch (err: any) {
+        if (!err.message.includes('already exists')) {
+          console.warn(`[Warning] Failed custom migration statement: ${err.message}`);
+        }
+      }
+    }
+    console.log('Custom schema upgrades applied.');
+
     console.log('All database migrations applied successfully.');
   } catch (err: any) {
     console.error('Migration runner failed:', err.message);

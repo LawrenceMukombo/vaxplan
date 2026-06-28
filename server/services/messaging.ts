@@ -203,7 +203,7 @@ export async function sendEmail(options: SendEmailOptions): Promise<{ success: b
     const host = config?.host || process.env.SMTP_HOST || 'smtp.gmail.com';
     const port = config?.port || Number(process.env.SMTP_PORT) || 465;
     const user = config?.user || process.env.SMTP_USER;
-    const pass = config?.pass || process.env.SMTP_PASS;
+    const pass = config?.pass || process.env.SMTP_PASS || process.env.SMTP_PASSWORD;
     const from = config?.from || process.env.SMTP_FROM || `"VaxPlan Notifications" <${user}>`;
 
     // Check if SMTP configs exist to avoid breaking if they are missing

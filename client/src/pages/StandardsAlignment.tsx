@@ -926,18 +926,14 @@ const STATUS_META: Record<Status, { label: string; icon: React.ComponentType<{ c
 };
 
 const TOP_ACTIONS: { n: number; title: string; standard: string; effort: "S" | "M" | "L" }[] = [
-  { n: 1, title: "✅ DONE — Service Worker Background Sync for the offline outbox", standard: "Principles for Digital Development", effort: "M" },
-  { n: 2, title: "✅ DONE — DHIS2 Tracker adapter for individual-level client + vaccination push (parallel to the existing aggregate adapter)", standard: "DHIS2 Tracker; WHO SMART IMMZ", effort: "M" },
-  { n: 3, title: "✅ DONE — AccessMod-style isochrone catchments (friction surface + travel time)", standard: "WHO AccessMod 5; UNICEF MicroPlan", effort: "L" },
-  { n: 4, title: "✅ DONE — AEFI reports entity + DHIS2 push", standard: "JRF; IHR 2005; Gavi safety", effort: "M" },
-  { n: 5, title: "✅ DONE — Cold-chain equipment + temperature logs with PQS codes", standard: "EVM 2.0 E2–E4", effort: "M" },
-  { n: 6, title: "✅ DONE — Stockout days + actual wastage in monthly reports", standard: "JRF; EVM 2.0 E6", effort: "M" },
-  { n: 7, title: "✅ DONE — GTIN + lot/expiry on stock; barcode-scan UI", standard: "GS1; Gavi traceability", effort: "M" },
-  { n: 8, title: "✅ DONE — Microplan lock cascade — block POST/PATCH /api/sessions when parent microplan.status='locked'", standard: "WHO/UNICEF Microplanning §1.3", effort: "S" },
-  { n: 9, title: "✅ DONE — Per-district disaggregation export for dropout (/indicators/dropout) — WUENIC submission CSV", standard: "WUENIC; RED/REC monitoring", effort: "S" },
-  { n: 10, title: "✅ DONE — Budget actual-spent capture (actualSpent + payment status on budget_items) for planned-vs-actual by funding source", standard: "Gavi HSS; WHO core element 8", effort: "S" },
-  { n: 11, title: "✅ DONE — Campaign independent monitoring + post-campaign coverage survey entities", standard: "WHO SIA field guide; IA2030 SP5", effort: "M" },
-  { n: 12, title: "✅ DONE — Extend FHIR adapter (Encounter + MedicationAdministration + Location + Practitioner)", standard: "WHO SMART Guidelines IMMZ", effort: "M" },
+  { n: 1, title: "Evidence-backed standards status: link each green/partial/gap row to a live route, table, or validation check", standard: "WHO/UNICEF RED governance; digital public goods auditability", effort: "S" },
+  { n: 2, title: "Plan Health score: summarize denominator, catchment, session, approval, budget, review, and stock readiness on Dashboard", standard: "RED monitoring for action; Gavi RED-Q", effort: "S" },
+  { n: 3, title: "Denominator confidence badges: expose source mix, confidence score, approval status, and latest year wherever population denominators are used", standard: "Geo-enabled microplanning master-list governance", effort: "S" },
+  { n: 4, title: "Equity-first dashboard: lead with zero-dose, under-immunized, dropout, missed communities, and hard-to-reach signals", standard: "IA2030 SP1; Gavi zero-dose/missed communities", effort: "S" },
+  { n: 5, title: "Quarterly review completeness: show facilities missing RED-4 review notes and link them to defaulter/dropout follow-up", standard: "WHO RED monitoring for action", effort: "M" },
+  { n: 6, title: "EVM maturity KPIs: add stockout-days, wastage %, temperature excursions, and maintenance overdue to supply-chain scorecards", standard: "WHO EVM 2.0; JRF", effort: "M" },
+  { n: 7, title: "Interoperability validation packs: test DHIS2/FHIR/SMART IMMZ payloads per tenant before production sync", standard: "WHO SMART Guidelines; DHIS2 Tracker/Aggregate", effort: "M" },
+  { n: 8, title: "Corrective-action supervision: convert checklist findings into owned actions with due dates and escalation", standard: "WHO RED supportive supervision", effort: "M" },
 ];
 
 function StatusBadge({ status }: { status: Status }) {
@@ -1084,7 +1080,7 @@ export default function StandardsAlignment() {
           Start with the <strong>Features</strong> tab for a plain-language list of what
           VaxPlan can do today. The remaining tabs are a grounded review of how VaxPlan aligns with WHO,
           UNICEF, Gavi and Ministry-of-Health standards for microplanning and GIS-microplanning — every row
-          cites concrete evidence from this codebase or a concrete gap-closure recommendation. Mirror copy:{" "}
+          cites concrete evidence from this codebase or a concrete gap-closure recommendation. Status is evidence-based: green rows mean implemented evidence exists, while recommendations track audit and maturity work rather than blanket certification. Mirror copy:{" "}
           <code className="text-xs">docs/who-unicef-gavi-alignment.md</code>.
         </p>
       </div>
@@ -1448,7 +1444,7 @@ export default function StandardsAlignment() {
           Start with the <strong>Features</strong> tab for a plain-language list of what
           VaxPlan can do today. The remaining tabs are a grounded review of how VaxPlan aligns with WHO,
           UNICEF, Gavi and Ministry-of-Health standards for microplanning and GIS-microplanning — every row
-          cites concrete evidence from this codebase or a concrete gap-closure recommendation. Mirror copy:{" "}
+          cites concrete evidence from this codebase or a concrete gap-closure recommendation. Status is evidence-based: green rows mean implemented evidence exists, while recommendations track audit and maturity work rather than blanket certification. Mirror copy:{" "}
           <code className="text-xs">docs/who-unicef-gavi-alignment.md</code>.
         </p>
       </div>

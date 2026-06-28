@@ -1051,10 +1051,22 @@ export class DatabaseStorage implements IStorage {
     return v;
   }
   async deleteVillage(tenantId: string, id: number): Promise<boolean> {
-    const result = await db
-      .delete(villages)
-      .where(and(eq(villages.id, id), eq(villages.tenantId, tenantId)));
-    return (result.rowCount ?? 0) > 0;
+    return await db.transaction(async (tx) => {
+      // 1. Delete associated htr_scores
+      await tx.delete(htrScores).where(eq(htrScores.villageId, id));
+      
+      // 2. Delete associated session_villages
+      await tx.delete(sessionVillages).where(eq(sessionVillages.villageId, id));
+      
+      // 3. Delete associated population_data
+      await tx.delete(populationData).where(eq(populationData.villageId, id));
+
+      // 4. Delete the village itself
+      const result = await tx
+        .delete(villages)
+        .where(and(eq(villages.id, id), eq(villages.tenantId, tenantId)));
+      return (result.rowCount ?? 0) > 0;
+    });
   }
   async createCatchmentConflict(tenantId: string, data: InsertCatchmentConflict): Promise<CatchmentConflict> {
     const { tenantId: _drop, ...rest } = data as any;

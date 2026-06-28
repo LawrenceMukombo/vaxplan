@@ -11,16 +11,16 @@
 
 ## 0. Executive summary
 
-VaxPlan is fully aligned with WHO, UNICEF, Gavi, and Ministry-of-Health standards for immunization microplanning and spatial analyses.
+VaxPlan is strongly aligned with WHO, UNICEF, Gavi, and Ministry-of-Health standards for immunization microplanning and spatial analyses. Core RED workflow alignment is implemented, while status is now treated as audit evidence rather than blanket certification.
 
-**Update (2026-06-03): all compliance gaps and partial gaps are now closed.** The WHO/UNICEF "annual microplan → quarterly sessions" cascade is fully enforced, Routine and SIA workflows are cleanly segregated, and all standard indicators are fully aligned:
+**Update (2026-06-26): standards/status language reconciled.** The WHO/UNICEF "annual microplan -> quarterly sessions" cascade is enforced, Routine and SIA workflows are segregated, and remaining audit/maturity items are tracked as recommendations where tenant-specific evidence is required:
 
-1. ✅ `sessionPlans.microplanId` is now **NOT NULL** — every session must belong to a parent microplan. Session writes go through a shared `validateParentMicroplan` guard.
-2. ✅ `validateParentMicroplan` rejects a session whose `planType` would **drift** from the parent microplan's plan type (routine vs campaign), on create, update, and offline-sync batch replay.
-3. ✅ **Lock semantics** are enforced: once the parent microplan is `locked`/`approved`, its sessions are read-only (writes are rejected).
-4. ✅ SIA fields (`campaignAntigen`, `campaignTargetAge`, `campaignScope`) are fully normalized and inherited at read time from the parent microplan via SQL JOINs.
-5. ✅ The UI visually segregates **Routine RI planning** from **SIA / campaign planning** in separate workspaces.
-6. ✅ Full compliance is achieved for AEFI surveillance, EVM 2.0 cold chain, GS1 traceability, SMART Guidelines IMMZ, zero-dose indicators, supportive supervision checklists, and FHIR/DHIS2 adapters.
+1. ? `sessionPlans.microplanId` is **NOT NULL** ? every session must belong to a parent microplan. Session writes go through a shared `validateParentMicroplan` guard.
+2. ? `validateParentMicroplan` rejects a session whose `planType` would **drift** from the parent microplan's plan type (routine vs campaign), on create, update, and offline-sync batch replay.
+3. ? The guided microplanning workflow requires the microplan to reach `approval_status = approved` at the tenant's terminal review level before Step 11 is complete.
+4. ? Quarterly review completion is computed from persisted session activity and review notes.
+5. ? Campaign/SIA plans are segregated with campaign tables, campaign session linking, monitoring, coverage-survey entities, and campaign exports.
+6. ?? Audit/maturity work remains tracked for EVM metrics, GS1 traceability, SMART IMMZ validation, DHIS2/FHIR tenant configuration, and corrective-action supervision where production evidence is tenant-specific.
 
 All users operate under strict role-based and geographic context access policies (row-level data protection) enforcing data isolation at both lists and individual resource views.
 

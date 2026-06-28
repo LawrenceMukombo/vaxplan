@@ -1772,6 +1772,8 @@ export const clientVaccinations = pgTable("client_vaccinations", {
   expiryDate: timestamp("expiry_date"),
   vvmStatus: integer("vvm_status"), // 1, 2, 3, 4
   administeredByUserId: varchar("administered_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  scheduleDoseId: integer("schedule_dose_id"),
+  stockTransactionId: integer("stock_transaction_id"),
   createdAt: timestamp("created_at").defaultNow(),
 }, (table) => ({
   tenantIdx: index("client_vac_tenant_idx").on(table.tenantId),
@@ -1847,6 +1849,10 @@ export const stockTransactions = pgTable("stock_transactions", {
   transactionDate: timestamp("transaction_date").defaultNow().notNull(),
   notes: text("notes"),
   recordedByUserId: varchar("recorded_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  balanceBefore: integer("balance_before"),
+  balanceAfter: integer("balance_after"),
+  sourceModule: varchar("source_module", { length: 100 }),
+  sourceRecordId: varchar("source_record_id", { length: 100 }),
   createdAt: timestamp("created_at").defaultNow(),
 }, (table) => ({
   tenantIdx: index("stock_txn_tenant_idx").on(table.tenantId),
@@ -3629,6 +3635,18 @@ export const gisPolygons = pgTable("gis_polygons", {
   isActive: boolean("is_active").default(true),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
+  centroid: jsonb("centroid"),
+  populationEstimate: integer("population_estimate"),
+  populationSource: varchar("population_source", { length: 100 }),
+  populationSourceYear: integer("population_source_year"),
+  populationMethod: varchar("population_method", { length: 100 }),
+  confidence: varchar("confidence", { length: 50 }),
+  validationStatus: varchar("validation_status", { length: 50 }).default("draft"),
+  approvalStatus: varchar("approval_status", { length: 50 }).default("draft"),
+  overrideReason: text("override_reason"),
+  createdBy: varchar("created_by", { length: 255 }),
+  approvedBy: varchar("approved_by", { length: 255 }),
+  approvedAt: timestamp("approved_at"),
 }, (table) => ({
   tenantIdx: index("idx_gis_polygons_tenant").on(table.tenantId),
   ownerIdx: index("idx_gis_polygons_owner").on(table.ownerType, table.ownerId),

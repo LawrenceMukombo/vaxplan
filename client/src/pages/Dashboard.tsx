@@ -26,6 +26,7 @@ import {
   Download,
   FileText,
   Info,
+  Database,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { Link, useLocation, useSearch } from "wouter";
@@ -99,7 +100,7 @@ const CURRENT_QUARTER = Math.floor(CURRENT_DATE.getUTCMonth() / 3) + 1;
 const COVERAGE_STORAGE_KEY = "vaxplan_dashboard_coverage_filters";
 
 const isFacilityScopedRole = (role?: string) =>
-  role === "facility_clerk" || role === "facility_in_charge";
+  role === "facility_clerk" || role === "facility_in_charge" || role === "facility_partner";
 
 interface ZeroDoseSummary {
   total: number;
@@ -121,10 +122,209 @@ interface DropoutSummary {
   dtp1_mcv1: { num: number; denom: number; rate: number; byDistrict: Array<{ districtId: number; districtName: string; dtp1: number; mcv1: number; rate: number }> };
 }
 
+interface QuarterlyReviewCoverage {
+  year: number;
+  quarter: number;
+  totalFacilities: number;
+  facilitiesWithReview: number;
+  coveragePct: number;
+}
+
 function dropoutBadgeClass(rate: number) {
   if (rate > 10) return "border-rose-500 text-rose-600";
   if (rate >= 5) return "border-amber-500 text-amber-600";
   return "border-emerald-500 text-emerald-600";
+}
+
+function scoreTone(score: number) {
+  if (score >= 80) return "text-emerald-600 border-emerald-500 bg-emerald-500/10";
+  if (score >= 60) return "text-amber-600 border-amber-500 bg-amber-500/10";
+  return "text-rose-600 border-rose-500 bg-rose-500/10";
+}
+
+function denominatorTone(score: number | null) {
+  if (score === null) return { label: "Unscored", className: "border-slate-400 text-slate-600 bg-slate-500/10" };
+  if (score >= 85) return { label: "High confidence", className: "border-emerald-500 text-emerald-600 bg-emerald-500/10" };
+  if (score >= 70) return { label: "Medium confidence", className: "border-amber-500 text-amber-600 bg-amber-500/10" };
+  return { label: "Needs review", className: "border-rose-500 text-rose-600 bg-rose-500/10" };
+}
+
+function PlanHealthCard({
+  metrics,
+}: {
+  metrics: Array<{ label: string; score: number; detail: string; href?: string }>;
+}) {
+  const score = metrics.length
+    ? Math.round(metrics.reduce((sum, metric) => sum + metric.score, 0) / metrics.length)
+    : 0;
+  const blockerCount = metrics.filter((metric) => metric.score < 60).length;
+
+  return (
+    <Card data-testid="card-plan-health-score">
+      <CardHeader className="pb-2">
+        <div className="flex items-center justify-between gap-2">
+          <CardTitle className="text-lg flex items-center gap-2">
+            <ClipboardCheck className="h-5 w-5 text-primary" />
+            Plan Health Score
+          </CardTitle>
+          <Badge variant="outline" className={scoreTone(score)}>
+            {score >= 80 ? "Ready" : score >= 60 ? "Watch" : "Action needed"}
+          </Badge>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4 pt-2">
+        <div className="flex items-end justify-between gap-3">
+          <div>
+            <div className="text-4xl font-bold leading-none" data-testid="text-plan-health-score">
+              {score}
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">
+              Composite of denominator, catchment, session, approval, budget, review, and stock readiness.
+            </p>
+          </div>
+          <div className="text-right">
+            <div className="text-sm font-semibold text-foreground">
+              {blockerCount} blocker{blockerCount === 1 ? "" : "s"}
+            </div>
+            <div className="text-xs text-muted-foreground">below 60%</div>
+          </div>
+        </div>
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Facility readiness drivers</span>
+          <Button variant="outline" size="sm" asChild>
+            <Link href="/plan-health">Open facility scores</Link>
+          </Button>
+        </div>
+        <div className="grid gap-2 md:grid-cols-2">
+          {metrics.map((metric) => {
+            const row = (
+              <div className="space-y-1 rounded-lg border bg-muted/20 px-3 py-2 hover:bg-muted/35 transition-colors">
+                <div className="flex items-center justify-between gap-2 text-xs">
+                  <span className="font-semibold text-foreground">{metric.label}</span>
+                  <span className={`font-mono font-bold ${metric.score >= 80 ? "text-emerald-600" : metric.score >= 60 ? "text-amber-600" : "text-rose-600"}`}>
+                    {metric.score}%
+                  </span>
+                </div>
+                <div className="h-1.5 bg-background rounded-full overflow-hidden">
+                  <div
+                    className={`h-full rounded-full ${metric.score >= 80 ? "bg-emerald-500" : metric.score >= 60 ? "bg-amber-500" : "bg-rose-500"}`}
+                    style={{ width: `${Math.max(0, Math.min(metric.score, 100))}%` }}
+                  />
+                </div>
+                <p className="text-[11px] text-muted-foreground">{metric.detail}</p>
+              </div>
+            );
+            return metric.href ? (
+              <Link key={metric.label} href={metric.href} className="block">
+                {row}
+              </Link>
+            ) : (
+              <div key={metric.label}>{row}</div>
+            );
+          })}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function DenominatorConfidenceCard({
+  records,
+  fallbackPopulation,
+}: {
+  records: PopulationData[] | undefined;
+  fallbackPopulation: number;
+}) {
+  const summary = useMemo(() => {
+    const rows = records ?? [];
+    const scored = rows
+      .map((row) => Number((row as any).confidenceScore))
+      .filter((n) => Number.isFinite(n));
+    const avg = scored.length
+      ? Math.round(scored.reduce((sum, n) => sum + n, 0) / scored.length)
+      : null;
+    const approved = rows.filter((row) => row.approvalStatus === "approved").length;
+    const latestYear = rows.length ? Math.max(...rows.map((row) => Number(row.year) || 0)) : null;
+    const sourceCounts = new Map<string, number>();
+    rows.forEach((row) => {
+      const key = String(row.source || "unknown").toUpperCase();
+      sourceCounts.set(key, (sourceCounts.get(key) ?? 0) + 1);
+    });
+    const sources = Array.from(sourceCounts.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 4);
+    const totalPopulation = rows.reduce((sum, row) => sum + Number(row.totalPopulation || 0), 0);
+    return {
+      avg,
+      approved,
+      total: rows.length,
+      latestYear,
+      sources,
+      totalPopulation: totalPopulation || fallbackPopulation,
+    };
+  }, [records, fallbackPopulation]);
+
+  const tone = denominatorTone(summary.avg);
+  const approvalPct = summary.total ? Math.round((summary.approved / summary.total) * 100) : 0;
+
+  return (
+    <Card data-testid="card-denominator-confidence">
+      <CardHeader className="pb-2">
+        <div className="flex items-center justify-between gap-2">
+          <CardTitle className="text-lg flex items-center gap-2">
+            <Database className="h-5 w-5 text-sky-500" />
+            Denominator Confidence
+          </CardTitle>
+          <Badge variant="outline" className={tone.className}>
+            {tone.label}
+          </Badge>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4 pt-2">
+        <div className="grid grid-cols-3 gap-2 text-xs">
+          <div className="rounded-lg border p-2">
+            <div className="text-muted-foreground">Confidence</div>
+            <div className="text-xl font-bold" data-testid="text-denominator-confidence">
+              {summary.avg === null ? "--" : `${summary.avg}%`}
+            </div>
+          </div>
+          <div className="rounded-lg border p-2">
+            <div className="text-muted-foreground">Approved</div>
+            <div className="text-xl font-bold">{approvalPct}%</div>
+          </div>
+          <div className="rounded-lg border p-2">
+            <div className="text-muted-foreground">Year</div>
+            <div className="text-xl font-bold">{summary.latestYear || "n/a"}</div>
+          </div>
+        </div>
+        <div className="space-y-2">
+          <div className="flex items-center justify-between text-xs">
+            <span className="text-muted-foreground">Planning denominator</span>
+            <span className="font-mono font-semibold">
+              {summary.totalPopulation.toLocaleString()}
+            </span>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {summary.sources.length === 0 ? (
+              <Badge variant="outline">No source records</Badge>
+            ) : (
+              summary.sources.map(([source, count]) => (
+                <Badge key={source} variant="secondary" className="text-[10px]">
+                  {source} ({count})
+                </Badge>
+              ))
+            )}
+          </div>
+          <p className="text-[11px] text-muted-foreground">
+            Badge reflects available confidence scores, approval status, recency, and source mix for population records in scope.
+          </p>
+        </div>
+        <Button variant="outline" size="sm" className="w-full" asChild>
+          <Link href="/population">Review denominators</Link>
+        </Button>
+      </CardContent>
+    </Card>
+  );
 }
 
 function ImmunizationIndicatorCards() {
@@ -980,7 +1180,7 @@ export default function Dashboard() {
         month: "long",
         day: "numeric",
       }) +
-      " · " +
+      " � " +
       liveTime.toLocaleTimeString("en-US", {
         hour: "numeric",
         minute: "2-digit",
@@ -991,13 +1191,13 @@ export default function Dashboard() {
 
   const { data: facilities, isLoading: loadingFacilities } = useQuery<Facility[]>({
     queryKey: ["/api/facilities"],
-    staleTime: 10 * 60 * 1000, // 10 min — facility list changes rarely
+    staleTime: 10 * 60 * 1000, // 10 min - facility list changes rarely
   });
 
   /* Original Code:
   const { data: villages, isLoading: loadingVillages } = useQuery<Village[]>({
     queryKey: ["/api/villages/summary"],
-    staleTime: 10 * 60 * 1000, // 10 min — village list changes rarely
+    staleTime: 10 * 60 * 1000, // 10 min - village list changes rarely
   });
 
   const { data: sessions, isLoading: loadingSessions } = useQuery<SessionPlan[]>({
@@ -1010,7 +1210,7 @@ export default function Dashboard() {
   const { data: stats } = useQuery<StatsData>({
     queryKey: ["/api/stats"],
     staleTime: 10 * 60 * 1000,
-    // Not in isLoading — we compute locally when data is available
+    // Not in isLoading - we compute locally when data is available
   });
 
   const { data: budgetItems, isLoading: loadingBudget } = useQuery<BudgetItem[]>({
@@ -1037,8 +1237,15 @@ export default function Dashboard() {
     queryKey: ["/api/sessions"],
   });
 
+  const scopedFacilityId = facilityLocked ? Number(user?.facilityId) : null;
+  const statsUrl = scopedFacilityId ? `/api/stats?facilityId=${scopedFacilityId}&scope=assigned` : "/api/stats";
+  const populationUrl = scopedFacilityId
+    ? `/api/population?excludeVillages=true&facilityId=${scopedFacilityId}`
+    : "/api/population?excludeVillages=true";
+  const stockLedgerUrl = scopedFacilityId ? `/api/stock/ledger?facilityId=${scopedFacilityId}` : "/api/stock/ledger";
+
   const { data: stats, isLoading: loadingStats } = useQuery<StatsData>({
-    queryKey: ["/api/stats"],
+    queryKey: [statsUrl],
   });
 
   const { data: budgetItems, isLoading: loadingBudget } = useQuery<BudgetItem[]>({
@@ -1052,7 +1259,7 @@ export default function Dashboard() {
   });
 
   const { data: populationDataList, isLoading: loadingPopulation } = useQuery<PopulationData[]>({
-    queryKey: ["/api/population?excludeVillages=true"],
+    queryKey: [populationUrl],
   });
 
   const { data: allDistricts } = useQuery<any[]>({
@@ -1066,7 +1273,7 @@ export default function Dashboard() {
   });
 
   const { data: stockTransactions } = useQuery<StockTransaction[]>({
-    queryKey: ["/api/stock/ledger"],
+    queryKey: [stockLedgerUrl],
     staleTime: 5 * 60 * 1000,
   });
 
@@ -1145,6 +1352,14 @@ export default function Dashboard() {
 
   const { data: coverage, isLoading: loadingCoverage } = useQuery<CoverageData>({
     queryKey: [`/api/coverage?${coverageQueryString}`],
+  });
+
+  const quarterlyReviewCoverageUrl = scopedFacilityId
+    ? `/api/indicators/quarterly-review-coverage?year=${CURRENT_YEAR}&quarter=${CURRENT_QUARTER}&facilityId=${scopedFacilityId}`
+    : `/api/indicators/quarterly-review-coverage?year=${CURRENT_YEAR}&quarter=${CURRENT_QUARTER}`;
+  const { data: quarterlyReviewCoverage } = useQuery<QuarterlyReviewCoverage>({
+    queryKey: [quarterlyReviewCoverageUrl],
+    staleTime: 5 * 60 * 1000,
   });
 
   // Persist coverage filter selection across reloads (URL + localStorage).
@@ -1410,6 +1625,94 @@ export default function Dashboard() {
     return Math.round((approvedBudgetSum / totalBudgetSum) * 100);
   }, [approvedBudgetSum, totalBudgetSum]);
 
+  const denominatorConfidenceScore = useMemo(() => {
+    if (!populationDataList?.length) return 0;
+    const scored = populationDataList
+      .map((p) => Number((p as any).confidenceScore))
+      .filter((n) => Number.isFinite(n));
+    if (scored.length === 0) return 50;
+    return Math.round(scored.reduce((sum, n) => sum + n, 0) / scored.length);
+  }, [populationDataList]);
+
+  const facilityPlanCoveragePct = useMemo(() => {
+    const total = stats?.totalFacilities || facilities?.length || 0;
+    if (!total) return 0;
+    return Math.round(((stats?.facilitiesWithApprovedPlans || 0) / total) * 100);
+  }, [stats, facilities]);
+
+  const stockReadinessPct = useMemo(() => {
+    const total = stats?.activeFacilities || facilities?.length || 0;
+    if (!total) return 100;
+    const risk = Math.min(total, scopedStockAlerts.totals.facilitiesAtRisk || 0);
+    return Math.max(0, Math.round(((total - risk) / total) * 100));
+  }, [stats, facilities, scopedStockAlerts.totals.facilitiesAtRisk]);
+
+  const planHealthMetrics = useMemo(
+    () => [
+      {
+        label: "Denominator confidence",
+        score: denominatorConfidenceScore,
+        detail: `${populationDataList?.length || 0} population records in scope`,
+        href: "/population",
+      },
+      {
+        label: "Catchment assignment",
+        score: villagesPercentage,
+        detail: `${assignedVillagesCount.toLocaleString()} of ${totalVillagesCount.toLocaleString()} communities linked to facilities`,
+        href: "/map",
+      },
+      {
+        label: "Sessions completed",
+        score: sessionsPercentage,
+        detail: `${completedSessionsCount.toLocaleString()} of ${totalSessionsCount.toLocaleString()} sessions conducted`,
+        href: "/all-sessions",
+      },
+      {
+        label: "Approved facility plans",
+        score: facilityPlanCoveragePct,
+        detail: `${stats?.facilitiesWithApprovedPlans || 0} of ${stats?.totalFacilities || facilities?.length || 0} facilities have approved plans`,
+        href: "/approvals",
+      },
+      {
+        label: "Budget approval",
+        score: budgetPercentage,
+        detail: `$${approvedBudgetSum.toLocaleString()} approved of $${totalBudgetSum.toLocaleString()} planned`,
+        href: "/microplans/routine",
+      },
+      {
+        label: "Quarterly review coverage",
+        score: quarterlyReviewCoverage?.coveragePct ?? 0,
+        detail: `${quarterlyReviewCoverage?.facilitiesWithReview || 0} of ${quarterlyReviewCoverage?.totalFacilities || 0} facilities have Q${CURRENT_QUARTER} review notes`,
+        href: "/clients/defaulters",
+      },
+      {
+        label: "Stock readiness",
+        score: stockReadinessPct,
+        detail: `${scopedStockAlerts.totals.facilitiesAtRisk} facilities currently have active stock risk`,
+        href: "/stock",
+      },
+    ],
+    [
+      denominatorConfidenceScore,
+      populationDataList,
+      villagesPercentage,
+      assignedVillagesCount,
+      totalVillagesCount,
+      sessionsPercentage,
+      completedSessionsCount,
+      totalSessionsCount,
+      facilityPlanCoveragePct,
+      stats,
+      facilities,
+      budgetPercentage,
+      approvedBudgetSum,
+      totalBudgetSum,
+      quarterlyReviewCoverage,
+      stockReadinessPct,
+      scopedStockAlerts.totals.facilitiesAtRisk,
+    ],
+  );
+
   // 4. Pending Approvals list
   const pendingApprovals = useMemo(() => {
     if (!approvals) return [];
@@ -1480,41 +1783,111 @@ export default function Dashboard() {
 
   return (
     <div className="p-6 space-y-6">
-      {/* Premium Welcome Banner */}
-      <div className="relative overflow-hidden rounded-2xl border border-primary/10 bg-gradient-to-r from-primary/10 via-primary/5 to-transparent p-6 shadow-sm">
-        <div className="absolute right-0 top-0 h-40 w-40 bg-primary/5 rounded-full filter blur-2xl -z-10" />
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="rounded-xl border bg-card p-5 shadow-sm">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div className="space-y-1">
-            <h1 className="text-2xl font-bold tracking-tight text-foreground flex items-center gap-2">
-              <Sparkles className="h-6 w-6 text-primary animate-pulse shrink-0" />
-              {greeting}, {displayName}!
+            <div className="flex items-center gap-2 text-sm font-semibold text-primary">
+              <Sparkles className="h-4 w-4" />
+              Q{coverageFilters.quarter} {coverageFilters.year} dashboard
+            </div>
+            <h1 className="text-2xl font-bold tracking-tight text-foreground">
+              {greeting}, {displayName}
             </h1>
-            <p className="text-muted-foreground text-sm">
-              {user?.facilityId && facilities?.find(f => f.id === user.facilityId)?.name 
-                ? `Welcome back to ${facilities.find(f => f.id === user.facilityId)?.name}`
-                : "Welcome back to VaxPlan GIS-Microplanning panel."}
+            <p className="text-sm text-muted-foreground">
+              {user?.facilityId && facilities?.find((f) => f.id === user.facilityId)?.name
+                ? facilities.find((f) => f.id === user.facilityId)?.name
+                : "All facilities"} - Focus on missed children, plan readiness, and the next action to unblock service delivery.
             </p>
           </div>
-          <div className="flex items-center gap-2 bg-background/50 border backdrop-blur-md px-4 py-2 rounded-xl text-xs font-mono font-bold text-muted-foreground shadow-sm w-fit shrink-0">
-            <Clock className="h-4 w-4 text-primary shrink-0 animate-spin animate-duration-10000" />
-            <span>{formattedTime}</span>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button asChild size="sm">
+              <Link href="/microplans/routine">Plan sessions</Link>
+            </Button>
+            <Button asChild size="sm" variant="outline">
+              <Link href="/clients/defaulters">Review defaulters</Link>
+            </Button>
+            <Badge variant="outline" className="gap-1 px-3 py-1.5 font-mono">
+              <Clock className="h-3.5 w-3.5 text-primary" />
+              {formattedTime}
+            </Badge>
           </div>
         </div>
       </div>
 
-      <Tabs defaultValue="overview" className="space-y-6 mt-6">
-        <TabsList className="w-full justify-start overflow-x-auto flex-nowrap shrink-0 border-b rounded-none bg-transparent p-0">
-          <TabsTrigger value="overview" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent shadow-none px-4 py-2">Overview & Operations</TabsTrigger>
-          <TabsTrigger value="immunization" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent shadow-none px-4 py-2">Immunization & Indicators</TabsTrigger>
-          <TabsTrigger value="supervision" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent shadow-none px-4 py-2">Supervision</TabsTrigger>
-          <TabsTrigger value="vgie" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent shadow-none px-4 py-2">VGIE Analytics</TabsTrigger>
-        </TabsList>
+      <Card data-testid="card-dashboard-navigation">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-lg">Dashboard navigation</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+            {[
+              { label: "Equity signals", href: "#equity", icon: AlertTriangle, detail: "Zero-dose and dropout" },
+              { label: "Operations", href: "#operations", icon: Calendar, detail: "Sessions and approvals" },
+              { label: "Coverage", href: "#coverage", icon: Syringe, detail: "Antigen progress" },
+              { label: "Map", href: "#map", icon: Building2, detail: "Facilities and catchments" },
+              { label: "Missed communities", href: "/missed-communities", icon: Users, detail: "No recent contact" },
+              { label: "Stock ledger", href: "/stock", icon: Package, detail: "Supply risks" },
+              { label: "Approvals", href: "/approvals", icon: CheckCircle2, detail: "Plans awaiting review" },
+              { label: "Reports", href: "/reports", icon: FileText, detail: "Exports and reviews" },
+            ].map((item) => {
+              const Icon = item.icon;
+              const content = (
+                <div className="flex items-center gap-3 rounded-lg border bg-muted/20 px-3 py-3 transition-colors hover:border-primary hover:bg-muted/35">
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-background text-primary">
+                    <Icon className="h-4 w-4" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-semibold text-foreground">{item.label}</div>
+                    <div className="truncate text-xs text-muted-foreground">{item.detail}</div>
+                  </div>
+                </div>
+              );
+              return item.href.startsWith("#") ? (
+                <a key={item.label} href={item.href} className="block">
+                  {content}
+                </a>
+              ) : (
+                <Link key={item.label} href={item.href} className="block">
+                  {content}
+                </Link>
+              );
+            })}
+          </div>
+        </CardContent>
+      </Card>
 
-        <TabsContent value="overview" className="space-y-6 focus-visible:outline-none">
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            {isLoading ? (
-          <>
-            {[1, 2, 3, 4].map((i) => (
+      <section id="equity" className="space-y-4" data-testid="section-equity-first-dashboard">
+        <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+          <div>
+            <h2 className="text-xl font-bold tracking-tight text-foreground">Equity command center</h2>
+            <p className="text-sm text-muted-foreground">
+              Start here: zero-dose, under-immunized, dropout, denominator confidence, and plan readiness are the primary dashboard signals.
+            </p>
+          </div>
+          <Button variant="outline" size="sm" asChild>
+            <Link href="/missed-communities">Open missed communities</Link>
+          </Button>
+        </div>
+        <ImmunizationIndicatorCards />
+        <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1.15fr)_minmax(340px,0.85fr)]">
+          <PlanHealthCard metrics={planHealthMetrics} />
+          <DenominatorConfidenceCard
+            records={populationDataList}
+            fallbackPopulation={annualPopulationDisplay.value}
+          />
+        </div>
+      </section>
+
+      <section id="operations" className="space-y-4">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h2 className="text-xl font-bold tracking-tight text-foreground">Operations snapshot</h2>
+            <p className="text-sm text-muted-foreground">A compact view of the work queue. Detailed readiness now lives in Plan Health above.</p>
+          </div>
+        </div>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          {isLoading ? (
+            [1, 2, 3, 4].map((i) => (
               <Card key={i}>
                 <CardHeader className="pb-2">
                   <Skeleton className="h-4 w-24" />
@@ -1523,274 +1896,234 @@ export default function Dashboard() {
                   <Skeleton className="h-8 w-20" />
                 </CardContent>
               </Card>
-            ))}
-          </>
-        ) : (
-          <>
-            <StatsCard
-              title="Health Facilities"
-              value={facilities?.length || 0}
-              subtitle="Active facilities in system"
-              icon={Building2}
-              trend={{ value: 5, isPositive: true }}
-              href="/facilities"
-              testId="stats-health-facilities"
-            />
-            <StatsCard
-              title="Annual Population"
-              value={annualPopulationDisplay.value.toLocaleString()}
-              subtitle={annualPopulationDisplay.label}
-              icon={Users}
-              href="/population"
-              testId="stats-annual-population"
-            />
-            <StatsCard
-              title="Planned Sessions"
-              value={pendingSessions}
-              subtitle="Sessions pending this quarter"
-              icon={Calendar}
-              href="/microplans/routine"
-              testId="stats-planned-sessions"
-            />
-            <StatsCard
-              title="Hard-to-Reach"
-              value={htrVillages}
-              subtitle="Villages requiring special attention"
-              icon={AlertTriangle}
-              href="/htr"
-              testId="stats-hard-to-reach"
-            />
-            <StatsCard
-              title="Pending Implementation"
-              value={sessionsPendingImplementation.total}
-              subtitle={
-                sessionsPendingImplementation.overdue > 0
-                  ? `${sessionsPendingImplementation.overdue} overdue — needs attention`
-                  : "Sessions to conduct or report"
-              }
-              icon={Clock}
-              href="/microplans/routine"
-              testId="link-pending-implementation"
-            />
-            <StatsCard
-              title="Stock Alerts"
-              value={
-                scopedStockAlerts.totals.lowStock +
-                scopedStockAlerts.totals.outOfStock +
-                scopedStockAlerts.totals.nearExpiry
-              }
-              subtitle={
-                user?.facilityId
-                  ? `${scopedStockAlerts.totals.lowStock + scopedStockAlerts.totals.outOfStock} low/out · ${scopedStockAlerts.totals.nearExpiry} expiring ≤60d`
-                  : `${scopedStockAlerts.totals.facilitiesAtRisk} facilities at risk · ${scopedStockAlerts.totals.expiringSoon} batches ≤30d`
-              }
-              icon={Package}
-              href="/stock"
-              testId="link-stock-alerts"
-            />
-          </>
-        )}
-      </div>
- 
-      {/* Microplanning Coverage & Statistics Panel */}
-      <Card data-testid="card-microplanning-statistics">
-        <CardHeader className="pb-2">
-          <CardTitle className="text-lg flex items-center gap-2">
-            <Calendar className="h-5 w-5 text-primary" />
-            Microplanning Coverage & Statistics
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="pt-2 space-y-4">
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            {/* Facility Coverage Widget */}
-            <div className="rounded-xl border p-4 bg-card flex flex-col justify-between space-y-3">
-              <div>
-                <p className="text-xs uppercase text-muted-foreground font-semibold">Facility Plan Coverage</p>
-                <div className="flex items-baseline gap-1 mt-1">
-                  <span className="text-2xl font-bold text-foreground">
-                    {stats?.facilitiesWithApprovedPlans || 0}
-                  </span>
-                  <span className="text-xs text-muted-foreground">
-                    / {stats?.totalFacilities || 0} Facilities
-                  </span>
-                </div>
-              </div>
-              <div className="space-y-1">
-                <div className="flex justify-between text-[10px] text-muted-foreground font-mono">
-                  <span>Progress</span>
-                  <span>
-                    {stats?.totalFacilities ? Math.round(((stats.facilitiesWithApprovedPlans || 0) / stats.totalFacilities) * 100) : 0}%
-                  </span>
-                </div>
-                <div className="h-2 bg-muted rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-emerald-500 rounded-full transition-all duration-500"
-                    style={{
-                      width: `${stats?.totalFacilities ? Math.round(((stats.facilitiesWithApprovedPlans || 0) / stats.totalFacilities) * 100) : 0}%`,
-                    }}
-                  />
-                </div>
-              </div>
-            </div>
-
-            {/* Approved Microplans */}
-            <div className="rounded-xl border p-4 bg-card flex flex-col justify-between">
-              <div>
-                <p className="text-xs uppercase text-muted-foreground font-semibold">Approved Plans</p>
-                <p className="text-2xl font-bold text-emerald-600 mt-1" data-testid="text-approved-plans">
-                  {stats?.approvedPlans || 0}
-                </p>
-              </div>
-              <p className="text-[11px] text-muted-foreground mt-2">Plans reviewed and approved by district</p>
-            </div>
-
-            {/* Auto-Approved Microplans */}
-            <div className="rounded-xl border p-4 bg-card flex flex-col justify-between">
-              <div>
-                <p className="text-xs uppercase text-muted-foreground font-semibold">Auto-Approved Plans</p>
-                <p className="text-2xl font-bold text-blue-600 mt-1" data-testid="text-auto-approved-plans">
-                  {stats?.autoApprovedPlans || 0}
-                </p>
-              </div>
-              <p className="text-[11px] text-muted-foreground mt-2">Approved automatically after 14 days</p>
-            </div>
-
-            {/* Pending Microplans */}
-            <div className="rounded-xl border p-4 bg-card flex flex-col justify-between">
-              <div>
-                <p className="text-xs uppercase text-muted-foreground font-semibold">Pending Review</p>
-                <p className="text-2xl font-bold text-amber-600 mt-1" data-testid="text-pending-plans">
-                  {stats?.submittedPlans || 0}
-                </p>
-              </div>
-              <p className="text-[11px] text-muted-foreground mt-2">Submitted plans awaiting district review</p>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Stock Alerts detail panel */}
-      {(scopedStockAlerts.totals.lowStock +
-        scopedStockAlerts.totals.outOfStock +
-        scopedStockAlerts.totals.nearExpiry >
-        0) && (
-        <Card data-testid="card-stock-alerts">
-          <CardHeader className="pb-2">
-            <div className="flex items-center justify-between gap-2">
-              <CardTitle className="text-lg flex items-center gap-2">
-                <Package className="h-5 w-5 text-amber-500" />
-                Vaccine Stock Alerts
-                <TooltipProvider>
-                  <Tooltip delayDuration={300}>
-                    <TooltipTrigger asChild>
-                      <span className="inline-flex cursor-help">
-                        <Info className="h-4 w-4 text-muted-foreground hover:text-foreground transition-colors" />
-                      </span>
-                    </TooltipTrigger>
-                    <TooltipContent side="right" className="max-w-[300px] text-xs leading-relaxed z-50">
-                      These metrics represent cumulative incidents across all your facilities. For example, "Out of stock" counts the total number of facility-level stockouts (Facility A out of Polio + Facility B out of BCG = 2 stockouts), not the number of distinct vaccine types.
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-              </CardTitle>
-              <Link
+            ))
+          ) : (
+            <>
+              <StatsCard
+                title="Planned Sessions"
+                value={pendingSessions}
+                subtitle="Sessions pending this quarter"
+                icon={Calendar}
+                href="/microplans/routine"
+                testId="stats-planned-sessions"
+              />
+              <StatsCard
+                title="Pending Implementation"
+                value={sessionsPendingImplementation.total}
+                subtitle={
+                  sessionsPendingImplementation.overdue > 0
+                    ? `${sessionsPendingImplementation.overdue} overdue - needs attention`
+                    : "Sessions to conduct or report"
+                }
+                icon={Clock}
+                href="/microplans/routine"
+                testId="link-pending-implementation"
+              />
+              <StatsCard
+                title="Pending Review"
+                value={stats?.submittedPlans || 0}
+                subtitle={`${stats?.approvedPlans || 0} approved - ${stats?.autoApprovedPlans || 0} auto-approved`}
+                icon={CheckCircle2}
+                href="/approvals"
+                testId="stats-pending-review"
+              />
+              <StatsCard
+                title="Stock Alerts"
+                value={
+                  scopedStockAlerts.totals.lowStock +
+                  scopedStockAlerts.totals.outOfStock +
+                  scopedStockAlerts.totals.nearExpiry
+                }
+                subtitle={
+                  user?.facilityId
+                    ? `${scopedStockAlerts.totals.lowStock + scopedStockAlerts.totals.outOfStock} low/out - ${scopedStockAlerts.totals.nearExpiry} expiring <=60d`
+                    : `${scopedStockAlerts.totals.facilitiesAtRisk} facilities at risk - ${scopedStockAlerts.totals.expiringSoon} batches <=30d`
+                }
+                icon={Package}
                 href="/stock"
-                className="text-xs font-semibold text-primary hover:underline"
-                data-testid="link-open-stock-ledger"
-              >
-                Open stock ledger →
-              </Link>
+                testId="link-stock-alerts"
+              />
+            </>
+          )}
+        </div>
+
+        <div className="grid gap-6 lg:grid-cols-[minmax(0,1.15fr)_minmax(320px,0.85fr)]">
+          {(scopedStockAlerts.totals.lowStock + scopedStockAlerts.totals.outOfStock + scopedStockAlerts.totals.nearExpiry > 0) && (
+            <Card data-testid="card-stock-alerts">
+              <CardHeader className="pb-2">
+                <div className="flex items-center justify-between gap-2">
+                  <CardTitle className="text-lg flex items-center gap-2">
+                    <Package className="h-5 w-5 text-amber-500" />
+                    Supply risks
+                    <TooltipProvider>
+                      <Tooltip delayDuration={300}>
+                        <TooltipTrigger asChild>
+                          <span className="inline-flex cursor-help">
+                            <Info className="h-4 w-4 text-muted-foreground hover:text-foreground transition-colors" />
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent side="right" className="max-w-[300px] text-xs leading-relaxed z-50">
+                          Counts represent facility-level incidents, not distinct antigen names.
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                  </CardTitle>
+                  <Link href="/stock" className="text-xs font-semibold text-primary hover:underline" data-testid="link-open-stock-ledger">
+                    Open ledger
+                  </Link>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-4 pt-2">
+                <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+                  {[
+                    { label: "Out", value: scopedStockAlerts.totals.outOfStock, tone: "text-rose-600", note: "stockouts" },
+                    { label: "Low", value: scopedStockAlerts.totals.lowStock, tone: "text-amber-600", note: "low stock" },
+                    { label: "<=30d", value: scopedStockAlerts.totals.expiringSoon, tone: "text-rose-600", note: "expiring" },
+                    { label: "<=60d", value: scopedStockAlerts.totals.nearExpiry, tone: "text-amber-600", note: "expiring" },
+                  ].map((metric) => (
+                    <Link key={metric.label} href="/stock" className="block rounded-lg border p-3 transition-colors hover:border-primary">
+                      <p className="text-[11px] uppercase font-semibold text-muted-foreground">{metric.label}</p>
+                      <p className={`text-2xl font-bold ${metric.tone}`}>{metric.value}</p>
+                      <p className="text-[11px] text-muted-foreground">{metric.note}</p>
+                    </Link>
+                  ))}
+                </div>
+                {topAlertFacilities.length > 0 && (
+                  <div className="space-y-2">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Highest-risk facilities</p>
+                    {topAlertFacilities.map((f) => (
+                      <div key={f.facilityId} className="flex items-center justify-between gap-3 rounded-lg border bg-muted/20 px-3 py-2" data-testid={`row-stock-alert-${f.facilityId}`}>
+                        <span className="truncate text-sm font-medium text-foreground">{f.name}</span>
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          {f.outOfStockAntigens.length > 0 && <Badge variant="outline" className="border-rose-500 text-rose-600 bg-rose-500/10 text-[10px]">{f.outOfStockAntigens.length} out</Badge>}
+                          {f.lowStockAntigens.length > 0 && <Badge variant="outline" className="border-amber-500 text-amber-600 bg-amber-500/10 text-[10px]">{f.lowStockAntigens.length} low</Badge>}
+                          {f.expiringSoonBatches > 0 && <Badge variant="outline" className="border-rose-500 text-rose-600 bg-rose-500/10 text-[10px]">{f.expiringSoonBatches} {"<=30d"}</Badge>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-lg">Approval queue</CardTitle>
+            </CardHeader>
+            <CardContent className="pt-2">
+              <div className="space-y-3">
+                {pendingApprovals.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center rounded-lg border border-dashed bg-muted/20 py-6 text-center">
+                    <CheckCircle2 className="h-8 w-8 text-emerald-500" />
+                    <p className="mt-2 text-sm font-semibold text-foreground">No pending approvals</p>
+                    <p className="max-w-[240px] text-xs text-muted-foreground">Microplans and budgets are clear for now.</p>
+                  </div>
+                ) : (
+                  pendingApprovals.slice(0, 4).map((item) => (
+                    <div key={item.id} className="flex items-center justify-between gap-3 rounded-lg border bg-muted/30 p-3">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold capitalize text-foreground">{item.entityType.replace(/_/g, " ")}</p>
+                        <p className="mt-0.5 flex items-center gap-1 text-[11px] text-muted-foreground">
+                          <Clock className="h-3 w-3 text-primary" />
+                          Submitted {new Date(item.submittedAt || "").toLocaleDateString()}
+                        </p>
+                      </div>
+                      <Badge variant="outline" className="shrink-0 capitalize text-xs">{item.currentLevel}</Badge>
+                    </div>
+                  ))
+                )}
+                <Button variant="outline" className="w-full gap-1" asChild data-testid="button-view-approvals">
+                  <Link href="/approvals">
+                    Open approvals
+                    <ArrowRight className="h-3.5 w-3.5" />
+                  </Link>
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </section>
+
+      <section id="coverage" className="space-y-4">
+        <Card>
+          <CardHeader className="pb-2">
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <CardTitle className="text-lg flex items-center gap-2">
+                <Syringe className="h-5 w-5 text-primary" />
+                Vaccine coverage
+              </CardTitle>
+              <div className="flex flex-wrap items-center gap-2">
+                <Select value={String(coverageFilters.quarter)} onValueChange={(v) => setCoverageFilters((p) => ({ ...p, quarter: parseInt(v, 10) }))}>
+                  <SelectTrigger className="h-8 w-[110px]" data-testid="select-coverage-quarter">
+                    <SelectValue placeholder="Quarter" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {[1, 2, 3, 4].map((q) => <SelectItem key={q} value={String(q)}>Q{q}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+                <Select value={String(coverageFilters.year)} onValueChange={(v) => setCoverageFilters((p) => ({ ...p, year: parseInt(v, 10) }))}>
+                  <SelectTrigger className="h-8 w-[110px]" data-testid="select-coverage-year">
+                    <SelectValue placeholder="Year" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {yearOptions.map((y) => <SelectItem key={y} value={String(y)}>{y}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+                {facilityLocked ? (
+                  <Badge variant="outline" data-testid="badge-coverage-facility-locked">{selectedFacilityName}</Badge>
+                ) : (
+                  <Select value={coverageFilters.facilityId === null ? "all" : String(coverageFilters.facilityId)} onValueChange={(v) => setCoverageFilters((p) => ({ ...p, facilityId: v === "all" ? null : parseInt(v, 10) }))}>
+                    <SelectTrigger className="h-8 w-[200px]" data-testid="select-coverage-facility">
+                      <SelectValue placeholder="Facility" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All facilities</SelectItem>
+                      {facilityOptions.map((f) => <SelectItem key={f.id} value={String(f.id)}>{f.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                )}
+                {coverage && <Badge variant="secondary">{coverage.totals.coveragePct}% overall</Badge>}
+              </div>
             </div>
           </CardHeader>
-          <CardContent className="pt-2 space-y-4">
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              <Link href="/stock" className="rounded-xl border p-3 block hover:border-primary transition-colors cursor-pointer">
-                <p className="text-[11px] uppercase text-muted-foreground font-semibold">Out of stock</p>
-                <p className="text-2xl font-bold text-rose-600" data-testid="text-stock-out">
-                  {scopedStockAlerts.totals.outOfStock}
-                </p>
-                <p className="text-[11px] text-muted-foreground">facility-level stockouts</p>
-              </Link>
-              <Link href="/stock" className="rounded-xl border p-3 block hover:border-primary transition-colors cursor-pointer">
-                <p className="text-[11px] uppercase text-muted-foreground font-semibold">Low stock</p>
-                <p className="text-2xl font-bold text-amber-600" data-testid="text-stock-low">
-                  {scopedStockAlerts.totals.lowStock}
-                </p>
-                <p className="text-[11px] text-muted-foreground">facility-level low stock alerts</p>
-              </Link>
-              <Link href="/stock" className="rounded-xl border p-3 block hover:border-primary transition-colors cursor-pointer">
-                <p className="text-[11px] uppercase text-muted-foreground font-semibold">Expiring ≤30d</p>
-                <p className="text-2xl font-bold text-rose-600" data-testid="text-stock-expiring-30">
-                  {scopedStockAlerts.totals.expiringSoon}
-                </p>
-                <p className="text-[11px] text-muted-foreground">batches at facilities expiring</p>
-              </Link>
-              <Link href="/stock" className="rounded-xl border p-3 block hover:border-primary transition-colors cursor-pointer">
-                <p className="text-[11px] uppercase text-muted-foreground font-semibold">Expiring ≤60d</p>
-                <p className="text-2xl font-bold text-amber-600" data-testid="text-stock-expiring-60">
-                  {scopedStockAlerts.totals.nearExpiry}
-                </p>
-                <p className="text-[11px] text-muted-foreground">batches at facilities expiring</p>
-              </Link>
-            </div>
-            {topAlertFacilities.length > 0 && (
-              <div className="space-y-2">
-                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                  Facilities with the most active stock issues
-                </p>
-                {topAlertFacilities.map((f) => (
-                  <div
-                    key={f.facilityId}
-                    className="flex items-center justify-between gap-3 rounded-lg border bg-muted/20 px-3 py-2"
-                    data-testid={`row-stock-alert-${f.facilityId}`}
-                  >
-                    <span className="text-sm font-medium truncate text-foreground">
-                      {f.name}
-                    </span>
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      {f.outOfStockAntigens.length > 0 && (
-                        <Badge variant="outline" className="border-rose-500 text-rose-600 bg-rose-500/10 text-[10px]">
-                          {f.outOfStockAntigens.length} out
-                        </Badge>
-                      )}
-                      {f.lowStockAntigens.length > 0 && (
-                        <Badge variant="outline" className="border-amber-500 text-amber-600 bg-amber-500/10 text-[10px]">
-                          {f.lowStockAntigens.length} low
-                        </Badge>
-                      )}
-                      {f.expiringSoonBatches > 0 && (
-                        <Badge variant="outline" className="border-rose-500 text-rose-600 bg-rose-500/10 text-[10px]">
-                          {f.expiringSoonBatches} ≤30d
-                        </Badge>
-                      )}
-                      {f.nearExpiryBatches > f.expiringSoonBatches && (
-                        <Badge variant="outline" className="border-amber-500 text-amber-600 bg-amber-500/10 text-[10px]">
-                          {f.nearExpiryBatches - f.expiringSoonBatches} ≤60d
-                        </Badge>
-                      )}
+          <CardContent className="pt-3">
+            {loadingCoverage ? (
+              <div className="space-y-3">{[1, 2, 3].map((i) => <Skeleton key={i} className="h-8 w-full" />)}</div>
+            ) : !coverage || coverage.vaccines.length === 0 ? (
+              <div className="flex flex-col items-center justify-center rounded-lg border border-dashed bg-muted/20 py-6 text-center">
+                <Syringe className="h-8 w-8 text-muted-foreground" />
+                <p className="mt-2 text-sm font-semibold text-foreground">No vaccine targets set</p>
+                <p className="max-w-[320px] text-xs text-muted-foreground">Add vaccine requirements for this quarter to track coverage against target population.</p>
+              </div>
+            ) : (
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                {coverage.vaccines.map((v) => (
+                  <div key={v.vaccineName} className="space-y-2 rounded-lg border bg-card p-3" data-testid={`coverage-${v.vaccineName}`}>
+                    <div className="flex items-baseline justify-between gap-2">
+                      <span className="truncate text-sm font-semibold text-foreground">{v.vaccineName}</span>
+                      <span className="font-mono text-base font-bold text-foreground">{v.coveragePct}%</span>
                     </div>
+                    <div className="h-2 overflow-hidden rounded-full bg-muted">
+                      <div className={`h-full rounded-full transition-all duration-500 ${coverageBarColor(v.coveragePct)}`} style={{ width: `${Math.min(v.coveragePct, 100)}%` }} />
+                    </div>
+                    <p className="text-[11px] text-muted-foreground">{v.administered.toLocaleString()} administered of {v.targetPopulation.toLocaleString()} target</p>
                   </div>
                 ))}
               </div>
             )}
           </CardContent>
         </Card>
-      )}
+      </section>
 
-      {canViewSiteAnalytics(user) && <SiteActivityPanel />}
-
-      <div className="grid lg:grid-cols-3 gap-6">
+      <section id="map" className="grid gap-6 lg:grid-cols-3">
         <Card className="lg:col-span-2">
           <CardHeader className="pb-2">
-            <CardTitle className="text-lg">Facility Distribution</CardTitle>
+            <CardTitle className="text-lg">Facility and catchment map</CardTitle>
           </CardHeader>
           <CardContent className="p-0">
             <div className="h-80">
-              <MapView
-                facilities={facilities || []}
-                villages={villages || []}
-                height="100%"
-              />
+              <MapView facilities={facilities || []} villages={villages || []} height="100%" />
             </div>
           </CardContent>
         </Card>
@@ -1798,33 +2131,25 @@ export default function Dashboard() {
         <Card>
           <CardHeader className="pb-2">
             <div className="flex items-center justify-between gap-2">
-              <CardTitle className="text-lg">Recent Activity</CardTitle>
-              <Button variant="ghost" size="sm" data-testid="button-view-all-activity">
-                View All
+              <CardTitle className="text-lg">Recent activity</CardTitle>
+              <Button variant="ghost" size="sm" asChild data-testid="button-view-all-activity">
+                <Link href="/reports">View reports</Link>
               </Button>
             </div>
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
               {recentActivities.map((activity, i) => (
-                <div
-                  key={i}
-                  className="flex items-start gap-3 pb-3 border-b last:border-0 last:pb-0"
-                >
-                  <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center flex-shrink-0">
+                <div key={i} className="flex items-start gap-3 border-b pb-3 last:border-0 last:pb-0">
+                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted">
                     <Activity className="h-4 w-4 text-muted-foreground" />
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium truncate text-foreground">{activity.action}</p>
-                    <p className="text-xs text-muted-foreground truncate">
-                      {activity.facility}
-                    </p>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-medium text-foreground">{activity.action}</p>
+                    <p className="truncate text-xs text-muted-foreground">{activity.facility}</p>
                     <p className="text-xs text-muted-foreground">{activity.time}</p>
                   </div>
-                  <Badge
-                    variant={activity.status === "approved" ? "secondary" : "outline"}
-                    className="text-xs flex-shrink-0 capitalize"
-                  >
+                  <Badge variant={activity.status === "approved" ? "secondary" : "outline"} className="shrink-0 text-xs capitalize">
                     {activity.status}
                   </Badge>
                 </div>
@@ -1832,249 +2157,27 @@ export default function Dashboard() {
             </div>
           </CardContent>
         </Card>
-      </div>
+      </section>
 
-      <Card>
-        <CardHeader className="pb-2">
-          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-            <CardTitle className="text-lg flex items-center gap-2">
-              <Syringe className="h-5 w-5 text-primary" />
-              Vaccine Coverage
-            </CardTitle>
-            <div className="flex flex-wrap items-center gap-2">
-              <Select
-                value={String(coverageFilters.quarter)}
-                onValueChange={(v) =>
-                  setCoverageFilters((p) => ({ ...p, quarter: parseInt(v, 10) }))
-                }
-              >
-                <SelectTrigger className="h-8 w-[110px]" data-testid="select-coverage-quarter">
-                  <SelectValue placeholder="Quarter" />
-                </SelectTrigger>
-                <SelectContent>
-                  {[1, 2, 3, 4].map((q) => (
-                    <SelectItem key={q} value={String(q)}>
-                      Q{q}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Select
-                value={String(coverageFilters.year)}
-                onValueChange={(v) =>
-                  setCoverageFilters((p) => ({ ...p, year: parseInt(v, 10) }))
-                }
-              >
-                <SelectTrigger className="h-8 w-[110px]" data-testid="select-coverage-year">
-                  <SelectValue placeholder="Year" />
-                </SelectTrigger>
-                <SelectContent>
-                  {yearOptions.map((y) => (
-                    <SelectItem key={y} value={String(y)}>
-                      {y}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {facilityLocked ? (
-                <Badge variant="outline" data-testid="badge-coverage-facility-locked">
-                  {selectedFacilityName}
-                </Badge>
-              ) : (
-                <Select
-                  value={
-                    coverageFilters.facilityId === null
-                      ? "all"
-                      : String(coverageFilters.facilityId)
-                  }
-                  onValueChange={(v) =>
-                    setCoverageFilters((p) => ({
-                      ...p,
-                      facilityId: v === "all" ? null : parseInt(v, 10),
-                    }))
-                  }
-                >
-                  <SelectTrigger className="h-8 w-[200px]" data-testid="select-coverage-facility">
-                    <SelectValue placeholder="Facility" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All facilities</SelectItem>
-                    {facilityOptions.map((f) => (
-                      <SelectItem key={f.id} value={String(f.id)}>
-                        {f.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              )}
-              {coverage && (
-                <Badge variant="secondary">
-                  {coverage.totals.coveragePct}% overall
-                </Badge>
-              )}
-            </div>
+      {canViewSiteAnalytics(user) && <SiteActivityPanel />}
+
+      <Tabs defaultValue="supervision" className="space-y-4">
+        <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+          <div>
+            <h2 className="text-xl font-bold tracking-tight text-foreground">Deep dives</h2>
+            <p className="text-sm text-muted-foreground">Detailed analytics that are not repeated in the executive dashboard.</p>
           </div>
-        </CardHeader>
-        <CardContent className="pt-3">
-          {loadingCoverage ? (
-            <div className="space-y-3">
-              {[1, 2, 3].map((i) => (
-                <Skeleton key={i} className="h-8 w-full" />
-              ))}
-            </div>
-          ) : !coverage || coverage.vaccines.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-6 text-center space-y-2 border border-dashed rounded-xl bg-muted/20">
-              <Syringe className="h-8 w-8 text-muted-foreground shrink-0" />
-              <p className="text-sm font-semibold text-foreground">No vaccine targets set</p>
-              <p className="text-xs text-muted-foreground max-w-[320px]">
-                Add vaccine requirements for this quarter to track coverage against target population.
-              </p>
-            </div>
-          ) : (
-            <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {coverage.vaccines.map((v) => (
-                <div
-                  key={v.vaccineName}
-                  className="rounded-xl border bg-card p-3 space-y-2"
-                  data-testid={`coverage-${v.vaccineName}`}
-                >
-                  <div className="flex items-baseline justify-between gap-2">
-                    <span className="text-sm font-semibold text-foreground truncate">
-                      {v.vaccineName}
-                    </span>
-                    <span className="text-base font-mono font-bold text-foreground">
-                      {v.coveragePct}%
-                    </span>
-                  </div>
-                  <div className="h-2 bg-muted rounded-full overflow-hidden">
-                    <div
-                      className={`h-full rounded-full transition-all duration-500 ${coverageBarColor(v.coveragePct)}`}
-                      style={{ width: `${Math.min(v.coveragePct, 100)}%` }}
-                    />
-                  </div>
-                  <p className="text-[11px] text-muted-foreground">
-                    {v.administered.toLocaleString()} administered of{" "}
-                    {v.targetPopulation.toLocaleString()} target
-                  </p>
-                </div>
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      <div className="grid md:grid-cols-2 gap-6">
-        <Card>
-          <CardHeader className="pb-2">
-            <div className="flex items-center justify-between gap-2">
-              <CardTitle className="text-lg">Quarterly Microplanning Goals</CardTitle>
-              <Badge variant="secondary">Q4 2026</Badge>
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-5 pt-3">
-            {[
-              { 
-                label: "Sessions Completed", 
-                current: completedSessionsCount, 
-                target: totalSessionsCount, 
-                percent: sessionsPercentage,
-                description: `${completedSessionsCount} of ${totalSessionsCount} microplans conducted`
-              },
-              { 
-                label: "Villages Catchment Coverage", 
-                current: assignedVillagesCount, 
-                target: totalVillagesCount, 
-                percent: villagesPercentage,
-                description: `${assignedVillagesCount} of ${totalVillagesCount} communities registered to facilities`
-              },
-              { 
-                label: "Approved Budget Allocation", 
-                current: approvedBudgetSum, 
-                target: totalBudgetSum, 
-                percent: budgetPercentage,
-                description: `$${approvedBudgetSum.toLocaleString()} approved of $${totalBudgetSum.toLocaleString()} allocated`
-              },
-            ].map((metric) => (
-              <div key={metric.label} className="space-y-2">
-                <div className="flex items-center justify-between text-sm">
-                  <span className="font-semibold text-foreground">{metric.label}</span>
-                  <span className="text-muted-foreground font-mono font-bold">
-                    {metric.percent}%
-                  </span>
-                </div>
-                <div className="h-2 bg-muted rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-primary rounded-full transition-all duration-500"
-                    style={{ width: `${metric.percent}%` }}
-                  />
-                </div>
-                <p className="text-[11px] text-muted-foreground">{metric.description}</p>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-lg">Pending Approvals</CardTitle>
-          </CardHeader>
-          <CardContent className="pt-2">
-            <div className="space-y-3">
-              {pendingApprovals.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-6 text-center space-y-2 border border-dashed rounded-xl bg-muted/20">
-                  <CheckCircle2 className="h-8 w-8 text-emerald-500 shrink-0" />
-                  <p className="text-sm font-semibold text-foreground">All Tasks Fully Approved</p>
-                  <p className="text-xs text-muted-foreground max-w-[220px]">There are no pending microplans or budget items awaiting review.</p>
-                </div>
-              ) : (
-                pendingApprovals.slice(0, 3).map((item) => (
-                  <div
-                    key={item.id}
-                    className="flex items-center justify-between p-3 rounded-xl bg-muted/40 border hover:bg-muted/65 transition-colors"
-                  >
-                    <div>
-                      <p className="text-sm font-semibold capitalize text-foreground">
-                        {item.entityType.replace(/_/g, " ")}
-                      </p>
-                      <p className="text-[10px] text-muted-foreground flex items-center gap-1 mt-0.5">
-                        <Clock className="h-3 w-3 text-primary" />
-                        Submitted {new Date(item.submittedAt || "").toLocaleDateString()}
-                      </p>
-                    </div>
-                    <Badge variant="outline" className="capitalize text-xs font-semibold px-2 py-0.5">
-                      {item.currentLevel} Level
-                    </Badge>
-                  </div>
-                ))
-              )}
-              <Button
-                variant="outline"
-                className="w-full text-xs font-bold gap-1 mt-2 rounded-xl"
-                asChild
-                data-testid="button-view-approvals"
-              >
-                <Link href="/approvals">
-                  View All Approvals
-                  <ArrowRight className="h-3.5 w-3.5" />
-                </Link>
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-      </TabsContent>
-
-      <TabsContent value="immunization" className="space-y-6 focus-visible:outline-none">
-        <ImmunizationIndicatorCards />
-      </TabsContent>
-
-      <TabsContent value="supervision" className="space-y-6 focus-visible:outline-none">
-        <SupervisionCoverageByDistrictCard />
-      </TabsContent>
-
-      <TabsContent value="vgie" className="focus-visible:outline-none">
-        <VgieDashboard />
-      </TabsContent>
+          <TabsList className="w-fit">
+            <TabsTrigger value="supervision">Supervision</TabsTrigger>
+            <TabsTrigger value="vgie">VGIE analytics</TabsTrigger>
+          </TabsList>
+        </div>
+        <TabsContent value="supervision" className="space-y-6 focus-visible:outline-none">
+          <SupervisionCoverageByDistrictCard />
+        </TabsContent>
+        <TabsContent value="vgie" className="focus-visible:outline-none">
+          <VgieDashboard />
+        </TabsContent>
       </Tabs>
     </div>
   );

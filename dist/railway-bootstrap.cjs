@@ -1529,6 +1529,8 @@ var clientVaccinations = (0, import_pg_core.pgTable)("client_vaccinations", {
   vvmStatus: (0, import_pg_core.integer)("vvm_status"),
   // 1, 2, 3, 4
   administeredByUserId: (0, import_pg_core.varchar)("administered_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  scheduleDoseId: (0, import_pg_core.integer)("schedule_dose_id"),
+  stockTransactionId: (0, import_pg_core.integer)("stock_transaction_id"),
   createdAt: (0, import_pg_core.timestamp)("created_at").defaultNow()
 }, (table) => ({
   tenantIdx: (0, import_pg_core.index)("client_vac_tenant_idx").on(table.tenantId),
@@ -1606,6 +1608,10 @@ var stockTransactions = (0, import_pg_core.pgTable)("stock_transactions", {
   transactionDate: (0, import_pg_core.timestamp)("transaction_date").defaultNow().notNull(),
   notes: (0, import_pg_core.text)("notes"),
   recordedByUserId: (0, import_pg_core.varchar)("recorded_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  balanceBefore: (0, import_pg_core.integer)("balance_before"),
+  balanceAfter: (0, import_pg_core.integer)("balance_after"),
+  sourceModule: (0, import_pg_core.varchar)("source_module", { length: 100 }),
+  sourceRecordId: (0, import_pg_core.varchar)("source_record_id", { length: 100 }),
   createdAt: (0, import_pg_core.timestamp)("created_at").defaultNow()
 }, (table) => ({
   tenantIdx: (0, import_pg_core.index)("stock_txn_tenant_idx").on(table.tenantId),
@@ -2926,7 +2932,19 @@ var gisPolygons = (0, import_pg_core.pgTable)("gis_polygons", {
   version: (0, import_pg_core.integer)("version").default(1),
   isActive: (0, import_pg_core.boolean)("is_active").default(true),
   createdAt: (0, import_pg_core.timestamp)("created_at").defaultNow(),
-  updatedAt: (0, import_pg_core.timestamp)("updated_at").defaultNow()
+  updatedAt: (0, import_pg_core.timestamp)("updated_at").defaultNow(),
+  centroid: (0, import_pg_core.jsonb)("centroid"),
+  populationEstimate: (0, import_pg_core.integer)("population_estimate"),
+  populationSource: (0, import_pg_core.varchar)("population_source", { length: 100 }),
+  populationSourceYear: (0, import_pg_core.integer)("population_source_year"),
+  populationMethod: (0, import_pg_core.varchar)("population_method", { length: 100 }),
+  confidence: (0, import_pg_core.varchar)("confidence", { length: 50 }),
+  validationStatus: (0, import_pg_core.varchar)("validation_status", { length: 50 }).default("draft"),
+  approvalStatus: (0, import_pg_core.varchar)("approval_status", { length: 50 }).default("draft"),
+  overrideReason: (0, import_pg_core.text)("override_reason"),
+  createdBy: (0, import_pg_core.varchar)("created_by", { length: 255 }),
+  approvedBy: (0, import_pg_core.varchar)("approved_by", { length: 255 }),
+  approvedAt: (0, import_pg_core.timestamp)("approved_at")
 }, (table) => ({
   tenantIdx: (0, import_pg_core.index)("idx_gis_polygons_tenant").on(table.tenantId),
   ownerIdx: (0, import_pg_core.index)("idx_gis_polygons_owner").on(table.ownerType, table.ownerId)

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+﻿import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useRoute } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -101,7 +101,7 @@ import {
   isAtLeastDaysAhead,
 } from "@shared/schedulingDates";
 
-// ─── Step metadata ────────────────────────────────────────────────────────
+// --- Step metadata --------------------------------------------------------
 export type StepDef = {
   id: number;
   title: string;
@@ -111,10 +111,11 @@ export type StepDef = {
 export const STEPS: StepDef[] = [
   {
     id: 1,
-    title: "Coverage review",
+    title: "Coverage & denominators",
     whatToDo: [
       "Enter DTP1, DTP3, MCV1, MCV2 coverage % from last full year.",
-      "Dropout from DTP1→DTP3 and DTP1→MCV1 is calculated for you.",
+      "Confirm the denominator scenario that will drive all downstream planning fields.",
+      "Dropout from DTP1->DTP3 and DTP1->MCV1 is calculated for you.",
       "List stockout events, AEFI cases, and sessions planned vs held.",
     ],
   },
@@ -131,7 +132,7 @@ export const STEPS: StepDef[] = [
     id: 3,
     title: "Risk scoring",
     whatToDo: [
-      "Score each community 1–5 on distance, terrain, season, and insecurity.",
+      "Score each community 1-5 on distance, terrain, season, and insecurity.",
       "Tick 'missed (no contact in 12 months)' for any community you have not visited.",
       "Tick 'zero-dose hotspot' where you know unimmunised children live.",
     ],
@@ -159,42 +160,22 @@ export const STEPS: StepDef[] = [
     title: "Vaccine forecasting",
     whatToDo: [
       "Default wastage: BCG 40%, MR/OPV 25%, Penta/PCV 11%, IPV/Rota 5%.",
-      "Doses = target × doses per child × (1 + wastage). Vials, syringes, safety boxes follow.",
+      "Doses = target x doses per child x (1 + wastage). Vials, syringes, safety boxes follow.",
       "Add cold-chain sizing: cold boxes, ice packs, carriers per session.",
     ],
   },
   {
     id: 7,
-    title: "Social mobilization",
+    title: "Demand generation",
     whatToDo: [
       "Pick announcement channels per session day (megaphone, religious leader, SMS).",
       "Name a focal point with a phone number for every community.",
-      "Tick IEC materials you will hand out.",
+      "Confirm HFC and CHV readiness as supporting community-mobilization evidence.",
     ],
   },
-  // Sheet 9 — Health Facility Committee Board
   {
     id: 8,
-    title: "HFC Board",
-    whatToDo: [
-      "Record each HFC Board member: name, gender, position, years of service.",
-      "Mark the Chairperson and record their contact phone.",
-      "Enter the date the committee was established.",
-    ],
-  },
-  // Sheet 10 — Community Health Volunteers
-  {
-    id: 9,
-    title: "CHV Profile",
-    whatToDo: [
-      "Add every Community Health Volunteer: name, gender, education, training status.",
-      "Assign their campaign role (mobilizer, guide, recorder, vaccinator).",
-      "Link each CHV to their community unit and responsible village.",
-    ],
-  },
-  {
-    id: 10,
-    title: "Transport",
+    title: "Logistics & transport",
     whatToDo: [
       "Set transport mode per session day: foot, motorbike, 4WD, boat.",
       "Record distance km and estimated fuel litres.",
@@ -202,16 +183,16 @@ export const STEPS: StepDef[] = [
     ],
   },
   {
-    id: 11,
+    id: 9,
     title: "Budget",
     whatToDo: [
       "Add one line per cost: Personnel, Transport, Supplies, Per Diem, Cold Chain, Training, Communication.",
       "Pick the funding source: Govt, Gavi, WHO, UNICEF, Other.",
-      "Total is calculated from quantity × unit cost.",
+      "Total is calculated from quantity x unit cost.",
     ],
   },
   {
-    id: 12,
+    id: 10,
     title: "Supervision plan",
     whatToDo: [
       "At least one supportive supervision visit per quarter.",
@@ -220,20 +201,20 @@ export const STEPS: StepDef[] = [
     ],
   },
   {
-    id: 13,
+    id: 11,
     title: "Submit for approval",
     whatToDo: [
       "Review the summary below.",
       "Only the facility-in-charge can submit.",
-      "Submitting sends the plan to district → provincial → national approvers.",
+      "Submitting sends the plan to district -> provincial -> national approvers.",
     ],
   },
   {
-    id: 14,
-    title: "Monitoring",
+    id: 12,
+    title: "Execution & review",
     whatToDo: [
       "After approval, this view shows live doses given, defaulters, and missed communities.",
-      "Use the wall chart to mark catch-up actions as you go.",
+      "Use quarterly review evidence to feed the next Step 1 coverage and denominator review.",
     ],
   },
 ];
@@ -266,7 +247,7 @@ export const FUNDING_SOURCES = [
   { value: "other", label: "Other" },
 ];
 
-// ─── Helpers ──────────────────────────────────────────────────────────────
+// --- Helpers --------------------------------------------------------------
 export function currentQuarter() {
   return Math.ceil((new Date().getMonth() + 1) / 3);
 }
@@ -284,7 +265,7 @@ export function WhatToDo({ bullets }: { bullets: string[] }) {
   );
 }
 
-// Task #101 / #130 — context the wizard needs to send the user back to a
+// Task #101 / #130 - context the wizard needs to send the user back to a
 // village session once the microplan exists. Persisted to sessionStorage so
 // it survives hard reloads and clean-URL navigations (e.g. `/microplan/new?id=`).
 type ReturnVillage = {
@@ -348,12 +329,12 @@ export type ExcludedVillageDetail = {
   reason: string | null;
 };
 
-// ─── Page ─────────────────────────────────────────────────────────────────
+// --- Page -----------------------------------------------------------------
 // Props:
 //   prePlanType: when the route already declares the intent (e.g.
 //   /microplans/routine vs /microplans/campaigns) the plan-type chooser is
 //   locked to that value and a badge is shown in the header. /flow leaves
-//   it undefined → the chooser defaults to "routine" but stays editable.
+//   it undefined -> the chooser defaults to "routine" but stays editable.
 type MicroplanWizardProps = {
   prePlanType?: "routine" | "campaign";
 };
@@ -368,7 +349,7 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
   const [microplanId, setMicroplanId] = useState<number | null>(null);
   const [showConfirmation, setShowConfirmation] = useState(false);
 
-  // ─── Plan type (routine vs SIA campaign) ──────────────────────────────
+  // --- Plan type (routine vs SIA campaign) ------------------------------
   // The wizard is the same template for both flows; only the planType and
   // a handful of SIA-only fields differ. When the route pre-selects a type
   // (Routine Microplan / SIA Campaigns sidebar entries) we lock the chooser.
@@ -394,7 +375,7 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
   }>({ provinceIds: [], districtIds: [], facilityIds: [] });
 
 
-  // Task #101 — when the user lands here from a village pin that had no
+  // Task #101 - when the user lands here from a village pin that had no
   // routine microplan, the map passes the facility to prefill plus the
   // village context so we can hand them back to the New Session dialog
   // once a microplan exists.
@@ -407,7 +388,7 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
     const n = raw == null ? NaN : Number(raw);
     return Number.isFinite(n) ? n : null;
   })();
-  // Task #130 — initialize from URL when present, otherwise restore from
+  // Task #130 - initialize from URL when present, otherwise restore from
   // sessionStorage so a hard reload or in-app revisit keeps the banner alive.
   const [returnVillage, setReturnVillage] = useState<ReturnVillage | null>(() => {
     if (typeof window === "undefined") return null;
@@ -445,7 +426,7 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
 
   // Resume an existing draft via either the path param (/microplans/routine/:id,
   // /microplans/campaigns/:id) or the legacy `?id=` query string. The path-param
-  // form is what SessionsHub / the map popups link to — without honouring it the
+  // form is what SessionsHub / the map popups link to - without honouring it the
   // wizard silently stayed in "new microplan" mode and hid the saved plan
   // (along with its planned sessions) from the user.
   const [, routineParams] = useRoute("/microplans/routine/:id");
@@ -466,14 +447,14 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
     setActive(1);
   }, [routeIdRaw]);
 
-  // Sync facility from user when it arrives — but never override an explicit
+  // Sync facility from user when it arrives - but never override an explicit
   // ?facilityId= prefill coming from the village pin (Task #101).
   useEffect(() => {
     if (queryFacilityId) return;
     if (user?.facilityId && !facilityId) setFacilityId(user.facilityId);
   }, [user, facilityId, queryFacilityId]);
 
-  // Task #130 — keep sessionStorage in sync with the live context so a reload
+  // Task #130 - keep sessionStorage in sync with the live context so a reload
   // restores the banner. Once we have a real microplanId we migrate the entry
   // off the "new" bucket onto the id-keyed bucket.
   useEffect(() => {
@@ -507,7 +488,7 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
     setLocation(`/sessions/microplan/${microplanId}?${qs.toString()}`);
   };
 
-  // ─── Data fetches ───────────────────────────────────────────────────────
+  // --- Data fetches -------------------------------------------------------
   const { data: facilities } = useQuery<Facility[]>({
     queryKey: ["/api/facilities"],
   });
@@ -517,7 +498,7 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
   // Consolidated hydration: one request returns the microplan plus every
   // per-microplan / per-facility row the wizard's resume effects need. This
   // replaces 8 separate round trips (sessions, day plans, supervision visits,
-  // population, htr scores, vaccine reqs, mobilization, budget) — see
+  // population, htr scores, vaccine reqs, mobilization, budget) - see
   // GET /api/microplans/:id/hydration.
   type MicroplanHydration = {
     microplan: Microplan;
@@ -667,7 +648,7 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
 
   // Reset the readiness flag whenever the facility changes so the catchment
   // seed effect waits for the server response before populating from
-  // facilityVillages — otherwise a previously-removed village could slip
+  // facilityVillages - otherwise a previously-removed village could slip
   // back in during the moment between switch and server response.
   useEffect(() => {
     if (loadedExcludedFacilityRef.current !== facilityId) {
@@ -679,7 +660,7 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
   }, [facilityId]);
 
   // Hydrate excludedVillageIds from whichever source resolves first:
-  //   1. the per-microplan hydration payload (preferred — already in flight)
+  //   1. the per-microplan hydration payload (preferred - already in flight)
   //   2. the dedicated /excluded-villages query for the facility
   //   3. legacy localStorage values (one-shot migration to the server)
   useEffect(() => {
@@ -792,7 +773,7 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
     );
   }, [villages, facility, excludedVillageIds]);
 
-  // ─── Microplan ensure (idempotent via in-flight ref) ───────────────────
+  // --- Microplan ensure (idempotent via in-flight ref) -------------------
   const ensureInFlight = useRef<Promise<number> | null>(null);
   const ensureMicroplan = async (): Promise<number> => {
     if (microplanId) return microplanId;
@@ -838,7 +819,7 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
   const [sessionIdMap, setSessionIdMap] = useState<Record<string, number>>({});
   const [dayPlanIdMap, setDayPlanIdMap] = useState<Record<string, number>>({});
 
-  // ─── Rehydration data (resume case) ─────────────────────────────────────
+  // --- Rehydration data (resume case) -------------------------------------
   // Derived from the single /api/microplans/:id/hydration call above so each
   // step's resume effect doesn't trigger its own request.
   const existingSessions = hydration?.sessions;
@@ -850,7 +831,7 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
   const existingSupervision = hydration?.supervisionVisits;
   const existingDayPlans = hydration?.sessionDayPlans;
 
-  // ─── Save draft ────────────────────────────────────────────────────────
+  // --- Save draft --------------------------------------------------------
   const saveDraft = async () => {
     // Persist the current step through the shared save path so a manual save
     // also benefits from validation-error focus. persistStep handles its own
@@ -873,7 +854,7 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
     }
   };
 
-  // ─── Step state ────────────────────────────────────────────────────────
+  // --- Step state --------------------------------------------------------
   type CoverageRow = {
     dtp1: string;
     dtp3: string;
@@ -889,6 +870,14 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
     mcv1Doses: string;     // Actual MCV1 doses given
     mcv2Doses: string;     // Actual MCV2 doses given
     targetInfants: string; // Denominator: surviving infants / target population
+    denominatorScenarioId: string;
+    denominatorSource: "nso" | "hmis" | "worldpop" | "survey" | "community_census";
+    denominatorMethod: "authoritative_total" | "spatial_allocation" | "direct_community";
+    denominatorYear: string;
+    denominatorConfidence: "high" | "medium" | "low";
+    denominatorStatus: "draft" | "ready" | "needs_review";
+    denominatorVersion: string;
+    denominatorOverrideReason: string;
     // SIA-specific raw counts
     vaccinated: string;    // Total vaccinated (SIA)
     targetSIA: string;     // SIA target population
@@ -908,6 +897,14 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
     mcv1Doses: "",
     mcv2Doses: "",
     targetInfants: "",
+    denominatorScenarioId: "",
+    denominatorSource: "nso",
+    denominatorMethod: "authoritative_total",
+    denominatorYear: String(year),
+    denominatorConfidence: "medium",
+    denominatorStatus: "draft",
+    denominatorVersion: "v1",
+    denominatorOverrideReason: "",
     vaccinated: "",
     targetSIA: "",
     siaVaccineCoverage: "",
@@ -948,21 +945,124 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
     isCrossingPoint?: boolean;
     crossingType?: string;
     dailyMovementVolume?: string | number;
-    // Sheet 1.1 — Border village inter-country coordination
+    // Sheet 1.1 - Border village inter-country coordination
     borderVillageCountry?: string;
     borderVillageFacilityName?: string;
-    // Sheet 1.0 — Settlement classification + risk flags
+    // Sheet 1.0 - Settlement classification + risk flags
     settlementType?: string;
     highRisk?: boolean;
     highRiskReason?: string;
-    // Sheet 1.0 — Direct population capture
+    // Sheet 1.0 - Direct population capture
     totalCatchmentPopulation?: string | number;
     under5Population?: string | number;
-    // Population columns — dual source
+    // Population columns - dual source
     gridPop?: string;          // WorldPop / gridded raster estimate (auto-fetched)
     surveyPop?: string;        // NSO / HMIS / Survey / Census (manual entry)
   };
   const [communities, setCommunities] = useState<CommunityRow[]>([]);
+  const lastCommunityBalanceSignature = useRef<string | null>(null);
+
+  function planningNumber(value: unknown): number {
+    const n = Number(value);
+    return Number.isFinite(n) && n > 0 ? Math.round(n) : 0;
+  }
+
+  function communityPopulationWeight(row: CommunityRow): number {
+    const currentTarget = planningNumber(row.targetPopulation);
+    if (currentTarget > 0) return currentTarget;
+    const authoritativeTotal = planningNumber(row.surveyPop ?? row.totalCatchmentPopulation);
+    const worldPopTotal = planningNumber(row.gridPop);
+    return authoritativeTotal || worldPopTotal || 1;
+  }
+
+  function balanceCommunityTargets(rows: CommunityRow[], targetInfants: number): CommunityRow[] {
+    const denominator = planningNumber(targetInfants);
+    if (!rows.length || denominator <= 0) return rows;
+    const weights = rows.map(communityPopulationWeight);
+    const totalWeight = weights.reduce((sum, weight) => sum + weight, 0);
+    if (totalWeight <= 0) return rows;
+
+    const rawShares = weights.map((weight) => (weight / totalWeight) * denominator);
+    const targets = rawShares.map(Math.floor);
+    let remainder = denominator - targets.reduce((sum, value) => sum + value, 0);
+    const order = rawShares
+      .map((share, index) => ({
+        index,
+        remainder: share - targets[index],
+        weight: weights[index],
+      }))
+      .sort((a, b) => b.remainder - a.remainder || b.weight - a.weight);
+
+    for (let i = 0; i < order.length && remainder > 0; i += 1, remainder -= 1) {
+      targets[order[i].index] += 1;
+    }
+
+    return rows.map((row, index) => {
+      const nextTarget = String(targets[index]);
+      return String(row.targetPopulation ?? "") === nextTarget ? row : { ...row, targetPopulation: nextTarget };
+    });
+  }
+
+  useEffect(() => {
+    const denominator = planningNumber(coverage.targetInfants);
+    if (!communities.length || denominator <= 0) return;
+    const signature = JSON.stringify({
+      source: coverage.denominatorSource,
+      scenario: coverage.denominatorScenarioId,
+      denominator,
+      rows: communities.map((row) => [
+        row.rowId,
+        row.villageId ?? null,
+        row.source,
+        row.gridPop ?? null,
+        row.surveyPop ?? null,
+        row.totalCatchmentPopulation ?? null,
+      ]),
+    });
+    if (lastCommunityBalanceSignature.current === signature) return;
+    lastCommunityBalanceSignature.current = signature;
+
+    setCommunities((prev) => {
+      const sourceAligned = prev.map((row) => ({
+        ...row,
+        source: coverage.denominatorSource || row.source,
+      }));
+      const balanced = balanceCommunityTargets(sourceAligned, denominator);
+      const changed = balanced.some(
+        (row, index) =>
+          row.targetPopulation !== prev[index]?.targetPopulation ||
+          row.source !== prev[index]?.source,
+      );
+      return changed ? balanced : prev;
+    });
+  }, [
+    coverage.denominatorSource,
+    coverage.denominatorScenarioId,
+    coverage.targetInfants,
+    communities.length,
+    communities
+      .map((row) =>
+        [
+          row.rowId,
+          row.villageId ?? "",
+          row.source,
+          row.gridPop ?? "",
+          row.surveyPop ?? "",
+          row.totalCatchmentPopulation ?? "",
+        ].join(":"),
+      )
+      .join("|"),
+  ]);
+
+  useEffect(() => {
+    const total = communities.reduce((sum, row) => sum + (parseInt(row.targetPopulation || "0", 10) || 0), 0);
+    if (total <= 0) return;
+    const nextInfants = String(total);
+    setCoverage((prev) => {
+      if (prev.denominatorScenarioId || planningNumber(prev.targetInfants) > 0) return prev;
+      return prev.targetInfants === nextInfants ? prev : { ...prev, targetInfants: nextInfants };
+    });
+  }, [communities]);
 
   useEffect(() => {
     if (microplanId || !dbPopulation || !dbPopulation.length || !communities.length) return;
@@ -1021,6 +1121,8 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
         // Sheet 1.0 population
         totalCatchmentPopulation: (v as any).totalCatchmentPopulation ?? undefined,
         under5Population: (v as any).under5Population ?? undefined,
+        gridPop: (v as any).griddedPopulation != null ? String((v as any).griddedPopulation) : undefined,
+        surveyPop: (v as any).totalCatchmentPopulation != null ? String((v as any).totalCatchmentPopulation) : undefined,
       })),
     );
   }, [facilityVillages, communities.length, excludedReady]);
@@ -1233,7 +1335,7 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
     teamType: string;
     target: string;
     perDiem: string;
-    // Sheet 3 — Vitamin A & scissors
+    // Sheet 3 - Vitamin A & scissors
     vitaminABlueCaps?: string;
     vitaminARedCaps?: string;
     scissorsCount?: string;
@@ -1245,7 +1347,7 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
       if (prev.length === calendar.length) return prev;
       return calendar.map((c) => ({
         rowId: c.rowId,
-        sessionLabel: `${c.name} — ${c.scheduledDate}`,
+        sessionLabel: `${c.name} - ${c.scheduledDate}`,
         vaccinator: "",
         recorder: "",
         supervisor: "",
@@ -1320,7 +1422,7 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
       if (prev.length === calendar.length) return prev;
       return calendar.map((c) => ({
         rowId: c.rowId,
-        sessionLabel: `${c.name} — ${c.scheduledDate}`,
+        sessionLabel: `${c.name} - ${c.scheduledDate}`,
         channels: ["megaphone"],
         focalPoint: "",
         focalPhone: "",
@@ -1393,7 +1495,7 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
       if (prev.length === calendar.length) return prev;
       return calendar.map((c) => ({
         rowId: c.rowId,
-        sessionLabel: `${c.name} — ${c.scheduledDate}`,
+        sessionLabel: `${c.name} - ${c.scheduledDate}`,
         mode: "road",
         distanceKm: "0",
         fuelLitres: "0",
@@ -1420,7 +1522,7 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
       for (const dp of existingDayPlans) {
         if (!sessionIdSet.has(dp.sessionPlanId)) continue;
         // Storage orders by sessionPlanId, dayNumber, so the first row per
-        // session is the lowest dayNumber — matching the prior `arr[0]` behavior.
+        // session is the lowest dayNumber - matching the prior `arr[0]` behavior.
         if (!bySessionId[dp.sessionPlanId]) bySessionId[dp.sessionPlanId] = dp;
       }
       const dayIdMap: Record<string, number> = {};
@@ -1557,7 +1659,7 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
     hydratedRef.current.supervision = true;
   }, [microplanId, existingSupervision]);
 
-  // ─── Per-step persistence ──────────────────────────────────────────────
+  // --- Per-step persistence ----------------------------------------------
   const [busy, setBusy] = useState(false);
 
   // Inline auto-save status shown next to the Save Draft button so planners can
@@ -1568,7 +1670,7 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
   );
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
 
-  // ─── Validation error focus ────────────────────────────────────────────
+  // --- Validation error focus --------------------------------------------
   // When a save (manual, auto, or on Next) detects a validation problem we
   // record which step + field/row is at fault here, switch the wizard to that
   // step, and let the step component scroll/highlight/focus the offending
@@ -1581,7 +1683,7 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
     message: string;
   } | null>(null);
 
-  // ─── Background auto-save ──────────────────────────────────────────────
+  // --- Background auto-save ----------------------------------------------
   // Per-step snapshot of the last-persisted user-editable data, so the
   // debounced auto-save only fires when something actually changed and the
   // first visit to a step doesn't trigger a needless save.
@@ -1663,14 +1765,14 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
     const snap = snapshotForStep(active);
     const saved = savedSnapshots.current[active];
     if (saved === undefined) {
-      // First time we've seen this step's data — establish a baseline so we
+      // First time we've seen this step's data - establish a baseline so we
       // don't auto-save unedited (e.g. freshly hydrated) content.
       savedSnapshots.current[active] = snap;
       return;
     }
     if (saved === snap) return; // nothing changed
     const timer = setTimeout(async () => {
-      // Another save is still in flight — don't fire a second concurrent save.
+      // Another save is still in flight - don't fire a second concurrent save.
       // Use the synchronous busyRef (not the captured `busy`, which can be
       // stale) so a manual/Next save started after this timer was scheduled is
       // always observed. Remember outstanding work so we re-evaluate on settle.
@@ -1683,13 +1785,13 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
       try {
         const ok = await persistStep(active, { silent: true });
         if (ok) {
-          // Mark ONLY the snapshot we actually dispatched as clean — never the
+          // Mark ONLY the snapshot we actually dispatched as clean - never the
           // current UI state, which may have newer edits made while the save
           // was in flight. Marking those clean would silently drop them.
           savedSnapshots.current[active] = snap;
           setLastSavedAt(Date.now());
           setSaveStatus("saved");
-          // Auto-save runs silently in the background — no toast interruption.
+          // Auto-save runs silently in the background - no toast interruption.
         } else {
           setSaveStatus("idle");
         }
@@ -1725,7 +1827,7 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
     transport,
   ]);
 
-  // ─── Per-row deletion helpers ──────────────────────────────────────────
+  // --- Per-row deletion helpers ------------------------------------------
   // Each helper removes the row from local state and, when the row has
   // already been saved to the server, deletes the matching backend row so it
   // doesn't reappear when the microplan is reopened. Saved rows (those with a
@@ -2118,7 +2220,7 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
               }
             }
           } else if (vid && row.latLngDirty && (latNum || lngNum)) {
-            // User moved/typed coordinates for an existing village — persist them.
+            // User moved/typed coordinates for an existing village - persist them.
             try {
               await apiRequest("PATCH", `/api/villages/${vid}`, {
                 ...(latNum ? { latitude: latNum } : {}),
@@ -2142,15 +2244,16 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
               if (row.isCrossingPoint !== undefined) villagePatch.isCrossingPoint = !!row.isCrossingPoint;
               if (row.crossingType !== undefined) villagePatch.crossingType = row.crossingType || null;
               if (row.dailyMovementVolume !== undefined) villagePatch.dailyMovementVolume = row.dailyMovementVolume ? parseInt(String(row.dailyMovementVolume), 10) : null;
-              // Sheet 1.1 — Border village inter-country coordination
+              // Sheet 1.1 - Border village inter-country coordination
               if (row.borderVillageCountry !== undefined) villagePatch.borderVillageCountry = row.borderVillageCountry || null;
               if (row.borderVillageFacilityName !== undefined) villagePatch.borderVillageFacilityName = row.borderVillageFacilityName || null;
-              // Sheet 1.0 — Settlement classification and risk
+              // Sheet 1.0 - Settlement classification and risk
               if (row.settlementType !== undefined) villagePatch.settlementType = row.settlementType || "village";
               if (row.highRisk !== undefined) villagePatch.highRisk = !!row.highRisk;
-              if (row.highRiskReason !== undefined) villagePatch.highRiskReason = row.highRiskReason || null;
-              // Sheet 1.0 — Direct population fields
-              if (row.totalCatchmentPopulation !== undefined) villagePatch.totalCatchmentPopulation = row.totalCatchmentPopulation ? parseInt(String(row.totalCatchmentPopulation), 10) : null;
+              if (row.highRiskReason !== undefined) villagePatch.highRiskReason = row.highRiskReason || null;              // Sheet 1.0 population fields used by the communities/facilities module.
+              const officialPopulation = row.surveyPop ?? row.totalCatchmentPopulation;
+              if (officialPopulation !== undefined) villagePatch.totalCatchmentPopulation = officialPopulation ? parseInt(String(officialPopulation), 10) : null;
+              if (row.gridPop !== undefined) villagePatch.griddedPopulation = row.gridPop ? parseInt(String(row.gridPop), 10) : null;
               if (row.under5Population !== undefined) villagePatch.under5Population = row.under5Population ? parseInt(String(row.under5Population), 10) : null;
               if (Object.keys(villagePatch).length > 0) {
                 await apiRequest("PATCH", `/api/villages/${vid}`, villagePatch);
@@ -2223,7 +2326,7 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
               rowId: firstFailRow,
               message:
                 firstFailMsg ??
-                "Fix the highlighted community — it was rejected on save.",
+                "Fix the highlighted community - it was rejected on save.",
             };
             if (!silent) {
               toast({
@@ -2294,7 +2397,7 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
               rowId: firstFailRow,
               message:
                 firstFailMsg ??
-                "Fix the highlighted risk row — it was rejected on save.",
+                "Fix the highlighted risk row - it was rejected on save.",
             };
             if (!silent) {
               toast({
@@ -2363,7 +2466,7 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
               rowId: firstFailRow,
               message:
                 firstFailMsg ??
-                "Fix the highlighted session date — it was rejected on save.",
+                "Fix the highlighted session date - it was rejected on save.",
             };
             if (!silent) {
               toast({
@@ -2378,7 +2481,7 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
         queryClient.invalidateQueries({ queryKey: ["/api/sessions"] });
       } else if (step === 8) {
         // Bulk upsert day plans in a single request. Each item is either an
-        // update (id) or a create (sessionPlanId) — the server picks the
+        // update (id) or a create (sessionPlanId) - the server picks the
         // right path per item.
         const nextIdMap: Record<string, number> = { ...dayPlanIdMap };
         const items: any[] = [];
@@ -2403,7 +2506,7 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
             distanceKm: t?.distanceKm ?? "0",
             transportType: t?.mode ?? "road",
             fuelLiters: t?.fuelLitres ?? "0",
-            // Sheet 3 — Vitamin A supplements + scissors
+            // Sheet 3 - Vitamin A supplements + scissors
             vitaminABlueCaps: s.vitaminABlueCaps ? parseInt(String(s.vitaminABlueCaps), 10) : 0,
             vitaminARedCaps: s.vitaminARedCaps ? parseInt(String(s.vitaminARedCaps), 10) : 0,
             scissorsCount: s.scissorsCount ? parseInt(String(s.scissorsCount), 10) : 0,
@@ -2604,7 +2707,7 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
               rowId: firstFailRow,
               message:
                 firstFailMsg ??
-                "Fix the highlighted vaccine row — it was rejected on save.",
+                "Fix the highlighted vaccine row - it was rejected on save.",
             };
             if (!silent) {
               toast({
@@ -2631,7 +2734,7 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
             id: m.id ?? null,
             facilityId,
             activityType: m.channels.join(",") || "announcement",
-            description: `${m.sessionLabel} — focal: ${m.focalPoint} ${m.focalPhone}; IEC: ${m.iec.join(", ")}`,
+            description: `${m.sessionLabel} - focal: ${m.focalPoint} ${m.focalPhone}; IEC: ${m.iec.join(", ")}`,
             targetAudience: "community",
             status: "planned",
           });
@@ -2664,7 +2767,7 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
               rowId: firstFailRow,
               message:
                 firstFailMsg ??
-                "Fix the highlighted mobilization row — it was rejected on save.",
+                "Fix the highlighted mobilization row - it was rejected on save.",
             };
             if (!silent) {
               toast({
@@ -2732,7 +2835,7 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
               rowId: firstFailRow,
               message:
                 firstFailMsg ??
-                "Fix the highlighted budget line — it was rejected on save.",
+                "Fix the highlighted budget line - it was rejected on save.",
             };
             if (!silent) {
               toast({
@@ -2795,7 +2898,7 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
               rowId: firstFailRow,
               message:
                 firstFailMsg ??
-                "Fix the highlighted supervision visit — it was rejected on save.",
+                "Fix the highlighted supervision visit - it was rejected on save.",
             };
             if (!silent) {
               toast({
@@ -2840,7 +2943,7 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
     if (ok) {
       // Mark the step we just saved as clean so auto-save doesn't re-fire it.
       savedSnapshots.current[active] = snap;
-      if (active < 13) setActive(active + 1);
+      if (active < 11) setActive(active + 1);
     }
   }
 
@@ -2884,7 +2987,7 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
     }
   }
 
-  // ─── Render ────────────────────────────────────────────────────────────
+  // --- Render ------------------------------------------------------------
   const stepDef = STEPS.find((s) => s.id === active)!;
   const status = microplan?.status ?? "draft";
   const isReadOnly = status !== "draft";
@@ -3131,6 +3234,19 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
     return errors;
   }, [communities, calendar, staffing, staffRoster, mobilization, budget]);
 
+  const { data: readiness } = useQuery<any>({
+    queryKey: ["/api/microplans/readiness", facilityId, year],
+    queryFn: async () => {
+      const res = await fetch(`/api/microplans/readiness/${facilityId}?year=${year}`, { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to load microplanning readiness");
+      return res.json();
+    },
+    enabled: !!facilityId,
+    staleTime: 60_000,
+  });
+  const blockingReadinessItems = readiness?.items?.filter((item: any) => item.status === "blocking") ?? [];
+  const warningReadinessItems = readiness?.items?.filter((item: any) => item.status === "warning") ?? [];
+
   return (
     <div className="flex h-full min-h-[calc(100vh-3.5rem)] flex-col">
       {/* Sticky header (Original line commented out to satisfy rule 1)
@@ -3179,7 +3295,7 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
             {status}
           </Badge>
         </div>
-        {/* Task #101 — return-to-village banner */}
+        {/* Task #101 - return-to-village banner */}
         {returnVillage && (
           <div
             className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-xs"
@@ -3244,6 +3360,43 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
       )}
       */}
 
+      {facilityId && readiness?.summary?.status !== "ready" && (
+        <div className="px-4 pt-4">
+          <Card className={blockingReadinessItems.length > 0 ? "border-destructive/40 bg-destructive/5" : "border-amber-300/60 bg-amber-50/70 dark:bg-amber-950/20"}>
+            <CardHeader className="pb-2">
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <div>
+                  <CardTitle className="text-base">Microplanning Readiness Check</CardTitle>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    VaxPlan checks reference data first so health workers do not have to retype information during planning.
+                  </p>
+                </div>
+                <Badge variant={blockingReadinessItems.length > 0 ? "destructive" : "outline"}>
+                  {blockingReadinessItems.length > 0 ? `${blockingReadinessItems.length} item(s) need fixing` : "Can continue with warnings"}
+                </Badge>
+              </div>
+            </CardHeader>
+            <CardContent className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+              {[...blockingReadinessItems, ...warningReadinessItems].map((item: any) => (
+                <div key={item.key} className="rounded-md border bg-background p-3 text-sm">
+                  <div className="mb-1 flex items-center justify-between gap-2">
+                    <p className="font-medium">{item.label}</p>
+                    <Badge variant={item.status === "blocking" ? "destructive" : "outline"}>
+                      {item.status === "blocking" ? "Fix first" : "Review"}
+                    </Badge>
+                  </div>
+                  <p className="text-xs text-muted-foreground">{item.message}</p>
+                  {item.actionHref && item.actionLabel && (
+                    <Button asChild variant="ghost" size="sm" className="mt-2 h-auto px-0 text-xs text-primary hover:text-primary">
+                      <Link href={item.actionHref}>{item.actionLabel}</Link>
+                    </Button>
+                  )}
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        </div>
+      )}
       {/* Body: stepper + content */}
       <div className="flex flex-1 gap-4 overflow-hidden p-4">
         {/* Left rail */}
@@ -3286,7 +3439,7 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
 
         {/* Step content */}
         <div className="flex flex-1 flex-col overflow-hidden">
-          {active === 13 && showConfirmation && status !== "draft" ? (
+          {active === 11 && showConfirmation && status !== "draft" ? (
             <SubmissionConfirmation
               microplan={microplan ?? null}
               submittedByName={
@@ -3306,7 +3459,7 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
             <CardHeader className="border-b">
               <div className="flex items-center justify-between gap-2">
                 <CardTitle className="text-base">
-                  Step {stepDef.id} · {stepDef.title}
+                  Step {stepDef.id} - {stepDef.title}
                 </CardTitle>
               <div className="flex items-center gap-2">
                 {returnToSummary && active !== 11 && (
@@ -3325,7 +3478,7 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
                 {/* Duplicate action button at the top of the card so it's always
                     reachable when the step content is long and the footer is
                     off-screen, and so toasts at the bottom can't obscure it. */}
-                {active === 13 ? (
+                {active === 11 ? (
                   <Button
                     size="sm"
                     onClick={handleSubmit}
@@ -3515,29 +3668,29 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
                 />
               )}
               {active === 7 && (
-                <Step7
-                  mobilization={mobilization}
-                  setMobilization={setMobilization}
-                  onDelete={deleteMobilizationRow}
-                  errorRowId={
-                    errorFocus?.step === 7 ? errorFocus.rowId : undefined
-                  }
-                  errorMessage={
-                    errorFocus?.step === 7 ? errorFocus.message : undefined
-                  }
-                  onClearError={() => setErrorFocus(null)}
-                />
+                <div className="space-y-4">
+                  <Step7
+                    mobilization={mobilization}
+                    setMobilization={setMobilization}
+                    onDelete={deleteMobilizationRow}
+                    errorRowId={
+                      errorFocus?.step === 7 ? errorFocus.rowId : undefined
+                    }
+                    errorMessage={
+                      errorFocus?.step === 7 ? errorFocus.message : undefined
+                    }
+                    onClearError={() => setErrorFocus(null)}
+                  />
+                  <div className="grid gap-4 xl:grid-cols-2">
+                    <StepHfcBoard facilityId={facilityId} />
+                    <StepChvProfile facilityId={facilityId} villages={communities} planType={planType} />
+                  </div>
+                </div>
               )}
               {active === 8 && (
-                <StepHfcBoard facilityId={facilityId} />
-              )}
-              {active === 9 && (
-                <StepChvProfile facilityId={facilityId} villages={communities} planType={planType} />
-              )}
-              {active === 10 && (
                 <Step8 transport={transport} setTransport={setTransport} />
               )}
-              {active === 11 && (
+              {active === 9 && (
                 <Step9
                   budget={budget}
                   setBudget={setBudget}
@@ -3551,7 +3704,7 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
                   onClearError={() => setErrorFocus(null)}
                 />
               )}
-              {active === 12 && (
+              {active === 10 && (
                 <Step10
                   supervision={supervision}
                   setSupervision={setSupervision}
@@ -3566,7 +3719,7 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
                   facilityId={facilityId}
                 />
               )}
-              {active === 13 && (
+              {active === 11 && (
                 <Step11
                   microplan={microplan ?? null}
                   facilityLabel={facilityLabel}
@@ -3588,10 +3741,9 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
                   }}
                 />
               )}
-              {active === 14 && (
+              {active === 12 && (
                 <Step12 microplanId={microplanId} facilityId={facilityId} />
-              )}
-              </fieldset>
+              )}              </fieldset>
             </CardContent>
 
             {/* Footer */}
@@ -3614,7 +3766,7 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
                     {saveStatus === "saving" ? (
                       <>
                         <Loader2 className="h-3 w-3 animate-spin" />
-                        Saving…
+                        Saving...
                       </>
                     ) : (
                       <>
@@ -3637,7 +3789,7 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
                 >
                   <Save className="mr-1 h-4 w-4" /> Save Draft
                 </Button>
-                {active === 13 ? (
+                {active === 11 ? (
                   <Button
                     onClick={handleSubmit}
                     disabled={!canSubmit || busy || !microplanId || validationErrors.length > 0 || isReadOnly}
@@ -3653,7 +3805,7 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
                 ) : (
                   <Button
                     onClick={handleNext}
-                    disabled={busy || active >= 14 || !facilityId}
+                    disabled={busy || active >= 12 || !facilityId}
                     data-testid="button-next"
                   >
                     {busy ? (
@@ -3709,7 +3861,7 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
               id="removal-reason"
               value={removalReason}
               onChange={(e) => setRemovalReason(e.target.value.slice(0, 500))}
-              placeholder="e.g. Now served by another facility, abandoned hamlet, duplicate entry…"
+              placeholder="e.g. Now served by another facility, abandoned hamlet, duplicate entry..."
               maxLength={500}
               rows={3}
               data-testid="input-removal-reason"
@@ -3738,7 +3890,7 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
               disabled={deleteBusy}
               data-testid="button-confirm-removal"
             >
-              {deleteBusy ? "Removing…" : "Remove from catchment"}
+              {deleteBusy ? "Removing..." : "Remove from catchment"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -3761,7 +3913,7 @@ export function formatRemovedAt(iso: string | null): string {
   });
 }
 
-// ─── Step components ──────────────────────────────────────────────────────
+// --- Step components ------------------------------------------------------
 import {
   NumberField,
   Step1,
@@ -3786,3 +3938,5 @@ import {
   SavedMicroplansPanel,
   Step12
 } from './MicroplanWizardSteps';
+
+
