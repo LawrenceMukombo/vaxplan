@@ -36,6 +36,8 @@ export function useSyncEngine() {
   useEffect(() => {
     if (activeTenantId) {
       syncEngine.init(activeTenantId);
+    } else {
+      syncEngine.stopForLogout();
     }
   }, [activeTenantId]);
 

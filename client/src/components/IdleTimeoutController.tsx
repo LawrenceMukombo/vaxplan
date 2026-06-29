@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Clock } from "lucide-react";
+import { performClientLogout } from "@/lib/logout";
 
 export function IdleTimeoutController() {
   const { user } = useAuth();
@@ -51,13 +52,13 @@ export function IdleTimeoutController() {
     return globalTimeout;
   }, [tenant, user, sessionConfig]);
 
-  const doLogout = useCallback(() => {
-    if (!navigator.onLine) {
-      localStorage.removeItem("vaxplan_active_user");
-      window.location.href = "/";
-    } else {
-      window.location.href = "/api/logout?reason=idle_timeout";
-    }
+  const doLogout = useCallback((reason = "idle_timeout", broadcast = true, server = true) => {
+    void performClientLogout({
+      reason,
+      broadcast,
+      server,
+      message: reason === "idle_timeout" ? "Session expired. Please sign in again." : undefined,
+    });
   }, []);
 
   const resetTimer = useCallback((broadcast = true) => {
@@ -85,7 +86,7 @@ export function IdleTimeoutController() {
         setCountdown((prev) => {
           if (prev <= 1) {
             clearInterval(countdownId.current!);
-            doLogout();
+            doLogout("idle_timeout");
             return 0;
           }
           return prev - 1;
@@ -94,7 +95,7 @@ export function IdleTimeoutController() {
     }, timeUntilWarning);
 
     timeoutId.current = setTimeout(() => {
-      doLogout();
+      doLogout("idle_timeout");
     }, timeoutMs);
 
     if (broadcast && channel.current) {
@@ -120,7 +121,7 @@ export function IdleTimeoutController() {
       if (event.data?.type === "RESET_IDLE") {
         resetTimer(false);
       } else if (event.data?.type === "LOGOUT_NOW") {
-        doLogout();
+        doLogout("cross_tab_logout", false, false);
       }
     };
 
@@ -158,10 +159,7 @@ export function IdleTimeoutController() {
   };
 
   const handleSignOutNow = () => {
-    if (channel.current) {
-      channel.current.postMessage({ type: "LOGOUT_NOW" });
-    }
-    doLogout();
+    doLogout("manual_logout");
   };
 
   const formatTime = (seconds: number) => {

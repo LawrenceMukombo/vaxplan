@@ -31,7 +31,14 @@ import { UpdateBanner } from "@/components/UpdateBanner";
 import { OfflineBanner } from "@/components/OfflineBanner";
 import { useUnmappedAntigenWarnings } from "@/hooks/useUnmappedAntigenWarnings";
 import { useProximityConflictWarnings } from "@/hooks/useProximityConflictWarnings";
-import { HeartPulse } from "lucide-react";
+import { HeartPulse, ShieldCheck } from "lucide-react";
+import {
+  getOfflineAuthMessage,
+  getLogoutState,
+  LOGOUT_BROADCAST_KEY,
+  LOGOUT_CHANNEL,
+} from "./lib/authSession";
+import { performClientLogout } from "./lib/logout";
 const MapPage = lazy(() => import("@/pages/MapPage"));
 const Facilities = lazy(() => import("@/pages/Facilities"));
 const Population = lazy(() => import("@/pages/Population"));
@@ -115,6 +122,27 @@ function RouteFallback() {
       <div className="space-y-4 text-center">
         <Skeleton className="h-12 w-12 rounded-full mx-auto" />
         <Skeleton className="h-4 w-32 mx-auto" />
+      </div>
+    </div>
+  );
+}
+function OfflineAuthLockScreen() {
+  const online = typeof navigator === "undefined" ? true : navigator.onLine;
+  return (
+    <div className="min-h-screen bg-background text-foreground flex items-center justify-center p-6">
+      <div className="w-full max-w-md rounded-lg border bg-card p-8 text-center shadow-sm">
+        <div className="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-md bg-primary text-primary-foreground">
+          <ShieldCheck className="h-7 w-7" />
+        </div>
+        <h1 className="text-2xl font-semibold tracking-tight">VaxPlan sign-in required</h1>
+        <p className="mt-3 text-sm text-muted-foreground">{getOfflineAuthMessage()}</p>
+        <button
+          type="button"
+          className="mt-6 inline-flex h-10 items-center justify-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+          onClick={() => window.location.reload()}
+        >
+          {online ? "Continue" : "Retry connection"}
+        </button>
       </div>
     </div>
   );
@@ -378,6 +406,47 @@ function AuthenticatedRouter() {
 }
 function AuthenticatedLayout() {
   const { user, isLoading } = useAuth();
+  useEffect(() => {
+    const handleLogout = (reason = "cross_tab_logout") => {
+      void performClientLogout({ reason, broadcast: false, server: false });
+    };
+    let channel: BroadcastChannel | null = null;
+    try {
+      channel = new BroadcastChannel(LOGOUT_CHANNEL);
+      channel.onmessage = (event) => {
+        if (event.data?.type === "LOGOUT_NOW") {
+          handleLogout(event.data.reason ?? "cross_tab_logout");
+        }
+      };
+    } catch {
+      channel = null;
+    }
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key !== LOGOUT_BROADCAST_KEY || !event.newValue) return;
+      try {
+        const payload = JSON.parse(event.newValue);
+        if (payload?.type === "LOGOUT_NOW") {
+          handleLogout(payload.reason ?? "cross_tab_logout");
+        }
+      } catch {
+        handleLogout("cross_tab_logout");
+      }
+    };
+    window.addEventListener("storage", handleStorage);
+    return () => {
+      channel?.close();
+      window.removeEventListener("storage", handleStorage);
+    };
+  }, []);
+  useEffect(() => {
+    const logoutState = getLogoutState();
+    if (logoutState?.pendingServerLogout && typeof navigator !== "undefined" && navigator.onLine) {
+      fetch(`/api/logout?reason=${encodeURIComponent(logoutState.reason ?? "offline_logout")}&format=json`, {
+        credentials: "include",
+        headers: { Accept: "application/json" },
+      }).catch(() => {});
+    }
+  }, []);
   // Task #106 - surface a toast when the offline outbox replays a mark-done
   // and the server reports antigen codes outside the tenant's vaccine schedule.
   useUnmappedAntigenWarnings();
@@ -409,6 +478,11 @@ function AuthenticatedLayout() {
     );
   }
   if (!user) {
+    const offline = typeof navigator !== "undefined" && !navigator.onLine;
+    const logoutState = getLogoutState();
+    if (offline || logoutState?.pendingServerLogout) {
+      return <OfflineAuthLockScreen />;
+    }
     return <Landing />;
   }
   const style = {

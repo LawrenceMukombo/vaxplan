@@ -1,6 +1,13 @@
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
 import { offlineDb, enqueueOutbox } from "./offlineDb";
 import { loadActiveTenant } from "./tenantCache";
+import {
+  broadcastLogout,
+  clearClientAuthStorage,
+  getValidOfflineUser,
+  hasValidOfflineSession,
+  recordOnlineAuthSession,
+} from "./authSession";
 
 async function throwIfResNotOk(res: Response) {
   if (!res.ok) {
@@ -106,22 +113,7 @@ async function getOfflineData(url: string): Promise<any> {
   }
 
   if (pathname === "/api/auth/user") {
-    if (typeof window !== "undefined") {
-      const cached = localStorage.getItem("vaxplan_active_user");
-      if (cached) return JSON.parse(cached);
-    }
-    const tenantIdRow = await offlineDb.syncMeta.get("tenantId");
-    const tenantId = tenantIdRow?.value || "1";
-    return {
-      id: "offline-user",
-      email: "offline@ministry.gov",
-      role: "national_admin",
-      roles: ["national_admin"],
-      firstName: "Offline",
-      lastName: "Officer",
-      tenantId: tenantId,
-      isActive: true,
-    };
+    return getValidOfflineUser();
   }
 
   if (pathname === "/api/me/tenant") {
@@ -540,6 +532,9 @@ export async function apiRequest<T = unknown>(
   // If browser network state is offline, run mutation locally and queue in outbox
   const isOffline = !navigator.onLine;
   if (isOffline && method !== "GET") {
+    if (!hasValidOfflineSession()) {
+      throw new Error("Offline authentication required. Reconnect and sign in again.");
+    }
     return await handleOfflineMutation(method, url, data) as T;
   }
 
@@ -556,6 +551,9 @@ export async function apiRequest<T = unknown>(
     });
   } catch (err) {
     if (method !== "GET") {
+      if (!hasValidOfflineSession()) {
+        throw new Error("Offline authentication required. Reconnect and sign in again.");
+      }
       console.warn("Network request failed, falling back to local database write:", err);
       return await handleOfflineMutation(method, url, data) as T;
     }
@@ -635,10 +633,18 @@ export const getQueryFn: <T>(options: {
   async ({ queryKey }) => {
     const url = queryKey.join("/") as string;
     const isOffline = !navigator.onLine;
+    const pathname = url.split("?")[0];
+    const isAuthUserQuery = pathname === "/api/auth/user";
+    const isPublicQuery =
+      pathname === "/api/public/tenants" ||
+      pathname === "/api/auth/session-config";
 
     // Immediately resolve from local IndexedDB if offline
     if (isOffline) {
       try {
+        if (!isAuthUserQuery && !isPublicQuery && !hasValidOfflineSession()) {
+          throw new Error("Offline authentication required. Reconnect and sign in again.");
+        }
         return await getOfflineData(url);
       } catch (e) {
         console.warn("Offline IndexedDB fetch failed:", e);
@@ -655,6 +661,9 @@ export const getQueryFn: <T>(options: {
       // local IndexedDB so the app stays usable when truly offline.
       try {
         console.warn("Network unreachable, falling back to local IndexedDB:", err);
+        if (!isAuthUserQuery && !isPublicQuery && !hasValidOfflineSession()) {
+          throw err;
+        }
         return await getOfflineData(url);
       } catch (offlineErr) {
         throw err;
@@ -666,17 +675,11 @@ export const getQueryFn: <T>(options: {
 
     if (res.status === 401) {
       if (typeof window !== "undefined") {
-        localStorage.removeItem("vaxplan_active_user");
-        try {
-          const channel = new BroadcastChannel("vaxplan_session_sync");
-          channel.postMessage({ type: "LOGOUT_NOW" });
-          channel.close();
-        } catch (e) {}
-        
-        if (unauthorizedBehavior === "throw" && window.location.pathname !== "/") {
-          window.location.href = "/api/logout?reason=unauthenticated";
-          return new Promise(() => {}); // Suspend execution while redirecting
-        }
+        clearClientAuthStorage({
+          reason: "unauthenticated",
+          message: "Session expired. Please sign in again.",
+        });
+        broadcastLogout("unauthenticated");
       }
       
       if (unauthorizedBehavior === "returnNull") {
@@ -705,7 +708,7 @@ export const getQueryFn: <T>(options: {
       }
       const data = await res.json();
       if (url === "/api/auth/user" && data) {
-        localStorage.setItem("vaxplan_active_user", JSON.stringify(data));
+        recordOnlineAuthSession(data);
       }
       return data;
     }
@@ -767,5 +770,3 @@ export const queryClient = new QueryClient({
     },
   },
 });
-
-

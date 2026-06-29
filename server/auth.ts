@@ -100,36 +100,51 @@ export async function setupAuth(app: Express, sessionMiddleware: RequestHandler 
   // blocked by that guard. The route destroys the server-side session and
   // redirects to '/' (the login / landing page).
   app.get("/api/logout", async (req: any, res) => {
-    const reason = req.query.reason;
+    const reason = typeof req.query.reason === "string" ? req.query.reason : "manual_logout";
     const userId = req.user?.id;
     const tenantId = req.user?.tenantId;
     const cookieName = process.env.SESSION_COOKIE_NAME || "vaxplan.sid";
-    if (reason === "idle_timeout" && userId) {
+    const wantsJson =
+      req.query.format === "json" ||
+      (req.get("accept") || "").toLowerCase().includes("application/json");
+
+    if (userId) {
+      const isIdleTimeout = reason === "idle_timeout";
       try {
         await db.insert(auditLogs).values({
           userId: userId,
           tenantId: tenantId,
-          action: "IDLE_TIMEOUT_LOGOUT",
+          action: isIdleTimeout ? "IDLE_TIMEOUT_LOGOUT" : "USER_LOGOUT",
           entityType: "User",
           entityId: 0,
           oldValue: null,
-          newValue: { message: "User session logged out automatically due to inactivity" },
+          newValue: {
+            message: isIdleTimeout
+              ? "User session logged out automatically due to inactivity"
+              : "User logged out",
+            reason,
+          },
           ipAddress: req.ip || req.socket.remoteAddress
         });
       } catch (e) {
-        console.error("Failed to insert idle timeout audit log:", e);
+        console.error("Failed to insert logout audit log:", e);
       }
     }
+
+    const finish = () => {
+      res.clearCookie(cookieName, { path: "/" });
+      if (wantsJson) {
+        return res.status(200).json({ success: true });
+      }
+      return res.redirect("/");
+    };
+
     if (typeof req.session?.destroy === "function") {
-      req.session.destroy(() => {
-        res.clearCookie(cookieName, { path: "/" });
-        res.redirect("/");
-      });
+      req.session.destroy(finish);
+    } else if (typeof req.logout === "function") {
+      req.logout(finish);
     } else {
-      req.logout?.(() => {
-        res.clearCookie(cookieName, { path: "/" });
-        res.redirect("/");
-      });
+      finish();
     }
   });
   app.post("/api/auth/ping", isAuthenticated, (req, res) => {

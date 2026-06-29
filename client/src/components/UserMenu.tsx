@@ -13,6 +13,7 @@ import type { User as UserType } from "@shared/schema";
 import { useState } from "react";
 import { useLocation } from "wouter";
 import { ChangePasswordDialog } from "@/components/ChangePasswordDialog";
+import { performClientLogout } from "@/lib/logout";
 
 interface UserMenuProps {
   user: UserType;
@@ -92,8 +93,9 @@ export function UserMenu({ user }: UserMenuProps) {
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem
-          onSelect={() => {
-            window.location.href = "/api/logout";
+          onSelect={(event) => {
+            event.preventDefault();
+            void performClientLogout({ reason: "manual_logout" });
           }}
           className="cursor-pointer"
           data-testid="menu-item-logout"

@@ -646,8 +646,29 @@ class SyncEngine {
     return this._state;
   }
 
+  stopForLogout() {
+    if (this.periodicTimer) {
+      clearInterval(this.periodicTimer);
+      this.periodicTimer = null;
+    }
+    if (this.networkUnsub) {
+      this.networkUnsub();
+      this.networkUnsub = null;
+    }
+    this.syncing = false;
+    this._initializedTenantId = null;
+    this.setState({
+      status: "idle",
+      pendingCount: 0,
+      stuckCount: 0,
+      errorMessage: null,
+      currentStage: "",
+      progressPercent: 0,
+    });
+  }
+
   dispose() {
-    if (this.periodicTimer) clearInterval(this.periodicTimer);
+    this.stopForLogout();
   }
 }
 
