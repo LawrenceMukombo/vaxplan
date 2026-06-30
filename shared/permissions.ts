@@ -1,23 +1,5 @@
-export type Permission =
-  | "view_clients"
-  | "create_client"
-  | "edit_client"
-  | "log_immunization"
-  | "send_reminders"
-  | "view_session_plans"
-  | "manage_session_plans"
-  | "approve_plans"
-  | "view_stock"
-  | "manage_stock"
-  | "view_mobilization"
-  | "manage_mobilization"
-  | "view_budget"
-  | "manage_budget"
-  | "approve_budget"
-  | "view_reports"
-  | "manage_reports"
-  | "manage_boundaries"
-  | "manage_users";
+export type Permission = string;
+
 
 /* Original Code:
 export const ROLE_PERMISSIONS: Record<string, Permission[]> = {

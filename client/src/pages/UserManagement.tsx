@@ -3,15 +3,15 @@ import { GeoCascadeFilter } from "@/components/GeoCascadeFilter";
 import { buildGeoMaps, getRecordHierarchy } from "@/lib/geoHierarchy";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { DataTable } from "@/components/DataTable";
-import { 
-  Users, 
-  Shield, 
-  MapPin, 
-  Search, 
-  Edit3, 
-  Check, 
-  X, 
-  Lock, 
+import {
+  Users,
+  Shield,
+  MapPin,
+  Search,
+  Edit3,
+  Check,
+  X,
+  Lock,
   Unlock,
   AlertTriangle,
   Building,
@@ -29,13 +29,13 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import { Label } from "@/components/ui/label";
-import { 
-  Dialog, 
-  DialogContent, 
-  DialogHeader, 
-  DialogTitle, 
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
   DialogDescription,
-  DialogFooter 
+  DialogFooter
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -44,6 +44,7 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { User, Province, District, Facility } from "@shared/schema";
 import { ROLE_PERMISSIONS, type Permission } from "@shared/permissions";
+import { canAccessPermissionManagement, canAccessRoleManagement, hasAnyPermission } from "@/lib/accessControl";
 
 function csvEscape(v: any): string {
   if (v === null || v === undefined) return "";
@@ -574,6 +575,13 @@ export default function UserManagement() {
     currentUserRoles.includes("national_admin") ||
     currentUserRoles.includes("national_program_manager");
   const canManagePasswords = isPlatformAdmin || hasPasswordRole;
+  const canCreateUsers = hasAnyPermission(currentUser as any, ["users.create", "manage_users"]);
+  const canUpdateUsers = hasAnyPermission(currentUser as any, ["users.update", "users.assign_roles", "users.assign_permissions", "manage_users"]);
+  const canDeactivateUsers = hasAnyPermission(currentUser as any, ["users.deactivate", "manage_users"]);
+  const canAssignRoles = hasAnyPermission(currentUser as any, ["users.assign_roles", "manage_users"]);
+  const canAssignPermissions = hasAnyPermission(currentUser as any, ["users.assign_permissions", "permissions.assign", "manage_users"]);
+  const canManageRoles = canAccessRoleManagement(currentUser as any);
+  const canManagePermissions = canAccessPermissionManagement(currentUser as any);
   const [searchTerm, setSearchTerm] = useState("");
   const [geoFilterProvinceId, setGeoFilterProvinceId] = useState<number | null>(null);
   const [geoFilterDistrictId, setGeoFilterDistrictId] = useState<number | null>(null);
@@ -642,7 +650,7 @@ export default function UserManagement() {
   const [newRoleCode, setNewRoleCode] = useState("");
   const [newRoleName, setNewRoleName] = useState("");
   const [newRolePermissions, setNewRolePermissions] = useState<string[]>([]);
-  
+
   const [selectedRole, setSelectedRole] = useState<any | null>(null);
   const [isEditingRole, setIsEditingRole] = useState(false);
   const [editRoleName, setEditRoleName] = useState("");
@@ -1214,17 +1222,17 @@ export default function UserManagement() {
   };
 
   const toggleRole = (roleVal: string) => {
-    setAssignedRoles(prev => 
-      prev.includes(roleVal) 
-        ? prev.filter(r => r !== roleVal) 
+    setAssignedRoles(prev =>
+      prev.includes(roleVal)
+        ? prev.filter(r => r !== roleVal)
         : [...prev, roleVal]
     );
   };
 
   const togglePermission = (permVal: string) => {
-    setPermissionOverrides(prev => 
-      prev.includes(permVal) 
-        ? prev.filter(p => p !== permVal) 
+    setPermissionOverrides(prev =>
+      prev.includes(permVal)
+        ? prev.filter(p => p !== permVal)
         : [...prev, permVal]
     );
   };
@@ -1237,11 +1245,11 @@ export default function UserManagement() {
         // Deselect districts under this province
         const disIds = (districts || []).filter(d => Number(d.provinceId) === id).map(d => d.id);
         setScopeDistricts(prevD => prevD.filter(dId => !disIds.includes(dId)));
-        
+
         // Deselect facilities under those districts
         const facIds = (facilities || []).filter(f => disIds.includes(f.districtId)).map(f => f.id);
         setScopeFacilities(prevF => prevF.filter(fId => !facIds.includes(fId)));
-        
+
         return prev.filter(x => x !== id);
       } else {
         return [...prev, id];
@@ -1256,7 +1264,7 @@ export default function UserManagement() {
         // Deselect facilities under this district
         const facIds = (facilities || []).filter(f => f.districtId === id).map(f => f.id);
         setScopeFacilities(prevF => prevF.filter(fId => !facIds.includes(fId)));
-        
+
         return prev.filter(x => x !== id);
       } else {
         return [...prev, id];
@@ -1384,9 +1392,9 @@ export default function UserManagement() {
       header: "Data Scope Locks",
       render: (u: User) => {
         const scope = (u.dataAccessScope as any) || { provinces: [], districts: [], facilities: [] };
-        const hasRestrictedScope = 
-          (scope.provinces && scope.provinces.length > 0) || 
-          (scope.districts && scope.districts.length > 0) || 
+        const hasRestrictedScope =
+          (scope.provinces && scope.provinces.length > 0) ||
+          (scope.districts && scope.districts.length > 0) ||
           (scope.facilities && scope.facilities.length > 0);
 
         if (!hasRestrictedScope) {
@@ -1437,9 +1445,10 @@ export default function UserManagement() {
       header: "Actions",
       sortable: false,
       render: (u: User) => (
-        <Button 
+        <Button
           size="sm"
           onClick={() => handleOpenEdit(u)}
+          disabled={!canUpdateUsers}
           className="bg-secondary hover:bg-secondary/80 border border-border text-foreground rounded-xl py-1 px-3 flex items-center justify-center gap-1.5 transition-all font-sans text-xs font-semibold"
         >
           <Edit3 className="h-3.5 w-3.5 text-indigo-500 dark:text-indigo-400" />
@@ -1447,7 +1456,7 @@ export default function UserManagement() {
         </Button>
       ),
     },
-  ], [geoMaps]);
+  ], [geoMaps, canUpdateUsers]);
 
   return (
     <div className="container mx-auto p-6 max-w-7xl animate-in fade-in duration-300">
@@ -1478,6 +1487,7 @@ export default function UserManagement() {
           }}
           className="bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl py-2.5 px-5 flex items-center gap-2 shadow-lg shadow-indigo-600/10 self-start md:self-auto font-sans font-semibold text-sm"
           data-testid="btn-add-user"
+        disabled={!canCreateUsers}
         >
           <Plus className="h-4 w-4" />
           <span>Add New User</span>
@@ -1491,11 +1501,11 @@ export default function UserManagement() {
             <Users className="h-4 w-4" />
             Users Access Registry
           </TabsTrigger>
-          <TabsTrigger value="roles" className="rounded-xl text-muted-foreground data-[state=active]:bg-indigo-600 data-[state=active]:text-white data-[state=active]:shadow font-semibold flex items-center gap-1.5 px-4 py-2 text-xs">
+          <TabsTrigger value="roles" disabled={!canManageRoles} className="rounded-xl text-muted-foreground data-[state=active]:bg-indigo-600 data-[state=active]:text-white data-[state=active]:shadow font-semibold flex items-center gap-1.5 px-4 py-2 text-xs">
             <Shield className="h-4 w-4" />
             Custom Roles Manager
           </TabsTrigger>
-          <TabsTrigger value="permissions" className="rounded-xl text-muted-foreground data-[state=active]:bg-indigo-600 data-[state=active]:text-white data-[state=active]:shadow font-semibold flex items-center gap-1.5 px-4 py-2 text-xs" data-testid="tab-permissions">
+          <TabsTrigger value="permissions" disabled={!canManagePermissions} className="rounded-xl text-muted-foreground data-[state=active]:bg-indigo-600 data-[state=active]:text-white data-[state=active]:shadow font-semibold flex items-center gap-1.5 px-4 py-2 text-xs" data-testid="tab-permissions">
             <Lock className="h-4 w-4" />
             Permissions Registry
           </TabsTrigger>
@@ -1511,8 +1521,8 @@ export default function UserManagement() {
             <div className="flex items-center gap-3 flex-wrap">
               <div className="relative w-full max-w-md">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input 
-                  placeholder="Search users by name or email..." 
+                <Input
+                  placeholder="Search users by name or email..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                   className="pl-10 bg-background border-border text-foreground placeholder:text-muted-foreground focus:border-indigo-500 rounded-xl"
@@ -1624,10 +1634,10 @@ export default function UserManagement() {
               {(dbRoles || []).map((role: any) => {
                 const isSystemRole = ["facility_clerk", "facility_in_charge", "district_manager", "provincial_coordinator", "gis_specialist", "national_admin", "facility_partner", "district_partner", "provincial_partner", "national_partner", "national_manager"].includes(role.code);
                 const rolePerms = Array.isArray(role.permissions) ? (role.permissions as string[]) : [];
-                
+
                 return (
-                  <div 
-                    key={role.id} 
+                  <div
+                    key={role.id}
                     className="bg-card rounded-3xl border border-border p-6 flex flex-col justify-between hover:border-border/80 dark:hover:border-white/20 transition-all duration-300 shadow-md group"
                   >
                     <div>
@@ -1698,6 +1708,7 @@ export default function UserManagement() {
             </div>
           )}
         </TabsContent>
+
 
         <TabsContent value="permissions" className="space-y-6 mt-4">
           <div className="flex justify-between items-center gap-4 flex-wrap">
@@ -1772,7 +1783,7 @@ export default function UserManagement() {
                       </div>
                     )}
                   </div>
-                  
+
                   <div className="flex items-center gap-2 pt-2 border-t border-border/60 mt-auto opacity-0 group-hover:opacity-100 transition-opacity">
                     <Button
                       onClick={() => {
@@ -1808,6 +1819,7 @@ export default function UserManagement() {
           </div>
         </TabsContent>
 
+
         <TabsContent value="activity" className="space-y-4 mt-4">
           <ActivityLogPanel users={usersList || []} />
         </TabsContent>
@@ -1832,10 +1844,10 @@ export default function UserManagement() {
                 <TabsTrigger value="general" className="rounded-xl text-muted-foreground data-[state=active]:bg-indigo-600 data-[state=active]:text-white data-[state=active]:shadow font-semibold">
                   1. General Info
                 </TabsTrigger>
-                <TabsTrigger value="roles" className="rounded-xl text-muted-foreground data-[state=active]:bg-indigo-600 data-[state=active]:text-white data-[state=active]:shadow font-semibold">
+                <TabsTrigger value="roles" disabled={!canAssignRoles} className="rounded-xl text-muted-foreground data-[state=active]:bg-indigo-600 data-[state=active]:text-white data-[state=active]:shadow font-semibold">
                   2. Multi-Roles
                 </TabsTrigger>
-                <TabsTrigger value="permissions" className="rounded-xl text-muted-foreground data-[state=active]:bg-indigo-600 data-[state=active]:text-white data-[state=active]:shadow font-semibold">
+                <TabsTrigger value="permissions" disabled={!canAssignPermissions} className="rounded-xl text-muted-foreground data-[state=active]:bg-indigo-600 data-[state=active]:text-white data-[state=active]:shadow font-semibold">
                   3. Overrides
                 </TabsTrigger>
                 <TabsTrigger value="scopes" className="rounded-xl text-muted-foreground data-[state=active]:bg-indigo-600 data-[state=active]:text-white data-[state=active]:shadow font-semibold">
@@ -1850,11 +1862,11 @@ export default function UserManagement() {
                     <Users className="h-4 w-4 text-indigo-500" />
                     User General Details
                   </h4>
-                  
+
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="space-y-1">
                       <label className="text-xs font-semibold text-muted-foreground">First Name</label>
-                      <Input 
+                      <Input
                         value={userFirstName}
                         onChange={(e) => setUserFirstName(e.target.value)}
                         placeholder="e.g. John"
@@ -1863,7 +1875,7 @@ export default function UserManagement() {
                     </div>
                     <div className="space-y-1">
                       <label className="text-xs font-semibold text-muted-foreground">Last Name</label>
-                      <Input 
+                      <Input
                         value={userLastName}
                         onChange={(e) => setUserLastName(e.target.value)}
                         placeholder="e.g. Doe"
@@ -1874,7 +1886,7 @@ export default function UserManagement() {
 
                   <div className="space-y-1">
                     <label className="text-xs font-semibold text-muted-foreground">Email Address</label>
-                    <Input 
+                    <Input
                       value={userEmail}
                       onChange={(e) => setUserEmail(e.target.value)}
                       placeholder="e.g. john.doe@health.gov"
@@ -1888,7 +1900,7 @@ export default function UserManagement() {
                       <span className="text-sm font-bold text-foreground">User Active Status</span>
                       <span className="text-xs text-muted-foreground block">Toggle to enable or disable system login access</span>
                     </div>
-                    <Switch 
+                    <Switch
                       checked={userIsActive}
                       onCheckedChange={setUserIsActive}
                       className="data-[state=checked]:bg-indigo-600"
@@ -1898,7 +1910,7 @@ export default function UserManagement() {
                   {/* User Primary Scoped Cascade (Province -> District -> Facility) */}
                   <div className="space-y-3 rounded-xl border p-4 bg-background">
                     <span className="text-xs font-bold text-indigo-500 uppercase tracking-wider block">Primary Scoped Locations</span>
-                    
+
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                       <div className="space-y-1">
                         <label className="text-xs font-medium text-muted-foreground">Province</label>
@@ -2072,7 +2084,7 @@ export default function UserManagement() {
                           deleteUserMutation.mutate(selectedUser.id);
                         }
                       }}
-                      disabled={deleteUserMutation.isPending}
+                      disabled={deleteUserMutation.isPending || !canDeactivateUsers}
                       className="border-destructive/40 text-destructive hover:bg-destructive/10 font-semibold text-xs px-4 py-2"
                     >
                       {deleteUserMutation.isPending ? "Deleting Account..." : "Delete User Account"}
@@ -2089,17 +2101,17 @@ export default function UserManagement() {
                     Select Active Roles
                   </h4>
                   <p className="text-muted-foreground text-xs mb-4">A user may belong to multiple roles concurrently. Active permissions will be dynamically aggregated across all checked roles.</p>
-                  
+
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                     {activeRolesList.map(role => {
                       const active = assignedRoles.includes(role.value);
                       return (
-                        <div 
+                        <div
                           key={role.value}
                           onClick={() => toggleRole(role.value)}
                           className={`p-4 rounded-xl border flex items-center justify-between cursor-pointer transition-all duration-200 ${
-                            active 
-                              ? "bg-indigo-500/10 border-indigo-500 text-foreground" 
+                            active
+                              ? "bg-indigo-500/10 border-indigo-500 text-foreground"
                               : "bg-background border-border text-muted-foreground hover:bg-accent hover:text-accent-foreground"
                           }`}
                         >
@@ -2133,7 +2145,7 @@ export default function UserManagement() {
                       const hasAccess = isInherited || isOverridden;
 
                       return (
-                        <div 
+                        <div
                           key={perm.value}
                           className="flex items-start justify-between p-3.5 rounded-xl bg-background border border-border hover:bg-accent/40 transition-colors"
                         >
@@ -2153,9 +2165,9 @@ export default function UserManagement() {
                             </div>
                             <span className="text-xs text-muted-foreground block mt-0.5">{perm.desc}</span>
                           </div>
-                          
-                          <Switch 
-                            checked={hasAccess} 
+
+                          <Switch
+                            checked={hasAccess}
                             disabled={isInherited} // Can't toggle off inherited permissions via override switches
                             onCheckedChange={() => togglePermission(perm.value)}
                             className="data-[state=checked]:bg-indigo-600"
@@ -2184,7 +2196,7 @@ export default function UserManagement() {
                         {(provinces || []).map(p => {
                           const active = scopeProvinces.includes(p.id);
                           return (
-                            <div 
+                            <div
                               key={p.id}
                               onClick={() => toggleProvinceScope(p.id)}
                               className={`p-2 rounded-lg border text-xs cursor-pointer flex items-center justify-between transition-colors ${
@@ -2203,16 +2215,16 @@ export default function UserManagement() {
                     <div>
                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2">
                         <span className="text-xs font-bold text-sky-500 dark:text-sky-300 uppercase tracking-wider block">Districts Grid Scope</span>
-                        <Input 
-                          placeholder="Filter districts..." 
-                          value={districtSearch} 
-                          onChange={(e) => setDistrictSearch(e.target.value)} 
+                        <Input
+                          placeholder="Filter districts..."
+                          value={districtSearch}
+                          onChange={(e) => setDistrictSearch(e.target.value)}
                           className="max-w-[200px] h-7 bg-background border-border text-xs rounded-lg placeholder:text-muted-foreground/60 text-foreground focus-visible:ring-indigo-500"
                         />
                       </div>
                       <div className="grid grid-cols-2 md:grid-cols-3 gap-2 max-h-[140px] overflow-y-auto pr-1">
                         {(() => {
-                          const filteredDistricts = (districts || []).filter(d => 
+                          const filteredDistricts = (districts || []).filter(d =>
                             scopeProvinces.length === 0 || scopeProvinces.includes(Number(d.provinceId))
                           );
                           const activeD = filteredDistricts.filter(d => scopeDistricts.includes(d.id));
@@ -2220,15 +2232,15 @@ export default function UserManagement() {
                           const list = districtSearch
                             ? filteredDistricts.filter(d => d.name.toLowerCase().includes(districtSearch.toLowerCase()) || scopeDistricts.includes(d.id))
                             : [...activeD, ...inactiveD.slice(0, 15)];
-                          
+
                           if (list.length === 0) {
                             return <div className="text-xs text-muted-foreground/75 col-span-3 py-2 text-center">No matching districts found</div>;
                           }
-                          
+
                           return list.map(d => {
                             const active = scopeDistricts.includes(d.id);
                             return (
-                              <div 
+                              <div
                                 key={d.id}
                                 onClick={() => toggleDistrictScope(d.id)}
                                 className={`p-2 rounded-lg border text-xs cursor-pointer flex items-center justify-between transition-colors ${
@@ -2248,10 +2260,10 @@ export default function UserManagement() {
                     <div>
                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2">
                         <span className="text-xs font-bold text-amber-500 dark:text-amber-300 uppercase tracking-wider block">Facilities Clinic Scope</span>
-                        <Input 
-                          placeholder="Filter facilities..." 
-                          value={facilitySearch} 
-                          onChange={(e) => setFacilitySearch(e.target.value)} 
+                        <Input
+                          placeholder="Filter facilities..."
+                          value={facilitySearch}
+                          onChange={(e) => setFacilitySearch(e.target.value)}
                           className="max-w-[200px] h-7 bg-background border-border text-xs rounded-lg placeholder:text-muted-foreground/60 text-foreground focus-visible:ring-indigo-500"
                         />
                       </div>
@@ -2276,15 +2288,15 @@ export default function UserManagement() {
                           const list = facilitySearch
                             ? filteredFacilities.filter(f => f.name.toLowerCase().includes(facilitySearch.toLowerCase()) || scopeFacilities.includes(f.id)).slice(0, 30)
                             : [...activeF, ...inactiveF.slice(0, 15)];
-                          
+
                           if (list.length === 0) {
                             return <div className="text-xs text-muted-foreground/75 col-span-3 py-2 text-center">No matching facilities found</div>;
                           }
-                          
+
                           return list.map(f => {
                             const active = scopeFacilities.includes(f.id);
                             return (
-                              <div 
+                              <div
                                 key={f.id}
                                 onClick={() => toggleFacilityScope(f.id)}
                                 className={`p-2 rounded-lg border text-xs cursor-pointer flex items-center justify-between transition-colors ${
@@ -2305,7 +2317,7 @@ export default function UserManagement() {
             </Tabs>
 
             <DialogFooter className="mt-8 border-t border-border pt-4 flex gap-2 justify-end">
-              <Button 
+              <Button
                 onClick={() => {
                   setIsEditing(false);
                   setSelectedUser(null);
@@ -2314,7 +2326,7 @@ export default function UserManagement() {
               >
                 Cancel Changes
               </Button>
-              <Button 
+              <Button
                 onClick={handleSave}
                 disabled={updateAccessMutation.isPending}
                 className="bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl px-6 py-2 font-sans font-semibold text-sm shadow-md"
@@ -2494,7 +2506,7 @@ export default function UserManagement() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-1">
                 <label className="text-xs font-semibold text-muted-foreground">First Name</label>
-                <Input 
+                <Input
                   value={addFirstName}
                   onChange={(e) => setAddFirstName(e.target.value)}
                   placeholder="e.g. Alice"
@@ -2503,7 +2515,7 @@ export default function UserManagement() {
               </div>
               <div className="space-y-1">
                 <label className="text-xs font-semibold text-muted-foreground">Last Name</label>
-                <Input 
+                <Input
                   value={addLastName}
                   onChange={(e) => setAddLastName(e.target.value)}
                   placeholder="e.g. Smith"
@@ -2514,7 +2526,7 @@ export default function UserManagement() {
 
             <div className="space-y-1">
               <label className="text-xs font-semibold text-muted-foreground">Email Address *</label>
-              <Input 
+              <Input
                 value={addEmail}
                 onChange={(e) => setAddEmail(e.target.value)}
                 placeholder="e.g. alice.smith@health.gov"
@@ -2568,7 +2580,7 @@ export default function UserManagement() {
             {/* User Primary Scoped Cascade (Province -> District -> Facility) */}
             <div className="space-y-3 rounded-xl border p-4 bg-secondary/30">
               <span className="text-xs font-bold text-indigo-500 uppercase tracking-wider block">Scope Location Scopes</span>
-              
+
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                 <div className="space-y-1">
                   <label className="text-xs font-medium text-muted-foreground">Province</label>
@@ -2636,14 +2648,14 @@ export default function UserManagement() {
           </div>
 
           <DialogFooter className="mt-6 border-t border-border pt-4 flex gap-2 justify-end">
-            <Button 
+            <Button
               onClick={() => setIsAdding(false)}
               variant="outline"
               className="rounded-xl px-4 py-2 font-sans font-semibold text-sm"
             >
               Cancel
             </Button>
-            <Button 
+            <Button
               onClick={() => {
                 if (!addEmail.trim()) {
                   toast({ title: "Email required", description: "Please supply a valid email address.", variant: "destructive" });
@@ -2665,7 +2677,7 @@ export default function UserManagement() {
                   password: canManagePasswords && addPassword ? addPassword : undefined,
                 });
               }}
-              disabled={createUserMutation.isPending}
+              disabled={createUserMutation.isPending || !canCreateUsers}
               className="bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl px-6 py-2 font-sans font-semibold text-sm shadow-md"
             >
               {createUserMutation.isPending ? "Creating User..." : "Register User"}
@@ -2691,7 +2703,7 @@ export default function UserManagement() {
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1.5">
                 <label className="text-xs font-semibold text-muted-foreground">Role Name *</label>
-                <Input 
+                <Input
                   value={newRoleName}
                   onChange={(e) => setNewRoleName(e.target.value)}
                   placeholder="e.g. Senior Supervisor"
@@ -2700,7 +2712,7 @@ export default function UserManagement() {
               </div>
               <div className="space-y-1.5">
                 <label className="text-xs font-semibold text-muted-foreground">Role Key Code *</label>
-                <Input 
+                <Input
                   value={newRoleCode}
                   onChange={(e) => setNewRoleCode(e.target.value)}
                   placeholder="e.g. senior_supervisor"
@@ -2715,12 +2727,12 @@ export default function UserManagement() {
                 {permissionsList.map(perm => {
                   const active = newRolePermissions.includes(perm.value);
                   return (
-                    <div 
+                    <div
                       key={perm.value}
                       onClick={() => {
-                        setNewRolePermissions(prev => 
-                          prev.includes(perm.value) 
-                            ? prev.filter(p => p !== perm.value) 
+                        setNewRolePermissions(prev =>
+                          prev.includes(perm.value)
+                            ? prev.filter(p => p !== perm.value)
                             : [...prev, perm.value]
                         );
                       }}
@@ -2745,14 +2757,14 @@ export default function UserManagement() {
           </div>
 
           <DialogFooter className="mt-6 border-t border-border pt-4 flex gap-2 justify-end">
-            <Button 
+            <Button
               onClick={() => setIsAddingRole(false)}
               variant="outline"
               className="rounded-xl px-4 py-2 text-xs font-semibold"
             >
               Cancel
             </Button>
-            <Button 
+            <Button
               onClick={() => {
                 if (!newRoleName.trim() || !newRoleCode.trim()) {
                   toast({ title: "Validation failed", description: "Role Name and Key Code are required.", variant: "destructive" });
@@ -2790,7 +2802,7 @@ export default function UserManagement() {
             <div className="space-y-4 pt-4">
               <div className="space-y-1.5">
                 <label className="text-xs font-semibold text-muted-foreground">Role Name *</label>
-                <Input 
+                <Input
                   value={editRoleName}
                   onChange={(e) => setEditRoleName(e.target.value)}
                   placeholder="e.g. Senior Coordinator"
@@ -2804,12 +2816,12 @@ export default function UserManagement() {
                   {permissionsList.map(perm => {
                     const active = editRolePermissions.includes(perm.value);
                     return (
-                      <div 
+                      <div
                         key={perm.value}
                         onClick={() => {
-                          setEditRolePermissions(prev => 
-                            prev.includes(perm.value) 
-                              ? prev.filter(p => p !== perm.value) 
+                          setEditRolePermissions(prev =>
+                            prev.includes(perm.value)
+                              ? prev.filter(p => p !== perm.value)
                               : [...prev, perm.value]
                           );
                         }}
@@ -2834,7 +2846,7 @@ export default function UserManagement() {
             </div>
 
             <DialogFooter className="mt-6 border-t border-border pt-4 flex gap-2 justify-end">
-              <Button 
+              <Button
                 onClick={() => {
                   setIsEditingRole(false);
                   setSelectedRole(null);
@@ -2844,7 +2856,7 @@ export default function UserManagement() {
               >
                 Cancel
               </Button>
-              <Button 
+              <Button
                 onClick={() => {
                   if (!editRoleName.trim()) {
                     toast({ title: "Validation failed", description: "Role display name is required.", variant: "destructive" });
@@ -2882,7 +2894,7 @@ export default function UserManagement() {
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1.5">
                 <label className="text-xs font-semibold text-muted-foreground">Permission Name *</label>
-                <Input 
+                <Input
                   value={newPermName}
                   onChange={(e) => setNewPermName(e.target.value)}
                   placeholder="e.g. Export Reports"
@@ -2891,7 +2903,7 @@ export default function UserManagement() {
               </div>
               <div className="space-y-1.5">
                 <label className="text-xs font-semibold text-muted-foreground">Permission Key Code *</label>
-                <Input 
+                <Input
                   value={newPermCode}
                   onChange={(e) => setNewPermCode(e.target.value)}
                   placeholder="e.g. export_reports"
@@ -2902,7 +2914,7 @@ export default function UserManagement() {
 
             <div className="space-y-1.5">
               <label className="text-xs font-semibold text-muted-foreground">Description</label>
-              <Input 
+              <Input
                 value={newPermDesc}
                 onChange={(e) => setNewPermDesc(e.target.value)}
                 placeholder="e.g. Allows downloading raw PDF or Excel report files"
@@ -2912,14 +2924,14 @@ export default function UserManagement() {
           </div>
 
           <DialogFooter className="mt-6 border-t border-border pt-4 flex gap-2 justify-end">
-            <Button 
+            <Button
               onClick={() => setIsAddingPermission(false)}
               variant="outline"
               className="rounded-xl px-4 py-2 text-xs font-semibold"
             >
               Cancel
             </Button>
-            <Button 
+            <Button
               onClick={() => {
                 if (!newPermName.trim() || !newPermCode.trim()) {
                   toast({ title: "Validation failed", description: "Permission Name and Key Code are required.", variant: "destructive" });
@@ -2957,7 +2969,7 @@ export default function UserManagement() {
             <div className="space-y-4 pt-4">
               <div className="space-y-1.5">
                 <label className="text-xs font-semibold text-muted-foreground">Permission Name *</label>
-                <Input 
+                <Input
                   value={editPermName}
                   onChange={(e) => setEditPermName(e.target.value)}
                   placeholder="e.g. Export Reports"
@@ -2967,7 +2979,7 @@ export default function UserManagement() {
 
               <div className="space-y-1.5">
                 <label className="text-xs font-semibold text-muted-foreground">Description</label>
-                <Input 
+                <Input
                   value={editPermDesc}
                   onChange={(e) => setEditPermDesc(e.target.value)}
                   placeholder="e.g. Allows downloading raw PDF or Excel report files"
@@ -2977,7 +2989,7 @@ export default function UserManagement() {
             </div>
 
             <DialogFooter className="mt-6 border-t border-border pt-4 flex gap-2 justify-end">
-              <Button 
+              <Button
                 onClick={() => {
                   setIsEditingPermission(false);
                   setEditPermId(null);
@@ -2987,7 +2999,7 @@ export default function UserManagement() {
               >
                 Cancel
               </Button>
-              <Button 
+              <Button
                 onClick={() => {
                   if (!editPermName.trim()) {
                     toast({ title: "Validation failed", description: "Permission Name is required.", variant: "destructive" });

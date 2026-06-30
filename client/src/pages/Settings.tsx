@@ -65,6 +65,7 @@ import CountryOnboarding from "./CountryOnboarding";
 import BoundaryManager from "./BoundaryManager";
 import { WastageThresholdsCard } from "@/components/WastageThresholdsCard";
 import { DEFAULT_MODULES, MODULE_METADATA, MODULE_CATEGORIES } from "@/lib/modules";
+import { canAccessUserManagement } from "@/lib/accessControl";
 
 /** Shows the actual browser storage usage for this origin. */
 function CacheStorageBadge() {
@@ -213,7 +214,7 @@ export default function Settings() {
   // Original Code: Allowed provincial coordinators to access User Management settings
   // const canAccessUserManagement = isNationalAdmin || user?.role === "provincial_coordinator";
   // Updated Code: Restrict User Management settings strictly to national administrators (admins)
-  const canAccessUserManagement = isNationalAdmin;
+  const canUseUserManagement = canAccessUserManagement(user);
 
   // Allow deep-linking to a specific tab (e.g. the user menu's "Profile" item
   // navigates to /settings?tab=profile). Falls back to the role-based default.
@@ -722,7 +723,7 @@ export default function Settings() {
     setExtractionDuration("");
 
     const startTime = Date.now();
-    
+
     // Poll the backend extraction progress endpoint
     const pollProgress = async () => {
       try {
@@ -745,20 +746,20 @@ export default function Settings() {
     try {
       // Type-safe apiRequest call that directly returns the parsed JSON response object
       const data = await apiRequest<{ success: boolean; count: number }>("POST", "/api/villages/extract");
-      
+
       clearInterval(progressInterval);
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
       setExtractionDuration(elapsed);
       setExtractionProgress(100);
       setExtractionStage("Centroid extraction successfully completed!");
-      
+
       queryClient.invalidateQueries({ queryKey: ["/api/villages"] });
-      
+
       toast({
         title: "Map Extraction Complete",
         description: `Successfully computed centroids from active boundaries and seeded ${data.count || 0} villages.`,
       });
-      
+
       setImportResults({
         success: true,
         count: data.count,
@@ -831,7 +832,7 @@ export default function Settings() {
 
       // Read and map headers
       const headers = parseCSVLine(lines[0]).map(h => h.toLowerCase().replace(/["']/g, "").trim());
-      
+
       const nameIdx = headers.findIndex(h => h === "name" || h === "village" || h === "community" || h === "settlement");
       const latIdx = headers.findIndex(h => h === "latitude" || h === "lat" || h === "y");
       const lngIdx = headers.findIndex(h => h === "longitude" || h === "lng" || h === "lon" || h === "x");
@@ -1103,8 +1104,8 @@ export default function Settings() {
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full space-y-6">
         <TabsList className="flex flex-wrap h-auto p-1.5 bg-muted/60 dark:bg-muted/30 border border-border/40 backdrop-blur-md rounded-2xl w-full gap-1 shadow-lg overflow-x-auto custom-scrollbar">
-          <TabsTrigger 
-            value="profile" 
+          <TabsTrigger
+            value="profile"
             className="py-2.5 px-4 rounded-xl text-xs font-semibold flex items-center justify-center transition-all duration-300 hover:bg-accent/40 hover:text-foreground data-[state=active]:bg-gradient-to-r data-[state=active]:from-indigo-600 data-[state=active]:to-sky-600 data-[state=active]:text-white data-[state=active]:shadow-md dark:data-[state=active]:from-indigo-500 dark:data-[state=active]:to-sky-500 data-[state=active]:font-bold"
           >
             <User className="h-4 w-4 mr-2 flex-shrink-0" />
@@ -1112,29 +1113,29 @@ export default function Settings() {
           </TabsTrigger>
           {isNationalAdmin && (
             <>
-              <TabsTrigger 
-                value="microplanning" 
+              <TabsTrigger
+                value="microplanning"
                 className="py-2.5 px-4 rounded-xl text-xs font-semibold flex items-center justify-center transition-all duration-300 hover:bg-accent/40 hover:text-foreground data-[state=active]:bg-gradient-to-r data-[state=active]:from-indigo-600 data-[state=active]:to-sky-600 data-[state=active]:text-white data-[state=active]:shadow-md dark:data-[state=active]:from-indigo-500 dark:data-[state=active]:to-sky-500 data-[state=active]:font-bold"
               >
                 <SettingsIcon className="h-4 w-4 mr-2 flex-shrink-0" />
                 <span>Microplanning Settings</span>
               </TabsTrigger>
-              <TabsTrigger 
-                value="data_import" 
+              <TabsTrigger
+                value="data_import"
                 className="py-2.5 px-4 rounded-xl text-xs font-semibold flex items-center justify-center transition-all duration-300 hover:bg-accent/40 hover:text-foreground data-[state=active]:bg-gradient-to-r data-[state=active]:from-indigo-600 data-[state=active]:to-sky-600 data-[state=active]:text-white data-[state=active]:shadow-md dark:data-[state=active]:from-indigo-500 dark:data-[state=active]:to-sky-500 data-[state=active]:font-bold"
               >
                 <Database className="h-4 w-4 mr-2 flex-shrink-0" />
                 <span>Data Seeding</span>
               </TabsTrigger>
-              <TabsTrigger 
-                value="access" 
+              <TabsTrigger
+                value="access"
                 className="py-2.5 px-4 rounded-xl text-xs font-semibold flex items-center justify-center transition-all duration-300 hover:bg-accent/40 hover:text-foreground data-[state=active]:bg-gradient-to-r data-[state=active]:from-indigo-600 data-[state=active]:to-sky-600 data-[state=active]:text-white data-[state=active]:shadow-md dark:data-[state=active]:from-indigo-500 dark:data-[state=active]:to-sky-500 data-[state=active]:font-bold"
               >
                 <Shield className="h-4 w-4 mr-2 flex-shrink-0" />
                 <span>Permissions & Modules</span>
               </TabsTrigger>
-              <TabsTrigger 
-                value="communications" 
+              <TabsTrigger
+                value="communications"
                 className="py-2.5 px-4 rounded-xl text-xs font-semibold flex items-center justify-center transition-all duration-300 hover:bg-accent/40 hover:text-foreground data-[state=active]:bg-gradient-to-r data-[state=active]:from-indigo-600 data-[state=active]:to-sky-600 data-[state=active]:text-white data-[state=active]:shadow-md dark:data-[state=active]:from-indigo-500 dark:data-[state=active]:to-sky-500 data-[state=active]:font-bold"
               >
                 <MessageSquare className="h-4 w-4 mr-2 flex-shrink-0" />
@@ -1144,9 +1145,9 @@ export default function Settings() {
           )}
 
           {/* Dynamic Administrative Triggers inside Systems settings */}
-          {canAccessUserManagement && (
-            <TabsTrigger 
-              value="user_management" 
+          {canUseUserManagement && (
+            <TabsTrigger
+              value="user_management"
               className="py-2.5 px-4 rounded-xl text-xs font-semibold flex items-center justify-center transition-all duration-300 hover:bg-accent/40 hover:text-foreground data-[state=active]:bg-gradient-to-r data-[state=active]:from-indigo-600 data-[state=active]:to-sky-600 data-[state=active]:text-white data-[state=active]:shadow-md dark:data-[state=active]:from-indigo-500 dark:data-[state=active]:to-sky-500 data-[state=active]:font-bold"
             >
               <Users className="h-4 w-4 mr-2 flex-shrink-0" />
@@ -1155,22 +1156,22 @@ export default function Settings() {
           )}
           {isNationalAdmin && (
             <>
-              <TabsTrigger 
-                value="signup_requests" 
+              <TabsTrigger
+                value="signup_requests"
                 className="py-2.5 px-4 rounded-xl text-xs font-semibold flex items-center justify-center transition-all duration-300 hover:bg-accent/40 hover:text-foreground data-[state=active]:bg-gradient-to-r data-[state=active]:from-indigo-600 data-[state=active]:to-sky-600 data-[state=active]:text-white data-[state=active]:shadow-md dark:data-[state=active]:from-indigo-500 dark:data-[state=active]:to-sky-500 data-[state=active]:font-bold"
               >
                 <UserPlus className="h-4 w-4 mr-2 flex-shrink-0" />
                 <span>Access Requests</span>
               </TabsTrigger>
-              <TabsTrigger 
-                value="countries" 
+              <TabsTrigger
+                value="countries"
                 className="py-2.5 px-4 rounded-xl text-xs font-semibold flex items-center justify-center transition-all duration-300 hover:bg-accent/40 hover:text-foreground data-[state=active]:bg-gradient-to-r data-[state=active]:from-indigo-600 data-[state=active]:to-sky-600 data-[state=active]:text-white data-[state=active]:shadow-md dark:data-[state=active]:from-indigo-500 dark:data-[state=active]:to-sky-500 data-[state=active]:font-bold"
               >
                 <Globe className="h-4 w-4 mr-2 flex-shrink-0" />
                 <span>Country Onboarding</span>
               </TabsTrigger>
-              <TabsTrigger 
-                value="boundaries" 
+              <TabsTrigger
+                value="boundaries"
                 className="py-2.5 px-4 rounded-xl text-xs font-semibold flex items-center justify-center transition-all duration-300 hover:bg-accent/40 hover:text-foreground data-[state=active]:bg-gradient-to-r data-[state=active]:from-indigo-600 data-[state=active]:to-sky-600 data-[state=active]:text-white data-[state=active]:shadow-md dark:data-[state=active]:from-indigo-500 dark:data-[state=active]:to-sky-500 data-[state=active]:font-bold"
               >
                 <Map className="h-4 w-4 mr-2 flex-shrink-0" />
@@ -1179,8 +1180,8 @@ export default function Settings() {
             </>
           )}
 
-          <TabsTrigger 
-            value="system" 
+          <TabsTrigger
+            value="system"
             className="py-2.5 px-4 rounded-xl text-xs font-semibold flex items-center justify-center transition-all duration-300 hover:bg-accent/40 hover:text-foreground data-[state=active]:bg-gradient-to-r data-[state=active]:from-indigo-600 data-[state=active]:to-sky-600 data-[state=active]:text-white data-[state=active]:shadow-md dark:data-[state=active]:from-indigo-500 dark:data-[state=active]:to-sky-500 data-[state=active]:font-bold"
           >
             <Globe className="h-4 w-4 mr-2 flex-shrink-0" />
@@ -1444,9 +1445,9 @@ export default function Settings() {
 
                       toast({
                         title: "Idle Timeout Updated",
-                        description: val === "default" 
+                        description: val === "default"
                           ? "Idle timeout reset to program defaults."
-                          : val === "0" 
+                          : val === "0"
                             ? "Automatic idle timeout disabled on this device."
                             : `Automatic idle timeout set to ${val} minute(s).`,
                       });
@@ -2144,7 +2145,7 @@ export default function Settings() {
                   <Upload className="h-4 w-4" />
                   Option B: Spreadsheet Village Registry Ingestion
                 </h4>
-                
+
                 <div
                   onDragEnter={handleDragVil}
                   onDragOver={handleDragVil}
@@ -2228,11 +2229,11 @@ export default function Settings() {
               <div className="space-y-2">
                 <Label>Global Idle Timeout (Minutes)</Label>
                 <div className="flex gap-2 max-w-sm">
-                  <Input 
-                    type="number" 
-                    min="5" 
-                    max="60" 
-                    value={idleTimeoutMinutes} 
+                  <Input
+                    type="number"
+                    min="5"
+                    max="60"
+                    value={idleTimeoutMinutes}
                     onChange={e => setIdleTimeoutMinutes(e.target.value)}
                   />
                 </div>
@@ -2242,9 +2243,9 @@ export default function Settings() {
                 <Label>Role-Based Overrides</Label>
                 <div className="grid gap-2 max-w-md">
                   {[
-                      "facility_clerk", "facility_in_charge", "district_manager", 
-                      "provincial_coordinator", "national_admin", "gis_specialist", 
-                      "facility_partner", "district_partner", "provincial_partner", 
+                      "facility_clerk", "facility_in_charge", "district_manager",
+                      "provincial_coordinator", "national_admin", "gis_specialist",
+                      "facility_partner", "district_partner", "provincial_partner",
                       "national_partner", "national_manager"
                     ].map(role => (
                     <div key={role} className="flex items-center gap-4">
@@ -2303,7 +2304,7 @@ export default function Settings() {
                           >
                             <div className="flex gap-3 min-w-0 pr-4">
                               <div className={`mt-0.5 h-8 w-8 rounded-xl flex items-center justify-center shrink-0 border transition-all duration-300 ${
-                                isEnabled 
+                                isEnabled
                                   ? `${category.bg} ${category.color} border-indigo-500/20`
                                   : "bg-muted text-muted-foreground border-border"
                               }`}>
@@ -2460,7 +2461,7 @@ export default function Settings() {
         </TabsContent>
 
         {/* Dynamic Administrative Tab Contents */}
-        {canAccessUserManagement && (
+        {canUseUserManagement && (
           <TabsContent value="user_management" className="space-y-6 mt-6 animate-in fade-in duration-300">
             <UserManagement />
           </TabsContent>

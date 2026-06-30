@@ -39,7 +39,7 @@ import {
   LOGOUT_CHANNEL,
 } from "./lib/authSession";
 import { performClientLogout } from "./lib/logout";
-import { canAccessClientLogbook, canAccessDefaulterList } from "@/lib/accessControl";
+import { canAccessClientLogbook, canAccessDefaulterList, canAccessUserManagement } from "@/lib/accessControl";
 import type { User } from "@shared/schema";
 const MapPage = lazy(() => import("@/pages/MapPage"));
 const Facilities = lazy(() => import("@/pages/Facilities"));
@@ -384,7 +384,9 @@ function AuthenticatedRouter({ user }: { user: User }) {
         {modules.supervision !== false ? <HouseToHouse /> : <ModuleDisabled moduleName="Supervision & Checklists" />}
       </Route>
       <Route path="/admin/signups" component={SignupRequests} />
-      <Route path="/admin/users" component={UserManagement} />
+      <Route path="/admin/users">
+        {canAccessUserManagement(user) ? <UserManagement /> : <AccessDeniedPage moduleName="User Management" />}
+      </Route>
       <Route path="/admin/staff" component={StaffManagement} />
       <Route path="/admin/countries" component={CountryOnboarding} />
       <Route path="/admin/boundaries" component={BoundaryManager} />
@@ -468,7 +470,7 @@ function AuthenticatedLayout() {
   useDeviceTokenBootstrap(user);
   useRealtimeSync();
   useAnalyticsTracker(!!user);
-  
+
   useEffect(() => {
     if (user && typeof window !== "undefined") {
       const userPref = localStorage.getItem("vaxplan_user_idle_timeout");

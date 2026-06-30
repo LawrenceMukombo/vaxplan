@@ -49,7 +49,7 @@ import {
 } from "lucide-react";
 import type { User } from "@shared/schema";
 import { DEFAULT_MODULES } from "@/lib/modules";
-import { canAccessClientLogbook, canAccessDefaulterList, canAccessDropoutRates } from "@/lib/accessControl";
+import { canAccessClientLogbook, canAccessDefaulterList, canAccessDropoutRates, canAccessUserManagement } from "@/lib/accessControl";
 
 interface TenantSummary {
   id: string;
@@ -110,7 +110,8 @@ export function GlobalSearch({ user }: GlobalSearchProps) {
     const isNationalAdmin = user.role === "national_admin";
     const isPlatformAdmin = (user as any).isPlatformAdmin === true;
     const canAccessHis = user.role === "national_admin" || user.role === "gis_specialist";
-    const canAccessAdmin = isNationalAdmin || user.role === "provincial_coordinator" || isPlatformAdmin;
+    const canManageUsers = canAccessUserManagement(user);
+    const canAccessAdmin = isNationalAdmin || canManageUsers || user.role === "provincial_coordinator" || isPlatformAdmin;
     const canReconcile = user.role === "national_admin" || user.role === "district_manager";
     const canAccessFieldTeams = ["district_manager", "provincial_coordinator", "national_admin", "gis_specialist"].includes(user.role || "") || isPlatformAdmin;
 
@@ -303,13 +304,15 @@ export function GlobalSearch({ user }: GlobalSearchProps) {
 
     // ─── 4. Administration Group ─────────────────────────────────────────────
     if (canAccessAdmin) {
-      items.push({
-        title: "User Management",
-        description: "Manage tenant accounts, invite staff, and assign access roles",
-        path: "/admin/users",
-        icon: Users,
-        group: "Administration",
-      });
+      if (canManageUsers) {
+        items.push({
+          title: "User Management",
+          description: "Manage tenant accounts, invite staff, and assign access roles",
+          path: "/admin/users",
+          icon: Users,
+          group: "Administration",
+        });
+      }
       items.push({
         title: "Access Requests",
         description: "Review pending signup requests and authorize new facility users",
@@ -488,7 +491,7 @@ export function GlobalSearch({ user }: GlobalSearchProps) {
         <CommandInput placeholder="Type a feature name or command to search..." />
         <CommandList className="max-h-[350px] p-2">
           <CommandEmpty>No matching features or actions found.</CommandEmpty>
-          
+
           {/* Group items by category */}
           {["Navigation", "Planning & Tools", "Supervision & Campaigns", "Administration", "System", "Quick Actions"].map((groupName) => {
             const groupItems = searchItems.filter((i) => i.group === groupName);

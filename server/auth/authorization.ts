@@ -26,6 +26,67 @@ export interface UserDataAccessScope {
 // tenant, and refreshed / invalidated by the `/api/user-roles` admin endpoints so
 // permission edits take effect immediately without a server restart.
 export const tenantRolesCache = new Map<string, Record<string, Permission[]>>();
+export const PERMISSION_ALIASES: Record<string, Permission[]> = {
+  manage_users: [
+    "users.view",
+    "users.create",
+    "users.update",
+    "users.deactivate",
+    "users.reset_password",
+    "users.assign_roles",
+    "users.assign_permissions",
+    "roles.view",
+    "roles.create",
+    "roles.update",
+    "roles.delete",
+    "roles.assign_permissions",
+    "permissions.view",
+    "permissions.assign",
+  ],
+  view_clients: ["client_logbook.view"],
+  create_client: ["client_logbook.create"],
+  edit_client: ["client_logbook.update"],
+  view_reports: ["dashboard.view", "dropout_rates.view"],
+  manage_boundaries: ["polygons.view", "polygons.create", "polygons.update", "polygons.archive", "polygons.validate"],
+  manage_session_plans: ["microplans.create", "microplans.update_draft", "microplans.submit"],
+  approve_plans: ["microplans.review", "microplans.approve", "microplans.request_changes"],
+  view_session_plans: ["microplans.view"],
+};
+
+function addPermissionWithAliases(target: Set<Permission>, permission: string): void {
+  target.add(permission);
+  const aliases = PERMISSION_ALIASES[permission] || [];
+  aliases.forEach((alias) => target.add(alias));
+}
+
+export async function getEffectivePermissions(user: User, activeTenantId?: string | null): Promise<Permission[]> {
+  if ((user as any).isPlatformAdmin === true) return ["*"];
+
+  const tenantId = activeTenantId || user.tenantId;
+  if (tenantId) await ensureTenantRolesCache(tenantId);
+
+  const roles: string[] = Array.isArray(user.roles) ? (user.roles as string[]) : [];
+  const activeRoles = roles.length > 0 ? roles : [user.role];
+  const cachedRoles = tenantId ? tenantRolesCache.get(tenantId) : null;
+  const permissionsSet = new Set<Permission>();
+
+  activeRoles.forEach((roleName) => {
+    const rolePerms = (cachedRoles && cachedRoles[roleName]) || ROLE_PERMISSIONS[roleName] || [];
+    rolePerms.forEach((p) => addPermissionWithAliases(permissionsSet, String(p)));
+  });
+
+  const userOverrides: string[] = Array.isArray(user.permissions) ? (user.permissions as string[]) : [];
+  userOverrides.forEach((p) => addPermissionWithAliases(permissionsSet, String(p)));
+
+  return Array.from(permissionsSet).sort();
+}
+
+export function userHasEffectivePermission(user: User, requiredPermission: Permission, effectivePermissions: Permission[]): boolean {
+  if ((user as any).isPlatformAdmin === true) return true;
+  const roles: string[] = Array.isArray(user.roles) ? (user.roles as string[]) : [];
+  if (user.role === "national_admin" || roles.includes("national_admin")) return true;
+  return effectivePermissions.includes("*") || effectivePermissions.includes(requiredPermission);
+}
 
 /**
  * Rebuild the cached role -> permissions map for a tenant by reading the
@@ -134,14 +195,14 @@ export function hasPermission(
   const cachedRoles = user.tenantId ? tenantRolesCache.get(user.tenantId) : null;
   activeRoles.forEach((roleName) => {
     const rolePerms = (cachedRoles && cachedRoles[roleName]) || ROLE_PERMISSIONS[roleName] || [];
-    rolePerms.forEach((p) => permissionsSet.add(p));
+    rolePerms.forEach((p) => addPermissionWithAliases(permissionsSet, String(p)));
   });
 
   // 4. Incorporate individual user overrides (permissions array)
   const userOverrides: string[] = Array.isArray(user.permissions)
     ? (user.permissions as string[])
     : [];
-  userOverrides.forEach((p) => permissionsSet.add(p as Permission));
+  userOverrides.forEach((p) => addPermissionWithAliases(permissionsSet, String(p)));
 
   // 5. If they don't have the permission, return false
   if (!permissionsSet.has(requiredPermission)) {
@@ -225,4 +286,3 @@ export function hasPermission(
   return true;
 }
 */
-

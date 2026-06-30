@@ -10,6 +10,7 @@ import {
   ROLE_PERMISSIONS,
   refreshTenantRolesCache,
   ensureTenantRolesCache,
+  getEffectivePermissions,
   type Permission,
 } from "./auth/authorization";
 import { registerSsoRoutes } from "./auth/ssoRoutes";
@@ -572,7 +573,7 @@ async function userHasAccessToUser(viewer: any, target: any, tenantId: string): 
   if (seesWholeTenant) return true;
 
   const scope = await getGeoScope(viewer, tenantId);
-  
+
   if (target.isPlatformAdmin) return false;
   if (target.role === "national_admin" || target.role === "gis_specialist") return false;
   if (Array.isArray(target.roles) && target.roles.some((r: string) => r === "national_admin" || r === "gis_specialist")) return false;
@@ -613,7 +614,7 @@ function requirePermission(
       if (!user) {
         return res.status(401).json({ message: "Unauthorized" });
       }
-      
+
       // Lazily populate dynamic role permissions cache for this tenant. The
       // helper no-ops when the cache is already warm, so the steady-state
       // cost is one Map.has lookup; admin endpoints that mutate roles
@@ -621,7 +622,7 @@ function requirePermission(
       if (req.tenantId) {
         await ensureTenantRolesCache(req.tenantId);
       }
-      
+
       // Reuse the row attached by the loadDbUser middleware; fall back to a
       // direct lookup only if the middleware did not run for this request.
       // If the lookup still comes back empty after isAuthenticated has
@@ -656,6 +657,133 @@ function requirePermission(
   };
 }
 
+function requireAnyPermission(
+  permissions: Permission[],
+  getGeographicContext?: (req: any) => Promise<any> | any
+) {
+  return async (req: any, res: any, next: any) => {
+    try {
+      const user = req.user as any;
+      if (!user) return res.status(401).json({ message: "Unauthorized" });
+      if (req.tenantId) await ensureTenantRolesCache(req.tenantId);
+      const freshUser = req.dbUser ?? (await storage.getUser(getCurrentUserId(req)));
+      if (!freshUser) {
+        return res.status(500).json({
+          message: "Could not resolve your user account from the active session. Please sign out and back in.",
+        });
+      }
+      const context = getGeographicContext ? await getGeographicContext(req) : {};
+      const allowed = permissions.some((permission) => hasPermission(freshUser, permission, context));
+      if (!allowed) {
+        return res.status(403).json({
+          message: "You do not have permission to perform this action.",
+          requiredPermissions: permissions,
+        });
+      }
+      req.dbUser = freshUser;
+      next();
+    } catch (error) {
+      console.error("Authorization middleware error:", error);
+      res.status(500).json({ message: "Internal server error during authorization" });
+    }
+  };
+}
+const ROLE_DELEGATION_LEVEL: Record<string, number> = {
+  facility_clerk: 10,
+  facility_in_charge: 20,
+  facility_partner: 20,
+  district_manager: 30,
+  district_partner: 30,
+  provincial_coordinator: 40,
+  provincial_partner: 40,
+  national_program_manager: 50,
+  national_partner: 50,
+  gis_specialist: 50,
+  national_admin: 60,
+};
+
+function getUserRolesForDelegation(user: any): string[] {
+  const roles = Array.isArray(user?.roles) ? user.roles.map(String) : [];
+  return roles.length > 0 ? roles : [String(user?.role || "")].filter(Boolean);
+}
+
+function highestDelegationLevel(userOrRoles: any): number {
+  const roles = Array.isArray(userOrRoles)
+    ? userOrRoles.map(String)
+    : getUserRolesForDelegation(userOrRoles);
+  return roles.reduce((max, role) => Math.max(max, ROLE_DELEGATION_LEVEL[role] || 0), 0);
+}
+
+function canAssignRequestedRoles(caller: any, requestedRoles: unknown): boolean {
+  if (!Array.isArray(requestedRoles)) return true;
+  if (caller?.isPlatformAdmin === true) return true;
+  if (hasPermission(caller, "permissions.super_admin")) return true;
+  return highestDelegationLevel(requestedRoles) <= highestDelegationLevel(caller);
+}
+
+function hasDirectPermissionAssignmentAccess(caller: any): boolean {
+  return (
+    caller?.isPlatformAdmin === true ||
+    hasPermission(caller, "users.assign_permissions") ||
+    hasPermission(caller, "permissions.assign") ||
+    hasPermission(caller, "manage_users")
+  );
+}
+
+function requestedPermissionsChanged(requested: unknown, existing?: unknown): boolean {
+  if (!Array.isArray(requested)) return false;
+  const before = Array.isArray(existing) ? existing.map(String).sort() : [];
+  const after = requested.map(String).sort();
+  return before.length !== after.length || before.some((value, index) => value !== after[index]);
+}
+const SYSTEM_USER_PERMISSIONS: { code: string; name: string; description: string }[] = [
+  { code: "manage_users", name: "Manage Users", description: "Legacy alias for tenant user, role, and permission administration." },
+  { code: "users.view", name: "View Users", description: "View user accounts within the assigned geographic scope." },
+  { code: "users.create", name: "Create Users", description: "Create user accounts within the assigned geographic scope." },
+  { code: "users.update", name: "Update Users", description: "Edit user profile, status, and geographic scope details." },
+  { code: "users.deactivate", name: "Deactivate Users", description: "Deactivate or remove user accounts within allowed scope." },
+  { code: "users.reset_password", name: "Reset User Passwords", description: "Set or reset passwords for eligible local accounts." },
+  { code: "users.assign_roles", name: "Assign User Roles", description: "Assign roles that are within the caller's delegation level." },
+  { code: "users.assign_permissions", name: "Assign User Permissions", description: "Assign direct permission overrides to user accounts." },
+  { code: "roles.view", name: "View Roles", description: "View role definitions and their permissions." },
+  { code: "roles.create", name: "Create Roles", description: "Create custom role definitions." },
+  { code: "roles.update", name: "Update Roles", description: "Edit custom role definitions." },
+  { code: "roles.delete", name: "Delete Roles", description: "Delete non-critical custom role definitions." },
+  { code: "roles.assign_permissions", name: "Assign Role Permissions", description: "Attach permissions to custom roles." },
+  { code: "permissions.view", name: "View Permission Registry", description: "View available system permissions." },
+  { code: "permissions.assign", name: "Manage Permission Registry", description: "Create, edit, or retire permission registry entries." },
+  { code: "permissions.super_admin", name: "Super Delegation", description: "Allows exceptional delegation above the caller's role level." },
+  { code: "view_reports", name: "View Reports", description: "Legacy alias for dashboard and reporting access." },
+  { code: "dashboard.view", name: "View Dashboard", description: "View dashboard indicators and summary metrics." },
+  { code: "reports.view", name: "View Reports", description: "View generated reports and summaries." },
+  { code: "dropout_rates.view", name: "View Dropout Rates", description: "View antigen dropout indicators and charts." },
+  { code: "view_clients", name: "View Client Logbook", description: "Legacy alias for client logbook viewing." },
+  { code: "create_client", name: "Create Client", description: "Legacy alias for creating client logbook records." },
+  { code: "edit_client", name: "Edit Client", description: "Legacy alias for editing client logbook records." },
+  { code: "client_logbook.view", name: "View Client Logbook", description: "View child registry and vaccination ledger records." },
+  { code: "client_logbook.create", name: "Create Client Records", description: "Create child registry and vaccination ledger records." },
+  { code: "client_logbook.update", name: "Update Client Records", description: "Update child registry and vaccination ledger records." },
+  { code: "defaulter_list.view", name: "View Defaulter List", description: "View overdue and defaulter tracking lists." },
+  { code: "microplans.view", name: "View Microplans", description: "View facility and campaign microplans." },
+  { code: "microplans.create", name: "Create Microplans", description: "Create draft microplans." },
+  { code: "microplans.update_draft", name: "Update Draft Microplans", description: "Edit draft microplan content." },
+  { code: "microplans.submit", name: "Submit Microplans", description: "Submit microplans for review." },
+  { code: "microplans.review", name: "Review Microplans", description: "Review submitted microplans." },
+  { code: "microplans.approve", name: "Approve Microplans", description: "Approve reviewed microplans." },
+  { code: "microplans.request_changes", name: "Request Microplan Changes", description: "Return a microplan for correction." },
+  { code: "view_session_plans", name: "View Sessions", description: "Legacy alias for session plan viewing." },
+  { code: "manage_session_plans", name: "Manage Sessions", description: "Legacy alias for session planning actions." },
+  { code: "approve_plans", name: "Approve Plans", description: "Legacy alias for microplan review and approval." },
+  { code: "view_stock", name: "View Stock Ledger", description: "View vaccine stock ledger and availability." },
+  { code: "manage_stock", name: "Manage Stock Ledger", description: "Create stock transactions and update inventory counts." },
+  { code: "conduct_supervision", name: "Conduct Supervision", description: "Conduct supervision visits and checklist reviews." },
+  { code: "polygons.view", name: "View Polygons", description: "View catchment and planning polygons." },
+  { code: "polygons.create", name: "Create Polygons", description: "Create catchment or planning polygons." },
+  { code: "polygons.update", name: "Update Polygons", description: "Edit catchment or planning polygons." },
+  { code: "polygons.archive", name: "Archive Polygons", description: "Archive catchment or planning polygons." },
+  { code: "polygons.validate", name: "Validate Polygons", description: "Validate catchment or planning polygons." },
+  { code: "manage_boundaries", name: "Manage Boundaries", description: "Legacy alias for boundary and polygon management." },
+];
 function requireGeoAccess(
   getGeoContext: (req: any) => { provinceId?: number; districtId?: number; facilityId?: number } | Promise<{ provinceId?: number; districtId?: number; facilityId?: number }>
 ) {
@@ -1243,7 +1371,7 @@ export async function registerRoutes(
   // --- SUBDOMAIN ROUTING MIDDLEWARE ---
   app.use(async (req, res, next) => {
     const host = req.get("host") || "";
-    
+
     // 1. Technical Docs Subdomain (docs.vaxplan.org)
     // We now let this fall through to the React SPA (App.tsx) so it can render PublicDocs
     // instead of serving the old static docs-site.
@@ -1260,7 +1388,7 @@ export async function registerRoutes(
       ) {
         return next();
       }
-      
+
       const _path = await import("path");
       if (process.env.NODE_ENV === "production") {
         return res.sendFile(_path.resolve(process.cwd(), "dist/public/index.html"));
@@ -1283,7 +1411,7 @@ export async function registerRoutes(
       ) {
         return next();
       }
-      
+
       // Serve the index.html for React SPA
       const _path = await import("path");
       if (process.env.NODE_ENV === "production") {
@@ -1310,7 +1438,7 @@ export async function registerRoutes(
 
   // --- USER ACCESS MANAGEMENT ENDPOINTS ---
   /* Original Code commented out for backward-compatibility:
-  app.get("/api/users", isAuthenticated, requireTenant, requirePermission("manage_users"), async (req: any, res) => {
+  app.get("/api/users", isAuthenticated, requireTenant, requireAnyPermission(["users.view", "manage_users"]), async (req: any, res) => {
     try {
       const list = await storage.listUsers(req.tenantId);
       res.json(list);
@@ -1320,7 +1448,7 @@ export async function registerRoutes(
     }
   });
 
-  app.put("/api/users/:id/roles-permissions", isAuthenticated, requireTenant, requirePermission("manage_users"), async (req: any, res) => {
+  app.put("/api/users/:id/roles-permissions", isAuthenticated, requireTenant, requireAnyPermission(["users.assign_roles", "users.assign_permissions", "manage_users"]), async (req: any, res) => {
     try {
       const { roles, permissions, dataAccessScope } = req.body;
       if (!Array.isArray(roles)) {
@@ -1332,7 +1460,7 @@ export async function registerRoutes(
       if (!dataAccessScope || typeof dataAccessScope !== "object") {
         return res.status(400).json({ message: "dataAccessScope must be a geographic scope object" });
       }
-      
+
       const updatedUser = await storage.updateUserRolesAndPermissions(
         req.tenantId,
         req.params.id,
@@ -1340,11 +1468,11 @@ export async function registerRoutes(
         permissions,
         dataAccessScope
       );
-      
+
       if (!updatedUser) {
         return res.status(404).json({ message: "User not found" });
       }
-      
+
       await logAudit(req, "update_user_access", "users", null, null, {
         userId: req.params.id,
         roles,
@@ -1359,7 +1487,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/users", isAuthenticated, requireTenant, requirePermission("manage_users"), async (req: any, res) => {
+  app.post("/api/users", isAuthenticated, requireTenant, requireAnyPermission(["users.create", "manage_users"]), async (req: any, res) => {
     try {
       const { email, firstName, lastName, roles, dataAccessScope, isActive, facilityId, districtId, provinceId } = req.body;
       if (!email) {
@@ -1388,7 +1516,7 @@ export async function registerRoutes(
     }
   });
 
-  app.patch("/api/users/:id", isAuthenticated, requireTenant, requirePermission("manage_users"), async (req: any, res) => {
+  app.patch("/api/users/:id", isAuthenticated, requireTenant, requireAnyPermission(["users.update", "manage_users"]), async (req: any, res) => {
     try {
       const { firstName, lastName, email, roles, permissions, dataAccessScope, isActive, facilityId, districtId, provinceId } = req.body;
       const oldUser = await storage.getUser(req.params.id);
@@ -1417,7 +1545,7 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/users/:id", isAuthenticated, requireTenant, requirePermission("manage_users"), async (req: any, res) => {
+  app.delete("/api/users/:id", isAuthenticated, requireTenant, requireAnyPermission(["users.deactivate", "manage_users"]), async (req: any, res) => {
     try {
       const oldUser = await storage.getUser(req.params.id);
       if (!oldUser || oldUser.tenantId !== req.tenantId) {
@@ -1435,29 +1563,29 @@ export async function registerRoutes(
   */
 
   // GET /api/users with geographic scoping
-  app.get("/api/users", isAuthenticated, requireTenant, requirePermission("manage_users"), async (req: any, res) => {
+  app.get("/api/users", isAuthenticated, requireTenant, requireAnyPermission(["users.view", "manage_users"]), async (req: any, res) => {
     try {
       const list = await storage.listUsers(req.tenantId);
       const scope = await getGeoScope(req.dbUser!, req.tenantId);
       if (scope.all) {
         return res.json(list);
       }
-      
+
       const filtered = list.filter((u: any) => {
         if (u.isPlatformAdmin) return false;
-        
+
         const targetGeo = {
           facilityId: u.facilityId,
           districtId: u.districtId,
           provinceId: u.provinceId
         };
         if (recordInGeoScope(scope, targetGeo)) return true;
-        
+
         const tScope = u.dataAccessScope || {};
         const tFacs = Array.isArray(tScope.facilities) ? tScope.facilities.map(Number) : [];
         const tDists = Array.isArray(tScope.districts) ? tScope.districts.map(Number) : [];
         const tProvs = Array.isArray(tScope.provinces) ? tScope.provinces.map(Number) : [];
-        
+
         for (const fid of tFacs) {
           if (scope.facilityIds.has(fid)) return true;
         }
@@ -1467,7 +1595,7 @@ export async function registerRoutes(
         for (const pid of tProvs) {
           if (scope.provinceIds.has(pid)) return true;
         }
-        
+
         return false;
       });
       res.json(filtered);
@@ -1478,7 +1606,7 @@ export async function registerRoutes(
   });
 
   // PUT /api/users/:id/roles-permissions with geographic check on target and dataAccessScope
-  app.put("/api/users/:id/roles-permissions", isAuthenticated, requireTenant, requirePermission("manage_users"), async (req: any, res) => {
+  app.put("/api/users/:id/roles-permissions", isAuthenticated, requireTenant, requireAnyPermission(["users.assign_roles", "users.assign_permissions", "manage_users"]), async (req: any, res) => {
     try {
       const { roles, permissions, dataAccessScope } = req.body;
       if (!Array.isArray(roles)) {
@@ -1490,7 +1618,7 @@ export async function registerRoutes(
       if (!dataAccessScope || typeof dataAccessScope !== "object") {
         return res.status(400).json({ message: "dataAccessScope must be a geographic scope object" });
       }
-      
+
       const targetUser = await storage.getUser(req.params.id);
       if (!targetUser || targetUser.tenantId !== req.tenantId) {
         return res.status(404).json({ message: "User not found" });
@@ -1498,12 +1626,18 @@ export async function registerRoutes(
       if (!(await userHasAccessToUser(req.dbUser!, targetUser, req.tenantId))) {
         return res.status(403).json({ message: "Forbidden: no management access to this user context" });
       }
+      if (!canAssignRequestedRoles(req.dbUser!, roles)) {
+        return res.status(403).json({ message: "Forbidden: cannot assign roles above your delegation level" });
+      }
+      if (requestedPermissionsChanged(permissions, targetUser.permissions) && !hasDirectPermissionAssignmentAccess(req.dbUser!)) {
+        return res.status(403).json({ message: "Forbidden: direct permission assignment requires explicit permission assignment access" });
+      }
 
       // Check explicit scopes in dataAccessScope
       const tFacs = Array.isArray(dataAccessScope.facilities) ? dataAccessScope.facilities.map(Number) : [];
       const tDists = Array.isArray(dataAccessScope.districts) ? dataAccessScope.districts.map(Number) : [];
       const tProvs = Array.isArray(dataAccessScope.provinces) ? dataAccessScope.provinces.map(Number) : [];
-      
+
       for (const fid of tFacs) {
         if (!(await userCanAccessGeo(req.dbUser!, req.tenantId, { facilityId: fid }))) {
           return res.status(403).json({ message: "Forbidden: target facility scope is outside your access scope" });
@@ -1519,7 +1653,7 @@ export async function registerRoutes(
           return res.status(403).json({ message: "Forbidden: target province scope is outside your access scope" });
         }
       }
-      
+
       const updatedUser = await storage.updateUserRolesAndPermissions(
         req.tenantId,
         req.params.id,
@@ -1527,11 +1661,11 @@ export async function registerRoutes(
         permissions,
         dataAccessScope
       );
-      
+
       if (!updatedUser) {
         return res.status(404).json({ message: "User not found" });
       }
-      
+
       await logAudit(req, "update_user_access", "users", null, null, {
         userId: req.params.id,
         roles,
@@ -1547,7 +1681,7 @@ export async function registerRoutes(
   });
 
   // POST /api/users with geographic check on target location parameters and dataAccessScope
-  app.post("/api/users", isAuthenticated, requireTenant, requirePermission("manage_users"), async (req: any, res) => {
+  app.post("/api/users", isAuthenticated, requireTenant, requireAnyPermission(["users.create", "manage_users"]), async (req: any, res) => {
     try {
       const { email, firstName, lastName, roles, dataAccessScope, isActive, facilityId, districtId, provinceId } = req.body;
       if (!email) {
@@ -1556,6 +1690,9 @@ export async function registerRoutes(
       const existing = await storage.getUserByEmailAndTenant(email, req.tenantId);
       if (existing) {
         return res.status(400).json({ message: "A user with this email address already exists" });
+      }
+      if (!canAssignRequestedRoles(req.dbUser!, roles || ["facility_clerk"])) {
+        return res.status(403).json({ message: "Forbidden: cannot assign roles above your delegation level" });
       }
 
       // Geofence checking on initial configuration
@@ -1572,7 +1709,7 @@ export async function registerRoutes(
         const tFacs = Array.isArray(dataAccessScope.facilities) ? dataAccessScope.facilities.map(Number) : [];
         const tDists = Array.isArray(dataAccessScope.districts) ? dataAccessScope.districts.map(Number) : [];
         const tProvs = Array.isArray(dataAccessScope.provinces) ? dataAccessScope.provinces.map(Number) : [];
-        
+
         for (const fid of tFacs) {
           if (!(await userCanAccessGeo(req.dbUser!, req.tenantId, { facilityId: fid }))) {
             return res.status(403).json({ message: "Forbidden: explicit facility scope is outside your scope" });
@@ -1610,7 +1747,7 @@ export async function registerRoutes(
   });
 
   // PATCH /api/users/:id with geographic check on target and body params
-  app.patch("/api/users/:id", isAuthenticated, requireTenant, requirePermission("manage_users"), async (req: any, res) => {
+  app.patch("/api/users/:id", isAuthenticated, requireTenant, requireAnyPermission(["users.update", "manage_users"]), async (req: any, res) => {
     try {
       const { firstName, lastName, email, roles, permissions, dataAccessScope, isActive, facilityId, districtId, provinceId } = req.body;
       const oldUser = await storage.getUser(req.params.id);
@@ -1619,6 +1756,12 @@ export async function registerRoutes(
       }
       if (!(await userHasAccessToUser(req.dbUser!, oldUser, req.tenantId))) {
         return res.status(403).json({ message: "Forbidden: no access to this user context" });
+      }
+      if (!canAssignRequestedRoles(req.dbUser!, roles)) {
+        return res.status(403).json({ message: "Forbidden: cannot assign roles above your delegation level" });
+      }
+      if (requestedPermissionsChanged(permissions, oldUser.permissions) && !hasDirectPermissionAssignmentAccess(req.dbUser!)) {
+        return res.status(403).json({ message: "Forbidden: direct permission assignment requires explicit permission assignment access" });
       }
 
       // Geofence checking on changes
@@ -1635,7 +1778,7 @@ export async function registerRoutes(
         const tFacs = Array.isArray(dataAccessScope.facilities) ? dataAccessScope.facilities.map(Number) : [];
         const tDists = Array.isArray(dataAccessScope.districts) ? dataAccessScope.districts.map(Number) : [];
         const tProvs = Array.isArray(dataAccessScope.provinces) ? dataAccessScope.provinces.map(Number) : [];
-        
+
         for (const fid of tFacs) {
           if (!(await userCanAccessGeo(req.dbUser!, req.tenantId, { facilityId: fid }))) {
             return res.status(403).json({ message: "Forbidden: explicit facility scope is outside your scope" });
@@ -1675,7 +1818,7 @@ export async function registerRoutes(
   });
 
   // DELETE /api/users/:id with geographic check on target
-  app.delete("/api/users/:id", isAuthenticated, requireTenant, requirePermission("manage_users"), async (req: any, res) => {
+  app.delete("/api/users/:id", isAuthenticated, requireTenant, requireAnyPermission(["users.deactivate", "manage_users"]), async (req: any, res) => {
     try {
       const oldUser = await storage.getUser(req.params.id);
       if (!oldUser || oldUser.tenantId !== req.tenantId) {
@@ -1742,7 +1885,7 @@ export async function registerRoutes(
   });
 
   // --- CUSTOM USER ROLES CRUD ENDPOINTS ---
-  app.get("/api/user-roles", isAuthenticated, requireTenant, requirePermission("manage_users"), async (req: any, res) => {
+  app.get("/api/user-roles", isAuthenticated, requireTenant, requireAnyPermission(["roles.view", "users.assign_roles", "manage_users"]), async (req: any, res) => {
     try {
       let roles = await storage.getUserRoles(req.tenantId);
       if (roles.length === 0) {
@@ -1763,13 +1906,13 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/user-roles", isAuthenticated, requireTenant, requirePermission("manage_users"), async (req: any, res) => {
+  app.post("/api/user-roles", isAuthenticated, requireTenant, requireAnyPermission(["roles.create", "manage_users"]), async (req: any, res) => {
     try {
       /* Original Code:
       const data = insertUserRoleSchema.parse(req.body);
       */
       const data = insertUserRoleSchema.parse(req.body) as any;
-      
+
       const existing = await storage.getUserRoleByCode(req.tenantId, data.code);
       if (existing) {
         return res.status(400).json({ message: `A user role with code ${data.code} already exists.` });
@@ -1788,7 +1931,7 @@ export async function registerRoutes(
     }
   });
 
-  app.patch("/api/user-roles/:id", isAuthenticated, requireTenant, requirePermission("manage_users"), async (req: any, res) => {
+  app.patch("/api/user-roles/:id", isAuthenticated, requireTenant, requireAnyPermission(["roles.update", "roles.assign_permissions", "manage_users"]), async (req: any, res) => {
     try {
       const id = parseInt(req.params.id);
       const oldRole = await storage.getUserRole(req.tenantId, id);
@@ -1808,7 +1951,7 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/user-roles/:id", isAuthenticated, requireTenant, requirePermission("manage_users"), async (req: any, res) => {
+  app.delete("/api/user-roles/:id", isAuthenticated, requireTenant, requireAnyPermission(["roles.delete", "manage_users"]), async (req: any, res) => {
     try {
       const id = parseInt(req.params.id);
       const oldRole = await storage.getUserRole(req.tenantId, id);
@@ -1832,30 +1975,17 @@ export async function registerRoutes(
   });
 
   // --- CUSTOM USER PERMISSIONS CRUD ENDPOINTS ---
-  app.get("/api/user-permissions", isAuthenticated, requireTenant, requirePermission("manage_users"), async (req: any, res) => {
+  app.get("/api/user-permissions", isAuthenticated, requireTenant, requireAnyPermission(["permissions.view", "roles.view", "users.assign_permissions", "manage_users"]), async (req: any, res) => {
     try {
       let permissions = await storage.getUserPermissions(req.tenantId);
-      if (permissions.length === 0) {
-        // Seed dynamic user_permissions table from static list on first access
-        const ALL_PERMS = [
-          { value: "manage_users", label: "Manage Users", desc: "Allows creating, editing, and deleting users, roles, and boundaries." },
-          { value: "view_reports", label: "View Reports", desc: "Allows viewing dashboards, KPIs, budget reports, and standard summaries." },
-          { value: "edit_microplans", label: "Edit Microplans", desc: "Allows creating, updating, and hydrating facilities, target populations, and calendars." },
-          { value: "plan_sessions", label: "Plan Sessions", desc: "Allows adding, scheduling, rescheduling, and mapping vaccine session locations." },
-          { value: "execute_sessions", label: "Record Session Results", desc: "Allows marking sessions completed, recording vaccines given, and uploading logbooks." },
-          { value: "manage_stock", label: "Manage Stock Ledger", desc: "Allows creating stock transactions, updating inventory counts, and tracking waste." },
-          { value: "conduct_supervision", label: "Conduct Supervision", desc: "Allows conducting supervision visits, filling checklists, and reporting PCE reviews." }
-        ];
+      const existingCodes = new Set(permissions.map((permission: any) => String(permission.code).toLowerCase()));
 
-        for (const perm of ALL_PERMS) {
-          await storage.createUserPermission(req.tenantId, {
-            code: perm.value,
-            name: perm.label,
-            description: perm.desc
-          });
-        }
-        permissions = await storage.getUserPermissions(req.tenantId);
+      for (const permission of SYSTEM_USER_PERMISSIONS) {
+        if (existingCodes.has(permission.code.toLowerCase())) continue;
+        await storage.createUserPermission(req.tenantId, permission);
       }
+
+      permissions = await storage.getUserPermissions(req.tenantId);
       res.json(permissions);
     } catch (err: any) {
       console.error("GET /api/user-permissions failed:", err);
@@ -1863,7 +1993,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/user-permissions", isAuthenticated, requireTenant, requirePermission("manage_users"), async (req: any, res) => {
+  app.post("/api/user-permissions", isAuthenticated, requireTenant, requireAnyPermission(["permissions.assign", "manage_users"]), async (req: any, res) => {
     try {
       const { code, name, description } = req.body;
       if (!code || !name) {
@@ -1884,7 +2014,7 @@ export async function registerRoutes(
     }
   });
 
-  app.patch("/api/user-permissions/:id", isAuthenticated, requireTenant, requirePermission("manage_users"), async (req: any, res) => {
+  app.patch("/api/user-permissions/:id", isAuthenticated, requireTenant, requireAnyPermission(["permissions.assign", "manage_users"]), async (req: any, res) => {
     try {
       const id = parseInt(req.params.id);
       const oldPerm = await storage.getUserPermission(req.tenantId, id);
@@ -1902,7 +2032,7 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/user-permissions/:id", isAuthenticated, requireTenant, requirePermission("manage_users"), async (req: any, res) => {
+  app.delete("/api/user-permissions/:id", isAuthenticated, requireTenant, requireAnyPermission(["permissions.assign", "manage_users"]), async (req: any, res) => {
     try {
       const id = parseInt(req.params.id);
       const oldPerm = await storage.getUserPermission(req.tenantId, id);
@@ -2113,7 +2243,7 @@ export async function registerRoutes(
             try {
               console.log("[Self-Healing] Found South Sudan facilities.csv, seeding high-fidelity dataset...");
               const rawCsv = readFileSync(csvPath, "utf8");
-              
+
               const parseSsdCsv = (text: string) => {
                 const lines: string[] = [];
                 let cur = "";
@@ -2177,7 +2307,7 @@ export async function registerRoutes(
               };
 
               const rows = parseSsdCsv(rawCsv);
-              
+
               // 1. Seed national region
               const [reg] = await db.insert(regions).values({
                 tenantId: ssd.id,
@@ -2257,7 +2387,7 @@ export async function registerRoutes(
 
                 const distId = districtMap.get(r.county_code.trim());
                 if (!distId) continue;
-                
+
                 const lat = toNumOrNull(r.latitude);
                 const lon = toNumOrNull(r.longitude);
 
@@ -2318,7 +2448,7 @@ export async function registerRoutes(
                 const matchingProv = await db.select()
                   .from(provinces)
                   .where(and(eq(provinces.tenantId, ssd.id), eq(provinces.name, census.stateName)));
-                  
+
                 if (matchingProv.length > 0) {
                   const provId = matchingProv[0].id;
                   popRows.push({
@@ -2406,7 +2536,10 @@ export async function registerRoutes(
 
   app.get("/api/auth/user", isAuthenticated, async (req: any, res) => {
     try {
-      res.json(req.dbUser ?? null);
+      const dbUser = req.dbUser ?? (await storage.getUser(getCurrentUserId(req)));
+      if (!dbUser) return res.json(null);
+      const effectivePermissions = await getEffectivePermissions(dbUser, req.tenantId ?? dbUser.tenantId);
+      res.json({ ...dbUser, effectivePermissions, permissionVersion: dbUser.updatedAt ?? dbUser.createdAt ?? null });
     } catch (error) {
       console.error("Error fetching user:", error);
       res.status(500).json({ message: "Failed to fetch user" });
@@ -3522,7 +3655,7 @@ export async function registerRoutes(
       // from the user's granted districts/facilities (so district managers and
       // facility staff can see the province containing their district/facility).
       const visibleProvinceIds = new Set<number>(scope.provinceIds);
-      
+
       const districtsForProvinces = new Set<number>(scope.districtIds);
       if (scope.facilityIds.size > 0) {
         const allFacilities = await storage.getFacilities(req.tenantId);
@@ -3604,7 +3737,7 @@ export async function registerRoutes(
       // Cache stable geo-reference lists in the browser for 5 minutes.
       res.set("Cache-Control", "no-store, max-age=0, must-revalidate");
       const all = await storage.getDistricts(req.tenantId, provinceId);
-      
+
       const visibleDistrictIds = new Set<number>(scope.districtIds);
       if (scope.facilityIds.size > 0) {
         const allFacilities = await storage.getFacilities(req.tenantId);
@@ -3676,7 +3809,7 @@ export async function registerRoutes(
     try {
       const dbUser = req.dbUser!;
       const districtId = req.query.districtId ? parseInt(req.query.districtId as string) : undefined;
-      
+
       res.set("Cache-Control", "no-store, max-age=0, must-revalidate");
 
       // getGeoScope handles all role tiers and respects dataAccessScope:
@@ -4036,9 +4169,9 @@ export async function registerRoutes(
       if (req.dbUser?.isPlatformAdmin !== true && !userRolesList.some((r) => allowed.includes(r))) {
         return res.status(403).json({ message: "Your role cannot add facilities." });
       }
-      
+
       const data = insertFacilitySchema.parse(req.body);
-      
+
       // Enforce geographic boundaries using userCanAccessGeo and custom error messages for test compatibility
       /* Original Code:
       if (!(await userCanAccessGeo(req.dbUser, req.tenantId, { districtId: Number(data.districtId) }))) {
@@ -4363,7 +4496,7 @@ export async function registerRoutes(
         .insert(facilityStaff)
         .values({ ...parsed, tenantId: req.tenantId } as any)
         .returning();
-      
+
       await logAudit(req, "create", "facility_staff", inserted.id, null, inserted);
       res.status(201).json(inserted);
     } catch (error: any) {
@@ -4379,7 +4512,7 @@ export async function registerRoutes(
       if (isNaN(staffId) || isNaN(facilityId)) {
         return res.status(400).json({ message: "Invalid parameters" });
       }
-      
+
       const [existing] = await db
         .select()
         .from(facilityStaff)
@@ -4465,7 +4598,7 @@ export async function registerRoutes(
         .from(facilityStaff)
         .where(and(eq(facilityStaff.id, staffId), eq(facilityStaff.facilityId, facilityId), eq(facilityStaff.tenantId, req.tenantId)));
       if (!existing) return res.status(404).json({ message: "Staff member not found" });
-      
+
       await db.delete(facilityStaff).where(eq(facilityStaff.id, staffId));
       await logAudit(req, "delete", "facility_staff", staffId, existing, null);
       res.json({ success: true });
@@ -4482,7 +4615,7 @@ export async function registerRoutes(
       if (isNaN(facilityId)) return res.status(400).json({ message: "Invalid facility id" });
       const parsed = parseBulkItems(req.body);
       if (!parsed) return res.status(400).json({ message: "Body must be { items: [...] }" });
-      
+
       const results: BulkResult[] = [];
       for (const item of parsed.items) {
         const clientId = item.clientId;
@@ -4538,7 +4671,7 @@ export async function registerRoutes(
     try {
       const facilityId = parseInt(req.params.facilityId);
       if (isNaN(facilityId)) return res.status(400).json({ message: "Invalid facilityId" });
-      
+
       if (req.query.planType === "campaign") {
         const members = await db
           .select()
@@ -4564,7 +4697,7 @@ export async function registerRoutes(
     try {
       const facilityId = parseInt(req.params.facilityId);
       if (isNaN(facilityId)) return res.status(400).json({ message: "Invalid facilityId" });
-      
+
       if (req.query.planType === "campaign") {
         const parsed = insertHfcCommitteeSchema.parse({
           ...req.body,
@@ -4594,7 +4727,7 @@ export async function registerRoutes(
       const memberId = parseInt(req.params.memberId);
       const facilityId = parseInt(req.params.facilityId);
       if (isNaN(memberId) || isNaN(facilityId)) return res.status(400).json({ message: "Invalid parameters" });
-      
+
       if (req.query.planType === "campaign") {
         const [existing] = await db
           .select().from(hfcCommittee)
@@ -4632,7 +4765,7 @@ export async function registerRoutes(
       const memberId = parseInt(req.params.memberId);
       const facilityId = parseInt(req.params.facilityId);
       if (isNaN(memberId) || isNaN(facilityId)) return res.status(400).json({ message: "Invalid parameters" });
-      
+
       if (req.query.planType === "campaign") {
         const [existing] = await db
           .select().from(hfcCommittee)
@@ -4658,7 +4791,7 @@ export async function registerRoutes(
     try {
       const facilityId = parseInt(req.params.facilityId);
       if (isNaN(facilityId)) return res.status(400).json({ message: "Invalid facilityId" });
-      
+
       if (req.query.planType === "campaign") {
         const chvs = await db
           .select()
@@ -4712,7 +4845,7 @@ export async function registerRoutes(
     try {
       const facilityId = parseInt(req.params.facilityId);
       if (isNaN(facilityId)) return res.status(400).json({ message: "Invalid facilityId" });
-      
+
       if (req.query.planType === "campaign") {
         const parsed = insertCommunityHealthVolunteerSchema.parse({
           ...req.body,
@@ -4782,7 +4915,7 @@ export async function registerRoutes(
       const chvId = parseInt(req.params.chvId);
       const facilityId = parseInt(req.params.facilityId);
       if (isNaN(chvId) || isNaN(facilityId)) return res.status(400).json({ message: "Invalid parameters" });
-      
+
       if (req.query.planType === "campaign") {
         const [existing] = await db
           .select().from(communityHealthVolunteers)
@@ -4801,7 +4934,7 @@ export async function registerRoutes(
           .where(and(eq(chvProfiles.id, chvId), eq(chvProfiles.tenantId, req.tenantId))).limit(1);
         if (!existing) return res.status(404).json({ message: "CHV not found" });
         const allowed: any = {};
-        
+
         /* Original allowed patch assignments commented out to maintain rule 1/2 of user_global config:
         if (req.body.name !== undefined) allowed.fullName = req.body.name;
         if (req.body.gender !== undefined) allowed.gender = req.body.gender;
@@ -4824,11 +4957,11 @@ export async function registerRoutes(
         if (req.body.contactPhone !== undefined) allowed.contactPhone = req.body.contactPhone || null;
         if (req.body.age !== undefined) allowed.age = req.body.age ? Number(req.body.age) : null;
         if (req.body.roleDescription !== undefined) allowed.roleDescription = req.body.roleDescription || null;
-        
+
         allowed.updatedAt = new Date();
         const [updated] = await db.update(chvProfiles).set(allowed).where(eq(chvProfiles.id, chvId)).returning();
         await logAudit(req, "update", "chv_profile", chvId, existing, updated);
-        
+
         /* Original mappedUpdated commented out to maintain rule 1/2 of user_global config:
         const mappedUpdated = {
           id: updated.id,
@@ -4871,7 +5004,7 @@ export async function registerRoutes(
       const chvId = parseInt(req.params.chvId);
       const facilityId = parseInt(req.params.facilityId);
       if (isNaN(chvId) || isNaN(facilityId)) return res.status(400).json({ message: "Invalid parameters" });
-      
+
       if (req.query.planType === "campaign") {
         const [existing] = await db
           .select().from(communityHealthVolunteers)
@@ -4899,7 +5032,7 @@ export async function registerRoutes(
       if (isNaN(facilityId)) return res.status(400).json({ message: "Invalid facility id" });
       const parsed = parseBulkItems(req.body);
       if (!parsed) return res.status(400).json({ message: "Body must be { items: [...] }" });
-      
+
       if (req.query.planType === "campaign") {
         const results: BulkResult[] = [];
         for (const item of parsed.items) {
@@ -5443,8 +5576,8 @@ export async function registerRoutes(
       let under5Pop = 0;
 
       if (villageRow.boundary) {
-        let geomJson = typeof villageRow.boundary === "string" 
-          ? villageRow.boundary 
+        let geomJson = typeof villageRow.boundary === "string"
+          ? villageRow.boundary
           : JSON.stringify(villageRow.boundary);
         if (typeof villageRow.boundary === "object" && (villageRow.boundary as any).geometry) {
           geomJson = JSON.stringify((villageRow.boundary as any).geometry);
@@ -5452,7 +5585,7 @@ export async function registerRoutes(
 
         const res = await pool.query(
           `
-          SELECT 
+          SELECT
             COALESCE(SUM(population_total), 0)::int AS total_pop,
             COALESCE(SUM(under5_population), 0)::int AS under5_pop
           FROM population_grids
@@ -5475,7 +5608,7 @@ export async function registerRoutes(
         if (!isNaN(latVal) && !isNaN(lngVal)) {
           const res = await pool.query(
             `
-            SELECT 
+            SELECT
               COALESCE(population_total, 0)::int AS total_pop,
               COALESCE(under5_population, 0)::int AS under5_pop
             FROM population_grids
@@ -5499,7 +5632,7 @@ export async function registerRoutes(
       }
 
       const under1Pop = Math.round(under5Pop / 5) || Math.round(totalPop * 0.035);
-      
+
       let provinceId: number | null = null;
       if (villageRow.districtId) {
         const [d] = await dbInstance
@@ -5603,7 +5736,7 @@ export async function registerRoutes(
       const dbUser = req.dbUser!;
       const districtId = req.query.districtId ? parseInt(req.query.districtId as string) : undefined;
       const facilityId = req.query.facilityId ? parseInt(req.query.facilityId as string) : undefined;
-      
+
       res.set("Cache-Control", "no-store, max-age=0, must-revalidate");
 
       const scope = await getGeoScope(dbUser, req.tenantId);
@@ -5860,7 +5993,7 @@ export async function registerRoutes(
       }
 
       await logAudit(req, "create", "village", village.id, null, village);
-      
+
       // Estimate and save the population based on the drawn boundary polygon or coordinate points
       await estimateAndSaveVillagePopulation(req.tenantId, village.id);
 
@@ -6105,7 +6238,7 @@ export async function registerRoutes(
           stage: `Seeding ${villagesToInsert.length} community registries to database...`
         });
         const inserted = await db.insert(villages).values(villagesToInsert).returning({ id: villages.id });
-        
+
         // Estimate population for each extracted village
         for (let j = 0; j < inserted.length; j++) {
           if (j % 10 === 0 || j === inserted.length) {
@@ -6273,7 +6406,7 @@ export async function registerRoutes(
               updatedAt: new Date(),
             })
             .where(eq(villages.id, existing.id));
-          
+
           await estimateAndSaveVillagePopulation(req.tenantId, existing.id);
           updatedCount++;
         } else {
@@ -6295,7 +6428,7 @@ export async function registerRoutes(
               insecurityLevel: item.insecurityLevel ?? null,
             })
             .returning({ id: villages.id });
-          
+
           if (inserted) {
             await estimateAndSaveVillagePopulation(req.tenantId, inserted.id);
           }
@@ -6436,7 +6569,7 @@ export async function registerRoutes(
       }
 
       await logAudit(req, "update", "village", entityId, oldVillage, village);
-      
+
       // Re-calculate and save the estimated population from the boundary or coordinates
       await estimateAndSaveVillagePopulation(req.tenantId, entityId);
 
@@ -6672,7 +6805,7 @@ export async function registerRoutes(
           const facLat = parseFloat(facility.latitude.toString());
           const facLng = parseFloat(facility.longitude.toString());
           const dist = calculateHaversineDistance(lat, lng, facLat, facLng);
-          
+
           if (dist <= 10.0) {
             matchedVillageIds.push(v.id);
           }
@@ -6731,7 +6864,7 @@ export async function registerRoutes(
       const files = readdirSync(resourcesDir);
       // Intelligently find optimized gridded population raster (preferring 1km resolution which is ~2MB and highly performant)
       let geotiffFile = files.find((f: string) => f.includes("pop") && f.includes("1km") && (f.endsWith(".tif") || f.endsWith(".tiff")));
-      
+
       // Fallback to any population file
       if (!geotiffFile) {
         geotiffFile = files.find((f: string) => f.includes("pop") && (f.endsWith(".tif") || f.endsWith(".tiff")));
@@ -6749,7 +6882,7 @@ export async function registerRoutes(
       const filePath = join(resourcesDir, geotiffFile);
       res.setHeader("Content-Type", "application/octet-stream");
       res.setHeader("Content-Disposition", `attachment; filename="${geotiffFile}"`);
-      
+
       const stream = createReadStream(filePath);
       stream.pipe(res);
     } catch (error: any) {
@@ -6855,7 +6988,7 @@ export async function registerRoutes(
             return matchesTenant && lowerF.includes("pop") && lowerF.includes("100m") && (lowerF.endsWith(".tif") || lowerF.endsWith(".tiff"));
           }) || "";
         }
-        
+
         // 3. Fallback to any population file for this country tenant
         if (!geotiffFile) {
           geotiffFile = files.find((f: string) => {
@@ -6984,7 +7117,7 @@ export async function registerRoutes(
         .map((f) => {
           let country = "Universal";
           let resolution = "1km";
-          
+
           if (f.toLowerCase().includes("zmb")) country = "Zambia";
           else if (f.toLowerCase().includes("ssd")) country = "South Sudan";
           else if (f.toLowerCase().includes("png")) country = "Papua New Guinea";
@@ -7093,7 +7226,7 @@ export async function registerRoutes(
 
       const filePath = join(resourcesDir, fileName);
       const writeStream = createWriteStream(filePath);
-      
+
       req.pipe(writeStream);
 
       req.on("error", (err: any) => {
@@ -7325,16 +7458,16 @@ export async function registerRoutes(
           if (p.districtId && scope.districtIds.has(p.districtId)) return true;
           // Check if explicit provinceId matches province scope
           if (p.provinceId && scope.provinceIds.has(p.provinceId)) return true;
-          
+
           // Check if village is assigned to a facility in scope
           if (p.villageId) {
             const facId = villageToFacilityMap.get(p.villageId);
             if (facId && scope.facilityIds.has(facId)) return true;
-            
+
             const village = allVillages.find((v: any) => v.id === p.villageId);
             if (village && village.districtId && scope.districtIds.has(village.districtId)) return true;
           }
-          
+
           // If no specific boundaries are set, fallback check using the record's parents
           if (!p.facilityId && !p.villageId) {
             if (p.districtId && scope.districtIds.has(p.districtId)) return true;
@@ -7655,7 +7788,7 @@ export async function registerRoutes(
           })
           .from(villages)
           .where(and(eq(villages.id, Number(villageId)), eq(villages.tenantId, req.tenantId)));
-        
+
         if (villageRow) {
           if (villageRow.boundary) {
             activeBoundary = villageRow.boundary;
@@ -7680,7 +7813,7 @@ export async function registerRoutes(
 
         const result = await pool.query(
           `
-          SELECT 
+          SELECT
             population_total AS value,
             under5_population AS under5_value,
             geojson
@@ -7703,7 +7836,7 @@ export async function registerRoutes(
             const radVal = parseFloat(radiusKm);
             const result = await pool.query(
               `
-              SELECT 
+              SELECT
                 population_total AS value,
                 under5_population AS under5_value,
                 geojson
@@ -7724,7 +7857,7 @@ export async function registerRoutes(
           } else {
             const result = await pool.query(
               `
-              SELECT 
+              SELECT
                 population_total AS value,
                 under5_population AS under5_value,
                 geojson
@@ -7751,7 +7884,7 @@ export async function registerRoutes(
       for (const r of rows) {
         totalPop += r.value || 0;
         under5Pop += r.under5_value || 0;
-        
+
         if (r.geojson) {
           const parsed = parseCellGeoJson(r.geojson);
           if (parsed) {
@@ -7780,7 +7913,7 @@ export async function registerRoutes(
               geomJson = JSON.stringify((activeBoundary as any).geometry);
             }
             const geomResult = await pool.query(`
-              SELECT 
+              SELECT
                 ST_Area(ST_SetSRID(ST_GeomFromGeoJSON($1), 4326)::geography) / 1000000.0 AS area_km2,
                 ST_Y(ST_Centroid(ST_SetSRID(ST_GeomFromGeoJSON($1), 4326))) AS center_lat,
                 ST_X(ST_Centroid(ST_SetSRID(ST_GeomFromGeoJSON($1), 4326))) AS center_lng
@@ -7989,7 +8122,7 @@ export async function registerRoutes(
       const isApprover = dbUser.role === "national_admin" || dbUser.role === "gis_specialist" ||
         dbUser.role === "provincial_coordinator" || dbUser.role === "district_manager" ||
         (Array.isArray(dbUser.roles) && (dbUser.roles as string[]).some(r => ["national_admin", "gis_specialist", "provincial_coordinator", "district_manager"].includes(r)));
-      
+
       if (!isApprover) {
         return res.status(403).json({ message: "Forbidden: only reviewers are authorized to review population data" });
       }
@@ -8038,7 +8171,7 @@ export async function registerRoutes(
       const isApprover = dbUser.role === "national_admin" || dbUser.role === "gis_specialist" ||
         dbUser.role === "provincial_coordinator" || dbUser.role === "district_manager" ||
         (Array.isArray(dbUser.roles) && (dbUser.roles as string[]).some(r => ["national_admin", "gis_specialist", "provincial_coordinator", "district_manager"].includes(r)));
-      
+
       if (!isApprover) {
         return res.status(403).json({ message: "Forbidden: only reviewers are authorized to approve population data" });
       }
@@ -8088,7 +8221,7 @@ export async function registerRoutes(
       const isApprover = dbUser.role === "national_admin" || dbUser.role === "gis_specialist" ||
         dbUser.role === "provincial_coordinator" || dbUser.role === "district_manager" ||
         (Array.isArray(dbUser.roles) && (dbUser.roles as string[]).some(r => ["national_admin", "gis_specialist", "provincial_coordinator", "district_manager"].includes(r)));
-      
+
       if (!isApprover) {
         return res.status(403).json({ message: "Forbidden: only reviewers are authorized to return population data" });
       }
@@ -8138,7 +8271,7 @@ export async function registerRoutes(
       const isApprover = dbUser.role === "national_admin" || dbUser.role === "gis_specialist" ||
         dbUser.role === "provincial_coordinator" || dbUser.role === "district_manager" ||
         (Array.isArray(dbUser.roles) && (dbUser.roles as string[]).some(r => ["national_admin", "gis_specialist", "provincial_coordinator", "district_manager"].includes(r)));
-      
+
       if (!isApprover) {
         return res.status(403).json({ message: "Forbidden: only reviewers are authorized to reject population data" });
       }
@@ -8187,7 +8320,7 @@ export async function registerRoutes(
 
       const isNational = dbUser.role === "national_admin" || dbUser.role === "gis_specialist" || dbUser.isPlatformAdmin ||
         (Array.isArray(dbUser.roles) && (dbUser.roles as string[]).some(r => ["national_admin", "gis_specialist"].includes(r)));
-      
+
       if (!isNational) {
         return res.status(403).json({ message: "Forbidden: only national administrators can archive population datasets" });
       }
@@ -8231,7 +8364,7 @@ export async function registerRoutes(
       const isApprover = dbUser.role === "national_admin" || dbUser.role === "gis_specialist" ||
         dbUser.role === "provincial_coordinator" || dbUser.role === "district_manager" ||
         (Array.isArray(dbUser.roles) && (dbUser.roles as string[]).some(r => ["national_admin", "gis_specialist", "provincial_coordinator", "district_manager"].includes(r)));
-      
+
       if (!isApprover) {
         return res.status(403).json({ message: "Forbidden: not authorized to reopen population data" });
       }
@@ -8455,7 +8588,7 @@ export async function registerRoutes(
   app.post("/api/microplans", ...auth, async (req: any, res) => {
     try {
       const data = insertMicroplanSchema.parse(req.body);
-      
+
       // Enforce geographic boundaries for microplan creation
       if (data.facilityId && !(await userCanAccessGeo(req.dbUser, req.tenantId, { facilityId: Number(data.facilityId) }))) {
         return res.status(403).json({ message: "Forbidden: no access to this facility." });
@@ -8493,13 +8626,13 @@ export async function registerRoutes(
       if (oldPlan.status === "approved" || oldPlan.status === "auto_approved") {
         const isDistManager = req.dbUser.role === "district_manager" || (Array.isArray(req.dbUser.roles) && req.dbUser.roles.includes("district_manager"));
         const isAdmin = req.dbUser.role === "national_admin" || req.dbUser.isPlatformAdmin;
-        
+
         if (!isDistManager && !isAdmin) {
           return res.status(403).json({
             message: "Forbidden: Approved microplans can only be edited by district or national/platform officials."
           });
         }
-        
+
         if (!req.body.districtEditReason || req.body.districtEditReason.trim().length === 0) {
           return res.status(400).json({
             message: "A justification reason (districtEditReason) is required to edit an approved microplan."
@@ -8622,7 +8755,7 @@ export async function registerRoutes(
       const microplanId = parseInt(req.params.id);
       const { facilityId, selectedSource, parentTotalPopulation } = req.body;
       if (!selectedSource || !facilityId) return res.status(400).json({ message: 'Missing required fields' });
-      
+
       const scenario = await DenominatorHarmonisationService.generateScenario({
         microplanId,
         tenantId: (req as any).tenantId,
@@ -8674,7 +8807,7 @@ export async function registerRoutes(
       const dbUser = req.dbUser!;
 
       const facilityId = req.query.facilityId ? parseInt(req.query.facilityId as string) : undefined;
-      
+
       if (facilityId) {
         const geoContext = await getFacilityHierarchy(facilityId, req.tenantId);
         if (!hasPermission(dbUser, "view_session_plans", geoContext)) {
@@ -9340,7 +9473,7 @@ export async function registerRoutes(
       const facMap = new Map<number, any>(facList.map((f: any) => [f.id, f]));
       const vilList = await storage.getVillages(req.tenantId);
       const vilMap = new Map<number, any>(vilList.map((v: any) => [v.id, v]));
-      
+
       const activeSessionIds = active.map((s: any) => s.id);
       let svRows: any[] = [];
       if (activeSessionIds.length > 0) {
@@ -9354,7 +9487,7 @@ export async function registerRoutes(
             )
           );
       }
-      
+
       const svByPlan = new Map<number, number[]>();
       for (const r of svRows) {
         const arr = svByPlan.get(r.sessionId) ?? [];
@@ -9795,12 +9928,12 @@ export async function registerRoutes(
       const unserved = (vilList as any[]).filter((v) => {
         if (v.latitude == null || v.longitude == null) return false;
         if (!recordInGeoScope(scope, { facilityId: v.assignedFacilityId, districtId: v.districtId })) return false;
-        
+
         // VGIE distance-based logic: served if distance <= 5km
         if (v.assignedFacilityId && v.distanceToFacility != null && Number(v.distanceToFacility) <= 5) {
           return false;
         }
-        
+
         // Filter out out-of-bounds villages for the Zambia tenant dynamically using the cached constituencies set
         if (outsideVillageIds.has(Number(v.id))) return false;
 
@@ -10383,7 +10516,7 @@ export async function registerRoutes(
       if (data.facilityId) {
         const f = await storage.getFacility(req.tenantId, data.facilityId);
         if (!f) return res.status(400).json({ message: "Facility does not belong to this tenant" });
-        
+
         // Enforce geographic bounds for creating supervision visits
         if (!(await userCanAccessGeo(req.dbUser, req.tenantId, { facilityId: Number(data.facilityId) }))) {
           return res.status(403).json({ message: "Forbidden: no access to this facility." });
@@ -10417,7 +10550,7 @@ export async function registerRoutes(
       if (body.scheduledDate && typeof body.scheduledDate === "string") body.scheduledDate = new Date(body.scheduledDate);
       if (body.conductedDate && typeof body.conductedDate === "string") body.conductedDate = new Date(body.conductedDate);
       if (body.nextVisitDate && typeof body.nextVisitDate === "string") body.nextVisitDate = new Date(body.nextVisitDate);
-      
+
       const old = await storage.getSupervisionVisit(req.tenantId, id);
       if (!old) return res.status(404).json({ message: "Supervision visit not found" });
 
@@ -12022,11 +12155,11 @@ export async function registerRoutes(
           .select()
           .from(facilities)
           .where(eq(facilities.id, parsed.facilityId));
-        
+
         if (!facility) {
           return res.status(400).json({ message: "Assigned facility not found" });
         }
-        
+
         const districtId = facility.districtId;
 
         // 2. Look for existing virtual village in this district context
@@ -12040,7 +12173,7 @@ export async function registerRoutes(
               eq(villages.tenantId, req.tenantId)
             )
           );
-        
+
         if (virtualVillage) {
           resolvedVillageId = virtualVillage.id;
         } else {
@@ -12103,18 +12236,18 @@ export async function registerRoutes(
       const generatedClientId = `${prefix}-${checkDigit}`;
 
       // Save client record with resolved village ID mapping
-      const clientToCreate = { 
-        ...parsed, 
+      const clientToCreate = {
+        ...parsed,
         villageId: resolvedVillageId,
         clientId: generatedClientId,
         serialNumber: serialNum,
         registrationYear: regYear
       };
       const created = await storage.createClient(req.tenantId, clientToCreate);
-      
+
       // Store justification in newValue jsonb column of audit log entry
-      await logAudit(req, "create_client", "client", null, null, { 
-        id: created.id, 
+      await logAudit(req, "create_client", "client", null, null, {
+        id: created.id,
         name: created.name,
         justification: req.user?.dbRole === "national_admin" ? req.body.justification : undefined
       });
@@ -12184,7 +12317,7 @@ export async function registerRoutes(
   app.patch("/api/clients/:id", isAuthenticated, requireTenant, requireDbUser, async (req: any, res) => {
     try {
       let parsed = insertClientSchema.partial().parse(req.body);
-      
+
       // Fetch the existing client to analyze transition state
       const existingClient = await storage.getClient(req.tenantId, req.params.id);
       if (!existingClient) return res.status(404).json({ message: "Client not found" });
@@ -12206,11 +12339,11 @@ export async function registerRoutes(
           .select()
           .from(facilities)
           .where(eq(facilities.id, facilityId));
-        
+
         if (!facility) {
           return res.status(400).json({ message: "Assigned facility not found" });
         }
-        
+
         const districtId = facility.districtId;
 
         // Look for existing virtual village in this district context
@@ -12224,7 +12357,7 @@ export async function registerRoutes(
               eq(villages.tenantId, req.tenantId)
             )
           );
-        
+
         if (virtualVillage) {
           villageId = virtualVillage.id;
         } else {
@@ -12394,9 +12527,9 @@ export async function registerRoutes(
         sentAt: new Date().toISOString(),
       });
 
-      res.status(200).json({ 
-        success: true, 
-        message: `Successfully transmitted ${client.name}'s booklet via ${method} to ${destination} from ${senderNumber}` 
+      res.status(200).json({
+        success: true,
+        message: `Successfully transmitted ${client.name}'s booklet via ${method} to ${destination} from ${senderNumber}`
       });
     } catch (err: any) {
       console.error("POST /api/clients/share failed:", err);
@@ -12443,8 +12576,8 @@ export async function registerRoutes(
         await sendMessagingEmail({ to: destination, subject: "Certified Digital Immunization Booklet", text: messageText });
       }
 
-      res.status(200).json({ 
-        success: true, 
+      res.status(200).json({
+        success: true,
         message: `Successfully transmitted ${client.name}'s booklet via ${method} to ${destination} from ${senderNumber}`,
         messageText,
         attachment: {
@@ -12469,7 +12602,7 @@ export async function registerRoutes(
       }
 
       const filename = `EPI_Certified_Booklet_${client.name.replace(/\s+/g, "_")}.pdf`;
-      
+
       res.setHeader("Content-Type", "application/pdf");
       res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
 
@@ -12499,10 +12632,10 @@ export async function registerRoutes(
       // ---
       // PAGE 1: COVER & DEMOGRAPHICS
       // ---
-      
+
       // Top color border
       doc.rect(40, 40, 515, 8).fill(BRAND.primary);
-      
+
       // Header Text
       let republicName = "REPUBLIC OF SOUTH SUDAN";
       if (tenant?.code === "ZMB" || tenant?.name?.toLowerCase().includes("zambia")) {
@@ -12512,14 +12645,14 @@ export async function registerRoutes(
       } else if (tenant) {
         republicName = `REPUBLIC OF ${tenant.name.toUpperCase()}`;
       }
-      
+
       doc.fillColor(BRAND.muted).fontSize(10).font("Helvetica-Bold")
          .text(republicName, 40, 60, { align: "left" });
       doc.fillColor(BRAND.text).fontSize(14).font("Helvetica-Bold")
          .text("MINISTRY OF HEALTH", 40, 75);
       doc.fillColor(BRAND.primary).fontSize(11).font("Helvetica-Bold")
          .text("Certified E-Health Immunization Booklet", 40, 95);
-         
+
       // Verification Box/QR Code space (drawn as beautiful vector checkmark & badge)
       const qrBoxX = 435;
       const qrBoxY = 60;
@@ -12527,50 +12660,50 @@ export async function registerRoutes(
       doc.fillColor(BRAND.success).fontSize(8).font("Helvetica-Bold").text("EPI CERTIFIED", qrBoxX + 10, qrBoxY + 12);
       doc.fillColor(BRAND.muted).fontSize(7).font("Helvetica").text("Digital Verification QR", qrBoxX + 10, qrBoxY + 24);
       doc.fillColor(BRAND.muted).fontSize(6).text("Scan on front card", qrBoxX + 10, qrBoxY + 34);
-      
+
       // Divider line
       doc.moveTo(40, 115).lineTo(555, 115).strokeColor(BRAND.border).lineWidth(1).stroke();
-      
+
       // Client ID Banner
       doc.roundedRect(40, 125, 515, 30, 4).fillColor(BRAND.bgLight).strokeColor(BRAND.primary).lineWidth(0.5).fillAndStroke();
       doc.fillColor(BRAND.primary).fontSize(8).font("Helvetica-Bold").text("UNIQUE CLIENT ID (E-Health Registry)", 50, 131);
       doc.fillColor(BRAND.primary).fontSize(12).font("Helvetica-Bold").text(client.clientId || client.id.substring(0, 12).toUpperCase(), 50, 142);
-      
+
       // Demographics Card (Left Column)
       const colWidth = 245;
       const cardY = 165;
       const cardHeight = 220;
-      
+
       doc.roundedRect(40, cardY, colWidth, cardHeight, 8).fillColor(BRAND.white).strokeColor(BRAND.border).lineWidth(1).fillAndStroke();
       doc.fillColor(BRAND.primary).fontSize(9).font("Helvetica-Bold").text("CHILD DEMOGRAPHICS", 50, cardY + 12);
-      
+
       let curY = cardY + 30;
       const renderField = (label: string, value: string, fontBold = false) => {
         doc.fillColor(BRAND.muted).fontSize(8).font("Helvetica").text(label, 50, curY);
         doc.fillColor(BRAND.text).fontSize(9).font(fontBold ? "Helvetica-Bold" : "Helvetica").text(value, 50, curY + 10);
         curY += 28;
       };
-      
+
       renderField("Child Full Name", client.name, true);
       renderField("Date of Birth", new Date(client.dateOfBirth).toLocaleDateString(), false);
       renderField("Gender / Sex", client.gender ? client.gender.toUpperCase() : "N/A", false);
       renderField("Mother / Guardian Name", client.parentName || "Not registered", false);
       renderField("Guardian Contact Phone", client.contactPhone || "None", false);
-      
+
       // Residency & Geographic Card (Right Column)
       doc.roundedRect(310, cardY, colWidth, cardHeight, 8).fillColor(BRAND.white).strokeColor(BRAND.border).lineWidth(1).fillAndStroke();
       doc.fillColor(BRAND.primary).fontSize(9).font("Helvetica-Bold").text("GEOGRAPHIC ACCESS SCOPE", 320, cardY + 12);
-      
+
       curY = cardY + 30;
       const renderRightField = (label: string, value: string) => {
         doc.fillColor(BRAND.muted).fontSize(8).font("Helvetica").text(label, 320, curY);
         doc.fillColor(BRAND.text).fontSize(9).font("Helvetica-Bold").text(value, 320, curY + 10, { width: colWidth - 20 });
         curY += 28;
       };
-      
+
       const villageName = village ? village.name : "N/A";
       const facilityName = facility ? facility.name : "N/A";
-      
+
       if (!client.isCrossBorder) {
         renderRightField("Village Catchment", villageName);
         renderRightField("Registered Clinic", facilityName);
@@ -12581,11 +12714,11 @@ export async function registerRoutes(
         renderRightField("Border Point of Entry", client.borderPointOfEntry || "N/A");
         renderRightField("Foreign Residence", client.foreignResidence || "N/A");
       }
-      
+
       // Risk flags / Clinical Advisories section
       const advisoryY = 395;
       const hasFlags = client.isRefusal || (Array.isArray(client.contraindications) && client.contraindications.length > 0);
-      
+
       if (hasFlags) {
         doc.roundedRect(40, advisoryY, 515, 60, 8).fillColor("#fef2f2").strokeColor(BRAND.danger).lineWidth(1).fillAndStroke();
         doc.fillColor(BRAND.danger).fontSize(9).font("Helvetica-Bold").text("CLINICAL RISK FLAGS & ADVISORIES", 50, advisoryY + 10);
@@ -12602,7 +12735,7 @@ export async function registerRoutes(
         doc.fillColor(BRAND.success).fontSize(9).font("Helvetica-Bold").text("CLINICAL ADVISORY & IMMUNIZATION STATUS", 50, advisoryY + 10);
         doc.fillColor(BRAND.text).fontSize(8).font("Helvetica").text("This child has no recorded contraindications or refusal flags. Clinician instruction: Please continue administering the vaccine routine as scheduled below. Stamp and date the immunization grid on Page 2 after each dose is successfully administered.", 50, advisoryY + 24, { width: 495, lineGap: 1.5 });
       }
-      
+
       // Live metadata watermark footer
       doc.fillColor(BRAND.muted).fontSize(7).font("Helvetica")
          .text(`Registry Sync Date: ${new Date().toLocaleDateString()}  •  System ID: ${client.id}  •  VaxPlan Platform v1.4.0`, 40, 770, { align: "center", width: 515 });
@@ -12611,28 +12744,28 @@ export async function registerRoutes(
       // PAGE 2: SCHEDULE TABLE & GRID
       // ---
       doc.addPage();
-      
+
       // Top color border
       doc.rect(40, 40, 515, 8).fill(BRAND.primary);
-      
+
       // Page Title
       doc.fillColor(BRAND.muted).fontSize(10).font("Helvetica-Bold")
          .text("IMMUNIZATION SCHEDULE & RECORD GRID", 40, 60);
       doc.fillColor(BRAND.text).fontSize(14).font("Helvetica-Bold")
          .text("Official Dose Administration Register", 40, 75);
-      
+
       // Unique Client ID block at top-right
       doc.fillColor(BRAND.muted).fontSize(8).font("Helvetica").text("Client:", 400, 60, { align: "right", width: 155 });
       doc.fillColor(BRAND.primary).fontSize(9).font("Helvetica-Bold").text(client.name, 400, 70, { align: "right", width: 155 });
       doc.fillColor(BRAND.muted).fontSize(8).font("Courier-Bold").text(`ID: ${client.clientId || client.id.substring(0, 12).toUpperCase()}`, 400, 82, { align: "right", width: 155 });
-      
+
       // Divider
       doc.moveTo(40, 100).lineTo(555, 100).strokeColor(BRAND.border).lineWidth(1).stroke();
-      
+
       // Draw Table Header
       const tableY = 115;
       doc.rect(40, tableY, 515, 20).fill(BRAND.primary);
-      
+
       const colX = {
         dose: 45,
         target: 195,
@@ -12640,14 +12773,14 @@ export async function registerRoutes(
         date: 345,
         batch: 475,
       };
-      
+
       doc.fillColor(BRAND.white).fontSize(8).font("Helvetica-Bold");
       doc.text("Antigen Dose", colX.dose, tableY + 6);
       doc.text("Target", colX.target, tableY + 6);
       doc.text("Status", colX.status, tableY + 6);
       doc.text("Date Given / Facility", colX.date, tableY + 6);
       doc.text("Batch / VVM", colX.batch, tableY + 6);
-      
+
       // Table Row heights & spacing
       let rowY = tableY + 20;
       const rowHeight = 22;
@@ -12697,17 +12830,17 @@ export async function registerRoutes(
         if (idx % 2 === 1) {
           doc.rect(40, rowY, 515, rowHeight).fill(BRAND.bgLight);
         }
-        
+
         // Draw bottom row line
         doc.moveTo(40, rowY + rowHeight).lineTo(555, rowY + rowHeight).strokeColor(BRAND.border).lineWidth(0.5).stroke();
-        
+
         const matchingVac = findVaccination(dose.code, dose.name);
-        
+
         let status = "PENDING";
         let statusColor = BRAND.muted;
         let dateText = "-";
         let batchText = "-";
-        
+
         if (matchingVac) {
           status = "GIVEN";
           statusColor = BRAND.success;
@@ -12724,9 +12857,9 @@ export async function registerRoutes(
           const dueDate = new Date(dob.getTime() + dose.weeks * 7 * 24 * 60 * 60 * 1000);
           const today = new Date();
           today.setHours(0, 0, 0, 0);
-          
+
           const ageDays = (today.getTime() - dob.getTime()) / (24 * 60 * 60 * 1000);
-          
+
           if (today >= dueDate) {
             if (isVaccineMissed(dose.code, ageDays)) {
               status = "MISSED";
@@ -12748,39 +12881,39 @@ export async function registerRoutes(
             dateText = `Due: ${dueDate.toLocaleDateString()}`;
           }
         }
-        
+
         // Draw texts in cells
         doc.fillColor(BRAND.text).fontSize(8).font("Helvetica-Bold").text(dose.name, colX.dose, rowY + 6);
         doc.fillColor(BRAND.muted).fontSize(7).font("Helvetica").text(dose.group, colX.target, rowY + 7);
-        
+
         // Status text
         doc.save();
         doc.fillColor(statusColor).fontSize(7).font("Helvetica-Bold").text(status, colX.status, rowY + 7);
         doc.restore();
-        
+
         doc.fillColor(BRAND.text).fontSize(7.5).font("Helvetica").text(dateText, colX.date, rowY + 7, { width: 125, height: 14, ellipsis: true });
         doc.fillColor(BRAND.muted).fontSize(7.5).font("Courier").text(batchText, colX.batch, rowY + 7, { width: 75, height: 14, ellipsis: true });
-        
+
         rowY += rowHeight;
       });
 
       // Signature & stamp lines
       const sigY = 540;
       doc.moveTo(40, sigY).lineTo(555, sigY).strokeColor(BRAND.border).lineWidth(1).stroke();
-      
+
       doc.fillColor(BRAND.primary).fontSize(9).font("Helvetica-Bold").text("CLINICIAN CERTIFICATION SIGN-OFF", 40, sigY + 15);
-      
+
       doc.fillColor(BRAND.muted).fontSize(8).font("Helvetica");
       doc.text("Clinician Name: _______________________", 40, sigY + 35);
       doc.text("Signature & Stamp: _______________________", 40, sigY + 55);
-      
+
       doc.text("Date Signed: _______________________", 320, sigY + 35);
       doc.text("Facility Location: _______________________", 320, sigY + 55);
-      
+
       // Certified watermark text
       doc.fillColor(BRAND.success).fontSize(7).font("Helvetica-Bold")
          .text("MINISTRY OF HEALTH OFFICIAL IMMUNIZATION REGISTER", 40, sigY + 95, { align: "center", width: 515 });
-         
+
       // Page 2 Footer
       doc.fillColor(BRAND.muted).fontSize(7).font("Helvetica")
          .text(`Document Ref: ${client.id.toUpperCase()}  •  Certified Record Booklet  •  Page 2 of 2`, 40, 770, { align: "center", width: 515 });
@@ -13278,7 +13411,7 @@ export async function registerRoutes(
       if (genericDose) {
         return res.status(400).json({ message: "Please select scheduled doses such as Penta-1, OPV-0, PCV-2, or MR-1 instead of generic vaccine series." });
       }
-      
+
       const results = await db.transaction(async (tx: any) => {
         const rows = [];
         for (const item of parsed as any[]) {
@@ -13384,7 +13517,7 @@ export async function registerRoutes(
     try {
       const sessionPlanId = parseInt(req.params.sessionId);
       if (isNaN(sessionPlanId)) return res.status(400).json({ message: "Invalid session plan ID" });
-      
+
       const session = await storage.getSessionPlan(req.tenantId, sessionPlanId);
       if (!session) return res.status(404).json({ message: "Session plan not found" });
 
@@ -13553,7 +13686,7 @@ export async function registerRoutes(
 
       list = list.filter((t: any) => {
          if (!recordInGeoScope(scope, { facilityId: t.facilityId })) return false;
-         
+
          if (geoMaps) {
            const fac = geoMaps.allFacilities.find((f: any) => f.id === t.facilityId);
            if (!fac) return false;
@@ -13585,8 +13718,8 @@ export async function registerRoutes(
       */
 
       // EXPLANATION OF CHANGE:
-      // Zod validation is failing on stock card transaction saves because Drizzle-Zod expects `expiryDate` and `transactionDate` 
-      // to be JavaScript Date objects, but the client submits them as ISO strings. We pre-parse these values and also supply 
+      // Zod validation is failing on stock card transaction saves because Drizzle-Zod expects `expiryDate` and `transactionDate`
+      // to be JavaScript Date objects, but the client submits them as ISO strings. We pre-parse these values and also supply
       // the verified `tenantId` to ensure strict multi-tenant validation succeeds.
       const payload = {
         ...req.body,
@@ -13729,7 +13862,7 @@ export async function registerRoutes(
 
       list = list.filter((r: any) => {
          if (!recordInGeoScope(scope, { facilityId: r.facilityId })) return false;
-         
+
          if (geoMaps) {
            const fac = geoMaps.allFacilities.find((f: any) => f.id === r.facilityId);
            if (!fac) return false;
@@ -13801,7 +13934,7 @@ export async function registerRoutes(
     try {
       const id = parseInt(req.params.id);
       if (isNaN(id)) return res.status(400).json({ message: "Invalid report ID" });
-      
+
       const role = req.user?.dbRole as string | undefined;
       if (role !== "district_manager" && role !== "national_admin") {
         return res.status(403).json({ message: "Only District Managers or National Admins can approve monthly compiled reports." });
@@ -14700,7 +14833,7 @@ export async function registerRoutes(
   app.post("/api/unmapped-settlements/run-engine", isAuthenticated, requireTenant, async (req: any, res) => {
     try {
       const { populationThreshold, buildingThreshold, radiusKm } = req.body;
-      
+
       const result = await runMissingSettlementDetection(req.tenantId, {
         populationThreshold: populationThreshold ? parseInt(populationThreshold, 10) : undefined,
         buildingThreshold: buildingThreshold ? parseInt(buildingThreshold, 10) : undefined,
@@ -14730,7 +14863,7 @@ export async function registerRoutes(
       // Find all population grids that are > 5km from any health facility
       const client = pool;
       const query = `
-        SELECT 
+        SELECT
           g.id,
           g.population_total,
           g.under5_population,
@@ -14748,7 +14881,7 @@ export async function registerRoutes(
         ORDER BY g.population_total DESC
       `;
       const resGrids = await client.query(query, [req.tenantId]);
-      
+
       // Filter grids where distance is >= 5000m (5km)
       const gapGrids = resGrids.rows
         .filter((row: any) => parseFloat(row.distance_to_nearest_facility) >= 5000)
@@ -16488,13 +16621,13 @@ export async function registerRoutes(
         }
         const tenant = await storage.getTenant(req.tenantId!);
         if (!tenant) return res.status(404).json({ message: "Tenant not found" });
-        
+
         const commConfig = ((tenant.settings as any)?.communication || {})[channel];
         const isSmartRouting = (tenant.settings as any)?.communication?.smartRouting === true;
-        
+
         let result;
         const msgText = `Test message from VaxPlan Unified Communication Engine via ${channel.toUpperCase()}!`;
-        
+
         if (isSmartRouting) {
           result = await dispatchWithFallback({
             tenantId: req.tenantId!,
@@ -16515,7 +16648,7 @@ export async function registerRoutes(
             return res.status(400).json({ message: "Invalid channel" });
           }
         }
-        
+
         if (result.success) {
           res.json({ message: "Message dispatched", details: result });
         } else {
@@ -18550,13 +18683,13 @@ export async function registerRoutes(
 
         // 1. Gather live database stats for the tenant context
         const scope = await getGeoScope(req.dbUser, tenantId);
-        
+
         let statsRow: Record<string, any> = { totalFacilities: 0, activeFacilities: 0, totalVillages: 0, htrVillages: 0, totalSessions: 0, totalPopulation: 0 };
-        
+
         if (scope.all || scope.facilityIds.size > 0 || scope.districtIds.size > 0 || scope.provinceIds.size > 0) {
           const facList = scope.all ? "" : (Array.from(scope.facilityIds).join(",") || "0");
           const distList = scope.all ? "" : (Array.from(scope.districtIds).join(",") || "0");
-          
+
           const facCond = scope.all ? dsql`` : dsql`AND id = ANY(ARRAY[${dsql.raw(facList)}]::int[])`;
           const facRefCond = scope.all ? dsql`` : dsql`AND facility_id = ANY(ARRAY[${dsql.raw(facList)}]::int[])`;
           const villCond = scope.all ? dsql`` : dsql`AND (assigned_facility_id = ANY(ARRAY[${dsql.raw(facList)}]::int[]) OR district_id = ANY(ARRAY[${dsql.raw(distList)}]::int[]))`;
@@ -18614,7 +18747,7 @@ export async function registerRoutes(
 
         const zeroDoseCount = Math.max(0, eligibleCount - penta1Count);
         const zeroDoseRate = eligibleCount > 0 ? (zeroDoseCount / eligibleCount) * 100 : 0;
-        
+
         const dropoutCount = Math.max(0, penta1Count - penta3Count);
         const dropoutRate = penta1Count > 0 ? (dropoutCount / penta1Count) * 100 : 0;
 
@@ -18834,7 +18967,7 @@ Instructions:
             ST_MakeValid(
               ST_SetSRID(
                 ST_GeomFromGeoJSON(
-                  CASE 
+                  CASE
                     WHEN geojson->>'type' = 'Feature' THEN (geojson->'geometry')::text
                     ELSE geojson::text
                   END
@@ -18902,7 +19035,7 @@ Instructions:
       const flagged = [];
       for (const settlement of uncoveredSettlements) {
         const nearest = await getNearestHealthFacility(req.tenantId, settlement.longitude, settlement.latitude);
-        
+
         let facilityRow = null;
         if (nearest.facilityName) {
           const [fac] = await db
@@ -18914,7 +19047,7 @@ Instructions:
         }
 
         const messageText = `ALERT: Community "${settlement.name}" (estimated population: ${settlement.population_estimate}) in ${settlement.district_name || 'District'}, ${settlement.province_name || 'Province'} has been identified as UNCOVERED (not in any official facility catchment). The nearest health facility is "${nearest.facilityName || 'Unknown'}" (${nearest.distanceKm} km away). Please coordinate to cover this community.`;
-        
+
         const recipients: string[] = [];
 
         if (facilityRow) {
@@ -19044,7 +19177,7 @@ Instructions:
       if (!row) return res.status(404).json({ message: "Facility not found" });
 
       const { gisPolygons } = await import("@shared/schema");
-      
+
       // Get the active polygon from gisPolygons table
       const [activeGeo] = await db.select().from(gisPolygons)
         .where(and(
@@ -19281,7 +19414,7 @@ Instructions:
       if (!row) return res.status(404).json({ message: "Village not found" });
 
       const { gisPolygons } = await import("@shared/schema");
-      
+
       // Get the active polygon from gisPolygons table
       const [activeGeo] = await db.select().from(gisPolygons)
         .where(and(
@@ -19622,11 +19755,11 @@ Instructions:
       const year = parseInt(req.query.year as string);
       const quarter = parseInt(req.query.quarter as string);
       const source = (req.query.populationSource as string) || "worldpop";
-      
+
       if (!facilityId || !year || !quarter) {
         return res.status(400).json({ message: "Missing required query parameters: facilityId, year, quarter" });
       }
-      
+
       const { MicroplanPrefillService } = await import("./services/microplanPrefillService.js");
       const bundle = await MicroplanPrefillService.buildBundle(
         req.tenantId,
@@ -19635,7 +19768,7 @@ Instructions:
         quarter,
         source as any
       );
-      
+
       res.json(bundle);
     } catch (e) {
       console.error("[Prefill API Error]", e);
@@ -19788,7 +19921,7 @@ Instructions:
   app.get("/api/wiki/pages/:slug", async (req: any, res: any) => {
     try {
       const { slug } = req.params;
-      
+
       let showUnpublished = false;
       if (req.session?.userId) {
         const u = await storage.getUser(req.session.userId);
@@ -19974,7 +20107,7 @@ Instructions:
             .toLowerCase()
             .replace(/[^a-z0-9]/g, "-")
             .slice(0, 50);
-          
+
           const filename = `${safeBasename}-${Date.now()}-${rand}${ext}`;
           const fullPath = _path.join(wikiMediaDir, filename);
 
@@ -20172,7 +20305,7 @@ Instructions:
 
       const { PopulationIntelligenceService } = await import("./services/populationIntelligenceService");
       const result = await PopulationIntelligenceService.fetchPointRadiusPopulation(req.tenantId, lat, lng, radiusKm);
-      
+
       res.json({ success: true, data: result });
     } catch (err: any) {
       console.error("[Pop Intel API]", err);
@@ -20191,7 +20324,7 @@ Instructions:
 
       const { PopulationIntelligenceService } = await import("./services/populationIntelligenceService");
       const result = await PopulationIntelligenceService.fetchFacilityPopulation(req.tenantId, facilityId, radiusKm);
-      
+
       res.json({ success: true, data: result });
     } catch (err: any) {
       console.error("[Pop Intel API]", err);
@@ -20212,7 +20345,7 @@ Instructions:
       // Fallback: If no specific microplan fetching exists yet, just return dummy or use facility fetching
       // Since we need the facilityId to fetch the microplan.
       const [microplan] = await db.select().from(microplans).where(and(eq(microplans.id, microplanId), eq(microplans.tenantId, req.tenantId))).limit(1);
-      
+
       if (!microplan || !microplan.facilityId) {
         return res.status(404).json({ message: "Microplan or associated facility not found." });
       }
@@ -20228,4 +20361,3 @@ Instructions:
   return httpServer;
 
 }
-

@@ -1,4 +1,4 @@
-﻿import { useLocation, Link } from "wouter";
+import { useLocation, Link } from "wouter";
 import { useState } from "react";
 import { versionLabel } from "@/lib/version";
 import {
@@ -56,7 +56,7 @@ import { Badge } from "@/components/ui/badge";
 import { useQuery } from "@tanstack/react-query";
 import type { User, ApprovalRequest } from "@shared/schema";
 import { DEFAULT_MODULES } from "@/lib/modules";
-import { canAccessClientLogbook, canAccessDefaulterList, canAccessDropoutRates } from "@/lib/accessControl";
+import { canAccessClientLogbook, canAccessDefaulterList, canAccessDropoutRates, canAccessUserManagement } from "@/lib/accessControl";
 interface TenantSummary { id: string; name: string; code: string }
 interface AppSidebarProps {
   user: User;
@@ -223,7 +223,8 @@ export function AppSidebar({ user }: AppSidebarProps) {
   const isPlatformAdmin = (user as any).isPlatformAdmin === true;
   const isFacilityStaff = user.role === "facility_clerk" || user.role === "facility_in_charge" || user.role === "facility_partner";
   const canAccessHis = user.role === "national_admin" || user.role === "gis_specialist";
-  const canAccessAdmin = isNationalAdmin || user.role === "provincial_coordinator" || user.role === "district_manager" || isPlatformAdmin;
+  const canManageUsers = canAccessUserManagement(user);
+  const canAccessAdmin = isNationalAdmin || canManageUsers || user.role === "provincial_coordinator" || isPlatformAdmin;
   const canEditWiki = isNationalAdmin || user.role === "gis_specialist" || isPlatformAdmin;
   const canReconcile = user.role === "national_admin" || user.role === "district_manager";
   // Field Teams page is available to district_manager and above (not facility-level roles)
@@ -454,7 +455,10 @@ export function AppSidebar({ user }: AppSidebarProps) {
                   if (item.path === "/admin/staff") {
                     return true;
                   }
-                  if (item.path === "/admin/users" || item.path === "/admin/signups") {
+                  if (item.path === "/admin/users") {
+                    return canManageUsers;
+                  }
+                  if (item.path === "/admin/signups") {
                     return isNationalAdmin || isPlatformAdmin;
                   }
                   return isNationalAdmin;
