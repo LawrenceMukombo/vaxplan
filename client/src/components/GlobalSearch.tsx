@@ -49,6 +49,7 @@ import {
 } from "lucide-react";
 import type { User } from "@shared/schema";
 import { DEFAULT_MODULES } from "@/lib/modules";
+import { canAccessClientLogbook, canAccessDefaulterList, canAccessDropoutRates } from "@/lib/accessControl";
 
 interface TenantSummary {
   id: string;
@@ -174,7 +175,7 @@ export function GlobalSearch({ user }: GlobalSearchProps) {
       });
     }
 
-    if (modules.clientLogbook !== false) {
+    if (modules.clientLogbook !== false && canAccessClientLogbook(user)) {
       items.push({
         title: "Client Logbook",
         description: "Child registry and vaccination ledger tracking individual routine immunization records",
@@ -184,7 +185,7 @@ export function GlobalSearch({ user }: GlobalSearchProps) {
       });
     }
 
-    if (modules.defaulters !== false) {
+    if (modules.defaulters !== false && canAccessDefaulterList(user)) {
       items.push({
         title: "Defaulter Tracking",
         description: "Track immunization defaulters, overdue list, and checklist reviews",
@@ -194,7 +195,7 @@ export function GlobalSearch({ user }: GlobalSearchProps) {
       });
     }
 
-    if (modules.dropout !== false) {
+    if (modules.dropout !== false && canAccessDropoutRates(user)) {
       items.push({
         title: "Dropout Rates",
         description: "Calculate and graph antigen dropout rates (DTP1 to DTP3, BCG to MCV1)",

@@ -65,7 +65,8 @@ export function canEditFacility(
       role === "provincial_coordinator" ||
       role === "district_manager" ||
       role === "facility_clerk" ||
-      role === "facility_in_charge"
+      role === "facility_in_charge" ||
+      role === "facility_partner"
     );
   }
   
@@ -83,7 +84,7 @@ export function canEditFacility(
     return true;
   }
   
-  if ((role === "facility_clerk" || role === "facility_in_charge") && user.facilityId && facilityId) {
+  if ((role === "facility_clerk" || role === "facility_in_charge" || role === "facility_partner") && user.facilityId && facilityId) {
     return Number(user.facilityId) === Number(facilityId);
   }
   

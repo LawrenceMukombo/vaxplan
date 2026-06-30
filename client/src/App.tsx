@@ -39,6 +39,8 @@ import {
   LOGOUT_CHANNEL,
 } from "./lib/authSession";
 import { performClientLogout } from "./lib/logout";
+import { canAccessClientLogbook, canAccessDefaulterList } from "@/lib/accessControl";
+import type { User } from "@shared/schema";
 const MapPage = lazy(() => import("@/pages/MapPage"));
 const Facilities = lazy(() => import("@/pages/Facilities"));
 const Population = lazy(() => import("@/pages/Population"));
@@ -116,6 +118,18 @@ function SessionPlanningDetailRoute({ planTypeFilter }: { planTypeFilter: "routi
   if (!Number.isFinite(id)) return <NotFound />;
   return <SessionPlanning planTypeFilter={planTypeFilter} lockedMicroplanId={id} />;
 }
+function AccessDeniedPage({ moduleName }: { moduleName: string }) {
+  return (
+    <div className="flex min-h-[60vh] items-center justify-center p-8">
+      <div className="max-w-md rounded-lg border bg-card p-8 text-center shadow-sm">
+        <ShieldCheck className="mx-auto mb-4 h-10 w-10 text-muted-foreground" />
+        <h1 className="text-xl font-semibold">Access denied</h1>
+        <p className="mt-2 text-sm text-muted-foreground">You do not have permission to access {moduleName}.</p>
+      </div>
+    </div>
+  );
+}
+
 function RouteFallback() {
   return (
     <div className="flex h-full w-full items-center justify-center p-8">
@@ -236,7 +250,7 @@ function HelpGate() {
   );
 }
 // VgieGate removed: VGIE routes now render within the main AuthenticatedRouter shell.
-function AuthenticatedRouter() {
+function AuthenticatedRouter({ user }: { user: User }) {
   const { data: tenant } = useQuery<any>({ queryKey: ["/api/me/tenant"], retry: false });
   useEffect(() => {
     if (tenant) {
@@ -324,7 +338,7 @@ function AuthenticatedRouter() {
         {modules.sessions !== false ? <SessionDayPlans /> : <ModuleDisabled moduleName="Sessions Hub" />}
       </Route>
       <Route path="/clients/defaulters">
-        {modules.defaulters !== false ? <Defaulters /> : <ModuleDisabled moduleName="Defaulter Tracking" />}
+        {modules.defaulters !== false ? (canAccessDefaulterList(user) ? <Defaulters /> : <AccessDeniedPage moduleName="Defaulter List" />) : <ModuleDisabled moduleName="Defaulter Tracking" />}
       </Route>
       <Route path="/indicators/dropout">
         {modules.dropout !== false ? <DropoutRates /> : <ModuleDisabled moduleName="Dropout Rates" />}
@@ -333,7 +347,7 @@ function AuthenticatedRouter() {
         {modules.zeroDose !== false ? <ZeroDoseVillages /> : <ModuleDisabled moduleName="Zero-Dose Villages" />}
       </Route>
       <Route path="/clients">
-        {modules.clientLogbook !== false ? <ClientLogbook /> : <ModuleDisabled moduleName="Client Logbook" />}
+        {modules.clientLogbook !== false ? (canAccessClientLogbook(user) ? <ClientLogbook /> : <AccessDeniedPage moduleName="Client Logbook" />) : <ModuleDisabled moduleName="Client Logbook" />}
       </Route>
       <Route path="/stock">
         {modules.stock !== false ? <StockLedger /> : <ModuleDisabled moduleName="Stock Ledger" />}
@@ -516,7 +530,7 @@ function AuthenticatedLayout() {
           <main className="flex-1 overflow-auto">
             <UpdateBanner />
             <OfflineBanner />
-            <AuthenticatedRouter />
+            <AuthenticatedRouter user={user} />
           </main>
           <InstallPrompt />
         </div>

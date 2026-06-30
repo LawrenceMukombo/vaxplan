@@ -162,7 +162,7 @@ export default function Facilities() {
   });
   const hasBoundaries = Array.isArray(boundaries) && boundaries.length > 0;
   const { user } = useAuth();
-  const isFacilityStaff = user?.role === "facility_clerk" || user?.role === "facility_in_charge";
+  const isFacilityStaff = user?.role === "facility_clerk" || user?.role === "facility_in_charge" || user?.role === "facility_partner";
   const isDistrictStaff = user?.role === "district_manager";
   const lockedFacDistrictId = (isDistrictStaff || isFacilityStaff) ? (user?.districtId ?? null) : null;
   const lockedCommDistrictId = isDistrictStaff ? (user?.districtId ?? null) : null;
@@ -1362,7 +1362,21 @@ export default function Facilities() {
     return villages.filter(v => v.assignedFacilityId === facilityId).length;
   };
 
+  const canManageFacility = (facility: Facility | null | undefined) => {
+    if (!facility) return false;
+    return canEditFacility(user, facility.districtId, facility.id, allDistricts, provinces, tenantInfo?.id);
+  };
+
   const handleEdit = (facility: Facility) => {
+    if (!canManageFacility(facility)) {
+      toast({
+        title: "Edit not available",
+        description: "You can only edit facilities within your assigned scope.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     setEditingFacility(facility);
     setDialogOpen(true);
   };
@@ -1497,9 +1511,7 @@ export default function Facilities() {
       key: "actions",
       header: "Actions",
       render: (item: Facility) => {
-        // Original Code: referenced districts which was renamed to allDistricts
-        // const canEdit = canEditFacility(user, item.districtId, item.id, districts, provinces);
-        const canEdit = canEditFacility(user, item.districtId, item.id, allDistricts, provinces, tenantInfo?.id);
+        const canEdit = canManageFacility(item);
         const canDelete = canDeleteData(user);
         
         if (!canEdit && !canDelete) return null;
@@ -2049,17 +2061,19 @@ export default function Facilities() {
         <TabsContent value="facilities" className="space-y-6">
           <div className="flex justify-between items-center gap-4 flex-wrap">
             <h2 className="text-lg font-semibold">Facilities Registry</h2>
-            {canAddFacility && (
+            {(canAddFacility || editingFacility) && (
               <Dialog open={dialogOpen} onOpenChange={(open) => {
                 setDialogOpen(open);
                 if (!open) setEditingFacility(null);
               }}>
-                <DialogTrigger asChild>
-                  <Button data-testid="button-add-facility">
-                    <Plus className="h-4 w-4 mr-1" />
-                    Add Facility
-                  </Button>
-                </DialogTrigger>
+                {canAddFacility && (
+                  <DialogTrigger asChild>
+                    <Button data-testid="button-add-facility">
+                      <Plus className="h-4 w-4 mr-1" />
+                      Add Facility
+                    </Button>
+                  </DialogTrigger>
+                )}
                 <DialogContent className="max-w-5xl w-[90vw] p-0 overflow-hidden">
                   <DialogHeader className="p-6 pb-2">
                     <DialogTitle>{editingFacility ? "Edit Facility & Catchment" : "Add New Facility & Catchment"}</DialogTitle>

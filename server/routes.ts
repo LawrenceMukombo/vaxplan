@@ -330,6 +330,30 @@ function resolveRoleScopeIds(dbUser: any): {
   return { provinceIds, districtIds, facilityIds, hasAny, isScopedRole };
 }
 
+function roleNamesForAccess(dbUser: any): string[] {
+  const roles = Array.isArray(dbUser?.roles) ? dbUser.roles : [];
+  return [dbUser?.role, ...roles].filter(Boolean).map(String);
+}
+
+function isDistrictStaffRole(dbUser: any): boolean {
+  return roleNamesForAccess(dbUser).some((role) => role === "district_manager" || role === "district_partner");
+}
+
+function canMoveFacilityDistrict(dbUser: any): boolean {
+  if (dbUser?.isPlatformAdmin === true) return true;
+  const roles = roleNamesForAccess(dbUser);
+  if (roles.some((role) => role === "national_admin" || role === "gis_specialist")) return true;
+  const permissions = Array.isArray(dbUser?.permissions) ? dbUser.permissions.map(String) : [];
+  return permissions.includes("facility.move_district") || permissions.includes("manage_facility_district_moves");
+}
+
+function blockDistrictStaffClientWorkspaces(req: any, res: any, next: any) {
+  if (isDistrictStaffRole(req.dbUser)) {
+    return res.status(403).json({ message: "Forbidden: district staff do not have access to the client logbook or defaulter list." });
+  }
+  next();
+}
+
 async function userCanAccessGeo(
   dbUser: any,
   tenantId: string,
@@ -4060,11 +4084,26 @@ export async function registerRoutes(
       if (!(await userCanAccessGeo(req.dbUser, req.tenantId, { facilityId: entityId }))) {
         return res.status(403).json({ message: "Forbidden: no access to this facility." });
       }
-      if (req.body.districtId && !(await userCanAccessGeo(req.dbUser, req.tenantId, { districtId: Number(req.body.districtId) }))) {
-        return res.status(403).json({ message: "Forbidden: no access to move facility to target district." });
+      const updateBody = { ...req.body };
+      const requestedDistrictId = updateBody.districtId == null || updateBody.districtId === ""
+        ? Number(oldFacility.districtId)
+        : Number(updateBody.districtId);
+      if (!Number.isFinite(requestedDistrictId)) {
+        return res.status(400).json({ message: "Invalid target district." });
+      }
+      const districtChanged = requestedDistrictId !== Number(oldFacility.districtId);
+      updateBody.districtId = districtChanged ? requestedDistrictId : Number(oldFacility.districtId);
+
+      if (districtChanged) {
+        if (!canMoveFacilityDistrict(req.dbUser)) {
+          return res.status(403).json({ message: "You do not have permission to move this facility to another district." });
+        }
+        if (!(await userCanAccessGeo(req.dbUser, req.tenantId, { districtId: requestedDistrictId }))) {
+          return res.status(403).json({ message: "Forbidden: target district scope is outside your access scope." });
+        }
       }
 
-      const facility = await storage.updateFacility(req.tenantId, entityId, req.body);
+      const facility = await storage.updateFacility(req.tenantId, entityId, updateBody);
       await logAudit(req, "update", "facility", entityId, oldFacility, facility);
       res.json(facility);
     } catch (error) {
@@ -11792,6 +11831,9 @@ export async function registerRoutes(
   // CLIENTS — Child & Pregnant Woman logbook demographics
   // ─────────────────────────────────────────────────────────────────────────
 
+  app.use("/api/clients", isAuthenticated, requireTenant, requireDbUser, blockDistrictStaffClientWorkspaces);
+  app.use("/api/indicators/defaulters", isAuthenticated, requireTenant, requireDbUser, blockDistrictStaffClientWorkspaces);
+
   // GET /api/clients — List clients, optionally filtered by facility and type
   app.get("/api/clients", isAuthenticated, requireTenant, requireDbUser, async (req: any, res) => {
     try {
@@ -19068,11 +19110,18 @@ Instructions:
         });
       }
 
+      const dbUser = req.dbUser ?? (await storage.getUser(getCurrentUserId(req)));
+      if (!dbUser) return res.status(403).json({ message: "Forbidden: User context not resolved" });
+      req.dbUser = dbUser;
+      if (!(await userCanAccessGeo(dbUser, req.tenantId, { facilityId }))) {
+        return res.status(403).json({ message: "Forbidden: no access to save this facility catchment polygon." });
+      }
+
       const { geojson, gridPopulation, status = 'active' } = req.body;
       const { gisPolygons } = await import("@shared/schema");
 
       if (status === 'clear_draft') {
-        await db.delete(gisPolygons)
+        await db.update(gisPolygons).set({ status: "archived", isActive: false, updatedAt: new Date() })
           .where(and(
             eq(gisPolygons.tenantId, req.tenantId),
             eq(gisPolygons.ownerType, "facility"),
@@ -19178,7 +19227,7 @@ Instructions:
 
       // If we saved an active polygon, clear any existing drafts
       if (status === 'active') {
-         await db.delete(gisPolygons)
+         await db.update(gisPolygons).set({ status: "archived", isActive: false, updatedAt: new Date() })
           .where(and(
             eq(gisPolygons.tenantId, req.tenantId),
             eq(gisPolygons.ownerType, "facility"),
@@ -19312,11 +19361,18 @@ Instructions:
         }
       }
 
+      const dbUser = req.dbUser ?? (await storage.getUser(getCurrentUserId(req)));
+      if (!dbUser) return res.status(403).json({ message: "Forbidden: User context not resolved" });
+      req.dbUser = dbUser;
+      if (village.facilityId && !(await userCanAccessGeo(dbUser, req.tenantId, { facilityId: Number(village.facilityId) }))) {
+        return res.status(403).json({ message: "Forbidden: no access to save this community polygon." });
+      }
+
       const { geojson, griddedPopulation, polygonColor, populationSourceLabel, status = 'active', overrideReason } = req.body;
       const { gisPolygons } = await import("@shared/schema");
 
       if (status === 'clear_draft') {
-        await db.delete(gisPolygons)
+        await db.update(gisPolygons).set({ status: "archived", isActive: false, updatedAt: new Date() })
           .where(and(
             eq(gisPolygons.tenantId, req.tenantId),
             eq(gisPolygons.ownerType, "village"),
@@ -19461,7 +19517,7 @@ Instructions:
       }
 
       if (status === 'active') {
-         await db.delete(gisPolygons)
+         await db.update(gisPolygons).set({ status: "archived", isActive: false, updatedAt: new Date() })
           .where(and(
             eq(gisPolygons.tenantId, req.tenantId),
             eq(gisPolygons.ownerType, "village"),

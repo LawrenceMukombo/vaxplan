@@ -56,6 +56,7 @@ import { Badge } from "@/components/ui/badge";
 import { useQuery } from "@tanstack/react-query";
 import type { User, ApprovalRequest } from "@shared/schema";
 import { DEFAULT_MODULES } from "@/lib/modules";
+import { canAccessClientLogbook, canAccessDefaulterList, canAccessDropoutRates } from "@/lib/accessControl";
 interface TenantSummary { id: string; name: string; code: string }
 interface AppSidebarProps {
   user: User;
@@ -241,9 +242,9 @@ export function AppSidebar({ user }: AppSidebarProps) {
     if (item.path === "/settlement-intelligence") return modules.settlementIntel !== false;
     if (item.path === "/facilities") return modules.facilities !== false;
     if (item.path === "/population") return modules.population !== false;
-    if (item.path === "/clients") return modules.clientLogbook !== false;
-    if (item.path === "/clients/defaulters") return modules.defaulters !== false;
-    if (item.path === "/indicators/dropout") return modules.dropout !== false;
+    if (item.path === "/clients") return modules.clientLogbook !== false && canAccessClientLogbook(user);
+    if (item.path === "/clients/defaulters") return modules.defaulters !== false && canAccessDefaulterList(user);
+    if (item.path === "/indicators/dropout") return modules.dropout !== false && canAccessDropoutRates(user);
     if (item.path === "/missed-communities") return modules.missedCommunities !== false;
     return true;
   });
