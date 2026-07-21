@@ -443,7 +443,7 @@ export class EntityHistoryService {
         await db.insert(facilityHistoryVersions).values({
           tenantId,
           versionId,
-          facilityId: Number(stableEntityId),
+          facilityId: Number.isFinite(Number(stableEntityId)) ? Number(stableEntityId) : Number(data.facilityId) || 0,
           name: data.name || "Facility",
           hmisCode: data.hmisCode || data.code || null,
           facilityType: data.facilityType || data.type || null,
@@ -462,7 +462,7 @@ export class EntityHistoryService {
         await db.insert(communityHistoryVersions).values({
           tenantId,
           versionId,
-          villageId: Number(stableEntityId),
+          villageId: Number.isFinite(Number(stableEntityId)) ? Number(stableEntityId) : Number(data.villageId) || 0,
           name: data.name || "Community",
           code: data.code || null,
           assignedFacilityId: data.assignedFacilityId ? Number(data.assignedFacilityId) : null,
