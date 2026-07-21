@@ -21,6 +21,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Resolved `ERESOLVE` peer dependency conflicts during `npm install` by enforcing an override for `@react-leaflet/core` required by `react-leaflet-cluster`.
 - Fixed an issue where background API polling indefinitely kept user sessions alive by explicitly disabling Express-session rolling updates and carefully controlling backend activity tracking.
 
+## [1.5.0] - 2026-07-21
+
+### Added
+- **Enterprise Entity History Tracking**:
+  - Implemented versioning schema across Users/Staff, Health Facilities, Communities, Population Denominators, Vaccine Schedules, and Stock Reference data (`entity_history_versions`, `user_assignment_history`, `facility_history_versions`, `community_history_versions`, `population_history_versions`, `vaccine_schedule_history_versions`, `stock_reference_history_versions`).
+  - Added central `EntityHistoryService` and `AsOfDateService` for point-in-time state resolution as of any specified calendar date.
+  - Built frontend history component suite: `EntityHistoryDrawer`, `TimelineComponent`, `VersionCompareModal`, `ViewAsOfDateControl`, `CreateChangeModal`, and `ChangeApprovalScreen`.
+  - Added history drawer triggers to `UserManagement.tsx` and `Facilities.tsx`.
+  - Added snapshot freezing (`report_entity_snapshots`) for original vs. restated historical reporting.
+
+### Fixed
+- **Leaflet Cluster Bubbles**: Resolved marker clustering issue in `ChvCoverageTab.tsx` by flattening markers passed to `MarkerClusterGroup`.
+- **Community Popup Metadata**: Enhanced community map popups and highlighted cards to display Linked Health Facility name, distance (km), and driving/walking time (min).
+
 ## [1.4.0] - 2026-06-19
 ### Changed
 - Initial introduction of the changelog feature to better track deployment versions.

@@ -12825,7 +12825,7 @@ export async function registerRoutes(
 
       // Live metadata watermark footer
       doc.fillColor(BRAND.muted).fontSize(7).font("Helvetica")
-         .text(`Registry Sync Date: ${new Date().toLocaleDateString()}  •  System ID: ${client.id}  •  VaxPlan Platform v1.4.0`, 40, 770, { align: "center", width: 515 });
+         .text(`Registry Sync Date: ${new Date().toLocaleDateString()}  •  System ID: ${client.id}  •  VaxPlan Platform v1.5.0`, 40, 770, { align: "center", width: 515 });
 
       // ---
       // PAGE 2: SCHEDULE TABLE & GRID
