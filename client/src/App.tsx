@@ -39,7 +39,7 @@ import {
   LOGOUT_CHANNEL,
 } from "./lib/authSession";
 import { performClientLogout } from "./lib/logout";
-import { canAccessClientLogbook, canAccessDefaulterList, canAccessUserManagement } from "@/lib/accessControl";
+import { canAccessClientLogbook, canAccessDefaulterList, canAccessHisIntegrations, canAccessSessionPlanning, canAccessUserManagement, canPlanSessions } from "@/lib/accessControl";
 import type { User } from "@shared/schema";
 const MapPage = lazy(() => import("@/pages/MapPage"));
 const Facilities = lazy(() => import("@/pages/Facilities"));
@@ -100,6 +100,7 @@ const Surveillance = lazy(() => import("@/pages/Surveillance"));
 const WikiEditor = lazy(() => import("@/pages/WikiEditor"));
 const CatalogueAdmin = lazy(() => import("@/pages/CatalogueAdmin"));
 const ResearchHubPage = lazy(() => import("@/pages/ResearchHub"));
+const TemporalHistory = lazy(() => import("@/pages/TemporalHistory"));
 import { DEFAULT_MODULES } from "@/lib/modules";
 // Task #50 - Small wrapper that reads :id from the route and passes it to
 // SessionPlanning as `lockedMicroplanId`, so the unserved-prefill auto-open
@@ -313,29 +314,29 @@ function AuthenticatedRouter({ user }: { user: User }) {
       </Route>
       {/* Back-compat: /sessions now redirects to the routine microplan workspace. */}
       <Route path="/sessions">
-        {modules.sessions !== false ? <SessionPlanning planTypeFilter="routine" /> : <ModuleDisabled moduleName="Sessions Hub" />}
+        {modules.sessions !== false ? (canPlanSessions(user) ? <SessionPlanning planTypeFilter="routine" /> : <AccessDeniedPage moduleName="Session Planning" />) : <ModuleDisabled moduleName="Sessions Hub" />}
       </Route>
       {/* Task #50 - Routed detail mode for SessionPlanning so the unserved-place
           one-click "Plan a session here" flow lands on the New Session dialog
           with the village prefilled. */}
       <Route path="/sessions/microplan/:id">
-        {modules.sessions !== false ? <SessionPlanningDetailRoute planTypeFilter="routine" /> : <ModuleDisabled moduleName="Sessions Hub" />}
+        {modules.sessions !== false ? (canPlanSessions(user) ? <SessionPlanningDetailRoute planTypeFilter="routine" /> : <AccessDeniedPage moduleName="Session Planning" />) : <ModuleDisabled moduleName="Sessions Hub" />}
       </Route>
       <Route path="/sessions/campaign/:id">
-        {modules.sessions !== false ? <SessionPlanningDetailRoute planTypeFilter="campaign" /> : <ModuleDisabled moduleName="Sessions Hub" />}
+        {modules.sessions !== false ? (canPlanSessions(user) ? <SessionPlanningDetailRoute planTypeFilter="campaign" /> : <AccessDeniedPage moduleName="Session Planning" />) : <ModuleDisabled moduleName="Sessions Hub" />}
       </Route>
       <Route path="/all-sessions">
-        {modules.sessions !== false ? <SessionsHub /> : <ModuleDisabled moduleName="Sessions Hub" />}
+        {modules.sessions !== false ? (canAccessSessionPlanning(user) ? <SessionsHub /> : <AccessDeniedPage moduleName="Sessions Hub" />) : <ModuleDisabled moduleName="Sessions Hub" />}
       </Route>
       <Route path="/plan-health" component={PlanHealth} />
       <Route path="/field-readiness" component={FieldReadiness} />
       <Route path="/notifications" component={Notifications} />
       <Route path="/sessions/history">
-        {modules.sessions !== false ? <SessionHistory /> : <ModuleDisabled moduleName="Sessions Hub" />}
+        {modules.sessions !== false ? (canAccessSessionPlanning(user) ? <SessionHistory /> : <AccessDeniedPage moduleName="Session History" />) : <ModuleDisabled moduleName="Sessions Hub" />}
       </Route>
       <Route path="/admin/reconcile-vaccines" component={ReconcileUnmappedVaccines} />
       <Route path="/sessions/:id/day-plans">
-        {modules.sessions !== false ? <SessionDayPlans /> : <ModuleDisabled moduleName="Sessions Hub" />}
+        {modules.sessions !== false ? (canPlanSessions(user) ? <SessionDayPlans /> : <AccessDeniedPage moduleName="Session Day Plans" />) : <ModuleDisabled moduleName="Sessions Hub" />}
       </Route>
       <Route path="/clients/defaulters">
         {modules.defaulters !== false ? (canAccessDefaulterList(user) ? <Defaulters /> : <AccessDeniedPage moduleName="Defaulter List" />) : <ModuleDisabled moduleName="Defaulter Tracking" />}
@@ -394,7 +395,7 @@ function AuthenticatedRouter({ user }: { user: User }) {
       <Route path="/admin/catalogue" component={CatalogueAdmin} />
       <Route path="/admin/wiki" component={WikiEditor} />
       <Route path="/his-integrations">
-        {modules.interop !== false ? <HisIntegrations /> : <ModuleDisabled moduleName="HIS Interoperability" />}
+        {modules.interop !== false ? (canAccessHisIntegrations(user) ? <HisIntegrations /> : <AccessDeniedPage moduleName="HIS Integrations" />) : <ModuleDisabled moduleName="HIS Interoperability" />}
       </Route>
       <Route path="/missed-communities">
         {modules.missedCommunities !== false ? <MissedCommunities /> : <ModuleDisabled moduleName="Missed Communities" />}
@@ -410,6 +411,7 @@ function AuthenticatedRouter({ user }: { user: User }) {
       <Route path="/api-reference" component={ApiReference} />
       <Route path="/surveillance" component={Surveillance} />
       <Route path="/settings" component={Settings} />
+      <Route path="/temporal-history" component={TemporalHistory} />
       <Route path="/help" component={Help} />
       <Route path="/research/admin" component={lazy(() => import("@/pages/ResearchAdmin"))} />
       <Route path="/vgie/recommendations" component={VgieRecommendations} />
@@ -641,3 +643,4 @@ function App() {
   );
 }
 export default App;
+

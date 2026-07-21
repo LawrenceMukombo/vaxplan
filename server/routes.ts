@@ -20861,6 +20861,34 @@ Instructions:
   // ENTITY HISTORY TRACKING & TEMPORAL VERSIONING APIS
   // ============================================================================
 
+  // GET /api/entity-history/history (Global version ledger)
+  app.get("/api/entity-history/history", ...auth, requireTenant, async (req: any, res) => {
+    try {
+      const { entityType, status } = req.query;
+      const { entityHistoryVersions } = await import("@shared/schema");
+      const { eq, and, desc } = await import("drizzle-orm");
+
+      const conditions: any[] = [eq(entityHistoryVersions.tenantId, req.tenantId)];
+      if (entityType && entityType !== "all") {
+        conditions.push(eq(entityHistoryVersions.entityType, String(entityType)));
+      }
+      if (status && status !== "all") {
+        conditions.push(eq(entityHistoryVersions.status, String(status)));
+      }
+
+      const versions = await db
+        .select()
+        .from(entityHistoryVersions)
+        .where(and(...conditions))
+        .orderBy(desc(entityHistoryVersions.createdAt))
+        .limit(200);
+
+      res.json(versions);
+    } catch (err: any) {
+      res.status(500).json({ message: err?.message || "Failed to fetch global entity history" });
+    }
+  });
+
   // GET /api/entity-history/:entityType/:entityId/current
   app.get("/api/entity-history/:entityType/:entityId/current", ...auth, requireTenant, async (req: any, res) => {
     try {
