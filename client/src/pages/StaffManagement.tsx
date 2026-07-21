@@ -40,6 +40,7 @@ import {
   Stethoscope,
   Star,
   MoreVertical,
+  History,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
@@ -228,22 +229,43 @@ function StatCard({
   value,
   sub,
   color,
+  isSelected,
+  onClick,
 }: {
   icon: React.ElementType;
   label: string;
   value: number | string;
   sub?: string;
   color: string;
+  isSelected?: boolean;
+  onClick?: () => void;
 }) {
   return (
-    <Card className="border-border bg-card shadow-sm hover:shadow-md transition-shadow">
+    <Card
+      onClick={onClick}
+      className={`border-border bg-card shadow-sm hover:shadow-md transition-all cursor-pointer select-none group relative overflow-hidden ${
+        isSelected
+          ? "ring-2 ring-primary border-primary bg-primary/5 dark:bg-primary/10 shadow-md"
+          : "hover:border-primary/50"
+      }`}
+    >
       <CardContent className="p-4 flex items-center gap-4">
         <div className={`h-11 w-11 rounded-xl flex items-center justify-center shrink-0 ${color}`}>
           <Icon className="h-5 w-5" />
         </div>
-        <div className="min-w-0">
-          <div className="text-2xl font-bold text-foreground tabular-nums">{value}</div>
-          <div className="text-xs text-muted-foreground font-medium">{label}</div>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center justify-between">
+            <div className="text-2xl font-bold text-foreground tabular-nums">{value}</div>
+            {isSelected && (
+              <Badge variant="default" className="text-[9px] px-1.5 py-0 font-medium">
+                Active Filter
+              </Badge>
+            )}
+          </div>
+          <div className="text-xs text-muted-foreground font-medium flex items-center gap-1 mt-0.5">
+            <span>{label}</span>
+            <Filter className="h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity text-primary" />
+          </div>
           {sub && <div className="text-[10px] text-muted-foreground/70 mt-0.5">{sub}</div>}
         </div>
       </CardContent>
@@ -294,6 +316,7 @@ export default function StaffManagement() {
   const [searchTerm, setSearchTerm] = useState("");
   const [roleFilter, setRoleFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [activeKpiFilter, setActiveKpiFilter] = useState<"all" | "active" | "vaccinator" | "supervisor" | "volunteer">("all");
   const [activeTab, setActiveTab] = useState("roster");
 
   // ─── Pagination & Sorting State ──────────────────────────────────────────
@@ -1394,13 +1417,19 @@ export default function StaffManagement() {
         {/* ── Stats + Roster (admin sees always; others need facility selected) ── */}
         {(selectedFacilityId || isGlobalAdmin) && (
           <>
-            {/* Stats Row */}
+            {/* Stats Row — Clickable & Filterable */}
             <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
               <StatCard
                 icon={Users}
                 label="Total Staff"
                 value={stats.total}
                 color="bg-blue-500/10 text-blue-600 dark:text-blue-400"
+                isSelected={activeKpiFilter === "all"}
+                onClick={() => {
+                  setActiveKpiFilter("all");
+                  setRoleFilter("all");
+                  setStatusFilter("all");
+                }}
               />
               <StatCard
                 icon={UserCheck}
@@ -1408,26 +1437,99 @@ export default function StaffManagement() {
                 value={stats.active}
                 sub={`${stats.total ? Math.round((stats.active / stats.total) * 100) : 0}% of roster`}
                 color="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                isSelected={activeKpiFilter === "active"}
+                onClick={() => {
+                  const next = activeKpiFilter === "active" ? "all" : "active";
+                  setActiveKpiFilter(next);
+                  setStatusFilter(next);
+                  setRoleFilter("all");
+                }}
               />
               <StatCard
                 icon={Stethoscope}
                 label="Vaccinators"
                 value={stats.vaccinators}
                 color="bg-indigo-500/10 text-indigo-600 dark:text-indigo-400"
+                isSelected={activeKpiFilter === "vaccinator"}
+                onClick={() => {
+                  const next = activeKpiFilter === "vaccinator" ? "all" : "vaccinator";
+                  setActiveKpiFilter(next);
+                  setRoleFilter(next);
+                  setStatusFilter("all");
+                }}
               />
               <StatCard
                 icon={Shield}
                 label="Supervisors"
                 value={stats.supervisors}
                 color="bg-amber-500/10 text-amber-600 dark:text-amber-400"
+                isSelected={activeKpiFilter === "supervisor"}
+                onClick={() => {
+                  const next = activeKpiFilter === "supervisor" ? "all" : "supervisor";
+                  setActiveKpiFilter(next);
+                  setRoleFilter(next);
+                  setStatusFilter("all");
+                }}
               />
               <StatCard
                 icon={Star}
                 label="Volunteers"
                 value={stats.volunteers}
                 color="bg-rose-500/10 text-rose-600 dark:text-rose-400"
+                isSelected={activeKpiFilter === "volunteer"}
+                onClick={() => {
+                  const next = activeKpiFilter === "volunteer" ? "all" : "volunteer";
+                  setActiveKpiFilter(next);
+                  setStatusFilter(next);
+                  setRoleFilter("all");
+                }}
               />
             </div>
+
+            {/* Interactive Detailed Summary Banner */}
+            <Card className="border border-primary/20 bg-primary/5 dark:bg-primary/10 p-3 rounded-lg flex items-center justify-between flex-wrap gap-3 text-xs shadow-xs">
+              <div className="flex items-center gap-2.5">
+                <div className="h-8 w-8 rounded-lg bg-primary/10 text-primary flex items-center justify-center font-bold shrink-0">
+                  <Filter className="h-4 w-4" />
+                </div>
+                <div>
+                  <div className="font-semibold text-foreground flex items-center gap-2">
+                    <span>
+                      {activeKpiFilter === "all" && "Showing All Registered Healthcare Workers"}
+                      {activeKpiFilter === "active" && `Filtering Active In-Service Roster (${stats.active} Active)`}
+                      {activeKpiFilter === "vaccinator" && `Filtering Vaccinators (${stats.vaccinators} Staff)`}
+                      {activeKpiFilter === "supervisor" && `Filtering Supervisors & Facility In-Charge (${stats.supervisors} Staff)`}
+                      {activeKpiFilter === "volunteer" && `Filtering Volunteers (${stats.volunteers} Volunteers)`}
+                    </span>
+                    <Badge variant="outline" className="text-[10px] bg-background">
+                      {filteredStaff.length} matching
+                    </Badge>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground mt-0.5">
+                    {activeKpiFilter === "all" && `${stats.total} total staff members. Click any KPI card above to instantly filter the roster.`}
+                    {activeKpiFilter === "active" && `${stats.total ? Math.round((stats.active / stats.total) * 100) : 0}% active operational rate across selected scope.`}
+                    {activeKpiFilter === "vaccinator" && "Primary immunizers responsible for routine immunization & SIA outreach."}
+                    {activeKpiFilter === "supervisor" && "Field leads, facility in-charges, and cold chain supervisors."}
+                    {activeKpiFilter === "volunteer" && "Community health volunteers & mobilizers supporting microplanning."}
+                  </p>
+                </div>
+              </div>
+
+              {activeKpiFilter !== "all" && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setActiveKpiFilter("all");
+                    setRoleFilter("all");
+                    setStatusFilter("all");
+                  }}
+                  className="h-7 px-2 text.11px text-muted-foreground hover:text-foreground border border-border/50"
+                >
+                  <X className="h-3 w-3 mr-1" /> Reset Filter
+                </Button>
+              )}
+            </Card>
 
             {/* Roster Card */}
             <Card className="border-border bg-card shadow-sm">
