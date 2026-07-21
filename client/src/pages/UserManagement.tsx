@@ -25,7 +25,9 @@ import {
   Clock,
   Loader2,
   KeyRound,
+  History,
 } from "lucide-react";
+import { EntityHistoryDrawer } from "@/components/history/EntityHistoryDrawer";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import { Label } from "@/components/ui/label";
@@ -587,6 +589,7 @@ export default function UserManagement() {
   const [geoFilterDistrictId, setGeoFilterDistrictId] = useState<number | null>(null);
   const [geoFilterFacilityId, setGeoFilterFacilityId] = useState<number | null>(null);
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
+  const [historyUser, setHistoryUser] = useState<User | null>(null);
   const [isEditing, setIsEditing] = useState(false);
 
   // Modal editing states
@@ -1445,15 +1448,27 @@ export default function UserManagement() {
       header: "Actions",
       sortable: false,
       render: (u: User) => (
-        <Button
-          size="sm"
-          onClick={() => handleOpenEdit(u)}
-          disabled={!canUpdateUsers}
-          className="bg-secondary hover:bg-secondary/80 border border-border text-foreground rounded-xl py-1 px-3 flex items-center justify-center gap-1.5 transition-all font-sans text-xs font-semibold"
-        >
-          <Edit3 className="h-3.5 w-3.5 text-indigo-500 dark:text-indigo-400" />
-          <span>Configure Access</span>
-        </Button>
+        <div className="flex items-center gap-1.5">
+          <Button
+            size="sm"
+            onClick={() => handleOpenEdit(u)}
+            disabled={!canUpdateUsers}
+            className="bg-secondary hover:bg-secondary/80 border border-border text-foreground rounded-xl py-1 px-3 flex items-center justify-center gap-1.5 transition-all font-sans text-xs font-semibold"
+          >
+            <Edit3 className="h-3.5 w-3.5 text-indigo-500 dark:text-indigo-400" />
+            <span>Configure Access</span>
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setHistoryUser(u)}
+            className="rounded-xl py-1 px-2.5 flex items-center justify-center gap-1 text-xs font-semibold"
+            title="View full role, assignment, and employment history"
+          >
+            <History className="h-3.5 w-3.5 text-amber-500" />
+            <span>History</span>
+          </Button>
+        </div>
       ),
     },
   ], [geoMaps, canUpdateUsers]);
@@ -3022,6 +3037,15 @@ export default function UserManagement() {
           </DialogContent>
         </Dialog>
       )}
+
+      {/* Entity History Drawer for Users */}
+      <EntityHistoryDrawer
+        isOpen={!!historyUser}
+        onClose={() => setHistoryUser(null)}
+        entityType="user"
+        entityId={historyUser?.id || ""}
+        entityName={historyUser ? `${historyUser.firstName} ${historyUser.lastName}` : ""}
+      />
     </div>
   );
 }

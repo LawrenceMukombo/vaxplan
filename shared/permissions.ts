@@ -1,4 +1,4 @@
-export type Permission = string;
+﻿export type Permission = string;
 
 
 /* Original Code:
@@ -52,6 +52,17 @@ export const ROLE_PERMISSIONS: Record<string, Permission[]> = {
     "approve_budget",
     "view_reports",
     "manage_users",
+    "temporal.view",
+    "temporal.view_history",
+    "temporal.propose_change",
+    "temporal.review_change",
+    "temporal.approve_change",
+    "temporal.approve_retroactive_change",
+    "temporal.correct_history",
+    "temporal.cancel_future_change",
+    "temporal.export_history",
+    "temporal.view_full_audit",
+    "temporal.manage_configuration",
   ],
   gis_specialist: [
     "view_clients",
@@ -59,6 +70,9 @@ export const ROLE_PERMISSIONS: Record<string, Permission[]> = {
     "view_mobilization",
     "view_budget",
     "manage_boundaries",
+    "temporal.view",
+    "temporal.view_history",
+    "temporal.propose_change",
   ],
   national_admin: [
     "view_clients",
@@ -80,6 +94,17 @@ export const ROLE_PERMISSIONS: Record<string, Permission[]> = {
     "manage_reports",
     "manage_boundaries",
     "manage_users",
+    "temporal.view",
+    "temporal.view_history",
+    "temporal.propose_change",
+    "temporal.review_change",
+    "temporal.approve_change",
+    "temporal.approve_retroactive_change",
+    "temporal.correct_history",
+    "temporal.cancel_future_change",
+    "temporal.export_history",
+    "temporal.view_full_audit",
+    "temporal.manage_configuration",
   ],
 };
 */
@@ -124,6 +149,17 @@ export const ROLE_PERMISSIONS: Record<string, Permission[]> = {
     "approve_budget",
     "view_reports",
     "manage_users",
+    "temporal.view",
+    "temporal.view_history",
+    "temporal.propose_change",
+    "temporal.review_change",
+    "temporal.approve_change",
+    "temporal.approve_retroactive_change",
+    "temporal.correct_history",
+    "temporal.cancel_future_change",
+    "temporal.export_history",
+    "temporal.view_full_audit",
+    "temporal.manage_configuration",
   ],
   provincial_coordinator: [
     "view_clients",
@@ -135,6 +171,17 @@ export const ROLE_PERMISSIONS: Record<string, Permission[]> = {
     "approve_budget",
     "view_reports",
     "manage_users",
+    "temporal.view",
+    "temporal.view_history",
+    "temporal.propose_change",
+    "temporal.review_change",
+    "temporal.approve_change",
+    "temporal.approve_retroactive_change",
+    "temporal.correct_history",
+    "temporal.cancel_future_change",
+    "temporal.export_history",
+    "temporal.view_full_audit",
+    "temporal.manage_configuration",
   ],
   gis_specialist: [
     "view_clients",
@@ -142,6 +189,9 @@ export const ROLE_PERMISSIONS: Record<string, Permission[]> = {
     "view_mobilization",
     "view_budget",
     "manage_boundaries",
+    "temporal.view",
+    "temporal.view_history",
+    "temporal.propose_change",
   ],
   national_admin: [
     "view_clients",
@@ -163,6 +213,17 @@ export const ROLE_PERMISSIONS: Record<string, Permission[]> = {
     "manage_reports",
     "manage_boundaries",
     "manage_users",
+    "temporal.view",
+    "temporal.view_history",
+    "temporal.propose_change",
+    "temporal.review_change",
+    "temporal.approve_change",
+    "temporal.approve_retroactive_change",
+    "temporal.correct_history",
+    "temporal.cancel_future_change",
+    "temporal.export_history",
+    "temporal.view_full_audit",
+    "temporal.manage_configuration",
   ],
   facility_partner: [
     "view_clients",
@@ -206,6 +267,9 @@ export const ROLE_PERMISSIONS: Record<string, Permission[]> = {
     "manage_reports",
     "approve_plans",
     "approve_budget",
+    "temporal.view",
+    "temporal.view_history",
+    "temporal.review_change",
   ],
 };
 */
@@ -265,6 +329,9 @@ export const ROLE_PERMISSIONS: Record<string, Permission[]> = {
     "view_mobilization",
     "view_budget",
     "manage_boundaries",
+    "temporal.view",
+    "temporal.view_history",
+    "temporal.propose_change",
   ],
   national_admin: [
     "view_clients",
@@ -286,6 +353,17 @@ export const ROLE_PERMISSIONS: Record<string, Permission[]> = {
     "manage_reports",
     "manage_boundaries",
     "manage_users",
+    "temporal.view",
+    "temporal.view_history",
+    "temporal.propose_change",
+    "temporal.review_change",
+    "temporal.approve_change",
+    "temporal.approve_retroactive_change",
+    "temporal.correct_history",
+    "temporal.cancel_future_change",
+    "temporal.export_history",
+    "temporal.view_full_audit",
+    "temporal.manage_configuration",
   ],
   facility_partner: [
     "view_clients",
@@ -329,5 +407,12 @@ export const ROLE_PERMISSIONS: Record<string, Permission[]> = {
     "manage_reports",
     "approve_plans",
     "approve_budget",
+    "temporal.view",
+    "temporal.view_history",
+    "temporal.review_change",
   ],
 };
+
+
+
+

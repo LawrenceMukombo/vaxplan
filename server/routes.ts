@@ -1,9 +1,12 @@
 import { DenominatorHarmonisationService } from "./services/denominatorHarmonisationService.js";
+import { EntityHistoryService } from "./services/entityHistoryService";
+import { AsOfDateService } from "./services/asOfDateService";
 import express, { type Express, type Request } from "express";
 import { createServer, type Server } from "http";
 import PDFDocument from "pdfkit";
 import { storage } from "./storage";
 import { setupAuth, isAuthenticated, getCurrentUserId, ensureDbUserFromSession } from "./auth";
+
 
 import {
   hasPermission,
@@ -111,7 +114,7 @@ import { z } from "zod";
 import { db, pool } from "./db";
 import { readFileSync, existsSync, readdirSync, createReadStream, createWriteStream, writeFileSync, mkdirSync, unlinkSync } from "fs";
 import { join, basename } from "path";
-import { eq, and, or, desc, ne, inArray, gte, lte, like, ilike, isNull, gt, sql as dsql } from "drizzle-orm";
+import { eq, and, or, asc, desc, ne, inArray, gte, lte, like, ilike, isNull, gt, sql as dsql } from "drizzle-orm";
 import {
   fetchGeoBoundariesGeoJSON,
   calcBBox,
@@ -4833,6 +4836,8 @@ export async function registerRoutes(
           contactPhone: r.contactPhone,
           age: r.age,
           roleDescription: r.roleDescription,
+          employmentStatus: r.employmentStatus,
+          supervisorId: r.supervisorId,
         }));
         res.json(mapped);
       }
@@ -4857,8 +4862,43 @@ export async function registerRoutes(
         res.status(201).json(inserted);
       } else {
         const { chvProfiles, insertChvProfileSchema } = await import("@shared/schema");
+        
+        // Validation: Format and duplicate checks
+        const cleanName = (req.body.name || "").trim();
+        if (!cleanName) {
+          return res.status(400).json({ message: "Full name is required" });
+        }
+        
+        if (!req.body.nrc) {
+          return res.status(400).json({ message: "NRC is required" });
+        }
+        let cleanNrc = req.body.nrc.trim();
+        const nrcPattern = /^\d{6}\/\d{2}\/\d{1}$/;
+        if (!nrcPattern.test(cleanNrc)) {
+          return res.status(400).json({ message: "Invalid NRC format. Must be XXXXXX/XX/X (e.g. 123456/78/9)" });
+        }
+        const [nrcDup] = await db.select().from(chvProfiles)
+          .where(and(
+            eq(chvProfiles.tenantId, req.tenantId),
+            eq(dsql`LOWER(REPLACE(${chvProfiles.nrc}, '/', ''))`, cleanNrc.replace(/\//g, "").toLowerCase())
+          )).limit(1);
+        if (nrcDup) {
+          const [nrcFac] = await db.select({ name: facilities.name }).from(facilities).where(eq(facilities.id, nrcDup.facilityId)).limit(1);
+          return res.status(400).json({ message: `Duplicate NRC: "${nrcDup.fullName}" at "${nrcFac?.name || 'another facility'}" has this NRC.` });
+        }
+        // Local duplicate check: name in the same facility
+        const [nameDup] = await db.select().from(chvProfiles)
+          .where(and(
+            eq(chvProfiles.tenantId, req.tenantId),
+            eq(chvProfiles.facilityId, facilityId),
+            eq(dsql`LOWER(TRIM(${chvProfiles.fullName}))`, cleanName.toLowerCase())
+          )).limit(1);
+        if (nameDup) {
+          return res.status(400).json({ message: `Duplicate name: A worker named "${cleanName}" is already registered in this facility.` });
+        }
         const mappedBody = {
-          fullName: req.body.name,
+          fullName: cleanName,
+          nrc: cleanNrc,
           gender: req.body.gender,
           educationLevel: req.body.educationLevel,
           trainingReceived: req.body.trainingStatus,
@@ -4869,6 +4909,8 @@ export async function registerRoutes(
           contactPhone: req.body.contactPhone || null,
           age: req.body.age || null,
           roleDescription: req.body.roleDescription || null,
+          employmentStatus: req.body.employmentStatus || "Active - In-service",
+          supervisorId: req.body.supervisorId ? Number(req.body.supervisorId) : null,
         };
         const data = insertChvProfileSchema.parse({ ...mappedBody, facilityId });
         const [created] = await db.insert(chvProfiles).values({ ...data, tenantId: req.tenantId } as any).returning();
@@ -4902,6 +4944,8 @@ export async function registerRoutes(
           contactPhone: created.contactPhone,
           age: created.age,
           roleDescription: created.roleDescription,
+          employmentStatus: created.employmentStatus,
+          supervisorId: created.supervisorId,
         };
         res.status(201).json(mappedCreated);
       }
@@ -4933,20 +4977,53 @@ export async function registerRoutes(
         const [existing] = await db.select().from(chvProfiles)
           .where(and(eq(chvProfiles.id, chvId), eq(chvProfiles.tenantId, req.tenantId))).limit(1);
         if (!existing) return res.status(404).json({ message: "CHV not found" });
+        
+        // Name validations
+        if (req.body.name !== undefined) {
+          const cleanName = req.body.name.trim();
+          if (!cleanName) {
+            return res.status(400).json({ message: "Full name cannot be empty" });
+          }
+          const [nameDup] = await db.select().from(chvProfiles)
+            .where(and(
+              eq(chvProfiles.tenantId, req.tenantId),
+              eq(chvProfiles.facilityId, facilityId),
+              ne(chvProfiles.id, chvId),
+              eq(dsql`LOWER(TRIM(${chvProfiles.fullName}))`, cleanName.toLowerCase())
+            )).limit(1);
+          if (nameDup) {
+            return res.status(400).json({ message: `Duplicate name: A worker named "${cleanName}" is already registered in this facility.` });
+          }
+        }
+
+        // NRC duplicate and format check
+        if (req.body.nrc !== undefined && req.body.nrc) {
+          const cleanNrc = req.body.nrc.trim();
+          const nrcPattern = /^\d{6}\/\d{2}\/\d{1}$/;
+          if (!nrcPattern.test(cleanNrc)) {
+            return res.status(400).json({ message: "Invalid NRC format. Must be in the format XXXXXX/XX/X (e.g. 123456/78/9)" });
+          }
+
+          const [nrcDup] = await db.select().from(chvProfiles)
+            .where(and(
+              eq(chvProfiles.tenantId, req.tenantId),
+              ne(chvProfiles.id, chvId),
+              eq(dsql`LOWER(REPLACE(${chvProfiles.nrc}, '/', ''))`, cleanNrc.replace(/\//g, "").toLowerCase())
+            )).limit(1);
+
+          if (nrcDup) {
+            const [fac] = await db.select({ name: facilities.name }).from(facilities).where(eq(facilities.id, nrcDup.facilityId)).limit(1);
+            return res.status(400).json({ 
+              message: `Duplicate NRC: A worker with NRC ${cleanNrc} is already registered as "${nrcDup.fullName}" at facility "${fac?.name || 'another facility'}".` 
+            });
+          }
+        }
+
         const allowed: any = {};
 
-        /* Original allowed patch assignments commented out to maintain rule 1/2 of user_global config:
-        if (req.body.name !== undefined) allowed.fullName = req.body.name;
-        if (req.body.gender !== undefined) allowed.gender = req.body.gender;
-        if (req.body.educationLevel !== undefined) allowed.educationLevel = req.body.educationLevel;
-        if (req.body.trainingStatus !== undefined) allowed.trainingReceived = req.body.trainingStatus;
-        if (req.body.yearsOfService !== undefined) allowed.yearsOfService = req.body.yearsOfService ? Number(req.body.yearsOfService) : null;
-        if (req.body.campaignRole !== undefined) allowed.siaRole = req.body.campaignRole;
-        if (req.body.villageId !== undefined) allowed.assignedVillageId = req.body.villageId ? Number(req.body.villageId) : null;
-        if (req.body.active !== undefined) allowed.isActive = req.body.active;
-        */
         // Enhanced allowed assignments supporting additional basic/professional fields
-        if (req.body.name !== undefined) allowed.fullName = req.body.name;
+        if (req.body.name !== undefined) allowed.fullName = req.body.name.trim();
+        if (req.body.nrc !== undefined) allowed.nrc = req.body.nrc ? req.body.nrc.trim() : null;
         if (req.body.gender !== undefined) allowed.gender = req.body.gender;
         if (req.body.educationLevel !== undefined) allowed.educationLevel = req.body.educationLevel;
         if (req.body.trainingStatus !== undefined) allowed.trainingReceived = req.body.trainingStatus;
@@ -4957,6 +5034,8 @@ export async function registerRoutes(
         if (req.body.contactPhone !== undefined) allowed.contactPhone = req.body.contactPhone || null;
         if (req.body.age !== undefined) allowed.age = req.body.age ? Number(req.body.age) : null;
         if (req.body.roleDescription !== undefined) allowed.roleDescription = req.body.roleDescription || null;
+        if (req.body.employmentStatus !== undefined) allowed.employmentStatus = req.body.employmentStatus;
+        if (req.body.supervisorId !== undefined) allowed.supervisorId = req.body.supervisorId ? Number(req.body.supervisorId) : null;
 
         allowed.updatedAt = new Date();
         const [updated] = await db.update(chvProfiles).set(allowed).where(eq(chvProfiles.id, chvId)).returning();
@@ -4991,6 +5070,8 @@ export async function registerRoutes(
           contactPhone: updated.contactPhone,
           age: updated.age,
           roleDescription: updated.roleDescription,
+          employmentStatus: updated.employmentStatus,
+          supervisorId: updated.supervisorId,
         };
         res.json(mappedUpdated);
       }
@@ -6550,6 +6631,12 @@ export async function registerRoutes(
         }
       }
 
+      if (body.boundary) {
+        body.catchmentPolygon = body.boundary;
+      }
+      if (body.boundary) {
+        body.catchmentPolygon = body.boundary;
+      }
       const village = await storage.updateVillage(req.tenantId, entityId, body);
       if (!village) {
         return res.status(404).json({ message: "Village not found" });
@@ -19405,6 +19492,7 @@ Instructions:
       if (isNaN(villageId)) return res.status(400).json({ message: "Invalid village id" });
       const [row] = await db.select({
         catchmentPolygon: villages.catchmentPolygon,
+        boundary: villages.boundary,
         griddedPopulation: villages.griddedPopulation,
         polygonColor: villages.polygonColor,
         populationSourceLabel: villages.populationSourceLabel
@@ -19433,7 +19521,7 @@ Instructions:
         )).limit(1);
 
       res.json({
-        catchmentPolygon: activeGeo?.geometry || row.catchmentPolygon || null,
+        catchmentPolygon: activeGeo?.geometry || row.catchmentPolygon || row.boundary || null,
         griddedPopulation: activeGeo?.populationEstimate || row.griddedPopulation || null,
         polygonColor: row.polygonColor || null,
         populationSourceLabel: activeGeo?.populationSource || row.populationSourceLabel || null,
@@ -19624,6 +19712,7 @@ Instructions:
       if (status === 'active') {
         const [updated] = await db.update(villages).set({
           catchmentPolygon: geojson as any,
+          boundary: geojson as any,
           griddedPopulation: popEst,
           polygonColor: polygonColor || null,
           populationSourceLabel: popSource || null,
@@ -20358,6 +20447,602 @@ Instructions:
     }
   });
 
+  // GET /api/chvs — Complete table of all Community Health Workers with search, filtering, and pagination
+  app.get("/api/chvs", ...auth, requireTenant, async (req: any, res) => {
+    try {
+      const { chvProfiles, facilities, villages, districts, provinces, facilityStaff } = await import("@shared/schema");
+      const page = parseInt(req.query.page as string) || 1;
+      const pageSize = parseInt(req.query.pageSize as string) || 10;
+      const offset = (page - 1) * pageSize;
+      const search = (req.query.q as string || "").trim().toLowerCase();
+      const provinceId = req.query.provinceId ? parseInt(req.query.provinceId as string) : null;
+      const districtId = req.query.districtId ? parseInt(req.query.districtId as string) : null;
+      const facilityId = req.query.facilityId ? parseInt(req.query.facilityId as string) : null;
+      const sortBy = req.query.sortBy as string || "name";
+      const sortOrder = req.query.sortOrder as string || "asc";
+
+      const conditions: any[] = [eq(chvProfiles.tenantId, req.tenantId)];
+
+      if (facilityId) {
+        conditions.push(eq(chvProfiles.facilityId, facilityId));
+      }
+      if (search) {
+        conditions.push(or(
+          ilike(chvProfiles.fullName, `%${search}%`),
+          ilike(chvProfiles.nrc, `%${search}%`),
+          ilike(chvProfiles.contactPhone, `%${search}%`)
+        ));
+      }
+
+      // Base query to get CHWs joined with admin details
+      let baseQuery = db.select({
+        id: chvProfiles.id,
+        name: chvProfiles.fullName,
+        nrc: chvProfiles.nrc,
+        gender: chvProfiles.gender,
+        age: chvProfiles.age,
+        educationLevel: chvProfiles.educationLevel,
+        trainingStatus: chvProfiles.trainingReceived,
+        yearsOfService: chvProfiles.yearsOfService,
+        campaignRole: chvProfiles.siaRole,
+        active: chvProfiles.isActive,
+        contactPhone: chvProfiles.contactPhone,
+        roleDescription: chvProfiles.roleDescription,
+        facilityId: chvProfiles.facilityId,
+        facilityName: facilities.name,
+        districtId: facilities.districtId,
+        districtName: districts.name,
+        provinceId: districts.provinceId,
+        provinceName: provinces.name,
+        villageId: chvProfiles.assignedVillageId,
+        villageName: villages.name,
+        employmentStatus: chvProfiles.employmentStatus,
+        supervisorId: chvProfiles.supervisorId,
+        supervisorName: facilityStaff.fullName
+      })
+      .from(chvProfiles)
+      .innerJoin(facilities, eq(chvProfiles.facilityId, facilities.id))
+      .innerJoin(districts, eq(facilities.districtId, districts.id))
+      .innerJoin(provinces, eq(districts.provinceId, provinces.id))
+      .leftJoin(villages, eq(chvProfiles.assignedVillageId, villages.id))
+      .leftJoin(facilityStaff, eq(chvProfiles.supervisorId, facilityStaff.id));
+
+      if (provinceId) {
+        conditions.push(eq(districts.provinceId, provinceId));
+      }
+      if (districtId) {
+        conditions.push(eq(facilities.districtId, districtId));
+      }
+
+      const countResult = await db.select({ count: dsql`count(*)` })
+        .from(chvProfiles)
+        .innerJoin(facilities, eq(chvProfiles.facilityId, facilities.id))
+        .innerJoin(districts, eq(facilities.districtId, districts.id))
+        .innerJoin(provinces, eq(districts.provinceId, provinces.id))
+        .where(and(...conditions));
+      const totalCount = Number(countResult[0]?.count || 0);
+
+      // Ordering
+      let orderClause: any;
+      if (sortBy === "nrc") {
+        orderClause = sortOrder === "desc" ? desc(chvProfiles.nrc) : asc(chvProfiles.nrc);
+      } else if (sortBy === "facility") {
+        orderClause = sortOrder === "desc" ? desc(facilities.name) : asc(facilities.name);
+      } else if (sortBy === "village") {
+        orderClause = sortOrder === "desc" ? desc(villages.name) : asc(villages.name);
+      } else if (sortBy === "yearsOfService") {
+        orderClause = sortOrder === "desc" ? desc(chvProfiles.yearsOfService) : asc(chvProfiles.yearsOfService);
+      } else {
+        orderClause = sortOrder === "desc" ? desc(chvProfiles.fullName) : asc(chvProfiles.fullName);
+      }
+
+      const rows = await baseQuery
+        .where(and(...conditions))
+        .orderBy(orderClause)
+        .limit(pageSize)
+        .offset(offset);
+
+      res.json({
+        data: rows,
+        total: totalCount,
+        page,
+        pageSize,
+        totalPages: Math.ceil(totalCount / pageSize)
+      });
+    } catch (err: any) {
+      res.status(500).json({ message: err?.message || "Failed to fetch community health workers directory" });
+    }
+  });
+
+  // GET /api/chvs/:id — Fetch a single CHV profile with enriched data (facility, village, supervisor)
+  app.get("/api/chvs/:id", ...auth, requireTenant, async (req: any, res) => {
+    try {
+      const id = parseInt(req.params.id as string);
+      if (isNaN(id)) return res.status(400).json({ message: "Invalid CHV id" });
+
+      const { chvProfiles, facilities, villages, districts, provinces, facilityStaff } = await import("@shared/schema");
+
+      const [row] = await db.select({
+        id: chvProfiles.id,
+        name: chvProfiles.fullName,
+        fullName: chvProfiles.fullName,
+        nrc: chvProfiles.nrc,
+        gender: chvProfiles.gender,
+        age: chvProfiles.age,
+        educationLevel: chvProfiles.educationLevel,
+        trainingStatus: chvProfiles.trainingReceived,
+        yearsOfService: chvProfiles.yearsOfService,
+        campaignRole: chvProfiles.siaRole,
+        active: chvProfiles.isActive,
+        isActive: chvProfiles.isActive,
+        contactPhone: chvProfiles.contactPhone,
+        roleDescription: chvProfiles.roleDescription,
+        employmentStatus: chvProfiles.employmentStatus,
+        facilityId: chvProfiles.facilityId,
+        facilityName: facilities.name,
+        districtId: facilities.districtId,
+        districtName: districts.name,
+        provinceId: districts.provinceId,
+        provinceName: provinces.name,
+        villageId: chvProfiles.assignedVillageId,
+        villageName: villages.name,
+        supervisorId: chvProfiles.supervisorId,
+        supervisorName: facilityStaff.fullName,
+        createdAt: chvProfiles.createdAt,
+        updatedAt: chvProfiles.updatedAt,
+      })
+        .from(chvProfiles)
+        .innerJoin(facilities, eq(chvProfiles.facilityId, facilities.id))
+        .innerJoin(districts, eq(facilities.districtId, districts.id))
+        .innerJoin(provinces, eq(districts.provinceId, provinces.id))
+        .leftJoin(villages, eq(chvProfiles.assignedVillageId, villages.id))
+        .leftJoin(facilityStaff, eq(chvProfiles.supervisorId, facilityStaff.id))
+        .where(and(eq(chvProfiles.id, id), eq(chvProfiles.tenantId, req.tenantId)));
+
+      if (!row) return res.status(404).json({ message: "CHV not found" });
+      res.json(row);
+    } catch (err: any) {
+      res.status(500).json({ message: err?.message || "Failed to fetch CHV" });
+    }
+  });
+
+  // POST /api/chvs/import — Bulk import CHVs from CSV
+  app.post("/api/chvs/import", ...auth, requireTenant, async (req: any, res) => {
+    try {
+      const { chvProfiles, facilities } = await import("@shared/schema");
+      const { chvs } = req.body;
+      if (!Array.isArray(chvs) || chvs.length === 0) return res.status(400).json({ message: "No CHVs provided" });
+
+      const allFacs = await db.select().from(facilities).where(eq(facilities.tenantId, req.tenantId));
+      const hmisMap = new Map(allFacs.map(f => [f.hmisCode.toLowerCase(), f.id]));
+
+      let added = 0;
+      for (const chv of chvs) {
+        if (!chv.fullName || !chv.facilityHmisCode) continue;
+        const facId = hmisMap.get(chv.facilityHmisCode.toLowerCase());
+        if (!facId) continue;
+        
+        await db.insert(chvProfiles).values({
+          tenantId: req.tenantId,
+          facilityId: facId,
+          fullName: chv.fullName,
+          gender: chv.gender || "female",
+          contactPhone: chv.contactPhone || null,
+          nrc: chv.nrc || null,
+          age: chv.age || null,
+          educationLevel: chv.educationLevel || "primary",
+          trainingReceived: chv.trainingReceived || null,
+          roleDescription: chv.roleDescription || null,
+          yearsOfService: chv.yearsOfService || null,
+          siaRole: chv.siaRole || "mobilizer",
+          employmentStatus: chv.employmentStatus || "Active - In-service",
+          isActive: true
+        });
+        added++;
+      }
+
+      res.json({ success: true, message: `Successfully imported ${added} community workers.` });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
+  });
+
+  // POST /api/chvs — Create a new CHV profile from the national directory (facility chosen in form)
+  app.post("/api/chvs", ...auth, requireTenant, async (req: any, res) => {
+    try {
+      const { chvProfiles, insertChvProfileSchema } = await import("@shared/schema");
+
+      const facilityId = req.body.facilityId ? Number(req.body.facilityId) : null;
+      if (!facilityId || isNaN(facilityId)) {
+        return res.status(400).json({ message: "facilityId is required" });
+      }
+
+      // Validate the facility belongs to this tenant
+      const [fac] = await db.select({ id: facilities.id }).from(facilities)
+        .where(and(eq(facilities.id, facilityId), eq(facilities.tenantId, req.tenantId))).limit(1);
+      if (!fac) return res.status(400).json({ message: "Facility not found or not accessible" });
+
+      const cleanName = (req.body.name || "").trim();
+      if (!cleanName) return res.status(400).json({ message: "Full name is required" });
+
+      // Duplicate name check within facility
+      const [nameDup] = await db.select().from(chvProfiles)
+        .where(and(
+          eq(chvProfiles.tenantId, req.tenantId),
+          eq(chvProfiles.facilityId, facilityId),
+          eq(dsql`LOWER(TRIM(${chvProfiles.fullName}))`, cleanName.toLowerCase())
+        )).limit(1);
+      if (nameDup) {
+        return res.status(400).json({ message: `Duplicate name: A worker named "${cleanName}" is already registered in this facility.` });
+      }
+
+      if (!req.body.nrc) {
+        return res.status(400).json({ message: "NRC is required" });
+      }
+      let cleanNrc = req.body.nrc.trim();
+      const nrcPattern = /^\d{6}\/\d{2}\/\d{1}$/;
+      if (!nrcPattern.test(cleanNrc)) {
+        return res.status(400).json({ message: "Invalid NRC format. Must be XXXXXX/XX/X (e.g. 123456/78/9)" });
+      }
+      const [nrcDup] = await db.select().from(chvProfiles)
+        .where(and(
+          eq(chvProfiles.tenantId, req.tenantId),
+          eq(dsql`LOWER(REPLACE(${chvProfiles.nrc}, '/', ''))`, cleanNrc.replace(/\//g, "").toLowerCase())
+        )).limit(1);
+      if (nrcDup) {
+        const [nrcFac] = await db.select({ name: facilities.name }).from(facilities).where(eq(facilities.id, nrcDup.facilityId)).limit(1);
+        return res.status(400).json({ message: `Duplicate NRC: "${nrcDup.fullName}" at "${nrcFac?.name || 'another facility'}" has this NRC.` });
+      }
+
+      const mappedBody = {
+        fullName: cleanName,
+        nrc: cleanNrc,
+        gender: req.body.gender || "female",
+        educationLevel: req.body.educationLevel || "Secondary",
+        trainingReceived: req.body.trainingStatus || "trained",
+        yearsOfService: req.body.yearsOfService ? Number(req.body.yearsOfService) : null,
+        siaRole: req.body.campaignRole || "social_mobilizer",
+        assignedVillageId: req.body.villageId ? Number(req.body.villageId) : null,
+        isActive: req.body.active ?? true,
+        contactPhone: req.body.contactPhone || null,
+        age: req.body.age ? Number(req.body.age) : null,
+        roleDescription: req.body.roleDescription || null,
+        employmentStatus: req.body.employmentStatus || "Active - In-service",
+        supervisorId: req.body.supervisorId ? Number(req.body.supervisorId) : null,
+      };
+
+      const data = insertChvProfileSchema.parse({ ...mappedBody, facilityId });
+      const [created] = await db.insert(chvProfiles).values({ ...data, tenantId: req.tenantId } as any).returning();
+      await logAudit(req, "create", "chv_profile", created.id, null, created);
+
+      res.status(201).json({
+        id: created.id,
+        name: created.fullName,
+        gender: created.gender,
+        age: created.age,
+        nrc: created.nrc,
+        contactPhone: created.contactPhone,
+        educationLevel: created.educationLevel,
+        trainingStatus: created.trainingReceived,
+        yearsOfService: created.yearsOfService,
+        campaignRole: created.siaRole,
+        villageId: created.assignedVillageId,
+        active: created.isActive,
+        employmentStatus: created.employmentStatus,
+        supervisorId: created.supervisorId,
+        roleDescription: created.roleDescription,
+        facilityId: created.facilityId,
+      });
+    } catch (err: any) {
+      res.status(400).json({ message: err?.message || "Failed to create CHV" });
+    }
+  });
+
+  // PATCH /api/chvs/:id — Update a CHV profile from the national directory
+  app.patch("/api/chvs/:id", ...auth, requireTenant, async (req: any, res) => {
+    try {
+      const id = parseInt(req.params.id as string);
+      if (isNaN(id)) return res.status(400).json({ message: "Invalid CHV id" });
+
+      const { chvProfiles } = await import("@shared/schema");
+
+      const [existing] = await db.select().from(chvProfiles)
+        .where(and(eq(chvProfiles.id, id), eq(chvProfiles.tenantId, req.tenantId))).limit(1);
+      if (!existing) return res.status(404).json({ message: "CHV not found" });
+
+      // Name duplicate check (excluding self)
+      if (req.body.name !== undefined) {
+        const cleanName = req.body.name.trim();
+        if (!cleanName) return res.status(400).json({ message: "Full name cannot be empty" });
+        const [nameDup] = await db.select().from(chvProfiles)
+          .where(and(
+            eq(chvProfiles.tenantId, req.tenantId),
+            eq(chvProfiles.facilityId, existing.facilityId),
+            ne(chvProfiles.id, id),
+            eq(dsql`LOWER(TRIM(${chvProfiles.fullName}))`, cleanName.toLowerCase())
+          )).limit(1);
+        if (nameDup) {
+          return res.status(400).json({ message: `Duplicate name: "${cleanName}" is already registered in this facility.` });
+        }
+      }
+
+      if (!req.body.nrc) {
+        return res.status(400).json({ message: "NRC is required" });
+      }
+      const cleanNrc = req.body.nrc.trim();
+      const nrcPattern = /^\d{6}\/\d{2}\/\d{1}$/;
+      if (!nrcPattern.test(cleanNrc)) {
+        return res.status(400).json({ message: "Invalid NRC format. Must be XXXXXX/XX/X (e.g. 123456/78/9)" });
+      }
+      const [nrcDup] = await db.select().from(chvProfiles)
+        .where(and(
+          eq(chvProfiles.tenantId, req.tenantId),
+          ne(chvProfiles.id, id),
+          eq(dsql`LOWER(REPLACE(${chvProfiles.nrc}, '/', ''))`, cleanNrc.replace(/\//g, "").toLowerCase())
+        )).limit(1);
+      if (nrcDup) {
+        const [nrcFac] = await db.select({ name: facilities.name }).from(facilities).where(eq(facilities.id, nrcDup.facilityId)).limit(1);
+        return res.status(400).json({ message: `Duplicate NRC: "${nrcDup.fullName}" at "${nrcFac?.name || 'another facility'}" has this NRC.` });
+      }
+
+      const allowed: any = {};
+      if (req.body.name !== undefined) allowed.fullName = req.body.name.trim();
+      if (req.body.nrc !== undefined) allowed.nrc = req.body.nrc ? req.body.nrc.trim() : null;
+      if (req.body.gender !== undefined) allowed.gender = req.body.gender;
+      if (req.body.age !== undefined) allowed.age = req.body.age ? Number(req.body.age) : null;
+      if (req.body.educationLevel !== undefined) allowed.educationLevel = req.body.educationLevel;
+      if (req.body.trainingStatus !== undefined) allowed.trainingReceived = req.body.trainingStatus;
+      if (req.body.yearsOfService !== undefined) allowed.yearsOfService = req.body.yearsOfService ? Number(req.body.yearsOfService) : null;
+      if (req.body.campaignRole !== undefined) allowed.siaRole = req.body.campaignRole;
+      if (req.body.villageId !== undefined) allowed.assignedVillageId = req.body.villageId ? Number(req.body.villageId) : null;
+      if (req.body.active !== undefined) allowed.isActive = req.body.active;
+      if (req.body.contactPhone !== undefined) allowed.contactPhone = req.body.contactPhone || null;
+      if (req.body.roleDescription !== undefined) allowed.roleDescription = req.body.roleDescription || null;
+      if (req.body.employmentStatus !== undefined) allowed.employmentStatus = req.body.employmentStatus;
+      if (req.body.supervisorId !== undefined) allowed.supervisorId = req.body.supervisorId ? Number(req.body.supervisorId) : null;
+      if (req.body.facilityId !== undefined) allowed.facilityId = req.body.facilityId ? Number(req.body.facilityId) : null;
+      allowed.updatedAt = new Date();
+
+      const [updated] = await db.update(chvProfiles).set(allowed)
+        .where(and(eq(chvProfiles.id, id), eq(chvProfiles.tenantId, req.tenantId)))
+        .returning();
+      await logAudit(req, "update", "chv_profile", id, existing, updated);
+
+      res.json({
+        id: updated.id,
+        name: updated.fullName,
+        gender: updated.gender,
+        age: updated.age,
+        nrc: updated.nrc,
+        contactPhone: updated.contactPhone,
+        educationLevel: updated.educationLevel,
+        trainingStatus: updated.trainingReceived,
+        yearsOfService: updated.yearsOfService,
+        campaignRole: updated.siaRole,
+        villageId: updated.assignedVillageId,
+        active: updated.isActive,
+        employmentStatus: updated.employmentStatus,
+        supervisorId: updated.supervisorId,
+        roleDescription: updated.roleDescription,
+        facilityId: updated.facilityId,
+        updatedAt: updated.updatedAt,
+      });
+    } catch (err: any) {
+      res.status(400).json({ message: err?.message || "Failed to update CHV" });
+    }
+  });
+
+  // DELETE /api/chvs/:id — Soft-delete (set isActive = false) a CHV profile from the directory
+  app.delete("/api/chvs/:id", ...auth, requireTenant, async (req: any, res) => {
+    try {
+      const id = parseInt(req.params.id as string);
+      if (isNaN(id)) return res.status(400).json({ message: "Invalid CHV id" });
+
+      const { chvProfiles } = await import("@shared/schema");
+
+      const [existing] = await db.select().from(chvProfiles)
+        .where(and(eq(chvProfiles.id, id), eq(chvProfiles.tenantId, req.tenantId))).limit(1);
+      if (!existing) return res.status(404).json({ message: "CHV not found" });
+
+      // Soft delete — mark inactive rather than destructive removal
+      const [deactivated] = await db.update(chvProfiles)
+        .set({ isActive: false, updatedAt: new Date() })
+        .where(and(eq(chvProfiles.id, id), eq(chvProfiles.tenantId, req.tenantId)))
+        .returning();
+      await logAudit(req, "deactivate", "chv_profile", id, existing, deactivated);
+
+      res.json({ success: true, message: "Community health volunteer deactivated." });
+    } catch (err: any) {
+      res.status(500).json({ message: err?.message || "Failed to deactivate CHV" });
+    }
+  });
+
+  // ============================================================================
+  // ENTITY HISTORY TRACKING & TEMPORAL VERSIONING APIS
+  // ============================================================================
+
+  // GET /api/entity-history/:entityType/:entityId/current
+  app.get("/api/entity-history/:entityType/:entityId/current", ...auth, requireTenant, async (req: any, res) => {
+    try {
+      const { entityType, entityId } = req.params;
+      const current = await EntityHistoryService.getCurrent(req.tenantId, entityType, entityId);
+      res.json(current || { message: "No active version recorded yet", entityId, entityType });
+    } catch (err: any) {
+      res.status(500).json({ message: err?.message || "Failed to fetch current version" });
+    }
+  });
+
+  // GET /api/entity-history/:entityType/:entityId/history
+  app.get("/api/entity-history/:entityType/:entityId/history", ...auth, requireTenant, async (req: any, res) => {
+    try {
+      const { entityType, entityId } = req.params;
+      const history = await EntityHistoryService.getHistory(req.tenantId, entityType, entityId);
+      res.json(history);
+    } catch (err: any) {
+      res.status(500).json({ message: err?.message || "Failed to fetch history" });
+    }
+  });
+
+  // GET /api/entity-history/:entityType/:entityId/as-of
+  app.get("/api/entity-history/:entityType/:entityId/as-of", ...auth, requireTenant, async (req: any, res) => {
+    try {
+      const { entityType, entityId } = req.params;
+      const { date } = req.query;
+      if (!date) return res.status(400).json({ message: "date parameter is required (YYYY-MM-DD)" });
+      const version = await EntityHistoryService.getAsOf(req.tenantId, entityType, entityId, String(date));
+      res.json(version || { message: "No version found as of specified date", date });
+    } catch (err: any) {
+      res.status(500).json({ message: err?.message || "Failed to resolve as-of date" });
+    }
+  });
+
+  // GET /api/entity-history/:entityType/:entityId/timeline
+  app.get("/api/entity-history/:entityType/:entityId/timeline", ...auth, requireTenant, async (req: any, res) => {
+    try {
+      const { entityType, entityId } = req.params;
+      const history = await EntityHistoryService.getHistory(req.tenantId, entityType, entityId);
+      
+      const timeline = history.map((v) => ({
+        id: v.id,
+        versionNumber: v.versionNumber,
+        event: v.changeType,
+        summary: v.changeSummary || `${v.entityType} version ${v.versionNumber}`,
+        reason: v.changeReason,
+        status: v.status,
+        isCurrent: v.isCurrent,
+        validFrom: v.validFrom,
+        validTo: v.validTo,
+        recordedAt: v.recordedAt,
+        createdBy: v.createdBy,
+        approvedBy: v.approvedBy,
+        sourceType: v.sourceType,
+        sourceReference: v.sourceReference,
+        sourceDocumentUrl: v.sourceDocumentUrl,
+        snapshot: v.snapshotData,
+      }));
+
+      res.json(timeline);
+    } catch (err: any) {
+      res.status(500).json({ message: err?.message || "Failed to fetch timeline" });
+    }
+  });
+
+  // GET /api/entity-history/:entityType/:entityId/compare
+  app.get("/api/entity-history/:entityType/:entityId/compare", ...auth, requireTenant, async (req: any, res) => {
+    try {
+      const { fromVersionId, toVersionId } = req.query;
+      if (!fromVersionId || !toVersionId) {
+        return res.status(400).json({ message: "fromVersionId and toVersionId parameters are required" });
+      }
+      const comparison = await EntityHistoryService.compareVersions(
+        req.tenantId,
+        Number(fromVersionId),
+        Number(toVersionId)
+      );
+      res.json(comparison);
+    } catch (err: any) {
+      res.status(500).json({ message: err?.message || "Failed to compare versions" });
+    }
+  });
+
+  // GET /api/entity-history/pending-approvals
+  app.get("/api/entity-history/pending-approvals", ...auth, requireTenant, async (req: any, res) => {
+    try {
+      const { entityHistoryVersions } = await import("@shared/schema");
+      const { eq, and, or, desc } = await import("drizzle-orm");
+      const pending = await db
+        .select()
+        .from(entityHistoryVersions)
+        .where(
+          and(
+            eq(entityHistoryVersions.tenantId, req.tenantId),
+            or(
+              eq(entityHistoryVersions.status, "pending_review"),
+              eq(entityHistoryVersions.status, "draft")
+            )
+          )
+        )
+        .orderBy(desc(entityHistoryVersions.createdAt));
+
+      res.json(pending);
+    } catch (err: any) {
+      res.status(500).json({ message: err?.message || "Failed to fetch pending approvals" });
+    }
+  });
+
+  // POST /api/entity-history/:entityType/:entityId/changes
+  app.post("/api/entity-history/:entityType/:entityId/changes", ...auth, requireTenant, async (req: any, res) => {
+    try {
+      const { entityType, entityId } = req.params;
+      const userId = req.user?.claims?.sub || req.dbUser?.id || "user";
+      const created = await EntityHistoryService.createChange(
+        req.tenantId,
+        entityType,
+        entityId,
+        req.body,
+        userId
+      );
+      await logAudit(req, "propose_entity_change", entityType, entityId, null, created);
+      res.status(201).json(created);
+    } catch (err: any) {
+      res.status(400).json({ message: err?.message || "Failed to propose entity change" });
+    }
+  });
+
+  // POST /api/entity-history/changes/:changeId/submit
+  app.post("/api/entity-history/changes/:changeId/submit", ...auth, requireTenant, async (req: any, res) => {
+    try {
+      const changeId = parseInt(req.params.changeId);
+      const userId = req.user?.claims?.sub || req.dbUser?.id;
+      const submitted = await EntityHistoryService.submitChange(req.tenantId, changeId, userId);
+      await logAudit(req, "submit_entity_change", "entity_history_versions", changeId, null, submitted);
+      res.json(submitted);
+    } catch (err: any) {
+      res.status(400).json({ message: err?.message || "Failed to submit change" });
+    }
+  });
+
+  // POST /api/entity-history/changes/:changeId/approve
+  app.post("/api/entity-history/changes/:changeId/approve", ...auth, requireTenant, async (req: any, res) => {
+    try {
+      const changeId = parseInt(req.params.changeId);
+      const userId = req.user?.claims?.sub || req.dbUser?.id;
+      const approved = await EntityHistoryService.approveChange(req.tenantId, changeId, userId);
+      await logAudit(req, "approve_entity_change", "entity_history_versions", changeId, null, approved);
+      res.json(approved);
+    } catch (err: any) {
+      res.status(400).json({ message: err?.message || "Failed to approve change" });
+    }
+  });
+
+  // POST /api/entity-history/changes/:changeId/reject
+  app.post("/api/entity-history/changes/:changeId/reject", ...auth, requireTenant, async (req: any, res) => {
+    try {
+      const changeId = parseInt(req.params.changeId);
+      const userId = req.user?.claims?.sub || req.dbUser?.id;
+      const { reason } = req.body || {};
+      const rejected = await EntityHistoryService.rejectChange(req.tenantId, changeId, userId, reason);
+      await logAudit(req, "reject_entity_change", "entity_history_versions", changeId, null, rejected);
+      res.json(rejected);
+    } catch (err: any) {
+      res.status(400).json({ message: err?.message || "Failed to reject change" });
+    }
+  });
+
+  // POST /api/entity-history/changes/:changeId/correct
+  app.post("/api/entity-history/changes/:changeId/correct", ...auth, requireTenant, async (req: any, res) => {
+    try {
+      const changeId = parseInt(req.params.changeId);
+      const userId = req.user?.claims?.sub || req.dbUser?.id;
+      const corrected = await EntityHistoryService.correctVersion(req.tenantId, changeId, req.body, userId);
+      await logAudit(req, "correct_entity_version", "entity_history_versions", changeId, null, corrected);
+      res.json(corrected);
+    } catch (err: any) {
+      res.status(400).json({ message: err?.message || "Failed to correct version" });
+    }
+  });
+
   return httpServer;
 
 }
+

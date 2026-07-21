@@ -1134,6 +1134,7 @@ export const chvProfiles = pgTable(
     facilityId: integer("facility_id").notNull().references(() => facilities.id, { onDelete: "cascade" }),
     assignedVillageId: integer("assigned_village_id").references(() => villages.id, { onDelete: "set null" }),
     fullName: varchar("full_name", { length: 255 }).notNull(),
+    nrc: varchar("nrc", { length: 50 }).notNull(),
     gender: varchar("gender", { length: 20 }).notNull().default("female"),
     age: integer("age"),
     educationLevel: varchar("education_level", { length: 50 }).default("primary"),
@@ -1144,6 +1145,8 @@ export const chvProfiles = pgTable(
     // SIA campaign role: vaccinator | mobilizer | volunteer | supervisor
     siaRole: varchar("sia_role", { length: 50 }).default("mobilizer"),
     isActive: boolean("is_active").default(true).notNull(),
+    employmentStatus: varchar("employment_status", { length: 50 }).default("Active - In-service"),
+    supervisorId: integer("supervisor_id").references(() => facilityStaff.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow(),
   },
@@ -2999,6 +3002,7 @@ export const communityHealthVolunteers = pgTable("community_health_volunteers", 
   facilityId: integer("facility_id").notNull().references(() => facilities.id, { onDelete: "cascade" }),
   villageId: integer("village_id").references(() => villages.id, { onDelete: "set null" }),
   name: varchar("name", { length: 255 }).notNull(),
+  nrc: varchar("nrc", { length: 50 }),
   gender: varchar("gender", { length: 20 }),
   yearsOfService: integer("years_of_service"),
   educationLevel: varchar("education_level", { length: 100 }),  // Primary, Secondary, Certificate, Diploma, Degree
@@ -3721,3 +3725,267 @@ export type VgieRecommendationRule = typeof vgieRecommendationRules.$inferSelect
 export const insertVgieAlertRuleSchema = createInsertSchema(vgieAlertRules);
 export const selectVgieAlertRuleSchema = createSelectSchema(vgieAlertRules);
 export type VgieAlertRule = typeof vgieAlertRules.$inferSelect;
+
+// ============================================================================
+// ENTITY HISTORY TRACKING & TEMPORAL VERSIONING SYSTEM
+// ============================================================================
+
+export const entityHistoryVersions = pgTable("entity_history_versions", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  stableEntityId: varchar("stable_entity_id", { length: 255 }).notNull(),
+  entityType: varchar("entity_type", { length: 100 }).notNull(), // 'user' | 'facility' | 'community' | 'population' | 'vaccine_schedule' | 'stock_reference'
+  versionNumber: integer("version_number").notNull().default(1),
+  countryId: integer("country_id"),
+  provinceId: integer("province_id"),
+  districtId: integer("district_id"),
+  facilityId: integer("facility_id"),
+  validFrom: timestamp("valid_from").notNull().defaultNow(),
+  validTo: timestamp("valid_to"),
+  recordedAt: timestamp("recorded_at").notNull().defaultNow(),
+  recordedUntil: timestamp("recorded_until"),
+  status: varchar("status", { length: 50 }).notNull().default("active"), // 'draft' | 'pending_review' | 'approved' | 'active' | 'superseded' | 'rejected' | 'corrected' | 'cancelled'
+  isCurrent: boolean("is_current").notNull().default(true),
+  changeType: varchar("change_type", { length: 100 }).notNull().default("created"), // 'created' | 'updated' | 'reclassified' | 'transferred' | 'role_changed' | 'realigned' | 'corrected' | 'status_changed' | 'catchment_updated'
+  changeReason: text("change_reason"),
+  changeSummary: text("change_summary"),
+  sourceType: varchar("source_type", { length: 100 }).default("manual"), // 'manual' | 'census' | 'survey' | 'gis_import' | 'gazette' | 'administrative_order' | 'system'
+  sourceReference: text("source_reference"),
+  sourceDocumentUrl: text("source_document_url"),
+  createdBy: varchar("created_by", { length: 255 }),
+  reviewedBy: varchar("reviewed_by", { length: 255 }),
+  approvedBy: varchar("approved_by", { length: 255 }),
+  approvedAt: timestamp("approved_at"),
+  supersededBy: integer("superseded_by"),
+  correctedFromVersionId: integer("corrected_from_version_id"),
+  metadataJson: jsonb("metadata_json").default({}),
+  snapshotData: jsonb("snapshot_data").default({}),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => ({
+  tenantIdx: index("idx_entity_hist_tenant").on(table.tenantId),
+  entityTypeIdx: index("idx_entity_hist_type_entity").on(table.tenantId, table.entityType, table.stableEntityId),
+  isCurrentIdx: index("idx_entity_hist_current").on(table.tenantId, table.entityType, table.stableEntityId, table.isCurrent),
+  validFromToIdx: index("idx_entity_hist_valid_dates").on(table.tenantId, table.validFrom, table.validTo),
+}));
+
+export const userAssignmentHistory = pgTable("user_assignment_history", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  versionId: integer("version_id").references(() => entityHistoryVersions.id, { onDelete: "cascade" }),
+  userId: varchar("user_id", { length: 255 }).notNull(),
+  roleId: varchar("role_id", { length: 100 }),
+  roleName: varchar("role_name", { length: 255 }),
+  assignmentType: varchar("assignment_type", { length: 50 }).notNull().default("substantive"), // 'substantive' | 'acting' | 'delegated' | 'temporary' | 'expired'
+  countryId: integer("country_id"),
+  provinceId: integer("province_id"),
+  districtId: integer("district_id"),
+  facilityId: integer("facility_id"),
+  validFrom: timestamp("valid_from").notNull().defaultNow(),
+  validTo: timestamp("valid_to"),
+  status: varchar("status", { length: 50 }).notNull().default("active"),
+  assignedBy: varchar("assigned_by", { length: 255 }),
+  approvedBy: varchar("approved_by", { length: 255 }),
+  reason: text("reason"),
+  permissions: jsonb("permissions").default([]),
+  metadataJson: jsonb("metadata_json").default({}),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => ({
+  tenantIdx: index("idx_user_assign_hist_tenant").on(table.tenantId),
+  userIdx: index("idx_user_assign_hist_user").on(table.tenantId, table.userId),
+}));
+
+export const facilityHistoryVersions = pgTable("facility_history_versions", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  versionId: integer("version_id").references(() => entityHistoryVersions.id, { onDelete: "cascade" }),
+  facilityId: integer("facility_id").notNull(),
+  versionNumber: integer("version_number").notNull().default(1),
+  name: varchar("name", { length: 255 }).notNull(),
+  hmisCode: varchar("hmis_code", { length: 100 }),
+  facilityType: varchar("facility_type", { length: 100 }),
+  ownership: varchar("ownership", { length: 100 }),
+  operationalStatus: varchar("operational_status", { length: 50 }).default("operational"),
+  countryId: integer("country_id"),
+  provinceId: integer("province_id"),
+  districtId: integer("district_id"),
+  latitude: decimal("latitude", { precision: 10, scale: 7 }),
+  longitude: decimal("longitude", { precision: 10, scale: 7 }),
+  catchmentPolygon: jsonb("catchment_polygon"),
+  coldChainStatus: varchar("cold_chain_status", { length: 50 }).default("No"),
+  staffCount: integer("staff_count").default(0),
+  validFrom: timestamp("valid_from").notNull().defaultNow(),
+  validTo: timestamp("valid_to"),
+  status: varchar("status", { length: 50 }).default("active"),
+  changeReason: text("change_reason"),
+  approvedBy: varchar("approved_by", { length: 255 }),
+  metadataJson: jsonb("metadata_json").default({}),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => ({
+  tenantIdx: index("idx_fac_hist_tenant").on(table.tenantId),
+  facIdx: index("idx_fac_hist_facility").on(table.tenantId, table.facilityId),
+}));
+
+export const communityHistoryVersions = pgTable("community_history_versions", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  versionId: integer("version_id").references(() => entityHistoryVersions.id, { onDelete: "cascade" }),
+  villageId: integer("village_id").notNull(),
+  versionNumber: integer("version_number").notNull().default(1),
+  name: varchar("name", { length: 255 }).notNull(),
+  code: varchar("code", { length: 100 }),
+  assignedFacilityId: integer("assigned_facility_id"),
+  districtId: integer("district_id"),
+  latitude: decimal("latitude", { precision: 10, scale: 7 }),
+  longitude: decimal("longitude", { precision: 10, scale: 7 }),
+  catchmentPolygon: jsonb("catchment_polygon"),
+  isHardToReach: boolean("is_hard_to_reach").default(false),
+  terrainDifficulty: integer("terrain_difficulty"),
+  populationEstimate: integer("population_estimate"),
+  validFrom: timestamp("valid_from").notNull().defaultNow(),
+  validTo: timestamp("valid_to"),
+  status: varchar("status", { length: 50 }).default("active"),
+  changeReason: text("change_reason"),
+  approvedBy: varchar("approved_by", { length: 255 }),
+  metadataJson: jsonb("metadata_json").default({}),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => ({
+  tenantIdx: index("idx_comm_hist_tenant").on(table.tenantId),
+  villageIdx: index("idx_comm_hist_village").on(table.tenantId, table.villageId),
+}));
+
+export const populationHistoryVersions = pgTable("population_history_versions", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  versionId: integer("version_id").references(() => entityHistoryVersions.id, { onDelete: "cascade" }),
+  populationEntityId: varchar("population_entity_id", { length: 255 }).notNull(),
+  geographicUnitType: varchar("geographic_unit_type", { length: 50 }).notNull(),
+  geographicUnitId: integer("geographic_unit_id").notNull(),
+  source: varchar("source", { length: 100 }).notNull(),
+  sourceYear: integer("source_year").notNull(),
+  datasetVersion: varchar("dataset_version", { length: 100 }),
+  method: varchar("method", { length: 100 }),
+  totalPopulation: integer("total_population").notNull(),
+  targetInfants: integer("target_infants"),
+  underOne: integer("under_one"),
+  underFive: integer("under_five"),
+  womenOfReproductiveAge: integer("women_of_reproductive_age"),
+  confidence: varchar("confidence", { length: 50 }),
+  planningStatus: varchar("planning_status", { length: 50 }).default("official"),
+  usedInMicroplans: jsonb("used_in_microplans").default([]),
+  validFrom: timestamp("valid_from").notNull().defaultNow(),
+  validTo: timestamp("valid_to"),
+  status: varchar("status", { length: 50 }).default("active"),
+  changeReason: text("change_reason"),
+  approvedBy: varchar("approved_by", { length: 255 }),
+  metadataJson: jsonb("metadata_json").default({}),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => ({
+  tenantIdx: index("idx_pop_hist_tenant").on(table.tenantId),
+  geoIdx: index("idx_pop_hist_geo").on(table.tenantId, table.geographicUnitType, table.geographicUnitId),
+}));
+
+export const vaccineScheduleHistoryVersions = pgTable("vaccine_schedule_history_versions", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  versionId: integer("version_id").references(() => entityHistoryVersions.id, { onDelete: "cascade" }),
+  scheduleId: integer("schedule_id").notNull(),
+  antigenCode: varchar("antigen_code", { length: 100 }).notNull(),
+  doseNumber: integer("dose_number").notNull(),
+  vaccineProductId: integer("vaccine_product_id"),
+  dosesPerVial: integer("doses_per_vial"),
+  wastageFactor: decimal("wastage_factor", { precision: 5, scale: 2 }),
+  targetAgeGroup: varchar("target_age_group", { length: 100 }),
+  validFrom: timestamp("valid_from").notNull().defaultNow(),
+  validTo: timestamp("valid_to"),
+  status: varchar("status", { length: 50 }).default("active"),
+  changeReason: text("change_reason"),
+  approvedBy: varchar("approved_by", { length: 255 }),
+  metadataJson: jsonb("metadata_json").default({}),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => ({
+  tenantIdx: index("idx_vac_sched_hist_tenant").on(table.tenantId),
+  schedIdx: index("idx_vac_sched_hist_id").on(table.tenantId, table.scheduleId),
+}));
+
+export const stockReferenceHistoryVersions = pgTable("stock_reference_history_versions", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  versionId: integer("version_id").references(() => entityHistoryVersions.id, { onDelete: "cascade" }),
+  itemId: integer("item_id"),
+  equipmentId: integer("equipment_id"),
+  name: varchar("name", { length: 255 }).notNull(),
+  minStockLevel: integer("min_stock_level"),
+  maxStockLevel: integer("max_stock_level"),
+  bufferStockPolicy: text("buffer_stock_policy"),
+  equipmentStatus: varchar("equipment_status", { length: 50 }),
+  locationFacilityId: integer("location_facility_id"),
+  ownership: varchar("ownership", { length: 100 }),
+  validFrom: timestamp("valid_from").notNull().defaultNow(),
+  validTo: timestamp("valid_to"),
+  status: varchar("status", { length: 50 }).default("active"),
+  changeReason: text("change_reason"),
+  approvedBy: varchar("approved_by", { length: 255 }),
+  metadataJson: jsonb("metadata_json").default({}),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => ({
+  tenantIdx: index("idx_stock_ref_hist_tenant").on(table.tenantId),
+}));
+
+export const reportEntitySnapshots = pgTable("report_entity_snapshots", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  reportType: varchar("report_type", { length: 100 }).notNull(),
+  reportId: varchar("report_id", { length: 255 }).notNull(),
+  facilityVersionId: integer("facility_version_id"),
+  geographyVersionId: integer("geography_version_id"),
+  populationVersionId: integer("population_version_id"),
+  vaccineScheduleVersionId: integer("vaccine_schedule_version_id"),
+  userRoleVersionId: integer("user_role_version_id"),
+  snapshotData: jsonb("snapshot_data").notNull().default({}),
+  frozenAt: timestamp("frozen_at").notNull().defaultNow(),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => ({
+  tenantIdx: index("idx_rep_snaps_tenant").on(table.tenantId),
+  reportIdx: index("idx_rep_snaps_report").on(table.tenantId, table.reportType, table.reportId),
+}));
+
+// Drizzle Schema Exports for Entity History System
+export const insertEntityHistoryVersionSchema = createInsertSchema(entityHistoryVersions);
+export const selectEntityHistoryVersionSchema = createSelectSchema(entityHistoryVersions);
+export type EntityHistoryVersion = typeof entityHistoryVersions.$inferSelect;
+
+export const insertUserAssignmentHistorySchema = createInsertSchema(userAssignmentHistory);
+export const selectUserAssignmentHistorySchema = createSelectSchema(userAssignmentHistory);
+export type UserAssignmentHistory = typeof userAssignmentHistory.$inferSelect;
+
+export const insertFacilityHistoryVersionSchema = createInsertSchema(facilityHistoryVersions);
+export const selectFacilityHistoryVersionSchema = createSelectSchema(facilityHistoryVersions);
+export type FacilityHistoryVersion = typeof facilityHistoryVersions.$inferSelect;
+
+export const insertCommunityHistoryVersionSchema = createInsertSchema(communityHistoryVersions);
+export const selectCommunityHistoryVersionSchema = createSelectSchema(communityHistoryVersions);
+export type CommunityHistoryVersion = typeof communityHistoryVersions.$inferSelect;
+
+export const insertPopulationHistoryVersionSchema = createInsertSchema(populationHistoryVersions);
+export const selectPopulationHistoryVersionSchema = createSelectSchema(populationHistoryVersions);
+export type PopulationHistoryVersion = typeof populationHistoryVersions.$inferSelect;
+
+export const insertVaccineScheduleHistoryVersionSchema = createInsertSchema(vaccineScheduleHistoryVersions);
+export const selectVaccineScheduleHistoryVersionSchema = createSelectSchema(vaccineScheduleHistoryVersions);
+export type VaccineScheduleHistoryVersion = typeof vaccineScheduleHistoryVersions.$inferSelect;
+
+export const insertStockReferenceHistoryVersionSchema = createInsertSchema(stockReferenceHistoryVersions);
+export const selectStockReferenceHistoryVersionSchema = createSelectSchema(stockReferenceHistoryVersions);
+export type StockReferenceHistoryVersion = typeof stockReferenceHistoryVersions.$inferSelect;
+
+export const insertReportEntitySnapshotSchema = createInsertSchema(reportEntitySnapshots);
+export const selectReportEntitySnapshotSchema = createSelectSchema(reportEntitySnapshots);
+export type ReportEntitySnapshot = typeof reportEntitySnapshots.$inferSelect;
+

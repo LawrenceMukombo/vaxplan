@@ -9,7 +9,7 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { CARTO_POSITRON_ATTRIBUTION } from "@/data/dataSources";
 import { usePersistedBasemap, BasemapTileLayer } from "@/components/map/BasemapToggle";
-import { createOutlinePinIcon } from "@/lib/mapIcons";
+import { createFacilityCircleIcon, createGapVillageIcon, createOutlinePinIcon, createVillageWithChvsIcon } from "@/lib/mapIcons";
 import {
   usePopulationOverlay,
   PopulationWmsLayer,
@@ -17,6 +17,9 @@ import {
   PopulationOverlayLegend,
 } from "@/components/PopulationOverlay";
 import { CatchmentMapPanel } from "@/components/CatchmentMapPanel";
+import { ChvCoverageTab } from "@/components/ChvCoverageTab";
+import { EntityHistoryDrawer } from "@/components/history/EntityHistoryDrawer";
+import { ViewAsOfDateControl } from "@/components/history/ViewAsOfDateControl";
 
 // Fix Leaflet default marker icon asset pathways
 delete (L.Icon.Default.prototype as any)._getIconUrl;
@@ -90,7 +93,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { Plus, Building2, Users, Thermometer, Filter, X, Pencil, Trash2 } from "lucide-react";
 */
 // Updated Code: Added Snowflake, Wrench, AlertTriangle, RefreshCw icons for Cold Chain tab
-import { Plus, Building2, Users, Thermometer, X, Pencil, Trash2, Download, Upload, Snowflake, Wrench, AlertTriangle, RefreshCw, CheckCircle2, Loader2, SlidersHorizontal } from "lucide-react";
+import { Plus, Building2, Users, Thermometer, X, Pencil, Trash2, Download, Upload, Snowflake, Wrench, AlertTriangle, RefreshCw, CheckCircle2, Loader2, SlidersHorizontal, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ArrowUpDown, Check, Contact, Search, MapPin, History } from "lucide-react";
 import { GeoCascadeFilter } from "@/components/GeoCascadeFilter";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useAuth } from "@/hooks/useAuth";
@@ -146,6 +149,7 @@ function MapResizer() {
   }, [map]);
   return null;
 }
+import { MapLegend } from "@/components/map/MapLegend";
 
 export default function Facilities() {
   const { toast } = useToast();
@@ -167,6 +171,7 @@ export default function Facilities() {
   const lockedFacDistrictId = (isDistrictStaff || isFacilityStaff) ? (user?.districtId ?? null) : null;
   const lockedCommDistrictId = isDistrictStaff ? (user?.districtId ?? null) : null;
   const populationOverlay = usePopulationOverlay();
+  const [mainTab, setMainTab] = useState("facilities");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingFacility, setEditingFacility] = useState<Facility | null>(null);
   const [deletingFacility, setDeletingFacility] = useState<Facility | null>(null);
@@ -174,6 +179,7 @@ export default function Facilities() {
   const [selectedProvinceId, setSelectedProvinceId] = useState<number | null>(null);
   const [selectedDistrictId, setSelectedDistrictId] = useState<number | null>(null);
   const [selectedFacilityId, setSelectedFacilityId] = useState<number | null>(null);
+  const [historyEntity, setHistoryEntity] = useState<{ type: string; id: string | number; name: string } | null>(null);
 
   // Communities Registry states
   const [communityDialogOpen, setCommunityDialogOpen] = useState(false);
@@ -191,6 +197,7 @@ export default function Facilities() {
   const [overlapConflicts, setOverlapConflicts] = useState<any[]>([]);
   const [overlapSourceVillage, setOverlapSourceVillage] = useState<{ id: number; name: string } | null>(null);
   const [harmonizedIds, setHarmonizedIds] = useState<number[]>([]);
+  const [activeCommTab, setActiveCommTab] = useState<string>("details");
 
   // Live estimated population states & calculation effect
   const [estimatedPopulation, setEstimatedPopulation] = useState<number | null>(null);
@@ -613,7 +620,7 @@ export default function Facilities() {
     return (villages || []).find((v) => {
       if (ignoreId && Number(v.id) === Number(ignoreId)) return false;
       if (normalizeCommunityName(v.name) !== normalized) return false;
-      if (assignedFacilityId) return Number(v.assignedFacilityId) === Number(assignedFacilityId);
+      // Scoped to the same district! If the district matches, it's a duplicate.
       return districtId ? Number(v.districtId) === Number(districtId) : false;
     }) || null;
   };
@@ -678,17 +685,13 @@ export default function Facilities() {
     onSuccess: (res: any) => {
       queryClient.setQueryData<Village[]>(["/api/villages"], (old) => old ? [...old.filter((v) => Number(v.id) !== Number(res.id)), res] : old);
       invalidateCommunityCaches();
-      setCommunityDialogOpen(false);
-      setNewCommName("");
-      setNewCommDistrictId("");
-      setNewCommHTR(false);
-      setNewCommFacilityId("");
-      setNewCommLat("");
-      setNewCommLng("");
-      setCommPolygonPoints([]);
+      // Transition newly created community to edit mode in the dialog
+      setEditingCommunity(res);
+      // Auto-navigate to community workers tab
+      setActiveCommTab("workers");
       toast({
         title: "Community Registered",
-        description: "The new community has been added successfully.",
+        description: "The new community has been added successfully. You can now add community workers.",
       });
       maybeShowOverlaps(res);
     },
@@ -708,15 +711,8 @@ export default function Facilities() {
     onSuccess: (res: any) => {
       queryClient.setQueryData<Village[]>(["/api/villages"], (old) => old ? [...old.filter((v) => Number(v.id) !== Number(res.id)), res] : old);
       invalidateCommunityCaches();
-      setCommunityDialogOpen(false);
-      setEditingCommunity(null);
-      setNewCommName("");
-      setNewCommDistrictId("");
-      setNewCommHTR(false);
-      setNewCommFacilityId("");
-      setNewCommLat("");
-      setNewCommLng("");
-      setCommPolygonPoints([]);
+      // Keep dialog open and update editingCommunity state to the saved community
+      setEditingCommunity(res);
       toast({
         title: "Community updated",
         description: "The community has been updated successfully.",
@@ -846,6 +842,19 @@ export default function Facilities() {
     },
   });
 
+  const downloadCommunityTemplate = () => {
+    const headers = ["name", "code", "district", "is_hard_to_reach", "latitude", "longitude", "facility_hmis_code", "insecurity_level", "comments"];
+    const csvContent = "data:text/csv;charset=utf-8," + headers.join(",") + "\nExample Community,COMM-001,Lusaka District,false,-15.3875,28.3228,HMIS-001,0,Accessible during dry season";
+    
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", "community_import_template.csv");
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   const handleImportClick = () => {
     document.getElementById("csv-json-import-file")?.click();
   };
@@ -881,6 +890,9 @@ export default function Facilities() {
           const latIdx = headers.findIndex(h => h.toLowerCase() === "latitude" || h.toLowerCase() === "lat");
           const lngIdx = headers.findIndex(h => h.toLowerCase() === "longitude" || h.toLowerCase() === "lng" || h.toLowerCase() === "lon");
           const hmisIdx = headers.findIndex(h => h.toLowerCase() === "facilityhmiscode" || h.toLowerCase() === "facility_hmis_code" || h.toLowerCase() === "hmis");
+          const codeIdx = headers.findIndex(h => h.toLowerCase() === "code");
+          const insecIdx = headers.findIndex(h => h.toLowerCase() === "insecurity_level" || h.toLowerCase() === "insecuritylevel" || h.toLowerCase() === "insecurity");
+          const commentsIdx = headers.findIndex(h => h.toLowerCase() === "comments" || h.toLowerCase() === "comment" || h.toLowerCase() === "notes");
 
           if (nameIdx === -1) throw new Error("CSV must contain a 'name' column.");
 
@@ -911,11 +923,14 @@ export default function Facilities() {
 
             villagesList.push({
               name,
+              code: codeIdx !== -1 ? row[codeIdx] || null : null,
               districtName: distIdx !== -1 ? row[distIdx] || null : null,
               isHardToReach: htrIdx !== -1 ? row[htrIdx]?.toLowerCase() === "true" || row[htrIdx] === "1" : false,
               latitude: latIdx !== -1 && row[latIdx] ? parseFloat(row[latIdx]) : null,
               longitude: lngIdx !== -1 && row[lngIdx] ? parseFloat(row[lngIdx]) : null,
               facilityHmisCode: hmisIdx !== -1 ? row[hmisIdx] || null : null,
+              insecurityLevel: insecIdx !== -1 && row[insecIdx] ? parseInt(row[insecIdx], 10) : null,
+              comments: commentsIdx !== -1 ? row[commentsIdx] || null : null,
             });
           }
 
@@ -962,7 +977,9 @@ export default function Facilities() {
     
     let result = facilities;
     
-    if (selectedDistrictId) {
+    if (selectedFacilityId) {
+      result = result.filter(f => Number(f.id) === Number(selectedFacilityId));
+    } else if (selectedDistrictId) {
       result = result.filter(f => Number(f.districtId) === Number(selectedDistrictId));
     } else if (selectedProvinceId && allDistricts) {
       const districtIds = allDistricts
@@ -980,7 +997,26 @@ export default function Facilities() {
     }
     
     return result;
-  }, [facilities, allDistricts, provinces, selectedRegionId, selectedProvinceId, selectedDistrictId]);
+  }, [facilities, allDistricts, provinces, selectedRegionId, selectedProvinceId, selectedDistrictId, selectedFacilityId]);
+
+  const filteredVillages = useMemo(() => {
+    if (!villages) return [];
+    let result = villages;
+    if (selectedFacilityId) {
+      result = result.filter(v => Number(v.assignedFacilityId) === Number(selectedFacilityId));
+    } else if (selectedDistrictId) {
+      result = result.filter(v => Number(v.districtId) === Number(selectedDistrictId));
+    } else if (selectedProvinceId && allDistricts) {
+      const distIds = allDistricts.filter(d => Number(d.provinceId) === Number(selectedProvinceId)).map(d => Number(d.id));
+      result = result.filter(v => distIds.includes(Number(v.districtId)));
+    } else if (selectedRegionId && provinces && allDistricts) {
+      const provIds = provinces.filter(p => Number(p.regionId) === Number(selectedRegionId)).map(p => Number(p.id));
+      const distIds = allDistricts.filter(d => provIds.includes(Number(d.provinceId))).map(d => Number(d.id));
+      result = result.filter(v => distIds.includes(Number(v.districtId)));
+    }
+    return result;
+  }, [villages, allDistricts, provinces, selectedRegionId, selectedProvinceId, selectedDistrictId, selectedFacilityId]);
+
 
   const facilityCommunities = useMemo(() => {
     if (!villages || !selectedFacilityId) return [];
@@ -1518,6 +1554,17 @@ export default function Facilities() {
         
         return (
           <div className="flex gap-1">
+            <Button
+              variant="ghost"
+              size="icon"
+              title="View facility change and reclassification history"
+              onClick={(e) => {
+                e.stopPropagation();
+                setHistoryEntity({ type: "facility", id: item.id, name: item.name });
+              }}
+            >
+              <History className="h-4 w-4 text-amber-500" />
+            </Button>
             {canEdit && (
               <Button
                 variant="ghost"
@@ -1707,25 +1754,41 @@ export default function Facilities() {
     setSelectedFacilityId(null);
   };
 
-  const handleEditCommunity = (village: Village) => {
-    setEditingCommunity(village);
-    setNewCommName(village.name);
-    setNewCommDistrictId(village.districtId.toString());
-    setNewCommHTR(village.isHardToReach || false);
-    setNewCommFacilityId(village.assignedFacilityId?.toString() || "");
-    setNewCommLat(village.latitude?.toString() || "");
-    setNewCommLng(village.longitude?.toString() || "");
-    setNewCommTransportMode(village.transportMode || "walking");
-    // Load any stored catchment boundary back into the polygon draw tool so it
-    // can be reviewed / edited.
-    const existing = boundaryToLatLngs((village as any).boundary);
-    if (existing.length >= 3) {
-      setCommPolygonPoints(existing.map((p) => L.latLng(p.lat, p.lng)));
-      setCommDrawMode("polygon");
-    } else {
-      setCommPolygonPoints([]);
+  const handleEditCommunity = async (village: Village) => {
+    setActiveCommTab("details");
+    const loadingToast = toast({
+      title: "Loading",
+      description: "Fetching full community details...",
+    });
+    try {
+      const fullVillage = await apiRequest<Village>("GET", `/api/villages/${village.id}`);
+      setEditingCommunity(fullVillage);
+      setNewCommName(fullVillage.name);
+      setNewCommDistrictId(fullVillage.districtId.toString());
+      setNewCommHTR(fullVillage.isHardToReach || false);
+      setNewCommFacilityId(fullVillage.assignedFacilityId?.toString() || "");
+      setNewCommLat(fullVillage.latitude?.toString() || "");
+      setNewCommLng(fullVillage.longitude?.toString() || "");
+      setNewCommTransportMode(fullVillage.transportMode || "walking");
+      
+      const existing = boundaryToLatLngs((fullVillage as any).boundary);
+      if (existing.length >= 3) {
+        setCommPolygonPoints(existing.map((p) => L.latLng(p.lat, p.lng)));
+        setCommDrawMode("polygon");
+      } else {
+        setCommPolygonPoints([]);
+        setCommDrawMode("pin");
+      }
+      setCommunityDialogOpen(true);
+      loadingToast.dismiss();
+    } catch (err) { 
+      loadingToast.dismiss();
+      toast({
+        title: "Error",
+        description: "Failed to load full community details.",
+        variant: "destructive",
+      });
     }
-    setCommunityDialogOpen(true);
   };
 
   const handleAddCommunity = () => {
@@ -1736,6 +1799,8 @@ export default function Facilities() {
     setNewCommLng("");
     setNewCommTransportMode("walking");
     setCommPolygonPoints([]);
+    setCommDrawMode("pin");
+    setActiveCommTab("details");
     // Pre-fill the location based on the caller's role: facility staff are pinned
     // to their own facility (and its district); district staff start in their
     // district; everyone else starts blank.
@@ -2037,7 +2102,7 @@ export default function Facilities() {
 
   return (
     <div className="p-6 space-y-6">
-      <Tabs defaultValue="facilities" className="space-y-6">
+      <Tabs value={mainTab} onValueChange={setMainTab} className="space-y-6">
         <div className="flex items-center justify-between gap-4 flex-wrap">
           <div>
             <h1 className="text-2xl font-bold">Health Facilities & Communities</h1>
@@ -2055,8 +2120,52 @@ export default function Facilities() {
               <Users className="h-4 w-4" />
               Communities Registry
             </TabsTrigger>
+            <TabsTrigger value="chvs" className="gap-2" data-testid="tab-chvs">
+              <Contact className="h-4 w-4" />
+              Community Workers
+            </TabsTrigger>
+            <TabsTrigger value="chv-coverage" className="gap-2" data-testid="tab-chv-coverage">
+              <MapPin className="h-4 w-4" />
+              Coverage & Gaps
+            </TabsTrigger>
           </TabsList>
         </div>
+
+                <Card className="mb-6 bg-card border-border/40 shadow-sm">
+          <CardContent className="pt-4 pb-4">
+            <GeoCascadeFilter
+              showRegion={!skipRegionLevel}
+              regionId={selectedRegionId}
+              provinceId={selectedProvinceId}
+              districtId={selectedDistrictId}
+              showFacility={true}
+              facilityId={selectedFacilityId}
+              onRegionChange={(id) => {
+                setSelectedRegionId(id);
+                setSelectedProvinceId(null);
+                setSelectedDistrictId(null);
+                setSelectedFacilityId(null);
+              }}
+              onProvinceChange={(id) => {
+                setSelectedProvinceId(id);
+                setSelectedDistrictId(null);
+                setSelectedFacilityId(null);
+              }}
+              onDistrictChange={(id) => {
+                setSelectedDistrictId(id);
+                setSelectedFacilityId(null);
+              }}
+              onFacilityChange={setSelectedFacilityId}
+              regions={regions}
+              provinces={provinces}
+              districts={allDistricts}
+              facilities={facilities}
+              provinceLabel={adminLabels.level1}
+              districtLabel={adminLabels.level2}
+              testIdPrefix="global-cascade-filter"
+            />
+          </CardContent>
+        </Card>
 
         <TabsContent value="facilities" className="space-y-6">
           <div className="flex justify-between items-center gap-4 flex-wrap">
@@ -2638,7 +2747,10 @@ export default function Facilities() {
                                   return (
                                     <div key={village.id} className="p-3.5 flex items-start justify-between hover:bg-muted/40 transition-all rounded-lg border border-transparent hover:border-muted-foreground/15 bg-background shadow-sm">
                                       <div className="space-y-1 flex-1 min-w-0 pr-2">
-                                        <p className="font-semibold text-sm text-foreground truncate" title={village.name}>{village.name}</p>
+                                        <div className="flex items-start justify-between gap-2">
+                                          <p className="font-semibold text-sm text-foreground truncate" title={village.name}>{village.name}</p>
+                                        </div>
+                                        <div className="text-[10px] text-muted-foreground/80 mt-1 mb-1">Linked HF: <span className="font-semibold text-foreground/80">{editingFacility?.name}</span></div>
                                         <p className="text-[11px] text-muted-foreground font-mono">
                                           {village.latitude && village.longitude ? `${Number(village.latitude).toFixed(5)}, ${Number(village.longitude).toFixed(5)}` : "No Coordinates"}
                                         </p>
@@ -2648,8 +2760,10 @@ export default function Facilities() {
                                               <Badge variant="outline" className="font-semibold text-foreground bg-background/50 border-primary/10">
                                                 {route.distanceToFacility.toFixed(2)} km
                                               </Badge>
-                                              <span className="text-[11px] text-muted-foreground">
-                                                🚗 {route.drivingTimeMinutes}m · 🚶 {route.walkingTimeMinutes}m
+                                              <span className="text-[11px] text-muted-foreground flex items-center gap-1.5">
+                                                <span>🚗 {route.drivingTimeMinutes}m</span>
+                                                <span className="opacity-50">|</span>
+                                                <span>🚶 {route.walkingTimeMinutes}m</span>
                                               </span>
                                             </div>
                                             <div className="flex items-center gap-1.5 flex-wrap">
@@ -2807,11 +2921,13 @@ export default function Facilities() {
                             {/* Assigned Villages Pins (Green, Draggable) */}
                             {(villages?.filter(v => v.assignedFacilityId === editingFacility?.id) || []).map((village) => {
                               if (!village.latitude || !village.longitude) return null;
+                              const chvCount = facilityChvs?.filter((chv: any) => chv.villageId === village.id).length || 0;
+                              const currentIcon = chvCount > 0 && typeof window !== "undefined" ? createVillageWithChvsIcon(chvCount) : OFFLINE_VILLAGE_ICON;
                               return (
                                 <Marker
                                   key={village.id}
                                   position={[parseFloat(village.latitude.toString()), parseFloat(village.longitude.toString())]}
-                                  icon={OFFLINE_VILLAGE_ICON}
+                                  icon={currentIcon}
                                   draggable
                                   eventHandlers={{
                                     dragend: (e) => {
@@ -2928,32 +3044,7 @@ export default function Facilities() {
             )}
           </div>
 
-          <Card>
-            <CardContent className="pt-6">
-              <GeoCascadeFilter
-                showRegion={!skipRegionLevel}
-                regionId={selectedRegionId}
-                provinceId={selectedProvinceId}
-                districtId={selectedDistrictId}
-                onRegionChange={(id) => {
-                  setSelectedRegionId(id);
-                  setSelectedProvinceId(null);
-                  setSelectedDistrictId(null);
-                }}
-                onProvinceChange={(id) => {
-                  setSelectedProvinceId(id);
-                  setSelectedDistrictId(null);
-                }}
-                onDistrictChange={setSelectedDistrictId}
-                regions={regions}
-                provinces={provinces}
-                districts={allDistricts}
-                provinceLabel={adminLabels.level1}
-                districtLabel={adminLabels.level2}
-                testIdPrefix="facilities-filter"
-              />
-            </CardContent>
-          </Card>
+          
 
           <Card>
             <CardHeader className="pb-4">
@@ -3082,6 +3173,7 @@ export default function Facilities() {
                       <div className="absolute top-4 left-4 z-[1000] bg-background/90 px-3 py-1.5 rounded-md border text-[10px] shadow-md font-sans">
                         Drag village pins <span className="inline-block w-2.5 h-2.5 bg-emerald-500 rounded-full border border-white align-middle"></span> to dynamically edit coordinates.
                       </div>
+                      <MapLegend />
                       <MapContainer
                         center={(() => {
                           const fac = facilities?.find(f => f.id === selectedFacilityId);
@@ -3196,11 +3288,13 @@ export default function Facilities() {
                         {/* Assigned Villages Pins (Green, Draggable) */}
                         {facilityCommunities.map((village) => {
                           if (!village.latitude || !village.longitude) return null;
+                          const chvCount = facilityChvs?.filter((chv: any) => chv.villageId === village.id).length || 0;
+                          const currentIcon = chvCount > 0 && typeof window !== "undefined" ? createVillageWithChvsIcon(chvCount) : OFFLINE_VILLAGE_ICON;
                           return (
                             <Marker
                               key={village.id}
                               position={[parseFloat(village.latitude.toString()), parseFloat(village.longitude.toString())]}
-                              icon={OFFLINE_VILLAGE_ICON}
+                              icon={currentIcon}
                               draggable
                               eventHandlers={{
                                 dragend: (e) => {
@@ -3266,6 +3360,10 @@ export default function Facilities() {
                 className="hidden"
                 onChange={handleFileChange}
               />
+              <Button onClick={downloadCommunityTemplate} variant="outline" className="gap-1 border-primary/20 hover:bg-primary/5 text-primary">
+                <Download className="h-4 w-4" />
+                Template
+              </Button>
               <Button
                 variant="outline"
                 onClick={handleImportClick}
@@ -3404,7 +3502,7 @@ export default function Facilities() {
 
                 return (
                   <DataTable
-                    data={villages || []}
+                    data={filteredVillages}
                     columns={communityRegistryColumns}
                     searchable
                     searchPlaceholder="Search communities registry..."
@@ -3419,6 +3517,39 @@ export default function Facilities() {
             </CardContent>
           </Card>
         </TabsContent>
+
+        <TabsContent value="chvs" className="space-y-6">
+          <CommunityWorkersTab 
+            provinces={provinces || []} 
+            allDistricts={allDistricts || []} 
+            facilities={filteredFacilities} 
+            selectedProvinceId={selectedProvinceId}
+            selectedDistrictId={selectedDistrictId}
+            selectedFacilityId={selectedFacilityId}
+          />
+        </TabsContent>
+
+        <TabsContent value="chv-coverage" className="space-y-6">
+          <ChvCoverageTab 
+            facilities={filteredFacilities} 
+            villages={filteredVillages} 
+            regions={regions || []} 
+            provinces={provinces || []} 
+            districts={allDistricts || []} 
+            provinceLabel={adminLabels.level1} 
+            districtLabel={adminLabels.level2} 
+            skipRegionLevel={skipRegionLevel}
+            selectedRegionId={selectedRegionId}
+            selectedProvinceId={selectedProvinceId}
+            selectedDistrictId={selectedDistrictId} 
+            onManageFacility={(facility) => {
+              setEditingFacility(facility);
+              setMainTab("facilities");
+              // Use a tiny timeout to let the tab mount before opening the dialog
+              setTimeout(() => setDialogOpen(true), 50);
+            }}
+          />
+        </TabsContent>
       </Tabs>
 
       {/* Add/Edit Community Dialog */}
@@ -3426,6 +3557,7 @@ export default function Facilities() {
         if (!v) {
           setCommunityDialogOpen(false);
           setEditingCommunity(null);
+          setActiveCommTab("details");
         } else {
           setCommunityDialogOpen(true);
         }
@@ -3464,7 +3596,7 @@ export default function Facilities() {
             </DialogTitle>
           </DialogHeader>
 
-          <Tabs defaultValue="details" className="w-full">
+          <Tabs value={activeCommTab} onValueChange={setActiveCommTab} className="w-full">
             <div className="px-6 border-b flex items-center justify-between">
               <TabsList className="bg-muted/50 p-1 border-0 rounded-none h-12">
                 <TabsTrigger value="details" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent h-full px-4">
@@ -3899,6 +4031,15 @@ export default function Facilities() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Entity History Drawer for Facilities & Communities */}
+      <EntityHistoryDrawer
+        isOpen={!!historyEntity}
+        onClose={() => setHistoryEntity(null)}
+        entityType={historyEntity?.type || "facility"}
+        entityId={historyEntity?.id || ""}
+        entityName={historyEntity?.name}
+      />
     </div>
   );
 }
@@ -4396,8 +4537,20 @@ const CHV_TRAINING = [
   { value: "untrained", label: "Untrained" },
 ];
 
+const CHW_EMPLOYMENT_STATUS = [
+  "Active - In-service",
+  "Active - Intern",
+  "Inactive - Suspended",
+  "Inactive - Resigned",
+  "Inactive - Retired",
+  "Inactive - Deceased",
+  "Not commenced",
+  "Other - Unclassified"
+];
+
 const EMPTY_CHV_FORM = {
   name: "",
+  nrc: "",
   gender: "female",
   contactPhone: "",
   age: "",
@@ -4407,6 +4560,9 @@ const EMPTY_CHV_FORM = {
   yearsOfService: "",
   campaignRole: "social_mobilizer",
   active: true,
+  employmentStatus: "Active - In-service",
+  supervisorId: "",
+  villageId: "",
 };
 
 function ChvRoleColor({ role }: { role: string }) {
@@ -4456,6 +4612,16 @@ function CommunityWorkerRosterManager({
   const [form, setForm] = useState({ ...EMPTY_CHV_FORM });
   const { toast } = useToast();
 
+  const { data: staffList } = useQuery<any[]>({
+    queryKey: ["/api/facilities", Number(facilityId), "staff"],
+    queryFn: async () => {
+      const res = await fetch(`/api/facilities/${facilityId}/staff`, { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to fetch facility staff");
+      return res.json();
+    },
+    enabled: !!facilityId && isDialogOpen,
+  });
+
   const setField = <K extends keyof typeof EMPTY_CHV_FORM>(key: K, val: any) =>
     setForm(prev => ({ ...prev, [key]: val }));
 
@@ -4471,6 +4637,7 @@ function CommunityWorkerRosterManager({
     setEditingChv(member);
     setForm({
       name: member.name || member.fullName || "",
+      nrc: member.nrc || "",
       gender: member.gender || "female",
       contactPhone: member.contactPhone || "",
       age: member.age?.toString() || "",
@@ -4480,6 +4647,9 @@ function CommunityWorkerRosterManager({
       yearsOfService: member.yearsOfService?.toString() || "",
       campaignRole: member.campaignRole || "social_mobilizer",
       active: member.active ?? member.isActive ?? true,
+      employmentStatus: member.employmentStatus || "Active - In-service",
+      supervisorId: member.supervisorId?.toString() || "",
+      villageId: member.villageId?.toString() || "",
     });
     setFormTab("basic");
     setIsDialogOpen(true);
@@ -4493,10 +4663,29 @@ function CommunityWorkerRosterManager({
       return;
     }
 
+    if (!form.nrc.trim()) {
+      toast({
+        title: "NRC is required",
+        description: "National Registration Card is mandatory.",
+        variant: "destructive",
+      });
+      return;
+    }
+    const nrcPattern = /^\d{6}\/\d{2}\/\d{1}$/;
+    if (!nrcPattern.test(form.nrc.trim())) {
+      toast({
+        title: "Invalid NRC format",
+        description: "NRC must be formatted as XXXXXX/XX/X (e.g. 123456/78/9)",
+        variant: "destructive",
+      });
+      return;
+    }
+
     try {
       setSubmitting(true);
       const payload = {
         name: form.name.trim(),
+        nrc: form.nrc.trim() || null,
         gender: form.gender,
         contactPhone: form.contactPhone.trim() || null,
         age: form.age ? parseInt(form.age) : null,
@@ -4507,6 +4696,8 @@ function CommunityWorkerRosterManager({
         campaignRole: form.campaignRole,
         villageId: villageId, // lock to current community/village
         active: form.active,
+        employmentStatus: form.employmentStatus,
+        supervisorId: form.supervisorId && form.supervisorId !== "none" ? parseInt(form.supervisorId) : null,
       };
 
       if (editingChv) {
@@ -4580,9 +4771,9 @@ function CommunityWorkerRosterManager({
               <th className="p-3 text-left font-semibold">Name</th>
               <th className="p-3 text-left font-semibold">Campaign Role</th>
               <th className="p-3 text-left font-semibold hidden md:table-cell">Contact</th>
-              <th className="p-3 text-left font-semibold hidden lg:table-cell">Training</th>
-              <th className="p-3 text-left font-semibold hidden lg:table-cell">Years Service</th>
-              <th className="p-3 text-center font-semibold">Status</th>
+              <th className="p-3 text-left font-semibold hidden lg:table-cell">Status</th>
+              <th className="p-3 text-left font-semibold hidden lg:table-cell">Supervisor</th>
+              <th className="p-3 text-center font-semibold">Active</th>
               <th className="p-3 text-right font-semibold">Actions</th>
             </tr>
           </thead>
@@ -4604,15 +4795,11 @@ function CommunityWorkerRosterManager({
                     {member.contactPhone || "—"}
                   </td>
                   <td className="p-3 hidden lg:table-cell">
-                    <span className={`text-[10px] font-medium rounded px-1.5 py-0.5 ${
-                      member.trainingStatus === "trained" ? "bg-green-500/10 text-green-600" :
-                      "bg-red-500/10 text-red-600"
-                    }`}>
-                      {member.trainingStatus || "—"}
-                    </span>
+                    <div className="text-xs font-semibold">{member.employmentStatus || "Active - In-service"}</div>
+                    <div className="text-[10px] text-muted-foreground capitalize">{member.trainingStatus || "trained"} · {member.yearsOfService || 0} yrs</div>
                   </td>
-                  <td className="p-3 font-mono text-xs text-muted-foreground hidden lg:table-cell text-center">
-                    {member.yearsOfService !== null && member.yearsOfService !== undefined ? member.yearsOfService : "—"}
+                  <td className="p-3 text-xs text-muted-foreground hidden lg:table-cell">
+                    {member.supervisorName || "—"}
                   </td>
                   <td className="p-3 text-center">
                     <span className={`inline-flex h-2 w-2 rounded-full ${member.active ? "bg-emerald-500" : "bg-muted-foreground/30"}`} />
@@ -4675,6 +4862,11 @@ function CommunityWorkerRosterManager({
                     <Label htmlFor="chv-name">Full Name *</Label>
                     <Input id="chv-name" placeholder="e.g. Grace Mutale" value={form.name}
                       onChange={e => setField("name", e.target.value)} disabled={submitting} />
+                  </div>
+                  <div className="sm:col-span-2 space-y-1.5">
+                    <Label htmlFor="chv-nrc">National Registration Card (NRC) *</Label>
+                    <Input id="chv-nrc" placeholder="XXXXXX/XX/X (e.g. 123456/78/9)" value={form.nrc}
+                      onChange={e => setField("nrc", e.target.value)} disabled={submitting} />
                   </div>
                   <div className="space-y-1.5">
                     <Label htmlFor="chv-gender">Gender</Label>
@@ -4739,6 +4931,25 @@ function CommunityWorkerRosterManager({
                     <Input id="chv-description" placeholder="Provides community mobilization and traces dropouts" value={form.roleDescription}
                       onChange={e => setField("roleDescription", e.target.value)} disabled={submitting} />
                   </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="chv-employment">Employment Status</Label>
+                    <Select value={form.employmentStatus} onValueChange={v => setField("employmentStatus", v)} disabled={submitting}>
+                      <SelectTrigger id="chv-employment"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {CHW_EMPLOYMENT_STATUS.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="chv-supervisor">Supervisor (Facility Staff)</Label>
+                    <Select value={form.supervisorId || "none"} onValueChange={v => setField("supervisorId", v)} disabled={submitting}>
+                      <SelectTrigger id="chv-supervisor"><SelectValue placeholder="Select supervisor" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">No Supervisor</SelectItem>
+                        {(staffList || []).map(s => <SelectItem key={s.id} value={s.id.toString()}>{s.fullName} ({s.role})</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
               </div>
             )}
@@ -4779,4 +4990,1063 @@ function CommunityWorkerRosterManager({
 
 
 
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CommunityWorkersTab Component (National CHW Directory with Enterprise Features)
+// ─────────────────────────────────────────────────────────────────────────────
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Checkbox } from "@/components/ui/checkbox";
+
+interface CommunityWorkersTabProps {
+    provinces: any[];
+    allDistricts: any[];
+    facilities: any[];
+    selectedProvinceId: number | null;
+    selectedDistrictId: number | null;
+    selectedFacilityId: number | null;
+  }
+
+function CommunityWorkersTab({ provinces, allDistricts, facilities, selectedProvinceId, selectedDistrictId, selectedFacilityId }: CommunityWorkersTabProps) {
+  const { toast } = useToast();
+  const [selectedChwId, setSelectedChwId] = useState<number | null>(null);
+  const [selectedChwData, setSelectedChwData] = useState<any>(null);
+  const [chwDialogOpen, setChwDialogOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+        
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+  const [sortBy, setSortBy] = useState("name");
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
+
+  // Column Visibility State
+  const [visibleCols, setVisibleCols] = useState({
+    name: true,
+    nrc: true,
+    gender: true,
+    contactPhone: true,
+    facilityName: true,
+    villageName: true,
+    campaignRole: true,
+    trainingStatus: true,
+    yearsOfService: true,
+    employmentStatus: true,
+    supervisorName: true,
+    active: true,
+    options: true,
+  });
+
+  // Debounce search input
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedSearch(searchQuery);
+      setPage(1); // Reset to page 1 on new search
+    }, 400);
+    return () => clearTimeout(handler);
+  }, [searchQuery]);
+
+  
+
+  // Sorting Handler
+  const handleSort = (field: string) => {
+    if (sortBy === field) {
+      setSortOrder(sortOrder === "asc" ? "desc" : "asc");
+    } else {
+      setSortBy(field);
+      setSortOrder("asc");
+    }
+    setPage(1);
+  };
+
+  // Build API Query URL
+  const queryUrl = useMemo(() => {
+    const params = new URLSearchParams({
+      page: page.toString(),
+      pageSize: pageSize.toString(),
+      q: debouncedSearch,
+      sortBy,
+      sortOrder,
+    });
+    if (selectedProvinceId) params.append("provinceId", selectedProvinceId.toString());
+    if (selectedDistrictId) params.append("districtId", selectedDistrictId.toString());
+    if (selectedFacilityId) params.append("facilityId", selectedFacilityId.toString());
+    return `/api/chvs?${params.toString()}`;
+  }, [page, pageSize, debouncedSearch, sortBy, sortOrder, selectedProvinceId, selectedDistrictId, selectedFacilityId]);
+
+  // Fetch Community Workers
+  const { data, isLoading, error } = useQuery<{
+    data: any[];
+    total: number;
+    page: number;
+    pageSize: number;
+    totalPages: number;
+  }>({
+    queryKey: [queryUrl],
+    queryFn: async () => {
+      const res = await fetch(queryUrl, { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to fetch community health workers directory");
+      return res.json();
+    },
+  });
+
+  // Client-Side CSV Export (fetches all matching records up to 10k items)
+  const handleExportCSV = async () => {
+    try {
+      const params = new URLSearchParams({
+        page: "1",
+        pageSize: "10000",
+        q: debouncedSearch,
+        sortBy,
+        sortOrder,
+      });
+      if (selectedProvinceId) params.append("provinceId", selectedProvinceId.toString());
+      if (selectedDistrictId) params.append("districtId", selectedDistrictId.toString());
+      if (selectedFacilityId) params.append("facilityId", selectedFacilityId.toString());
+
+      const res = await fetch(`/api/chvs?${params.toString()}`, { credentials: "include" });
+      if (!res.ok) throw new Error("Export failed");
+      const result = await res.json();
+      const workers = result.data || [];
+
+      if (workers.length === 0) {
+        alert("No workers available to export matching the current filters.");
+        return;
+      }
+
+      // Headers corresponding to active columns
+      const headers = [
+        "Full Name",
+        "NRC",
+        "Gender",
+        "Phone",
+        "Province",
+        "District",
+        "Facility",
+        "Village",
+        "Campaign Role",
+        "Training Status",
+        "Years of Service",
+        "Employment Status",
+        "Supervisor",
+        "Status"
+      ];
+
+      const csvRows = [headers.join(",")];
+
+      for (const w of workers) {
+        const row = [
+          `"${(w.name || "").replace(/"/g, '""')}"`,
+          `"${(w.nrc || "").replace(/"/g, '""')}"`,
+          w.gender || "",
+          w.contactPhone || "",
+          `"${(w.provinceName || "").replace(/"/g, '""')}"`,
+          `"${(w.districtName || "").replace(/"/g, '""')}"`,
+          `"${(w.facilityName || "").replace(/"/g, '""')}"`,
+          `"${(w.villageName || "").replace(/"/g, '""')}"`,
+          w.campaignRole || "",
+          w.trainingStatus || "",
+          w.yearsOfService ?? "",
+          `"${(w.employmentStatus || "Active - In-service").replace(/"/g, '""')}"`,
+          `"${(w.supervisorName || "").replace(/"/g, '""')}"`,
+          w.active ? "Active" : "Inactive"
+        ];
+        csvRows.push(row.join(","));
+      }
+
+      const csvContent = "data:text/csv;charset=utf-8," + csvRows.join("\n");
+      const encodedUri = encodeURI(csvContent);
+      const link = document.createElement("a");
+      link.setAttribute("href", encodedUri);
+      link.setAttribute("download", `community_workers_directory_${new Date().toISOString().split("T")[0]}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch (err: any) {
+      alert("Failed to export community workers CSV: " + err.message);
+    }
+  };
+
+  const importChvMutation = useMutation({
+    mutationFn: async (payload: any) => {
+      return apiRequest("POST", "/api/chvs/import", payload);
+    },
+    onSuccess: (res: any) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/chvs"] });
+      toast({
+        title: "Import Successful",
+        description: res?.message || "Community workers imported.",
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Import Failed",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handleImportChvClick = () => {
+    document.getElementById("csv-chv-import")?.click();
+  };
+
+  const handleChvsFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      const text = event.target?.result as string;
+      try {
+        const lines = text.split(/\r?\n/).filter(line => line.trim().length > 0);
+        if (lines.length < 2) throw new Error("CSV file must contain at least headers and one data row.");
+        
+        const headers = lines[0].split(",").map(h => h.trim().replace(/^["']|["']$/g, "").toLowerCase());
+        
+        // Find indices for required and optional fields
+        const getIdx = (aliases: string[]) => headers.findIndex(h => aliases.includes(h));
+        
+        const nameIdx = getIdx(["name", "fullname", "full_name"]);
+        const hmisIdx = getIdx(["facilityhmiscode", "facility_hmis_code", "hmis", "facility_id"]);
+        
+        if (nameIdx === -1) throw new Error("CSV must contain a 'name' column.");
+        if (hmisIdx === -1) throw new Error("CSV must contain a 'facilityHmisCode' column.");
+
+        const nrcIdx = getIdx(["nrc"]);
+        const genderIdx = getIdx(["gender"]);
+        const ageIdx = getIdx(["age"]);
+        const eduIdx = getIdx(["educationlevel", "education_level", "education"]);
+        const trainIdx = getIdx(["trainingreceived", "training_received", "training"]);
+        const roleDescIdx = getIdx(["roledescription", "role_description", "description"]);
+        const phoneIdx = getIdx(["contactphone", "contact_phone", "phone"]);
+        const yearsIdx = getIdx(["yearsofservice", "years_of_service", "years"]);
+        const siaIdx = getIdx(["siarole", "sia_role"]);
+        const empIdx = getIdx(["employmentstatus", "employment_status", "status"]);
+
+        const chvs = [];
+        for (let i = 1; i < lines.length; i++) {
+          const vals = lines[i].split(",").map(v => v.trim().replace(/^["']|["']$/g, ""));
+          
+          const getVal = (idx: number) => idx > -1 && vals[idx] ? vals[idx] : undefined;
+
+          chvs.push({
+            fullName: vals[nameIdx],
+            facilityHmisCode: vals[hmisIdx],
+            nrc: getVal(nrcIdx),
+            gender: getVal(genderIdx) || "female",
+            age: getVal(ageIdx) ? parseInt(getVal(ageIdx)!) : undefined,
+            educationLevel: getVal(eduIdx),
+            trainingReceived: getVal(trainIdx),
+            roleDescription: getVal(roleDescIdx),
+            contactPhone: getVal(phoneIdx),
+            yearsOfService: getVal(yearsIdx) ? parseInt(getVal(yearsIdx)!) : undefined,
+            siaRole: getVal(siaIdx),
+            employmentStatus: getVal(empIdx)
+          });
+        }
+        
+        importChvMutation.mutate({ chvs });
+      } catch (err: any) {
+        toast({ title: "Failed to parse CSV", description: err.message, variant: "destructive" });
+      }
+      e.target.value = ""; // reset
+    };
+    reader.readAsText(file);
+  };
+
+  const downloadChvTemplate = () => {
+    const csvContent = "data:text/csv;charset=utf-8,name,facilityHmisCode,gender,phone,nrc,age,educationLevel,trainingReceived,roleDescription,yearsOfService,siaRole,employmentStatus\nJane Doe,F-12345,female,0901234567,112233/11/1,35,Secondary,Basic First Aid,Community Health Volunteer,5,mobilizer,Active - In-service\n";
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", "chv_import_template.csv");
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const chwList = data?.data || [];
+  const total = data?.total || 0;
+  const totalPages = data?.totalPages || 1;
+
+  return (
+    <>
+      <Card className="border shadow-md bg-card">
+        <CardHeader className="pb-3 border-b">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+          <div>
+            <CardTitle className="text-xl font-bold flex items-center gap-2">
+              <Contact className="h-5 w-5 text-primary" />
+              Community Health Volunteers & Workers Directory
+            </CardTitle>
+            <p className="text-muted-foreground text-sm mt-1">
+              National registry of all active healthcare volunteers and microplanning mobilizers.
+            </p>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <input type="file" id="csv-chv-import" accept=".csv" className="hidden" onChange={handleChvsFileChange} />
+            <Button onClick={downloadChvTemplate} variant="outline" className="flex items-center gap-1.5 h-9">
+              <Download className="h-4 w-4" />
+              Template
+            </Button>
+            <Button onClick={handleImportChvClick} disabled={importChvMutation.isPending} variant="outline" className="flex items-center gap-1.5 h-9">
+              <Upload className="h-4 w-4" />
+              Import
+            </Button>
+            <Button onClick={() => { setSelectedChwId(null); setSelectedChwData(null); setChwDialogOpen(true); }} className="flex items-center gap-1.5 bg-primary hover:bg-primary/90 text-primary-foreground shadow-sm h-9">
+              <Plus className="h-4 w-4" />
+              Add Worker
+            </Button>
+            <Button onClick={handleExportCSV} variant="outline" className="flex items-center gap-1.5 h-9">
+              <Download className="h-4 w-4" />
+              Export Directory
+            </Button>
+          </div>
+        </div>
+      </CardHeader>
+
+      <CardContent className="p-6 space-y-6">
+        {/* Search, Cascade Filters, and Column Visibility controls */}
+        <div className="flex gap-4 items-end mb-4">
+          {/* Search box */}
+          <div className="space-y-1.5 flex-1 max-w-sm">
+            <Label htmlFor="search-chw" className="text-xs font-semibold">Search Workers</Label>
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                id="search-chw"
+                placeholder="Search by name, NRC or phone..."
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                className="pl-9"
+              />
+            </div>
+          </div>
+
+          <div className="space-y-1.5 shrink-0">
+            <Label className="text-xs font-semibold invisible block">Columns</Label>
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="outline" size="icon" className="h-10 w-10">
+                  <SlidersHorizontal className="h-4 w-4" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-56" align="end">
+                <div className="space-y-2.5">
+                  <h4 className="font-semibold text-sm border-b pb-1.5">Visible Columns</h4>
+                  {Object.entries(visibleCols).map(([col, val]) => (
+                    <div key={col} className="flex items-center gap-2">
+                      <Checkbox
+                        id={`col-${col}`}
+                        checked={val}
+                        onCheckedChange={(checked) =>
+                          setVisibleCols(prev => ({ ...prev, [col]: !!checked }))
+                        }
+                      />
+                      <Label htmlFor={`col-${col}`} className="text-xs capitalize font-normal cursor-pointer">
+                        {col.replace(/([A-Z])/g, " $1")}
+                      </Label>
+                    </div>
+                  ))}
+                </div>
+              </PopoverContent>
+            </Popover>
+          </div>
+        </div>        {/* Directory Table */}
+        <div className="border rounded-lg overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm text-left border-collapse">
+              <thead className="bg-muted/50 text-muted-foreground text-xs uppercase font-semibold">
+                <tr className="border-b">
+                  {visibleCols.name && (
+                    <th onClick={() => handleSort("name")} className="px-4 py-3 cursor-pointer hover:bg-muted/70 transition-colors">
+                      <div className="flex items-center gap-1.5">
+                        Name
+                        <ArrowUpDown className="h-3 w-3 shrink-0" />
+                      </div>
+                    </th>
+                  )}
+                  {visibleCols.nrc && (
+                    <th onClick={() => handleSort("nrc")} className="px-4 py-3 cursor-pointer hover:bg-muted/70 transition-colors">
+                      <div className="flex items-center gap-1.5">
+                        NRC
+                        <ArrowUpDown className="h-3 w-3 shrink-0" />
+                      </div>
+                    </th>
+                  )}
+                  {visibleCols.gender && <th className="px-4 py-3">Gender</th>}
+                  {visibleCols.contactPhone && <th className="px-4 py-3">Phone</th>}
+                  {visibleCols.facilityName && (
+                    <th onClick={() => handleSort("facility")} className="px-4 py-3 cursor-pointer hover:bg-muted/70 transition-colors">
+                      <div className="flex items-center gap-1.5">
+                        Facility
+                        <ArrowUpDown className="h-3 w-3 shrink-0" />
+                      </div>
+                    </th>
+                  )}
+                  {visibleCols.villageName && (
+                    <th onClick={() => handleSort("village")} className="px-4 py-3 cursor-pointer hover:bg-muted/70 transition-colors">
+                      <div className="flex items-center gap-1.5">
+                        Village
+                        <ArrowUpDown className="h-3 w-3 shrink-0" />
+                      </div>
+                    </th>
+                  )}
+                  {visibleCols.campaignRole && <th className="px-4 py-3">Campaign Role</th>}
+                  {visibleCols.employmentStatus && <th className="px-4 py-3">Employment Status</th>}
+                  {visibleCols.supervisorName && <th className="px-4 py-3">Supervisor</th>}
+                  {visibleCols.trainingStatus && <th className="px-4 py-3">Training</th>}
+                  {visibleCols.yearsOfService && (
+                    <th onClick={() => handleSort("yearsOfService")} className="px-4 py-3 cursor-pointer hover:bg-muted/70 transition-colors text-center">
+                      <div className="flex items-center justify-center gap-1.5">
+                        Experience
+                        <ArrowUpDown className="h-3 w-3 shrink-0" />
+                      </div>
+                    </th>
+                  )}
+                  {visibleCols.active && <th className="px-4 py-3 text-center">Status</th>}
+                  {visibleCols.options && <th className="px-4 py-3 text-center">Options</th>}
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {isLoading ? (
+                  Array.from({ length: pageSize }).map((_, idx) => (
+                    <tr key={idx} className="hover:bg-muted/10">
+                      {Object.values(visibleCols).map((visible, cidx) => visible && (
+                        <td key={cidx} className="px-4 py-3.5"><Skeleton className="h-4 w-28" /></td>
+                      ))}
+                    </tr>
+                  ))
+                ) : error ? (
+                  <tr>
+                    <td colSpan={Object.values(visibleCols).filter(Boolean).length} className="px-4 py-8 text-center text-destructive">
+                      {error.message || "Failed to load community health volunteers registry. Please check your network connection."}
+                    </td>
+                  </tr>
+                ) : chwList.length === 0 ? (
+                  <tr>
+                    <td colSpan={Object.values(visibleCols).filter(Boolean).length} className="px-4 py-12 text-center text-muted-foreground italic">
+                      No community workers found matching the selected search query and cascading filters.
+                    </td>
+                  </tr>
+                ) : (
+                  chwList.map((chw) => (
+                    <tr
+                      key={chw.id}
+                      className="hover:bg-muted/30 transition-colors cursor-pointer"
+                      onClick={() => { setSelectedChwId(chw.id); setChwDialogOpen(true); }}
+                    >
+                      {visibleCols.name && (
+                        <td className="px-4 py-3 font-semibold text-foreground">
+                          <div className="flex items-center gap-2">
+                            <ChvInitials name={chw.name} gender={chw.gender} />
+                            <div>
+                              <span>{chw.name}</span>
+                              <span className="block text-[10px] text-muted-foreground capitalize font-normal">
+                                {chw.gender} · {chw.age ? `${chw.age} yrs old` : "Age unrecorded"}
+                              </span>
+                            </div>
+                          </div>
+                        </td>
+                      )}
+                      {visibleCols.nrc && (
+                        <td className="px-4 py-3 font-mono text-xs text-foreground">
+                          {chw.nrc || <span className="text-muted-foreground italic">-</span>}
+                        </td>
+                      )}
+                      {visibleCols.gender && (
+                        <td className="px-4 py-3 capitalize text-muted-foreground">
+                          {chw.gender}
+                        </td>
+                      )}
+                      {visibleCols.contactPhone && (
+                        <td className="px-4 py-3 text-foreground font-mono text-xs">
+                          {chw.contactPhone || <span className="text-muted-foreground italic">-</span>}
+                        </td>
+                      )}
+                      {visibleCols.facilityName && (
+                        <td className="px-4 py-3 font-medium text-foreground">
+                          {chw.facilityName}
+                          <span className="block text-[10px] text-muted-foreground font-normal">
+                            {chw.districtName} · {chw.provinceName}
+                          </span>
+                        </td>
+                      )}
+                      {visibleCols.villageName && (
+                        <td className="px-4 py-3 text-muted-foreground">
+                          {chw.villageName || <span className="italic text-muted-foreground">-</span>}
+                        </td>
+                      )}
+                      {visibleCols.campaignRole && (
+                        <td className="px-4 py-3">
+                          <ChvRoleColor role={chw.campaignRole} />
+                        </td>
+                      )}
+                      {visibleCols.employmentStatus && (
+                        <td className="px-4 py-3 font-medium text-foreground">
+                          {chw.employmentStatus || "Active - In-service"}
+                        </td>
+                      )}
+                      {visibleCols.supervisorName && (
+                        <td className="px-4 py-3 text-muted-foreground">
+                          {chw.supervisorName || <span className="italic text-muted-foreground">-</span>}
+                        </td>
+                      )}
+                      {visibleCols.trainingStatus && (
+                        <td className="px-4 py-3">
+                          <Badge variant={chw.trainingStatus === "trained" ? "default" : "outline"} className="text-[10px]">
+                            {chw.trainingStatus === "trained" ? "Trained" : "Untrained"}
+                          </Badge>
+                        </td>
+                      )}
+                      {visibleCols.yearsOfService && (
+                        <td className="px-4 py-3 text-center font-medium">
+                          {chw.yearsOfService !== null ? `${chw.yearsOfService} yrs` : <span className="text-muted-foreground italic">-</span>}
+                        </td>
+                      )}
+                      {visibleCols.active && (
+                        <td className="px-4 py-3 text-center">
+                          <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${
+                            chw.active ? "bg-emerald-100 text-emerald-800" : "bg-gray-100 text-gray-800"
+                          }`}>
+                            {chw.active ? "Active" : "Inactive"}
+                          </span>
+                        </td>
+                      )}
+                      {visibleCols.options && (
+                        <td className="px-4 py-3 text-center">
+                          <Button 
+                            variant="ghost" 
+                            size="sm" 
+                            className="h-8 text-primary hover:text-primary hover:bg-primary/10"
+                            onClick={(e) => {
+                              e.stopPropagation(); // Prevent row click from firing twice
+                              setSelectedChwId(chw.id);
+                              setSelectedChwData(chw);
+                              setChwDialogOpen(true);
+                            }}
+                          >
+                            <Pencil className="h-4 w-4 mr-2" />
+                            Manage
+                          </Button>
+                        </td>
+                      )}
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* Pagination Footer */}
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-4 border-t pt-4">
+          <div className="text-sm text-muted-foreground">
+            Showing <span className="font-semibold">{total > 0 ? (page - 1) * pageSize + 1 : 0}</span> to{" "}
+            <span className="font-semibold">{Math.min(page * pageSize, total)}</span> of{" "}
+            <span className="font-semibold">{total}</span> community health workers
+          </div>
+
+          <div className="flex items-center gap-6">
+            <div className="flex items-center gap-2">
+              <Label htmlFor="chw-page-size" className="text-xs text-muted-foreground whitespace-nowrap">Rows per page</Label>
+              <Select value={pageSize.toString()} onValueChange={(v) => { setPageSize(Number(v)); setPagePageSize(Number(v)); }}>
+                <SelectTrigger id="chw-page-size" className="h-8 w-[70px]"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {["10", "25", "50", "100"].map(size => (
+                    <SelectItem key={size} value={size}>{size}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="flex items-center gap-1">
+              <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => setPage(1)} disabled={page === 1}>
+                <ChevronsLeft className="h-4 w-4" />
+              </Button>
+              <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}>
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <span className="text-xs text-muted-foreground px-2">
+                Page <span className="font-semibold text-foreground">{page}</span> of {totalPages}
+              </span>
+              <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages}>
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+              <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => setPage(totalPages)} disabled={page === totalPages}>
+                <ChevronsRight className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+
+    {/* View / Edit dialog — opened when clicking a row */}
+    {chwDialogOpen && selectedChwId && (
+      <ChwDirectoryDialog
+        chvId={selectedChwId}
+        initialData={selectedChwData}
+        mode="edit"
+        provinces={provinces}
+        allDistricts={allDistricts}
+        facilities={facilities}
+        onClose={() => { setChwDialogOpen(false); setSelectedChwId(null); setSelectedChwData(null); }}
+        onSaved={() => { setChwDialogOpen(false); setSelectedChwId(null); setSelectedChwData(null); }}
+        queryUrl={queryUrl}
+      />
+    )}
+
+    {/* Create dialog — opened via 'Add Community Worker' button */}
+    {chwDialogOpen && !selectedChwId && (
+      <ChwDirectoryDialog
+        chvId={null}
+        mode="create"
+        provinces={provinces}
+        allDistricts={allDistricts}
+        facilities={facilities}
+        onClose={() => setChwDialogOpen(false)}
+        onSaved={() => setChwDialogOpen(false)}
+        queryUrl={queryUrl}
+      />
+    )}
+    </>
+  );
+}
+
+// ─── ChwDirectoryDialog ──────────────────────────────────────────────────────
+// Full-featured dialog for viewing, editing, and creating CHV profiles from the
+// national directory. Used in both row-click (edit) and Add Worker (create) modes.
+// ─────────────────────────────────────────────────────────────────────────────
+interface ChwDirectoryDialogProps {
+  chvId: number | null;
+  initialData?: any;
+  mode: "edit" | "create";
+  provinces: any[];
+  allDistricts: any[];
+  facilities: any[];
+  onClose: () => void;
+  onSaved: () => void;
+  queryUrl: string;
+}
+
+function ChwDirectoryDialog({ chvId, initialData, mode, provinces, allDistricts, facilities, onClose, onSaved, queryUrl }: ChwDirectoryDialogProps) {
+  const { toast } = useToast();
+  const [formTab, setFormTab] = useState("basic");
+  const [submitting, setSubmitting] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState(false);
+  const [form, setForm] = useState({ ...EMPTY_CHV_FORM, facilityId: "" });
+  
+  const [filterProvId, setFilterProvId] = useState<string>("all");
+  const [filterDistId, setFilterDistId] = useState<string>("all");
+
+  const setField = <K extends keyof typeof form>(key: K, val: any) =>
+    setForm(prev => ({ ...prev, [key]: val }));
+
+  // Pre-populate form when opened in edit mode
+  useEffect(() => {
+    if (mode === "edit" && initialData) {
+      setForm({
+        name: initialData.name || initialData.fullName || "",
+        nrc: initialData.nrc || "",
+        gender: initialData.gender || "female",
+        contactPhone: initialData.contactPhone || "",
+        age: initialData.age?.toString() || "",
+        roleDescription: initialData.roleDescription || "",
+        educationLevel: initialData.educationLevel || "Secondary",
+        trainingStatus: initialData.trainingStatus || "trained",
+        yearsOfService: initialData.yearsOfService?.toString() || "",
+        campaignRole: initialData.campaignRole || "social_mobilizer",
+        active: initialData.active ?? initialData.isActive ?? true,
+        employmentStatus: initialData.employmentStatus || "Active - In-service",
+        supervisorId: initialData.supervisorId?.toString() || "",
+        facilityId: initialData.facilityId?.toString() || "",
+        villageId: initialData.villageId?.toString() || "",
+      });
+      if (initialData.facilityId) {
+        const fac = facilities.find(f => f.id.toString() === initialData.facilityId?.toString());
+        if (fac) {
+          setFilterDistId(fac.districtId.toString());
+          const dist = allDistricts.find(d => d.id === fac.districtId);
+          if (dist) setFilterProvId(dist.provinceId.toString());
+        }
+      }
+    } else if (mode === "create") {
+      setForm({ ...EMPTY_CHV_FORM, facilityId: "" });
+      setFilterProvId("all");
+      setFilterDistId("all");
+    }
+  }, [mode, initialData, facilities, allDistricts]);
+
+  const dialogDistricts = useMemo(() => {
+    if (filterProvId === "all") return allDistricts;
+    return allDistricts.filter((d) => d.provinceId.toString() === filterProvId);
+  }, [allDistricts, filterProvId]);
+
+  const dialogFacilities = useMemo(() => {
+    if (filterDistId !== "all") {
+      return facilities.filter(f => f.districtId.toString() === filterDistId);
+    }
+    if (filterProvId !== "all") {
+      const validDistIds = new Set(dialogDistricts.map(d => d.id.toString()));
+      return facilities.filter(f => validDistIds.has(f.districtId.toString()));
+    }
+    return facilities;
+  }, [facilities, filterProvId, filterDistId, dialogDistricts]);
+
+  // Load facility staff for supervisor picker
+  const selectedFacilityIdNum = form.facilityId ? parseInt(form.facilityId) : null;
+  const { data: staffList } = useQuery<any[]>({
+    queryKey: ["/api/facilities", selectedFacilityIdNum, "staff"],
+    queryFn: async () => {
+      const res = await fetch(`/api/facilities/${selectedFacilityIdNum}/staff`, { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to fetch staff");
+      return res.json();
+    },
+    enabled: !!selectedFacilityIdNum,
+  });
+
+  // Load facility communities
+  const { data: communityList } = useQuery<any[]>({
+    queryKey: ["/api/villages", { facilityId: selectedFacilityIdNum }],
+    queryFn: async () => {
+      const res = await fetch(`/api/villages?facilityId=${selectedFacilityIdNum}`, { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to fetch communities");
+      return res.json();
+    },
+    enabled: !!selectedFacilityIdNum,
+  });
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!form.name.trim()) {
+      toast({ title: "Full name is required", variant: "destructive" });
+      return;
+    }
+    if (mode === "create" && !form.facilityId) {
+      toast({ title: "Please select a facility", variant: "destructive" });
+      return;
+    }
+    if (!form.nrc.trim()) {
+      toast({ title: "NRC is required", description: "National Registration Card is mandatory.", variant: "destructive" });
+      return;
+    }
+    const nrcPattern = /^\d{6}\/\d{2}\/\d{1}$/;
+    if (!nrcPattern.test(form.nrc.trim())) {
+      toast({ title: "Invalid NRC format", description: "Must be XXXXXX/XX/X (e.g. 123456/78/9)", variant: "destructive" });
+      return;
+    }
+    try {
+      setSubmitting(true);
+      const payload: any = {
+        name: form.name.trim(),
+        nrc: form.nrc.trim() || null,
+        gender: form.gender,
+        contactPhone: form.contactPhone.trim() || null,
+        age: form.age ? parseInt(form.age) : null,
+        roleDescription: form.roleDescription.trim() || null,
+        educationLevel: form.educationLevel,
+        trainingStatus: form.trainingStatus,
+        yearsOfService: form.yearsOfService ? parseInt(form.yearsOfService) : null,
+        campaignRole: form.campaignRole,
+        active: form.active,
+        employmentStatus: form.employmentStatus,
+        supervisorId: form.supervisorId && form.supervisorId !== "none" ? parseInt(form.supervisorId) : null,
+        facilityId: form.facilityId ? parseInt(form.facilityId) : null,
+        villageId: form.villageId && form.villageId !== "none" ? parseInt(form.villageId) : null,
+      };
+      if (mode === "create") {
+        await apiRequest("POST", "/api/chvs", payload);
+        toast({ title: "Community worker added", description: `${form.name} has been registered.` });
+      } else {
+        await apiRequest("PATCH", `/api/chvs/${chvId}`, payload);
+        toast({ title: "Community worker updated", description: `${form.name} has been updated.` });
+      }
+      await queryClient.invalidateQueries({ queryKey: [queryUrl] });
+      onSaved();
+    } catch (error: any) {
+      toast({ title: "Save failed", description: error.message, variant: "destructive" });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleDeactivate = async () => {
+    try {
+      setSubmitting(true);
+      await apiRequest("DELETE", `/api/chvs/${chvId}`);
+      toast({ title: "Worker deactivated", description: "The CHV has been marked as inactive." });
+      await queryClient.invalidateQueries({ queryKey: [queryUrl] });
+      onSaved();
+    } catch (error: any) {
+      toast({ title: "Deactivation failed", description: error.message, variant: "destructive" });
+    } finally {
+      setSubmitting(false);
+      setDeleteConfirm(false);
+    }
+  };
+
+  return (
+    <>
+      <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{mode === "edit" ? "Edit Community Worker" : "Add Community Worker"}</DialogTitle>
+            <DialogDescription>
+              {mode === "edit"
+                ? "Update details, reassign facility, or change active status."
+                : "Register a new Community Health Worker into the national roster."}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="py-4">
+            <form onSubmit={handleSubmit} className="space-y-0">
+              {/* Tab navigation */}
+              <div className="flex gap-1 border-b mb-4">
+                {[
+                  ["basic", "Basic Info"],
+                  ["facility", "Facility & Supervisor"],
+                  ["professional", "Professional"],
+                  ["campaign", "Campaign"]
+                ].map(([tab, label]) => (
+                  <button key={tab} type="button"
+                    onClick={() => setFormTab(tab)}
+                    className={`px-3 py-2 text-sm font-medium border-b-2 transition-colors ${
+                      formTab === tab ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Facility & Supervisor Tab */}
+              {formTab === "facility" && (
+                <div className="space-y-4">
+                  {/* Smart Cascade Filter */}
+                  {(provinces.length > 1 || allDistricts.length > 1) && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      {provinces.length > 1 && (
+                        <div className="space-y-1.5">
+                          <Label>Province Filter</Label>
+                          <Select value={filterProvId} onValueChange={v => { setFilterProvId(v); setFilterDistId("all"); setField("facilityId", ""); }} disabled={submitting}>
+                            <SelectTrigger><SelectValue placeholder="All Provinces" /></SelectTrigger>
+                            <SelectContent className="max-h-64">
+                              <SelectItem value="all">All Provinces</SelectItem>
+                              {provinces.map(p => <SelectItem key={p.id} value={p.id.toString()}>{p.name}</SelectItem>)}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      )}
+                      {allDistricts.length > 1 && (
+                        <div className="space-y-1.5">
+                          <Label>District Filter</Label>
+                          <Select value={filterDistId} onValueChange={v => { setFilterDistId(v); setField("facilityId", ""); }} disabled={submitting}>
+                            <SelectTrigger><SelectValue placeholder="All Districts" /></SelectTrigger>
+                            <SelectContent className="max-h-64">
+                              <SelectItem value="all">All Districts</SelectItem>
+                              {dialogDistricts.map(d => <SelectItem key={d.id} value={d.id.toString()}>{d.name}</SelectItem>)}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="chwd-facility">Facility *</Label>
+                      <Select value={form.facilityId} onValueChange={v => setField("facilityId", v)} disabled={submitting}>
+                        <SelectTrigger id="chwd-facility"><SelectValue placeholder="Select facility…" /></SelectTrigger>
+                        <SelectContent className="max-h-64">
+                          {dialogFacilities.map(f => <SelectItem key={f.id} value={f.id.toString()}>{f.name}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                      <p className="text-xs text-muted-foreground">The facility this volunteer is attached to.</p>
+                    </div>
+                    
+                    <div className="space-y-1.5">
+                      <Label htmlFor="chwd-supervisor">Supervisor (Facility Staff)</Label>
+                      <Select value={form.supervisorId || "none"} onValueChange={v => setField("supervisorId", v)} disabled={submitting || !form.facilityId}>
+                        <SelectTrigger id="chwd-supervisor"><SelectValue placeholder="Select supervisor" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">No Supervisor</SelectItem>
+                          {(staffList || []).map(s => <SelectItem key={s.id} value={s.id.toString()}>{s.fullName} ({s.role})</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                      <p className="text-xs text-muted-foreground">Dynamically loaded based on selected facility.</p>
+                    </div>
+                    
+                    <div className="space-y-1.5">
+                      <Label htmlFor="chwd-community">Assigned Community</Label>
+                      <Select value={form.villageId || "none"} onValueChange={v => setField("villageId", v)} disabled={submitting || !form.facilityId}>
+                        <SelectTrigger id="chwd-community"><SelectValue placeholder="Select community" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">No Community Assigned</SelectItem>
+                          {(communityList || []).map(c => <SelectItem key={c.id} value={c.id.toString()}>{c.name}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                      <p className="text-xs text-muted-foreground">Dynamically loaded based on selected facility.</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Basic Info Tab */}
+              {formTab === "basic" && (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="sm:col-span-2 space-y-1.5">
+                      <Label htmlFor="chwd-name">Full Name *</Label>
+                      <Input id="chwd-name" placeholder="e.g. Grace Mutale" value={form.name}
+                        onChange={e => setField("name", e.target.value)} disabled={submitting} />
+                    </div>
+                    <div className="sm:col-span-2 space-y-1.5">
+                      <Label htmlFor="chwd-nrc">National Registration Card (NRC) *</Label>
+                      <Input id="chwd-nrc" placeholder="XXXXXX/XX/X (e.g. 123456/78/9)" value={form.nrc}
+                        onChange={e => setField("nrc", e.target.value)} disabled={submitting} />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="chwd-gender">Gender</Label>
+                      <Select value={form.gender} onValueChange={v => setField("gender", v)} disabled={submitting}>
+                        <SelectTrigger id="chwd-gender"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="female">Female</SelectItem>
+                          <SelectItem value="male">Male</SelectItem>
+                          <SelectItem value="other">Other / Prefer not to say</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="chwd-phone">Contact Phone</Label>
+                      <Input id="chwd-phone" placeholder="+260977123456" value={form.contactPhone}
+                        onChange={e => setField("contactPhone", e.target.value)} disabled={submitting} />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="chwd-age">Age</Label>
+                      <Input id="chwd-age" type="number" min="15" max="100" placeholder="30" value={form.age}
+                        onChange={e => setField("age", e.target.value)} disabled={submitting} />
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 pt-1">
+                    <Switch id="chwd-active" checked={form.active} onCheckedChange={v => setField("active", v)} disabled={submitting} />
+                    <Label htmlFor="chwd-active" className="text-sm cursor-pointer">Active</Label>
+                  </div>
+                </div>
+              )}
+
+              {/* Professional Tab */}
+              {formTab === "professional" && (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="chwd-education">Education Level</Label>
+                      <Select value={form.educationLevel} onValueChange={v => setField("educationLevel", v)} disabled={submitting}>
+                        <SelectTrigger id="chwd-education"><SelectValue placeholder="Select…" /></SelectTrigger>
+                        <SelectContent>
+                          {CHV_EDUCATION.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="chwd-training">Training Status</Label>
+                      <Select value={form.trainingStatus} onValueChange={v => setField("trainingStatus", v)} disabled={submitting}>
+                        <SelectTrigger id="chwd-training"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          {CHV_TRAINING.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="chwd-yrs">Years of Service</Label>
+                      <Input id="chwd-yrs" type="number" min="0" max="50" placeholder="3" value={form.yearsOfService}
+                        onChange={e => setField("yearsOfService", e.target.value)} disabled={submitting} />
+                    </div>
+                    <div className="sm:col-span-2 space-y-1.5">
+                      <Label htmlFor="chwd-desc">Routine Role / Job Description</Label>
+                      <Input id="chwd-desc" placeholder="Community mobilization and dropout tracing" value={form.roleDescription}
+                        onChange={e => setField("roleDescription", e.target.value)} disabled={submitting} />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="chwd-employment">Employment Status</Label>
+                      <Select value={form.employmentStatus} onValueChange={v => setField("employmentStatus", v)} disabled={submitting}>
+                        <SelectTrigger id="chwd-employment"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          {CHW_EMPLOYMENT_STATUS.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Campaign Tab */}
+              {formTab === "campaign" && (
+                <div className="space-y-4">
+                  <p className="text-sm text-muted-foreground">Campaign roles apply during SIA / supplemental immunisation activities.</p>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="chwd-campRole">Campaign Role</Label>
+                    <Select value={form.campaignRole} onValueChange={v => setField("campaignRole", v)} disabled={submitting}>
+                      <SelectTrigger id="chwd-campRole"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {CHV_CAMPAIGN_ROLES.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              )}
+
+              <DialogFooter className="mt-6 flex flex-col sm:flex-row gap-2 sm:justify-between items-stretch sm:items-center">
+                {mode === "edit" && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="text-destructive border-destructive/40 hover:bg-destructive/10"
+                    onClick={() => setDeleteConfirm(true)}
+                    disabled={submitting}
+                  >
+                    <Trash2 className="h-4 w-4 mr-1.5" /> Deactivate Worker
+                  </Button>
+                )}
+                <div className="flex gap-2 sm:ml-auto">
+                  <Button type="button" variant="outline" onClick={onClose} disabled={submitting}>Cancel</Button>
+                  <Button type="submit" disabled={submitting}>
+                    {submitting ? <><Loader2 className="h-4 w-4 mr-1.5 animate-spin" />Saving…</> : mode === "create" ? "Register Worker" : "Save Changes"}
+                  </Button>
+                </div>
+              </DialogFooter>
+            </form>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Deactivation confirm dialog */}
+      <AlertDialog open={deleteConfirm} onOpenChange={setDeleteConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Deactivate {form.name}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will mark the worker as <strong>Inactive</strong> in the registry. Their record will be preserved and can be reactivated later. No data will be deleted.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={submitting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeactivate}
+              disabled={submitting}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {submitting ? "Deactivating…" : "Yes, Deactivate"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
+  );
+}
+
+function setPagePageSize(size: number) {
+  // Utility helper if page limits are synchronized
+}
 

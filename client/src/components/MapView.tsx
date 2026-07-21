@@ -108,7 +108,7 @@ import {
 } from "@/components/ui/select";
 import {
   applyDefaultLeafletPinIcon,
-  createFacilityCircleIcon,
+  createFacilityCircleIcon, createVillageWithChvsIcon, createGapVillageIcon,
   createFilledPinIcon,
   FILLED_PIN_DATA_URIS,
   FILLED_PIN_SIZE_20x29,
@@ -297,8 +297,8 @@ const plannedIcon = createFilledPinIcon("green", FILLED_PIN_SIZE_20x29);
 const missingStandardIcon = createFilledPinIcon("amber", FILLED_PIN_SIZE_20x29);
 const missingHtrIcon = createFilledPinIcon("red", FILLED_PIN_SIZE_20x29);
 
-const villageIcon = plannedIcon;
-const htrIcon = missingHtrIcon;
+const villageIcon = createVillageWithChvsIcon(0); // Render as default community icon with 0 showing if no CHV data mapped here
+const htrIcon = createGapVillageIcon();
 
 // Custom violet pin icon for community outreach posts
 const outreachSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="35" viewBox="0 0 24 35" fill="none">` +
@@ -3164,6 +3164,7 @@ export function MapView({
         if (!dist || Number(dist.provinceId) !== Number(selectedProvinceId)) return false;
       }
       if (selectedDistrictId !== "all" && Number(f.districtId) !== Number(selectedDistrictId)) return false;
+      if (selectedFacilityId && Number(f.id) !== Number(selectedFacilityId)) return false;
       if (selectedLlgId !== "all") {
         if (llgLookup.size === 0) return true;
         const hasVillageInLlg = villages.some(
@@ -3308,6 +3309,7 @@ export function MapView({
         if (!dist || Number(dist.provinceId) !== Number(selectedProvinceId)) return false;
       }
       if (selectedDistrictId !== "all" && Number(v.districtId) !== Number(selectedDistrictId)) return false;
+      if (selectedFacilityId && Number(v.assignedFacilityId) !== Number(selectedFacilityId)) return false;
       if (selectedLlgId !== "all") {
         if (llgLookup.size === 0) return true;
         if (Number(v.llgId) !== Number(selectedLlgId)) return false;
@@ -7142,6 +7144,10 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
                             {llgLookup.get(Number(village.llgId))?.name}
                           </div>
                         )}
+                        <div className="pl-5 truncate mt-1 pt-1 border-t border-border/20">
+                          <span className="font-semibold text-foreground/80">Linked HF:</span>{" "}
+                          {facilities?.find((f) => f.id === Number(village.assignedFacilityId))?.name || "Unassigned"}
+                        </div>
                       </div>
 
                       <hr className="border-border/40" />
@@ -8440,7 +8446,11 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
                         </Badge>
                       </div>
 
-                      <div className="grid grid-cols-2 gap-2 mt-2.5 text-[10px] text-muted-foreground">
+                      <div className="text-[10px] text-muted-foreground mt-1.5 mb-2">
+                        Linked HF: <strong className="text-foreground/80">{selectedFacility?.name || route.facilityName || "Assigned Facility"}</strong>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2 mt-2 text-[10px] text-muted-foreground">
                         <div className="flex items-center gap-1.5">
                           <span className="text-primary font-medium text-xs">🚗</span>
                           <span>Road: <strong>{route.distanceToFacility} km</strong> ({route.drivingTimeMinutes}m)</span>
@@ -8935,7 +8945,8 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
 
             <CardContent className="flex-1 overflow-y-auto p-2.5 space-y-1.5 custom-scrollbar">
               {filteredFacilities.length > 0 ? (
-                filteredFacilities.map((fac) => {
+                <>
+                  {filteredFacilities.slice(0, 50).map((fac) => {
                   const isSelected = selectedFacilityId === fac.id;
                   return (
                     <div
@@ -8950,7 +8961,13 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
                       ...
                     </div>
                   );
-                })
+                })}
+                  {filteredFacilities.length > 50 && (
+                    <div className="text-[10px] text-center text-muted-foreground p-2 border-t mt-2">
+                      Showing first 50 facilities. Please zoom in or use filters to see more.
+                    </div>
+                  )}
+                </>
               ) : (
                 <div className="flex flex-col items-center justify-center h-48 text-center p-4">
                   ...
@@ -9087,12 +9104,16 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
                             </Badge>
                           </div>
 
-                          <div className="grid grid-cols-2 gap-2 mt-2.5 text-[10px] text-muted-foreground">
-                            <div className="flex items-center gap-1">
+                          <div className="text-[10px] text-muted-foreground mt-1.5 mb-2">
+                            Linked HF: <strong className="text-foreground/80">{facilities?.find(f => f.id === Number(selectedFacilityId))?.name || route.facilityName || "Assigned Facility"}</strong>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-2 mt-2 text-[10px] text-muted-foreground">
+                            <div className="flex items-center gap-1.5">
                               <span className="text-xs">🚗</span>
                               <span>Road: <strong>{route.distanceToFacility} km</strong> ({route.drivingTimeMinutes}m)</span>
                             </div>
-                            <div className="flex items-center gap-1">
+                            <div className="flex items-center gap-1.5">
                               <span className="text-xs">🚶</span>
                               <span>Walk: <strong>{route.walkingTimeMinutes}m</strong></span>
                             </div>
@@ -9277,7 +9298,8 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
 
                 <CardContent className="flex-1 overflow-y-auto p-2.5 space-y-1.5 custom-scrollbar">
                   {filteredFacilities.length > 0 ? (
-                    filteredFacilities.map((fac) => {
+                    <>
+                      {filteredFacilities.slice(0, 50).map((fac) => {
                       const isSelected = selectedFacilityId === fac.id;
                       return (
                         <div
@@ -9325,7 +9347,13 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
                           )}
                         </div>
                       );
-                    })
+                    })}
+                    {filteredFacilities.length > 50 && (
+                      <div className="text-[10px] text-center text-muted-foreground p-2 border-t mt-2">
+                        Showing first 50 facilities. Please zoom in or use filters to see more.
+                      </div>
+                    )}
+                  </>
                   ) : (
                     <div className="flex flex-col items-center justify-center h-48 text-center p-4">
                       <Building2 className="h-8 w-8 text-muted-foreground/40 mb-2" />
