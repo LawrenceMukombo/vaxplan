@@ -35,14 +35,20 @@ describe("dynamic granular RBAC", () => {
   });
 
   it("expands legacy permissions into granular permissions", async () => {
-    const user = baseUser({ permissions: ["manage_users", "view_clients"] });
+    const user = baseUser({ permissions: ["manage_users", "view_clients", "manage_session_plans", "his_integrations.view"] });
 
     expect(hasPermission(user, "users.assign_roles")).toBe(true);
     expect(hasPermission(user, "client_logbook.view")).toBe(true);
+    expect(hasPermission(user, "sessions.plan")).toBe(true);
+    expect(hasPermission(user, "sessions.create")).toBe(true);
+    expect(hasPermission(user, "his_integrations.view")).toBe(true);
 
     const effective = await getEffectivePermissions(user, "tenant-1");
     expect(effective).toContain("manage_users");
     expect(effective).toContain("users.assign_permissions");
     expect(effective).toContain("client_logbook.view");
+    expect(effective).toContain("sessions.plan");
+    expect(effective).toContain("sessions.create");
+    expect(effective).toContain("his_integrations.view");
   });
 });

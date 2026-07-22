@@ -1,4 +1,4 @@
-﻿import { Router } from "express";
+import { Router } from "express";
 import { db } from "../db";
 import { VgieService } from "../services/vgieService";
 import { storage } from "../storage";
@@ -773,6 +773,12 @@ router.get("/settlements", async (req: any, res) => {
     const itemsMapped = items.map((v) => {
       const pop = Number(v.populationEstimate || 0);
       const riskScore = v.riskLevel === "very_high" ? 85 : v.riskLevel === "high" ? 65 : v.riskLevel === "medium" ? 35 : 15;
+      // Nearest facility: prefer the stored name string, then look up by nearestFacilityId
+      const nearestFacilityName = (v as any).nearestFacility ||
+        ((v as any).nearestFacilityId ? facilityNameMap.get((v as any).nearestFacilityId) : null) ||
+        null;
+      // Linked facility name
+      const linkedFacilityName = v.linkedFacilityId ? facilityNameMap.get(v.linkedFacilityId) ?? null : null;
       return {
         id: v.id,
         name: v.name,
@@ -781,12 +787,15 @@ router.get("/settlements", async (req: any, res) => {
         district: v.districtName || "Unknown",
         districtId: v.districtId,
         facilityId: v.linkedFacilityId,
-        facility: v.linkedFacilityId ? facilityNameMap.get(v.linkedFacilityId) : null,
+        // Show linked facility if available, otherwise show nearest facility
+        facility: linkedFacilityName || nearestFacilityName || null,
+        facilityLinked: !!linkedFacilityName,   // true = linked, false = nearest (unlinked)
+        nearestFacilityName,
         linkedCommunityId: v.linkedCommunityId,
         linkedCommunityName: v.linkedCommunityId ? communityNameMap.get(v.linkedCommunityId) : null,
         latitude: v.latitude ? Number(v.latitude) : null,
         longitude: v.longitude ? Number(v.longitude) : null,
-        population: pop,
+        population: pop > 0 ? pop : null,       // null when unknown so UI shows —
         serviceStatus: v.serviceStatus,
         riskLevel: v.riskLevel,
         riskScore,
@@ -865,7 +874,32 @@ router.put("/settlements/:id", async (req: any, res) => {
       .select()
       .from(settlementsMaster)
       .where(and(eq(settlementsMaster.id, id), eq(settlementsMaster.tenantId, req.tenantId)));
-    if (!existing) return res.status(404).json({ error: "Settlement not found" });
+    if (!existing) {
+      // Fallback: check if it exists in villages table
+      const [vRow] = await db
+        .select()
+        .from(villages)
+        .where(and(eq(villages.id, id), eq(villages.tenantId, req.tenantId)));
+      if (!vRow) return res.status(404).json({ error: "Settlement not found" });
+
+      const updates = {
+        name: req.body.name ?? vRow.name,
+        settlementType: req.body.placeType ?? vRow.settlementType,
+        latitude: req.body.latitude != null ? String(req.body.latitude) : vRow.latitude,
+        longitude: req.body.longitude != null ? String(req.body.longitude) : vRow.longitude,
+        totalCatchmentPopulation: req.body.populationEstimate != null ? Number(req.body.populationEstimate) : vRow.totalCatchmentPopulation,
+        under5Population: req.body.populationEstimate != null ? Math.round(Number(req.body.populationEstimate) * 0.18) : vRow.under5Population,
+        highRisk: req.body.riskLevel != null ? (req.body.riskLevel === "high" || req.body.riskLevel === "very_high") : vRow.highRisk,
+        isHardToReach: req.body.hardToReach ?? vRow.isHardToReach,
+        updatedAt: new Date(),
+      };
+      const [updated] = await db
+        .update(villages)
+        .set(updates)
+        .where(eq(villages.id, id))
+        .returning();
+      return res.json({ success: true, data: updated });
+    }
     const updates = {
       name: req.body.name ?? existing.name,
       placeType: req.body.placeType ?? existing.placeType,
@@ -921,7 +955,41 @@ router.post("/settlements/:id/link-facility", async (req: any, res) => {
       .select()
       .from(settlementsMaster)
       .where(and(eq(settlementsMaster.id, id), eq(settlementsMaster.tenantId, req.tenantId)));
-    if (!settlement) return res.status(404).json({ error: "Settlement not found" });
+    if (!settlement) {
+      // Fallback: check if it exists in villages table
+      const [vRow] = await db
+        .select()
+        .from(villages)
+        .where(and(eq(villages.id, id), eq(villages.tenantId, req.tenantId)));
+      if (!vRow) return res.status(404).json({ error: "Settlement not found" });
+
+      const [facility] = await db
+        .select()
+        .from(facilities)
+        .where(and(eq(facilities.id, Number(facilityId)), eq(facilities.tenantId, req.tenantId)));
+      if (!facility) return res.status(404).json({ error: "Facility not found" });
+
+      const distance = getHaversineDistance(
+        Number(vRow.latitude),
+        Number(vRow.longitude),
+        Number(facility.latitude),
+        Number(facility.longitude)
+      );
+      const walkingTime = estimateTravelTimeMinutes(distance, "walking");
+      const drivingTime = estimateTravelTimeMinutes(distance, transportMode);
+
+      await db
+        .update(villages)
+        .set({
+          assignedFacilityId: facility.id,
+          distanceToFacility: String(distance.toFixed(2)),
+          travelTimeMinutes: walkingTime,
+          transportMode: transportMode,
+          updatedAt: new Date(),
+        })
+        .where(eq(villages.id, id));
+      return res.json({ success: true, message: "Linked to facility successfully", data: { distance, travelTime: drivingTime } });
+    }
     const [facility] = await db
       .select()
       .from(facilities)
@@ -969,7 +1037,15 @@ router.post("/settlements/:id/link-community", async (req: any, res) => {
       .select()
       .from(settlementsMaster)
       .where(and(eq(settlementsMaster.id, id), eq(settlementsMaster.tenantId, req.tenantId)));
-    if (!settlement) return res.status(404).json({ error: "Settlement not found" });
+    if (!settlement) {
+      // Fallback: check if it exists in villages table
+      const [vRow] = await db
+        .select()
+        .from(villages)
+        .where(and(eq(villages.id, id), eq(villages.tenantId, req.tenantId)));
+      if (!vRow) return res.status(404).json({ error: "Settlement not found" });
+      return res.json({ success: true, message: "Already linked to itself as a community" });
+    }
     const [community] = await db
       .select()
       .from(villages)
@@ -1005,7 +1081,15 @@ router.post("/settlements/:id/convert-to-community", async (req: any, res) => {
       .select()
       .from(settlementsMaster)
       .where(and(eq(settlementsMaster.id, id), eq(settlementsMaster.tenantId, req.tenantId)));
-    if (!settlement) return res.status(404).json({ error: "Settlement not found" });
+    if (!settlement) {
+      // Fallback: check if it exists in villages table
+      const [vRow] = await db
+        .select()
+        .from(villages)
+        .where(and(eq(villages.id, id), eq(villages.tenantId, req.tenantId)));
+      if (!vRow) return res.status(404).json({ error: "Settlement not found" });
+      return res.json({ success: true, message: "Already converted to community", data: vRow });
+    }
     // Generate code
     const countQuery = await db.select({ count: count() }).from(villages).where(eq(villages.tenantId, req.tenantId));
     const nextIdx = (countQuery[0]?.count ?? 0) + 1;
@@ -1097,11 +1181,48 @@ router.get("/settlements/:id", async (req: any, res) => {
   try {
     const id = Number(req.params.id);
     if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
-    const [v] = await db
+    let [v] = await db
       .select()
       .from(settlementsMaster)
       .where(and(eq(settlementsMaster.id, id), eq(settlementsMaster.tenantId, req.tenantId)));
-    if (!v) return res.status(404).json({ error: "Settlement not found" });
+    if (!v) {
+      // Fallback: check if it exists in villages table (village/community recommendation case)
+      const [vRow] = await db
+        .select()
+        .from(villages)
+        .where(and(eq(villages.id, id), eq(villages.tenantId, req.tenantId)));
+      if (!vRow) return res.status(404).json({ error: "Settlement not found" });
+      v = {
+        id: vRow.id,
+        tenantId: vRow.tenantId,
+        name: vRow.name,
+        placeType: vRow.settlementType || "village",
+        latitude: vRow.latitude,
+        longitude: vRow.longitude,
+        provinceId: null,
+        districtId: vRow.districtId,
+        districtName: null,
+        populationEstimate: vRow.totalCatchmentPopulation || 0,
+        under5Population: vRow.under5Population || 0,
+        buildingCount: 0,
+        linkedCommunityId: vRow.id,
+        linkedFacilityId: vRow.assignedFacilityId,
+        distanceToLinkedFacilityKm: vRow.distanceToFacility,
+        estimatedWalkingTimeMinutes: vRow.travelTimeMinutes || 30,
+        estimatedDrivingTimeMinutes: null,
+        travelModePlanning: vRow.transportMode,
+        drySeasonTravelTimeMinutes: null,
+        rainySeasonTravelTimeMinutes: null,
+        linkStatus: "linked",
+        linkMethod: "converted",
+        linkConfidence: "1.00",
+        linkNotes: vRow.comments,
+        isActive: true,
+        validationStatus: "approved",
+        updatedAt: vRow.updatedAt,
+        createdAt: vRow.createdAt,
+      } as any;
+    }
     const allDistricts = await db
       .select({ id: districts.id, name: districts.name })
       .from(districts)
@@ -1252,19 +1373,39 @@ router.get("/settlements/:id", async (req: any, res) => {
       .orderBy(desc(vgieRecommendations.createdAt))
       .limit(5);
     const pop = Number(v.populationEstimate || 0);
+    // Derive population sub-groups from population estimate
+    const households = pop > 0 ? Math.round(pop / 5) : null;
+    const childrenUnderFive = (v.under5Population && v.under5Population > 0)
+      ? v.under5Population
+      : (pop > 0 ? Math.round(pop * 0.18) : null);
+    const childrenUnderOne = pop > 0 ? Math.round(pop * 0.04) : null;
+    const pregnantWomen = pop > 0 ? Math.round(pop * 0.05) : null;
+    const riskScore = v.riskLevel === "very_high" ? 85 : v.riskLevel === "high" ? 65 : v.riskLevel === "medium" ? 35 : 15;
     res.json({
       id: v.id,
       name: v.name,
       district: districtLookup.get(v.districtId || 0) || v.districtName || "Unknown",
       districtId: v.districtId,
+      provinceId: v.provinceId,
+      provinceName: v.provinceName,
       latitude: v.latitude ? Number(v.latitude) : null,
       longitude: v.longitude ? Number(v.longitude) : null,
-      population: pop,
+      population: pop > 0 ? pop : null,
+      households,
+      childrenUnderFive,
+      childrenUnderOne,
+      pregnantWomen,
+      buildingCount: v.buildingCount ?? null,
+      confidenceScore: v.sourceConfidence ? Number(v.sourceConfidence) : null,
       under5Population: v.under5Population,
       serviceStatus: v.serviceStatus,
+      riskLevel: v.riskLevel,
+      riskScore,
+      validationStatus: v.validationStatus,
       highRisk: v.riskLevel === "high" || v.riskLevel === "very_high",
       highRiskReason: v.riskLevel === "very_high" ? "very high risk classification" : "high risk classification",
       isHardToReach: v.hardToReach,
+      isNewSettlement: v.createdAt != null && new Date(v.createdAt) > new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
       settlementType: v.placeType || "village",
       distanceToFacility: v.distanceToLinkedFacilityKm ? Number(v.distanceToLinkedFacilityKm) : null,
       travelTimeMinutes: v.estimatedWalkingTimeMinutes || 30,
@@ -1308,7 +1449,7 @@ router.get("/settlements/:id", async (req: any, res) => {
 // --- /api/vgie/facilities ---
 router.get("/facilities", async (req: any, res) => {
   try {
-    const { search, district } = req.query as Record<string, string | undefined>;
+    const { search, district, districtId } = req.query as Record<string, string | undefined>;
     const allDistricts = await db
       .select({ id: districts.id, name: districts.name })
       .from(districts)
@@ -1340,11 +1481,17 @@ router.get("/facilities", async (req: any, res) => {
           f.district.toLowerCase().includes(q)
       );
     }
-    if (district && district !== "all") {
+    // Filter by numeric districtId (preferred, from cascade selects)
+    if (districtId && districtId !== "all") {
+      const dId = Number(districtId);
+      result = result.filter((f) => f.districtId === dId);
+    } else if (district && district !== "all") {
+      // Fallback: filter by district name string
       result = result.filter((f) =>
         f.district.toLowerCase().includes(district.toLowerCase())
       );
     }
+    console.log("[DEBUG /facilities] Query params:", req.query, "Filtered result length:", result.length);
     res.json(result);
   } catch (err) {
     console.error("VGIE facilities error:", err);

@@ -1256,7 +1256,7 @@ export class FhirR4Adapter implements HisAdapter {
  * Country-specific HMIS generic REST adapter.
  *
  * Suitable for national systems that expose a non-standard REST API,
- * e.g. Zambia SmartCare, South Sudan eHIS, or custom MOH APIs.
+ * e.g. Zambia SmartCare, PNG eNHIS, or custom MOH APIs.
  *
  * The adapter POSTs a VaxPlan-structured JSON payload to the configured
  * endpoint. The receiving system is responsible for parsing it.

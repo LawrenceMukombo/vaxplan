@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, jest } from "@jest/globals";
+import { describe, it, expect, beforeEach } from "vitest";
 import { EntityHistoryService } from "../services/entityHistoryService";
 import { AsOfDateService } from "../services/asOfDateService";
 
