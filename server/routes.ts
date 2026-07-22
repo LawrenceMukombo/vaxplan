@@ -13818,7 +13818,7 @@ export async function registerRoutes(
       const parsed = insertStockTransactionSchema.parse(payload);
 
       const scope = await getGeoScope(req.dbUser, req.tenantId);
-      if (scope.facilityIds && !scope.facilityIds.has(parsed.facilityId)) {
+      if (!scope.all && scope.facilityIds && !scope.facilityIds.has(parsed.facilityId)) {
         return res.status(403).json({ message: "Not authorized to post transactions for this facility." });
       }
       const transaction = await storage.createStockTransaction(req.tenantId, {
