@@ -104,6 +104,37 @@ async function importAll() {
       let row = parseDates(rawRow);
       row = serializeJsonFields(row);
       try {
+        // Special check for userPermissions unique (tenantId, code) constraint
+        if (name === "userPermissions" && row.code) {
+          const byCode = await db
+            .select()
+            .from(table)
+            .where(sql`${table.code} = ${row.code} AND (${table.tenantId} = ${row.tenantId} OR ${table.tenantId} IS NULL OR ${row.tenantId} IS NULL)`)
+            .limit(1);
+
+          if (byCode.length > 0) {
+            const { [key]: _, ...updateFields } = row;
+            await db
+              .update(table)
+              .set(updateFields)
+              .where(eq(table.id, byCode[0].id));
+            inserted++;
+            continue;
+          }
+        }
+
+        // Special check for chvProfiles assigned_village_id foreign key validity
+        if (name === "chvProfiles" && row.assignedVillageId) {
+          const villageExists = await db
+            .select({ id: schema.villages.id })
+            .from(schema.villages)
+            .where(eq(schema.villages.id, row.assignedVillageId))
+            .limit(1);
+          if (villageExists.length === 0) {
+            row.assignedVillageId = null;
+          }
+        }
+
         const existing = await db
           .select()
           .from(table)
@@ -129,8 +160,7 @@ async function importAll() {
         }
         inserted++;
       } catch (err: any) {
-        console.error(`   ⚠️ Error importing row ${row[key]} in ${name}:`);
-        console.error(err);
+        console.error(`   ⚠️ Error importing row ${row[key]} in ${name}:`, err.message);
       }
     }
 
