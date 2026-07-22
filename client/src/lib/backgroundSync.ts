@@ -32,6 +32,8 @@ export function isBackgroundSyncSupported(): boolean {
 export async function registerBackgroundOutboxFlush(): Promise<boolean> {
   try {
     if (!isBackgroundSyncSupported()) return false;
+    const registration = await navigator.serviceWorker.getRegistration();
+    if (!registration) return false;
     const reg = (await navigator.serviceWorker.ready) as SyncRegistration;
     if (!reg.sync) return false;
     await reg.sync.register(OUTBOX_SYNC_TAG);

@@ -1,4 +1,4 @@
-import { useLocation, Link } from "wouter";
+﻿import { useLocation, Link } from "wouter";
 import { useState } from "react";
 import { versionLabel } from "@/lib/version";
 import {
@@ -56,7 +56,7 @@ import { Badge } from "@/components/ui/badge";
 import { useQuery } from "@tanstack/react-query";
 import type { User, ApprovalRequest } from "@shared/schema";
 import { DEFAULT_MODULES } from "@/lib/modules";
-import { canAccessClientLogbook, canAccessDefaulterList, canAccessDropoutRates, canAccessUserManagement } from "@/lib/accessControl";
+import { canAccessAdministration, canAccessClientLogbook, canAccessDefaulterList, canAccessDropoutRates, canAccessHisIntegrations, canAccessUserManagement, hasAnyPermission } from "@/lib/accessControl";
 interface TenantSummary { id: string; name: string; code: string }
 interface AppSidebarProps {
   user: User;
@@ -92,7 +92,6 @@ const planningNavItems = [
   { title: "Sessions", path: "/all-sessions", icon: CalendarDays },
   { title: "Stock Ledger", path: "/stock", icon: Package },
   { title: "Hard-to-Reach", path: "/htr", icon: AlertTriangle },
-  { title: "HIS Integrations", path: "/his-integrations", icon: Share2, adminOnly: true },
   { title: "Field Readiness", path: "/field-readiness", icon: Radio },
 ];
 */
@@ -102,7 +101,6 @@ const planningNavItems = [
   { title: "Sessions", path: "/all-sessions", icon: CalendarDays },
   { title: "Stock Ledger", path: "/stock", icon: Package },
   { title: "Hard-to-Reach", path: "/htr", icon: AlertTriangle },
-  { title: "HIS Integrations", path: "/his-integrations", icon: Share2, adminOnly: true },
   { title: "Field Readiness", path: "/field-readiness", icon: Radio },
 ];
 const siaNavItems = [
@@ -118,6 +116,7 @@ const adminNavItems = [
   { title: "User Management", path: "/admin/users", icon: Users },
   { title: "Access Requests", path: "/admin/signups", icon: UserPlus },
   { title: "Manage Staff", path: "/admin/staff", icon: Users },
+  { title: "HIS Integrations", path: "/his-integrations", icon: Share2 },
   { title: "Country Onboarding", path: "/admin/countries", icon: Globe, superAdminOnly: true },
   { title: "Boundary Manager", path: "/admin/boundaries", icon: Map },
   { title: "Custom Layers", path: "/admin/custom-layers", icon: Layers },
@@ -131,6 +130,7 @@ const systemNavItems = [
   { title: "Standards Alignment", path: "/standards-alignment", icon: ShieldCheck },
   { title: "Reconcile Vaccines", path: "/admin/reconcile-vaccines", icon: Wrench, reconcileOnly: true },
   { title: "Data Sources", path: "/data-sources", icon: Database },
+  { title: "Temporal History", path: "/temporal-history", icon: Database },
   { title: "API Reference", path: "/api-reference", icon: Terminal },
   { title: "Settings", path: "/settings", icon: Settings },
   { title: "Help", path: "/help", icon: HelpCircle },
@@ -222,9 +222,8 @@ export function AppSidebar({ user }: AppSidebarProps) {
   const isNationalAdmin = user.role === "national_admin";
   const isPlatformAdmin = (user as any).isPlatformAdmin === true;
   const isFacilityStaff = user.role === "facility_clerk" || user.role === "facility_in_charge" || user.role === "facility_partner";
-  const canAccessHis = user.role === "national_admin" || user.role === "gis_specialist";
   const canManageUsers = canAccessUserManagement(user);
-  const canAccessAdmin = isNationalAdmin || canManageUsers || user.role === "provincial_coordinator" || isPlatformAdmin;
+  const canAccessAdmin = canAccessAdministration(user);
   const canEditWiki = isNationalAdmin || user.role === "gis_specialist" || isPlatformAdmin;
   const canReconcile = user.role === "national_admin" || user.role === "district_manager";
   // Field Teams page is available to district_manager and above (not facility-level roles)
@@ -250,13 +249,11 @@ export function AppSidebar({ user }: AppSidebarProps) {
     return true;
   });
   const visiblePlanningNavItems = planningNavItems
-    .filter((item) => !(item as any).adminOnly || canAccessHis)
     .filter((item) => {
       if (item.path === "/microplans/routine") return modules.routine !== false;
       if (item.path === "/all-sessions") return modules.sessions !== false;
       if (item.path === "/stock") return modules.stock !== false;
       if (item.path === "/htr") return modules.htr !== false;
-      if (item.path === "/his-integrations") return modules.interop !== false;
       if (item.path === "/field-readiness") return true;
       if (item.path === "/plan-health") return modules.routine !== false;
       return true;
@@ -453,15 +450,27 @@ export function AppSidebar({ user }: AppSidebarProps) {
                   return isNationalAdmin;
                   */
                   if (item.path === "/admin/staff") {
-                    return true;
+                    return hasAnyPermission(user, ["users.view", "users.update", "manage_users"]);
                   }
                   if (item.path === "/admin/users") {
                     return canManageUsers;
                   }
                   if (item.path === "/admin/signups") {
-                    return isNationalAdmin || isPlatformAdmin;
+                    return hasAnyPermission(user, ["users.create", "users.update", "manage_users"]);
                   }
-                  return isNationalAdmin;
+                  if (item.path === "/his-integrations") {
+                    return modules.interop !== false && canAccessHisIntegrations(user);
+                  }
+                  if (item.path === "/admin/boundaries" || item.path === "/admin/custom-layers") {
+                    return hasAnyPermission(user, ["manage_boundaries", "polygons.view", "polygons.create", "polygons.update"]);
+                  }
+                  if (item.path === "/national-plan") {
+                    return hasAnyPermission(user, ["dashboard.view", "view_reports", "microplans.view", "view_session_plans"]);
+                  }
+                  if (item.path === "/admin/catalogue") {
+                    return hasAnyPermission(user, ["reference_data.view", "reference_data.manage"]);
+                  }
+                  return false;
                 })
                 .map((item) => (
                   <SidebarMenuItem key={item.path}>
@@ -536,3 +545,4 @@ export function AppSidebar({ user }: AppSidebarProps) {
     </Sidebar>
   );
 }
+

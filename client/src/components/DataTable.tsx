@@ -1,4 +1,4 @@
-﻿import {
+import {
   Table,
   TableBody,
   TableCell,
@@ -15,8 +15,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Search, Download } from "lucide-react";
-import { useState, useMemo } from "react";
+import { ChevronLeft, ChevronRight, ChevronDown, ChevronsLeft, ChevronsRight, Search, Download } from "lucide-react";
+import React, { useState, useMemo } from "react";
 // XLSX is loaded lazily on-demand (only when the user clicks Export) to keep
 // it out of the main JS bundle - the library is 424 kB raw / 142 kB gzipped.
 import { useToast } from "@/hooks/use-toast";
@@ -45,6 +45,7 @@ interface DataTableProps<T> {
   selectedIds?: (string | number)[];
   onSelectionChange?: (ids: (string | number)[]) => void;
   bulkActions?: React.ReactNode;
+  renderExpandedRow?: (item: T) => React.ReactNode;
 }
 
 export function DataTable<T extends { id?: number | string }>({
@@ -62,10 +63,20 @@ export function DataTable<T extends { id?: number | string }>({
   selectedIds = [],
   onSelectionChange,
   bulkActions,
+  renderExpandedRow,
 }: DataTableProps<T>) {
   const [search, setSearch] = useState("");
   const [limit, setLimit] = useState(pageSize);
   const [currentPage, setCurrentPage] = useState(1);
+  const [expandedRows, setExpandedRows] = useState<Set<string | number>>(new Set());
+
+  const toggleRowExpansion = (id: string | number) => {
+    const newExpanded = new Set(expandedRows);
+    if (newExpanded.has(id)) newExpanded.delete(id);
+    else newExpanded.add(id);
+    setExpandedRows(newExpanded);
+  };
+
   const [sortConfig, setSortConfig] = useState<{
     key: string;
     direction: "asc" | "desc";
@@ -265,6 +276,7 @@ export function DataTable<T extends { id?: number | string }>({
                   />
                 </TableHead>
               )}
+              {!!renderExpandedRow && <TableHead className="w-10 sticky top-0 bg-muted z-10"></TableHead>}
               {columns.map((col) => {
                 const isSortable = col.sortable !== false;
                 return (
@@ -300,6 +312,7 @@ export function DataTable<T extends { id?: number | string }>({
               </TableRow>
             ) : (
               paginatedData.map((item, index) => (
+                <React.Fragment key={item.id ?? index}>
                 <TableRow
                   key={item.id ?? index}
                   className={onRowClick ? "cursor-pointer hover-elevate" : ""}
@@ -322,6 +335,13 @@ export function DataTable<T extends { id?: number | string }>({
                       />
                     </TableCell>
                   )}
+                  {!!renderExpandedRow && (
+                    <TableCell className="w-10 text-center" onClick={(e) => { e.stopPropagation(); if (item.id !== undefined) toggleRowExpansion(item.id); }}>
+                      <Button variant="ghost" size="icon" className="h-6 w-6">
+                        {item.id !== undefined && expandedRows.has(item.id) ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                      </Button>
+                    </TableCell>
+                  )}
                   {columns.map((col) => (
                     <TableCell key={String(col.key)}>
                       {col.render
@@ -330,6 +350,16 @@ export function DataTable<T extends { id?: number | string }>({
                     </TableCell>
                   ))}
                 </TableRow>
+                {!!renderExpandedRow && item.id !== undefined && expandedRows.has(item.id) && (
+                  <TableRow>
+                    <TableCell colSpan={columns.length + (enableSelection ? 1 : 0) + (!!renderExpandedRow ? 1 : 0)} className="p-0 border-b">
+                      <div className="bg-muted/5 p-4 animate-in fade-in slide-in-from-top-2 border-t">
+                        {renderExpandedRow(item)}
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                )}
+                </React.Fragment>
               ))
             )}
           </TableBody>

@@ -38,6 +38,8 @@ import { format } from "date-fns";
 import { GeoCascadeFilter } from "@/components/GeoCascadeFilter";
 import { buildGeoMaps, getRecordHierarchy } from "@/lib/geoHierarchy";
 
+import { ChangeApprovalScreen } from "@/components/history/ChangeApprovalScreen";
+
 export default function Approvals() {
   const { toast } = useToast();
   const [selectedRequest, setSelectedRequest] = useState<ApprovalRequest | null>(null);
@@ -402,6 +404,9 @@ export default function Approvals() {
           <TabsTrigger value="pending" data-testid="tab-pending">
             Pending ({pendingRequests.length})
           </TabsTrigger>
+          <TabsTrigger value="entity-history" data-testid="tab-entity-history">
+            Entity Version Proposals
+          </TabsTrigger>
           <TabsTrigger value="approved" data-testid="tab-approved">
             Approved
           </TabsTrigger>
@@ -409,6 +414,10 @@ export default function Approvals() {
             Rejected
           </TabsTrigger>
         </TabsList>
+
+        <TabsContent value="entity-history" className="mt-4">
+          <ChangeApprovalScreen />
+        </TabsContent>
 
         <TabsContent value="pending" className="mt-4">
           <Card>

@@ -563,12 +563,27 @@ export default function Settlements() {
                       )}
                       {visibleColumns.province && <td className="px-4 py-3 text-muted-foreground">{s.province}</td>}
                       {visibleColumns.district && <td className="px-4 py-3 text-muted-foreground">{s.district}</td>}
-                      {visibleColumns.facility && <td className="px-4 py-3 text-muted-foreground truncate max-w-44">{s.facility || "—"}</td>}
+                      {visibleColumns.facility && (
+                        <td className="px-4 py-3">
+                          {s.facility ? (
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="text-muted-foreground truncate max-w-40 text-xs">{s.facility}</span>
+                              {!s.facilityLinked && (
+                                <span className="text-[9px] font-semibold text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded px-1 py-0 shrink-0">Nearest</span>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
+                          )}
+                        </td>
+                      )}
                       {visibleColumns.population && (
                         <td className="px-4 py-3 text-right">
                           <div className="flex items-center justify-end gap-1 font-medium">
                             <Users className="w-3 h-3 text-muted-foreground" />
-                            <span className="text-foreground">{s.population?.toLocaleString() ?? "0"}</span>
+                            <span className="text-foreground">
+                              {s.population != null ? s.population.toLocaleString() : "—"}
+                            </span>
                           </div>
                         </td>
                       )}

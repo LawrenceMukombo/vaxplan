@@ -7,6 +7,10 @@ export function useAuth() {
     queryKey: ["/api/auth/user"],
     queryFn: getQueryFn<User | null>({ on401: "returnNull" }),
     retry: false,
+    staleTime: 0,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
   });
 
   return {

@@ -49,7 +49,7 @@ import {
 } from "lucide-react";
 import type { User } from "@shared/schema";
 import { DEFAULT_MODULES } from "@/lib/modules";
-import { canAccessClientLogbook, canAccessDefaulterList, canAccessDropoutRates, canAccessUserManagement } from "@/lib/accessControl";
+import { canAccessAdministration, canAccessClientLogbook, canAccessDefaulterList, canAccessDropoutRates, canAccessHisIntegrations, canAccessUserManagement, hasAnyPermission } from "@/lib/accessControl";
 
 interface TenantSummary {
   id: string;
@@ -109,13 +109,12 @@ export function GlobalSearch({ user }: GlobalSearchProps) {
     const canAccessApprovals = ["district_manager", "provincial_coordinator", "national_admin"].includes(user.role || "");
     const isNationalAdmin = user.role === "national_admin";
     const isPlatformAdmin = (user as any).isPlatformAdmin === true;
-    const canAccessHis = user.role === "national_admin" || user.role === "gis_specialist";
     const canManageUsers = canAccessUserManagement(user);
-    const canAccessAdmin = isNationalAdmin || canManageUsers || user.role === "provincial_coordinator" || isPlatformAdmin;
+    const canAccessAdmin = canAccessAdministration(user);
     const canReconcile = user.role === "national_admin" || user.role === "district_manager";
     const canAccessFieldTeams = ["district_manager", "provincial_coordinator", "national_admin", "gis_specialist"].includes(user.role || "") || isPlatformAdmin;
 
-    // ─── 1. Navigation Group ─────────────────────────────────────────────────
+    // Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ 1. Navigation Group Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
     items.push({
       title: "Dashboard",
       description: "View key microplanning indicators and summary metrics",
@@ -216,7 +215,7 @@ export function GlobalSearch({ user }: GlobalSearchProps) {
       });
     }
 
-    // ─── 2. Planning & Tools Group ───────────────────────────────────────────
+    // Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ 2. Planning & Tools Group Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
     if (modules.routine !== false) {
       items.push({
         title: "Routine Microplans",
@@ -257,17 +256,8 @@ export function GlobalSearch({ user }: GlobalSearchProps) {
       });
     }
 
-    if (modules.interop !== false && canAccessHis) {
-      items.push({
-        title: "HIS Integrations",
-        description: "Configure DHIS2, OpenHIE, and external health registry sync profiles",
-        path: "/his-integrations",
-        icon: Share2,
-        group: "Planning & Tools",
-      });
-    }
 
-    // ─── 3. Supervision & Campaigns Group ────────────────────────────────────
+    // Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ 3. Supervision & Campaigns Group Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
     if (modules.campaigns !== false) {
       items.push({
         title: "SIA Campaigns",
@@ -302,7 +292,7 @@ export function GlobalSearch({ user }: GlobalSearchProps) {
       });
     }
 
-    // ─── 4. Administration Group ─────────────────────────────────────────────
+    // Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ 4. Administration Group Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
     if (canAccessAdmin) {
       if (canManageUsers) {
         items.push({
@@ -320,6 +310,15 @@ export function GlobalSearch({ user }: GlobalSearchProps) {
         icon: UserPlus,
         group: "Administration",
       });
+      if (modules.interop !== false && canAccessHisIntegrations(user)) {
+        items.push({
+          title: "HIS Integrations",
+          description: "Configure DHIS2, OpenHIE, and external health registry sync profiles",
+          path: "/his-integrations",
+          icon: Share2,
+          group: "Administration",
+        });
+      }
       if (isPlatformAdmin) {
         items.push({
           title: "Country Onboarding",
@@ -329,7 +328,7 @@ export function GlobalSearch({ user }: GlobalSearchProps) {
           group: "Administration",
         });
       }
-      if (isNationalAdmin) {
+      if (hasAnyPermission(user, ["manage_boundaries", "polygons.view", "polygons.create", "polygons.update"])) {
         items.push({
           title: "Boundary Manager",
           description: "Import, edit, and manage geographic administrative boundaries (Wards/LLGs)",
@@ -344,6 +343,8 @@ export function GlobalSearch({ user }: GlobalSearchProps) {
           icon: Layers,
           group: "Administration",
         });
+      }
+      if (hasAnyPermission(user, ["dashboard.view", "view_reports", "microplans.view", "view_session_plans"])) {
         items.push({
           title: "National Plan",
           description: "Review consolidated national vaccine immunization target sheets",
@@ -354,7 +355,7 @@ export function GlobalSearch({ user }: GlobalSearchProps) {
       }
     }
 
-    // ─── 5. System Group ─────────────────────────────────────────────────────
+    // Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ 5. System Group Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
     if (modules.supervision !== false) {
       items.push({
         title: "Supervision Checklists",
@@ -441,7 +442,7 @@ export function GlobalSearch({ user }: GlobalSearchProps) {
       group: "System",
     });
 
-    // ─── 6. Quick Actions Group ──────────────────────────────────────────────
+    // Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ 6. Quick Actions Group Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
     items.push({
       title: `Toggle Theme (Current: ${theme})`,
       description: "Switch between light and dark modes dynamically",

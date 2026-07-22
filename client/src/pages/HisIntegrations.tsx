@@ -622,8 +622,8 @@ export default function HisIntegrations() {
               Interoperability is implemented against WHO-endorsed open standards: <strong>DHIS2 Web API v2</strong> for 
               aggregate reporting (used in 70+ countries), <strong>HL7 FHIR R4</strong> for individual patient/immunization 
               records (IHE PIXm / mCSD compliant), and a configurable <strong>generic REST adapter</strong> for 
-              country-specific national HMIS such as South Sudan eHIS and Zambia SmartCare.
-            </p>
+              country-specific national HMIS such as PNG eNHIS and Zambia SmartCare.
+             </p>
           </div>
         </CardContent>
       </Card>
@@ -946,7 +946,7 @@ export default function HisIntegrations() {
               border: "border-amber-200 dark:border-amber-900/40",
               description:
                 "Configurable REST adapter for country-specific national systems. Posts a VaxPlan-structured JSON envelope.",
-              standards: ["Zambia SmartCare", "South Sudan eHIS", "Custom MOH APIs"],
+              standards: ["Zambia SmartCare", "PNG eNHIS", "Custom MOH APIs"],
             },
           ].map((card) => (
             <Card key={card.title} className={`border ${card.border} ${card.bg}`}>

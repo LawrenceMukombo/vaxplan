@@ -65,6 +65,7 @@ __export(schema_exports, {
   communications: () => communications,
   communityHealthVolunteers: () => communityHealthVolunteers,
   communityHealthVolunteersRelations: () => communityHealthVolunteersRelations,
+  communityHistoryVersions: () => communityHistoryVersions,
   coverageCsvRowSchema: () => coverageCsvRowSchema,
   csvImports: () => csvImports,
   customLayerCategoryEnum: () => customLayerCategoryEnum,
@@ -79,11 +80,13 @@ __export(schema_exports, {
   doseClassificationEnum: () => doseClassificationEnum,
   downloadAssets: () => downloadAssets,
   downloadAssetsRelations: () => downloadAssetsRelations,
+  entityHistoryVersions: () => entityHistoryVersions,
   facilities: () => facilities,
   facilitiesRelations: () => facilitiesRelations,
   facilityCatchments: () => facilityCatchments,
   facilityCatchmentsRelations: () => facilityCatchmentsRelations,
   facilityExcludedVillages: () => facilityExcludedVillages,
+  facilityHistoryVersions: () => facilityHistoryVersions,
   facilityStaff: () => facilityStaff,
   facilityStaffRelations: () => facilityStaffRelations,
   fundingSourceEnum: () => fundingSourceEnum,
@@ -114,11 +117,14 @@ __export(schema_exports, {
   insertClientVaccinationSchema: () => insertClientVaccinationSchema,
   insertColdChainEquipmentSchema: () => insertColdChainEquipmentSchema,
   insertCommunityHealthVolunteerSchema: () => insertCommunityHealthVolunteerSchema,
+  insertCommunityHistoryVersionSchema: () => insertCommunityHistoryVersionSchema,
   insertCsvImportSchema: () => insertCsvImportSchema,
   insertCustomLayerSchema: () => insertCustomLayerSchema,
   insertDistrictSchema: () => insertDistrictSchema,
   insertDownloadAssetSchema: () => insertDownloadAssetSchema,
+  insertEntityHistoryVersionSchema: () => insertEntityHistoryVersionSchema,
   insertFacilityCatchmentSchema: () => insertFacilityCatchmentSchema,
+  insertFacilityHistoryVersionSchema: () => insertFacilityHistoryVersionSchema,
   insertFacilitySchema: () => insertFacilitySchema,
   insertFacilityStaffSchema: () => insertFacilityStaffSchema,
   insertGisPolygonSchema: () => insertGisPolygonSchema,
@@ -136,15 +142,18 @@ __export(schema_exports, {
   insertPilotUpdateSchema: () => insertPilotUpdateSchema,
   insertPopulationDataSchema: () => insertPopulationDataSchema,
   insertPopulationGridSchema: () => insertPopulationGridSchema,
+  insertPopulationHistoryVersionSchema: () => insertPopulationHistoryVersionSchema,
   insertProvinceSchema: () => insertProvinceSchema,
   insertQuarterlyReviewSchema: () => insertQuarterlyReviewSchema,
   insertRegionSchema: () => insertRegionSchema,
+  insertReportEntitySnapshotSchema: () => insertReportEntitySnapshotSchema,
   insertResearchDocumentSchema: () => insertResearchDocumentSchema,
   insertResearchInterestSubmissionSchema: () => insertResearchInterestSubmissionSchema,
   insertSessionDayPlanSchema: () => insertSessionDayPlanSchema,
   insertSessionPlanSchema: () => insertSessionPlanSchema,
   insertSettlementMasterSchema: () => insertSettlementMasterSchema,
   insertSignupRequestSchema: () => insertSignupRequestSchema,
+  insertStockReferenceHistoryVersionSchema: () => insertStockReferenceHistoryVersionSchema,
   insertStockTransactionSchema: () => insertStockTransactionSchema,
   insertSupervisionChecklistTemplateSchema: () => insertSupervisionChecklistTemplateSchema,
   insertSupervisionVisitSchema: () => insertSupervisionVisitSchema,
@@ -154,11 +163,13 @@ __export(schema_exports, {
   insertTenantSchema: () => insertTenantSchema,
   insertTenantVpdConfigurationSchema: () => insertTenantVpdConfigurationSchema,
   insertUncoveredCommunitySchema: () => insertUncoveredCommunitySchema,
+  insertUserAssignmentHistorySchema: () => insertUserAssignmentHistorySchema,
   insertUserPermissionSchema: () => insertUserPermissionSchema,
   insertUserRoleSchema: () => insertUserRoleSchema,
   insertUserSchema: () => insertUserSchema,
   insertVaccineConfigSchema: () => insertVaccineConfigSchema,
   insertVaccineRequirementSchema: () => insertVaccineRequirementSchema,
+  insertVaccineScheduleHistoryVersionSchema: () => insertVaccineScheduleHistoryVersionSchema,
   insertVgieAlertRuleSchema: () => insertVgieAlertRuleSchema,
   insertVgieAlertSchema: () => insertVgieAlertSchema,
   insertVgieRecommendationRuleSchema: () => insertVgieRecommendationRuleSchema,
@@ -185,6 +196,7 @@ __export(schema_exports, {
   populationData: () => populationData,
   populationGrids: () => populationGrids,
   populationGridsRelations: () => populationGridsRelations,
+  populationHistoryVersions: () => populationHistoryVersions,
   populationRefreshJobs: () => populationRefreshJobs,
   populationRefreshStatusEnum: () => populationRefreshStatusEnum,
   populationRefreshTriggerEnum: () => populationRefreshTriggerEnum,
@@ -194,6 +206,7 @@ __export(schema_exports, {
   quarterlyReviews: () => quarterlyReviews,
   regions: () => regions,
   regionsRelations: () => regionsRelations,
+  reportEntitySnapshots: () => reportEntitySnapshots,
   researchDocuments: () => researchDocuments,
   researchDocumentsRelations: () => researchDocumentsRelations,
   researchDownloadEvents: () => researchDownloadEvents,
@@ -203,7 +216,15 @@ __export(schema_exports, {
   selectCatalogueScheduleDoseSchema: () => selectCatalogueScheduleDoseSchema,
   selectCatalogueVaccineSchema: () => selectCatalogueVaccineSchema,
   selectCatalogueWastageThresholdSchema: () => selectCatalogueWastageThresholdSchema,
+  selectCommunityHistoryVersionSchema: () => selectCommunityHistoryVersionSchema,
+  selectEntityHistoryVersionSchema: () => selectEntityHistoryVersionSchema,
+  selectFacilityHistoryVersionSchema: () => selectFacilityHistoryVersionSchema,
   selectGisPolygonSchema: () => selectGisPolygonSchema,
+  selectPopulationHistoryVersionSchema: () => selectPopulationHistoryVersionSchema,
+  selectReportEntitySnapshotSchema: () => selectReportEntitySnapshotSchema,
+  selectStockReferenceHistoryVersionSchema: () => selectStockReferenceHistoryVersionSchema,
+  selectUserAssignmentHistorySchema: () => selectUserAssignmentHistorySchema,
+  selectVaccineScheduleHistoryVersionSchema: () => selectVaccineScheduleHistoryVersionSchema,
   selectVgieAlertRuleSchema: () => selectVgieAlertRuleSchema,
   selectVgieRecommendationRuleSchema: () => selectVgieRecommendationRuleSchema,
   sessionDayPlans: () => sessionDayPlans,
@@ -220,6 +241,7 @@ __export(schema_exports, {
   signupRequests: () => signupRequests,
   signupStatusEnum: () => signupStatusEnum,
   stockAlertDigestSettingsSchema: () => stockAlertDigestSettingsSchema,
+  stockReferenceHistoryVersions: () => stockReferenceHistoryVersions,
   stockTransactions: () => stockTransactions,
   stockTransactionsRelations: () => stockTransactionsRelations,
   supervisionChecklistTemplates: () => supervisionChecklistTemplates,
@@ -234,6 +256,7 @@ __export(schema_exports, {
   tenants: () => tenants,
   transportModeEnum: () => transportModeEnum,
   uncoveredCommunities: () => uncoveredCommunities,
+  userAssignmentHistory: () => userAssignmentHistory,
   userPermissions: () => userPermissions,
   userRoleEnum: () => userRoleEnum,
   userRoles: () => userRoles,
@@ -242,6 +265,7 @@ __export(schema_exports, {
   vaccineConfigurations: () => vaccineConfigurations,
   vaccineConfigurationsRelations: () => vaccineConfigurationsRelations,
   vaccineRequirements: () => vaccineRequirements,
+  vaccineScheduleHistoryVersions: () => vaccineScheduleHistoryVersions,
   vgieAlertRules: () => vgieAlertRules,
   vgieAlertRulesRelations: () => vgieAlertRulesRelations,
   vgieAlerts: () => vgieAlerts,
@@ -1073,6 +1097,7 @@ var chvProfiles = (0, import_pg_core.pgTable)(
     facilityId: (0, import_pg_core.integer)("facility_id").notNull().references(() => facilities.id, { onDelete: "cascade" }),
     assignedVillageId: (0, import_pg_core.integer)("assigned_village_id").references(() => villages.id, { onDelete: "set null" }),
     fullName: (0, import_pg_core.varchar)("full_name", { length: 255 }).notNull(),
+    nrc: (0, import_pg_core.varchar)("nrc", { length: 50 }).notNull(),
     gender: (0, import_pg_core.varchar)("gender", { length: 20 }).notNull().default("female"),
     age: (0, import_pg_core.integer)("age"),
     educationLevel: (0, import_pg_core.varchar)("education_level", { length: 50 }).default("primary"),
@@ -1083,6 +1108,8 @@ var chvProfiles = (0, import_pg_core.pgTable)(
     // SIA campaign role: vaccinator | mobilizer | volunteer | supervisor
     siaRole: (0, import_pg_core.varchar)("sia_role", { length: 50 }).default("mobilizer"),
     isActive: (0, import_pg_core.boolean)("is_active").default(true).notNull(),
+    employmentStatus: (0, import_pg_core.varchar)("employment_status", { length: 50 }).default("Active - In-service"),
+    supervisorId: (0, import_pg_core.integer)("supervisor_id").references(() => facilityStaff.id, { onDelete: "set null" }),
     createdAt: (0, import_pg_core.timestamp)("created_at").defaultNow(),
     updatedAt: (0, import_pg_core.timestamp)("updated_at").defaultNow()
   },
@@ -2397,6 +2424,7 @@ var communityHealthVolunteers = (0, import_pg_core.pgTable)("community_health_vo
   facilityId: (0, import_pg_core.integer)("facility_id").notNull().references(() => facilities.id, { onDelete: "cascade" }),
   villageId: (0, import_pg_core.integer)("village_id").references(() => villages.id, { onDelete: "set null" }),
   name: (0, import_pg_core.varchar)("name", { length: 255 }).notNull(),
+  nrc: (0, import_pg_core.varchar)("nrc", { length: 50 }),
   gender: (0, import_pg_core.varchar)("gender", { length: 20 }),
   yearsOfService: (0, import_pg_core.integer)("years_of_service"),
   educationLevel: (0, import_pg_core.varchar)("education_level", { length: 100 }),
@@ -3008,6 +3036,245 @@ var insertVgieRecommendationRuleSchema = (0, import_drizzle_zod.createInsertSche
 var selectVgieRecommendationRuleSchema = (0, import_drizzle_zod.createSelectSchema)(vgieRecommendationRules);
 var insertVgieAlertRuleSchema = (0, import_drizzle_zod.createInsertSchema)(vgieAlertRules);
 var selectVgieAlertRuleSchema = (0, import_drizzle_zod.createSelectSchema)(vgieAlertRules);
+var entityHistoryVersions = (0, import_pg_core.pgTable)("entity_history_versions", {
+  id: (0, import_pg_core.integer)("id").primaryKey().generatedAlwaysAsIdentity(),
+  tenantId: (0, import_pg_core.varchar)("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  stableEntityId: (0, import_pg_core.varchar)("stable_entity_id", { length: 255 }).notNull(),
+  entityType: (0, import_pg_core.varchar)("entity_type", { length: 100 }).notNull(),
+  // 'user' | 'facility' | 'community' | 'population' | 'vaccine_schedule' | 'stock_reference'
+  versionNumber: (0, import_pg_core.integer)("version_number").notNull().default(1),
+  countryId: (0, import_pg_core.integer)("country_id"),
+  provinceId: (0, import_pg_core.integer)("province_id"),
+  districtId: (0, import_pg_core.integer)("district_id"),
+  facilityId: (0, import_pg_core.integer)("facility_id"),
+  validFrom: (0, import_pg_core.timestamp)("valid_from").notNull().defaultNow(),
+  validTo: (0, import_pg_core.timestamp)("valid_to"),
+  recordedAt: (0, import_pg_core.timestamp)("recorded_at").notNull().defaultNow(),
+  recordedUntil: (0, import_pg_core.timestamp)("recorded_until"),
+  status: (0, import_pg_core.varchar)("status", { length: 50 }).notNull().default("active"),
+  // 'draft' | 'pending_review' | 'approved' | 'active' | 'superseded' | 'rejected' | 'corrected' | 'cancelled'
+  isCurrent: (0, import_pg_core.boolean)("is_current").notNull().default(true),
+  changeType: (0, import_pg_core.varchar)("change_type", { length: 100 }).notNull().default("created"),
+  // 'created' | 'updated' | 'reclassified' | 'transferred' | 'role_changed' | 'realigned' | 'corrected' | 'status_changed' | 'catchment_updated'
+  changeReason: (0, import_pg_core.text)("change_reason"),
+  changeSummary: (0, import_pg_core.text)("change_summary"),
+  sourceType: (0, import_pg_core.varchar)("source_type", { length: 100 }).default("manual"),
+  // 'manual' | 'census' | 'survey' | 'gis_import' | 'gazette' | 'administrative_order' | 'system'
+  sourceReference: (0, import_pg_core.text)("source_reference"),
+  sourceDocumentUrl: (0, import_pg_core.text)("source_document_url"),
+  createdBy: (0, import_pg_core.varchar)("created_by", { length: 255 }),
+  reviewedBy: (0, import_pg_core.varchar)("reviewed_by", { length: 255 }),
+  approvedBy: (0, import_pg_core.varchar)("approved_by", { length: 255 }),
+  approvedAt: (0, import_pg_core.timestamp)("approved_at"),
+  supersededBy: (0, import_pg_core.integer)("superseded_by"),
+  correctedFromVersionId: (0, import_pg_core.integer)("corrected_from_version_id"),
+  metadataJson: (0, import_pg_core.jsonb)("metadata_json").default({}),
+  snapshotData: (0, import_pg_core.jsonb)("snapshot_data").default({}),
+  createdAt: (0, import_pg_core.timestamp)("created_at").defaultNow(),
+  updatedAt: (0, import_pg_core.timestamp)("updated_at").defaultNow()
+}, (table) => ({
+  tenantIdx: (0, import_pg_core.index)("idx_entity_hist_tenant").on(table.tenantId),
+  entityTypeIdx: (0, import_pg_core.index)("idx_entity_hist_type_entity").on(table.tenantId, table.entityType, table.stableEntityId),
+  isCurrentIdx: (0, import_pg_core.index)("idx_entity_hist_current").on(table.tenantId, table.entityType, table.stableEntityId, table.isCurrent),
+  validFromToIdx: (0, import_pg_core.index)("idx_entity_hist_valid_dates").on(table.tenantId, table.validFrom, table.validTo)
+}));
+var userAssignmentHistory = (0, import_pg_core.pgTable)("user_assignment_history", {
+  id: (0, import_pg_core.integer)("id").primaryKey().generatedAlwaysAsIdentity(),
+  tenantId: (0, import_pg_core.varchar)("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  versionId: (0, import_pg_core.integer)("version_id").references(() => entityHistoryVersions.id, { onDelete: "cascade" }),
+  userId: (0, import_pg_core.varchar)("user_id", { length: 255 }).notNull(),
+  roleId: (0, import_pg_core.varchar)("role_id", { length: 100 }),
+  roleName: (0, import_pg_core.varchar)("role_name", { length: 255 }),
+  assignmentType: (0, import_pg_core.varchar)("assignment_type", { length: 50 }).notNull().default("substantive"),
+  // 'substantive' | 'acting' | 'delegated' | 'temporary' | 'expired'
+  countryId: (0, import_pg_core.integer)("country_id"),
+  provinceId: (0, import_pg_core.integer)("province_id"),
+  districtId: (0, import_pg_core.integer)("district_id"),
+  facilityId: (0, import_pg_core.integer)("facility_id"),
+  validFrom: (0, import_pg_core.timestamp)("valid_from").notNull().defaultNow(),
+  validTo: (0, import_pg_core.timestamp)("valid_to"),
+  status: (0, import_pg_core.varchar)("status", { length: 50 }).notNull().default("active"),
+  assignedBy: (0, import_pg_core.varchar)("assigned_by", { length: 255 }),
+  approvedBy: (0, import_pg_core.varchar)("approved_by", { length: 255 }),
+  reason: (0, import_pg_core.text)("reason"),
+  permissions: (0, import_pg_core.jsonb)("permissions").default([]),
+  metadataJson: (0, import_pg_core.jsonb)("metadata_json").default({}),
+  createdAt: (0, import_pg_core.timestamp)("created_at").defaultNow(),
+  updatedAt: (0, import_pg_core.timestamp)("updated_at").defaultNow()
+}, (table) => ({
+  tenantIdx: (0, import_pg_core.index)("idx_user_assign_hist_tenant").on(table.tenantId),
+  userIdx: (0, import_pg_core.index)("idx_user_assign_hist_user").on(table.tenantId, table.userId)
+}));
+var facilityHistoryVersions = (0, import_pg_core.pgTable)("facility_history_versions", {
+  id: (0, import_pg_core.integer)("id").primaryKey().generatedAlwaysAsIdentity(),
+  tenantId: (0, import_pg_core.varchar)("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  versionId: (0, import_pg_core.integer)("version_id").references(() => entityHistoryVersions.id, { onDelete: "cascade" }),
+  facilityId: (0, import_pg_core.integer)("facility_id").notNull(),
+  versionNumber: (0, import_pg_core.integer)("version_number").notNull().default(1),
+  name: (0, import_pg_core.varchar)("name", { length: 255 }).notNull(),
+  hmisCode: (0, import_pg_core.varchar)("hmis_code", { length: 100 }),
+  facilityType: (0, import_pg_core.varchar)("facility_type", { length: 100 }),
+  ownership: (0, import_pg_core.varchar)("ownership", { length: 100 }),
+  operationalStatus: (0, import_pg_core.varchar)("operational_status", { length: 50 }).default("operational"),
+  countryId: (0, import_pg_core.integer)("country_id"),
+  provinceId: (0, import_pg_core.integer)("province_id"),
+  districtId: (0, import_pg_core.integer)("district_id"),
+  latitude: (0, import_pg_core.decimal)("latitude", { precision: 10, scale: 7 }),
+  longitude: (0, import_pg_core.decimal)("longitude", { precision: 10, scale: 7 }),
+  catchmentPolygon: (0, import_pg_core.jsonb)("catchment_polygon"),
+  coldChainStatus: (0, import_pg_core.varchar)("cold_chain_status", { length: 50 }).default("No"),
+  staffCount: (0, import_pg_core.integer)("staff_count").default(0),
+  validFrom: (0, import_pg_core.timestamp)("valid_from").notNull().defaultNow(),
+  validTo: (0, import_pg_core.timestamp)("valid_to"),
+  status: (0, import_pg_core.varchar)("status", { length: 50 }).default("active"),
+  changeReason: (0, import_pg_core.text)("change_reason"),
+  approvedBy: (0, import_pg_core.varchar)("approved_by", { length: 255 }),
+  metadataJson: (0, import_pg_core.jsonb)("metadata_json").default({}),
+  createdAt: (0, import_pg_core.timestamp)("created_at").defaultNow(),
+  updatedAt: (0, import_pg_core.timestamp)("updated_at").defaultNow()
+}, (table) => ({
+  tenantIdx: (0, import_pg_core.index)("idx_fac_hist_tenant").on(table.tenantId),
+  facIdx: (0, import_pg_core.index)("idx_fac_hist_facility").on(table.tenantId, table.facilityId)
+}));
+var communityHistoryVersions = (0, import_pg_core.pgTable)("community_history_versions", {
+  id: (0, import_pg_core.integer)("id").primaryKey().generatedAlwaysAsIdentity(),
+  tenantId: (0, import_pg_core.varchar)("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  versionId: (0, import_pg_core.integer)("version_id").references(() => entityHistoryVersions.id, { onDelete: "cascade" }),
+  villageId: (0, import_pg_core.integer)("village_id").notNull(),
+  versionNumber: (0, import_pg_core.integer)("version_number").notNull().default(1),
+  name: (0, import_pg_core.varchar)("name", { length: 255 }).notNull(),
+  code: (0, import_pg_core.varchar)("code", { length: 100 }),
+  assignedFacilityId: (0, import_pg_core.integer)("assigned_facility_id"),
+  districtId: (0, import_pg_core.integer)("district_id"),
+  latitude: (0, import_pg_core.decimal)("latitude", { precision: 10, scale: 7 }),
+  longitude: (0, import_pg_core.decimal)("longitude", { precision: 10, scale: 7 }),
+  catchmentPolygon: (0, import_pg_core.jsonb)("catchment_polygon"),
+  isHardToReach: (0, import_pg_core.boolean)("is_hard_to_reach").default(false),
+  terrainDifficulty: (0, import_pg_core.integer)("terrain_difficulty"),
+  populationEstimate: (0, import_pg_core.integer)("population_estimate"),
+  validFrom: (0, import_pg_core.timestamp)("valid_from").notNull().defaultNow(),
+  validTo: (0, import_pg_core.timestamp)("valid_to"),
+  status: (0, import_pg_core.varchar)("status", { length: 50 }).default("active"),
+  changeReason: (0, import_pg_core.text)("change_reason"),
+  approvedBy: (0, import_pg_core.varchar)("approved_by", { length: 255 }),
+  metadataJson: (0, import_pg_core.jsonb)("metadata_json").default({}),
+  createdAt: (0, import_pg_core.timestamp)("created_at").defaultNow(),
+  updatedAt: (0, import_pg_core.timestamp)("updated_at").defaultNow()
+}, (table) => ({
+  tenantIdx: (0, import_pg_core.index)("idx_comm_hist_tenant").on(table.tenantId),
+  villageIdx: (0, import_pg_core.index)("idx_comm_hist_village").on(table.tenantId, table.villageId)
+}));
+var populationHistoryVersions = (0, import_pg_core.pgTable)("population_history_versions", {
+  id: (0, import_pg_core.integer)("id").primaryKey().generatedAlwaysAsIdentity(),
+  tenantId: (0, import_pg_core.varchar)("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  versionId: (0, import_pg_core.integer)("version_id").references(() => entityHistoryVersions.id, { onDelete: "cascade" }),
+  populationEntityId: (0, import_pg_core.varchar)("population_entity_id", { length: 255 }).notNull(),
+  geographicUnitType: (0, import_pg_core.varchar)("geographic_unit_type", { length: 50 }).notNull(),
+  geographicUnitId: (0, import_pg_core.integer)("geographic_unit_id").notNull(),
+  source: (0, import_pg_core.varchar)("source", { length: 100 }).notNull(),
+  sourceYear: (0, import_pg_core.integer)("source_year").notNull(),
+  datasetVersion: (0, import_pg_core.varchar)("dataset_version", { length: 100 }),
+  method: (0, import_pg_core.varchar)("method", { length: 100 }),
+  totalPopulation: (0, import_pg_core.integer)("total_population").notNull(),
+  targetInfants: (0, import_pg_core.integer)("target_infants"),
+  underOne: (0, import_pg_core.integer)("under_one"),
+  underFive: (0, import_pg_core.integer)("under_five"),
+  womenOfReproductiveAge: (0, import_pg_core.integer)("women_of_reproductive_age"),
+  confidence: (0, import_pg_core.varchar)("confidence", { length: 50 }),
+  planningStatus: (0, import_pg_core.varchar)("planning_status", { length: 50 }).default("official"),
+  usedInMicroplans: (0, import_pg_core.jsonb)("used_in_microplans").default([]),
+  validFrom: (0, import_pg_core.timestamp)("valid_from").notNull().defaultNow(),
+  validTo: (0, import_pg_core.timestamp)("valid_to"),
+  status: (0, import_pg_core.varchar)("status", { length: 50 }).default("active"),
+  changeReason: (0, import_pg_core.text)("change_reason"),
+  approvedBy: (0, import_pg_core.varchar)("approved_by", { length: 255 }),
+  metadataJson: (0, import_pg_core.jsonb)("metadata_json").default({}),
+  createdAt: (0, import_pg_core.timestamp)("created_at").defaultNow(),
+  updatedAt: (0, import_pg_core.timestamp)("updated_at").defaultNow()
+}, (table) => ({
+  tenantIdx: (0, import_pg_core.index)("idx_pop_hist_tenant").on(table.tenantId),
+  geoIdx: (0, import_pg_core.index)("idx_pop_hist_geo").on(table.tenantId, table.geographicUnitType, table.geographicUnitId)
+}));
+var vaccineScheduleHistoryVersions = (0, import_pg_core.pgTable)("vaccine_schedule_history_versions", {
+  id: (0, import_pg_core.integer)("id").primaryKey().generatedAlwaysAsIdentity(),
+  tenantId: (0, import_pg_core.varchar)("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  versionId: (0, import_pg_core.integer)("version_id").references(() => entityHistoryVersions.id, { onDelete: "cascade" }),
+  scheduleId: (0, import_pg_core.integer)("schedule_id").notNull(),
+  antigenCode: (0, import_pg_core.varchar)("antigen_code", { length: 100 }).notNull(),
+  doseNumber: (0, import_pg_core.integer)("dose_number").notNull(),
+  vaccineProductId: (0, import_pg_core.integer)("vaccine_product_id"),
+  dosesPerVial: (0, import_pg_core.integer)("doses_per_vial"),
+  wastageFactor: (0, import_pg_core.decimal)("wastage_factor", { precision: 5, scale: 2 }),
+  targetAgeGroup: (0, import_pg_core.varchar)("target_age_group", { length: 100 }),
+  validFrom: (0, import_pg_core.timestamp)("valid_from").notNull().defaultNow(),
+  validTo: (0, import_pg_core.timestamp)("valid_to"),
+  status: (0, import_pg_core.varchar)("status", { length: 50 }).default("active"),
+  changeReason: (0, import_pg_core.text)("change_reason"),
+  approvedBy: (0, import_pg_core.varchar)("approved_by", { length: 255 }),
+  metadataJson: (0, import_pg_core.jsonb)("metadata_json").default({}),
+  createdAt: (0, import_pg_core.timestamp)("created_at").defaultNow(),
+  updatedAt: (0, import_pg_core.timestamp)("updated_at").defaultNow()
+}, (table) => ({
+  tenantIdx: (0, import_pg_core.index)("idx_vac_sched_hist_tenant").on(table.tenantId),
+  schedIdx: (0, import_pg_core.index)("idx_vac_sched_hist_id").on(table.tenantId, table.scheduleId)
+}));
+var stockReferenceHistoryVersions = (0, import_pg_core.pgTable)("stock_reference_history_versions", {
+  id: (0, import_pg_core.integer)("id").primaryKey().generatedAlwaysAsIdentity(),
+  tenantId: (0, import_pg_core.varchar)("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  versionId: (0, import_pg_core.integer)("version_id").references(() => entityHistoryVersions.id, { onDelete: "cascade" }),
+  itemId: (0, import_pg_core.integer)("item_id"),
+  equipmentId: (0, import_pg_core.integer)("equipment_id"),
+  name: (0, import_pg_core.varchar)("name", { length: 255 }).notNull(),
+  minStockLevel: (0, import_pg_core.integer)("min_stock_level"),
+  maxStockLevel: (0, import_pg_core.integer)("max_stock_level"),
+  bufferStockPolicy: (0, import_pg_core.text)("buffer_stock_policy"),
+  equipmentStatus: (0, import_pg_core.varchar)("equipment_status", { length: 50 }),
+  locationFacilityId: (0, import_pg_core.integer)("location_facility_id"),
+  ownership: (0, import_pg_core.varchar)("ownership", { length: 100 }),
+  validFrom: (0, import_pg_core.timestamp)("valid_from").notNull().defaultNow(),
+  validTo: (0, import_pg_core.timestamp)("valid_to"),
+  status: (0, import_pg_core.varchar)("status", { length: 50 }).default("active"),
+  changeReason: (0, import_pg_core.text)("change_reason"),
+  approvedBy: (0, import_pg_core.varchar)("approved_by", { length: 255 }),
+  metadataJson: (0, import_pg_core.jsonb)("metadata_json").default({}),
+  createdAt: (0, import_pg_core.timestamp)("created_at").defaultNow(),
+  updatedAt: (0, import_pg_core.timestamp)("updated_at").defaultNow()
+}, (table) => ({
+  tenantIdx: (0, import_pg_core.index)("idx_stock_ref_hist_tenant").on(table.tenantId)
+}));
+var reportEntitySnapshots = (0, import_pg_core.pgTable)("report_entity_snapshots", {
+  id: (0, import_pg_core.integer)("id").primaryKey().generatedAlwaysAsIdentity(),
+  tenantId: (0, import_pg_core.varchar)("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  reportType: (0, import_pg_core.varchar)("report_type", { length: 100 }).notNull(),
+  reportId: (0, import_pg_core.varchar)("report_id", { length: 255 }).notNull(),
+  facilityVersionId: (0, import_pg_core.integer)("facility_version_id"),
+  geographyVersionId: (0, import_pg_core.integer)("geography_version_id"),
+  populationVersionId: (0, import_pg_core.integer)("population_version_id"),
+  vaccineScheduleVersionId: (0, import_pg_core.integer)("vaccine_schedule_version_id"),
+  userRoleVersionId: (0, import_pg_core.integer)("user_role_version_id"),
+  snapshotData: (0, import_pg_core.jsonb)("snapshot_data").notNull().default({}),
+  frozenAt: (0, import_pg_core.timestamp)("frozen_at").notNull().defaultNow(),
+  createdAt: (0, import_pg_core.timestamp)("created_at").defaultNow()
+}, (table) => ({
+  tenantIdx: (0, import_pg_core.index)("idx_rep_snaps_tenant").on(table.tenantId),
+  reportIdx: (0, import_pg_core.index)("idx_rep_snaps_report").on(table.tenantId, table.reportType, table.reportId)
+}));
+var insertEntityHistoryVersionSchema = (0, import_drizzle_zod.createInsertSchema)(entityHistoryVersions);
+var selectEntityHistoryVersionSchema = (0, import_drizzle_zod.createSelectSchema)(entityHistoryVersions);
+var insertUserAssignmentHistorySchema = (0, import_drizzle_zod.createInsertSchema)(userAssignmentHistory);
+var selectUserAssignmentHistorySchema = (0, import_drizzle_zod.createSelectSchema)(userAssignmentHistory);
+var insertFacilityHistoryVersionSchema = (0, import_drizzle_zod.createInsertSchema)(facilityHistoryVersions);
+var selectFacilityHistoryVersionSchema = (0, import_drizzle_zod.createSelectSchema)(facilityHistoryVersions);
+var insertCommunityHistoryVersionSchema = (0, import_drizzle_zod.createInsertSchema)(communityHistoryVersions);
+var selectCommunityHistoryVersionSchema = (0, import_drizzle_zod.createSelectSchema)(communityHistoryVersions);
+var insertPopulationHistoryVersionSchema = (0, import_drizzle_zod.createInsertSchema)(populationHistoryVersions);
+var selectPopulationHistoryVersionSchema = (0, import_drizzle_zod.createSelectSchema)(populationHistoryVersions);
+var insertVaccineScheduleHistoryVersionSchema = (0, import_drizzle_zod.createInsertSchema)(vaccineScheduleHistoryVersions);
+var selectVaccineScheduleHistoryVersionSchema = (0, import_drizzle_zod.createSelectSchema)(vaccineScheduleHistoryVersions);
+var insertStockReferenceHistoryVersionSchema = (0, import_drizzle_zod.createInsertSchema)(stockReferenceHistoryVersions);
+var selectStockReferenceHistoryVersionSchema = (0, import_drizzle_zod.createSelectSchema)(stockReferenceHistoryVersions);
+var insertReportEntitySnapshotSchema = (0, import_drizzle_zod.createInsertSchema)(reportEntitySnapshots);
+var selectReportEntitySnapshotSchema = (0, import_drizzle_zod.createSelectSchema)(reportEntitySnapshots);
 
 // server/db.ts
 var { Pool } = import_pg.default;

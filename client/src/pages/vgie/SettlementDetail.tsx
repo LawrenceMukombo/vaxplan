@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useRoute, Link } from "wouter";
 import {
   ArrowLeft, Users, MapPin, Building2, Hospital,
@@ -79,16 +79,83 @@ export default function SettlementDetail() {
   const convertToCommunityMutation = useConvertToCommunity();
   const updateSettlementMutation = useUpdateSettlement();
 
-  // Dropdown list queries
-  const { data: allFacilities } = useGetFacilities();
-  const { data: allCommunities } = useQuery<any[]>({
-    queryKey: ["/api/villages"],
+  // Cascade filter state for Linkage Configuration
+  const [filterProvinceId, setFilterProvinceId] = useState("");
+  const [filterDistrictId, setFilterDistrictId] = useState("");
+  const [cascadePrePopulated, setCascadePrePopulated] = useState(false);
+
+  // Provinces list
+  const { data: allProvinces } = useQuery<any[]>({
+    queryKey: ["/api/provinces"],
     queryFn: async () => {
-      const res = await fetch("/api/villages");
-      if (!res.ok) throw new Error("Failed to fetch communities");
+      const res = await fetch("/api/provinces");
+      if (!res.ok) throw new Error("Failed to fetch provinces");
       return res.json();
     }
   });
+
+  // All districts (filtered client-side by province)
+  const { data: allDistrictsRaw } = useQuery<any[]>({
+    queryKey: ["/api/districts"],
+    queryFn: async () => {
+      const res = await fetch("/api/districts");
+      if (!res.ok) throw new Error("Failed to fetch districts");
+      return res.json();
+    }
+  });
+
+  // Filtered districts for the dropdown (by selected province)
+  const allDistricts = useMemo(() => {
+    if (!allDistrictsRaw) return [];
+    if (!filterProvinceId || filterProvinceId === "all") return allDistrictsRaw;
+    return allDistrictsRaw.filter((d: any) => String(d.provinceId) === filterProvinceId);
+  }, [allDistrictsRaw, filterProvinceId]);
+
+  // Fetch facilities for the selected district (avoids downloading 20,000 across the country)
+  const { data: allFacilities } = useGetFacilities(
+    filterDistrictId && filterDistrictId !== "all"
+      ? { districtId: filterDistrictId }
+      : undefined
+  );
+
+  // Fetch communities ONLY for the selected district
+  const { data: allCommunities } = useQuery<any[]>({
+    queryKey: ["/api/villages", filterDistrictId],
+    queryFn: async () => {
+      // If no district selected yet, return empty array to prevent massive data fetch
+      if (!filterDistrictId || filterDistrictId === "all") return [];
+      const res = await fetch(`/api/villages?districtId=${filterDistrictId}`);
+      if (!res.ok) throw new Error("Failed to fetch communities");
+      return res.json();
+    },
+    enabled: !!filterDistrictId && filterDistrictId !== "all",
+  });
+
+  // Pre-populate cascade from settlement's own location once loaded (useEffect — never during render)
+  useEffect(() => {
+    if (settlement && !cascadePrePopulated && allDistrictsRaw && allProvinces) {
+      let finalProvId = settlement.provinceId ? String(settlement.provinceId) : "";
+      let finalDistId = settlement.districtId ? String(settlement.districtId) : "";
+
+      // Database inconsistency self-healing:
+      // If the settlement's district is in our allowed districts list, use that district's provinceId!
+      if (finalDistId) {
+        const matchingDistrict = allDistrictsRaw.find((d: any) => String(d.id) === finalDistId);
+        if (matchingDistrict) {
+          finalProvId = String(matchingDistrict.provinceId);
+        }
+      }
+
+      // If the resolved provinceId is not valid in the current tenant's province list, clear it
+      if (finalProvId && !allProvinces.some((p: any) => String(p.id) === finalProvId)) {
+        finalProvId = "";
+      }
+
+      setFilterProvinceId(finalProvId);
+      setFilterDistrictId(finalDistId);
+      setCascadePrePopulated(true);
+    }
+  }, [settlement, cascadePrePopulated, allDistrictsRaw, allProvinces]);
 
   const [showForm, setShowForm] = useState(false);
   const [visitDate, setVisitDate] = useState(new Date().toISOString().slice(0, 10));
@@ -277,7 +344,7 @@ export default function SettlementDetail() {
         </Link>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2.5 flex-wrap">
-            <h2 className="text-xl font-bold text-slate-100">{settlement.name}</h2>
+            <h2 className="text-xl font-bold text-foreground">{settlement.name}</h2>
             <Badge className={`border ${sc.color}`}>{sc.label}</Badge>
             {settlement.isNewSettlement && (
               <Badge className="bg-purple-500/10 text-purple-400 border border-purple-500/20">Newly Detected</Badge>
@@ -317,17 +384,17 @@ export default function SettlementDetail() {
       {/* Stats Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {[
-          { label: "Population", value: settlement.population.toLocaleString(), icon: Users, color: "text-blue-400" },
-          { label: "Households", value: settlement.households?.toLocaleString() ?? "—", icon: Building2, color: "text-purple-400" },
-          { label: "Children U5", value: settlement.childrenUnderFive?.toLocaleString() ?? "—", icon: Shield, color: "text-emerald-400" },
-          { label: "Pregnant Women", value: settlement.pregnantWomen?.toLocaleString() ?? "—", icon: Users, color: "text-pink-400" },
+          { label: "Population", value: settlement.population != null && settlement.population > 0 ? settlement.population.toLocaleString() : "—", icon: Users, color: "text-blue-400" },
+          { label: "Households", value: settlement.households != null ? settlement.households.toLocaleString() : (settlement.population && settlement.population > 0 ? Math.round(settlement.population / 5).toLocaleString() : "—"), icon: Building2, color: "text-purple-400" },
+          { label: "Children U5", value: settlement.childrenUnderFive != null ? settlement.childrenUnderFive.toLocaleString() : (settlement.under5Population ? settlement.under5Population.toLocaleString() : (settlement.population && settlement.population > 0 ? Math.round(settlement.population * 0.18).toLocaleString() : "—")), icon: Shield, color: "text-emerald-400" },
+          { label: "Pregnant Women", value: settlement.pregnantWomen != null ? settlement.pregnantWomen.toLocaleString() : (settlement.population && settlement.population > 0 ? Math.round(settlement.population * 0.05).toLocaleString() : "—"), icon: Users, color: "text-pink-400" },
         ].map(({ label, value, icon: Icon, color }) => (
           <Card key={label} className="bg-background border-border">
             <CardContent className="p-4 flex items-center gap-3">
               <Icon className={`w-5 h-5 ${color} shrink-0`} />
               <div>
                 <p className="text-xs text-muted-foreground">{label}</p>
-                <p className="text-base font-bold text-slate-100">{value}</p>
+                <p className="text-base font-bold text-foreground">{value}</p>
               </div>
             </CardContent>
           </Card>
@@ -395,21 +462,113 @@ export default function SettlementDetail() {
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
+              {/* Shared Location Cascade Filters */}
+              <div className="p-3 rounded-lg bg-sky-500/5 border border-sky-500/15 space-y-2">
+                <p className="text-[10px] font-semibold text-sky-400 uppercase tracking-wide flex items-center gap-1.5">
+                  <MapPin className="w-3 h-3" /> Location Filter (narrows facility &amp; community lists below)
+                </p>
+                <div className="grid grid-cols-2 gap-2">
+                  {/* Province Filter */}
+                  <div>
+                    <label className="text-[10px] text-muted-foreground block mb-1">Province</label>
+                    <Select
+                      value={filterProvinceId}
+                      onValueChange={(v) => {
+                        setFilterProvinceId(v);
+                        setFilterDistrictId(""); // reset district when province changes
+                        setFacilityIdStr("");    // reset selection
+                        setCommunityIdStr("");
+                      }}
+                    >
+                      <SelectTrigger className="h-8 bg-background border-border text-foreground text-xs">
+                        <SelectValue placeholder="All provinces" />
+                      </SelectTrigger>
+                      <SelectContent className="bg-popover border border-border text-foreground">
+                        <SelectItem value="all" className="text-xs text-foreground hover:bg-accent cursor-pointer">All Provinces</SelectItem>
+                        {allProvinces?.map((p: any) => (
+                          <SelectItem key={p.id} value={String(p.id)} className="text-xs text-foreground hover:bg-accent cursor-pointer">
+                            {p.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  {/* District Filter */}
+                  <div>
+                    <label className="text-[10px] text-muted-foreground block mb-1">District</label>
+                    <Select
+                      value={filterDistrictId}
+                      onValueChange={(v) => {
+                        setFilterDistrictId(v);
+                        setFacilityIdStr("");   // reset selection
+                        setCommunityIdStr("");
+                      }}
+                    >
+                      <SelectTrigger className="h-8 bg-background border-border text-foreground text-xs">
+                        <SelectValue placeholder="All districts" />
+                      </SelectTrigger>
+                      <SelectContent className="bg-popover border border-border text-foreground">
+                        <SelectItem value="all" className="text-xs text-foreground hover:bg-accent cursor-pointer">All Districts</SelectItem>
+                        {allDistricts
+                          ?.filter((d: any) =>
+                            !filterProvinceId || filterProvinceId === "all"
+                              ? true
+                              : d.provinceId === Number(filterProvinceId)
+                          )
+                          .map((d: any) => (
+                            <SelectItem key={d.id} value={String(d.id)} className="text-xs text-foreground hover:bg-accent cursor-pointer">
+                              {d.name}
+                            </SelectItem>
+                          ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                {/* Active filter chips */}
+                {(filterProvinceId && filterProvinceId !== "all") || (filterDistrictId && filterDistrictId !== "all") ? (
+                  <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
+                    <span className="text-[10px] text-muted-foreground">Active:</span>
+                    {filterProvinceId && filterProvinceId !== "all" && (
+                      <span className="inline-flex items-center gap-1 text-[10px] bg-sky-500/10 text-sky-400 border border-sky-500/20 rounded px-1.5 py-0.5">
+                        {allProvinces?.find((p: any) => String(p.id) === filterProvinceId)?.name ?? "Province"}
+                        <button onClick={() => { setFilterProvinceId(""); setFilterDistrictId(""); }} className="hover:text-sky-200 leading-none">×</button>
+                      </span>
+                    )}
+                    {filterDistrictId && filterDistrictId !== "all" && (
+                      <span className="inline-flex items-center gap-1 text-[10px] bg-sky-500/10 text-sky-400 border border-sky-500/20 rounded px-1.5 py-0.5">
+                        {allDistricts?.find((d: any) => String(d.id) === filterDistrictId)?.name ?? "District"}
+                        <button onClick={() => setFilterDistrictId("")} className="hover:text-sky-200 leading-none">×</button>
+                      </span>
+                    )}
+                  </div>
+                ) : null}
+              </div>
+
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {/* Link Health Facility Form */}
                 <div className="p-3.5 rounded-lg bg-muted border border-border space-y-3">
                   <p className="text-xs font-bold text-foreground uppercase tracking-wide">Link Health Facility</p>
                   <div className="flex flex-col gap-2">
                     <div>
-                      <label className="text-[10px] text-muted-foreground block mb-1">Select Facility *</label>
+                      <label className="text-[10px] text-muted-foreground block mb-1">
+                        Select Facility *
+                        {allFacilities && (
+                          <span className="ml-1 text-sky-400">
+                            ({allFacilities.length} available)
+                          </span>
+                        )}
+                      </label>
                       <Select value={facilityIdStr} onValueChange={setFacilityIdStr}>
                         <SelectTrigger className="h-8 bg-background border-border text-foreground text-xs">
                           <SelectValue placeholder="Select facility" />
                         </SelectTrigger>
                         <SelectContent className="bg-popover border border-border text-foreground">
+                          {allFacilities?.length === 0 && (
+                            <div className="p-2 text-xs text-muted-foreground text-center">No facilities in selected area</div>
+                          )}
                           {allFacilities?.map((f: any) => (
                             <SelectItem key={f.id} value={String(f.id)} className="text-xs text-foreground hover:bg-accent cursor-pointer">
-                              {f.name} ({f.district})
+                              {f.name} — {f.district}
                             </SelectItem>
                           ))}
                         </SelectContent>
@@ -454,12 +613,22 @@ export default function SettlementDetail() {
                   <p className="text-xs font-bold text-foreground uppercase tracking-wide">Link Community</p>
                   <div className="flex flex-col gap-2">
                     <div>
-                      <label className="text-[10px] text-muted-foreground block mb-1">Select Registered Community *</label>
+                      <label className="text-[10px] text-muted-foreground block mb-1">
+                        Select Registered Community *
+                        {allCommunities && (
+                          <span className="ml-1 text-sky-400">
+                            ({allCommunities.length} available)
+                          </span>
+                        )}
+                      </label>
                       <Select value={communityIdStr} onValueChange={setCommunityIdStr}>
                         <SelectTrigger className="h-8 bg-background border-border text-foreground text-xs">
                           <SelectValue placeholder="Select community" />
                         </SelectTrigger>
                         <SelectContent className="bg-popover border border-border text-foreground">
+                          {allCommunities?.length === 0 && (
+                            <div className="p-2 text-xs text-muted-foreground text-center">No communities in selected area</div>
+                          )}
                           {allCommunities?.map((c: any) => (
                             <SelectItem key={c.id} value={String(c.id)} className="text-xs text-foreground hover:bg-accent cursor-pointer">
                               {c.name} ({c.code})
@@ -501,10 +670,10 @@ export default function SettlementDetail() {
             <CardContent className="space-y-3">
               <div className="grid grid-cols-2 gap-3">
                 {[
-                  { label: "Building Count", value: settlement.buildingCount?.toLocaleString() ?? "—", source: "Sentinel-2 / Open Buildings (sim.)" },
-                  { label: "Confidence Score", value: settlement.confidenceScore != null ? `${Math.round(settlement.confidenceScore * 100)}%` : "—", source: "Satellite classification" },
-                  { label: "Population Est.", value: settlement.population.toLocaleString(), source: "WorldPop API (pre-computed)" },
-                  { label: "Children U1", value: settlement.childrenUnderOne?.toLocaleString() ?? "—", source: "Meta population density" },
+                  { label: "Building Count", value: settlement.buildingCount != null ? Number(settlement.buildingCount).toLocaleString() : "—", source: "Sentinel-2 / Open Buildings" },
+                  { label: "Confidence Score", value: settlement.confidenceScore != null ? `${Math.round(Number(settlement.confidenceScore) * 100)}%` : "—", source: "Satellite classification" },
+                  { label: "Population Est.", value: settlement.population != null && settlement.population > 0 ? settlement.population.toLocaleString() : (settlement.under5Population ? Math.round(settlement.under5Population / 0.18).toLocaleString() : "—"), source: "WorldPop API (pre-computed)" },
+                  { label: "Children U1", value: settlement.childrenUnderOne != null ? settlement.childrenUnderOne.toLocaleString() : (settlement.population != null && settlement.population > 0 ? Math.round(settlement.population * 0.04).toLocaleString() : "—"), source: "Meta population density" },
                 ].map(({ label, value, source }) => (
                   <div key={label} className="p-2.5 rounded-lg bg-muted border border-border">
                     <p className="text-xs text-muted-foreground">{label}</p>

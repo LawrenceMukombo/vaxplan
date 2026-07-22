@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useRoute } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -5219,6 +5219,27 @@ const CHV_EDUCATION_LEVELS = ["Primary", "Secondary", "Certificate", "Diploma", 
 
 export function StepChvProfile({ facilityId, villages, planType = "routine" }: { facilityId: number | null; villages: any[]; planType?: string }) {
   const { toast } = useToast();
+
+  const { data: staffList } = useQuery<any[]>({
+    queryKey: ["/api/facilities", Number(facilityId), "staff"],
+    queryFn: async () => {
+      const res = await fetch(`/api/facilities/${facilityId}/staff`, { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to fetch facility staff");
+      return res.json();
+    },
+    enabled: !!facilityId,
+  });
+
+  const CHW_EMPLOYMENT_STATUS = [
+    "Active - In-service",
+    "Active - Intern",
+    "Inactive - Suspended",
+    "Inactive - Resigned",
+    "Inactive - Retired",
+    "Inactive - Deceased",
+    "Not commenced",
+    "Other - Unclassified"
+  ];
   const { data: chvs = [], isLoading } = useQuery<any[]>({
     queryKey: [`/api/facilities/${facilityId}/chvs`, planType],
     enabled: !!facilityId,
@@ -5230,21 +5251,33 @@ export function StepChvProfile({ facilityId, villages, planType = "routine" }: {
   });
 
   const [form, setForm] = useState<any>({
-    name: "", gender: "female", yearsOfService: "", educationLevel: "Secondary",
+    name: "", nrc: "", gender: "female", yearsOfService: "", educationLevel: "Secondary",
     trainingStatus: "trained", communityUnit: "", campaignRole: "social_mobilizer",
     villageId: "", active: true,
+    employmentStatus: "Active - In-service", supervisorId: "",
   });
   const [saving, setSaving] = useState(false);
   const [editId, setEditId] = useState<number | null>(null);
 
   function resetForm() {
-    setForm({ name: "", gender: "female", yearsOfService: "", educationLevel: "Secondary", trainingStatus: "trained", communityUnit: "", campaignRole: "social_mobilizer", villageId: "", active: true });
+    setForm({ name: "", nrc: "", gender: "female", yearsOfService: "", educationLevel: "Secondary", trainingStatus: "trained", communityUnit: "", campaignRole: "social_mobilizer", villageId: "", active: true, employmentStatus: "Active - In-service", supervisorId: "" });
     setEditId(null);
   }
 
   async function handleSave() {
     if (!facilityId || !form.name.trim()) {
       toast({ title: "CHV name is required", variant: "destructive" }); return;
+    }
+    if (form.nrc && form.nrc.trim()) {
+      const nrcPattern = /^\d{6}\/\d{2}\/\d{1}$/;
+      if (!nrcPattern.test(form.nrc.trim())) {
+        toast({
+          title: "Invalid NRC format",
+          description: "NRC must be formatted as XXXXXX/XX/X (e.g. 123456/78/9)",
+          variant: "destructive",
+        });
+        return;
+      }
     }
     setSaving(true);
     try {
@@ -5254,7 +5287,14 @@ export function StepChvProfile({ facilityId, villages, planType = "routine" }: {
       const res = await fetch(url, {
         method, credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...form, yearsOfService: form.yearsOfService ? Number(form.yearsOfService) : null, villageId: form.villageId ? Number(form.villageId) : null }),
+        body: JSON.stringify({
+          ...form,
+          nrc: form.nrc ? form.nrc.trim() : null,
+          yearsOfService: form.yearsOfService ? Number(form.yearsOfService) : null,
+          villageId: form.villageId ? Number(form.villageId) : null,
+          employmentStatus: form.employmentStatus,
+          supervisorId: form.supervisorId && form.supervisorId !== "none" ? Number(form.supervisorId) : null
+        }),
       });
       if (!res.ok) throw new Error(await res.text());
       queryClient.invalidateQueries({ queryKey: [`/api/facilities/${facilityId}/chvs`, planType] });
@@ -5288,6 +5328,10 @@ export function StepChvProfile({ facilityId, villages, planType = "routine" }: {
           <div>
             <Label className="text-xs">Full Name *</Label>
             <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. Grace Mutale" />
+          </div>
+          <div>
+            <Label className="text-xs">National Registration Card (NRC)</Label>
+            <Input value={form.nrc} onChange={(e) => setForm({ ...form, nrc: e.target.value })} placeholder="XXXXXX/XX/X (e.g. 123456/78/9)" />
           </div>
           <div>
             <Label className="text-xs">Gender</Label>
@@ -5347,6 +5391,27 @@ export function StepChvProfile({ facilityId, villages, planType = "routine" }: {
               </SelectContent>
             </Select>
           </div>
+          <div>
+            <Label className="text-xs">Employment Status</Label>
+            <Select value={form.employmentStatus} onValueChange={(v) => setForm({ ...form, employmentStatus: v })}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {CHW_EMPLOYMENT_STATUS.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label className="text-xs">Supervisor (Facility Staff)</Label>
+            <Select value={form.supervisorId || "none"} onValueChange={(v) => setForm({ ...form, supervisorId: v })}>
+              <SelectTrigger><SelectValue placeholder="Select supervisor" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">No Supervisor</SelectItem>
+                {(staffList || []).map((s) => (
+                  <SelectItem key={s.id} value={s.id.toString()}>{s.fullName} ({s.role})</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
         </div>
         <div className="flex gap-2">
           <Button size="sm" onClick={handleSave} disabled={saving}>
@@ -5381,7 +5446,7 @@ export function StepChvProfile({ facilityId, villages, planType = "routine" }: {
                   <td className="px-3 py-2">{c.villageId ? (villageMap[String(c.villageId)] ?? `ID ${c.villageId}`) : "-"}</td>
                   <td className="px-3 py-2">
                     <div className="flex gap-1">
-                      <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => { setEditId(c.id); setForm({ name: c.name, gender: c.gender||"female", yearsOfService: c.yearsOfService??"", educationLevel: c.educationLevel||"Secondary", trainingStatus: c.trainingStatus||"trained", communityUnit: c.communityUnit||"", campaignRole: c.campaignRole||"social_mobilizer", villageId: c.villageId??"", active: c.active }); }}>
+                      <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => { setEditId(c.id); setForm({ name: c.name, nrc: c.nrc || "", gender: c.gender||"female", yearsOfService: c.yearsOfService??"", educationLevel: c.educationLevel||"Secondary", trainingStatus: c.trainingStatus||"trained", communityUnit: c.communityUnit||"", campaignRole: c.campaignRole||"social_mobilizer", villageId: c.villageId??"", active: c.active, employmentStatus: c.employmentStatus || "Active - In-service", supervisorId: c.supervisorId?.toString() || "" }); }}>
                         <Pencil className="h-3 w-3" />
                       </Button>
                       <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-destructive hover:text-destructive" onClick={() => handleDelete(c.id)}>
