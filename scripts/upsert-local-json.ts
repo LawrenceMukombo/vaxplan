@@ -18,7 +18,6 @@ function parseDates(row: any) {
   for (const key of Object.keys(result)) {
     const val = result[key];
     if (val && typeof val === "string") {
-      // Check if it is an ISO date string or matches date-like keys
       const isDateKey = key.toLowerCase().endsWith("at") ||
                         key.toLowerCase().endsWith("date") ||
                         key.toLowerCase().endsWith("from") ||
@@ -31,6 +30,19 @@ function parseDates(row: any) {
           result[key] = new Date(val);
         }
       }
+    }
+  }
+  return result;
+}
+
+// Helper to serialize objects/arrays for JSON/JSONB columns
+function serializeJsonFields(row: any) {
+  if (!row) return row;
+  const result = { ...row };
+  for (const key of Object.keys(result)) {
+    const val = result[key];
+    if (val !== null && typeof val === "object" && !(val instanceof Date)) {
+      result[key] = JSON.stringify(val);
     }
   }
   return result;
@@ -78,7 +90,8 @@ async function importAll() {
     let skipped = 0;
 
     for (const rawRow of rows) {
-      const row = parseDates(rawRow);
+      let row = parseDates(rawRow);
+      row = serializeJsonFields(row);
       try {
         const existing = await db
           .select()
