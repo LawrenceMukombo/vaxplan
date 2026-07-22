@@ -11,6 +11,31 @@ if (!databaseUrl) {
   process.exit(1);
 }
 
+// Helper to convert serialized date strings back to Date objects
+function parseDates(row: any) {
+  if (!row) return row;
+  const result = { ...row };
+  for (const key of Object.keys(result)) {
+    const val = result[key];
+    if (val && typeof val === "string") {
+      // Check if it is an ISO date string or matches date-like keys
+      const isDateKey = key.toLowerCase().endsWith("at") ||
+                        key.toLowerCase().endsWith("date") ||
+                        key.toLowerCase().endsWith("from") ||
+                        key.toLowerCase().endsWith("to");
+      const isIsoString = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(val);
+      
+      if (isDateKey || isIsoString) {
+        const parsed = Date.parse(val);
+        if (!isNaN(parsed)) {
+          result[key] = new Date(val);
+        }
+      }
+    }
+  }
+  return result;
+}
+
 async function importAll() {
   const jsonPath = path.join(process.cwd(), "localhost_data.json");
   if (!fs.existsSync(jsonPath)) {
@@ -52,10 +77,9 @@ async function importAll() {
     let inserted = 0;
     let skipped = 0;
 
-    for (const row of rows) {
+    for (const rawRow of rows) {
+      const row = parseDates(rawRow);
       try {
-        // Safe check: If the row contains a tenantId and is NOT Zambia (the local tenant), skip it
-        // Or if it matches a production-only tenant, protect it.
         const existing = await db
           .select()
           .from(table)
@@ -67,7 +91,6 @@ async function importAll() {
           const isLocalTenant = tenantId === undefined || tenantId === null || tenantId === "ZMB" || tenantId.includes("4bb7abba");
           
           if (!isLocalTenant) {
-            console.log(`   [SKIP] Protecting production row ${row[key]} in ${name} (Tenant: ${tenantId})`);
             skipped++;
             continue;
           }
@@ -102,7 +125,7 @@ async function importAll() {
     try {
       await db.execute(sql.raw(`SELECT setval(pg_get_serial_sequence('${table}', 'id'), COALESCE(MAX(id), 1)) FROM ${table};`));
     } catch (err: any) {
-      // Ignore if not serial
+      // Ignore
     }
   }
 
