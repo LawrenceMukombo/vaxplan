@@ -23,7 +23,37 @@ const PERMISSION_ALIASES: Record<string, string[]> = {
   create_client: ["client_logbook.create"],
   edit_client: ["client_logbook.update"],
   view_reports: ["dashboard.view", "dropout_rates.view"],
+  manage_session_plans: ["sessions.view", "sessions.plan", "sessions.create", "sessions.update", "microplans.create", "microplans.update_draft", "microplans.submit"],
+  view_session_plans: ["sessions.view", "microplans.view"],
+  approve_plans: ["sessions.approve", "microplans.review", "microplans.approve", "microplans.request_changes"],
 };
+
+export const ADMINISTRATION_PERMISSIONS = [
+  "manage_users",
+  "users.view",
+  "users.create",
+  "users.update",
+  "users.deactivate",
+  "users.assign_roles",
+  "users.assign_permissions",
+  "roles.view",
+  "roles.create",
+  "roles.update",
+  "roles.delete",
+  "roles.assign_permissions",
+  "permissions.view",
+  "permissions.assign",
+  "settings.view",
+  "settings.update",
+  "audit_logs.view",
+  "reference_data.view",
+  "reference_data.manage",
+  "his_integrations.view",
+  "his_integrations.manage",
+];
+
+const SESSION_VIEW_PERMISSIONS = ["sessions.view", "sessions.plan", "sessions.create", "sessions.update", "sessions.approve", "view_session_plans", "manage_session_plans"];
+const SESSION_PLAN_PERMISSIONS = ["sessions.plan", "sessions.create", "manage_session_plans"];
 
 function expandPermission(target: Set<string>, permission: string): void {
   target.add(permission);
@@ -57,6 +87,17 @@ export function hasAnyPermission(user: User | null | undefined, permissions: str
   return effective.has("*") || permissions.some((permission) => effective.has(permission));
 }
 
+export function hasPermission(user: User | null | undefined, permission: string): boolean {
+  return hasAnyPermission(user, [permission]);
+}
+
+export function hasAllPermissions(user: User | null | undefined, permissions: string[]): boolean {
+  if (!user) return false;
+  if (isNationalAdmin(user)) return true;
+  const effective = permissionsForUser(user);
+  return effective.has("*") || permissions.every((permission) => effective.has(permission));
+}
+
 export function canAccessUserManagement(user: User | null | undefined): boolean {
   return hasAnyPermission(user, ["users.view", "users.create", "users.update", "manage_users"]);
 }
@@ -67,6 +108,30 @@ export function canAccessRoleManagement(user: User | null | undefined): boolean 
 
 export function canAccessPermissionManagement(user: User | null | undefined): boolean {
   return hasAnyPermission(user, ["permissions.view", "users.assign_permissions", "manage_users"]);
+}
+
+export function canAccessAdministration(user: User | null | undefined): boolean {
+  return hasAnyPermission(user, ADMINISTRATION_PERMISSIONS);
+}
+
+export function canAccessHisIntegrations(user: User | null | undefined): boolean {
+  return hasAnyPermission(user, ["his_integrations.view", "his_integrations.manage"]);
+}
+
+export function canAccessSessionPlanning(user: User | null | undefined): boolean {
+  return hasAnyPermission(user, SESSION_VIEW_PERMISSIONS);
+}
+
+export function canPlanSessions(user: User | null | undefined): boolean {
+  return hasAnyPermission(user, SESSION_PLAN_PERMISSIONS);
+}
+
+export function canUpdateSessions(user: User | null | undefined): boolean {
+  return hasAnyPermission(user, ["sessions.update", "sessions.plan", "manage_session_plans"]);
+}
+
+export function canDeleteSessions(user: User | null | undefined): boolean {
+  return hasAnyPermission(user, ["sessions.delete", "sessions.archive", "manage_session_plans"]);
 }
 
 export function canAccessClientLogbook(user: User | null | undefined): boolean {
