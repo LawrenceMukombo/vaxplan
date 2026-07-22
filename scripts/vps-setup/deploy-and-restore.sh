@@ -78,6 +78,12 @@ sudo chown -R www-data:www-data "$DOCS_DIR"
 sudo chmod -R 755 "$DOCS_DIR"
 echo "✅ Documentation site updated"
 
+# ── 4.5. Rebuild Production Assets ────────────────────────────────────────────────
+echo ""
+echo "🏗️  4.5. Compiling production bundle..."
+npm run build
+echo "✅ Build complete."
+
 # ── 5. Restart server ────────────────────────────────────────────────────────────
 echo ""
 echo "🔄 5. Restarting VaxPlan server under PM2..."
