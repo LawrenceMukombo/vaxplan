@@ -123,7 +123,8 @@ async function importAll() {
         }
         inserted++;
       } catch (err: any) {
-        console.error(`   ⚠️ Error importing row ${row[key]} in ${name}:`, err.message);
+        console.error(`   ⚠️ Error importing row ${row[key]} in ${name}:`);
+        console.error(err);
       }
     }
     console.log(`   ✓ Completed ${name}: ${inserted} inserted/updated, ${skipped} skipped (protected)`);
