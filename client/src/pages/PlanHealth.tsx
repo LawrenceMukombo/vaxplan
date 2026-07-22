@@ -1,4 +1,4 @@
-﻿import { useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
 import {
@@ -92,17 +92,26 @@ export default function PlanHealth() {
   const { data: supervision = [] } = useQuery<SupervisionVisit[]>({ queryKey: ["/api/supervision-visits"] });
   const { data: reviews = [] } = useQuery<QuarterlyReview[]>({ queryKey: ["/api/quarterly-reviews"] });
   const rows = useMemo(() => {
-    return facilities.map((facility) => {
+    const safeFacilities = Array.isArray(facilities) ? facilities : [];
+    const safeVillages = Array.isArray(villages) ? villages : [];
+    const safeSessions = Array.isArray(sessions) ? sessions : [];
+    const safeBudget = Array.isArray(budget) ? budget : [];
+    const safeMobilization = Array.isArray(mobilization) ? mobilization : [];
+    const safeSupervision = Array.isArray(supervision) ? supervision : [];
+    const safePopulation = Array.isArray(population) ? population : [];
+    const safeVaccines = Array.isArray(vaccines) ? vaccines : [];
+    const safeReviews = Array.isArray(reviews) ? reviews : [];
+    return safeFacilities.map((facility) => {
       const facilityId = Number(facility.id);
-      const facilityVillages = villages.filter((v: any) => Number(v.facilityId) === facilityId);
-      const facilitySessions = sessions.filter((s) => getSessionFacilityId(s) === facilityId);
+      const facilityVillages = safeVillages.filter((v: any) => Number(v.assignedFacilityId) === facilityId);
+      const facilitySessions = safeSessions.filter((s) => getSessionFacilityId(s) === facilityId);
       const conductedSessions = facilitySessions.filter(isConducted);
-      const facilityBudget = budget.filter((b: any) => Number(b.facilityId) === facilityId);
-      const facilityMobilization = mobilization.filter((m: any) => Number(m.facilityId) === facilityId);
-      const facilitySupervision = supervision.filter((v) => Number(v.facilityId) === facilityId);
-      const facilityPopulation = population.filter((p: any) => Number(p.facilityId) === facilityId);
-      const facilityVaccines = vaccines.filter((v: any) => Number(v.facilityId) === facilityId);
-      const review = reviews.find(
+      const facilityBudget = safeBudget.filter((b: any) => Number(b.facilityId) === facilityId);
+      const facilityMobilization = safeMobilization.filter((m: any) => Number(m.facilityId) === facilityId);
+      const facilitySupervision = safeSupervision.filter((v) => Number(v.facilityId) === facilityId);
+      const facilityPopulation = safePopulation.filter((p: any) => Number(p.facilityId) === facilityId);
+      const facilityVaccines = safeVaccines.filter((v: any) => Number(v.facilityId) === facilityId);
+      const review = safeReviews.find(
         (r) =>
           Number(r.facilityId) === facilityId &&
           Number(r.year) === CURRENT_YEAR &&
@@ -133,14 +142,14 @@ export default function PlanHealth() {
       const accessVillages = facilityVillages
         .map((v: any) => ({
           name: v.name,
-          distanceKm: Number(v.distanceToFacility),
-          travelTimeMin: Number(v.travelTimeMinutes),
+          distanceKm: v.distanceToFacility != null ? Number(v.distanceToFacility) : null,
+          travelTimeMin: v.travelTimeMinutes != null ? Number(v.travelTimeMinutes) : null,
         }))
-        .filter((v) => Number.isFinite(v.distanceKm) || Number.isFinite(v.travelTimeMin));
-      const distances = accessVillages.map((v) => v.distanceKm).filter(Number.isFinite);
-      const travelTimes = accessVillages.map((v) => v.travelTimeMin).filter(Number.isFinite);
+        .filter((v) => v.distanceKm !== null || v.travelTimeMin !== null);
+      const distances = accessVillages.map((v) => v.distanceKm).filter((d): d is number => d !== null && Number.isFinite(d));
+      const travelTimes = accessVillages.map((v) => v.travelTimeMin).filter((t): t is number => t !== null && Number.isFinite(t));
       const farthestCommunity = accessVillages
-        .filter((v) => Number.isFinite(v.distanceKm))
+        .filter((v): v is { name: string; distanceKm: number; travelTimeMin: number | null } => v.distanceKm !== null && Number.isFinite(v.distanceKm))
         .sort((a, b) => b.distanceKm - a.distanceKm)[0] ?? null;
       const accessSummary = {
         mapped: accessVillages.length,
@@ -149,7 +158,7 @@ export default function PlanHealth() {
         maxDistanceKm: farthestCommunity?.distanceKm ?? null,
         farthestCommunityName: farthestCommunity?.name ?? null,
         avgTravelTimeMin: travelTimes.length ? Math.round(travelTimes.reduce((sum, value) => sum + value, 0) / travelTimes.length) : null,
-        htrSignals: accessVillages.filter((v) => (Number.isFinite(v.distanceKm) && v.distanceKm >= 5) || (Number.isFinite(v.travelTimeMin) && v.travelTimeMin >= 60)).length,
+        htrSignals: accessVillages.filter((v) => (v.distanceKm !== null && v.distanceKm >= 5) || (v.travelTimeMin !== null && v.travelTimeMin >= 60)).length,
       };
       const metrics: HealthMetric[] = [
         {
@@ -228,15 +237,18 @@ export default function PlanHealth() {
       return { facility, score, met, total: metrics.length, metrics, accessSummary };
     });
   }, [budget, facilities, mobilization, population, reviews, sessions, supervision, vaccines, villages]);
-  const filtered = rows
-    .filter((row) => row.facility.name.toLowerCase().includes(search.toLowerCase()))
-    .filter((row) => {
-      if (scoreFilter === "ready") return row.score >= 80;
-      if (scoreFilter === "watch") return row.score >= 60 && row.score < 80;
-      if (scoreFilter === "action") return row.score < 60;
-      return true;
-    })
-    .sort((a, b) => a.score - b.score || a.facility.name.localeCompare(b.facility.name));
+  const filtered = useMemo(() => {
+    const safeRows = Array.isArray(rows) ? rows : [];
+    return safeRows
+      .filter((row) => row.facility.name.toLowerCase().includes(search.toLowerCase()))
+      .filter((row) => {
+        if (scoreFilter === "ready") return row.score >= 80;
+        if (scoreFilter === "watch") return row.score >= 60 && row.score < 80;
+        if (scoreFilter === "action") return row.score < 60;
+        return true;
+      })
+      .sort((a, b) => a.score - b.score || a.facility.name.localeCompare(b.facility.name));
+  }, [rows, search, scoreFilter]);
   const summary = useMemo(() => {
     const total = rows.length || 1;
     return {
