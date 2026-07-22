@@ -127,9 +127,54 @@ export function createOutlinePinIcon(
   return L.icon({ iconUrl: OUTLINE_PIN_DATA_URIS[color], ...size });
 }
 
-export function createFacilityCircleIcon(): L.Icon {
-  return L.icon({
-    iconUrl: FACILITY_CIRCLE_GREEN_DATA_URI,
-    ...FACILITY_CIRCLE_SIZE_18,
+
+const renderHumans = (count: number, color: string) => {
+  const maxToDraw = Math.min(count, 5);
+  const svgs = Array(maxToDraw).fill(`<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="${color}" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="margin-left: -4px;"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>`).join('');
+  const overflow = count > 5 ? `<span style="font-size: 9px; font-weight: bold; color: ${color}; margin-left: 2px;">+${count - 5}</span>` : '';
+  return `<div style="display: flex; align-items: center; padding-left: 4px;">${svgs}${overflow}</div>`;
+};
+
+export function createFacilityCircleIcon(unassignedCount: number = 0): L.DivIcon {
+  if (unassignedCount > 0) {
+    return L.divIcon({
+      html: `
+        <div style="display: flex; align-items: center; background: white; border-radius: 12px; border: 1.5px solid #2563eb; padding: 2px 4px 2px 2px; box-shadow: 0 0 4px rgba(0,0,0,0.3);">
+          <div style="background-color: #2563eb; width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0;"></div>
+        ${renderHumans(unassignedCount, '#f59e0b')}
+        </div>
+      `,
+      className: "",
+      iconSize: [(unassignedCount > 5 ? 60 : 20 + unassignedCount * 8), 20],
+      iconAnchor: [10, 10],
+    });
+  }
+  return L.divIcon({
+    html: `<div style="background-color: #2563eb; width: 14px; height: 14px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 4px rgba(0,0,0,0.5);"></div>`,
+    className: "",
+    iconSize: [14, 14],
+    iconAnchor: [7, 7],
+  });
+}
+
+export function createVillageWithChvsIcon(chvCount: number): L.DivIcon {
+  return L.divIcon({
+    html: `
+      <div style="display: inline-flex; align-items: center; background-color: white; border-radius: 12px; border: 1.5px solid #16a34a; padding: 2px; box-shadow: 0 0 2px rgba(0,0,0,0.3);">
+        ${renderHumans(chvCount, '#16a34a')}
+      </div>
+    `,
+    className: "",
+    iconSize: [(chvCount > 5 ? 50 : 8 + chvCount * 8), 20],
+    iconAnchor: [(chvCount > 5 ? 25 : 4 + chvCount * 4), 10],
+  });
+}
+
+export function createGapVillageIcon(): L.DivIcon {
+  return L.divIcon({
+    html: `<div style="background-color: #dc2626; width: 12px; height: 12px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 4px rgba(220,38,38,0.8);"></div>`,
+    className: "",
+    iconSize: [12, 12],
+    iconAnchor: [6, 6],
   });
 }
