@@ -188,7 +188,15 @@ async function run() {
       "ALTER TABLE chv_profiles ADD COLUMN IF NOT EXISTS nrc varchar(50);",
       "ALTER TABLE community_health_volunteers ADD COLUMN IF NOT EXISTS nrc varchar(50);",
       "ALTER TABLE chv_profiles ADD COLUMN IF NOT EXISTS employment_status varchar(50) DEFAULT 'Active - In-service';",
-      "ALTER TABLE chv_profiles ADD COLUMN IF NOT EXISTS supervisor_id integer;"
+      "ALTER TABLE chv_profiles ADD COLUMN IF NOT EXISTS supervisor_id integer;",
+      "ALTER TABLE microplans ADD COLUMN IF NOT EXISTS created_by_user_id varchar REFERENCES users(id) ON DELETE SET NULL;",
+      "ALTER TABLE microplans ADD COLUMN IF NOT EXISTS updated_by_user_id varchar REFERENCES users(id) ON DELETE SET NULL;",
+      "ALTER TABLE microplans ADD COLUMN IF NOT EXISTS approved_by_user_id varchar REFERENCES users(id) ON DELETE SET NULL;",
+      "ALTER TABLE microplans ADD COLUMN IF NOT EXISTS submitted_at timestamptz;",
+      "ALTER TABLE microplans ADD COLUMN IF NOT EXISTS auto_approve_at timestamptz;",
+      "ALTER TABLE microplans ADD COLUMN IF NOT EXISTS reminder_sent_at timestamptz;",
+      "ALTER TABLE microplans ADD COLUMN IF NOT EXISTS district_edit_reason text;",
+      "ALTER TABLE villages ADD COLUMN IF NOT EXISTS confidence_score numeric(5, 2);"
     ];
     for (const sql of customUpgrades) {
       try {
