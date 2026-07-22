@@ -108,16 +108,16 @@ async function importAll() {
         if (name === "userPermissions" && row.code) {
           const byCode = await db
             .select()
-            .from(table)
-            .where(sql`${table.code} = ${row.code} AND (${table.tenantId} = ${row.tenantId} OR ${table.tenantId} IS NULL OR ${row.tenantId} IS NULL)`)
+            .from(schema.userPermissions)
+            .where(eq(schema.userPermissions.code, row.code))
             .limit(1);
 
           if (byCode.length > 0) {
             const { [key]: _, ...updateFields } = row;
             await db
-              .update(table)
+              .update(schema.userPermissions)
               .set(updateFields)
-              .where(eq(table.id, byCode[0].id));
+              .where(eq(schema.userPermissions.id, byCode[0].id));
             inserted++;
             continue;
           }
