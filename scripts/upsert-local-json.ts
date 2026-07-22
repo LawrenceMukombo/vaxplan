@@ -108,11 +108,17 @@ async function importAll() {
             continue;
           }
 
+          // EXCLUDE PRIMARY KEY FROM UPDATE PAYLOAD TO AVOID IDENTITY COLUMN ERRORS
+          const { [key]: _, ...updateFields } = row;
           await db
             .update(table)
-            .set(row)
+            .set(updateFields)
             .where(eq(table[key], row[key]));
         } else {
+          // If inserting a record into a table with generated always as identity,
+          // we might need to override identity if possible, but Drizzle uses normal insert.
+          // In PG, generated always can be bypassed with OVERRIDING SYSTEM VALUE.
+          // For safety, let's try standard insert first.
           await db.insert(table).values(row);
         }
         inserted++;
