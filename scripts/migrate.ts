@@ -184,7 +184,11 @@ async function run() {
       "ALTER TABLE stock_transactions ADD COLUMN IF NOT EXISTS balance_before integer;",
       "ALTER TABLE stock_transactions ADD COLUMN IF NOT EXISTS balance_after integer;",
       "ALTER TABLE stock_transactions ADD COLUMN IF NOT EXISTS source_module varchar(100);",
-      "ALTER TABLE stock_transactions ADD COLUMN IF NOT EXISTS source_record_id varchar(100);"
+      "ALTER TABLE stock_transactions ADD COLUMN IF NOT EXISTS source_record_id varchar(100);",
+      "ALTER TABLE chv_profiles ADD COLUMN IF NOT EXISTS nrc varchar(50);",
+      "ALTER TABLE community_health_volunteers ADD COLUMN IF NOT EXISTS nrc varchar(50);",
+      "ALTER TABLE chv_profiles ADD COLUMN IF NOT EXISTS employment_status varchar(50) DEFAULT 'Active - In-service';",
+      "ALTER TABLE chv_profiles ADD COLUMN IF NOT EXISTS supervisor_id integer;"
     ];
     for (const sql of customUpgrades) {
       try {
