@@ -59,6 +59,9 @@ if [ -f "local_dump.sql.zip" ]; then
   echo "🔓 Unzipping database archive..."
   unzip -o local_dump.sql.zip
   
+  echo "🧹 Cleaning existing schema to prevent duplicate constraints..."
+  psql "$DATABASE_URL" -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public; GRANT ALL ON SCHEMA public TO public; CREATE EXTENSION IF NOT EXISTS postgis CASCADE;"
+  
   echo "📥 Importing SQL dump into production database..."
   psql "$DATABASE_URL" -f local_dump.sql
   echo "✅ Database restore completed successfully."
