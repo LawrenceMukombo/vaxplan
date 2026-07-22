@@ -49,7 +49,7 @@ echo "✅ Database backup saved to: $BACKUP_FILE"
 # ── 2. Install production dependencies ───────────────────────────────────────────
 echo ""
 echo "📦 2. Installing production dependencies..."
-npm install --omit=dev --legacy-peer-deps --no-audit --no-fund
+npm install --legacy-peer-deps --no-audit --no-fund
 echo "      ✓ Dependencies installed."
 
 # ── 3. Database Restore ─────────────────────────────────────────────────────────

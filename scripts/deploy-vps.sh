@@ -73,7 +73,7 @@ if [ -f "node_modules/.package-lock.json" ]; then
   fi
 fi
 
-npm install --omit=dev --legacy-peer-deps --no-audit --no-fund
+npm install --legacy-peer-deps --no-audit --no-fund
 echo "      ✓ Dependencies installed."
 
 # ─────────────────────────────────────────────────────
