@@ -1,60 +1,125 @@
 ---
-title: "Safe Deployment Guide"
-version: 1.0.0
-status: Final
-last_updated: 2026-06-21
-audience: System Administrators, Release Managers
+title: "VaxPlan Production Deployment Standard Operating Procedure (SOP)"
+version: 1.5.0
+status: Approved
+last_updated: 2026-07-22
+audience: System Administrators, Release Managers, DevOps Engineers
 ---
 
-# Safe Deployment Guide
+# VaxPlan Production Deployment Standard Operating Procedure (SOP)
 
-## 1. Principles of Data Safety
-VaxPlan adheres strictly to non-destructive deployment practices.
-- **No Wipe:** Production data is never erased.
-- **No Overwrite:** Existing fields (like Official Population) are not overwritten by automated migrations.
-- **Upsert Only:** Database migrations must only ADD tables or ADD columns.
+This Standard Operating Procedure (SOP) defines the non-destructive deployment protocol for VaxPlan across production, staging, and VPS hosting environments (e.g. Hostinger, Cloud VPS, Ubuntu Linux).
 
-## 2. Server Infrastructure
-VaxPlan is typically deployed to a VPS (e.g., Hostinger) running Ubuntu, Nginx, Node.js, and PM2.
+---
 
-## 3. Safe Migration Protocol
-Never run `npx drizzle-kit push` directly in a production environment as it may trigger destructive warnings or drop data.
+## 1. NON-NEGOTIABLE DEPLOYMENT RULES
 
-Instead, always use the custom safe script:
+> [!CAUTION]
+> **PROTECTED CONFIGURATIONS & ZERO DATA LOSS RULES**
+> 1. **NO CONFIGURATION CHANGES**: Never modify, overwrite, or commit `.env`, `nginx.conf`, PM2 ecosystem files, systemd services, SSL certificates, or deployment credentials.
+> 2. **NO DATA WIPE / RESET**: Never run `DROP TABLE`, `TRUNCATE`, database resets, or destructive seed scripts against production databases.
+> 3. **UPSERT ONLY**: All database migrations and data syncing must be purely additive (`ADD COLUMN IF NOT EXISTS`, `INSERT ... ON CONFLICT DO UPDATE`).
+> 4. **FULL DEPENDENCY INSTALLATION**: Always run `npm install` (do **NOT** use `--omit=dev` during build steps) to ensure Vite and ESBuild compilation toolchains remain available on the server.
+
+---
+
+## 2. PRE-DEPLOYMENT CHECKLIST
+
+Before deploying any release:
+- [ ] Confirm code changes pass local type checks (`npm run check`) and builds (`npm run build`).
+- [ ] Ensure all code and build outputs are committed to the designated feature branch or `main`.
+- [ ] Verify that `.env` files are excluded from Git.
+
+---
+
+## 3. AUTOMATED DEPLOYMENT PROTOCOL (RECOMMENDED)
+
+The repository includes an automated, self-healing deployment script that handles build artifact cleanup, branch syncing, additive database migrations, and PM2 process recycling.
+
+Execute the following on the VPS server:
+
 ```bash
-npm run db:safe-update
+cd /var/www/vaxplan
+bash scripts/deploy-vps.sh
 ```
-This script reads `.env` manually (as `dotenv` may not be present globally), loads the Drizzle config, and executes `drizzle-kit push --force` ONLY IF the changes are purely additive.
 
-## 4. Deployment Steps
+---
+
+## 4. MANUAL DEPLOYMENT STEP-BY-STEP PROCEDURE
+
+If executing deployment steps manually, follow this exact sequence:
+
+### Step 1: Clean Local Build Artifacts & Sync Repository
+Prevent Git pull conflicts caused by modified `dist/` build files on the server:
+
 ```bash
-# 1. Connect to VPS
-ssh user@vps_ip
-
-# 2. Navigate to project
 cd /var/www/vaxplan
 
-# 3. Pull latest code
-git pull origin main
+# Clean uncommitted build artifacts blocking branch checkout/pull
+git reset --hard HEAD
+git clean -fd dist/
 
-# 4. Install dependencies
+# Fetch and checkout target release branch
+git fetch origin
+git checkout codex/secure-logout-offline-guard  # Or main
+git pull origin codex/secure-logout-offline-guard
+```
+
+### Step 2: Install Full Dependencies
+Ensure all runtime and build-time dependencies (e.g. `vite`, `@vitejs/plugin-react`) are available:
+
+```bash
 npm install
+```
 
-# 5. Run safe schema updates
-npm run db:safe-update
+### Step 3: Run Additive Database Migrations
+Safely apply database migrations without altering or erasing existing data:
 
-# 6. Build the application
+```bash
+# Runs versioned SQL migrations and safe column additions
+npm run db:migrate
+```
+
+### Step 4: Optional Idempotent Local-to-Production Data Upsert
+If merging local operational data (microplans, CHV profiles, staff, roles, permissions) into production without overwriting existing VPS records:
+
+```bash
+npx tsx --env-file=.env scripts/upsert-local-json.ts
+```
+
+### Step 5: Build Production Bundle
+Bundle frontend assets (Vite PWA) and backend server (ESBuild):
+
+```bash
 npm run build
+```
 
-# 7. Restart PM2 process
+### Step 6: Restart & Monitor Application Process
+Recycle PM2 application workers safely:
+
+```bash
 pm2 restart vaxplan
-
-# 8. Check logs to verify health
+pm2 save
+pm2 status
 pm2 logs vaxplan --lines 50
 ```
 
-## 5. Handling Build Artifacts
-If `dist/` artifacts cause merge conflicts during `git pull`, run `git restore .` to discard local uncommitted changes. 
+---
 
-> [!WARNING]
-> Do not modify the `.env` or Nginx configuration files unless explicitly required and approved by the infrastructure lead.
+## 5. TROUBLESHOOTING & EMERGENCY RECOVERY
+
+| Symptom | Cause | Resolution |
+| :--- | :--- | :--- |
+| `Cannot find package '@vitejs/plugin-react'` | `npm install --omit=dev` was run | Run `npm install` without `--omit=dev`, then re-run `npm run build`. |
+| `Your local changes to dist/... would be overwritten` | Build files modified on VPS | Run `git reset --hard HEAD` and `git clean -fd dist/` before `git pull`. |
+| `column "..." does not exist` | Database schema missing new column | Run `npm run db:migrate` to execute additive `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`. |
+| `Key (...) already exists` during data upsert | Unique constraint collision | Ensure `scripts/upsert-local-json.ts` is pulled (includes `ON CONFLICT` / code lookup handling). |
+
+---
+
+## 6. AUDIT & REPORTING
+
+After every deployment, document:
+- Release branch and commit hash (`git log -n 1`).
+- PM2 process uptime and log status (`pm2 status`).
+- Confirmation that no `.env` files or database tables were destroyed.
