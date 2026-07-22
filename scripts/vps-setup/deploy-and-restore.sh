@@ -21,7 +21,7 @@ cd "$APP_DIR"
 # ── 1. Pull latest code ──────────────────────────────────────────────────────────
 echo "📥 1. Pulling latest from GitHub (main)..."
 git fetch origin
-git reset --hard origin/main
+git reset --hard origin/codex/secure-logout-offline-guard
 echo "✅ Code updated to: $(git log --oneline -1)"
 
 # Load env variables from .env file

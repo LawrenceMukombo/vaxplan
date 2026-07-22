@@ -44,7 +44,7 @@ echo "✅ Database backup saved to: $BACKUP_FILE"
 echo ""
 echo "📥 1. Pulling latest from GitHub (main)..."
 git fetch origin
-git reset --hard origin/main
+git reset --hard origin/codex/secure-logout-offline-guard
 echo "✅ Code updated to: $(git log --oneline -1)"
 
 # ── 2. Install production dependencies ───────────────────────────────────────────

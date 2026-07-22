@@ -21,7 +21,7 @@ cd "$APP_DIR"
 echo "📥 Pulling latest from GitHub (main)..."
 git fetch origin main
 BEFORE=$(git rev-parse HEAD)
-git reset --hard origin/main
+git reset --hard origin/codex/secure-logout-offline-guard
 AFTER=$(git rev-parse HEAD)
 
 if [ "$BEFORE" = "$AFTER" ]; then
