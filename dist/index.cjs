@@ -36832,8 +36832,7 @@ var init_index = __esm({
       if (typeof port === "number") {
         httpServer.listen(
           {
-            port,
-            host: "0.0.0.0"
+            port
           },
           () => {
             log(`serving on port ${port}`);
