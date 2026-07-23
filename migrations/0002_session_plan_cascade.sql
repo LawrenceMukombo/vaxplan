@@ -57,7 +57,7 @@ WITH orphan_groups AS (
       || CASE WHEN og.session_plan_type = 'campaign' THEN 'SIA' ELSE 'Routine' END || ')',
     og.year,
     og.quarter,
-    CASE WHEN og.session_plan_type = 'campaign' THEN 'sia_campaign' ELSE 'facility_routine' END,
+    CASE WHEN og.session_plan_type = 'campaign' THEN 'sia_campaign' ELSE 'facility_routine' END::microplan_type,
     'draft',
     NOW(),
     NOW()
@@ -73,8 +73,8 @@ WHERE sp.microplan_id IS NULL
   AND sp.year = c.year
   AND sp.quarter = c.quarter
   AND (
-    (sp.plan_type::text = 'campaign' AND c.plan_type = 'sia_campaign')
-    OR (sp.plan_type::text = 'routine' AND c.plan_type = 'facility_routine')
+    (sp.plan_type::text = 'campaign' AND c.plan_type::text = 'sia_campaign')
+    OR (sp.plan_type::text = 'routine' AND c.plan_type::text = 'facility_routine')
   );
 
 ALTER TABLE session_plans
