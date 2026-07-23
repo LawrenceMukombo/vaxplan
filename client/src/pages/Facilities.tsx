@@ -149,7 +149,6 @@ function MapResizer() {
   }, [map]);
   return null;
 }
-import { MapLegend } from "@/components/map/MapLegend";
 
 export default function Facilities() {
   const { toast } = useToast();
@@ -3173,7 +3172,6 @@ export default function Facilities() {
                       <div className="absolute top-4 left-4 z-[1000] bg-background/90 px-3 py-1.5 rounded-md border text-[10px] shadow-md font-sans">
                         Drag village pins <span className="inline-block w-2.5 h-2.5 bg-emerald-500 rounded-full border border-white align-middle"></span> to dynamically edit coordinates.
                       </div>
-                      <MapLegend />
                       <MapContainer
                         center={(() => {
                           const fac = facilities?.find(f => f.id === selectedFacilityId);

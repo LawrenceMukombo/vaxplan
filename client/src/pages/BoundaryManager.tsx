@@ -123,19 +123,12 @@ export default function BoundaryManager() {
   const [uploadLevelName, setUploadLevelName] = useState("");
   const [uploadFile, setUploadFile] = useState<File | null>(null);
 
+  // CSV Upload dialog state
+  const [csvUploadOpen, setCsvUploadOpen] = useState(false);
+  const [csvUploadFile, setCsvUploadFile] = useState<File | null>(null);
+
   // Delete confirmation
   const [deleteId, setDeleteId] = useState<string | null>(null);
-
-  /*
-  // Original queries (commented out to preserve working code while adding offline capabilities):
-  const { data: countries, isLoading: loadingCountries } = useQuery<SupportedCountry[]>({
-    queryKey: ["/api/boundaries/countries"],
-  });
-
-  const { data: boundaries, isLoading: loadingBoundaries } = useQuery<BoundaryMeta[]>({
-    queryKey: ["/api/boundaries"],
-  });
-  */
 
   // Updated queries with offline fallbacks:
   const { data: countries, isLoading: loadingCountries } = useQuery<SupportedCountry[]>({
@@ -184,6 +177,84 @@ export default function BoundaryManager() {
     },
   });
 
+  const csvUploadMutation = useMutation({
+    mutationFn: async (hqs: any[]) => apiRequest("POST", "/api/boundaries/hq-upload", { hqs }),
+    onSuccess: async (res: any) => {
+      const data = await res.json();
+      qc.invalidateQueries({ queryKey: ["/api/boundaries"] });
+      setCsvUploadOpen(false);
+      setCsvUploadFile(null);
+      toast({ title: "HQ Coordinates Uploaded", description: `Updated ${data.updatedProvinces || 0} provinces and ${data.updatedDistricts || 0} districts.` });
+    },
+    onError: (err: Error) => {
+      toast({ title: "CSV Upload failed", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const handleCsvUpload = () => {
+    if (!csvUploadFile) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const text = e.target?.result as string;
+        const lines = text.split('\n').filter(l => l.trim().length > 0);
+        
+        const parseLine = (line: string) => {
+          const result = [];
+          let current = '';
+          let inQuotes = false;
+          for (let i = 0; i < line.length; i++) {
+            const char = line[i];
+            if (char === '"') {
+              inQuotes = !inQuotes;
+            } else if (char === ',' && !inQuotes) {
+              result.push(current);
+              current = '';
+            } else {
+              current += char;
+            }
+          }
+          result.push(current);
+          return result;
+        };
+
+        const headers = parseLine(lines[0]).map(h => h.trim().toLowerCase());
+        const hqs = [];
+        
+        for (let i = 1; i < lines.length; i++) {
+          const cols = parseLine(lines[i]).map(c => c.trim());
+          const levelIdx = headers.findIndex(h => h.includes('level'));
+          const nameIdx = headers.findIndex(h => h.includes('office name') || h === 'name');
+          const latIdx = headers.findIndex(h => h === 'latitude' || h === 'lat');
+          const lngIdx = headers.findIndex(h => h === 'longitude' || h === 'lng' || h === 'long');
+          
+          if (levelIdx !== -1 && nameIdx !== -1 && latIdx !== -1 && lngIdx !== -1) {
+             const lat = parseFloat(cols[latIdx]);
+             const lng = parseFloat(cols[lngIdx]);
+             if (!isNaN(lat) && !isNaN(lng)) {
+               hqs.push({
+                 level: cols[levelIdx],
+                 name: cols[nameIdx].replace("Provincial Health Office", "").replace("District Health Office", "").trim(),
+                 lat,
+                 lng
+               });
+             }
+          }
+        }
+        
+        if (hqs.length === 0) {
+          toast({ title: "No valid rows found", description: "Ensure the CSV has columns: Office Level, Office Name, Latitude, Longitude", variant: "destructive" });
+          return;
+        }
+        
+        csvUploadMutation.mutate(hqs);
+      } catch (err) {
+        toast({ title: "Failed to parse CSV", variant: "destructive" });
+      }
+    };
+    reader.readAsText(csvUploadFile);
+  };
+
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => apiRequest("DELETE", `/api/boundaries/${id}`),
     onSuccess: () => {
@@ -196,7 +267,6 @@ export default function BoundaryManager() {
     },
   });
 
-  // When country is selected, auto-fill the default level name
   const handleCountrySelect = (code: string) => {
     const country = countries?.find((c) => c.code === code) ?? null;
     setSelectedCountry(country);
@@ -228,7 +298,7 @@ export default function BoundaryManager() {
     if (code.length !== 3) {
       toast({
         title: "Country code must be 3 letters",
-        description: `"${code || "(empty)"}" is not a valid ISO 3166-1 alpha-3 code. Use SSD for South Sudan, ZMB for Zambia, PNG for Papua New Guinea, KEN for Kenya, etc.`,
+        description: `"${code || "(empty)"}" is not a valid ISO 3166-1 alpha-3 code.`,
         variant: "destructive",
       });
       return;
@@ -259,7 +329,6 @@ export default function BoundaryManager() {
 
   return (
     <div className="p-6 space-y-6 max-w-5xl">
-      {/* Header */}
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div>
           <h1 className="text-2xl font-bold flex items-center gap-2">
@@ -267,10 +336,13 @@ export default function BoundaryManager() {
             Admin Boundary Manager
           </h1>
           <p className="text-muted-foreground text-sm mt-1">
-            Load GIS administrative boundaries for any country. Boundaries render as interactive polygons on the map.
+            Load GIS administrative boundaries for any country.
           </p>
         </div>
         <div className="flex gap-2">
+          <Button variant="outline" onClick={() => setCsvUploadOpen(true)} className="gap-2" data-testid="button-upload-csv">
+            <MapPin className="h-4 w-4" /> Upload HQ CSV
+          </Button>
           <Button variant="outline" onClick={() => setUploadOpen(true)} className="gap-2" data-testid="button-upload-boundary">
             <Upload className="h-4 w-4" /> Upload GeoJSON
           </Button>
@@ -280,59 +352,6 @@ export default function BoundaryManager() {
         </div>
       </div>
 
-      {/* Info Banner */}
-      <Card className="border-primary/20 bg-primary/5">
-        <CardContent className="p-4 flex gap-3 items-start">
-          <Info className="h-5 w-5 text-primary mt-0.5 shrink-0" />
-          <div className="space-y-2">
-            <p className="text-sm font-medium">How to get admin boundaries</p>
-            <div className="grid sm:grid-cols-3 gap-3">
-              {[
-                {
-                  name: "GeoBoundaries API",
-                  desc: "Best option. One-click fetch for 200+ countries. No download needed.",
-                  url: "https://geoboundaries.org",
-                  badge: "Recommended",
-                  badgeColor: "bg-emerald-500/10 text-emerald-700",
-                },
-                {
-                  name: "GADM (Manual)",
-                  desc: "Highest detail. Download .shp → convert to GeoJSON via Mapshaper.org → upload.",
-                  url: "https://gadm.org/download_country.html",
-                  badge: "Manual",
-                  badgeColor: "bg-amber-500/10 text-amber-700",
-                },
-                {
-                  name: "OCHA HDX",
-                  desc: "Humanitarian-grade Africa-focused boundaries. Includes South Sudan, Somalia, etc.",
-                  url: "https://data.humdata.org",
-                  badge: "Africa",
-                  badgeColor: "bg-blue-500/10 text-blue-700",
-                },
-              ].map((src) => (
-                <a
-                  key={src.name}
-                  href={src.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="block p-3 rounded-lg bg-background/60 border border-border/40 hover:border-primary/40 transition-colors"
-                >
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-xs font-semibold">{src.name}</span>
-                    <Badge variant="secondary" className={`text-[10px] ${src.badgeColor}`}>{src.badge}</Badge>
-                  </div>
-                  <p className="text-[11px] text-muted-foreground">{src.desc}</p>
-                  <div className="flex items-center gap-1 mt-1.5 text-[10px] text-primary">
-                    <ExternalLink className="h-2.5 w-2.5" /> Open
-                  </div>
-                </a>
-              ))}
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Active Boundaries */}
       <Card>
         <CardHeader className="pb-3">
           <div className="flex items-center justify-between">
@@ -344,9 +363,6 @@ export default function BoundaryManager() {
                   <Badge variant="secondary" className="text-xs">{boundaries?.length ?? 0}</Badge>
                 )}
               </CardTitle>
-              <CardDescription className="text-xs mt-0.5">
-                All boundaries render as interactive polygon overlays on the map view.
-              </CardDescription>
             </div>
             <Button
               variant="ghost"
@@ -366,7 +382,6 @@ export default function BoundaryManager() {
             <div className="py-10 text-center text-muted-foreground">
               <Layers className="h-8 w-8 mx-auto mb-3 opacity-30" />
               <p className="text-sm">No boundaries loaded yet.</p>
-              <p className="text-xs mt-1">Fetch from GeoBoundaries API or upload a GeoJSON file.</p>
             </div>
           ) : (
             <div>
@@ -378,7 +393,6 @@ export default function BoundaryManager() {
         </CardContent>
       </Card>
 
-      {/* ─── Fetch from GeoBoundaries Dialog ──────────────────────────────── */}
       <Dialog open={fetchOpen} onOpenChange={setFetchOpen}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
@@ -386,11 +400,7 @@ export default function BoundaryManager() {
               <Globe className="h-5 w-5 text-primary" />
               Fetch from GeoBoundaries API
             </DialogTitle>
-            <DialogDescription>
-              Select a country and admin level. GeoJSON is fetched automatically — no download or conversion needed.
-            </DialogDescription>
           </DialogHeader>
-
           <div className="space-y-4 py-2">
             <div className="space-y-1.5">
               <Label className="text-xs">Country</Label>
@@ -401,9 +411,7 @@ export default function BoundaryManager() {
                 <SelectContent className="max-h-64">
                   {grouped.map(({ region, countries: regionCountries }) => (
                     <SelectGroup key={region}>
-                      <SelectLabel className="px-2 py-1 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider bg-muted/40">
-                        {region}
-                      </SelectLabel>
+                      <SelectLabel className="px-2 py-1 text-[10px] font-semibold text-muted-foreground">{region}</SelectLabel>
                       {regionCountries.map((c) => (
                         <SelectItem key={c.code} value={c.code}>
                           {c.name} <span className="text-muted-foreground ml-1 text-xs font-mono">({c.code})</span>
@@ -414,7 +422,6 @@ export default function BoundaryManager() {
                 </SelectContent>
               </Select>
             </div>
-
             {selectedCountry && (
               <>
                 <div className="space-y-1.5">
@@ -434,105 +441,72 @@ export default function BoundaryManager() {
                     ))}
                   </div>
                 </div>
-
                 <div className="space-y-1.5">
-                  <Label htmlFor="level-name" className="text-xs">Level Label (editable)</Label>
+                  <Label htmlFor="level-name" className="text-xs">Level Label</Label>
                   <Input
                     id="level-name"
                     value={levelName}
                     onChange={(e) => setLevelName(e.target.value)}
-                    placeholder="e.g. District"
-                    data-testid="input-level-name"
                   />
-                </div>
-
-                <div className="rounded-lg bg-amber-500/5 border border-amber-500/20 p-3 text-xs text-amber-700 dark:text-amber-400 flex items-start gap-2">
-                  <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
-                  <span>
-                    Fetching large countries (Nigeria, DRC, Ethiopia) may take 30–60 seconds.
-                    The page will not freeze — data loads in the background.
-                  </span>
                 </div>
               </>
             )}
           </div>
-
           <DialogFooter>
             <Button variant="outline" onClick={() => setFetchOpen(false)}>Cancel</Button>
             <Button
               onClick={handleFetch}
               disabled={!selectedCountry || !levelName || fetchMutation.isPending}
-              className="gap-2"
-              data-testid="button-confirm-fetch"
             >
-              {fetchMutation.isPending ? (
-                <><RefreshCw className="h-4 w-4 animate-spin" /> Fetching…</>
-              ) : (
-                <><Download className="h-4 w-4" /> Fetch Boundaries</>
-              )}
+              {fetchMutation.isPending ? "Fetching…" : "Fetch Boundaries"}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      {/* ─── Upload GeoJSON Dialog ─────────────────────────────────────────── */}
+      
       <Dialog open={uploadOpen} onOpenChange={setUploadOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Upload className="h-5 w-5 text-primary" />
-              Upload Custom GeoJSON
+              Upload Boundary GeoJSON
             </DialogTitle>
             <DialogDescription>
-              Upload a GeoJSON FeatureCollection. Convert GADM shapefiles using{" "}
-              <a href="https://mapshaper.org" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
-                Mapshaper.org
-              </a>
-              .
+              Upload administrative boundaries manually. Files must be .geojson or .json containing a valid FeatureCollection.
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4 py-2">
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label htmlFor="up-code" className="text-xs">
-                  ISO-3 Country Code <span className="text-muted-foreground">(3 letters)</span>
-                </Label>
-                <Input
-                  id="up-code"
-                  value={uploadCountryCode}
-                  onChange={(e) => setUploadCountryCode(e.target.value.toUpperCase().replace(/[^A-Z]/g, "").slice(0, 3))}
-                  placeholder="e.g. SSD, ZMB, PNG, KEN"
-                  maxLength={3}
-                  className="font-mono"
-                  data-testid="input-upload-country-code"
-                />
-                <p className="text-[11px] text-muted-foreground">
-                  Use ISO 3166-1 alpha-3 (e.g. SSD for South Sudan, ZMB for Zambia, PNG for Papua New Guinea). Two-letter codes like SS will be rejected.
-                </p>
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="up-level" className="text-xs">Admin Level</Label>
-                <Select value={uploadLevel} onValueChange={setUploadLevel}>
-                  <SelectTrigger id="up-level">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {[0, 1, 2, 3, 4, 5].map((l) => (
-                      <SelectItem key={l} value={String(l)}>Level {l}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
             <div className="space-y-1.5">
-              <Label htmlFor="up-level-name" className="text-xs">Level Label</Label>
+              <Label className="text-xs">Country Code (ISO 3166-1 alpha-3)</Label>
+              <Input
+                placeholder="e.g. ZMB, PNG"
+                value={uploadCountryCode}
+                onChange={(e) => setUploadCountryCode(e.target.value.toUpperCase())}
+                maxLength={3}
+                data-testid="input-upload-country"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Admin Level</Label>
+              <Select value={uploadLevel} onValueChange={setUploadLevel}>
+                <SelectTrigger data-testid="select-upload-level">
+                  <SelectValue placeholder="Select level" />
+                </SelectTrigger>
+                <SelectContent>
+                  {[1, 2, 3, 4, 5].map((l) => (
+                    <SelectItem key={l} value={l.toString()}>Level {l}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="up-level-name" className="text-xs">Level Name</Label>
               <Input
                 id="up-level-name"
                 value={uploadLevelName}
                 onChange={(e) => setUploadLevelName(e.target.value)}
-                placeholder="e.g. District"
+                placeholder="e.g. Province, District, LLG"
                 data-testid="input-upload-level-name"
               />
             </div>
@@ -580,6 +554,44 @@ export default function BoundaryManager() {
               ) : (
                 <><Upload className="h-4 w-4" /> Upload & Store</>
               )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ─── Upload HQ CSV Dialog ──────────────────────────────── */}
+      <Dialog open={csvUploadOpen} onOpenChange={setCsvUploadOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <MapPin className="h-5 w-5 text-primary" />
+              Upload HQ Coordinates (CSV)
+            </DialogTitle>
+            <DialogDescription>
+              Upload a CSV containing HQ coordinates for provinces and districts.
+              Required columns: Office Level, Office Name, Latitude, Longitude.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            <div className="space-y-1.5">
+              <Label className="text-xs">CSV File (.csv)</Label>
+              <Input
+                type="file"
+                accept=".csv"
+                onChange={(e) => setCsvUploadFile(e.target.files?.[0] || null)}
+                className="text-xs file:mr-3 file:py-1 file:px-3 file:rounded file:border-0 file:text-xs file:font-medium file:bg-primary/10 file:text-primary hover:file:bg-primary/20 cursor-pointer"
+              />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCsvUploadOpen(false)}>Cancel</Button>
+            <Button
+              onClick={handleCsvUpload}
+              disabled={!csvUploadFile || csvUploadMutation.isPending}
+            >
+              {csvUploadMutation.isPending ? "Processing..." : "Update Coordinates"}
             </Button>
           </DialogFooter>
         </DialogContent>

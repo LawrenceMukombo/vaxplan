@@ -12,7 +12,6 @@ import { usePersistedBasemap, BasemapTileLayer, BasemapSwitcher } from "@/compon
 import { DataTable } from "@/components/DataTable";
 import { ExpandedFacilityDetails } from "@/components/ExpandedFacilityDetails";
 import { GeoCascadeFilter } from "@/components/GeoCascadeFilter";
-import { MapLegend } from "@/components/map/MapLegend";
 import "leaflet/dist/leaflet.css";
 
 const createGenericClusterIcon = function (cluster: any) {
@@ -532,7 +531,6 @@ export function ChvCoverageTab({
             />
           ) : (
             <div className="min-h-[600px] h-[calc(100vh-280px)] w-full rounded-md border overflow-hidden relative z-10">
-              <MapLegend />
               <MapContainer 
                 center={[-13.2543, 31.1458]} 
                 zoom={6} 
