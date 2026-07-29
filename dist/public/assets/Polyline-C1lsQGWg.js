@@ -1,0 +1,1 @@
+import{l as a}from"./leaflet-src-BXcoe6zh.js";import{a as l,b as s,e as r}from"./TileLayer-DvkrBK6J.js";const f=l(function({positions:t,...e},o){const n=new a.Polyline(t,e);return s(n,r(o,{overlayContainer:n}))},function(t,e,o){e.positions!==o.positions&&t.setLatLngs(e.positions)});export{f as P};

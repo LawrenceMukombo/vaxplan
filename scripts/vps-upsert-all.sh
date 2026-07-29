@@ -31,7 +31,10 @@ PGCONNECT_TIMEOUT=10 pg_dump \
 [[ -s "$backup_file" ]] || { echo "ERROR: Backup is empty. Upsert aborted." >&2; exit 1; }
 chmod 600 "$backup_file"
 
-echo "Backup verified. Upserting the complete 104-table local snapshot..."
+echo "Backup verified. Running safe additive database schema updates..."
+npx tsx scripts/migrate.ts
+
+echo "Schema updated. Upserting the complete 104-table local snapshot..."
 npx tsx scripts/upsert-entire-database.ts "$SNAPSHOT" 2>&1 | tee "$log_file"
 
 grep -q "Successfully upserted every one of 182069 records." "$log_file" || {

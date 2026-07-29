@@ -152,7 +152,13 @@ async function run() {
       "ALTER TABLE microplans ADD COLUMN IF NOT EXISTS auto_approve_at timestamptz;",
       "ALTER TABLE microplans ADD COLUMN IF NOT EXISTS reminder_sent_at timestamptz;",
       "ALTER TABLE microplans ADD COLUMN IF NOT EXISTS district_edit_reason text;",
-      "ALTER TABLE villages ADD COLUMN IF NOT EXISTS confidence_score numeric(5, 2);"
+      "ALTER TABLE villages ADD COLUMN IF NOT EXISTS confidence_score numeric(5, 2);",
+      "ALTER TYPE approval_status ADD VALUE IF NOT EXISTS 'published';",
+      "ALTER TYPE approval_status ADD VALUE IF NOT EXISTS 'retired';",
+      "ALTER TYPE approval_status ADD VALUE IF NOT EXISTS 'under_review';",
+      "ALTER TYPE approval_status ADD VALUE IF NOT EXISTS 'returned';",
+      "ALTER TYPE approval_status ADD VALUE IF NOT EXISTS 'archived';",
+      "ALTER TYPE approval_status ADD VALUE IF NOT EXISTS 'superseded';"
     ];
     for (const sql of customUpgrades) {
       try {
