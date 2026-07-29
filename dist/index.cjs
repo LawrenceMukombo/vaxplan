@@ -19708,7 +19708,10 @@ async function registerRoutes(httpServer2, app2) {
         outsideVillageIds.delete(Number(village.id));
       }
       await logAudit(req, "update", "village", entityId, oldVillage, village);
-      await estimateAndSaveVillagePopulation(req.tenantId, entityId);
+      const shouldReestimatePopulation = body.boundary !== void 0 || body.catchmentPolygon !== void 0 || body.latitude !== void 0 || body.longitude !== void 0;
+      if (shouldReestimatePopulation) {
+        await estimateAndSaveVillagePopulation(req.tenantId, entityId);
+      }
       const enrichedVillage = await storage.getVillage(req.tenantId, entityId);
       const overlaps = enrichedVillage && enrichedVillage.boundary ? await detectCommunityBoundaryOverlaps(req.tenantId, enrichedVillage.boundary, entityId) : [];
       res.json({ ...enrichedVillage || village, overlaps });
@@ -30175,6 +30178,23 @@ This response is powered by the local VaxPlan database query engine. You can que
       res.status(500).json({ message: err?.message || "Failed to fetch community health workers directory" });
     }
   });
+  app2.get("/api/chvs/coverage", ...auth, requireTenant, async (req, res) => {
+    try {
+      const { chvProfiles: chvProfiles2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
+      const rows = await db.select({
+        id: chvProfiles2.id,
+        name: chvProfiles2.fullName,
+        nrc: chvProfiles2.nrc,
+        contactPhone: chvProfiles2.contactPhone,
+        campaignRole: chvProfiles2.siaRole,
+        facilityId: chvProfiles2.facilityId,
+        villageId: chvProfiles2.assignedVillageId
+      }).from(chvProfiles2).where((0, import_drizzle_orm22.eq)(chvProfiles2.tenantId, req.tenantId));
+      res.json({ data: rows, total: rows.length });
+    } catch (err) {
+      res.status(500).json({ message: err?.message || "Failed to fetch CHV coverage data" });
+    }
+  });
   app2.get("/api/chvs/:id", ...auth, requireTenant, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
@@ -31937,6 +31957,7 @@ function getDistrictAwareVillageName(tenantCode, districtName, provinceName, fac
         return names[idx2];
       }
     }
+    return `${districtName || provinceName || "Demo"} Community ${slot + 1}`;
   }
   if (tenantCode === "PNG") {
     for (const [key, names] of Object.entries(PNG_DISTRICT_POOLS)) {
@@ -32010,6 +32031,21 @@ async function pickVillagesPerFacility(tenantCode, tenantId, picks) {
     for (const v of rows) {
       if (v.assignedFacilityId === p.facilityId && (v.code?.startsWith("DEMO-") || v.code?.startsWith("VIL-") || v.code?.startsWith("MC-"))) {
         pool2.push(v.id);
+        const slotMatch = v.code?.match(/^DEMO-\d+-(\d+)$/);
+        if (slotMatch) {
+          const slot = Number(slotMatch[1]);
+          const expectedName = getDistrictAwareVillageName(
+            tenantCode,
+            p.districtName,
+            p.provinceName,
+            p.facilityId,
+            slot - 1
+          );
+          if (v.name !== expectedName) {
+            await db.update(villages).set({ name: expectedName }).where((0, import_drizzle_orm26.eq)(villages.id, v.id));
+            v.name = expectedName;
+          }
+        }
       }
     }
     const base = facilityCoords.get(p.facilityId) ?? null;
