@@ -158,7 +158,28 @@ async function run() {
       "ALTER TYPE approval_status ADD VALUE IF NOT EXISTS 'under_review';",
       "ALTER TYPE approval_status ADD VALUE IF NOT EXISTS 'returned';",
       "ALTER TYPE approval_status ADD VALUE IF NOT EXISTS 'archived';",
-      "ALTER TYPE approval_status ADD VALUE IF NOT EXISTS 'superseded';"
+      "ALTER TYPE approval_status ADD VALUE IF NOT EXISTS 'superseded';",
+      "ALTER TABLE gis_polygons ADD COLUMN IF NOT EXISTS centroid jsonb;",
+      "ALTER TABLE gis_polygons ADD COLUMN IF NOT EXISTS population_estimate integer;",
+      "ALTER TABLE gis_polygons ADD COLUMN IF NOT EXISTS population_source varchar(100);",
+      "ALTER TABLE gis_polygons ADD COLUMN IF NOT EXISTS population_source_year integer;",
+      "ALTER TABLE gis_polygons ADD COLUMN IF NOT EXISTS population_method varchar(100);",
+      "ALTER TABLE gis_polygons ADD COLUMN IF NOT EXISTS confidence varchar(50);",
+      "ALTER TABLE gis_polygons ADD COLUMN IF NOT EXISTS validation_status varchar(50) DEFAULT 'draft';",
+      "ALTER TABLE gis_polygons ADD COLUMN IF NOT EXISTS approval_status varchar(50) DEFAULT 'draft';",
+      "ALTER TABLE gis_polygons ADD COLUMN IF NOT EXISTS override_reason text;",
+      "ALTER TABLE gis_polygons ADD COLUMN IF NOT EXISTS created_by varchar(255);",
+      "ALTER TABLE gis_polygons ADD COLUMN IF NOT EXISTS approved_by varchar(255);",
+      "ALTER TABLE gis_polygons ADD COLUMN IF NOT EXISTS approved_at timestamp;",
+      "ALTER TABLE gis_polygons ADD COLUMN IF NOT EXISTS parent_polygon_id integer;",
+      "ALTER TABLE gis_polygons ADD COLUMN IF NOT EXISTS style_key varchar(100);",
+      "ALTER TABLE gis_polygons ADD COLUMN IF NOT EXISTS color_key varchar(100);",
+      "ALTER TABLE gis_polygons ADD COLUMN IF NOT EXISTS effective_from timestamptz;",
+      "ALTER TABLE gis_polygons ADD COLUMN IF NOT EXISTS effective_to timestamptz;",
+      "ALTER TABLE gis_polygons ADD COLUMN IF NOT EXISTS planning_period varchar(100);",
+      "ALTER TABLE gis_polygons ADD COLUMN IF NOT EXISTS updated_by varchar(255);",
+      "ALTER TABLE gis_polygons ADD COLUMN IF NOT EXISTS archived_at timestamptz;",
+      "ALTER TABLE gis_polygons ADD COLUMN IF NOT EXISTS metadata jsonb;"
     ];
     for (const sql of customUpgrades) {
       try {

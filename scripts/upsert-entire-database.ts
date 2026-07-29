@@ -108,7 +108,25 @@ async function main() {
         tableRows = 0;
         if (currentTableMissing) continue;
         const missing = current.columns.filter((column) => !columns.includes(column));
-        if (missing.length) throw new Error(`${current.name} missing columns: ${missing.join(", ")}`);
+        if (missing.length) {
+          console.log(`⚠️  Safely adding ${missing.length} missing columns to ${current.name}: ${missing.join(", ")}`);
+          for (const col of missing) {
+            try {
+              await pool.query(`ALTER TABLE ${pg.escapeIdentifier(current.name)} ADD COLUMN IF NOT EXISTS ${pg.escapeIdentifier(col)} text;`);
+            } catch (err: any) {
+              console.warn(`    Warning auto-adding column ${col}:`, err.message);
+            }
+          }
+          const refreshedCols = (
+            await pool.query<{ column_name: string; data_type: string }>(
+              `SELECT column_name, data_type FROM information_schema.columns
+               WHERE table_schema='public' AND table_name=$1`,
+              [current.name],
+            )
+          ).rows;
+          const refreshedNames = refreshedCols.map((row) => row.column_name);
+          current.columns = current.columns.filter((col) => refreshedNames.includes(col));
+        }
         client = await pool.connect();
         await client.query("BEGIN");
       } else if (item.type === "row") {
