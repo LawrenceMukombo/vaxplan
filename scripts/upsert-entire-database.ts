@@ -68,6 +68,7 @@ async function main() {
   });
   let client: PoolClient | null = null;
   let current: TableMeta | null = null;
+  let currentTableMissing = false;
   let tableRows = 0;
   let processed = 0;
   let declaredTotal: number | null = null;
@@ -88,18 +89,33 @@ async function main() {
             [current.name],
           )
         ).rows.map((row) => row.column_name);
-        if (!columns.length) throw new Error(`Production table is missing: ${current.name}`);
+        currentTableMissing = columns.length === 0;
+        tableRows = 0;
+        if (currentTableMissing) continue;
         const missing = current.columns.filter((column) => !columns.includes(column));
         if (missing.length) throw new Error(`${current.name} missing columns: ${missing.join(", ")}`);
         client = await pool.connect();
         await client.query("BEGIN");
-        tableRows = 0;
       } else if (item.type === "row") {
+        if (currentTableMissing && current) {
+          throw new Error(`Production table is missing and contains records: ${current.name}`);
+        }
         if (!client || !current) throw new Error("Row encountered outside a table.");
         await upsertRow(client, current, item.data);
         tableRows++;
         processed++;
       } else if (item.type === "table_end") {
+        if (currentTableMissing && current) {
+          if (item.rowCount !== 0) {
+            throw new Error(
+              `Production table is missing and contains ${item.rowCount} records: ${current.name}`,
+            );
+          }
+          console.log(`${current.name}: 0 (table absent in production; no records to upsert)`);
+          current = null;
+          currentTableMissing = false;
+          continue;
+        }
         if (!client || !current) throw new Error("Table end encountered without a table.");
         if (tableRows !== item.rowCount) {
           throw new Error(`${current.name}: expected ${item.rowCount}, processed ${tableRows}`);
@@ -109,6 +125,7 @@ async function main() {
         client = null;
         console.log(`${current.name}: ${tableRows}`);
         current = null;
+        currentTableMissing = false;
       } else if (item.type === "footer") {
         declaredTotal = item.totalRows;
       }
