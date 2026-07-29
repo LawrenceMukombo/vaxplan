@@ -11,7 +11,12 @@ const inputPath = path.resolve(
   process.argv[2] || "scratch/local_database_all.jsonl.gz",
 );
 
-type TableMeta = { name: string; columns: string[]; conflictColumns: string[] };
+type TableMeta = {
+  name: string;
+  columns: string[];
+  conflictColumns: string[];
+  jsonColumns?: string[];
+};
 
 function decode(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(decode);
@@ -27,7 +32,13 @@ function decode(value: unknown): unknown {
 async function upsertRow(client: PoolClient, table: TableMeta, encoded: unknown) {
   const row = decode(encoded) as Record<string, unknown>;
   const columns = table.columns.filter((column) => Object.hasOwn(row, column));
-  const values = columns.map((column) => row[column]);
+  const jsonColumns = new Set(table.jsonColumns ?? []);
+  const values = columns.map((column) => {
+    const value = row[column];
+    return jsonColumns.has(column) && value !== null && typeof value === "object"
+      ? JSON.stringify(value)
+      : value;
+  });
   const columnSql = columns.map(pg.escapeIdentifier).join(", ");
   const valueSql = columns.map((_, index) => `$${index + 1}`).join(", ");
   let conflictSql = "ON CONFLICT DO NOTHING";
@@ -82,13 +93,17 @@ async function main() {
         }
       } else if (item.type === "table") {
         current = item as TableMeta;
-        const columns = (
-          await pool.query<{ column_name: string }>(
-            `SELECT column_name FROM information_schema.columns
+        const productionColumnRows = (
+          await pool.query<{ column_name: string; data_type: string }>(
+            `SELECT column_name, data_type FROM information_schema.columns
              WHERE table_schema='public' AND table_name=$1`,
             [current.name],
           )
-        ).rows.map((row) => row.column_name);
+        ).rows;
+        const columns = productionColumnRows.map((row) => row.column_name);
+        current.jsonColumns = productionColumnRows
+          .filter((row) => row.data_type === "json" || row.data_type === "jsonb")
+          .map((row) => row.column_name);
         currentTableMissing = columns.length === 0;
         tableRows = 0;
         if (currentTableMissing) continue;
