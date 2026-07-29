@@ -1,0 +1,165 @@
+{
+  "stamp": "2026-07-29T05-55-47-211Z",
+  "sourceFiles": {
+    "populatedPlaces": "C:\\Users\\Mukombo\\Downloads\\ssd_populatedplaces_tabulardata.xlsx",
+    "vaxPlanCommunities": "C:\\Users\\Mukombo\\Downloads\\South_Sudan_VaxPlan_Communities_Complete.xlsx"
+  },
+  "tenant": {
+    "id": "705728db-4892-49d7-9b67-35aa67c7574b",
+    "name": "Republic of South Sudan Ministry of Health",
+    "code": "SSD"
+  },
+  "backupPath": "C:\\vaxplan\\scratch\\ssd_align\\backups\\ssd-communities-pre-2026-07-29T05-55-47-211Z.json",
+  "source": {
+    "populatedPlaceRows": 18977,
+    "vaxPlanCommunityRows": 18977,
+    "preparedRows": 18878,
+    "skippedRows": 99,
+    "skippedSample": [
+      {
+        "pcode": "BC-1434",
+        "name": "",
+        "reason": "missing name, coordinates, or county/district match"
+      },
+      {
+        "pcode": "BC-1533",
+        "name": "",
+        "reason": "missing name, coordinates, or county/district match"
+      },
+      {
+        "pcode": "BC-1602",
+        "name": "",
+        "reason": "missing name, coordinates, or county/district match"
+      },
+      {
+        "pcode": "BB-0569",
+        "name": "",
+        "reason": "missing name, coordinates, or county/district match"
+      },
+      {
+        "pcode": "BB-0570",
+        "name": "",
+        "reason": "missing name, coordinates, or county/district match"
+      },
+      {
+        "pcode": "BA-0042",
+        "name": "",
+        "reason": "missing name, coordinates, or county/district match"
+      },
+      {
+        "pcode": "BA-0043",
+        "name": "",
+        "reason": "missing name, coordinates, or county/district match"
+      },
+      {
+        "pcode": "BB-0572",
+        "name": "",
+        "reason": "missing name, coordinates, or county/district match"
+      },
+      {
+        "pcode": "AS-0005",
+        "name": "",
+        "reason": "missing name, coordinates, or county/district match"
+      },
+      {
+        "pcode": "BF-0518",
+        "name": "",
+        "reason": "missing name, coordinates, or county/district match"
+      },
+      {
+        "pcode": "BF-0547",
+        "name": "",
+        "reason": "missing name, coordinates, or county/district match"
+      },
+      {
+        "pcode": "BF-0550",
+        "name": "",
+        "reason": "missing name, coordinates, or county/district match"
+      },
+      {
+        "pcode": "BF-0637",
+        "name": "",
+        "reason": "missing name, coordinates, or county/district match"
+      },
+      {
+        "pcode": "BE-0531",
+        "name": "",
+        "reason": "missing name, coordinates, or county/district match"
+      },
+      {
+        "pcode": "BE-0535",
+        "name": "",
+        "reason": "missing name, coordinates, or county/district match"
+      },
+      {
+        "pcode": "BF-0871",
+        "name": "",
+        "reason": "missing name, coordinates, or county/district match"
+      },
+      {
+        "pcode": "BG-0269",
+        "name": "",
+        "reason": "missing name, coordinates, or county/district match"
+      },
+      {
+        "pcode": "AX-0051",
+        "name": "",
+        "reason": "missing name, coordinates, or county/district match"
+      },
+      {
+        "pcode": "AW-0111",
+        "name": "",
+        "reason": "missing name, coordinates, or county/district match"
+      },
+      {
+        "pcode": "AW-0120",
+        "name": "",
+        "reason": "missing name, coordinates, or county/district match"
+      },
+      {
+        "pcode": "AW-0121",
+        "name": "",
+        "reason": "missing name, coordinates, or county/district match"
+      },
+      {
+        "pcode": "AW-0125",
+        "name": "",
+        "reason": "missing name, coordinates, or county/district match"
+      },
+      {
+        "pcode": "AW-0128",
+        "name": "",
+        "reason": "missing name, coordinates, or county/district match"
+      },
+      {
+        "pcode": "AW-0129",
+        "name": "",
+        "reason": "missing name, coordinates, or county/district match"
+      },
+      {
+        "pcode": "AW-0130",
+        "name": "",
+        "reason": "missing name, coordinates, or county/district match"
+      }
+    ]
+  },
+  "results": {
+    "updatedByCode": 18526,
+    "updatedByUniqueName": 0,
+    "insertedVillages": 352,
+    "insertedSettlements": 18878,
+    "counts": {
+      "villages": {
+        "total": 24235,
+        "official_source": 18878,
+        "non_demo_codes": 24220
+      },
+      "settlementsMaster": [
+        {
+          "source": "ssd_populated_places",
+          "count": 18878
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,61 @@
+flowchart LR
+  subgraph Users["Users"]
+    FacilityStaff["Facility staff"]
+    DistrictUsers["District managers"]
+    ProvincialUsers["Provincial coordinators"]
+    NationalUsers["National admins"]
+    GISUsers["GIS specialists"]
+    Partners["Partner users"]
+  end
+
+  subgraph Clients["Client Applications"]
+    Web["Web app / PWA"]
+    Android["Android app<br/>Capacitor WebView"]
+    Windows["Windows desktop<br/>Electron"]
+  end
+
+  subgraph VaxPlan["VaxPlan Platform"]
+    UI["React + Vite SPA"]
+    API["Express API server"]
+    Realtime["Realtime service<br/>WebSocket change pokes"]
+    Sync["Offline sync service"]
+    Jobs["Schedulers and background jobs"]
+  end
+
+  subgraph Data["Data Layer"]
+    Postgres["PostgreSQL<br/>Drizzle schema"]
+    IndexedDB["IndexedDB / Dexie<br/>local offline replica"]
+  end
+
+  subgraph External["External Systems and Sources"]
+    HIS["HIS / DHIS2 / FHIR"]
+    GIS["GIS files, boundaries,<br/>settlements, population grids"]
+    Messaging["Email / SMS / push channels"]
+    Reports["PDF, Word, Excel,<br/>PowerPoint exports"]
+  end
+
+  FacilityStaff --> Web
+  DistrictUsers --> Web
+  ProvincialUsers --> Web
+  NationalUsers --> Web
+  GISUsers --> Web
+  Partners --> Web
+  FacilityStaff --> Android
+  NationalUsers --> Windows
+
+  Web --> UI
+  Android --> UI
+  Windows --> UI
+  UI --> API
+  UI <--> IndexedDB
+  API <--> Postgres
+  API <--> Realtime
+  API <--> Sync
+  API --> Jobs
+  Sync <--> IndexedDB
+  Sync <--> Postgres
+  Jobs --> Postgres
+  API <--> HIS
+  API <--> GIS
+  API <--> Messaging
+  API --> Reports

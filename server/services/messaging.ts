@@ -1,5 +1,5 @@
 import nodemailer from 'nodemailer';
-import { redisConnection } from './uce/queue';
+import { isRedisConfigured, redisConnection } from './uce/queue';
 import { db } from '../db';
 import { communicationLogs } from '../../shared/schema';
 
@@ -48,6 +48,7 @@ export async function sendSms(options: SendSmsOptions): Promise<{ success: boole
     }
     
     if (provider === 'redis') {
+      if (!isRedisConfigured) throw new Error('Redis messaging requires REDIS_URL.');
       const channelName = config?.redisChannel || process.env.REDIS_SMS_CHANNEL || 'outbound_sms';
       await redisConnection.publish(channelName, JSON.stringify({
         to,
@@ -151,6 +152,7 @@ export async function sendWhatsApp(options: SendWhatsAppOptions): Promise<{ succ
     }
     
     if (provider === 'redis') {
+      if (!isRedisConfigured) throw new Error('Redis messaging requires REDIS_URL.');
       const channelName = config?.redisChannel || process.env.REDIS_WHATSAPP_CHANNEL || 'outbound_whatsapp';
       await redisConnection.publish(channelName, JSON.stringify({
         to,

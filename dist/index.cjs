@@ -5350,6 +5350,30 @@ var init_auth = __esm({
       const now = Math.floor(Date.now() / 1e3);
       const session3 = req.session;
       const cookieName = process.env.SESSION_COOKIE_NAME || "vaxplan.sid";
+      let dbUser = req.dbUser;
+      if (!dbUser) {
+        try {
+          dbUser = await ensureDbUserFromSession(req);
+          req.dbUser = dbUser;
+        } catch (error) {
+          console.error("Authenticated user status check failed:", error);
+          return res.status(503).json({
+            message: "Unable to verify account status. Please try again.",
+            reason: "account_status_unavailable"
+          });
+        }
+      }
+      if (!dbUser || dbUser.isActive === false) {
+        if (typeof req.session?.destroy === "function") {
+          req.session.destroy(() => {
+          });
+        }
+        res.clearCookie(cookieName, { path: "/" });
+        return res.status(401).json({
+          message: "This account is no longer active.",
+          reason: "account_disabled"
+        });
+      }
       if (session3 && !session3.createdAt) {
         session3.createdAt = now;
       }
@@ -6460,21 +6484,25 @@ var init_mailer = __esm({
 });
 
 // server/services/uce/queue.ts
-var import_bullmq, import_ioredis, redisConnection, lastErrorTime, communicationQueue;
+var import_bullmq, import_ioredis, isRedisConfigured, redisConnection, lastErrorTime, communicationQueue;
 var init_queue = __esm({
   "server/services/uce/queue.ts"() {
     "use strict";
     import_bullmq = require("bullmq");
     import_ioredis = __toESM(require("ioredis"), 1);
+    isRedisConfigured = Boolean(process.env.REDIS_URL?.trim());
     redisConnection = new import_ioredis.default(process.env.REDIS_URL || "redis://localhost:6379", {
+      lazyConnect: !isRedisConfigured,
       maxRetriesPerRequest: null,
       retryStrategy(times) {
+        if (!isRedisConfigured) return null;
         const delay = Math.min(times * 1e3, 1e4);
         return delay;
       }
     });
     lastErrorTime = 0;
     redisConnection.on("error", (err) => {
+      if (!isRedisConfigured) return;
       const now = Date.now();
       if (now - lastErrorTime > 1e4) {
         console.warn(`[Redis] Connection warning: ${err.message || err}`);
@@ -6509,6 +6537,7 @@ async function sendSms(options) {
       return { success: true, messageId: `mock-sms-${Date.now()}` };
     }
     if (provider === "redis") {
+      if (!isRedisConfigured) throw new Error("Redis messaging requires REDIS_URL.");
       const channelName = config?.redisChannel || process.env.REDIS_SMS_CHANNEL || "outbound_sms";
       await redisConnection.publish(channelName, JSON.stringify({
         to,
@@ -6583,6 +6612,7 @@ async function sendWhatsApp(options) {
       return { success: true, messageId: `mock-wa-${Date.now()}` };
     }
     if (provider === "redis") {
+      if (!isRedisConfigured) throw new Error("Redis messaging requires REDIS_URL.");
       const channelName = config?.redisChannel || process.env.REDIS_WHATSAPP_CHANNEL || "outbound_whatsapp";
       await redisConnection.publish(channelName, JSON.stringify({
         to,
@@ -6706,6 +6736,9 @@ var init_messaging = __esm({
 
 // server/services/uce/index.ts
 async function dispatchNotification(args) {
+  if (!isRedisConfigured) {
+    throw new Error("Notification queue is unavailable because REDIS_URL is not configured.");
+  }
   const { tenantId, recipientId, messageType, priority = "medium", templateName, templateData } = args;
   const [comm] = await db.insert(communications).values({
     tenantId,
@@ -18699,9 +18732,54 @@ async function registerRoutes(httpServer2, app2) {
       res.status(500).json({ message: "Export failed: " + err.message });
     }
   });
+  async function summarizeTenantFacilityMaintenance(tenantId, importedHmisCodes = []) {
+    const importedCodes = importedHmisCodes.map((code) => code.trim()).filter(Boolean);
+    const importedCodeList = importedCodes.length > 0 ? import_drizzle_orm22.sql.join(importedCodes.map((code) => import_drizzle_orm22.sql`${code}`), import_drizzle_orm22.sql`, `) : null;
+    const missingFromImportFilter = importedCodeList ? import_drizzle_orm22.sql`hmis_code NOT IN (${importedCodeList})` : import_drizzle_orm22.sql`TRUE`;
+    const summaryResult = await db.execute(import_drizzle_orm22.sql`SELECT
+      (SELECT COUNT(*)::int FROM facilities WHERE tenant_id = ${tenantId}) AS "facilityCount",
+      (SELECT COUNT(*)::int FROM villages WHERE tenant_id = ${tenantId} AND assigned_facility_id IN (SELECT id FROM facilities WHERE tenant_id = ${tenantId})) AS "linkedCommunityCount",
+      (SELECT COUNT(*)::int FROM facility_catchments WHERE tenant_id = ${tenantId}) AS "catchmentCount",
+      (SELECT COUNT(*)::int FROM session_plans WHERE tenant_id = ${tenantId}) AS "sessionPlanCount",
+      (SELECT COUNT(*)::int FROM microplans WHERE tenant_id = ${tenantId} AND facility_id IS NOT NULL) AS "microplanCount",
+      (SELECT COUNT(*)::int FROM stock_transactions WHERE tenant_id = ${tenantId}) AS "stockTransactionCount",
+      (SELECT COUNT(*)::int FROM clients WHERE tenant_id = ${tenantId}) AS "clientCount",
+      (SELECT COUNT(*)::int FROM cold_chain_equipment WHERE tenant_id = ${tenantId}) AS "coldChainCount",
+      (SELECT COUNT(*)::int FROM community_health_volunteers WHERE tenant_id = ${tenantId}) AS "chvCount",
+      (SELECT COUNT(*)::int FROM facility_staff WHERE tenant_id = ${tenantId}) AS "staffCount",
+      (SELECT COUNT(*)::int FROM facilities WHERE tenant_id = ${tenantId} AND ${missingFromImportFilter}) AS "missingFromImportCount"`);
+    const rows = summaryResult.rows || summaryResult;
+    return rows[0] || {};
+  }
+  async function purgeTenantFacilities(tx, tenantId, keepHmisCodes = []) {
+    const keepCodes = keepHmisCodes.map((code) => code.trim()).filter(Boolean);
+    const keepCodeList = keepCodes.length > 0 ? import_drizzle_orm22.sql.join(keepCodes.map((code) => import_drizzle_orm22.sql`${code}`), import_drizzle_orm22.sql`, `) : null;
+    const targetRows = await tx.select({ id: facilities.id }).from(facilities).where(
+      keepCodeList ? (0, import_drizzle_orm22.and)((0, import_drizzle_orm22.eq)(facilities.tenantId, tenantId), import_drizzle_orm22.sql`${facilities.hmisCode} NOT IN (${keepCodeList})`) : (0, import_drizzle_orm22.eq)(facilities.tenantId, tenantId)
+    );
+    const targetIds = targetRows.map((row) => Number(row.id)).filter((id) => Number.isFinite(id));
+    if (targetIds.length === 0) return { purgedCount: 0 };
+    const targetIdList = import_drizzle_orm22.sql.join(targetIds.map((id) => import_drizzle_orm22.sql`${id}`), import_drizzle_orm22.sql`, `);
+    const deleteTables = ["budget_items", "vaccine_requirements", "mobilization_activities", "facility_catchments", "clients", "stock_transactions", "monthly_reports", "hfc_committee", "community_health_volunteers", "cold_chain_equipment", "facility_staff", "facility_excluded_villages", "vgie_settlement_facility_links", "vgie_alerts"];
+    await tx.execute(import_drizzle_orm22.sql`DELETE FROM session_villages WHERE tenant_id = ${tenantId} AND session_id IN (SELECT id FROM session_plans WHERE tenant_id = ${tenantId} AND facility_id IN (${targetIdList}))`);
+    await tx.execute(import_drizzle_orm22.sql`DELETE FROM session_day_plans WHERE tenant_id = ${tenantId} AND session_plan_id IN (SELECT id FROM session_plans WHERE tenant_id = ${tenantId} AND facility_id IN (${targetIdList}))`);
+    await tx.execute(import_drizzle_orm22.sql`UPDATE villages SET assigned_facility_id = NULL WHERE tenant_id = ${tenantId} AND assigned_facility_id IN (${targetIdList})`);
+    await tx.execute(import_drizzle_orm22.sql`UPDATE population_data SET facility_id = NULL WHERE tenant_id = ${tenantId} AND facility_id IN (${targetIdList})`);
+    await tx.execute(import_drizzle_orm22.sql`UPDATE microplans SET facility_id = NULL WHERE tenant_id = ${tenantId} AND facility_id IN (${targetIdList})`);
+    await tx.execute(import_drizzle_orm22.sql`UPDATE catchment_conflicts SET conflicting_facility_id = NULL WHERE tenant_id = ${tenantId} AND conflicting_facility_id IN (${targetIdList})`);
+    for (const table of deleteTables) {
+      await tx.execute(import_drizzle_orm22.sql`DELETE FROM ${import_drizzle_orm22.sql.raw(table)} WHERE tenant_id = ${tenantId} AND facility_id IN (${targetIdList})`);
+    }
+    await tx.execute(import_drizzle_orm22.sql`DELETE FROM session_plans WHERE tenant_id = ${tenantId} AND facility_id IN (${targetIdList})`);
+    await tx.execute(import_drizzle_orm22.sql`DELETE FROM facilities WHERE tenant_id = ${tenantId} AND id IN (${targetIdList})`);
+    return { purgedCount: targetIds.length };
+  }
   app2.post("/api/facilities/import", isAuthenticated, requireTenant, loadRole, requireAdmin2, async (req, res) => {
     try {
       const schema = import_zod3.z.object({
+        mode: import_zod3.z.enum(["upsert", "replace_missing", "purge_replace"]).optional().default("upsert"),
+        dryRun: import_zod3.z.boolean().optional().default(false),
+        confirm: import_zod3.z.string().optional(),
         facilities: import_zod3.z.array(import_zod3.z.object({
           name: import_zod3.z.string().min(1),
           hmisCode: import_zod3.z.string().min(1),
@@ -18720,79 +18798,82 @@ async function registerRoutes(httpServer2, app2) {
           catchmentRadius: import_zod3.z.union([import_zod3.z.number(), import_zod3.z.string()]).optional().nullable()
         }))
       });
-      const { facilities: importedFacilities } = schema.parse(req.body);
+      const { facilities: importedFacilities, mode, dryRun, confirm } = schema.parse(req.body);
+      const importCodes = importedFacilities.map((item) => item.hmisCode.trim()).filter(Boolean);
+      if ((mode === "replace_missing" || mode === "purge_replace") && confirm !== "REPLACE FACILITIES") {
+        return res.status(400).json({ success: false, message: "Bulk replace/purge requires confirmation text: REPLACE FACILITIES" });
+      }
+      const beforeSummary = await summarizeTenantFacilityMaintenance(req.tenantId, importCodes);
+      if (dryRun) {
+        return res.json({ success: true, dryRun: true, mode, importCount: importedFacilities.length, summary: beforeSummary, message: "Dry run complete. No facility records were changed." });
+      }
       const allDistricts = await storage.getDistricts(req.tenantId);
-      let createdCount = 0;
-      let updatedCount = 0;
-      for (const item of importedFacilities) {
-        let districtId = null;
-        if (item.districtName) {
-          const matchedDist = allDistricts.find((d) => d.name.toLowerCase() === item.districtName.trim().toLowerCase());
-          if (matchedDist) {
-            districtId = matchedDist.id;
+      const { purgeSummary, createdCount, updatedCount } = await db.transaction(async (tx) => {
+        const purgeSummary2 = mode === "purge_replace" ? await purgeTenantFacilities(tx, req.tenantId) : mode === "replace_missing" ? await purgeTenantFacilities(tx, req.tenantId, importCodes) : { purgedCount: 0 };
+        let createdCount2 = 0;
+        let updatedCount2 = 0;
+        for (const item of importedFacilities) {
+          let districtId = null;
+          if (item.districtName) {
+            const matchedDist = allDistricts.find((d) => d.name.toLowerCase() === item.districtName.trim().toLowerCase());
+            if (matchedDist) districtId = matchedDist.id;
+          }
+          if (!districtId) districtId = allDistricts[0]?.id || null;
+          if (!districtId) continue;
+          const latVal = item.latitude !== null && item.latitude !== void 0 ? parseFloat(item.latitude.toString()) : null;
+          const lngVal = item.longitude !== null && item.longitude !== void 0 ? parseFloat(item.longitude.toString()) : null;
+          const radiusVal = item.catchmentRadius !== null && item.catchmentRadius !== void 0 ? parseFloat(item.catchmentRadius.toString()) : null;
+          const [existing] = await tx.select().from(facilities).where((0, import_drizzle_orm22.and)((0, import_drizzle_orm22.eq)(facilities.tenantId, req.tenantId), (0, import_drizzle_orm22.eq)(facilities.hmisCode, item.hmisCode.trim()))).limit(1);
+          if (existing) {
+            await tx.update(facilities).set({
+              name: item.name.trim(),
+              facilityType: item.facilityType ?? existing.facilityType,
+              agencyName: item.agencyName ?? existing.agencyName,
+              operationalStatus: item.operationalStatus ?? existing.operationalStatus,
+              districtId,
+              latitude: latVal !== null && !isNaN(latVal) ? latVal.toFixed(7) : existing.latitude,
+              longitude: lngVal !== null && !isNaN(lngVal) ? lngVal.toFixed(7) : existing.longitude,
+              address: item.address ?? existing.address,
+              contactPhone: item.contactPhone ?? existing.contactPhone,
+              operatingHours: item.operatingHours ?? existing.operatingHours,
+              hasRefrigerator: item.hasRefrigerator ?? existing.hasRefrigerator,
+              hasPower: item.hasPower ?? existing.hasPower,
+              staffCount: item.staffCount ?? existing.staffCount,
+              catchmentRadius: radiusVal !== null && !isNaN(radiusVal) ? radiusVal.toFixed(2) : existing.catchmentRadius,
+              isActive: true,
+              updatedAt: /* @__PURE__ */ new Date()
+            }).where((0, import_drizzle_orm22.eq)(facilities.id, existing.id));
+            updatedCount2++;
+          } else {
+            await tx.insert(facilities).values({
+              tenantId: req.tenantId,
+              name: item.name.trim(),
+              hmisCode: item.hmisCode.trim(),
+              facilityType: item.facilityType ?? null,
+              agencyName: item.agencyName ?? null,
+              operationalStatus: item.operationalStatus ?? null,
+              districtId,
+              latitude: latVal !== null && !isNaN(latVal) ? latVal.toFixed(7) : null,
+              longitude: lngVal !== null && !isNaN(lngVal) ? lngVal.toFixed(7) : null,
+              address: item.address ?? null,
+              contactPhone: item.contactPhone ?? null,
+              operatingHours: item.operatingHours ?? null,
+              hasRefrigerator: item.hasRefrigerator ?? false,
+              hasPower: item.hasPower ?? false,
+              staffCount: item.staffCount ?? null,
+              catchmentRadius: radiusVal !== null && !isNaN(radiusVal) ? radiusVal.toFixed(2) : null,
+              isActive: true
+            });
+            createdCount2++;
           }
         }
-        if (!districtId) {
-          districtId = allDistricts[0]?.id || null;
-        }
-        if (!districtId) continue;
-        const latVal = item.latitude !== null && item.latitude !== void 0 ? parseFloat(item.latitude.toString()) : null;
-        const lngVal = item.longitude !== null && item.longitude !== void 0 ? parseFloat(item.longitude.toString()) : null;
-        const radiusVal = item.catchmentRadius !== null && item.catchmentRadius !== void 0 ? parseFloat(item.catchmentRadius.toString()) : null;
-        const [existing] = await db.select().from(facilities).where(
-          (0, import_drizzle_orm22.and)(
-            (0, import_drizzle_orm22.eq)(facilities.tenantId, req.tenantId),
-            (0, import_drizzle_orm22.eq)(facilities.hmisCode, item.hmisCode.trim())
-          )
-        ).limit(1);
-        if (existing) {
-          await db.update(facilities).set({
-            name: item.name.trim(),
-            facilityType: item.facilityType ?? existing.facilityType,
-            agencyName: item.agencyName ?? existing.agencyName,
-            operationalStatus: item.operationalStatus ?? existing.operationalStatus,
-            districtId,
-            latitude: latVal !== null && !isNaN(latVal) ? latVal.toFixed(7) : existing.latitude,
-            longitude: lngVal !== null && !isNaN(lngVal) ? lngVal.toFixed(7) : existing.longitude,
-            address: item.address ?? existing.address,
-            contactPhone: item.contactPhone ?? existing.contactPhone,
-            operatingHours: item.operatingHours ?? existing.operatingHours,
-            hasRefrigerator: item.hasRefrigerator ?? existing.hasRefrigerator,
-            hasPower: item.hasPower ?? existing.hasPower,
-            staffCount: item.staffCount ?? existing.staffCount,
-            catchmentRadius: radiusVal !== null && !isNaN(radiusVal) ? radiusVal.toFixed(2) : existing.catchmentRadius,
-            updatedAt: /* @__PURE__ */ new Date()
-          }).where((0, import_drizzle_orm22.eq)(facilities.id, existing.id));
-          updatedCount++;
-        } else {
-          await db.insert(facilities).values({
-            tenantId: req.tenantId,
-            name: item.name.trim(),
-            hmisCode: item.hmisCode.trim(),
-            facilityType: item.facilityType ?? null,
-            agencyName: item.agencyName ?? null,
-            operationalStatus: item.operationalStatus ?? null,
-            districtId,
-            latitude: latVal !== null && !isNaN(latVal) ? latVal.toFixed(7) : null,
-            longitude: lngVal !== null && !isNaN(lngVal) ? lngVal.toFixed(7) : null,
-            address: item.address ?? null,
-            contactPhone: item.contactPhone ?? null,
-            operatingHours: item.operatingHours ?? null,
-            hasRefrigerator: item.hasRefrigerator ?? false,
-            hasPower: item.hasPower ?? false,
-            staffCount: item.staffCount ?? null,
-            catchmentRadius: radiusVal !== null && !isNaN(radiusVal) ? radiusVal.toFixed(2) : null,
-            isActive: true
-          });
-          createdCount++;
-        }
-      }
-      await logAudit(req, "import_facilities", "facilities", null, null, { createdCount, updatedCount });
-      res.json({ success: true, message: `Successfully imported ${importedFacilities.length} facilities.`, createdCount, updatedCount });
+        return { purgeSummary: purgeSummary2, createdCount: createdCount2, updatedCount: updatedCount2 };
+      });
+      const afterSummary = await summarizeTenantFacilityMaintenance(req.tenantId, importCodes);
+      await logAudit(req, "import_facilities", "facilities", null, null, { mode, createdCount, updatedCount, purgeSummary, beforeSummary, afterSummary });
+      res.json({ success: true, mode, message: "Successfully processed " + importedFacilities.length + " facilities.", createdCount, updatedCount, purgeSummary, beforeSummary, afterSummary });
     } catch (error) {
-      if (error?.name === "ZodError") {
-        return res.status(400).json({ success: false, message: "Invalid payload format.", errors: error.errors });
-      }
+      if (error?.name === "ZodError") return res.status(400).json({ success: false, message: "Invalid payload format.", errors: error.errors });
       console.error("Error importing facilities:", error);
       res.status(500).json({ success: false, message: "Failed to import facilities: " + error.message });
     }
@@ -19979,16 +20060,34 @@ Note from the requester: ${conflict.note}` : ""}`,
   });
   app2.get("/api/resources/grid3-settlements", ...auth, async (req, res) => {
     try {
+      res.vary("Cookie");
+      res.vary("x-tenant-id");
       let resourcesDir = (0, import_path4.join)(process.cwd(), "Resources");
       if (!(0, import_fs5.existsSync)(resourcesDir)) {
         const parentDir = (0, import_path4.join)(process.cwd(), "..", "Resources");
         if ((0, import_fs5.existsSync)(parentDir)) resourcesDir = parentDir;
       }
-      const cachePath = (0, import_path4.join)(resourcesDir, "grid3_settlements_zmb.geojson");
+      const tenant = req.tenantId ? await storage.getTenant(req.tenantId) : void 0;
+      const requestedTenant = String(req.query.tenant || tenant?.code || tenant?.countryCode || "").toUpperCase();
+      const countryCode = (tenant?.countryCode || requestedTenant || "ZMB").toUpperCase();
+      const safeCode = countryCode.toLowerCase().replace(/[^a-z0-9_-]/g, "");
+      const cachePath = (0, import_path4.join)(resourcesDir, `grid3_settlements_${safeCode}.geojson`);
       if ((0, import_fs5.existsSync)(cachePath)) {
-        res.setHeader("Cache-Control", "public, max-age=604800, stale-while-revalidate=86400");
+        res.setHeader("Cache-Control", "private, max-age=604800, stale-while-revalidate=86400");
         res.setHeader("Content-Type", "application/json");
         return (0, import_fs5.createReadStream)(cachePath).pipe(res);
+      }
+      if (countryCode !== "ZMB") {
+        res.setHeader("Cache-Control", "private, max-age=3600");
+        return res.json({
+          type: "FeatureCollection",
+          features: [],
+          metadata: {
+            countryCode,
+            available: false,
+            message: `No tenant settlement footprint file found at Resources/grid3_settlements_${safeCode}.geojson`
+          }
+        });
       }
       const liveUrl = "https://services3.arcgis.com/BU6Aadhn6tbBEdyk/arcgis/rest/services/GRID3_ZMB_Settlement_Extents_v3_0/FeatureServer/0/query?outFields=*&where=1%3D1&f=geojson";
       console.log("Fetching live GRID3 Zambia Settlements from ArcGIS FeatureServer...");
@@ -20000,11 +20099,11 @@ Note from the requester: ${conflict.note}` : ""}`,
       const cacheWriteStream = (0, import_fs5.createWriteStream)(cachePath);
       cacheWriteStream.write(JSON.stringify(geojsonData));
       cacheWriteStream.end();
-      res.setHeader("Cache-Control", "public, max-age=604800, stale-while-revalidate=86400");
+      res.setHeader("Cache-Control", "private, max-age=604800, stale-while-revalidate=86400");
       res.json(geojsonData);
     } catch (error) {
-      console.error("Error proxying GRID3 Zambia Settlement Extents:", error);
-      res.status(500).json({ success: false, message: "GRID3 proxy call failed: " + error.message });
+      console.error("Error resolving tenant GRID3 settlement footprints:", error);
+      res.status(500).json({ success: false, message: "GRID3 settlement footprint lookup failed: " + error.message });
     }
   });
   app2.post("/api/resources/geotiff/upload", isAuthenticated, requireTenant, loadRole, requireAdmin2, async (req, res) => {
@@ -29124,7 +29223,9 @@ This response is powered by the local VaxPlan database query engine. You can que
       }
       const areaSqKm = validation.areaSqKm;
       const centroid = polygonCentroid2(geojson);
-      const intel = await PopulationIntelligenceService2.fetchPolygonPopulation(req.tenantId, geojson, "ZMB", "facility", facilityId);
+      const activeTenant = req.tenantId ? await storage.getTenant(req.tenantId) : void 0;
+      const activeCountryCode = (activeTenant?.countryCode || activeTenant?.code || "ZMB").toUpperCase();
+      const intel = await PopulationIntelligenceService2.fetchPolygonPopulation(req.tenantId, geojson, activeCountryCode, "facility", facilityId);
       const bestSource = intel?.sources?.[0];
       const popEst = bestSource?.totalPopulation ?? 0;
       const popSource = bestSource?.source ?? "WorldPop";
@@ -29377,7 +29478,9 @@ This response is powered by the local VaxPlan database query engine. You can que
           }
         }
       }
-      const intel = await PopulationIntelligenceService2.fetchPolygonPopulation(req.tenantId, geojson, "ZMB", "village", villageId);
+      const activeTenant = req.tenantId ? await storage.getTenant(req.tenantId) : void 0;
+      const activeCountryCode = (activeTenant?.countryCode || activeTenant?.code || "ZMB").toUpperCase();
+      const intel = await PopulationIntelligenceService2.fetchPolygonPopulation(req.tenantId, geojson, activeCountryCode, "village", villageId);
       const bestSource = intel?.sources?.[0];
       const popEst = bestSource?.totalPopulation ?? 0;
       const popSource = bestSource?.source ?? "WorldPop";
@@ -36801,7 +36904,11 @@ var init_index = __esm({
         startSupervisionDigestScheduler();
         startApprovalScheduler();
         startMicroplanApprovalCron();
-        Promise.resolve().then(() => (init_workers(), workers_exports)).catch((err) => log(`Failed to load UCE worker: ${err}`));
+        if (process.env.REDIS_URL?.trim()) {
+          Promise.resolve().then(() => (init_workers(), workers_exports)).catch((err) => log(`Failed to load UCE worker: ${err}`));
+        } else {
+          log("REDIS_URL not configured: UCE queue worker disabled", "uce");
+        }
         const isProduction = process.env.NODE_ENV === "production";
         const demoSeedEnabled = process.env.SKIP_DEMO_SEED !== "1" && (!isProduction || process.env.ENABLE_DEMO_SEED === "1");
         if (demoSeedEnabled) {

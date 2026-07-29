@@ -122,15 +122,18 @@ export function ChvCoverageTab({
   const [cardFilter, setCardFilter] = useState<"all" | "covered" | "gaps" | "unassigned">("all");
 
   const { data: chvsResponse, isLoading: chvsLoading } = useQuery<any>({
-    queryKey: ["/api/chvs?pageSize=10000"], 
+    queryKey: ["/api/chvs?pageSize=10000"],
+    queryFn: async () => {
+      const response = await fetch("/api/chvs/coverage", { credentials: "include" });
+      if (!response.ok) throw new Error("Failed to load CHV coverage");
+      return response.json();
+    },
     staleTime: 5 * 60 * 1000,
   });
 
   const chvs = chvsResponse?.data || [];
 
   const coverageData = useMemo(() => {
-    if (!facilities.length || !villages.length) return null;
-
     let filteredFacilities = facilities;
     if (selectedDistrictId) {
       filteredFacilities = filteredFacilities.filter(f => Number(f.districtId) === Number(selectedDistrictId));
@@ -300,7 +303,7 @@ export function ChvCoverageTab({
     };
   }, [facilities, villages, chvs, selectedRegionId, selectedProvinceId, selectedDistrictId, provinces, districts, cardFilter]);
 
-  if (chvsLoading || !coverageData) {
+  if (chvsLoading) {
     return (
       <div className="flex justify-center items-center h-64">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />

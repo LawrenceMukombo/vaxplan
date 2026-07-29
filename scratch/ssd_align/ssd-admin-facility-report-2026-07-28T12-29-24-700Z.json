@@ -1,0 +1,46 @@
+{
+  "tenant": {
+    "id": "705728db-4892-49d7-9b67-35aa67c7574b",
+    "code": "SSD",
+    "name": "Republic of South Sudan Ministry of Health"
+  },
+  "backupPath": "C:/vaxplan/scratch/ssd_align/backups/ssd-admin-facilities-pre-2026-07-28T12-29-24-700Z.json",
+  "boundaries": [
+    {
+      "level": 0,
+      "name": "Country",
+      "featureCount": 1
+    },
+    {
+      "level": 1,
+      "name": "State",
+      "featureCount": 10
+    },
+    {
+      "level": 2,
+      "name": "County",
+      "featureCount": 79
+    },
+    {
+      "level": 3,
+      "name": "Payam",
+      "featureCount": 512
+    }
+  ],
+  "llgs": {
+    "updated": 472,
+    "inserted": 40
+  },
+  "facilities": {
+    "updated": 1329,
+    "inserted": 144,
+    "skipped": 2
+  },
+  "after": {
+    "provinces": 12,
+    "districts": 80,
+    "llgs": 513,
+    "facilities": 2127,
+    "boundaries": 4
+  }
+}

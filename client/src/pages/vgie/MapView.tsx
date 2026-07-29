@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { usePersistedBasemap, type Basemap, BasemapTileLayer, BASEMAP_ITEMS, BASEMAP_CONFIGS } from "@/components/map/BasemapToggle";
+import { getTenantMapDefaults } from "@/lib/tenantGeo";
 
 /* ─── Types ───────────────────────────────────────────────────────────── */
 
@@ -583,16 +584,10 @@ export default function MapView() {
     queryKey: ["/api/me/tenant"],
   });
 
-  /* Original Code commented out to support dynamic multi-country centers/zooms:
-  const ZAMBIA_CENTER: [number, number] = [-13.5, 28.5];
-  const ZAMBIA_ZOOM = 6;
-  */
-  const countryCenter = useMemo((): [number, number] => {
-    if (tenantInfo?.countryCode === "ZMB") return [-13.5, 28.5];
-    if (tenantInfo?.countryCode === "SSD") return [6.877, 31.307];
-    return [-6.314993, 143.95555]; // PNG / Default
-  }, [tenantInfo]);
-  const countryZoom = 6;
+  const tenantMapDefaults = useMemo(() => getTenantMapDefaults(tenantInfo), [tenantInfo]);
+  const countryCenter = tenantMapDefaults.center;
+  const countryZoom = tenantMapDefaults.zoom;
+  const countryMaxBounds = tenantMapDefaults.maxBounds;
 
   /* Province list from facilities */
   const provinces = Array.from(
@@ -1401,6 +1396,7 @@ export default function MapView() {
             onBoundaryProvince={handleBoundaryProvince}
             onBoundaryDistrict={handleBoundaryDistrict}
             countryCode={tenantInfo?.countryCode}
+            maxBounds={countryMaxBounds}
             onMoveSettlement={(sid, lat, lng) => setConfirmMove({ id: sid, lat, lng })}
             bulkSelectMode={bulkSelectMode}
             onBulkSelect={(ids) => setBulkSelectedIds(ids)}
@@ -1426,7 +1422,7 @@ function MapComponent({
   colorByRisk, colorByOutreach, onSelect, selectedId, highlightedSettlementIds, selectedFacilityId,
   onSelectFacility, facilityFlyTarget, onZoom, focusBounds,
   countryGeoJson, provinceGeoJson, districtGeoJson, onBoundaryProvince, onBoundaryDistrict,
-  countryCode, onMoveSettlement, bulkSelectMode, onBulkSelect,
+  countryCode, maxBounds, onMoveSettlement, bulkSelectMode, onBulkSelect,
 }: {
   L: any; RL: any;
   settlements: SettlementItem[];
@@ -1455,6 +1451,7 @@ function MapComponent({
   onBoundaryProvince: (name: string) => void;
   onBoundaryDistrict: (name: string) => void;
   countryCode?: string;
+  maxBounds?: [[number, number], [number, number]];
   onMoveSettlement?: (id: number, lat: number, lng: number) => void;
   bulkSelectMode?: boolean;
   onBulkSelect?: (ids: number[]) => void;
@@ -1518,7 +1515,7 @@ function MapComponent({
         }}
       >
         <button
-          title="Reset to Zambia"
+          title="Reset to active country"
           onClick={() => map.setView(center, defaultZoom)}
           style={{
             width: 32, height: 32, background: "#1e293b", border: "1px solid #334155",
@@ -1598,7 +1595,7 @@ function MapComponent({
         if (!isDrawing || !startLatLngRef.current || !rectRef.current) return;
         setIsDrawing(false);
         const bounds = rectRef.current.getBounds();
-        
+
         const insideIds: number[] = [];
         settlements.forEach((s: any) => {
           if (s.latitude && s.longitude) {
@@ -1608,7 +1605,7 @@ function MapComponent({
             }
           }
         });
-        
+
         onBulkSelect?.(insideIds);
         map.dragging.enable();
       };
@@ -1641,10 +1638,7 @@ function MapComponent({
       zoom={defaultZoom}
       style={{ height: "100%", width: "100%", background: "#0f172a" }}
       zoomControl={false}
-      /* Original Code commented out to support dynamic max bounds:
-      maxBounds={[[-18.5, 21.5], [-8.0, 34.0]]}
-      */
-      maxBounds={countryCode === "ZMB" ? [[-18.5, 21.5], [-8.0, 34.0]] : undefined}
+      maxBounds={maxBounds}
       maxBoundsViscosity={1.0}
     >
       {/* Commented out original static TileLayer and replaced with configuration-driven dynamic loading matching RL context */}
@@ -2024,3 +2018,7 @@ function FacilityClusterLayer({ L, RL, facilities, selectedFacilityId, onSelectF
 
   return null;
 }
+
+
+
+

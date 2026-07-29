@@ -1,10 +1,14 @@
 import { Queue } from 'bullmq';
 import IORedis from 'ioredis';
 
+export const isRedisConfigured = Boolean(process.env.REDIS_URL?.trim());
+
 // Create a singleton Redis connection for queues
 export const redisConnection = new IORedis(process.env.REDIS_URL || 'redis://localhost:6379', {
+  lazyConnect: !isRedisConfigured,
   maxRetriesPerRequest: null,
   retryStrategy(times) {
+    if (!isRedisConfigured) return null;
     const delay = Math.min(times * 1000, 10000);
     return delay;
   }
@@ -12,6 +16,7 @@ export const redisConnection = new IORedis(process.env.REDIS_URL || 'redis://loc
 
 let lastErrorTime = 0;
 redisConnection.on('error', (err) => {
+  if (!isRedisConfigured) return;
   const now = Date.now();
   if (now - lastErrorTime > 10000) {
     console.warn(`[Redis] Connection warning: ${err.message || err}`);

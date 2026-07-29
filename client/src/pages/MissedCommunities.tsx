@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
+import { getTenantMapDefaults, getTenantMaxBounds } from "@/lib/tenantGeo";
 import { AlertTriangle, MapPin, Target, ArrowRight, RefreshCw, Layers } from "lucide-react";
 import { GeoCascadeFilter } from "@/components/GeoCascadeFilter";
 import {
@@ -92,11 +93,8 @@ export default function MissedCommunities() {
 
   const mapped = rows.filter((r) => r.latitude != null && r.longitude != null);
 
-  const defaultCenter = useMemo(() => {
-    if (tenantInfo?.countryCode === "ZMB") return [-13.133897, 27.849332] as [number, number];
-    if (tenantInfo?.countryCode === "SSD") return [6.877, 31.307] as [number, number];
-    return [-6.314993, 143.95555] as [number, number];
-  }, [tenantInfo]);
+  const tenantMapDefaults = useMemo(() => getTenantMapDefaults(tenantInfo), [tenantInfo]);
+  const defaultCenter = tenantMapDefaults.center;
 
   const mapCenter: [number, number] = mapped.length
     ? [mapped[0].latitude!, mapped[0].longitude!]
@@ -243,10 +241,10 @@ export default function MissedCommunities() {
                 <>
                   <MapContainer
                     center={mapCenter}
-                    zoom={6}
+                    zoom={tenantMapDefaults.zoom}
                     className="h-full w-full"
                     scrollWheelZoom
-                    maxBounds={tenantInfo?.countryCode === "ZMB" ? [[-18.5, 21.5], [-8.0, 34.0]] : undefined}
+                    maxBounds={getTenantMaxBounds(tenantInfo)}
                     maxBoundsViscosity={1.0}
                   >
                     <BasemapTileLayer basemap={basemap} />
@@ -383,3 +381,6 @@ export default function MissedCommunities() {
     </div>
   );
 }
+
+
+

@@ -4862,13 +4862,13 @@ export async function registerRoutes(
         res.status(201).json(inserted);
       } else {
         const { chvProfiles, insertChvProfileSchema } = await import("@shared/schema");
-        
+
         // Validation: Format and duplicate checks
         const cleanName = (req.body.name || "").trim();
         if (!cleanName) {
           return res.status(400).json({ message: "Full name is required" });
         }
-        
+
         if (!req.body.nrc) {
           return res.status(400).json({ message: "NRC is required" });
         }
@@ -4977,7 +4977,7 @@ export async function registerRoutes(
         const [existing] = await db.select().from(chvProfiles)
           .where(and(eq(chvProfiles.id, chvId), eq(chvProfiles.tenantId, req.tenantId))).limit(1);
         if (!existing) return res.status(404).json({ message: "CHV not found" });
-        
+
         // Name validations
         if (req.body.name !== undefined) {
           const cleanName = req.body.name.trim();
@@ -5013,8 +5013,8 @@ export async function registerRoutes(
 
           if (nrcDup) {
             const [fac] = await db.select({ name: facilities.name }).from(facilities).where(eq(facilities.id, nrcDup.facilityId)).limit(1);
-            return res.status(400).json({ 
-              message: `Duplicate NRC: A worker with NRC ${cleanNrc} is already registered as "${nrcDup.fullName}" at facility "${fac?.name || 'another facility'}".` 
+            return res.status(400).json({
+              message: `Duplicate NRC: A worker with NRC ${cleanNrc} is already registered as "${nrcDup.fullName}" at facility "${fac?.name || 'another facility'}".`
             });
           }
         }
@@ -5375,10 +5375,66 @@ export async function registerRoutes(
     }
   });
 
-  // Bulk JSON import of facilities (non-destructive upserts)
+  async function summarizeTenantFacilityMaintenance(tenantId: string, importedHmisCodes: string[] = []) {
+    const importedCodes = importedHmisCodes.map((code) => code.trim()).filter(Boolean);
+    const importedCodeList = importedCodes.length > 0 ? dsql.join(importedCodes.map((code) => dsql`${code}`), dsql`, `) : null;
+    const missingFromImportFilter = importedCodeList ? dsql`hmis_code NOT IN (${importedCodeList})` : dsql`TRUE`;
+    const summaryResult = await db.execute(dsql`SELECT
+      (SELECT COUNT(*)::int FROM facilities WHERE tenant_id = ${tenantId}) AS "facilityCount",
+      (SELECT COUNT(*)::int FROM villages WHERE tenant_id = ${tenantId} AND assigned_facility_id IN (SELECT id FROM facilities WHERE tenant_id = ${tenantId})) AS "linkedCommunityCount",
+      (SELECT COUNT(*)::int FROM facility_catchments WHERE tenant_id = ${tenantId}) AS "catchmentCount",
+      (SELECT COUNT(*)::int FROM session_plans WHERE tenant_id = ${tenantId}) AS "sessionPlanCount",
+      (SELECT COUNT(*)::int FROM microplans WHERE tenant_id = ${tenantId} AND facility_id IS NOT NULL) AS "microplanCount",
+      (SELECT COUNT(*)::int FROM stock_transactions WHERE tenant_id = ${tenantId}) AS "stockTransactionCount",
+      (SELECT COUNT(*)::int FROM clients WHERE tenant_id = ${tenantId}) AS "clientCount",
+      (SELECT COUNT(*)::int FROM cold_chain_equipment WHERE tenant_id = ${tenantId}) AS "coldChainCount",
+      (SELECT COUNT(*)::int FROM community_health_volunteers WHERE tenant_id = ${tenantId}) AS "chvCount",
+      (SELECT COUNT(*)::int FROM facility_staff WHERE tenant_id = ${tenantId}) AS "staffCount",
+      (SELECT COUNT(*)::int FROM facilities WHERE tenant_id = ${tenantId} AND ${missingFromImportFilter}) AS "missingFromImportCount"`);
+    const rows = (summaryResult as any).rows || summaryResult;
+    return rows[0] || {};
+  }
+
+  async function purgeTenantFacilities(
+    tx: any,
+    tenantId: string,
+    keepHmisCodes: string[] = [],
+  ) {
+    const keepCodes = keepHmisCodes.map((code) => code.trim()).filter(Boolean);
+    const keepCodeList = keepCodes.length > 0 ? dsql.join(keepCodes.map((code) => dsql`${code}`), dsql`, `) : null;
+    const targetRows = await tx.select({ id: facilities.id }).from(facilities).where(
+      keepCodeList
+        ? and(eq(facilities.tenantId, tenantId), dsql`${facilities.hmisCode} NOT IN (${keepCodeList})`)
+        : eq(facilities.tenantId, tenantId)
+    );
+    const targetIds = targetRows.map((row: { id: number }) => Number(row.id)).filter((id: number) => Number.isFinite(id));
+    if (targetIds.length === 0) return { purgedCount: 0 };
+    const targetIdList = dsql.join(targetIds.map((id: number) => dsql`${id}`), dsql`, `);
+
+    const deleteTables = ["budget_items", "vaccine_requirements", "mobilization_activities", "facility_catchments", "clients", "stock_transactions", "monthly_reports", "hfc_committee", "community_health_volunteers", "cold_chain_equipment", "facility_staff", "facility_excluded_villages", "vgie_settlement_facility_links", "vgie_alerts"];
+
+    await tx.execute(dsql`DELETE FROM session_villages WHERE tenant_id = ${tenantId} AND session_id IN (SELECT id FROM session_plans WHERE tenant_id = ${tenantId} AND facility_id IN (${targetIdList}))`);
+    await tx.execute(dsql`DELETE FROM session_day_plans WHERE tenant_id = ${tenantId} AND session_plan_id IN (SELECT id FROM session_plans WHERE tenant_id = ${tenantId} AND facility_id IN (${targetIdList}))`);
+    await tx.execute(dsql`UPDATE villages SET assigned_facility_id = NULL WHERE tenant_id = ${tenantId} AND assigned_facility_id IN (${targetIdList})`);
+    await tx.execute(dsql`UPDATE population_data SET facility_id = NULL WHERE tenant_id = ${tenantId} AND facility_id IN (${targetIdList})`);
+    await tx.execute(dsql`UPDATE microplans SET facility_id = NULL WHERE tenant_id = ${tenantId} AND facility_id IN (${targetIdList})`);
+    await tx.execute(dsql`UPDATE catchment_conflicts SET conflicting_facility_id = NULL WHERE tenant_id = ${tenantId} AND conflicting_facility_id IN (${targetIdList})`);
+    for (const table of deleteTables) {
+      await tx.execute(dsql`DELETE FROM ${dsql.raw(table)} WHERE tenant_id = ${tenantId} AND facility_id IN (${targetIdList})`);
+    }
+    await tx.execute(dsql`DELETE FROM session_plans WHERE tenant_id = ${tenantId} AND facility_id IN (${targetIdList})`);
+    await tx.execute(dsql`DELETE FROM facilities WHERE tenant_id = ${tenantId} AND id IN (${targetIdList})`);
+
+    return { purgedCount: targetIds.length };
+  }
+
+  // Bulk JSON import of facilities (upsert, replace missing, or destructive purge/replace)
   app.post("/api/facilities/import", isAuthenticated, requireTenant, loadRole, requireAdmin, async (req: any, res) => {
     try {
       const schema = z.object({
+        mode: z.enum(["upsert", "replace_missing", "purge_replace"]).optional().default("upsert"),
+        dryRun: z.boolean().optional().default(false),
+        confirm: z.string().optional(),
         facilities: z.array(z.object({
           name: z.string().min(1),
           hmisCode: z.string().min(1),
@@ -5398,94 +5454,73 @@ export async function registerRoutes(
         }))
       });
 
-      const { facilities: importedFacilities } = schema.parse(req.body);
+      const { facilities: importedFacilities, mode, dryRun, confirm } = schema.parse(req.body);
+      const importCodes = importedFacilities.map((item) => item.hmisCode.trim()).filter(Boolean);
+
+      if ((mode === "replace_missing" || mode === "purge_replace") && confirm !== "REPLACE FACILITIES") {
+        return res.status(400).json({ success: false, message: "Bulk replace/purge requires confirmation text: REPLACE FACILITIES" });
+    }
+
+      const beforeSummary = await summarizeTenantFacilityMaintenance(req.tenantId, importCodes);
+      if (dryRun) {
+        return res.json({ success: true, dryRun: true, mode, importCount: importedFacilities.length, summary: beforeSummary, message: "Dry run complete. No facility records were changed." });
+    }
 
       const allDistricts = await storage.getDistricts(req.tenantId);
-      let createdCount = 0;
-      let updatedCount = 0;
+      const { purgeSummary, createdCount, updatedCount } = await db.transaction(async (tx) => {
+        const purgeSummary =
+          mode === "purge_replace"
+            ? await purgeTenantFacilities(tx, req.tenantId)
+            : mode === "replace_missing"
+              ? await purgeTenantFacilities(tx, req.tenantId, importCodes)
+              : { purgedCount: 0 };
+        let createdCount = 0;
+        let updatedCount = 0;
 
-      for (const item of importedFacilities) {
-        let districtId: number | null = null;
-        if (item.districtName) {
-          const matchedDist = allDistricts.find(d => d.name.toLowerCase() === item.districtName!.trim().toLowerCase());
-          if (matchedDist) {
-            districtId = matchedDist.id;
+        for (const item of importedFacilities) {
+          let districtId: number | null = null;
+          if (item.districtName) {
+            const matchedDist = allDistricts.find(d => d.name.toLowerCase() === item.districtName!.trim().toLowerCase());
+            if (matchedDist) districtId = matchedDist.id;
           }
-        }
-        if (!districtId) {
-          districtId = allDistricts[0]?.id || null;
-        }
-        if (!districtId) continue;
+          if (!districtId) districtId = allDistricts[0]?.id || null;
+          if (!districtId) continue;
 
-        const latVal = item.latitude !== null && item.latitude !== undefined ? parseFloat(item.latitude.toString()) : null;
-        const lngVal = item.longitude !== null && item.longitude !== undefined ? parseFloat(item.longitude.toString()) : null;
-        const radiusVal = item.catchmentRadius !== null && item.catchmentRadius !== undefined ? parseFloat(item.catchmentRadius.toString()) : null;
+          const latVal = item.latitude !== null && item.latitude !== undefined ? parseFloat(item.latitude.toString()) : null;
+          const lngVal = item.longitude !== null && item.longitude !== undefined ? parseFloat(item.longitude.toString()) : null;
+          const radiusVal = item.catchmentRadius !== null && item.catchmentRadius !== undefined ? parseFloat(item.catchmentRadius.toString()) : null;
+          const [existing] = await tx.select().from(facilities).where(and(eq(facilities.tenantId, req.tenantId), eq(facilities.hmisCode, item.hmisCode.trim()))).limit(1);
 
-        const [existing] = await db
-          .select()
-          .from(facilities)
-          .where(
-            and(
-              eq(facilities.tenantId, req.tenantId),
-              eq(facilities.hmisCode, item.hmisCode.trim())
-            )
-          )
-          .limit(1);
-
-        if (existing) {
-          await db
-            .update(facilities)
-            .set({
-              name: item.name.trim(),
-              facilityType: item.facilityType ?? existing.facilityType,
-              agencyName: item.agencyName ?? existing.agencyName,
-              operationalStatus: item.operationalStatus ?? existing.operationalStatus,
-              districtId: districtId,
+          if (existing) {
+            await tx.update(facilities).set({
+              name: item.name.trim(), facilityType: item.facilityType ?? existing.facilityType, agencyName: item.agencyName ?? existing.agencyName, operationalStatus: item.operationalStatus ?? existing.operationalStatus, districtId,
               latitude: latVal !== null && !isNaN(latVal) ? latVal.toFixed(7) : existing.latitude,
               longitude: lngVal !== null && !isNaN(lngVal) ? lngVal.toFixed(7) : existing.longitude,
-              address: item.address ?? existing.address,
-              contactPhone: item.contactPhone ?? existing.contactPhone,
-              operatingHours: item.operatingHours ?? existing.operatingHours,
-              hasRefrigerator: item.hasRefrigerator ?? existing.hasRefrigerator,
-              hasPower: item.hasPower ?? existing.hasPower,
-              staffCount: item.staffCount ?? existing.staffCount,
-              catchmentRadius: radiusVal !== null && !isNaN(radiusVal) ? radiusVal.toFixed(2) : existing.catchmentRadius,
-              updatedAt: new Date(),
-            })
-            .where(eq(facilities.id, existing.id));
-          updatedCount++;
-        } else {
-          await db
-            .insert(facilities)
-            .values({
-              tenantId: req.tenantId,
-              name: item.name.trim(),
-              hmisCode: item.hmisCode.trim(),
-              facilityType: item.facilityType ?? null,
-              agencyName: item.agencyName ?? null,
-              operationalStatus: item.operationalStatus ?? null,
-              districtId: districtId,
+              address: item.address ?? existing.address, contactPhone: item.contactPhone ?? existing.contactPhone, operatingHours: item.operatingHours ?? existing.operatingHours,
+              hasRefrigerator: item.hasRefrigerator ?? existing.hasRefrigerator, hasPower: item.hasPower ?? existing.hasPower, staffCount: item.staffCount ?? existing.staffCount,
+              catchmentRadius: radiusVal !== null && !isNaN(radiusVal) ? radiusVal.toFixed(2) : existing.catchmentRadius, isActive: true, updatedAt: new Date(),
+            }).where(eq(facilities.id, existing.id));
+            updatedCount++;
+          } else {
+            await tx.insert(facilities).values({
+              tenantId: req.tenantId, name: item.name.trim(), hmisCode: item.hmisCode.trim(), facilityType: item.facilityType ?? null, agencyName: item.agencyName ?? null, operationalStatus: item.operationalStatus ?? null, districtId,
               latitude: latVal !== null && !isNaN(latVal) ? latVal.toFixed(7) : null,
               longitude: lngVal !== null && !isNaN(lngVal) ? lngVal.toFixed(7) : null,
-              address: item.address ?? null,
-              contactPhone: item.contactPhone ?? null,
-              operatingHours: item.operatingHours ?? null,
-              hasRefrigerator: item.hasRefrigerator ?? false,
-              hasPower: item.hasPower ?? false,
-              staffCount: item.staffCount ?? null,
-              catchmentRadius: radiusVal !== null && !isNaN(radiusVal) ? radiusVal.toFixed(2) : null,
-              isActive: true,
+              address: item.address ?? null, contactPhone: item.contactPhone ?? null, operatingHours: item.operatingHours ?? null,
+              hasRefrigerator: item.hasRefrigerator ?? false, hasPower: item.hasPower ?? false, staffCount: item.staffCount ?? null,
+              catchmentRadius: radiusVal !== null && !isNaN(radiusVal) ? radiusVal.toFixed(2) : null, isActive: true,
             });
-          createdCount++;
+            createdCount++;
+          }
         }
-      }
 
-      await logAudit(req, "import_facilities", "facilities", null, null, { createdCount, updatedCount });
-      res.json({ success: true, message: `Successfully imported ${importedFacilities.length} facilities.`, createdCount, updatedCount });
+        return { purgeSummary, createdCount, updatedCount };
+      });
+      const afterSummary = await summarizeTenantFacilityMaintenance(req.tenantId, importCodes);
+      await logAudit(req, "import_facilities", "facilities", null, null, { mode, createdCount, updatedCount, purgeSummary, beforeSummary, afterSummary });
+      res.json({ success: true, mode, message: "Successfully processed " + importedFacilities.length + " facilities.", createdCount, updatedCount, purgeSummary, beforeSummary, afterSummary });
     } catch (error: any) {
-      if (error?.name === "ZodError") {
-        return res.status(400).json({ success: false, message: "Invalid payload format.", errors: error.errors });
-      }
+      if (error?.name === "ZodError") return res.status(400).json({ success: false, message: "Invalid payload format.", errors: error.errors });
       console.error("Error importing facilities:", error);
       res.status(500).json({ success: false, message: "Failed to import facilities: " + error.message });
     }
@@ -6657,8 +6692,16 @@ export async function registerRoutes(
 
       await logAudit(req, "update", "village", entityId, oldVillage, village);
 
-      // Re-calculate and save the estimated population from the boundary or coordinates
-      await estimateAndSaveVillagePopulation(req.tenantId, entityId);
+      // Recalculate population only when the community geometry/centroid changed.
+      // Outreach-post coordinates are independent and should remain a fast update.
+      const shouldReestimatePopulation =
+        body.boundary !== undefined ||
+        body.catchmentPolygon !== undefined ||
+        body.latitude !== undefined ||
+        body.longitude !== undefined;
+      if (shouldReestimatePopulation) {
+        await estimateAndSaveVillagePopulation(req.tenantId, entityId);
+      }
 
       // Fetch the enriched village object (which contains the population property)
       const enrichedVillage = await storage.getVillage(req.tenantId, entityId);
@@ -7226,48 +7269,63 @@ export async function registerRoutes(
     }
   });
 
-  // GET /api/resources/grid3-settlements — Proxy and cache the GRID3 Zambia Settlement Extents ArcGIS GeoJSON
+  // GET /api/resources/grid3-settlements — tenant-aware settlement footprint GeoJSON.
+  // Local files should be named grid3_settlements_<iso3>.geojson, for example
+  // grid3_settlements_ssd.geojson. Zambia keeps its live GRID3 proxy fallback;
+  // other tenants return an empty FeatureCollection until their file is imported.
   app.get("/api/resources/grid3-settlements", ...auth, async (req: any, res) => {
     try {
+      res.vary("Cookie");
+      res.vary("x-tenant-id");
       let resourcesDir = join(process.cwd(), "Resources");
       if (!existsSync(resourcesDir)) {
         const parentDir = join(process.cwd(), "..", "Resources");
         if (existsSync(parentDir)) resourcesDir = parentDir;
-      }
-      const cachePath = join(resourcesDir, "grid3_settlements_zmb.geojson");
+    }
 
-      // Serve from local persistent cache if already downloaded
+      const tenant = req.tenantId ? await storage.getTenant(req.tenantId) : undefined;
+      const requestedTenant = String(req.query.tenant || tenant?.code || tenant?.countryCode || "").toUpperCase();
+      const countryCode = (tenant?.countryCode || requestedTenant || "ZMB").toUpperCase();
+      const safeCode = countryCode.toLowerCase().replace(/[^a-z0-9_-]/g, "");
+      const cachePath = join(resourcesDir, `grid3_settlements_${safeCode}.geojson`);
+
       if (existsSync(cachePath)) {
-        // 7-day browser cache with 1-day background revalidation window.
-        // The national settlement registry rarely changes, so clients can safely serve
-        // stale content while revalidating in the background on day 8+.
-        res.setHeader("Cache-Control", "public, max-age=604800, stale-while-revalidate=86400");
+        res.setHeader("Cache-Control", "private, max-age=604800, stale-while-revalidate=86400");
         res.setHeader("Content-Type", "application/json");
         return createReadStream(cachePath).pipe(res);
-      }
+    }
 
-      // Query live GRID3 Zambia Settlement Extents FeatureServer API
+      if (countryCode !== "ZMB") {
+        res.setHeader("Cache-Control", "private, max-age=3600");
+        return res.json({
+          type: "FeatureCollection",
+          features: [],
+          metadata: {
+            countryCode,
+            available: false,
+            message: `No tenant settlement footprint file found at Resources/grid3_settlements_${safeCode}.geojson`,
+          },
+        });
+    }
+
       const liveUrl = "https://services3.arcgis.com/BU6Aadhn6tbBEdyk/arcgis/rest/services/GRID3_ZMB_Settlement_Extents_v3_0/FeatureServer/0/query?outFields=*&where=1%3D1&f=geojson";
       console.log("Fetching live GRID3 Zambia Settlements from ArcGIS FeatureServer...");
 
       const response = await fetch(liveUrl);
       if (!response.ok) {
         throw new Error(`ArcGIS FeatureServer returned error status: ${response.statusText}`);
-      }
+    }
 
       const geojsonData = await response.json();
-
-      // Cache file asynchronously to avoid blocking the client stream
       const cacheWriteStream = createWriteStream(cachePath);
       cacheWriteStream.write(JSON.stringify(geojsonData));
       cacheWriteStream.end();
 
-      // Apply cache headers on the live-proxy response too so the browser caches it immediately
-      res.setHeader("Cache-Control", "public, max-age=604800, stale-while-revalidate=86400");
+      res.setHeader("Cache-Control", "private, max-age=604800, stale-while-revalidate=86400");
       res.json(geojsonData);
     } catch (error: any) {
-      console.error("Error proxying GRID3 Zambia Settlement Extents:", error);
-      res.status(500).json({ success: false, message: "GRID3 proxy call failed: " + error.message });
+      console.error("Error resolving tenant GRID3 settlement footprints:", error);
+      res.status(500).json({ success: false, message: "GRID3 settlement footprint lookup failed: " + error.message });
     }
   });
 
@@ -19371,8 +19429,10 @@ Instructions:
       const areaSqKm = validation.areaSqKm;
       const centroid = polygonCentroid(geojson);
 
-      // Estimate population
-      const intel = await PopulationIntelligenceService.fetchPolygonPopulation(req.tenantId, geojson, "ZMB", "facility", facilityId);
+      // Estimate population using the active tenant country code.
+      const activeTenant = req.tenantId ? await storage.getTenant(req.tenantId) : undefined;
+      const activeCountryCode = (activeTenant?.countryCode || activeTenant?.code || "ZMB").toUpperCase();
+      const intel = await PopulationIntelligenceService.fetchPolygonPopulation(req.tenantId, geojson, activeCountryCode, "facility", facilityId);
       const bestSource = intel?.sources?.[0];
       const popEst = bestSource?.totalPopulation ?? 0;
       const popSource = bestSource?.source ?? "WorldPop";
@@ -19675,8 +19735,10 @@ Instructions:
         }
       }
 
-      // Estimate population
-      const intel = await PopulationIntelligenceService.fetchPolygonPopulation(req.tenantId, geojson, "ZMB", "village", villageId);
+      // Estimate population using the active tenant country code.
+      const activeTenant = req.tenantId ? await storage.getTenant(req.tenantId) : undefined;
+      const activeCountryCode = (activeTenant?.countryCode || activeTenant?.code || "ZMB").toUpperCase();
+      const intel = await PopulationIntelligenceService.fetchPolygonPopulation(req.tenantId, geojson, activeCountryCode, "village", villageId);
       const bestSource = intel?.sources?.[0];
       const popEst = bestSource?.totalPopulation ?? 0;
       const popSource = bestSource?.source ?? "WorldPop";
@@ -20554,6 +20616,31 @@ Instructions:
     }
   });
 
+  // GET /api/chvs/coverage — Minimal assignment data for the coverage dashboard.
+  // Avoid the directory endpoint's joins, count, sort, and oversized payload;
+  // this view only needs CHV-to-facility and CHV-to-community links.
+  app.get("/api/chvs/coverage", ...auth, requireTenant, async (req: any, res) => {
+    try {
+      const { chvProfiles } = await import("@shared/schema");
+      const rows = await db
+        .select({
+          id: chvProfiles.id,
+          name: chvProfiles.fullName,
+          nrc: chvProfiles.nrc,
+          contactPhone: chvProfiles.contactPhone,
+          campaignRole: chvProfiles.siaRole,
+          facilityId: chvProfiles.facilityId,
+          villageId: chvProfiles.assignedVillageId,
+        })
+        .from(chvProfiles)
+        .where(eq(chvProfiles.tenantId, req.tenantId));
+
+      res.json({ data: rows, total: rows.length });
+    } catch (err: any) {
+      res.status(500).json({ message: err?.message || "Failed to fetch CHV coverage data" });
+    }
+  });
+
   // GET /api/chvs/:id — Fetch a single CHV profile with enriched data (facility, village, supervisor)
   app.get("/api/chvs/:id", ...auth, requireTenant, async (req: any, res) => {
     try {
@@ -20621,7 +20708,7 @@ Instructions:
         if (!chv.fullName || !chv.facilityHmisCode) continue;
         const facId = hmisMap.get(chv.facilityHmisCode.toLowerCase());
         if (!facId) continue;
-        
+
         await db.insert(chvProfiles).values({
           tenantId: req.tenantId,
           facilityId: facId,
@@ -20929,7 +21016,7 @@ Instructions:
     try {
       const { entityType, entityId } = req.params;
       const history = await EntityHistoryService.getHistory(req.tenantId, entityType, entityId);
-      
+
       const timeline = history.map((v) => ({
         id: v.id,
         versionNumber: v.versionNumber,
@@ -21073,4 +21160,8 @@ Instructions:
   return httpServer;
 
 }
+
+
+
+
 

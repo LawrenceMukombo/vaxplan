@@ -1077,6 +1077,7 @@ function getDistrictAwareVillageName(
         return names[idx];
       }
     }
+    return `${districtName || provinceName || "Demo"} Community ${slot + 1}`;
   }
 
   if (tenantCode === "PNG") {
@@ -1187,6 +1188,21 @@ async function pickVillagesPerFacility(
     for (const v of rows) {
       if (v.assignedFacilityId === p.facilityId && (v.code?.startsWith("DEMO-") || v.code?.startsWith("VIL-") || v.code?.startsWith("MC-"))) {
         pool.push(v.id);
+        const slotMatch = v.code?.match(/^DEMO-\d+-(\d+)$/);
+        if (slotMatch) {
+          const slot = Number(slotMatch[1]);
+          const expectedName = getDistrictAwareVillageName(
+            tenantCode,
+            p.districtName,
+            p.provinceName,
+            p.facilityId,
+            slot - 1,
+          );
+          if (v.name !== expectedName) {
+            await db.update(villages).set({ name: expectedName }).where(eq(villages.id, v.id));
+            v.name = expectedName;
+          }
+        }
       }
     }
 

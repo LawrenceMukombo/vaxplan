@@ -179,6 +179,13 @@ export default function Facilities() {
   const [selectedDistrictId, setSelectedDistrictId] = useState<number | null>(null);
   const [selectedFacilityId, setSelectedFacilityId] = useState<number | null>(null);
   const [historyEntity, setHistoryEntity] = useState<{ type: string; id: string | number; name: string } | null>(null);
+  const [bulkDialogOpen, setBulkDialogOpen] = useState(false);
+  const [bulkMode, setBulkMode] = useState<"upsert" | "replace_missing" | "purge_replace">("upsert");
+  const [bulkJson, setBulkJson] = useState(
+    '{\n  "facilities": [\n    {\n      "name": "Example Health Centre",\n      "hmisCode": "EXAMPLE-001",\n      "districtName": "Lusaka",\n      "facilityType": "health_center",\n      "latitude": -15.4167,\n      "longitude": 28.2833,\n      "hasRefrigerator": true,\n      "hasPower": true\n    }\n  ]\n}'
+  );
+  const [bulkConfirmText, setBulkConfirmText] = useState("");
+  const [bulkImportResult, setBulkImportResult] = useState<any | null>(null);
 
   // Communities Registry states
   const [communityDialogOpen, setCommunityDialogOpen] = useState(false);
@@ -1357,6 +1364,43 @@ export default function Facilities() {
     },
   });
 
+  const parseBulkFacilityPayload = () => {
+    const parsed = JSON.parse(bulkJson);
+    const facilitiesPayload = Array.isArray(parsed) ? parsed : parsed?.facilities;
+    if (!Array.isArray(facilitiesPayload) || facilitiesPayload.length === 0) {
+      throw new Error('Paste JSON as { "facilities": [...] } or a non-empty facility array.');
+    }
+    return facilitiesPayload;
+  };
+
+  const bulkImportMutation = useMutation({
+    mutationFn: async ({ dryRun }: { dryRun: boolean }) => {
+      const facilitiesPayload = parseBulkFacilityPayload();
+      return apiRequest<any>('POST', '/api/facilities/import', {
+        mode: bulkMode,
+        dryRun,
+        confirm: bulkConfirmText,
+        facilities: facilitiesPayload,
+      });
+    },
+    onSuccess: (data: any) => {
+      setBulkImportResult(data);
+      queryClient.invalidateQueries({ queryKey: ['/api/facilities'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/villages'] });
+      toast({
+        title: data?.dryRun ? 'Bulk check complete' : 'Bulk facilities processed',
+        description: data?.message || ((data?.createdCount ?? 0) + ' created, ' + (data?.updatedCount ?? 0) + ' updated.'),
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: 'Bulk facility operation failed',
+        description: error?.message || 'Check the JSON format and confirmation text.',
+        variant: 'destructive',
+      });
+    },
+  });
+
   // Fetch population data list
   const { data: populationList } = useQuery<any[]>({
     queryKey: ["/api/population"],
@@ -2075,6 +2119,7 @@ export default function Facilities() {
   // Adding a *facility* is reserved for coordinator/admin roles; district and
   // facility staff can add communities but not facilities (server enforces 403).
   const canAddFacility = canCreateFacility(user);
+  const canBulkMaintainFacilities = user?.role === "national_admin";
   // Role-lock the community location picker: facility staff are pinned to their
   // own facility; district staff are locked to their district; coordinators and
   // admins get the full searchable Province → District → Facility cascade.
@@ -2169,6 +2214,111 @@ export default function Facilities() {
         <TabsContent value="facilities" className="space-y-6">
           <div className="flex justify-between items-center gap-4 flex-wrap">
             <h2 className="text-lg font-semibold">Facilities Registry</h2>
+            <div className="flex items-center gap-2 flex-wrap justify-end">
+              {canBulkMaintainFacilities && (
+                <Dialog open={bulkDialogOpen} onOpenChange={setBulkDialogOpen}>
+                  <DialogTrigger asChild>
+                    <Button variant="outline" data-testid="button-bulk-facility-maintenance">
+                      <Upload className="h-4 w-4 mr-1" />
+                      Bulk Replace / Purge
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent className="max-w-3xl">
+                    <DialogHeader>
+                      <DialogTitle>Bulk facility maintenance</DialogTitle>
+                      <DialogDescription>
+                        Import facilities in bulk, replace facilities missing from the uploaded list, or purge and reload the tenant facility registry.
+                      </DialogDescription>
+                    </DialogHeader>
+
+                    <div className="space-y-4">
+                      <div className="grid md:grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <Label>Operation mode</Label>
+                          <Select value={bulkMode} onValueChange={(value: "upsert" | "replace_missing" | "purge_replace") => {
+                            setBulkMode(value);
+                            setBulkImportResult(null);
+                          }}>
+                            <SelectTrigger data-testid="select-bulk-facility-mode">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="upsert">Upsert only - create or update</SelectItem>
+                              <SelectItem value="replace_missing">Replace missing - remove facilities not in JSON</SelectItem>
+                              <SelectItem value="purge_replace">Purge and reload - remove all first</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          <p className="text-xs text-muted-foreground">
+                            Destructive modes are tenant-scoped. Communities are unlinked; facility-owned plans, catchments, staff, cold chain, clients, and stock rows are removed for purged facilities.
+                          </p>
+                        </div>
+
+                        <div className="space-y-2">
+                          <Label>Destructive confirmation</Label>
+                          <Input
+                            value={bulkConfirmText}
+                            onChange={(event) => setBulkConfirmText(event.target.value)}
+                            placeholder="Type REPLACE FACILITIES"
+                            disabled={bulkMode === "upsert"}
+                            data-testid="input-bulk-facility-confirm"
+                          />
+                          <p className="text-xs text-muted-foreground">
+                            Required only for replace or purge modes. Use dry run first to review impact counts.
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label>Facilities JSON</Label>
+                        <textarea
+                          className="min-h-[260px] w-full rounded-md border border-input bg-background px-3 py-2 font-mono text-xs shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                          value={bulkJson}
+                          onChange={(event) => {
+                            setBulkJson(event.target.value);
+                            setBulkImportResult(null);
+                          }}
+                          spellCheck={false}
+                          data-testid="textarea-bulk-facility-json"
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          Accepted shape: <code>{'{ "facilities": [...] }'}</code> or a raw array. Required fields per row: <code>name</code> and <code>hmisCode</code>. Optional fields include <code>districtName</code>, coordinates, type, status, cold chain, power, staff count, and catchment radius.
+                        </p>
+                      </div>
+
+                      {bulkImportResult && (
+                        <div className="rounded-md border bg-muted/40 p-3 text-sm" data-testid="bulk-facility-result">
+                          <div className="font-semibold mb-2">{bulkImportResult.dryRun ? "Dry-run impact" : "Operation result"}</div>
+                          <div className="grid sm:grid-cols-3 gap-2 text-xs">
+                            <div>Facilities before: <strong>{bulkImportResult.summary?.facilityCount ?? bulkImportResult.beforeSummary?.facilityCount ?? "-"}</strong></div>
+                            <div>Missing from JSON: <strong>{bulkImportResult.summary?.missingFromImportCount ?? bulkImportResult.beforeSummary?.missingFromImportCount ?? "-"}</strong></div>
+                            <div>Purged: <strong>{bulkImportResult.purgeSummary?.purgedCount ?? 0}</strong></div>
+                            <div>Created: <strong>{bulkImportResult.createdCount ?? 0}</strong></div>
+                            <div>Updated: <strong>{bulkImportResult.updatedCount ?? 0}</strong></div>
+                            <div>Facilities after: <strong>{bulkImportResult.afterSummary?.facilityCount ?? "-"}</strong></div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    <DialogFooter className="gap-2 sm:gap-0">
+                      <Button type="button" variant="outline" onClick={() => bulkImportMutation.mutate({ dryRun: true })} disabled={bulkImportMutation.isPending} data-testid="button-bulk-facility-dry-run">
+                        {bulkImportMutation.isPending ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-1" />}
+                        Check impact
+                      </Button>
+                      <Button
+                        type="button"
+                        variant={bulkMode === "upsert" ? "default" : "destructive"}
+                        onClick={() => bulkImportMutation.mutate({ dryRun: false })}
+                        disabled={bulkImportMutation.isPending || ((bulkMode === "replace_missing" || bulkMode === "purge_replace") && bulkConfirmText !== "REPLACE FACILITIES")}
+                        data-testid="button-bulk-facility-run"
+                      >
+                        {bulkImportMutation.isPending ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Upload className="h-4 w-4 mr-1" />}
+                        Run bulk operation
+                      </Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
+              )}
             {(canAddFacility || editingFacility) && (
               <Dialog open={dialogOpen} onOpenChange={(open) => {
                 setDialogOpen(open);
@@ -3331,6 +3481,7 @@ export default function Facilities() {
               </CardContent>
             </Card>
           )}
+            </div>
         </TabsContent>
 
         <TabsContent value="communities" className="space-y-6">

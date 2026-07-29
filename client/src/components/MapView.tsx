@@ -26,6 +26,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { offlineDb } from "@/lib/offlineDb";
 import { loadActiveTenant } from "@/lib/tenantCache";
+import { getTenantMapDefaults, getTenantMaxBounds } from "@/lib/tenantGeo";
 import {
   usePopulationOverlay,
   PopulationWmsLayer,
@@ -150,6 +151,26 @@ const normalizeName = (name: string): string => {
     .trim();
 };
 
+const getBoundaryFeatureName = (feature: any, adminLevel: number): string => {
+  const properties = feature?.properties ?? {};
+  const levelSpecificKeys = [
+    `adm${adminLevel}_name`,
+    `ADM${adminLevel}_NAME`,
+    `ADM${adminLevel}_EN`,
+    `NAME_${adminLevel}`,
+    `name_${adminLevel}`,
+  ];
+  const genericKeys = ["name", "NAME", "shapeName"];
+
+  for (const key of [...levelSpecificKeys, ...genericKeys]) {
+    const value = properties[key];
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+
+  return "";
+};
 const getGeoJSONBBox = (geojson: any) => {
   let minLat = Infinity, maxLat = -Infinity;
   let minLng = Infinity, maxLng = -Infinity;
@@ -378,20 +399,20 @@ function MapController({ center, zoom }: { center: [number, number]; zoom: numbe
 */
 
 // Updated Code: MapController supports listening to active map zoom and bounds changes
-function MapController({ 
-  center, 
-  zoom, 
+function MapController({
+  center,
+  zoom,
   onZoomChange,
   onBoundsChange
-}: { 
-  center: [number, number]; 
-  zoom: number; 
+}: {
+  center: [number, number];
+  zoom: number;
   onZoomChange?: (zoom: number) => void;
   onBoundsChange?: (bounds: L.LatLngBounds) => void;
 }) {
   const map = useMap();
   const [lat, lng] = center;
-  
+
   // Track previous prop values using refs to prevent recursive snap-back cycles and infinite loops
   const prevCenterRef = useRef<[number, number]>([lat, lng]);
   const prevZoomRef = useRef<number>(zoom);
@@ -619,7 +640,7 @@ function MapLegend({
               );
             })}
           </div>
-          
+
           {/* Coverage Rate Progress Bar */}
           <div className="border-t border-border/30 pt-2.5 space-y-1.5 text-[10px]">
             <div className="flex justify-between font-bold">
@@ -724,7 +745,7 @@ function MapLegend({
                       Look for clusters of high-density population grids (Crimson, Red, Orange blocks) on the map that **lack green Community pins**. These represent unregistered settlements currently missed by vaccine outreach.
                     </p>
                   </div>
-                  
+
                   <div className="p-3 bg-emerald-500/5 rounded-xl border border-emerald-500/10">
                     <h4 className="font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5 mb-1.5 text-[11px] uppercase tracking-wider">
                       2. Audit Geofence Catchment Gaps
@@ -786,7 +807,7 @@ function MapLegend({
                     Look for clusters of high-density population grids (Crimson, Red, Orange blocks) on the map that **lack green Community pins**. These represent unregistered settlements currently missed by vaccine outreach.
                   </p>
                 </div>
-                
+
                 <div className="p-3 bg-emerald-500/5 rounded-xl border border-emerald-500/10">
                   <h4 className="font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5 mb-1.5 text-[11px] uppercase tracking-wider">
                     2. Audit Geofence Catchment Gaps
@@ -847,6 +868,7 @@ interface LayerPanelProps {
   boundaryList?: Array<{ id: string; adminLevel: number; levelName: string; isActive: boolean }>;
   countryCode?: string;
   adminLabels?: { level1: string; level2: string; level3: string; level4: string };
+  grid3Unavailable?: boolean;
 }
 
 /*
@@ -880,6 +902,7 @@ function LayerPanel({
   boundaryList = [],
   countryCode,
   adminLabels,
+  grid3Unavailable = false,
 }: LayerPanelProps) {
   return (
     <div className={`transition-all duration-200 ${isOpen ? "w-64" : "w-auto"}`} ref={disableLeafletPropagation}>
@@ -979,11 +1002,11 @@ function LayerPanel({
                     subtext = "District population from NSO/HMIS census data";
                   } else if (key === "grid3Settlements") {
                     displayName = "GRID3 Settlement Footprints";
-                    if (countryCode !== "ZMB") {
-                      subtext = "⚠ GRID3 settlement dataset not available for this country";
+                    if (grid3Unavailable) {
+                      subtext = "No tenant settlement-footprint file imported yet";
                       subtextClass = "text-[10px] text-amber-400 font-medium block mt-0.5 leading-normal";
                     } else {
-                      subtext = "High-fidelity building footprint extents (external API)";
+                      subtext = "High-fidelity settlement footprint extents for the active tenant";
                     }
                   } else if (key === "zeroDoseVillages") {
                     displayName = "Zero-dose Villages";
@@ -1003,7 +1026,7 @@ function LayerPanel({
                   if ((key === "boundaries" && !hasAnyBoundary) ||
                       (key === "wards" && !hasLevel3) ||
                       (key === "constituencies" && !hasLevel2) ||
-                      (key === "grid3Settlements" && countryCode !== "ZMB")) {
+                      (key === "grid3Settlements" && grid3Unavailable)) {
                     dotColor = "bg-amber-400";
                   } else if (key === "populationGeoTIFF" || key === "populationChoropleth") {
                     dotColor = "bg-sky-400";
@@ -1013,7 +1036,7 @@ function LayerPanel({
                     dotColor = "bg-sky-400";
                   }
 
-                  const isDisabled = key === "grid3Settlements" && countryCode !== "ZMB";
+                  const isDisabled = false;
 
                   return (
                     <div key={key} className="border-b border-border/10 pb-1.5 last:border-0 last:pb-0">
@@ -1030,7 +1053,7 @@ function LayerPanel({
                           checked={value && !isDisabled}
                           onCheckedChange={() => !isDisabled && onLayerToggle(key as keyof MapOverlayLayers)}
                           disabled={isDisabled}
-                          title={isDisabled ? "GRID3 settlement dataset not available for this country" : undefined}
+                          title={grid3Unavailable && key === "grid3Settlements" ? "No tenant settlement-footprint file imported yet" : undefined}
                           data-testid={`switch-layer-${key}`}
                           className="mt-0.5 flex-shrink-0"
                         />
@@ -1299,7 +1322,7 @@ function FilterPanel({
               <Label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">
                 Facility Equipment
               </Label>
-              
+
               <div className="flex items-center justify-between p-1.5 rounded-lg border border-border/40 hover:bg-accent/25 transition-colors">
                 <Label htmlFor="filter-cold-chain-toggle" className="text-xs font-medium flex items-center gap-1.5 cursor-pointer select-none">
                   <Thermometer className="h-4 w-4 text-blue-500 shrink-0" />
@@ -1392,7 +1415,7 @@ export const disableLeafletPropagation = (el: HTMLDivElement | null) => {
   if (el) {
     L.DomEvent.disableClickPropagation(el);
     L.DomEvent.disableScrollPropagation(el);
-    
+
     const halt = (e: Event) => e.stopPropagation();
     const events = ["click", "dblclick", "mousedown", "mouseup", "touchstart", "touchend", "touchmove", "pointerdown", "pointerup", "keydown", "keyup", "keypress", "contextmenu"];
     events.forEach(event => el.addEventListener(event, halt, true));
@@ -1414,7 +1437,7 @@ export const disableLeafletPropagation = (el: HTMLDivElement | null) => {
 
     L.DomEvent.disableClickPropagation(el);
     L.DomEvent.disableScrollPropagation(el);
-    
+
     const halt = (e: Event) => {
       const target = e.target as HTMLElement;
       if (
@@ -1450,180 +1473,6 @@ export const disableLeafletPropagation = (el: HTMLDivElement | null) => {
     events.forEach(event => el.addEventListener(event, halt, true));
   }
 };
-
-/*
-// Original Code: MapView component without interactive measurements and export dialogs
-export function MapView({
-  facilities = [],
-  villages = [],
-  center = [-6.0, 147.0],
-  zoom = 6,
-  height = "100%",
-}: MapViewProps) {
-  const mapRef = useRef<L.Map>(null);
-  const [layerPanelOpen, setLayerPanelOpen] = useState(true);
-  const [basemap, setBasemap] = usePersistedBasemap("osm");
-  const [layers, setLayers] = useState({
-    facilities: true,
-    villages: true,
-    htrAreas: true,
-    catchments: false,
-    roads: false,
-  });
-
-  const handleZoomIn = () => {
-    mapRef.current?.zoomIn();
-  };
-
-  const handleZoomOut = () => {
-    mapRef.current?.zoomOut();
-  };
-
-  const handleLocate = () => {
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          mapRef.current?.setView(
-            [position.coords.latitude, position.coords.longitude],
-            14
-          );
-        },
-        (error) => console.error("Geolocation error:", error)
-      );
-    }
-  };
-
-  const handleLayerToggle = (layer: keyof typeof layers) => {
-    setLayers((prev) => ({ ...prev, [layer]: !prev[layer] }));
-  };
-
-  return (
-    <div className="relative w-full" style={{ height }}>
-      <MapContainer
-        center={center}
-        zoom={zoom}
-        style={{ height: "100%", width: "100%" }}
-        ref={mapRef}
-        zoomControl={false}
-      >
-        {basemap === "osm" ? (
-          <TileLayer
-            attribution={CARTO_POSITRON_ATTRIBUTION}
-            url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
-          />
-        ) : (
-          // maxNativeZoom=17: ArcGIS World Imagery only provides tiles to z17 in most rural
-          // Africa / PNG regions. Requesting z18+ returns ArcGIS's own "Map data not yet
-          // available" placeholder tile. Leaflet scales z17 tiles for higher zoom levels.
-          <TileLayer
-            attribution={CARTO_VOYAGER_ATTRIBUTION}
-            url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
-            maxNativeZoom={17}
-            maxZoom={22}
-          />
-        )}
-
-        {/* Commented out raw unfiltered rendering to prevent double rendering that bypasses/violates the active Map Filters.
-            The correct premium, filtered facility and village markers are rendered dynamically in the second rendering block below.
-        layers.facilities &&
-          facilities
-            .filter((f) => f.latitude && f.longitude)
-            .map((facility) => (
-              <Marker
-                key={`facility-${facility.id}`}
-                position={[Number(facility.latitude), Number(facility.longitude)]}
-                icon={facilityIcon}
-              >
-                <Popup>
-                  <div className="min-w-48">
-                    <h3 className="font-semibold">{facility.name}</h3>
-                    <p className="text-xs text-muted-foreground">{facility.hmisCode}</p>
-                    <div className="mt-2 space-y-1 text-sm">
-                      <p>Type: {facility.facilityType}</p>
-                      <p>Staff: {facility.staffCount || "N/A"}</p>
-                      <div className="flex gap-2 mt-2">
-                        {facility.hasRefrigerator && (
-                          <Badge variant="secondary" className="text-xs">Cold Chain</Badge>
-                        )}
-                        {facility.hasPower && (
-                          <Badge variant="secondary" className="text-xs">Power</Badge>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                </Popup>
-              </Marker>
-            ))
-
-        layers.villages &&
-          villages
-            .filter((v) => v.latitude && v.longitude)
-            .map((village) => (
-              <Marker
-                key={`village-${village.id}`}
-                position={[Number(village.latitude), Number(village.longitude)]}
-                icon={village.isHardToReach ? htrIcon : villageIcon}
-              >
-                <Popup>
-                  <div className="min-w-40">
-                    <h3 className="font-semibold">{village.name}</h3>
-                    {village.code && (
-                      <p className="text-xs text-muted-foreground">{village.code}</p>
-                    )}
-                    <div className="mt-2 space-y-1 text-sm">
-                      {village.distanceToFacility && (
-                        <p>Distance: {Number(village.distanceToFacility).toFixed(1)} km</p>
-                      )}
-                      {village.travelTimeMinutes && (
-                        <p>Travel: {village.travelTimeMinutes} min</p>
-                      )}
-                      {village.isHardToReach && (
-                        <Badge variant="destructive" className="text-xs mt-2">
-                          Hard to Reach
-                        </Badge>
-                      )}
-                    </div>
-                  </div>
-                </Popup>
-        * /}
-
-        <MapController center={center} zoom={zoom} />
-      </MapContainer>
-
-      <LayerPanel
-        isOpen={layerPanelOpen}
-        onToggle={() => setLayerPanelOpen(!layerPanelOpen)}
-        layers={layers}
-        onLayerToggle={handleLayerToggle}
-        basemap={basemap}
-        onBasemapChange={setBasemap}
-        boundaryList={boundaryList}
-        countryCode={tenantInfo?.countryCode}
-        adminLabels={adminLabels}
-      />
-
-      <MapControls
-        onZoomIn={handleZoomIn}
-        onZoomOut={handleZoomOut}
-        onLocate={handleLocate}
-      />
-
-      <MapLegend />
-
-      <div className="absolute right-4 top-4 z-[1000] flex gap-2">
-        <Button size="sm" variant="secondary" data-testid="button-measure">
-          <Ruler className="h-4 w-4 mr-1" />
-          Measure
-        </Button>
-        <Button size="sm" variant="secondary" data-testid="button-download-map">
-          <Download className="h-4 w-4 mr-1" />
-          Export
-        </Button>
-      </div>
-    </div>
-  );
-}
-*/
 
 interface GeoTIFFOverlayProps {
   url: string;
@@ -2022,18 +1871,25 @@ export function MapView({
   const [outreachLngInput, setOutreachLngInput] = useState("");
   const [isPickingFromMap, setIsPickingFromMap] = useState(false);
   const [pickingOutreachForVillage, setPickingOutreachForVillage] = useState<Village | null>(null);
+  const [isSavingOutreach, setIsSavingOutreach] = useState(false);
+  const outreachDraftRef = useRef({ name: "", latitude: "", longitude: "" });
+  const skipOutreachHydrationRef = useRef(false);
 
   useEffect(() => {
     if (outreachDialogTarget) {
+      if (skipOutreachHydrationRef.current) {
+        skipOutreachHydrationRef.current = false;
+        return;
+      }
       setOutreachNameInput(outreachDialogTarget.outreachPostName || `${outreachDialogTarget.name} Outreach Post`);
       setOutreachLatInput(outreachDialogTarget.outreachLatitude ? String(outreachDialogTarget.outreachLatitude) : "");
       setOutreachLngInput(outreachDialogTarget.outreachLongitude ? String(outreachDialogTarget.outreachLongitude) : "");
-    } else {
+    } else if (!isPickingFromMap) {
       setOutreachNameInput("");
       setOutreachLatInput("");
       setOutreachLngInput("");
     }
-  }, [outreachDialogTarget]);
+  }, [outreachDialogTarget, isPickingFromMap]);
 
   const handleClearOutreachPost = async (village: Village) => {
     try {
@@ -2143,14 +1999,6 @@ export function MapView({
     }
   });
 
-  // Centroid mapping helper for country raster zoom
-  const countryCenters: Record<string, { center: [number, number]; zoom: number }> = {
-    "Zambia": { center: [-13.133897, 27.849332], zoom: 6 },
-    "South Sudan": { center: [6.877, 31.307], zoom: 6 },
-    "Papua New Guinea": { center: [-6.315, 143.955], zoom: 6 },
-    "Universal": { center: [-6.0, 147.0], zoom: 6 },
-  };
-
   // Task #101 — prompt to start a routine microplan when the user clicks
   // "Plan a session here" on a village whose facility has none yet.
   const [startMicroplanPrompt, setStartMicroplanPrompt] = useState<{
@@ -2215,7 +2063,7 @@ export function MapView({
         return [latSum / coords.length, lngSum / coords.length];
       }
     }
-    
+
     // Fallback: If we have linked villages, find their average
     const linkedVillages = sessionVillages
       ?.filter((sv: any) => sv.sessionId === plan.id)
@@ -2302,14 +2150,20 @@ export function MapView({
     },
   });
 
+  // Dynamic Geographic and Tenant Lookups for Premium Admin Hierarchy Resolution
+  const { data: tenantInfo } = useQuery<any>({
+    queryKey: ["/api/me/tenant"],
+  });
+
   // Fetch GRID3 Settlement Extents GeoJSON footprints — with IndexedDB persistent caching.
   // On first load the 18.4 MB file is downloaded once and stored in Dexie gisCache.
   // All subsequent layer toggles and page reloads serve the data instantly from IndexedDB (< 50 ms),
   // completely freeing the network queue for normal database synchronisation.
-  const grid3CacheKey = `grid3_settlements_${(user as any)?.tenantId ?? "global"}`;
+  const grid3TenantKey = String(tenantInfo?.id || tenantInfo?.code || tenantInfo?.countryCode || (user as any)?.tenantId || "global");
+  const grid3CacheKey = `grid3_settlements_${grid3TenantKey}`;
   const { data: grid3GeoJSON } = useQuery<any>({
     queryKey: ["/api/resources/grid3-settlements", grid3CacheKey],
-    enabled: !!layers.grid3Settlements,
+    enabled: !!layers.grid3Settlements && !!tenantInfo?.id,
     // 24-hour stale time — the GRID3 national settlement file rarely changes.
     // gcTime of 48 hours keeps the parsed object in React Query's memory cache for the full session.
     staleTime: 24 * 60 * 60 * 1000,
@@ -2320,7 +2174,7 @@ export function MapView({
         // Original Code (Composite primary key lookup with query object - returns undefined on composite index):
         // const cached = await offlineDb.gisCache.get({ key: "grid3_settlements", tenantId: (user as any)?.tenantId ?? "global" });
         // Updated Code: Correctly passes the composite index primary key as a tuple [key, tenantId]
-        const cached = await offlineDb.gisCache.get(["grid3_settlements", (user as any)?.tenantId ?? "global"]);
+        const cached = await offlineDb.gisCache.get(["grid3_settlements", grid3TenantKey]);
         if (cached && cached.geojson) {
           return cached.geojson;
         }
@@ -2330,14 +2184,14 @@ export function MapView({
       }
 
       // 2. Cache miss — download from the server (runs once per browser install)
-      const res = await fetch("/api/resources/grid3-settlements", { credentials: "include" });
+      const res = await fetch(`/api/resources/grid3-settlements?tenant=${encodeURIComponent(String(tenantInfo?.code || tenantInfo?.countryCode || tenantInfo?.id || ""))}`, { credentials: "include" });
       if (!res.ok) throw new Error("Failed to load GRID3 settlements");
       const geojson = await res.json();
 
       // 3. Persist to Dexie gisCache asynchronously — do not block the map render
       offlineDb.gisCache.put({
         key: "grid3_settlements",
-        tenantId: (user as any)?.tenantId ?? "global",
+        tenantId: grid3TenantKey,
         geojson,
         cachedAt: Date.now(),
       }).catch((err) =>
@@ -2570,10 +2424,14 @@ export function MapView({
   });
   */
 
-  // Dynamic Geographic and Tenant Lookups for Premium Admin Hierarchy Resolution
-  const { data: tenantInfo } = useQuery<any>({
-    queryKey: ["/api/me/tenant"],
-  });
+  // Centroid mapping helper for country raster zoom
+  const countryCenters: Record<string, { center: [number, number]; zoom: number }> = {
+    "Zambia": getTenantMapDefaults({ countryCode: "ZMB" }),
+    "South Sudan": getTenantMapDefaults({ countryCode: "SSD" }),
+    "Papua New Guinea": getTenantMapDefaults({ countryCode: "PNG" }),
+    "Universal": getTenantMapDefaults(tenantInfo),
+  };
+
 
   // Country boundary GeoJSON is loaded early because unserved places are clipped to the active country's polygons.
   const { data: boundaryList } = useQuery<Array<{ id: string; adminLevel: number; levelName: string; isActive: boolean }>>({
@@ -2900,7 +2758,7 @@ export function MapView({
   // Original Code: zoomToSelection focused only on facilities. Since health facilities lack dynamic LLG mappings in the schema, filtering and zooming to an LLG would not focus the map accurately.
   const zoomToSelection = useCallback((provId: number | "all", distId: number | "all", llgId: number | "all") => {
     if (!mapRef.current) return;
-    
+
     // Find all facilities matching the selection
     const matching = (facilities || []).filter((f) => {
       if (!f.latitude || !f.longitude) return false;
@@ -2920,7 +2778,7 @@ export function MapView({
       const coords = matching.map((f) => [Number(f.latitude), Number(f.longitude)] as [number, number]);
       const lats = coords.map((c) => c[0]);
       const lngs = coords.map((c) => c[1]);
-      
+
       const minLat = Math.min(...lats);
       const maxLat = Math.max(...lats);
       const minLng = Math.min(...lngs);
@@ -2952,7 +2810,7 @@ export function MapView({
   // Original Code: zoomToSelection focused on both matching facilities and villages using nested loops, which is slow during dynamic typing
   const zoomToSelection = useCallback((provId: number | "all", distId: number | "all", llgId: number | "all") => {
     if (!mapRef.current) return;
-    
+
     const matchingFacilities = (facilities || []).filter((f) => {
       if (!f.latitude || !f.longitude) return false;
       if (provId !== "all") {
@@ -2988,7 +2846,7 @@ export function MapView({
     if (coords.length > 0) {
       const lats = coords.map((c) => c[0]);
       const lngs = coords.map((c) => c[1]);
-      
+
       const minLat = Math.min(...lats);
       const maxLat = Math.max(...lats);
       const minLng = Math.min(...lngs);
@@ -3017,7 +2875,7 @@ export function MapView({
   // Updated Code: High-performance O(1) zoomToSelection utilizing pre-computed facilityVillagesMap lookup
   const zoomToSelection = useCallback((provId: number | "all", distId: number | "all", llgId: number | "all") => {
     if (!mapRef.current) return;
-    
+
     // Find all facilities matching the selection
     const matchingFacilities = (facilities || []).filter((f) => {
       if (!f.latitude || !f.longitude) return false;
@@ -3068,7 +2926,7 @@ export function MapView({
     if (coords.length > 0) {
       const lats = coords.map((c) => c[0]);
       const lngs = coords.map((c) => c[1]);
-      
+
       const minLat = Math.min(...lats);
       const maxLat = Math.max(...lats);
       const minLng = Math.min(...lngs);
@@ -3266,7 +3124,7 @@ export function MapView({
     const expanded = mapBounds.pad(0.3);
     return filteredFacilities.filter((f) => {
       if (!f.latitude || !f.longitude) return false;
-      
+
       // If this facility is currently focused/selected, bypass bounds pruning
       if (selectedFacilityId && Number(f.id) === Number(selectedFacilityId)) {
         return true;
@@ -3290,7 +3148,7 @@ export function MapView({
     const expanded = mapBounds.pad(0.3);
     return filteredFacilities.filter((f) => {
       if (!f.latitude || !f.longitude) return false;
-      
+
       // If this facility is currently focused/selected, bypass bounds pruning
       if (selectedFacilityId && Number(f.id) === Number(selectedFacilityId)) {
         return true;
@@ -3462,7 +3320,7 @@ export function MapView({
     let planned = 0;
     let missingStandard = 0;
     let missingHtr = 0;
-    
+
     filteredVillages.forEach((v) => {
       if (v.latitude && v.longitude) {
         if (plannedVillageIds.has(v.id)) {
@@ -3474,7 +3332,7 @@ export function MapView({
         }
       }
     });
-    
+
     const total = planned + missingStandard + missingHtr;
     const coverage = total > 0 ? Math.round((planned / total) * 100) : 0;
 
@@ -3537,7 +3395,7 @@ export function MapView({
       if (filteredVillages.length < 500) return filteredVillages;
       return filteredVillages.filter((v) => {
         if (!v.latitude || !v.longitude) return false;
-        
+
         // If this village is routed to the currently selected/focused facility, bypass bounds pruning
         const isRouted = selectedFacilityId && communityRoutes && communityRoutes.some((r: any) => r.villageId === v.id);
         if (isRouted || (selectedFacilityId && Number(v.assignedFacilityId) === Number(selectedFacilityId))) {
@@ -3596,7 +3454,7 @@ export function MapView({
       return filteredVillages.filter((v) => {
         const coords = villageCoordsCache.get(v.id);
         if (!coords) return false;
-        
+
         // If this village is routed to the currently selected/focused facility, bypass bounds pruning
         const isRouted = selectedFacilityId && routedVillageIds.has(v.id);
         if (isRouted || (selectedFacilityId && Number(v.assignedFacilityId) === Number(selectedFacilityId))) {
@@ -3692,9 +3550,9 @@ export function MapView({
         maxX: expanded.getEast(),
         maxY: expanded.getNorth(),
       };
-      
+
       const inBounds = filteredVillagesSpatialIndex.search(bbox).map(item => item.village);
-      
+
       if (!selectedFacilityId) {
         return inBounds;
       }
@@ -3769,9 +3627,9 @@ export function MapView({
         maxX: expanded.getEast(),
         maxY: expanded.getNorth(),
       };
-      
+
       const inBounds = filteredVillagesSpatialIndex.search(bbox).map(item => item.village);
-      
+
       if (!selectedFacilityId) {
         return inBounds;
       }
@@ -4708,7 +4566,7 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
         return [latSum / coords.length, lngSum / coords.length];
       }
     }
-    
+
     // Fallback: If we have linked villages, find their average
     const linkedVillages = sessionVillages
       ?.filter((sv: any) => sv.sessionId === plan.id)
@@ -4922,14 +4780,14 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
       const checkPolygonCoords = (polygonCoords: any[]): boolean => {
         const outerRing = polygonCoords[0];
         if (!outerRing || outerRing.length < 3) return false;
-        
+
         const ring = outerRing.map((c: any) => {
           if (Array.isArray(c)) {
             return { lat: c[1], lng: c[0] };
           }
           return { lat: c.lat, lng: c.lng };
         });
-        
+
         return isPointInPolygon(pLat, pLng, ring);
       };
 
@@ -5022,13 +4880,13 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
         const bbox = { minX: minLng, minY: minLat, maxX: maxLng, maxY: maxLat };
         const candidates = sparse.tree.search(bbox);
         const cells = sparse.cells;
-        
+
         for (let i = 0; i < candidates.length; i++) {
           const idx = candidates[i].idx * 3;
           const cellLng = cells[idx];
           const cellLat = cells[idx + 1];
           const rawVal = cells[idx + 2];
-          
+
           let inside = false;
           if (matchedFeature.geometry.type === "Polygon") {
             const ring = matchedFeature.geometry.coordinates[0].map((c: number[]) => L.latLng(c[1], c[0]));
@@ -5058,7 +4916,7 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
       })
       .filter((x): x is { facility: any; distance: number } => x !== null)
       .sort((a, b) => a.distance - b.distance);
-    
+
     const nearestFacility = facilitiesWithDist[0] || null;
     const nearbyFacilities = facilitiesWithDist.slice(0, 3);
 
@@ -5068,11 +4926,11 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
         let planLat = 0;
         let planLng = 0;
         let count = 0;
-        
+
         const linkedVillageIds = sessionVillages
           ?.filter((sv: any) => sv.sessionId === plan.id)
           ?.map((sv: any) => sv.villageId) || [];
-          
+
         villages.forEach((v) => {
           if (linkedVillageIds.includes(v.id) && v.latitude && v.longitude) {
             planLat += Number(v.latitude);
@@ -5080,7 +4938,7 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
             count++;
           }
         });
-        
+
         if (count > 0) {
           const avgLat = planLat / count;
           const avgLng = planLng / count;
@@ -5091,7 +4949,7 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
       })
       .filter((x): x is { plan: any; distance: number } => x !== null)
       .sort((a, b) => a.distance - b.distance);
-      
+
     const nearestPlan = plansWithDist[0] || null;
     const nearbyPlans = plansWithDist.slice(0, 3);
 
@@ -5356,8 +5214,13 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
   // Measurement & Catchment Drawing handlers
   const handleMapClick = (e: L.LeafletMouseEvent) => {
     if (isPickingFromMap && pickingOutreachForVillage) {
-      setOutreachLatInput(String(e.latlng.lat));
-      setOutreachLngInput(String(e.latlng.lng));
+      const latitude = String(e.latlng.lat);
+      const longitude = String(e.latlng.lng);
+      setOutreachNameInput(outreachDraftRef.current.name);
+      setOutreachLatInput(latitude);
+      setOutreachLngInput(longitude);
+      outreachDraftRef.current = { ...outreachDraftRef.current, latitude, longitude };
+      skipOutreachHydrationRef.current = true;
       setOutreachDialogTarget(pickingOutreachForVillage);
       setIsPickingFromMap(false);
       setPickingOutreachForVillage(null);
@@ -5411,7 +5274,7 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
       // Asynchronous Fallback for radial population
       if (density === 0) {
         setMapClickDetails(prev => prev ? { ...prev, isLoadingPopulation: true } : prev);
-        
+
         Promise.all([
           fetch(`/api/population/worldpop-point?lat=${lat}&lng=${lng}&radiusKm=1`).then(r => r.json()).catch(() => ({ gridPop: 0 })),
           fetch(`/api/population/worldpop-point?lat=${lat}&lng=${lng}&radiusKm=2`).then(r => r.json()).catch(() => ({ gridPop: 0 })),
@@ -5477,7 +5340,7 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
           geometry: {
             type: "Point",
             coordinates: [
-              f.longitude ? Number(f.longitude) : 0, 
+              f.longitude ? Number(f.longitude) : 0,
               f.latitude ? Number(f.latitude) : 0
             ]
           },
@@ -5494,7 +5357,7 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
           geometry: {
             type: "Point",
             coordinates: [
-              v.longitude ? Number(v.longitude) : 0, 
+              v.longitude ? Number(v.longitude) : 0,
               v.latitude ? Number(v.latitude) : 0
             ]
           },
@@ -5521,11 +5384,11 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
   const handleExportCSV = () => {
     let csvContent = "data:text/csv;charset=utf-8,";
     csvContent += "Type,ID,Name,Code_HMIS,Latitude,Longitude,Hard_To_Reach,Population,Distance_to_Facility_km,Travel_Time_min\n";
-    
+
     facilities.forEach(f => {
       csvContent += `Facility,${f.id},"${(f.name || '').replace(/"/g, '""')}",${f.hmisCode || ""},${f.latitude || ""},${f.longitude || ""},N/A,N/A,N/A,N/A\n`;
     });
-    
+
     villages.forEach(v => {
       csvContent += `Village,${v.id},"${(v.name || '').replace(/"/g, '""')}",${v.code || ""},${v.latitude || ""},${v.longitude || ""},${v.isHardToReach ? "Yes" : "No"},${v.population || ""},${v.distanceToFacility || ""},${v.travelTimeMinutes || ""}\n`;
     });
@@ -5550,7 +5413,7 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
           geometry: {
             type: "Point",
             coordinates: [
-              f.longitude ? Number(f.longitude) : 0, 
+              f.longitude ? Number(f.longitude) : 0,
               f.latitude ? Number(f.latitude) : 0
             ]
           },
@@ -5567,7 +5430,7 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
           geometry: {
             type: "Point",
             coordinates: [
-              v.longitude ? Number(v.longitude) : 0, 
+              v.longitude ? Number(v.longitude) : 0,
               v.latitude ? Number(v.latitude) : 0
             ]
           },
@@ -5593,11 +5456,11 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
   const handleExportCSV = () => {
     let csvContent = "data:text/csv;charset=utf-8,";
     csvContent += "Type,ID,Name,Code_HMIS,Latitude,Longitude,Hard_To_Reach,Population,Distance_to_Facility_km,Travel_Time_min\n";
-    
+
     facilities.forEach(f => {
       csvContent += `Facility,${f.id},"${(f.name || '').replace(/"/g, '""')}",${f.hmisCode || ""},${f.latitude || ""},${f.longitude || ""},N/A,N/A,N/A,N/A\n`;
     });
-    
+
     villages.forEach(v => {
       csvContent += `Village,${v.id},"${(v.name || '').replace(/"/g, '""')}",${v.code || ""},${v.latitude || ""},${v.longitude || ""},${v.isHardToReach ? "Yes" : "No"},N/A,${v.distanceToFacility || ""},${v.travelTimeMinutes || ""}\n`;
     });
@@ -5616,7 +5479,7 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
     setExportDialogOpen(false);
     setIsPrinting(true);
     setLayerPanelOpen(false);
-    
+
     // Allow leafet / map to re-render in printing mode before opening printer prompt
     setTimeout(() => {
       window.print();
@@ -5654,7 +5517,7 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
       {/*
         Updated Code: Enhanced Map container featuring active administrative boundary layers (layers.boundaries)
         fetched dynamically, local health worker catchment polygon layers (layers.hcwCatchments), real-time drawing
-        previews (Polygon/Polyline and CircleMarker vertices), a premium drawing HUD panel, and a dialog popup 
+        previews (Polygon/Polyline and CircleMarker vertices), a premium drawing HUD panel, and a dialog popup
         to bind newly drawn shapes to health facilities.
       */}
       <MapContainer
@@ -5664,7 +5527,7 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
         ref={mapRef}
         zoomControl={false}
         maxZoom={22}
-        maxBounds={tenantInfo?.countryCode === "ZMB" ? [[-18.5, 21.5], [-8.0, 34.0]] : undefined}
+        maxBounds={getTenantMaxBounds(tenantInfo)}
         maxBoundsViscosity={1.0}
       >
         <BasemapTileLayer basemap={basemap} />
@@ -5787,7 +5650,7 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
             selectedProvinceId / selectedDistrictId / selectedLlgId — so this
             layer is never unmounted by a filter change. Selection-aware
             emphasis is applied imperatively via `grid3LayerRef.setStyle`. */}
-        {layers.grid3Settlements && grid3GeoJSON && tenantInfo?.countryCode === "ZMB" && (
+        {layers.grid3Settlements && grid3GeoJSON?.features?.length > 0 && (
           <>
             <Grid3PaneCreator />
             <GeoJSON
@@ -5812,7 +5675,7 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
                   <div class="border-t pt-1 flex flex-col gap-0.5 mt-1 text-foreground">
                     <div><strong>Type:</strong> ${props.type || 'N/A'}</div>
                     <div><strong>Buildings:</strong> ${count} units</div>
-                    <div><strong>Built Area:</strong> ${area} m²</div>
+                    <div><strong>Built Area:</strong> ${area} mÂ²</div>
                     <div><strong>Source:</strong> ${props.source || 'CIESIN'}</div>
                   </div>
                 </div>
@@ -5866,7 +5729,7 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
                 }}
               />
             )}
-            
+
             {/* Render CircleMarkers for vertices */}
             {sessionPolygonPoints.map((pt, idx) => (
               <CircleMarker
@@ -5887,9 +5750,9 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
         {/* Render Active Session Plans (Planned vs Achieved) */}
         {activeSessionPlans.map((plan: any) => {
           if (!plan.geojson || !plan.geojson.coordinates) return null;
-          
+
           const isAchieved = plan.isAchieved;
-          
+
           // Color coding: Achieved = Solid Green (#10b981), Planned = Dashed Gold-Amber (#f59e0b)
           const color = isAchieved ? "#10b981" : "#f59e0b";
           const weight = isAchieved ? 3.5 : 2.5;
@@ -5935,7 +5798,7 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
                   <p className="text-[10px] text-muted-foreground mb-2">
                     Catchment Target: <strong>{plan.targetPopulation || 0}</strong> people
                   </p>
-                  
+
                   {linkedVils && linkedVils.length > 0 && (
                     <div className="mb-3">
                       <div className="text-[9px] font-bold text-muted-foreground uppercase tracking-wider mb-1">
@@ -6128,20 +5991,15 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
                   data={geojson}
                   style={choroplethStyleFn ?? style}
                   onEachFeature={(feature, layer) => {
-                    const name =
-                      feature.properties?.name ||
-                      feature.properties?.NAME ||
-                      feature.properties?.shapeName ||
-                      b.levelName ||
-                      "Administrative Boundary";
-                    
-                    if (layers.showLabels) {
+                    const name = getBoundaryFeatureName(feature, b.adminLevel);
+
+                    if (layers.showLabels && name) {
                       layer.bindTooltip(resolveLabel(name), {
                         permanent: true,
                         direction: "center",
                         className: "map-boundary-label",
                       });
-                    } else {
+                    } else if (name) {
                       layer.bindTooltip(resolveLabel(name), {
                         sticky: true,
                         className: "text-xs font-semibold px-2 py-1 rounded bg-background border shadow",
@@ -6149,13 +6007,7 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
                     }
 
                     // Pre-match boundary polygons with database entities for renaming and filtering
-                    const fName = feature.properties?.name ||
-                      feature.properties?.NAME ||
-                      feature.properties?.shapeName ||
-                      feature.properties?.NAME_1 ||
-                      feature.properties?.NAME_2 ||
-                      feature.properties?.NAME_3 ||
-                      "";
+                    const fName = getBoundaryFeatureName(feature, b.adminLevel);
                     const normFName = normalizeName(fName);
 
                     let matchedEntityId: number | null = null;
@@ -6186,12 +6038,12 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
                     // Create Leaflet Popup content offering Zoom + Rename
                     const container = document.createElement("div");
                     container.className = "p-2.5 font-sans text-xs space-y-2 min-w-[160px]";
-                    
+
                     const title = document.createElement("h4");
                     title.className = "font-bold text-foreground text-xs border-b pb-1 truncate";
                     title.innerText = name;
                     container.appendChild(title);
-                    
+
                     const metaInfo = document.createElement("p");
                     metaInfo.className = "text-[9px] font-bold text-muted-foreground uppercase tracking-wider";
                     metaInfo.innerText = `${b.levelName || "Boundary"}`;
@@ -6199,17 +6051,17 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
 
                     const buttonsDiv = document.createElement("div");
                     buttonsDiv.className = "flex flex-col gap-1 pt-1";
-                    
+
                     const zoomBtn = document.createElement("button");
                     zoomBtn.className = "w-full text-left px-2 py-1.5 hover:bg-accent rounded text-[10px] font-bold flex items-center gap-1.5 transition-colors";
-                    zoomBtn.innerHTML = "🔍 Zoom to area";
+                    zoomBtn.innerHTML = "Zoom to area";
                     zoomBtn.onclick = (e) => {
                       e.stopPropagation();
                       const pathLayer = layer as any;
                       if (mapRef.current && typeof pathLayer.getBounds === "function") {
                         mapRef.current.fitBounds(pathLayer.getBounds(), { padding: [20, 20] });
                       }
-                      
+
                       // Apply cascading filter in Sidebar
                       if (matchedEntityType === "province" && matchedEntityId) {
                         handleProvinceChange(matchedEntityId);
@@ -6220,12 +6072,12 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
                       }
                     };
                     buttonsDiv.appendChild(zoomBtn);
-                    
+
                     // Plan outreach session button dynamically linked to click coordinate
                     const planBtn = document.createElement("button");
                     planBtn.className = "w-full text-left px-2 py-1.5 hover:bg-accent rounded text-[10px] font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5 transition-colors";
-                    planBtn.innerHTML = "📅 Plan outreach session here";
-                    
+                    planBtn.innerHTML = "Plan outreach session here";
+
                     let currentLatLng: L.LatLng | null = null;
                     planBtn.onclick = (e) => {
                       e.stopPropagation();
@@ -6239,7 +6091,7 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
                     if (matchedEntityId && matchedEntityType) {
                       const renameBtn = document.createElement("button");
                       renameBtn.className = "w-full text-left px-2 py-1.5 hover:bg-accent rounded text-[10px] font-bold text-primary flex items-center gap-1.5 transition-colors";
-                      renameBtn.innerHTML = "✏️ Rename this area";
+                      renameBtn.innerHTML = "Rename this area";
                       renameBtn.onclick = (e) => {
                         e.stopPropagation();
                         setRenameTarget({
@@ -6250,7 +6102,7 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
                       };
                       buttonsDiv.appendChild(renameBtn);
                     }
-                    
+
                     container.appendChild(buttonsDiv);
                     layer.bindPopup(container);
 
@@ -6327,17 +6179,17 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
                           <div class="space-y-2 text-[11px] leading-snug">
                             <div class="bg-primary/5 border border-primary/10 rounded p-1.5 space-y-0.5">
                               <div class="flex justify-between items-center text-[9px] text-muted-foreground">
-                                <span>📍 CLICK COORDINATES</span>
+                                <span>CLICK COORDINATES</span>
                                 <span class="font-mono">${lat.toFixed(5)}, ${lng.toFixed(5)}</span>
                               </div>
                               ${ctx.polygonName ? `
                               <div class="text-[10px] font-bold text-primary flex justify-between items-center gap-1.5 mt-0.5">
-                                <span class="truncate">🗺️ ${ctx.polygonName}</span>
-                                ${ctx.polygonPopulation ? `<span class="text-emerald-600 font-bold shrink-0">≈ ${ctx.polygonPopulation.toLocaleString()} pop</span>` : ""}
+                                <span class="truncate">${ctx.polygonName}</span>
+                                ${ctx.polygonPopulation ? `<span class="text-emerald-600 font-bold shrink-0">~ ${ctx.polygonPopulation.toLocaleString()} pop</span>` : ""}
                               </div>
                               ` : ""}
                             </div>
-                            
+
                             <div class="space-y-1">
                               <span class="font-bold text-[9px] text-muted-foreground uppercase block">Aggressive Gridded Population</span>
                               <div class="grid grid-cols-3 gap-1 text-center font-mono text-[10px]">
@@ -6360,11 +6212,11 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
                               <span class="font-bold text-[9px] text-muted-foreground uppercase block">Catchment Proximity</span>
                               <div class="space-y-1 text-[10px]">
                                 <div class="flex justify-between items-center bg-muted/40 p-1 rounded px-1.5">
-                                  <span class="text-muted-foreground truncate max-w-[150px]">🏥 HF: ${ctx.nearestFacility?.name || "None"}</span>
+                                  <span class="text-muted-foreground truncate max-w-[150px]">HF: ${ctx.nearestFacility?.name || "None"}</span>
                                   <span class="font-mono font-bold shrink-0">${ctx.nearestFacility ? `${ctx.nearestFacility.distance}km` : "—"}</span>
                                 </div>
                                 <div class="flex justify-between items-center bg-muted/40 p-1 rounded px-1.5">
-                                  <span class="text-muted-foreground truncate max-w-[150px]">📅 Session: ${ctx.nearestPlan?.name || "None"}</span>
+                                  <span class="text-muted-foreground truncate max-w-[150px]">Session: ${ctx.nearestPlan?.name || "None"}</span>
                                   <span class="font-mono font-bold shrink-0">${ctx.nearestPlan ? `${ctx.nearestPlan.distance}km` : "—"}</span>
                                 </div>
                               </div>
@@ -6376,7 +6228,7 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
                                 ${ctx.nearbyVillages.length > 0 ? ctx.nearbyVillages.map(nv => `
                                   <div class="flex justify-between items-center text-[10px] border-b border-border/40 pb-0.5 last:border-0">
                                     <span class="truncate max-w-[110px] ${nv.isHardToReach ? 'text-amber-600 font-medium' : 'text-foreground'}">
-                                      🏡 ${nv.name} ${nv.isHardToReach ? '⚠️' : ''}
+                                      ${nv.name} ${nv.isHardToReach ? '(HTR)' : ''}
                                     </span>
                                     <span class="text-muted-foreground font-mono shrink-0">${nv.population} pop (${nv.distance}km)</span>
                                   </div>
@@ -6386,7 +6238,7 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
 
                             ${ctx.isHTR ? `
                             <div class="bg-amber-500/10 border border-amber-500/20 text-amber-700 rounded p-1.5 text-[9px] flex items-start gap-1 font-medium">
-                              <span>⚠️</span>
+                              <span>!</span>
                               <span>Hard-to-Reach (HTR) designated zone.</span>
                             </div>
                             ` : ""}
@@ -6450,7 +6302,7 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
                   fillColor: "#38bdf8", // Sky blue fill
                 }}
                 onEachFeature={(feature, layer) => {
-                  const areaStr = catchment.areaSqKm ? `${Number(catchment.areaSqKm).toFixed(2)} km²` : "N/A";
+                  const areaStr = catchment.areaSqKm ? `${Number(catchment.areaSqKm).toFixed(2)} kmÂ²` : "N/A";
                   const popStr = catchment.populationEstimate ? `${catchment.populationEstimate}` : "N/A";
                   const savedAt = (catchment as any).createdAt
                     ? new Date((catchment as any).createdAt).toLocaleString()
@@ -6509,7 +6361,7 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
                   fillColor: "#38bdf8", // Sky blue fill
                 }}
                 onEachFeature={(feature, layer) => {
-                  const areaStr = catchment.areaSqKm ? `${Number(catchment.areaSqKm).toFixed(2)} km²` : "N/A";
+                  const areaStr = catchment.areaSqKm ? `${Number(catchment.areaSqKm).toFixed(2)} kmÂ²` : "N/A";
                   const popStr = catchment.populationEstimate ? `${catchment.populationEstimate}` : "N/A";
                   const savedAt = (catchment as any).createdAt
                     ? new Date((catchment as any).createdAt).toLocaleString()
@@ -6644,15 +6496,15 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
             .map((village) => {
               const facility = filteredFacilitiesMap.get(Number(village.assignedFacilityId));
               if (!facility || !facility.latitude || !facility.longitude) return null;
-        
+
               const vLat = Number(village.latitude);
               const vLng = Number(village.longitude);
               const fLat = Number(facility.latitude);
               const fLng = Number(facility.longitude);
-        
+
               // Calculate Turf geodesic distance
               const dist = distance([vLng, vLat], [fLng, fLat], { units: "kilometers" });
-        
+
               // Color code based on walkability distance
               let color = "#22c55e"; // Walkable (<5km)
               if (dist > 10) {
@@ -6660,7 +6512,7 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
               } else if (dist > 5) {
                 color = "#ea580c"; // Outreach (5-10km)
               }
-        
+
               return (
                 <Polyline
                   key={`link-${village.id}-${facility.id}`}
@@ -6757,7 +6609,7 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
           communityRoutes.map((route: any) => {
             if (!route.routeGeometry || route.routeGeometry.length === 0) return null;
             const positions = route.routeGeometry.map(([lng, lat]: [number, number]) => [lat, lng]);
-            
+
             // Color code based on walkability distance
             const dist = route.distanceToFacility || 0;
             let color = "#3b82f6"; // Primary blue
@@ -6973,7 +6825,7 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
                               <span className="text-muted-foreground">Staff</span>
                               <span className="font-bold text-foreground text-sm leading-none mt-0.5">{facility.staffCount ?? "—"}</span>
                             </div>
-                            <div 
+                            <div
                               className="flex flex-col items-center justify-center bg-muted/60 rounded p-1.5 cursor-pointer hover:bg-muted/80 hover:text-primary transition-all duration-200"
                               onClick={() => setLocation("/population")}
                             >
@@ -6986,7 +6838,7 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
                                 {catchmentPop > 0 ? catchmentPop.toLocaleString() : "—"}
                               </span>
                             </div>
-                            <div 
+                            <div
                               className="flex flex-col items-center justify-center rounded p-1.5 border border-dashed border-primary/30 bg-primary/5 cursor-pointer hover:bg-primary/10 transition-all duration-200"
                               onClick={() => setLocation("/all-sessions")}
                             >
@@ -7109,7 +6961,7 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
                             }}
                             className="text-[10px] text-primary hover:underline font-bold mt-1 inline-flex items-center gap-0.5"
                           >
-                            ✏️ Rename
+                            Rename
                           </button>
                         </div>
                         {plannedVillageIds.has(village.id) ? (
@@ -7218,8 +7070,8 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
                           } else {
                             return (
                               <div className={`flex items-center gap-1.5 font-semibold p-1 px-1.5 rounded border ${
-                                village.isHardToReach 
-                                  ? "text-red-600 dark:text-red-400 bg-red-500/5 border-red-500/10" 
+                                village.isHardToReach
+                                  ? "text-red-600 dark:text-red-400 bg-red-500/5 border-red-500/10"
                                   : "text-amber-600 dark:text-amber-400 bg-amber-500/5 border-amber-500/10"
                               }`}>
                                 <XCircle className="h-3.5 w-3.5 text-current shrink-0" />
@@ -7238,7 +7090,7 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
                           <div className="space-y-1 bg-purple-500/5 p-1 px-1.5 rounded border border-purple-500/10">
                             <div className="flex justify-between items-center">
                               <span className="font-semibold text-purple-700 dark:text-purple-400 truncate max-w-[120px]" title={village.outreachPostName || "Outreach Post"}>
-                                📍 {village.outreachPostName || "Outreach Post"}
+                                {village.outreachPostName || "Outreach Post"}
                               </span>
                               <div className="flex gap-1">
                                 <button
@@ -7382,7 +7234,7 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
                     <Popup className="premium-map-popup">
                       <div className="w-56 p-3 font-sans text-xs">
                         <h4 className="font-bold text-sm text-[#a855f7] mb-1">
-                          📍 {village.outreachPostName || "Outreach Post"}
+                                {village.outreachPostName || "Outreach Post"}
                         </h4>
                         <p className="text-muted-foreground mb-2">
                           Outreach post for community: <strong>{village.name}</strong>
@@ -7673,7 +7525,7 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
                 <Popup>
                   <div className="text-xs space-y-1">
                     <div className="font-semibold">{v.villageName}</div>
-                    <div>{v.facilityName} · {v.districtName}</div>
+                    <div>{v.facilityName} Â· {v.districtName}</div>
                     <div>
                       Zero-dose: <strong>{v.zeroDose}</strong> ({v.pct}%)
                     </div>
@@ -7773,7 +7625,7 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
                 <Popup>
                   <div className="text-xs space-y-1">
                     <div className="font-semibold">{v.villageName}</div>
-                    <div>{v.facilityName} · {v.districtName}</div>
+                    <div>{v.facilityName} Â· {v.districtName}</div>
                     <div>
                       Under-imm: <strong>{v.underImmunized}</strong> ({v.underImmunizedPct}%)
                     </div>
@@ -7957,7 +7809,7 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
                 <Popup className="premium-map-popup">
                   <div className="w-64 p-3 font-sans text-xs">
                     <h4 className="font-bold text-sm text-[#2563eb] mb-1">
-                      🏢 {facility.name}
+                      {facility.name}
                     </h4>
                     <p className="text-muted-foreground mb-2">
                       Reporting Facility
@@ -8285,7 +8137,7 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
                       setIsDrawingSessionPolygon(false);
                       setNewSessionDate(getMinScheduleDateInputValue());
                       setCreateSessionDialogOpen(true);
-                      
+
                       toast({
                         title: "Geofence Plotted",
                         description: `Automatically calculated target population of ${pop} people inside this geofenced catchment.`,
@@ -8320,6 +8172,7 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
                 boundaryList={boundaryList}
                 countryCode={tenantInfo?.countryCode}
                 adminLabels={adminLabels}
+                grid3Unavailable={!!layers.grid3Settlements && !!grid3GeoJSON && !(grid3GeoJSON.features?.length > 0)}
               />
             </div>
           )}
@@ -8775,7 +8628,7 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
 
       {/* Floating Facility List Panel */}
       {showFacilityList && panelVis.facilities && !isPrinting && (
-        <div 
+        <div
           className="absolute right-4 top-16 w-80 h-[calc(100vh-140px)] max-h-[700px] z-[1000] flex flex-col bg-background/95 backdrop-blur-md border border-border shadow-2xl rounded-xl overflow-hidden transition-all duration-300"
           ref={disableLeafletPropagation}
         >
@@ -9008,7 +8861,7 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
                       <X className="h-3.5 w-3.5" />
                     </Button>
                   </div>
-                  
+
                   {(() => {
                     const fac = facilities.find((f) => f.id === selectedFacilityId);
                     if (!fac) return null;
@@ -9607,8 +9460,8 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
               <TabsList className="grid w-full grid-cols-3 bg-muted p-1 rounded-xl">
                 <TabsTrigger value="location" className="text-xs font-semibold py-1.5 rounded-lg">Location & Context</TabsTrigger>
                 <TabsTrigger value="microplanning" className="text-xs font-semibold py-1.5 rounded-lg">Planning & Coverage</TabsTrigger>
-                <TabsTrigger 
-                  value="feature" 
+                <TabsTrigger
+                  value="feature"
                   disabled={!mapClickDetails.intersectedFeature}
                   className="text-xs font-semibold py-1.5 rounded-lg disabled:opacity-40"
                 >
@@ -9693,7 +9546,7 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
                         {mapClickDetails.landmarks.map((l: any, idx: number) => (
                           <div key={idx} className="flex justify-between items-center text-[11px]">
                             <span className="flex items-center gap-1.5 text-foreground">
-                              {l.type === "school" ? "🏫" : l.type === "church" ? "⛪" : l.type === "market" ? "🛒" : "📍"}
+                              {l.type === "school" ? "School" : l.type === "church" ? "Church" : l.type === "market" ? "Market" : "Place"}
                               <span className="font-medium">{l.name}</span>
                             </span>
                             <span className="font-mono text-muted-foreground text-[10px]">{l.distance} km</span>
@@ -9740,7 +9593,7 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
                   {mapClickDetails.nearestFacility ? (
                     <div className="space-y-1.5">
                       <div className="flex justify-between items-center">
-                        <span className="font-bold text-foreground">🏥 {mapClickDetails.nearestFacility.name}</span>
+                        <span className="font-bold text-foreground">Facility: {mapClickDetails.nearestFacility.name}</span>
                         <Badge variant="secondary" className="text-[9px] font-semibold">
                           {mapClickDetails.nearestFacility.facilityType}
                         </Badge>
@@ -9761,7 +9614,7 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
                   {mapClickDetails.nearestVillage ? (
                     <div className="space-y-1.5">
                       <div className="flex justify-between items-center">
-                        <span className="font-bold text-foreground">🏡 {mapClickDetails.nearestVillage.name}</span>
+                        <span className="font-bold text-foreground">Community: {mapClickDetails.nearestVillage.name}</span>
                         {mapClickDetails.nearestVillage.isHardToReach && (
                           <Badge variant="destructive" className="text-[9px] font-semibold">Hard to Reach</Badge>
                         )}
@@ -9812,9 +9665,9 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
                           Intersected {mapClickDetails.intersectedFeature.type.toUpperCase()}
                         </span>
                         <span className="font-bold text-foreground text-sm">
-                          {mapClickDetails.intersectedFeature.type === "facility" && "🏥 " + mapClickDetails.intersectedFeature.data.name}
-                          {mapClickDetails.intersectedFeature.type === "village" && "🏡 " + mapClickDetails.intersectedFeature.data.name}
-                          {mapClickDetails.intersectedFeature.type === "catchment" && "🗺️ " + mapClickDetails.intersectedFeature.data.name}
+                          {mapClickDetails.intersectedFeature.type === "facility" && "Facility: " + mapClickDetails.intersectedFeature.data.name}
+                          {mapClickDetails.intersectedFeature.type === "village" && "Community: " + mapClickDetails.intersectedFeature.data.name}
+                          {mapClickDetails.intersectedFeature.type === "catchment" && "Catchment: " + mapClickDetails.intersectedFeature.data.name}
                           {mapClickDetails.intersectedFeature.type === "session" && "📅 " + mapClickDetails.intersectedFeature.data.name}
                         </span>
                       </div>
@@ -9871,7 +9724,6 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
                           )}
                         </>
                       )}
-
                       {mapClickDetails.intersectedFeature.type === "village" && (
                         <>
                           <div className="p-2 bg-muted/40 rounded-lg">
@@ -9927,7 +9779,6 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
                           )}
                         </>
                       )}
-
                       {mapClickDetails.intersectedFeature.type === "catchment" && (
                         <>
                           <div className="p-2 bg-muted/40 rounded-lg">
@@ -10270,7 +10121,7 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
                 if (!mapClickDetails || !selectedParentFacilityId) return;
                 const lat = mapClickDetails.lat;
                 const lng = mapClickDetails.lng;
-                
+
                 // Construct closed polygon geofence representing centroid coordinate default
                 const radiusDegrees = 0.005; // ~500m geofence outline
                 const coordinates = [[
@@ -10397,11 +10248,15 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
       {/* Click-to-pick Outreach location Banner Overlay */}
       {isPickingFromMap && pickingOutreachForVillage && (
         <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[2000] bg-purple-600 text-white px-4 py-2.5 rounded-full shadow-lg flex items-center gap-3 text-xs font-semibold animate-pulse border border-purple-400">
-          <span>📍 Click on the map to place the Outreach Post for <strong>{pickingOutreachForVillage.name}</strong></span>
+          <span>Click on the map to place the Outreach Post for <strong>{pickingOutreachForVillage.name}</strong></span>
           <Button
             size="sm"
             className="h-6 rounded-full bg-white/20 text-white hover:bg-white/30 border-none text-[10px] px-2 font-bold"
             onClick={() => {
+              setOutreachNameInput(outreachDraftRef.current.name);
+              setOutreachLatInput(outreachDraftRef.current.latitude);
+              setOutreachLngInput(outreachDraftRef.current.longitude);
+              skipOutreachHydrationRef.current = true;
               setOutreachDialogTarget(pickingOutreachForVillage);
               setIsPickingFromMap(false);
               setPickingOutreachForVillage(null);
@@ -10414,18 +10269,23 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
 
       {/* Outreach Post Configuration Dialog */}
       <Dialog open={!!outreachDialogTarget} onOpenChange={(open) => { if (!open) setOutreachDialogTarget(null); }}>
-        <DialogContent className="sm:max-w-md font-sans bg-background border border-border shadow-2xl rounded-2xl">
+        <DialogContent className="sm:max-w-lg font-sans bg-background border border-border shadow-2xl rounded-2xl">
           <DialogHeader>
             <DialogTitle className="text-purple-600 dark:text-purple-400 flex items-center gap-1.5 font-bold">
-              <span>📍 Configure Outreach Post</span>
+              <span>Configure Outreach Post</span>
             </DialogTitle>
             <DialogDescription className="text-xs text-muted-foreground pt-1">
-              Set the persistent location and name of the outreach post for <strong>{outreachDialogTarget?.name}</strong>.
+              Create a reusable service point for <strong>{outreachDialogTarget?.name}</strong>. It will appear as a violet pin on the map.
             </DialogDescription>
           </DialogHeader>
+          <div className="grid grid-cols-3 gap-2 text-[10px]" aria-label="Outreach post setup steps">
+            <div className="rounded-lg border border-purple-500/30 bg-purple-500/5 p-2"><strong className="block text-purple-700">1. Name</strong><span className="text-muted-foreground">Identify the post</span></div>
+            <div className="rounded-lg border border-purple-500/30 bg-purple-500/5 p-2"><strong className="block text-purple-700">2. Locate</strong><span className="text-muted-foreground">Choose coordinates</span></div>
+            <div className="rounded-lg border border-purple-500/30 bg-purple-500/5 p-2"><strong className="block text-purple-700">3. Save</strong><span className="text-muted-foreground">Create the map pin</span></div>
+          </div>
           <div className="space-y-4 py-2 text-xs">
             <div className="space-y-1.5">
-              <Label htmlFor="outreach-name" className="text-xs font-semibold">Post Name</Label>
+              <Label htmlFor="outreach-name" className="text-xs font-semibold">1. Post name</Label>
               <Input
                 id="outreach-name"
                 value={outreachNameInput}
@@ -10433,6 +10293,10 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
                 placeholder="e.g. Community Health Post, Under-tree Outpost"
                 className="h-8 text-xs bg-background/50"
               />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs font-semibold">2. Choose the post location</Label>
+              <p className="text-[10px] text-muted-foreground">Select a point on the map, use the community center, capture device GPS, or enter coordinates manually.</p>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
@@ -10460,6 +10324,15 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
                 />
               </div>
             </div>
+            {(outreachLatInput && outreachLngInput) ? (
+              <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 px-3 py-2 text-[10px] text-emerald-700">
+                Location ready: {Number(outreachLatInput).toFixed(5)}, {Number(outreachLngInput).toFixed(5)}
+              </div>
+            ) : (
+              <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-[10px] text-amber-700">
+                A location is required before this outreach post can be saved.
+              </div>
+            )}
             <div className="grid grid-cols-3 gap-2 pt-1">
               <Button
                 type="button"
@@ -10468,13 +10341,18 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
                 className="h-7 text-[10px] font-semibold border-purple-500/20 text-purple-600 hover:bg-purple-50"
                 onClick={() => {
                   if (outreachDialogTarget) {
+                    outreachDraftRef.current = {
+                      name: outreachNameInput,
+                      latitude: outreachLatInput,
+                      longitude: outreachLngInput,
+                    };
                     setPickingOutreachForVillage(outreachDialogTarget);
-                    setOutreachDialogTarget(null);
                     setIsPickingFromMap(true);
+                    setOutreachDialogTarget(null);
                   }
                 }}
               >
-                🖱️ Select on Map
+                Select on Map
               </Button>
               <Button
                 type="button"
@@ -10488,7 +10366,7 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
                   }
                 }}
               >
-                🏠 Use Village Center
+                Use Village Center
               </Button>
               <Button
                 type="button"
@@ -10523,7 +10401,7 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
                   }
                 }}
               >
-                🛰️ Use Current GPS
+                Use Current GPS
               </Button>
             </div>
           </div>
@@ -10533,53 +10411,72 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
               size="sm"
               className="h-8 text-xs"
               onClick={() => setOutreachDialogTarget(null)}
+              disabled={isSavingOutreach}
             >
               Cancel
             </Button>
             <Button
               size="sm"
               className="h-8 text-xs bg-purple-600 hover:bg-purple-700 text-white font-semibold"
+              disabled={isSavingOutreach}
               onClick={async () => {
+                if (!outreachDialogTarget) return;
+                if (!outreachNameInput.trim()) {
+                  toast({
+                    title: "Post name required",
+                    description: "Enter a clear name for the outreach post.",
+                    variant: "destructive",
+                  });
+                  return;
+                }
                 if (!outreachLatInput || !outreachLngInput) {
                   toast({
-                    title: "Missing coordinates",
-                    description: "Please specify latitude and longitude for the outreach post.",
+                    title: "Location required",
+                    description: "Choose a location method or enter latitude and longitude.",
                     variant: "destructive",
                   });
                   return;
                 }
-                const lat = parseFloat(outreachLatInput);
-                const lng = parseFloat(outreachLngInput);
-                if (isNaN(lat) || isNaN(lng)) {
+                const lat = Number(outreachLatInput);
+                const lng = Number(outreachLngInput);
+                if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
                   toast({
                     title: "Invalid coordinates",
-                    description: "Please specify valid numeric latitude and longitude coordinates.",
+                    description: "Latitude must be between -90 and 90; longitude must be between -180 and 180.",
                     variant: "destructive",
                   });
                   return;
                 }
+                setIsSavingOutreach(true);
                 try {
-                  await apiRequest("PATCH", `/api/villages/${outreachDialogTarget?.id}`, {
+                  const updatedVillage = await apiRequest<Village>("PATCH", `/api/villages/${outreachDialogTarget.id}`, {
                     outreachLatitude: String(lat),
                     outreachLongitude: String(lng),
-                    outreachPostName: outreachNameInput.trim() || null,
+                    outreachPostName: outreachNameInput.trim(),
                   });
-                  queryClient.invalidateQueries({ queryKey: ["/api/villages"] });
+                  queryClient.setQueriesData<Village[]>({ queryKey: ["/api/villages"] }, (current) =>
+                    Array.isArray(current)
+                      ? current.map((village) => village.id === updatedVillage.id ? updatedVillage : village)
+                      : current,
+                  );
+                  void queryClient.invalidateQueries({ queryKey: ["/api/villages"], refetchType: "none" });
                   toast({
                     title: "Outreach post saved",
-                    description: `Successfully configured outreach post for ${outreachDialogTarget?.name}.`,
+                    description: `${outreachNameInput.trim()} is now shown as a violet map pin for ${outreachDialogTarget.name}.`,
                   });
                   setOutreachDialogTarget(null);
                 } catch (err) {
                   toast({
-                    title: "Error saving outreach post",
-                    description: "Failed to save the outreach post location. Please try again.",
+                    title: "Could not save outreach post",
+                    description: err instanceof Error ? err.message : "The outreach post could not be saved. Please try again.",
                     variant: "destructive",
                   });
+                } finally {
+                  setIsSavingOutreach(false);
                 }
               }}
             >
-              Save Configuration
+              {isSavingOutreach ? "Saving outreach post..." : "3. Save outreach post"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -10588,4 +10485,3 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
     </div>
   );
 }
-

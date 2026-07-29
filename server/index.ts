@@ -352,8 +352,12 @@ async function backfillClientIds() {
   startSupervisionDigestScheduler();
   startApprovalScheduler();
   startMicroplanApprovalCron();
-  // Initialize UCE queue worker
-  import("./services/uce/workers").catch((err) => log(`Failed to load UCE worker: ${err}`));
+  // Initialize the UCE worker only when Redis is explicitly configured.
+  if (process.env.REDIS_URL?.trim()) {
+    import("./services/uce/workers").catch((err) => log(`Failed to load UCE worker: ${err}`));
+  } else {
+    log("REDIS_URL not configured: UCE queue worker disabled", "uce");
+  }
   // Auto-run the demo operational seed on startup. Idempotent: every step
   // skips/upserts so subsequent boots are a no-op once data is in place.
   // Runs in the background so a slow seed never blocks the HTTP listener.

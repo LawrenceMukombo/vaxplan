@@ -1,0 +1,505 @@
+{
+  "feature_count": 8120,
+  "geometry_types": {
+    "POINT": 7554,
+    "POLYGON": 566
+  },
+  "bbox": [
+    29.5835633,
+    -1.4584955,
+    34.9950819,
+    3.8747442
+  ],
+  "columns": [
+    {
+      "name": "id",
+      "type": "VARCHAR",
+      "null_count": 0,
+      "null_percent": 0.0,
+      "distinct_count": 8120,
+      "top_values": []
+    },
+    {
+      "name": "name",
+      "type": "VARCHAR",
+      "null_count": 505,
+      "null_percent": 6.22,
+      "distinct_count": 6785,
+      "top_values": []
+    },
+    {
+      "name": "name_en",
+      "type": "VARCHAR",
+      "null_count": 8082,
+      "null_percent": 99.53,
+      "distinct_count": 36,
+      "top_values": [
+        {
+          "value": "Chanika Medical Clinic",
+          "count": 2
+        },
+        {
+          "value": "Grace Family Shop",
+          "count": 2
+        },
+        {
+          "value": "Claire Nsenga Health Centre III",
+          "count": 1
+        },
+        {
+          "value": "Kilembe Hospital",
+          "count": 1
+        },
+        {
+          "value": "Aripea HC III",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "name": "name_sw",
+      "type": "VARCHAR",
+      "null_count": 8120,
+      "null_percent": 100.0,
+      "distinct_count": 0,
+      "top_values": []
+    },
+    {
+      "name": "amenity",
+      "type": "VARCHAR",
+      "null_count": 77,
+      "null_percent": 0.95,
+      "distinct_count": 7,
+      "top_values": [
+        {
+          "value": "clinic",
+          "count": 3226
+        },
+        {
+          "value": "hospital",
+          "count": 2524
+        },
+        {
+          "value": "doctors",
+          "count": 1179
+        },
+        {
+          "value": "pharmacy",
+          "count": 1058
+        },
+        {
+          "value": "dentist",
+          "count": 54
+        }
+      ]
+    },
+    {
+      "name": "building",
+      "type": "VARCHAR",
+      "null_count": 7872,
+      "null_percent": 96.95,
+      "distinct_count": 10,
+      "top_values": [
+        {
+          "value": "yes",
+          "count": 159
+        },
+        {
+          "value": "hospital",
+          "count": 77
+        },
+        {
+          "value": "Health Centre",
+          "count": 4
+        },
+        {
+          "value": "clinic",
+          "count": 2
+        },
+        {
+          "value": "prime phamacy",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "name": "healthcare",
+      "type": "VARCHAR",
+      "null_count": 7097,
+      "null_percent": 87.4,
+      "distinct_count": 20,
+      "top_values": [
+        {
+          "value": "hospital",
+          "count": 395
+        },
+        {
+          "value": "clinic",
+          "count": 252
+        },
+        {
+          "value": "pharmacy",
+          "count": 173
+        },
+        {
+          "value": "doctor",
+          "count": 129
+        },
+        {
+          "value": "laboratory",
+          "count": 21
+        }
+      ]
+    },
+    {
+      "name": "healthcare_speciality",
+      "type": "VARCHAR",
+      "null_count": 8051,
+      "null_percent": 99.15,
+      "distinct_count": 39,
+      "top_values": [
+        {
+          "value": "general",
+          "count": 26
+        },
+        {
+          "value": "homeopathy",
+          "count": 2
+        },
+        {
+          "value": "psychiatry",
+          "count": 2
+        },
+        {
+          "value": "radiology",
+          "count": 2
+        },
+        {
+          "value": "emergency",
+          "count": 2
+        }
+      ]
+    },
+    {
+      "name": "operator_type",
+      "type": "VARCHAR",
+      "null_count": 7813,
+      "null_percent": 96.22,
+      "distinct_count": 26,
+      "top_values": [
+        {
+          "value": "private",
+          "count": 158
+        },
+        {
+          "value": "government",
+          "count": 36
+        },
+        {
+          "value": "private_non_profit",
+          "count": 22
+        },
+        {
+          "value": "Private",
+          "count": 17
+        },
+        {
+          "value": "ngo",
+          "count": 14
+        }
+      ]
+    },
+    {
+      "name": "capacity_persons",
+      "type": "VARCHAR",
+      "null_count": 8120,
+      "null_percent": 100.0,
+      "distinct_count": 0,
+      "top_values": []
+    },
+    {
+      "name": "addr_full",
+      "type": "VARCHAR",
+      "null_count": 8110,
+      "null_percent": 99.88,
+      "distinct_count": 9,
+      "top_values": [
+        {
+          "value": "Kira Ln",
+          "count": 2
+        },
+        {
+          "value": "Busitema University",
+          "count": 1
+        },
+        {
+          "value": "Kyaliwajjala-Namugongo",
+          "count": 1
+        },
+        {
+          "value": "Kira",
+          "count": 1
+        },
+        {
+          "value": "Kyaliwajjala_Naalya Road",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "name": "addr_city",
+      "type": "VARCHAR",
+      "null_count": 6624,
+      "null_percent": 81.58,
+      "distinct_count": 247,
+      "top_values": [
+        {
+          "value": "Kampala",
+          "count": 306
+        },
+        {
+          "value": "kampala",
+          "count": 213
+        },
+        {
+          "value": "mbale",
+          "count": 90
+        },
+        {
+          "value": "Hoima",
+          "count": 60
+        },
+        {
+          "value": "Mbale",
+          "count": 57
+        }
+      ]
+    },
+    {
+      "name": "source",
+      "type": "VARCHAR",
+      "null_count": 8120,
+      "null_percent": 100.0,
+      "distinct_count": 0,
+      "top_values": []
+    },
+    {
+      "name": "adm0_pcode",
+      "type": "VARCHAR",
+      "null_count": 0,
+      "null_percent": 0.0,
+      "distinct_count": 1,
+      "top_values": [
+        {
+          "value": "UGA",
+          "count": 8120
+        }
+      ]
+    },
+    {
+      "name": "adm0_name",
+      "type": "VARCHAR",
+      "null_count": 0,
+      "null_percent": 0.0,
+      "distinct_count": 1,
+      "top_values": [
+        {
+          "value": "Uganda",
+          "count": 8120
+        }
+      ]
+    },
+    {
+      "name": "adm1_pcode",
+      "type": "VARCHAR",
+      "null_count": 0,
+      "null_percent": 0.0,
+      "distinct_count": 4,
+      "top_values": [
+        {
+          "value": "UG1",
+          "count": 2904
+        },
+        {
+          "value": "UG3",
+          "count": 1959
+        },
+        {
+          "value": "UG2",
+          "count": 1756
+        },
+        {
+          "value": "UG4",
+          "count": 1501
+        }
+      ]
+    },
+    {
+      "name": "adm1_name",
+      "type": "VARCHAR",
+      "null_count": 0,
+      "null_percent": 0.0,
+      "distinct_count": 4,
+      "top_values": [
+        {
+          "value": "Central",
+          "count": 2904
+        },
+        {
+          "value": "Northern",
+          "count": 1959
+        },
+        {
+          "value": "Eastern",
+          "count": 1756
+        },
+        {
+          "value": "Western",
+          "count": 1501
+        }
+      ]
+    },
+    {
+      "name": "adm2_pcode",
+      "type": "VARCHAR",
+      "null_count": 0,
+      "null_percent": 0.0,
+      "distinct_count": 134,
+      "top_values": [
+        {
+          "value": "UG1008",
+          "count": 1358
+        },
+        {
+          "value": "UG3072",
+          "count": 427
+        },
+        {
+          "value": "UG1026",
+          "count": 406
+        },
+        {
+          "value": "UG2040",
+          "count": 235
+        },
+        {
+          "value": "UG3099",
+          "count": 224
+        }
+      ]
+    },
+    {
+      "name": "adm2_name",
+      "type": "VARCHAR",
+      "null_count": 0,
+      "null_percent": 0.0,
+      "distinct_count": 134,
+      "top_values": [
+        {
+          "value": "Kampala",
+          "count": 1358
+        },
+        {
+          "value": "Arua",
+          "count": 427
+        },
+        {
+          "value": "Wakiso",
+          "count": 406
+        },
+        {
+          "value": "Jinja",
+          "count": 235
+        },
+        {
+          "value": "Yumbe",
+          "count": 224
+        }
+      ]
+    },
+    {
+      "name": "adm3_pcode",
+      "type": "VARCHAR",
+      "null_count": 0,
+      "null_percent": 0.0,
+      "distinct_count": 201,
+      "top_values": [
+        {
+          "value": "UG100801",
+          "count": 1358
+        },
+        {
+          "value": "UG309901",
+          "count": 224
+        },
+        {
+          "value": "UG307202",
+          "count": 177
+        },
+        {
+          "value": "UG307402",
+          "count": 160
+        },
+        {
+          "value": "UG412101",
+          "count": 144
+        }
+      ]
+    },
+    {
+      "name": "adm3_name",
+      "type": "VARCHAR",
+      "null_count": 0,
+      "null_percent": 0.0,
+      "distinct_count": 192,
+      "top_values": [
+        {
+          "value": "KCCA",
+          "count": 1404
+        },
+        {
+          "value": "Aringa",
+          "count": 224
+        },
+        {
+          "value": "Ayivu",
+          "count": 177
+        },
+        {
+          "value": "Gulu Municipality",
+          "count": 160
+        },
+        {
+          "value": "Bufumbira",
+          "count": 144
+        }
+      ]
+    },
+    {
+      "name": "adm4_pcode",
+      "type": "VARCHAR",
+      "null_count": 0,
+      "null_percent": 0.0,
+      "distinct_count": 1251,
+      "top_values": []
+    },
+    {
+      "name": "adm4_name",
+      "type": "VARCHAR",
+      "null_count": 0,
+      "null_percent": 0.0,
+      "distinct_count": 1201,
+      "top_values": []
+    },
+    {
+      "name": "name_latin",
+      "type": "VARCHAR",
+      "null_count": 502,
+      "null_percent": 6.18,
+      "distinct_count": 6786,
+      "top_values": []
+    }
+  ],
+  "summary": "8,120 features. geometry types: 7,554 POINT, 566 POLYGON. 10 of 24 columns are >=50% null (name_en, name_sw, building, healthcare, healthcare_speciality, operator_type, capacity_persons, addr_full, addr_city, source).",
+  "temporal": null
+}

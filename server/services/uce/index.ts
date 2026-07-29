@@ -1,6 +1,6 @@
 import { db } from '../../db';
 import { communications, clients } from '@shared/schema';
-import { communicationQueue, UceJobPayload } from './queue';
+import { communicationQueue, isRedisConfigured, UceJobPayload } from './queue';
 import { eq } from 'drizzle-orm';
 
 export interface DispatchNotificationArgs {
@@ -17,6 +17,9 @@ export interface DispatchNotificationArgs {
  * Evaluates the recipient and enqueues the first attempt based on priority rules.
  */
 export async function dispatchNotification(args: DispatchNotificationArgs): Promise<{ communicationId: string }> {
+  if (!isRedisConfigured) {
+    throw new Error('Notification queue is unavailable because REDIS_URL is not configured.');
+  }
   const { tenantId, recipientId, messageType, priority = 'medium', templateName, templateData } = args;
 
   // 1. Log intent in communications table

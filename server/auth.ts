@@ -283,6 +283,29 @@ export const isAuthenticated: RequestHandler = async (req, res, next) => {
   const now = Math.floor(Date.now() / 1000);
   const session = req.session as any;
   const cookieName = process.env.SESSION_COOKIE_NAME || "vaxplan.sid";
+  let dbUser = (req as any).dbUser;
+  if (!dbUser) {
+    try {
+      dbUser = await ensureDbUserFromSession(req);
+      (req as any).dbUser = dbUser;
+    } catch (error) {
+      console.error("Authenticated user status check failed:", error);
+      return res.status(503).json({
+        message: "Unable to verify account status. Please try again.",
+        reason: "account_status_unavailable",
+      });
+    }
+  }
+  if (!dbUser || dbUser.isActive === false) {
+    if (typeof req.session?.destroy === "function") {
+      req.session.destroy(() => {});
+    }
+    res.clearCookie(cookieName, { path: "/" });
+    return res.status(401).json({
+      message: "This account is no longer active.",
+      reason: "account_disabled",
+    });
+  }
   if (session && !session.createdAt) {
     session.createdAt = now;
   }

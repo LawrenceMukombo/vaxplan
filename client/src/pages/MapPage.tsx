@@ -33,23 +33,27 @@ export default function MapPage() {
   });
 
   const { data: facilities } = useQuery<Facility[]>({
-    queryKey: ["/api/facilities", activeTenantInfo?.id],
+    queryKey: ["/api/facilities", "tenant", activeTenantInfo?.id],
     queryFn: async () => {
       const res = await fetch("/api/facilities", { credentials: "include" });
       if (!res.ok) throw new Error("Failed to fetch facilities");
       return res.json();
     },
     enabled: !!activeTenantInfo?.id,
+    staleTime: 0,
+    refetchOnMount: "always",
   });
 
   const { data: villages } = useQuery<Village[]>({
-    queryKey: ["/api/villages", activeTenantInfo?.id],
+    queryKey: ["/api/villages", "tenant", activeTenantInfo?.id],
     queryFn: async () => {
       const res = await fetch("/api/villages", { credentials: "include" });
       if (!res.ok) throw new Error("Failed to fetch villages");
       return res.json();
     },
     enabled: !!activeTenantInfo?.id,
+    staleTime: 0,
+    refetchOnMount: "always",
   });
   */
 
@@ -67,7 +71,9 @@ export default function MapPage() {
       const data = await res.json();
       localStorage.setItem("vaxplan_active_tenant", JSON.stringify(data));
       return data;
-    }
+    },
+    staleTime: 0,
+    refetchOnMount: "always",
   });
 
   const { data: tenants } = useQuery<PublicTenant[]>({
@@ -85,7 +91,7 @@ export default function MapPage() {
   });
 
   const { data: facilities } = useQuery<Facility[]>({
-    queryKey: ["/api/facilities", activeTenantInfo?.id],
+    queryKey: ["/api/facilities", "tenant", activeTenantInfo?.id],
     queryFn: async () => {
       if (!navigator.onLine) {
         const _tid = loadActiveTenant()?.id;
@@ -98,10 +104,12 @@ export default function MapPage() {
       return res.json();
     },
     enabled: !!activeTenantInfo?.id,
+    staleTime: 0,
+    refetchOnMount: "always",
   });
 
   const { data: villages } = useQuery<Village[]>({
-    queryKey: ["/api/villages", activeTenantInfo?.id],
+    queryKey: ["/api/villages", "tenant", activeTenantInfo?.id],
     queryFn: async () => {
       if (!navigator.onLine) {
         const _tid = loadActiveTenant()?.id;
@@ -114,14 +122,25 @@ export default function MapPage() {
       return res.json();
     },
     enabled: !!activeTenantInfo?.id,
+    staleTime: 0,
+    refetchOnMount: "always",
   });
 
   const activeTenant = tenants?.find((t) => t.id === activeTenantInfo?.id);
   const tenantCenter = activeTenant?.settings?.mapCenter;
   const tenantZoom = activeTenant?.settings?.mapZoom;
 
+  // Never render cached records from a previous country while the current
+  // tenant's facility and village queries are refreshing.
+  const scopedFacilities = (facilities ?? []).filter(
+    (facility) => !facility.tenantId || facility.tenantId === activeTenantInfo?.id
+  );
+  const scopedVillages = (villages ?? []).filter(
+    (village) => !village.tenantId || village.tenantId === activeTenantInfo?.id
+  );
+
   // correctly parse decimal strings returned by node-postgres to numbers and calculate averages safely.
-  const facilityCoords = (facilities ?? []).filter(
+  const facilityCoords = scopedFacilities.filter(
     (f) => f.latitude !== null && f.longitude !== null && !isNaN(Number(f.latitude)) && !isNaN(Number(f.longitude))
   );
 
@@ -141,8 +160,8 @@ export default function MapPage() {
   return (
     <div className="h-full">
       <MapView
-        facilities={facilities || []}
-        villages={villages || []}
+        facilities={scopedFacilities}
+        villages={scopedVillages}
         center={center}
         zoom={zoom}
         height="100%"

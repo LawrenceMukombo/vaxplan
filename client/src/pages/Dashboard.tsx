@@ -1,7 +1,6 @@
-import { useState, useEffect, useMemo } from "react";
+import { lazy, Suspense, useState, useEffect, useMemo, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { StatsCard } from "@/components/StatsCard";
-import { MapView } from "@/components/MapView";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -48,7 +47,47 @@ import { deriveSessionLifecycle } from "@/lib/sessionStatus";
 import { summarizeFacilityAlerts, loadStockThreshold } from "@/lib/stockAlerts";
 import { Package } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import VgieDashboard from "@/pages/vgie/Dashboard";
+const MapView = lazy(() =>
+  import("@/components/MapView").then((module) => ({ default: module.MapView })),
+);
+const VgieDashboard = lazy(() => import("@/pages/vgie/Dashboard"));
+
+function DeferredDashboardMap({ facilities, villages }: { facilities: Facility[]; villages: Village[] }) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [shouldLoad, setShouldLoad] = useState(false);
+
+  useEffect(() => {
+    if (shouldLoad) return;
+    const element = containerRef.current;
+    if (!element || typeof IntersectionObserver === "undefined") {
+      setShouldLoad(true);
+      return;
+    }
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setShouldLoad(true);
+          observer.disconnect();
+        }
+      },
+      { rootMargin: "300px 0px" },
+    );
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [shouldLoad]);
+
+  return (
+    <div ref={containerRef} className="h-full w-full">
+      {shouldLoad ? (
+        <Suspense fallback={<Skeleton className="h-full w-full rounded-none" />}>
+          <MapView facilities={facilities} villages={villages} height="100%" />
+        </Suspense>
+      ) : (
+        <Skeleton className="h-full w-full rounded-none" />
+      )}
+    </div>
+  );
+}
 
 /* Original Code:
 interface StatsData {
@@ -1110,6 +1149,7 @@ export default function Dashboard() {
   const [, setLocation] = useLocation();
   const searchString = useSearch();
   const [liveTime, setLiveTime] = useState(new Date());
+  const [deepDiveTab, setDeepDiveTab] = useState("supervision");
 
   const facilityLocked = isFacilityScopedRole(user?.role) && !!user?.facilityId;
 
@@ -2123,7 +2163,7 @@ export default function Dashboard() {
           </CardHeader>
           <CardContent className="p-0">
             <div className="h-80">
-              <MapView facilities={facilities || []} villages={villages || []} height="100%" />
+              <DeferredDashboardMap facilities={facilities || []} villages={villages || []} />
             </div>
           </CardContent>
         </Card>
@@ -2161,7 +2201,7 @@ export default function Dashboard() {
 
       {canViewSiteAnalytics(user) && <SiteActivityPanel />}
 
-      <Tabs defaultValue="supervision" className="space-y-4">
+      <Tabs value={deepDiveTab} onValueChange={setDeepDiveTab} className="space-y-4">
         <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
           <div>
             <h2 className="text-xl font-bold tracking-tight text-foreground">Deep dives</h2>
@@ -2176,7 +2216,11 @@ export default function Dashboard() {
           <SupervisionCoverageByDistrictCard />
         </TabsContent>
         <TabsContent value="vgie" className="focus-visible:outline-none">
-          <VgieDashboard />
+          {deepDiveTab === "vgie" && (
+            <Suspense fallback={<Skeleton className="h-96 w-full" />}>
+              <VgieDashboard />
+            </Suspense>
+          )}
         </TabsContent>
       </Tabs>
     </div>

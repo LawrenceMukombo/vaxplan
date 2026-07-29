@@ -1,0 +1,165 @@
+{
+  "stamp": "2026-07-29T05-36-12-317Z",
+  "sourceFiles": {
+    "populatedPlaces": "C:\\Users\\Mukombo\\Downloads\\ssd_populatedplaces_tabulardata.xlsx",
+    "vaxPlanCommunities": "C:\\Users\\Mukombo\\Downloads\\South_Sudan_VaxPlan_Communities_Complete.xlsx"
+  },
+  "tenant": {
+    "id": "705728db-4892-49d7-9b67-35aa67c7574b",
+    "name": "Republic of South Sudan Ministry of Health",
+    "code": "SSD"
+  },
+  "backupPath": "C:\\vaxplan\\scratch\\ssd_align\\backups\\ssd-communities-pre-2026-07-29T05-36-12-317Z.json",
+  "source": {
+    "populatedPlaceRows": 18977,
+    "vaxPlanCommunityRows": 18977,
+    "preparedRows": 18526,
+    "skippedRows": 451,
+    "skippedSample": [
+      {
+        "pcode": "BC-1434",
+        "name": "",
+        "reason": "missing name, coordinates, or county/district match"
+      },
+      {
+        "pcode": "BC-1533",
+        "name": "",
+        "reason": "missing name, coordinates, or county/district match"
+      },
+      {
+        "pcode": "BC-1602",
+        "name": "",
+        "reason": "missing name, coordinates, or county/district match"
+      },
+      {
+        "pcode": "BK-0001",
+        "name": "Qawz Dengwiri",
+        "reason": "missing name, coordinates, or county/district match"
+      },
+      {
+        "pcode": "BK-0004",
+        "name": "Deim Bakhit",
+        "reason": "missing name, coordinates, or county/district match"
+      },
+      {
+        "pcode": "BK-0006",
+        "name": "Rizik",
+        "reason": "missing name, coordinates, or county/district match"
+      },
+      {
+        "pcode": "BK-0007",
+        "name": "Bira",
+        "reason": "missing name, coordinates, or county/district match"
+      },
+      {
+        "pcode": "BK-0008",
+        "name": "Abd El Lait",
+        "reason": "missing name, coordinates, or county/district match"
+      },
+      {
+        "pcode": "BK-0010",
+        "name": "Tala",
+        "reason": "missing name, coordinates, or county/district match"
+      },
+      {
+        "pcode": "BK-0011",
+        "name": "Rodi",
+        "reason": "missing name, coordinates, or county/district match"
+      },
+      {
+        "pcode": "BK-0012",
+        "name": "Robo",
+        "reason": "missing name, coordinates, or county/district match"
+      },
+      {
+        "pcode": "BK-0013",
+        "name": "Odesan",
+        "reason": "missing name, coordinates, or county/district match"
+      },
+      {
+        "pcode": "BK-0014",
+        "name": "Bibi",
+        "reason": "missing name, coordinates, or county/district match"
+      },
+      {
+        "pcode": "BK-0015",
+        "name": "River Mana",
+        "reason": "missing name, coordinates, or county/district match"
+      },
+      {
+        "pcode": "BK-0016",
+        "name": "Ager",
+        "reason": "missing name, coordinates, or county/district match"
+      },
+      {
+        "pcode": "BJ-0001",
+        "name": "Pannere",
+        "reason": "missing name, coordinates, or county/district match"
+      },
+      {
+        "pcode": "BJ-0002",
+        "name": "Riviere Sopo",
+        "reason": "missing name, coordinates, or county/district match"
+      },
+      {
+        "pcode": "BK-0017",
+        "name": "Rigl bibi",
+        "reason": "missing name, coordinates, or county/district match"
+      },
+      {
+        "pcode": "BK-0018",
+        "name": "Koladom",
+        "reason": "missing name, coordinates, or county/district match"
+      },
+      {
+        "pcode": "BK-0019",
+        "name": "Ngairanvor",
+        "reason": "missing name, coordinates, or county/district match"
+      },
+      {
+        "pcode": "BK-0020",
+        "name": "Banio",
+        "reason": "missing name, coordinates, or county/district match"
+      },
+      {
+        "pcode": "BK-0021",
+        "name": "Mangaia",
+        "reason": "missing name, coordinates, or county/district match"
+      },
+      {
+        "pcode": "BK-0022",
+        "name": "N'goro",
+        "reason": "missing name, coordinates, or county/district match"
+      },
+      {
+        "pcode": "BK-0023",
+        "name": "Yamarogo",
+        "reason": "missing name, coordinates, or county/district match"
+      },
+      {
+        "pcode": "BK-0024",
+        "name": "Bangbara",
+        "reason": "missing name, coordinates, or county/district match"
+      }
+    ]
+  },
+  "results": {
+    "updatedByCode": 0,
+    "updatedByUniqueName": 0,
+    "insertedVillages": 18526,
+    "insertedSettlements": 18526,
+    "counts": {
+      "villages": {
+        "total": 23883,
+        "official_source": 18526,
+        "non_demo_codes": 23868
+      },
+      "settlementsMaster": [
+        {
+          "source": "ssd_populated_places",
+          "count": 18526
+        }
+      ]
+    }
+  }
+}
