@@ -153,6 +153,9 @@ async function run() {
       "ALTER TABLE microplans ADD COLUMN IF NOT EXISTS reminder_sent_at timestamptz;",
       "ALTER TABLE microplans ADD COLUMN IF NOT EXISTS district_edit_reason text;",
       "ALTER TABLE villages ADD COLUMN IF NOT EXISTS confidence_score numeric(5, 2);",
+      "ALTER TABLE villages ADD COLUMN IF NOT EXISTS target_population integer;",
+      "ALTER TABLE villages ADD COLUMN IF NOT EXISTS target_children_under_one integer;",
+      "ALTER TABLE villages ADD COLUMN IF NOT EXISTS is_hard_to_reach boolean DEFAULT false;",
       "ALTER TYPE approval_status ADD VALUE IF NOT EXISTS 'published';",
       "ALTER TYPE approval_status ADD VALUE IF NOT EXISTS 'retired';",
       "ALTER TYPE approval_status ADD VALUE IF NOT EXISTS 'under_review';",
@@ -224,23 +227,21 @@ async function run() {
       `);
       console.log("Granted cross-tenant platform super-admin privileges to national admin user accounts.");
       await client.query(`
-        INSERT INTO villages (id, tenant_id, name, code, district_id, assigned_facility_id, latitude, longitude, is_hard_to_reach, target_population, target_children_under_one)
+        INSERT INTO villages (tenant_id, name, code, district_id, assigned_facility_id, latitude, longitude, is_hard_to_reach, target_population, target_children_under_one)
         SELECT 
-          sm.id,
           sm.tenant_id,
           sm.name,
-          COALESCE(sm.code, 'COMM-' || sm.id),
+          'COMM-' || sm.id,
           sm.district_id,
           sm.linked_facility_id,
           sm.latitude,
           sm.longitude,
-          COALESCE(sm.is_hard_to_reach, false),
-          COALESCE(sm.estimated_population, 0),
-          ROUND(COALESCE(sm.estimated_population, 0) * 0.04)
+          false,
+          0,
+          0
         FROM settlements_master sm
-        LEFT JOIN villages v ON sm.id = v.id
-        WHERE sm.is_active = true AND v.id IS NULL
-        ON CONFLICT (id) DO NOTHING;
+        LEFT JOIN villages v ON sm.name = v.name AND sm.tenant_id = v.tenant_id
+        WHERE sm.is_active = true AND sm.district_id IS NOT NULL AND v.id IS NULL;
       `);
       console.log("Synchronized settlements_master records to villages table.");
     } catch (err) {

@@ -2121,14 +2121,13 @@ export function MapView({
 
   // Unserved populated places (no session ever + no recorded vaccinations).
   const { data: unservedPlaces = [] } = useQuery<any[]>({
-    queryKey: ["/api/unserved-places", tenantInfo?.id],
+    queryKey: ["/api/unserved-places"],
     queryFn: async () => {
       if (!navigator.onLine) return [];
       const res = await fetch("/api/unserved-places");
       if (!res.ok) return [];
       return res.json();
     },
-    enabled: !!tenantInfo?.id,
   });
 
   // Fetch session villages junction table
