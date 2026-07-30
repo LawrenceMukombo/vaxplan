@@ -333,6 +333,7 @@ export interface IStorage {
   getAdminBoundary(tenantId: string, id: string): Promise<AdminBoundary | undefined>;
   getAdminBoundaryByLevel(tenantId: string, adminLevel: number): Promise<AdminBoundary | undefined>;
   upsertAdminBoundary(data: InsertAdminBoundary & { tenantId: string }): Promise<AdminBoundary>;
+  updateAdminBoundary(tenantId: string, id: string, updates: Partial<InsertAdminBoundary>): Promise<AdminBoundary | undefined>;
   deleteAdminBoundary(tenantId: string, id: string): Promise<boolean>;
 
   // Facility Catchments
@@ -2152,6 +2153,15 @@ export class DatabaseStorage implements IStorage {
       .values({ ...data, fetchedAt: new Date() })
       .returning();
     return inserted;
+  }
+
+  async updateAdminBoundary(tenantId: string, id: string, updates: Partial<InsertAdminBoundary>): Promise<AdminBoundary | undefined> {
+    const [updated] = await db
+      .update(adminBoundaries)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(and(eq(adminBoundaries.id, id), eq(adminBoundaries.tenantId, tenantId)))
+      .returning();
+    return updated;
   }
 
   async deleteAdminBoundary(tenantId: string, id: string): Promise<boolean> {

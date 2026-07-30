@@ -4819,6 +4819,10 @@ var init_storage = __esm({
         const [inserted] = await db.insert(adminBoundaries).values({ ...data, fetchedAt: /* @__PURE__ */ new Date() }).returning();
         return inserted;
       }
+      async updateAdminBoundary(tenantId, id, updates) {
+        const [updated] = await db.update(adminBoundaries).set({ ...updates, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm3.and)((0, import_drizzle_orm3.eq)(adminBoundaries.id, id), (0, import_drizzle_orm3.eq)(adminBoundaries.tenantId, tenantId))).returning();
+        return updated;
+      }
       async deleteAdminBoundary(tenantId, id) {
         const result = await db.delete(adminBoundaries).where((0, import_drizzle_orm3.and)((0, import_drizzle_orm3.eq)(adminBoundaries.id, id), (0, import_drizzle_orm3.eq)(adminBoundaries.tenantId, tenantId)));
         return (result.rowCount ?? 0) > 0;

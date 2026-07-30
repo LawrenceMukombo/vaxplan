@@ -65,42 +65,96 @@ const SOURCE_LABELS: Record<string, { label: string; color: string }> = {
   custom: { label: "Custom Upload", color: "bg-gray-500/10 text-gray-600" },
 };
 
-function BoundaryRow({ boundary, onDelete }: { boundary: BoundaryMeta; onDelete: (id: string) => void }) {
+function BoundaryRow({
+  boundary,
+  onDelete,
+  onToggleActive,
+  onReplace,
+  onDownload,
+}: {
+  boundary: BoundaryMeta;
+  onDelete: (id: string) => void;
+  onToggleActive: (id: string, currentActive: boolean) => void;
+  onReplace: (boundary: BoundaryMeta) => void;
+  onDownload: (id: string, name: string) => void;
+}) {
   const src = SOURCE_LABELS[boundary.source] ?? SOURCE_LABELS.custom;
   return (
-    <div className="flex items-center gap-4 py-3 border-b border-border/50 last:border-0 group">
-      <div className="h-8 w-8 rounded bg-primary/10 flex items-center justify-center shrink-0">
+    <div className="flex items-center gap-4 py-3.5 border-b border-border/50 last:border-0 hover:bg-muted/30 px-2.5 rounded-lg transition-colors">
+      <div className="h-9 w-9 rounded-lg bg-primary/10 flex items-center justify-center shrink-0 border border-primary/20">
         <span className="text-xs font-bold text-primary">L{boundary.adminLevel}</span>
       </div>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
-          <span className="font-medium text-sm">{boundary.levelName}</span>
-          <Badge variant="secondary" className="font-mono text-xs">{boundary.countryCode}</Badge>
+          <span className="font-semibold text-sm">{boundary.levelName}</span>
+          <Badge variant="outline" className="font-mono text-xs">{boundary.countryCode}</Badge>
           <Badge variant="secondary" className={`text-xs ${src.color}`}>{src.label}</Badge>
-          {boundary.isActive && (
-            <Badge variant="secondary" className="text-xs bg-emerald-500/10 text-emerald-600">Active</Badge>
-          )}
+          <button
+            type="button"
+            className="cursor-pointer"
+            onClick={() => onToggleActive(boundary.id, boundary.isActive)}
+            title="Click to toggle active status for map rendering"
+          >
+            {boundary.isActive ? (
+              <Badge variant="secondary" className="text-[10px] bg-emerald-500/15 text-emerald-600 border border-emerald-500/30 flex items-center gap-1">
+                <CheckCircle className="h-3 w-3" /> Active
+              </Badge>
+            ) : (
+              <Badge variant="outline" className="text-[10px] text-muted-foreground border-dashed">
+                Inactive (Click to activate)
+              </Badge>
+            )}
+          </button>
         </div>
-        <div className="flex items-center gap-3 mt-0.5">
-          <span className="text-xs text-muted-foreground">
+        <div className="flex items-center gap-3 mt-1">
+          <span className="text-xs text-muted-foreground font-medium">
             {boundary.featureCount?.toLocaleString() ?? "?"} features
           </span>
           {boundary.fetchedAt && (
             <span className="text-xs text-muted-foreground">
-              Fetched {new Date(boundary.fetchedAt).toLocaleDateString()}
+              Updated {new Date(boundary.fetchedAt).toLocaleDateString()}
             </span>
           )}
         </div>
       </div>
-      <Button
-        size="sm"
-        variant="ghost"
-        className="h-7 w-7 p-0 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-destructive transition-all"
-        onClick={() => onDelete(boundary.id)}
-        data-testid={`button-delete-boundary-${boundary.id}`}
-      >
-        <Trash2 className="h-3.5 w-3.5" />
-      </Button>
+
+      <div className="flex items-center gap-1.5 shrink-0">
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-8 text-xs gap-1.5 text-primary border-primary/20 hover:bg-primary/5"
+          onClick={() => onReplace(boundary)}
+          data-testid={`button-replace-boundary-${boundary.id}`}
+          title="Replace or re-upload Shapefile / GeoJSON for this level"
+        >
+          <Upload className="h-3.5 w-3.5" />
+          Replace
+        </Button>
+
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-8 text-xs gap-1.5 text-muted-foreground hover:text-foreground"
+          onClick={() => onDownload(boundary.id, boundary.levelName)}
+          data-testid={`button-download-boundary-${boundary.id}`}
+          title="Export and download GeoJSON file"
+        >
+          <Download className="h-3.5 w-3.5" />
+          Export
+        </Button>
+
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-8 text-xs gap-1.5 text-destructive hover:bg-destructive/10"
+          onClick={() => onDelete(boundary.id)}
+          data-testid={`button-delete-boundary-${boundary.id}`}
+          title="Delete shapefile boundary dataset"
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+          Delete
+        </Button>
+      </div>
     </div>
   );
 }
@@ -130,6 +184,10 @@ export default function BoundaryManager() {
   // Delete confirmation
   const [deleteId, setDeleteId] = useState<string | null>(null);
 
+  // Replace dialog state
+  const [replaceTarget, setReplaceTarget] = useState<BoundaryMeta | null>(null);
+  const [replaceFile, setReplaceFile] = useState<File | null>(null);
+
   // Updated queries with offline fallbacks:
   const { data: countries, isLoading: loadingCountries } = useQuery<SupportedCountry[]>({
     queryKey: ["/api/boundaries/countries"],
@@ -150,6 +208,67 @@ export default function BoundaryManager() {
       return res.json();
     }
   });
+
+  const toggleActiveMutation = useMutation({
+    mutationFn: async ({ id, isActive }: { id: string; isActive: boolean }) =>
+      apiRequest("PATCH", `/api/boundaries/${id}`, { isActive }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["/api/boundaries"] });
+      toast({ title: "Boundary active status updated" });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Update failed", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const replaceMutation = useMutation({
+    mutationFn: async ({ id, geojson, levelName }: { id: string; geojson: object; levelName?: string }) =>
+      apiRequest("POST", `/api/boundaries/${id}/replace`, { geojson, levelName }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["/api/boundaries"] });
+      setReplaceTarget(null);
+      setReplaceFile(null);
+      toast({ title: "Boundary replaced successfully", description: "The new GeoJSON shapefile boundary layer is now active." });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Replacement failed", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const handleDownloadGeoJSON = async (id: string, name: string) => {
+    try {
+      toast({ title: "Preparing export...", description: `Downloading ${name} GeoJSON` });
+      const res = await fetch(`/api/boundaries/${id}/geojson`, { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to fetch GeoJSON");
+      const geojson = await res.json();
+      const blob = new Blob([JSON.stringify(geojson, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${name.toLowerCase().replace(/\s+/g, "_")}_boundary.geojson`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err: any) {
+      toast({ title: "Export failed", description: err.message, variant: "destructive" });
+    }
+  };
+
+  const handleReplaceRead = async () => {
+    if (!replaceTarget || !replaceFile) return;
+    try {
+      const text = await replaceFile.text();
+      const geojson = JSON.parse(text);
+      replaceMutation.mutate({
+        id: replaceTarget.id,
+        geojson,
+        levelName: replaceTarget.levelName,
+      });
+    } catch {
+      toast({ title: "Invalid GeoJSON", description: "The replacement file could not be parsed as GeoJSON.", variant: "destructive" });
+    }
+  };
 
   const fetchMutation = useMutation({
     mutationFn: async (payload: { countryCode: string; adminLevel: number; levelName: string }) =>
@@ -386,7 +505,17 @@ export default function BoundaryManager() {
           ) : (
             <div>
               {boundaries.map((b) => (
-                <BoundaryRow key={b.id} boundary={b} onDelete={setDeleteId} />
+                <BoundaryRow
+                  key={b.id}
+                  boundary={b}
+                  onDelete={setDeleteId}
+                  onToggleActive={(id, isActive) => toggleActiveMutation.mutate({ id, isActive: !isActive })}
+                  onReplace={(b) => {
+                    setReplaceTarget(b);
+                    setReplaceFile(null);
+                  }}
+                  onDownload={handleDownloadGeoJSON}
+                />
               ))}
             </div>
           )}
@@ -592,6 +721,59 @@ export default function BoundaryManager() {
               disabled={!csvUploadFile || csvUploadMutation.isPending}
             >
               {csvUploadMutation.isPending ? "Processing..." : "Update Coordinates"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ─── Replace Boundary Modal ─────────────────────────────────────── */}
+      <Dialog open={!!replaceTarget} onOpenChange={(open) => !open && setReplaceTarget(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Upload className="h-5 w-5 text-primary" />
+              Replace Boundary Dataset
+            </DialogTitle>
+            <DialogDescription>
+              Upload a new GeoJSON / Shapefile dataset to replace Level {replaceTarget?.adminLevel} ({replaceTarget?.levelName}) for {replaceTarget?.countryCode}.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            <div className="rounded-lg border bg-muted/30 p-3 text-xs space-y-1">
+              <div className="flex justify-between font-medium">
+                <span className="text-muted-foreground">Target Level:</span>
+                <span>L{replaceTarget?.adminLevel} — {replaceTarget?.levelName}</span>
+              </div>
+              <div className="flex justify-between font-medium">
+                <span className="text-muted-foreground">Current Features:</span>
+                <span>{replaceTarget?.featureCount?.toLocaleString() ?? "Unknown"}</span>
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold">Select Replacement GeoJSON File</Label>
+              <Input
+                type="file"
+                accept=".json,.geojson"
+                onChange={(e) => setReplaceFile(e.target.files?.[0] || null)}
+                className="text-xs file:mr-3 file:py-1 file:px-3 file:rounded file:border-0 file:text-xs file:font-medium file:bg-primary/10 file:text-primary hover:file:bg-primary/20 cursor-pointer"
+                data-testid="input-replace-file"
+              />
+              <p className="text-[11px] text-muted-foreground">
+                File must be valid GeoJSON format containing standard polygon features.
+              </p>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setReplaceTarget(null)}>Cancel</Button>
+            <Button
+              onClick={handleReplaceRead}
+              disabled={!replaceFile || replaceMutation.isPending}
+              data-testid="button-confirm-replace"
+            >
+              {replaceMutation.isPending ? "Replacing..." : "Replace Dataset"}
             </Button>
           </DialogFooter>
         </DialogContent>
