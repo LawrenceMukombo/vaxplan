@@ -63,11 +63,34 @@ async function upsertRow(client: PoolClient, table: TableMeta, encoded: unknown)
     if (exists.rowCount) return;
   }
 
-  await client.query(
-    `INSERT INTO ${pg.escapeIdentifier("public")}.${pg.escapeIdentifier(table.name)}
-     (${columnSql}) OVERRIDING SYSTEM VALUE VALUES (${valueSql}) ${conflictSql}`,
-    values,
-  );
+  try {
+    await client.query("SAVEPOINT row_sp");
+    await client.query(
+      `INSERT INTO ${pg.escapeIdentifier("public")}.${pg.escapeIdentifier(table.name)}
+       (${columnSql}) OVERRIDING SYSTEM VALUE VALUES (${valueSql}) ${conflictSql}`,
+      values,
+    );
+    await client.query("RELEASE SAVEPOINT row_sp");
+  } catch (err: any) {
+    await client.query("ROLLBACK TO SAVEPOINT row_sp");
+    if (err.code === "23505") {
+      // Secondary unique constraint conflict (e.g. tenant_id + code): attempt ON CONFLICT DO NOTHING fallback
+      try {
+        await client.query("SAVEPOINT row_sp2");
+        await client.query(
+          `INSERT INTO ${pg.escapeIdentifier("public")}.${pg.escapeIdentifier(table.name)}
+           (${columnSql}) OVERRIDING SYSTEM VALUE VALUES (${valueSql}) ON CONFLICT DO NOTHING`,
+          values,
+        );
+        await client.query("RELEASE SAVEPOINT row_sp2");
+      } catch (err2: any) {
+        await client.query("ROLLBACK TO SAVEPOINT row_sp2");
+        console.warn(`    ⚠️  [Skip Duplicate Key] ${table.name}: ${err.message}`);
+      }
+    } else {
+      console.warn(`    ⚠️  [Row Skipped] ${table.name}: ${err.message}`);
+    }
+  }
 }
 
 async function main() {
