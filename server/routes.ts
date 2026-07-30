@@ -3776,7 +3776,7 @@ export async function registerRoutes(
       console.error("Error creating district:", error);
       res.status(400).json({ message: "Invalid district data" });
     }
-  });
+});
 
   app.patch("/api/districts/:id", ...auth, async (req: any, res) => {
     try {
