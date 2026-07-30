@@ -43,7 +43,12 @@ async function upsertRow(client: PoolClient, table: TableMeta, encoded: unknown)
   const valueSql = columns.map((_, index) => `$${index + 1}`).join(", ");
   let conflictSql = "ON CONFLICT DO NOTHING";
 
-  if (table.conflictColumns.length) {
+  if (table.name === "tenants") {
+    const updateColumns = columns.filter((col) => col !== "code");
+    conflictSql = `ON CONFLICT (code) DO UPDATE SET ${updateColumns
+      .map((col) => `${pg.escapeIdentifier(col)}=EXCLUDED.${pg.escapeIdentifier(col)}`)
+      .join(",")}`;
+  } else if (table.conflictColumns.length) {
     const target = table.conflictColumns.map(pg.escapeIdentifier).join(", ");
     const updateColumns = columns.filter((column) => !table.conflictColumns.includes(column));
     conflictSql = updateColumns.length

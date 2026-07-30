@@ -236,6 +236,38 @@ async function run() {
     }
     console.log('Custom schema upgrades applied.');
 
+    console.log('Aligning canonical tenant IDs across all database tables...');
+    try {
+      await client.query(`
+        DO $$
+        DECLARE
+          canonical_map JSONB := '{"SSD":"705728db-4892-49d7-9b67-35aa67c7574b","ZMB":"4bb7abba-11cd-4c99-96c2-eedc8a4dfd06","PNG":"8c2f81fb-06f3-4688-90ea-e9ae27d73191","ZAF":"c43e2923-b2d9-4175-a1a8-ff6b0cd58810","KEN":"08083581-cf5e-47d7-b3ed-a97b10be01ba"}'::jsonb;
+          code_item text;
+          canon_id text;
+          old_id text;
+          tbl text;
+        BEGIN
+          FOR code_item, canon_id IN SELECT * FROM jsonb_each_text(canonical_map) LOOP
+            SELECT id INTO old_id FROM tenants WHERE code = code_item LIMIT 1;
+            IF old_id IS NOT NULL AND old_id <> canon_id THEN
+              SET session_replication_role = 'replica';
+              FOR tbl IN 
+                SELECT table_name FROM information_schema.columns 
+                WHERE table_schema = 'public' AND column_name = 'tenant_id'
+              LOOP
+                EXECUTE format('UPDATE %I SET tenant_id = %L WHERE tenant_id = %L', tbl, canon_id, old_id);
+              END LOOP;
+              UPDATE tenants SET id = canon_id WHERE code = code_item;
+              SET session_replication_role = 'origin';
+            END IF;
+          END LOOP;
+        END $$;
+      `);
+      console.log('Canonical tenant IDs aligned.');
+    } catch (err: any) {
+      console.warn('[Warning] Tenant alignment skipped:', err.message);
+    }
+
     console.log('All database migrations applied successfully.');
   } catch (err: any) {
     console.error('Migration runner failed:', err.message);
