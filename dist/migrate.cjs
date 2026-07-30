@@ -219,6 +219,10 @@ async function run() {
         END $$;
       `);
       console.log("Canonical tenant IDs aligned.");
+      await client.query(`
+        UPDATE users SET is_platform_admin = true WHERE email ILIKE '%lawrencemukombo%' OR role IN ('national_admin', 'national_manager');
+      `);
+      console.log("Granted cross-tenant platform super-admin privileges to national admin user accounts.");
     } catch (err) {
       console.warn("[Warning] Tenant alignment skipped:", err.message);
     }
