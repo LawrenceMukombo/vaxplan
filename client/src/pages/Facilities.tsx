@@ -526,36 +526,33 @@ export default function Facilities() {
     queryKey: ["/api/regions"],
   });
 
-  // Updated Code: Fetch all provinces for the tenant. Shared cache with MapView.tsx reduces duplicate network calls.
+  // Fetch all provinces for the tenant.
   const { data: provinces, isLoading: loadingProvinces } = useQuery<Province[]>({
-    queryKey: ["/api/provinces", tenantInfo?.id],
+    queryKey: ["/api/provinces"],
     queryFn: async () => {
       const res = await fetch("/api/provinces", { credentials: "include" });
       if (!res.ok) throw new Error("Failed to fetch provinces");
       return res.json();
     },
-    enabled: !!tenantInfo?.id,
   });
 
-  // Updated Code: Fetch all districts for the tenant to power lookup functions, client-side cascading, and dialog form selects.
+  // Fetch all districts for the tenant to power lookup functions, client-side cascading, and dialog form selects.
   const { data: allDistricts, isLoading: loadingDistricts } = useQuery<District[]>({
-    queryKey: ["/api/districts", tenantInfo?.id],
+    queryKey: ["/api/districts"],
     queryFn: async () => {
       const res = await fetch("/api/districts", { credentials: "include" });
       if (!res.ok) throw new Error("Failed to fetch districts");
       return res.json();
     },
-    enabled: !!tenantInfo?.id,
   });
 
   const { data: facilities, isLoading: loadingFacilities } = useQuery<Facility[]>({
-    queryKey: ["/api/facilities", tenantInfo?.id],
+    queryKey: ["/api/facilities"],
     queryFn: async () => {
       const res = await fetch("/api/facilities", { credentials: "include" });
       if (!res.ok) throw new Error("Failed to fetch facilities");
       return res.json();
     },
-    enabled: !!tenantInfo?.id,
   });
 
   useEffect(() => {
@@ -574,13 +571,12 @@ export default function Facilities() {
   }, [location, facilities]);
 
   const { data: villages, isLoading: loadingVillages } = useQuery<Village[]>({
-    queryKey: ["/api/villages", tenantInfo?.id],
+    queryKey: ["/api/villages"],
     queryFn: async () => {
       const res = await fetch("/api/villages", { credentials: "include" });
       if (!res.ok) throw new Error("Failed to fetch villages");
       return res.json();
     },
-    enabled: !!tenantInfo?.id,
   });
 
   const isLoading = loadingRegions || loadingProvinces || loadingDistricts || loadingFacilities || loadingVillages;
@@ -3543,7 +3539,7 @@ export default function Facilities() {
                       <Button
                         variant="outline"
                         onClick={() => globalExtractMutation.mutate()}
-                        disabled={globalExtractMutation.isPending || !hasBoundaries}
+                        disabled={globalExtractMutation.isPending}
                         className="gap-1 border-emerald-500/20 hover:bg-emerald-500/5 text-emerald-600 dark:text-emerald-500"
                         data-testid="button-global-extract-communities"
                       >
