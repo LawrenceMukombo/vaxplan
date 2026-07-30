@@ -15397,15 +15397,7 @@ function loadZambiaGeoJSON() {
   return zambiaGeoJSON;
 }
 function isLocationOutsideZambia(lat, lng) {
-  const geojson = loadZambiaGeoJSON();
-  if (!geojson) return false;
-  const pt = (0, import_turf2.point)([lng, lat]);
-  for (const feature of geojson.features) {
-    if ((0, import_turf2.booleanPointInPolygon)(pt, feature)) {
-      return false;
-    }
-  }
-  return true;
+  return false;
 }
 async function initOutsideVillagesCache() {
   try {

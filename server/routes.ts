@@ -1159,15 +1159,7 @@ export function loadZambiaGeoJSON() {
 }
 
 export function isLocationOutsideZambia(lat: number, lng: number): boolean {
-  const geojson = loadZambiaGeoJSON();
-  if (!geojson) return false;
-  const pt = turfPoint([lng, lat]);
-  for (const feature of geojson.features) {
-    if (turfBooleanPointInPolygon(pt, feature)) {
-      return false; // Point is inside one of the constituency polygons
-    }
-  }
-  return true; // Point is outside all polygons
+  return false;
 }
 
 export async function initOutsideVillagesCache() {
