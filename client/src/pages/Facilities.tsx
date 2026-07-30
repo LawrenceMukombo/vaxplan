@@ -549,7 +549,13 @@ export default function Facilities() {
   });
 
   const { data: facilities, isLoading: loadingFacilities } = useQuery<Facility[]>({
-    queryKey: ["/api/facilities"],
+    queryKey: ["/api/facilities", tenantInfo?.id],
+    queryFn: async () => {
+      const res = await fetch("/api/facilities", { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to fetch facilities");
+      return res.json();
+    },
+    enabled: !!tenantInfo?.id,
   });
 
   useEffect(() => {
@@ -566,8 +572,15 @@ export default function Facilities() {
       document.querySelector('[data-selected-facility-panel="true"]')?.scrollIntoView({ behavior: "smooth", block: "start" });
     }, 100);
   }, [location, facilities]);
+
   const { data: villages, isLoading: loadingVillages } = useQuery<Village[]>({
-    queryKey: ["/api/villages"],
+    queryKey: ["/api/villages", tenantInfo?.id],
+    queryFn: async () => {
+      const res = await fetch("/api/villages", { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to fetch villages");
+      return res.json();
+    },
+    enabled: !!tenantInfo?.id,
   });
 
   const isLoading = loadingRegions || loadingProvinces || loadingDistricts || loadingFacilities || loadingVillages;

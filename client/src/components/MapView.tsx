@@ -2121,13 +2121,14 @@ export function MapView({
 
   // Unserved populated places (no session ever + no recorded vaccinations).
   const { data: unservedPlaces = [] } = useQuery<any[]>({
-    queryKey: ["/api/unserved-places"],
+    queryKey: ["/api/unserved-places", tenantInfo?.id],
     queryFn: async () => {
       if (!navigator.onLine) return [];
       const res = await fetch("/api/unserved-places");
       if (!res.ok) return [];
       return res.json();
     },
+    enabled: !!tenantInfo?.id,
   });
 
   // Fetch session villages junction table
@@ -3208,8 +3209,9 @@ export function MapView({
       const lat = Number(p.latitude);
       const lng = Number(p.longitude);
       if (!Number.isFinite(lat) || !Number.isFinite(lng)) return false;
-      if (countryBoundaryGeoJSONs.length === 0) return false;
-      if (!isPointInAnyGeoJSONBoundary(lat, lng, countryBoundaryGeoJSONs)) return false;
+      if (countryBoundaryGeoJSONs.length > 0 && !isPointInAnyGeoJSONBoundary(lat, lng, countryBoundaryGeoJSONs)) {
+        return false;
+      }
 
       if (selectedProvinceId !== "all") {
         if (districtLookup.size === 0) return true;
