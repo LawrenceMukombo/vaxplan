@@ -268,6 +268,26 @@ async function run() {
         UPDATE users SET is_platform_admin = true WHERE email ILIKE '%lawrencemukombo%' OR role IN ('national_admin', 'national_manager');
       `);
       console.log('Granted cross-tenant platform super-admin privileges to national admin user accounts.');
+      await client.query(`
+        INSERT INTO villages (id, tenant_id, name, code, district_id, assigned_facility_id, latitude, longitude, is_hard_to_reach, target_population, target_children_under_one)
+        SELECT 
+          sm.id,
+          sm.tenant_id,
+          sm.name,
+          COALESCE(sm.code, 'COMM-' || sm.id),
+          sm.district_id,
+          sm.linked_facility_id,
+          sm.latitude,
+          sm.longitude,
+          COALESCE(sm.is_hard_to_reach, false),
+          COALESCE(sm.estimated_population, 0),
+          ROUND(COALESCE(sm.estimated_population, 0) * 0.04)
+        FROM settlements_master sm
+        LEFT JOIN villages v ON sm.id = v.id
+        WHERE sm.is_active = true AND v.id IS NULL
+        ON CONFLICT (id) DO NOTHING;
+      `);
+      console.log('Synchronized settlements_master records to villages table.');
     } catch (err: any) {
       console.warn('[Warning] Tenant alignment skipped:', err.message);
     }
