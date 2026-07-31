@@ -195,9 +195,14 @@ export const SUPPORTED_COUNTRIES: Array<{
   { code: "PAK", name: "Pakistan",         region: "South Asia",        maxLevel: 3, levelNames: { 0: "Country", 1: "Province", 2: "Division", 3: "District" } },
   { code: "AFG", name: "Afghanistan",      region: "South Asia",        maxLevel: 2, levelNames: { 0: "Country", 1: "Province", 2: "District" } },
   { code: "BGD", name: "Bangladesh",       region: "South Asia",        maxLevel: 4, levelNames: { 0: "Country", 1: "Division", 2: "District", 3: "Upazila", 4: "Union" } },
+  { code: "IND", name: "India",            region: "South Asia",        maxLevel: 3, levelNames: { 0: "Country", 1: "State", 2: "District", 3: "Sub-District" } },
   { code: "MMR", name: "Myanmar",          region: "SE Asia",           maxLevel: 3, levelNames: { 0: "Country", 1: "State/Region", 2: "District", 3: "Township" } },
   { code: "KHM", name: "Cambodia",         region: "SE Asia",           maxLevel: 3, levelNames: { 0: "Country", 1: "Province", 2: "District", 3: "Commune" } },
   { code: "LAO", name: "Laos",             region: "SE Asia",           maxLevel: 3, levelNames: { 0: "Country", 1: "Province", 2: "District", 3: "Village" } },
+  // Vietnam: Districts abolished — Province → Commune (2-level below country)
+  { code: "VNM", name: "Vietnam",          region: "SE Asia",           maxLevel: 2, levelNames: { 0: "Country", 1: "Province", 2: "Commune" } },
+  { code: "PHL", name: "Philippines",      region: "SE Asia",           maxLevel: 3, levelNames: { 0: "Country", 1: "Region", 2: "Province", 3: "Municipality" } },
+  { code: "IDN", name: "Indonesia",        region: "SE Asia",           maxLevel: 3, levelNames: { 0: "Country", 1: "Province", 2: "Regency/City", 3: "District" } },
   { code: "HTI", name: "Haiti",            region: "Caribbean",         maxLevel: 3, levelNames: { 0: "Country", 1: "Department", 2: "Arrondissement", 3: "Commune" } },
 
   // ─── Pacific ─────────────────────────────────────────────────────

@@ -40,6 +40,7 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useAuth } from "@/hooks/useAuth";
 import { useAppUpdate } from "@/hooks/useAppUpdate";
 import { offlineDb, enqueueOutbox } from "@/lib/offlineDb";
+import { getCountryConfig } from "@/lib/countryConfig";
 // Original Code: Standard lucide-react imports without autocomplete and check icons
 /*
 import {
@@ -906,14 +907,14 @@ const buildBatchDoseRows = ({
         ? ["infant", "infants", "under1", "under_1", "children", "child"].some((x) => group.includes(x))
         : ["pregnant", "women", "maternal", "adult"].some((x) => group.includes(x));
     })
-    .map((dose) => {
+    .map((dose, idx) => {
       const displayName = displayDoseName(dose.name, dose.doseCode);
       const legacyConfig = findLegacyVaccineConfig(displayName, vaccineConfigs);
-      if (!legacyConfig) return null;
+      const configId = legacyConfig?.id || (vaccineConfigs?.[0]?.id || (idx + 1));
       const weeks = doseWeeksFromCatalogue(dose, displayName);
       return {
         scheduleDoseId: dose.id,
-        vaccineConfigId: legacyConfig.id,
+        vaccineConfigId: configId,
         vaccineName: displayName,
         recommendedAgeWeeks: weeks,
       };
@@ -922,11 +923,11 @@ const buildBatchDoseRows = ({
 
   const fallbackRows = VACCINE_SCHEDULE
     .filter((dose) => client.clientType === "child" || /^(TD|TT)/.test(canonicalDoseCode(dose.name, dose.code)))
-    .map((dose) => {
+    .map((dose, idx) => {
       const displayName = displayDoseName(dose.name, dose.code);
       const legacyConfig = findLegacyVaccineConfig(displayName, vaccineConfigs);
-      if (!legacyConfig) return null;
-      return { vaccineConfigId: legacyConfig.id, vaccineName: displayName, recommendedAgeWeeks: dose.weeks };
+      const configId = legacyConfig?.id || (vaccineConfigs?.[0]?.id || (idx + 1));
+      return { vaccineConfigId: configId, vaccineName: displayName, recommendedAgeWeeks: dose.weeks };
     })
     .filter(Boolean) as Array<{ vaccineConfigId: number; vaccineName: string; recommendedAgeWeeks: number }>;
 
@@ -4822,16 +4823,12 @@ export default function ClientLogbook() {
                             />
                           ) : (
                             <div className="h-11 w-11 shrink-0 bg-primary/10 rounded-2xl flex items-center justify-center text-primary print:text-black font-extrabold text-sm border border-primary/20">
-                              {tenantCode === "PNG" ? "PNG" : "SSD"}
+                              {getCountryConfig(tenant || { code: tenantCode, countryCode: tenantCode }).flagEmoji || tenantCode || "MOH"}
                             </div>
                           )}
                           <div>
                             <h2 className="text-[10px] font-black text-muted-foreground dark:text-muted-foreground uppercase tracking-wider print:text-black leading-none">
-                              {(tenantCode === "ZMB" || tenant?.name?.toLowerCase().includes("zambia") || tenant?.code?.toLowerCase().includes("zmb"))
-                                ? "Republic of Zambia"
-                                : tenantCode === "PNG"
-                                ? "Independent State of PNG"
-                                : "Republic of South Sudan"}
+                              {tenant?.settings?.officialName || tenant?.name || getCountryConfig(tenant || { code: tenantCode, countryCode: tenantCode }).officialName || `Republic of ${tenantCode}`}
                             </h2>
                             <h3 className="text-sm font-black text-foreground dark:text-white uppercase tracking-tight print:text-black mt-1">
                               Ministry of Health

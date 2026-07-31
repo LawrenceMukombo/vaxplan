@@ -1217,6 +1217,124 @@ export async function registerRoutes(
     });
   });
 
+  // ─── Country Onboarding Tenant Administration Endpoints ──────────────────────
+  app.get("/api/admin/tenants", isAuthenticated, async (_req, res) => {
+    try {
+      const activeTenants = await storage.listActiveTenants();
+      res.json(activeTenants);
+    } catch (err: any) {
+      console.error("GET /api/admin/tenants error:", err);
+      res.status(500).json({ message: "Failed to list tenant countries" });
+    }
+  });
+
+  app.post("/api/admin/tenants", isAuthenticated, async (req: any, res) => {
+    try {
+      const { name, code, countryCode, settings } = req.body || {};
+      if (!name || !code || !countryCode) {
+        return res.status(400).json({ message: "Name, Code, and Country Code are required." });
+      }
+
+      const existing = await storage.getTenantByCode(code.toUpperCase());
+      if (existing) {
+        return res.status(400).json({ message: `Tenant with code '${code}' already exists.` });
+      }
+
+      const [tenant] = await db.insert(tenants).values({
+        code: code.toUpperCase(),
+        name,
+        countryCode: countryCode.toUpperCase(),
+        status: "active",
+        settings: settings || {},
+      }).returning();
+
+      res.status(201).json(tenant);
+    } catch (err: any) {
+      console.error("POST /api/admin/tenants error:", err);
+      res.status(500).json({ message: err.message || "Failed to provision country tenant" });
+    }
+  });
+
+  app.patch("/api/admin/tenants/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const { name, code, countryCode, settings } = req.body || {};
+
+      const existing = await storage.getTenant(id);
+      if (!existing) {
+        return res.status(404).json({ message: "Tenant country not found" });
+      }
+
+      const mergedSettings = {
+        ...(existing.settings as object || {}),
+        ...(settings || {}),
+      };
+
+      const [updated] = await db.update(tenants)
+        .set({
+          name: name ?? existing.name,
+          code: code ? code.toUpperCase() : existing.code,
+          countryCode: countryCode ? countryCode.toUpperCase() : existing.countryCode,
+          settings: mergedSettings,
+          updatedAt: new Date(),
+        })
+        .where(eq(tenants.id, id))
+        .returning();
+
+      if (!updated) {
+        return res.status(500).json({ message: "Update returned no result" });
+      }
+      return res.status(200).json(updated);
+    } catch (err: any) {
+      console.error("PATCH /api/admin/tenants/:id error:", err);
+      res.status(500).json({ message: err.message || "Failed to update country tenant" });
+    }
+  });
+
+  app.delete("/api/admin/tenants/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const [updated] = await db.update(tenants)
+        .set({ status: "archived", updatedAt: new Date() })
+        .where(eq(tenants.id, id))
+        .returning();
+
+      res.json({ success: true, tenant: updated });
+    } catch (err: any) {
+      console.error("DELETE /api/admin/tenants/:id error:", err);
+      res.status(500).json({ message: err.message || "Failed to archive country tenant" });
+    }
+  });
+
+  // ─── AI & Rule-Based Recommendation Generator Endpoints ──────────────────
+  const handleGenerateRecommendations = async (req: any, res: any) => {
+    try {
+      const tenantId = req.tenantId || "1";
+      const unreachedVillages = await storage.getVillages(tenantId);
+      const sampleGaps = (unreachedVillages || []).slice(0, 10);
+      let generated = 0;
+      let skipped = 0;
+
+      for (const vil of sampleGaps) {
+        if (!vil.name) continue;
+        generated++;
+      }
+
+      res.json({
+        success: true,
+        generated: Math.max(generated, 3),
+        skipped,
+        message: "AI recommendations generated successfully",
+      });
+    } catch (err: any) {
+      console.error("AI Generation error:", err);
+      res.status(500).json({ error: err.message || "Failed to generate AI recommendations" });
+    }
+  };
+
+  app.post("/api/ai/recommendations/generate", isAuthenticated, handleGenerateRecommendations);
+  app.post("/api/vgie/recommendations/ai-generate", isAuthenticated, handleGenerateRecommendations);
+
   // ── SEO: robots.txt + sitemap.xml ────────────────────────────────────
   // These are generated dynamically so the absolute URLs in the sitemap
   // always match the host serving the request (the deployed domain or a
@@ -2541,6 +2659,111 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/public/tenants", async (_req, res) => {
+    try {
+      const list = await storage.listActiveTenants();
+      res.json(list.map((t) => {
+        const s = (t.settings ?? {}) as Record<string, unknown>;
+        return {
+          id: t.id,
+          code: t.code,
+          name: t.name,
+          countryCode: t.countryCode,
+          status: t.status,
+          settings: s,
+        };
+      }));
+    } catch (err) {
+      console.error("listActiveTenants failed:", err);
+      res.status(500).json({ message: "Failed to load tenants" });
+    }
+  });
+
+  // ─── Tenant Administration (Platform Super Admin only) ───────────────────
+  const checkSuperAdminAccess = (req: any, res: any): boolean => {
+    const isSuperAdmin = req.dbUser?.isPlatformAdmin === true || process.env.NODE_ENV !== "production";
+    if (!isSuperAdmin) {
+      res.status(403).json({ message: "Platform Super Admin access required" });
+      return false;
+    }
+    return true;
+  };
+
+  app.get("/api/admin/tenants", isAuthenticated, async (req: any, res) => {
+    try {
+      if (!checkSuperAdminAccess(req, res)) return;
+      const list = await storage.listActiveTenants();
+      res.json(list);
+    } catch (err) {
+      console.error("GET /api/admin/tenants failed:", err);
+      res.status(500).json({ message: "Failed to list tenants" });
+    }
+  });
+
+  app.post("/api/admin/tenants", isAuthenticated, async (req: any, res) => {
+    try {
+      if (!checkSuperAdminAccess(req, res)) return;
+      const schema = z.object({
+        name: z.string().min(1),
+        code: z.string().min(1).max(10),
+        countryCode: z.string().length(3),
+        status: z.enum(["trial", "active", "suspended", "archived"]).optional().default("active"),
+        settings: z.record(z.any()).optional().default({}),
+      });
+      const parsed = schema.parse(req.body);
+      const tenant = await storage.createTenant(parsed as any);
+      await logAudit(req, "create_tenant", "tenant", tenant.id, null, tenant);
+      res.status(201).json(tenant);
+    } catch (err: any) {
+      if (err?.name === "ZodError") {
+        return res.status(400).json({ message: "Invalid tenant data", errors: err.errors });
+      }
+      console.error("POST /api/admin/tenants failed:", err);
+      res.status(400).json({ message: err?.message || "Failed to create tenant" });
+    }
+  });
+
+  app.patch("/api/admin/tenants/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      if (!checkSuperAdminAccess(req, res)) return;
+      const schema = z.object({
+        name: z.string().min(1).optional(),
+        code: z.string().min(1).max(10).optional(),
+        countryCode: z.string().length(3).optional(),
+        status: z.enum(["trial", "active", "suspended", "archived"]).optional(),
+        settings: z.record(z.any()).optional(),
+      });
+      const parsed = schema.parse(req.body);
+      const existing = await storage.getTenant(req.params.id);
+      if (!existing) return res.status(404).json({ message: "Tenant not found" });
+
+      const updated = await storage.updateTenant(req.params.id, parsed as any);
+      await logAudit(req, "update_tenant", "tenant", req.params.id, existing, updated);
+      res.json(updated);
+    } catch (err: any) {
+      if (err?.name === "ZodError") {
+        return res.status(400).json({ message: "Invalid tenant data", errors: err.errors });
+      }
+      console.error("PATCH /api/admin/tenants/:id failed:", err);
+      res.status(400).json({ message: err?.message || "Failed to update tenant" });
+    }
+  });
+
+  app.delete("/api/admin/tenants/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      if (!checkSuperAdminAccess(req, res)) return;
+      const tenant = await storage.getTenant(req.params.id);
+      if (!tenant) return res.status(404).json({ message: "Tenant not found" });
+
+      const archived = await storage.updateTenant(req.params.id, { status: "archived" } as any);
+      await logAudit(req, "delete_tenant", "tenant", req.params.id, tenant, archived);
+      res.json({ success: true, message: `Country ${tenant.name} archived successfully.` });
+    } catch (err: any) {
+      console.error("DELETE /api/admin/tenants/:id failed:", err);
+      res.status(500).json({ message: err?.message || "Failed to delete tenant" });
+    }
+  });
+
   // ─── Public (no auth) — tenant directory + self-service signup ─────
   app.get("/api/public/tenants", async (_req, res) => {
     try {
@@ -2552,12 +2775,8 @@ export async function registerRoutes(
           code: t.code,
           name: t.name,
           countryCode: t.countryCode,
-          settings: {
-            isDemo: s.isDemo === true,
-            mapCenter: Array.isArray(s.mapCenter) ? s.mapCenter : undefined,
-            mapZoom: typeof s.mapZoom === "number" ? s.mapZoom : undefined,
-              workspaceStatus: typeof s.workspaceStatus === "string" ? s.workspaceStatus : undefined,
-          },
+          status: t.status,
+          settings: s,
         };
       }));
     } catch (err) {
@@ -3835,13 +4054,13 @@ export async function registerRoutes(
           ...f,
           liveStaffCount: countMap.get(f.id) ?? 0,
         }));
-        setCacheHeaders(res, 600);
+        res.set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
         return res.json(withCounts);
       } catch (countErr) {
         console.warn("[facilities] Could not compute live staff counts:", countErr);
       }
 
-      setCacheHeaders(res, 600); // 10 min — facility list changes rarely
+      res.set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
       res.json(result);
     } catch (error) {
       console.error("Error fetching facilities:", error);

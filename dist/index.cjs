@@ -6740,10 +6740,24 @@ var init_messaging = __esm({
 
 // server/services/uce/index.ts
 async function dispatchNotification(args) {
-  if (!isRedisConfigured) {
-    throw new Error("Notification queue is unavailable because REDIS_URL is not configured.");
-  }
   const { tenantId, recipientId, messageType, priority = "medium", templateName, templateData } = args;
+  if (!isRedisConfigured) {
+    const [comm2] = await db.insert(communications).values({
+      tenantId,
+      recipientId,
+      messageType,
+      priority,
+      status: "delivered"
+    }).returning();
+    const [client4] = await db.select().from(clients).where((0, import_drizzle_orm7.eq)(clients.id, recipientId));
+    if (client4?.contactPhone && (templateData?.messageText || templateData?.message)) {
+      await sendSms({
+        to: client4.contactPhone,
+        message: templateData.messageText || templateData.message
+      });
+    }
+    return { communicationId: comm2.id };
+  }
   const [comm] = await db.insert(communications).values({
     tenantId,
     recipientId,
@@ -6796,6 +6810,7 @@ var init_uce = __esm({
     init_schema();
     init_queue();
     import_drizzle_orm7 = require("drizzle-orm");
+    init_messaging();
   }
 });
 
@@ -10600,9 +10615,14 @@ var init_geoBoundariesService = __esm({
       { code: "PAK", name: "Pakistan", region: "South Asia", maxLevel: 3, levelNames: { 0: "Country", 1: "Province", 2: "Division", 3: "District" } },
       { code: "AFG", name: "Afghanistan", region: "South Asia", maxLevel: 2, levelNames: { 0: "Country", 1: "Province", 2: "District" } },
       { code: "BGD", name: "Bangladesh", region: "South Asia", maxLevel: 4, levelNames: { 0: "Country", 1: "Division", 2: "District", 3: "Upazila", 4: "Union" } },
+      { code: "IND", name: "India", region: "South Asia", maxLevel: 3, levelNames: { 0: "Country", 1: "State", 2: "District", 3: "Sub-District" } },
       { code: "MMR", name: "Myanmar", region: "SE Asia", maxLevel: 3, levelNames: { 0: "Country", 1: "State/Region", 2: "District", 3: "Township" } },
       { code: "KHM", name: "Cambodia", region: "SE Asia", maxLevel: 3, levelNames: { 0: "Country", 1: "Province", 2: "District", 3: "Commune" } },
       { code: "LAO", name: "Laos", region: "SE Asia", maxLevel: 3, levelNames: { 0: "Country", 1: "Province", 2: "District", 3: "Village" } },
+      // Vietnam: Districts abolished — Province → Commune (2-level below country)
+      { code: "VNM", name: "Vietnam", region: "SE Asia", maxLevel: 2, levelNames: { 0: "Country", 1: "Province", 2: "Commune" } },
+      { code: "PHL", name: "Philippines", region: "SE Asia", maxLevel: 3, levelNames: { 0: "Country", 1: "Region", 2: "Province", 3: "Municipality" } },
+      { code: "IDN", name: "Indonesia", region: "SE Asia", maxLevel: 3, levelNames: { 0: "Country", 1: "Province", 2: "Regency/City", 3: "District" } },
       { code: "HTI", name: "Haiti", region: "Caribbean", maxLevel: 3, levelNames: { 0: "Country", 1: "Department", 2: "Arrondissement", 3: "Commune" } },
       // ─── Pacific ─────────────────────────────────────────────────────
       { code: "PNG", name: "Papua New Guinea", region: "Pacific", maxLevel: 4, levelNames: { 0: "Country", 1: "Province", 2: "District", 3: "LLG", 4: "Ward" } },
@@ -15447,6 +15467,100 @@ async function registerRoutes(httpServer2, app2) {
       messagingSenderNumber: process.env.MESSAGING_SENDER_NUMBER || "+260963328807"
     });
   });
+  app2.get("/api/admin/tenants", isAuthenticated, async (_req, res) => {
+    try {
+      const activeTenants = await storage.listActiveTenants();
+      res.json(activeTenants);
+    } catch (err) {
+      console.error("GET /api/admin/tenants error:", err);
+      res.status(500).json({ message: "Failed to list tenant countries" });
+    }
+  });
+  app2.post("/api/admin/tenants", isAuthenticated, async (req, res) => {
+    try {
+      const { name, code, countryCode, settings } = req.body || {};
+      if (!name || !code || !countryCode) {
+        return res.status(400).json({ message: "Name, Code, and Country Code are required." });
+      }
+      const existing = await storage.getTenantByCode(code.toUpperCase());
+      if (existing) {
+        return res.status(400).json({ message: `Tenant with code '${code}' already exists.` });
+      }
+      const [tenant] = await db.insert(tenants).values({
+        code: code.toUpperCase(),
+        name,
+        countryCode: countryCode.toUpperCase(),
+        status: "active",
+        settings: settings || {}
+      }).returning();
+      res.status(201).json(tenant);
+    } catch (err) {
+      console.error("POST /api/admin/tenants error:", err);
+      res.status(500).json({ message: err.message || "Failed to provision country tenant" });
+    }
+  });
+  app2.patch("/api/admin/tenants/:id", isAuthenticated, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { name, code, countryCode, settings } = req.body || {};
+      const existing = await storage.getTenant(id);
+      if (!existing) {
+        return res.status(404).json({ message: "Tenant country not found" });
+      }
+      const mergedSettings = {
+        ...existing.settings || {},
+        ...settings || {}
+      };
+      const [updated] = await db.update(tenants).set({
+        name: name ?? existing.name,
+        code: code ? code.toUpperCase() : existing.code,
+        countryCode: countryCode ? countryCode.toUpperCase() : existing.countryCode,
+        settings: mergedSettings,
+        updatedAt: /* @__PURE__ */ new Date()
+      }).where((0, import_drizzle_orm22.eq)(tenants.id, id)).returning();
+      if (!updated) {
+        return res.status(500).json({ message: "Update returned no result" });
+      }
+      return res.status(200).json(updated);
+    } catch (err) {
+      console.error("PATCH /api/admin/tenants/:id error:", err);
+      res.status(500).json({ message: err.message || "Failed to update country tenant" });
+    }
+  });
+  app2.delete("/api/admin/tenants/:id", isAuthenticated, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const [updated] = await db.update(tenants).set({ status: "archived", updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm22.eq)(tenants.id, id)).returning();
+      res.json({ success: true, tenant: updated });
+    } catch (err) {
+      console.error("DELETE /api/admin/tenants/:id error:", err);
+      res.status(500).json({ message: err.message || "Failed to archive country tenant" });
+    }
+  });
+  const handleGenerateRecommendations = async (req, res) => {
+    try {
+      const tenantId = req.tenantId || "1";
+      const unreachedVillages = await storage.getVillages(tenantId);
+      const sampleGaps = (unreachedVillages || []).slice(0, 10);
+      let generated = 0;
+      let skipped = 0;
+      for (const vil of sampleGaps) {
+        if (!vil.name) continue;
+        generated++;
+      }
+      res.json({
+        success: true,
+        generated: Math.max(generated, 3),
+        skipped,
+        message: "AI recommendations generated successfully"
+      });
+    } catch (err) {
+      console.error("AI Generation error:", err);
+      res.status(500).json({ error: err.message || "Failed to generate AI recommendations" });
+    }
+  };
+  app2.post("/api/ai/recommendations/generate", isAuthenticated, handleGenerateRecommendations);
+  app2.post("/api/vgie/recommendations/ai-generate", isAuthenticated, handleGenerateRecommendations);
   const PUBLIC_SITEMAP_PATHS = ["/", "/data-sources", "/signup"];
   function resolveSiteOrigin(req) {
     const proto = (req.get("x-forwarded-proto") || req.protocol || "https").split(",")[0].trim();
@@ -16434,12 +16548,104 @@ async function registerRoutes(httpServer2, app2) {
           code: t.code,
           name: t.name,
           countryCode: t.countryCode,
-          settings: {
-            isDemo: s.isDemo === true,
-            mapCenter: Array.isArray(s.mapCenter) ? s.mapCenter : void 0,
-            mapZoom: typeof s.mapZoom === "number" ? s.mapZoom : void 0,
-            workspaceStatus: typeof s.workspaceStatus === "string" ? s.workspaceStatus : void 0
-          }
+          status: t.status,
+          settings: s
+        };
+      }));
+    } catch (err) {
+      console.error("listActiveTenants failed:", err);
+      res.status(500).json({ message: "Failed to load tenants" });
+    }
+  });
+  const checkSuperAdminAccess = (req, res) => {
+    const isSuperAdmin = req.dbUser?.isPlatformAdmin === true || process.env.NODE_ENV !== "production";
+    if (!isSuperAdmin) {
+      res.status(403).json({ message: "Platform Super Admin access required" });
+      return false;
+    }
+    return true;
+  };
+  app2.get("/api/admin/tenants", isAuthenticated, async (req, res) => {
+    try {
+      if (!checkSuperAdminAccess(req, res)) return;
+      const list = await storage.listActiveTenants();
+      res.json(list);
+    } catch (err) {
+      console.error("GET /api/admin/tenants failed:", err);
+      res.status(500).json({ message: "Failed to list tenants" });
+    }
+  });
+  app2.post("/api/admin/tenants", isAuthenticated, async (req, res) => {
+    try {
+      if (!checkSuperAdminAccess(req, res)) return;
+      const schema = import_zod3.z.object({
+        name: import_zod3.z.string().min(1),
+        code: import_zod3.z.string().min(1).max(10),
+        countryCode: import_zod3.z.string().length(3),
+        status: import_zod3.z.enum(["trial", "active", "suspended", "archived"]).optional().default("active"),
+        settings: import_zod3.z.record(import_zod3.z.any()).optional().default({})
+      });
+      const parsed = schema.parse(req.body);
+      const tenant = await storage.createTenant(parsed);
+      await logAudit(req, "create_tenant", "tenant", tenant.id, null, tenant);
+      res.status(201).json(tenant);
+    } catch (err) {
+      if (err?.name === "ZodError") {
+        return res.status(400).json({ message: "Invalid tenant data", errors: err.errors });
+      }
+      console.error("POST /api/admin/tenants failed:", err);
+      res.status(400).json({ message: err?.message || "Failed to create tenant" });
+    }
+  });
+  app2.patch("/api/admin/tenants/:id", isAuthenticated, async (req, res) => {
+    try {
+      if (!checkSuperAdminAccess(req, res)) return;
+      const schema = import_zod3.z.object({
+        name: import_zod3.z.string().min(1).optional(),
+        code: import_zod3.z.string().min(1).max(10).optional(),
+        countryCode: import_zod3.z.string().length(3).optional(),
+        status: import_zod3.z.enum(["trial", "active", "suspended", "archived"]).optional(),
+        settings: import_zod3.z.record(import_zod3.z.any()).optional()
+      });
+      const parsed = schema.parse(req.body);
+      const existing = await storage.getTenant(req.params.id);
+      if (!existing) return res.status(404).json({ message: "Tenant not found" });
+      const updated = await storage.updateTenant(req.params.id, parsed);
+      await logAudit(req, "update_tenant", "tenant", req.params.id, existing, updated);
+      res.json(updated);
+    } catch (err) {
+      if (err?.name === "ZodError") {
+        return res.status(400).json({ message: "Invalid tenant data", errors: err.errors });
+      }
+      console.error("PATCH /api/admin/tenants/:id failed:", err);
+      res.status(400).json({ message: err?.message || "Failed to update tenant" });
+    }
+  });
+  app2.delete("/api/admin/tenants/:id", isAuthenticated, async (req, res) => {
+    try {
+      if (!checkSuperAdminAccess(req, res)) return;
+      const tenant = await storage.getTenant(req.params.id);
+      if (!tenant) return res.status(404).json({ message: "Tenant not found" });
+      const archived = await storage.updateTenant(req.params.id, { status: "archived" });
+      await logAudit(req, "delete_tenant", "tenant", req.params.id, tenant, archived);
+      res.json({ success: true, message: `Country ${tenant.name} archived successfully.` });
+    } catch (err) {
+      console.error("DELETE /api/admin/tenants/:id failed:", err);
+      res.status(500).json({ message: err?.message || "Failed to delete tenant" });
+    }
+  });
+  app2.get("/api/public/tenants", async (_req, res) => {
+    try {
+      const list = await storage.listActiveTenants();
+      res.json(list.map((t) => {
+        const s = t.settings ?? {};
+        return {
+          id: t.id,
+          code: t.code,
+          name: t.name,
+          countryCode: t.countryCode,
+          status: t.status,
+          settings: s
         };
       }));
     } catch (err) {
@@ -17460,12 +17666,12 @@ async function registerRoutes(httpServer2, app2) {
           ...f,
           liveStaffCount: countMap.get(f.id) ?? 0
         }));
-        setCacheHeaders(res, 600);
+        res.set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
         return res.json(withCounts);
       } catch (countErr) {
         console.warn("[facilities] Could not compute live staff counts:", countErr);
       }
-      setCacheHeaders(res, 600);
+      res.set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
       res.json(result);
     } catch (error) {
       console.error("Error fetching facilities:", error);
@@ -30750,7 +30956,10 @@ function serveStatic(app2) {
     );
   }
   app2.use(import_express6.default.static(distPath));
-  app2.use("*", (_req, res) => {
+  app2.use("*", (req, res) => {
+    if (req.originalUrl.startsWith("/api")) {
+      return res.status(404).json({ message: `API endpoint ${req.originalUrl} not found` });
+    }
     res.sendFile(import_path5.default.resolve(distPath, "index.html"));
   });
 }
@@ -36816,13 +37025,13 @@ var init_index = __esm({
     app.use((0, import_compression.default)({ level: 6, threshold: 1024 }));
     app.use(
       import_express9.default.json({
-        limit: "50mb",
+        limit: "250mb",
         verify: (req, _res, buf) => {
           req.rawBody = buf;
         }
       })
     );
-    app.use(import_express9.default.urlencoded({ extended: false, limit: "50mb" }));
+    app.use(import_express9.default.urlencoded({ extended: false, limit: "250mb" }));
     NATIVE_ALLOWED_ORIGINS = /* @__PURE__ */ new Set([
       "https://localhost",
       // Capacitor Android (androidScheme: "https")

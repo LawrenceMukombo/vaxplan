@@ -20,6 +20,7 @@ import { CatchmentMapPanel } from "@/components/CatchmentMapPanel";
 import { ChvCoverageTab } from "@/components/ChvCoverageTab";
 import { EntityHistoryDrawer } from "@/components/history/EntityHistoryDrawer";
 import { ViewAsOfDateControl } from "@/components/history/ViewAsOfDateControl";
+import { offlineDb } from "@/lib/offlineDb";
 
 // Fix Leaflet default marker icon asset pathways
 delete (L.Icon.Default.prototype as any)._getIconUrl;
@@ -549,9 +550,13 @@ export default function Facilities() {
   const { data: facilities, isLoading: loadingFacilities } = useQuery<Facility[]>({
     queryKey: ["/api/facilities"],
     queryFn: async () => {
-      const res = await fetch("/api/facilities", { credentials: "include" });
+      const res = await fetch("/api/facilities", { credentials: "include", headers: { "Cache-Control": "no-cache" } });
       if (!res.ok) throw new Error("Failed to fetch facilities");
-      return res.json();
+      const list = await res.json();
+      try {
+        await offlineDb.facilities.bulkPut(list);
+      } catch {}
+      return list;
     },
   });
 
@@ -1333,6 +1338,13 @@ export default function Facilities() {
           unmappedOsm: extractionResult.unmapped.filter((u) => u.osmId && selectedUnmappedOsm.has(String(u.osmId))),
         });
       }
+      queryClient.setQueryData<Facility[]>(["/api/facilities"], (old) => {
+        if (!old) return old;
+        return old.map((f) => (Number(f.id) === Number(facility.id) ? { ...f, ...facility } : f));
+      });
+      try {
+        offlineDb.facilities.put(facility);
+      } catch {}
       queryClient.invalidateQueries({ queryKey: ["/api/facilities"] });
       setDialogOpen(false);
       setEditingFacility(null);
@@ -1374,12 +1386,83 @@ export default function Facilities() {
   });
 
   const parseBulkFacilityPayload = () => {
-    const parsed = JSON.parse(bulkJson);
-    const facilitiesPayload = Array.isArray(parsed) ? parsed : parsed?.facilities;
-    if (!Array.isArray(facilitiesPayload) || facilitiesPayload.length === 0) {
-      throw new Error('Paste JSON as { "facilities": [...] } or a non-empty facility array.');
+    const raw = bulkJson.trim();
+    if (!raw) {
+      throw new Error('Please paste facility data in JSON or CSV format.');
     }
-    return facilitiesPayload;
+
+    // Try parsing as JSON first
+    if (raw.startsWith('{') || raw.startsWith('[')) {
+      try {
+        const parsed = JSON.parse(raw);
+        const facilitiesPayload = Array.isArray(parsed) ? parsed : parsed?.facilities;
+        if (!Array.isArray(facilitiesPayload) || facilitiesPayload.length === 0) {
+          throw new Error('JSON must contain a non-empty array under "facilities" or as a root array.');
+        }
+        return facilitiesPayload;
+      } catch (e: any) {
+        if (raw.startsWith('{') || raw.startsWith('[')) throw e;
+      }
+    }
+
+    // Fallback: parse simple CSV format
+    const lines = raw.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    if (lines.length < 2) {
+      throw new Error('CSV input must contain a header row and at least one data row.');
+    }
+
+    const parseCsvRow = (rowStr: string): string[] => {
+      const result: string[] = [];
+      let current = '';
+      let inQuotes = false;
+      for (let i = 0; i < rowStr.length; i++) {
+        const char = rowStr[i];
+        if (char === '"') {
+          inQuotes = !inQuotes;
+        } else if (char === ',' && !inQuotes) {
+          result.push(current.trim());
+          current = '';
+        } else {
+          current += char;
+        }
+      }
+      result.push(current.trim());
+      return result;
+    };
+
+    const headers = parseCsvRow(lines[0]).map(h => h.replace(/^"|"$/g, '').trim());
+    const nameIdx = headers.indexOf('name');
+    const codeIdx = headers.indexOf('hmisCode');
+
+    if (nameIdx === -1 || codeIdx === -1) {
+      throw new Error('CSV header must contain "name" and "hmisCode" columns.');
+    }
+
+    const facilities: any[] = [];
+    for (let i = 1; i < lines.length; i++) {
+      const values = parseCsvRow(lines[i]).map(v => v.replace(/^"|"$/g, '').trim());
+      if (values.length < 2) continue;
+
+      const obj: any = {};
+      headers.forEach((h, idx) => {
+        const val = values[idx] ?? '';
+        if (val === '') return;
+        if (h === 'hasRefrigerator' || h === 'hasPower') {
+          obj[h] = val.toLowerCase() === 'true' || val === '1';
+        } else if (h === 'latitude' || h === 'longitude' || h === 'catchmentRadius' || h === 'staffCount') {
+          const num = Number(val);
+          obj[h] = isNaN(num) ? val : num;
+        } else {
+          obj[h] = val;
+        }
+      });
+      facilities.push(obj);
+    }
+
+    if (facilities.length === 0) {
+      throw new Error('No valid facility rows found in CSV data.');
+    }
+    return facilities;
   };
 
   const bulkImportMutation = useMutation({
@@ -2278,7 +2361,92 @@ export default function Facilities() {
                       </div>
 
                       <div className="space-y-2">
-                        <Label>Facilities JSON</Label>
+                        <div className="flex items-center justify-between">
+                          <Label>Facilities Data (JSON or CSV format)</Label>
+                          <div className="flex items-center gap-2">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="h-7 text-xs"
+                              onClick={() => {
+                                const templateObj = {
+                                  facilities: [
+                                    {
+                                      name: "Lusaka Urban Health Centre",
+                                      hmisCode: "LUS-HC-001",
+                                      districtName: "Lusaka",
+                                      facilityType: "health_center",
+                                      operationalStatus: "operational",
+                                      agencyName: "Ministry of Health",
+                                      latitude: -15.4167,
+                                      longitude: 28.2833,
+                                      address: "Independence Avenue, Lusaka",
+                                      contactPhone: "+260977000111",
+                                      operatingHours: "08:00 - 17:00",
+                                      hasRefrigerator: true,
+                                      hasPower: true,
+                                      staffCount: 12,
+                                      catchmentRadius: 5.0
+                                    },
+                                    {
+                                      name: "Chilenje Mini Hospital",
+                                      hmisCode: "LUS-MH-002",
+                                      districtName: "Lusaka",
+                                      facilityType: "hospital",
+                                      operationalStatus: "operational",
+                                      agencyName: "Ministry of Health",
+                                      latitude: -15.4411,
+                                      longitude: 28.3245,
+                                      address: "Muramba Road, Chilenje",
+                                      contactPhone: "+260977000222",
+                                      operatingHours: "24 Hours",
+                                      hasRefrigerator: true,
+                                      hasPower: true,
+                                      staffCount: 35,
+                                      catchmentRadius: 10.0
+                                    }
+                                  ]
+                                };
+                                const blob = new Blob([JSON.stringify(templateObj, null, 2)], { type: "application/json" });
+                                const url = URL.createObjectURL(blob);
+                                const a = document.createElement("a");
+                                a.href = url;
+                                a.download = "facility_import_template.json";
+                                a.click();
+                                URL.revokeObjectURL(url);
+                              }}
+                              data-testid="button-download-facility-json-template"
+                            >
+                              <Download className="h-3.5 w-3.5 mr-1" />
+                              Download JSON Template
+                            </Button>
+
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="h-7 text-xs"
+                              onClick={() => {
+                                const csvHeader = "name,hmisCode,districtName,facilityType,operationalStatus,agencyName,latitude,longitude,address,contactPhone,operatingHours,hasRefrigerator,hasPower,staffCount,catchmentRadius\n";
+                                const sampleRows =
+                                  '"Lusaka Urban Health Centre","LUS-HC-001","Lusaka","health_center","operational","Ministry of Health",-15.4167,28.2833,"Independence Avenue, Lusaka","+260977000111","08:00 - 17:00",true,true,12,5.0\n' +
+                                  '"Chilenje Mini Hospital","LUS-MH-002","Lusaka","hospital","operational","Ministry of Health",-15.4411,28.3245,"Muramba Road, Chilenje","+260977000222","24 Hours",true,true,35,10.0\n';
+                                const blob = new Blob([csvHeader + sampleRows], { type: "text/csv" });
+                                const url = URL.createObjectURL(blob);
+                                const a = document.createElement("a");
+                                a.href = url;
+                                a.download = "facility_import_template.csv";
+                                a.click();
+                                URL.revokeObjectURL(url);
+                              }}
+                              data-testid="button-download-facility-csv-template"
+                            >
+                              <Download className="h-3.5 w-3.5 mr-1" />
+                              Download CSV Template
+                            </Button>
+                          </div>
+                        </div>
                         <textarea
                           className="min-h-[260px] w-full rounded-md border border-input bg-background px-3 py-2 font-mono text-xs shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
                           value={bulkJson}
@@ -2290,7 +2458,7 @@ export default function Facilities() {
                           data-testid="textarea-bulk-facility-json"
                         />
                         <p className="text-xs text-muted-foreground">
-                          Accepted shape: <code>{'{ "facilities": [...] }'}</code> or a raw array. Required fields per row: <code>name</code> and <code>hmisCode</code>. Optional fields include <code>districtName</code>, coordinates, type, status, cold chain, power, staff count, and catchment radius.
+                          Accepted shape: <code>{'{ "facilities": [...] }'}</code>, a raw JSON array, or CSV text with headers. Required fields per row: <code>name</code> and <code>hmisCode</code>. Optional fields: <code>districtName</code>, <code>facilityType</code> (hospital, health_center, aid_post, clinic), <code>latitude</code>, <code>longitude</code>, <code>address</code>, <code>contactPhone</code>, <code>operatingHours</code>, <code>hasRefrigerator</code> (true/false), <code>hasPower</code> (true/false), <code>staffCount</code>, and <code>catchmentRadius</code>.
                         </p>
                       </div>
 

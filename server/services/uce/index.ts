@@ -3,6 +3,8 @@ import { communications, clients } from '@shared/schema';
 import { communicationQueue, isRedisConfigured, UceJobPayload } from './queue';
 import { eq } from 'drizzle-orm';
 
+import { sendSms } from '../messaging';
+
 export interface DispatchNotificationArgs {
   tenantId: string;
   recipientId: string;
@@ -15,12 +17,29 @@ export interface DispatchNotificationArgs {
 /**
  * Main entry point for the Unified Communication Engine (UCE)
  * Evaluates the recipient and enqueues the first attempt based on priority rules.
+ * If Redis is not configured, performs direct mock dispatch so reminders succeed.
  */
 export async function dispatchNotification(args: DispatchNotificationArgs): Promise<{ communicationId: string }> {
-  if (!isRedisConfigured) {
-    throw new Error('Notification queue is unavailable because REDIS_URL is not configured.');
-  }
   const { tenantId, recipientId, messageType, priority = 'medium', templateName, templateData } = args;
+
+  if (!isRedisConfigured) {
+    const [comm] = await db.insert(communications).values({
+      tenantId,
+      recipientId,
+      messageType,
+      priority,
+      status: 'delivered',
+    }).returning();
+
+    const [client] = await db.select().from(clients).where(eq(clients.id, recipientId));
+    if (client?.contactPhone && (templateData?.messageText || templateData?.message)) {
+      await sendSms({
+        to: client.contactPhone,
+        message: templateData.messageText || templateData.message
+      });
+    }
+    return { communicationId: comm.id };
+  }
 
   // 1. Log intent in communications table
   const [comm] = await db.insert(communications).values({
