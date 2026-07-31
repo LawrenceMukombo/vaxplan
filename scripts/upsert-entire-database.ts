@@ -16,6 +16,8 @@ type TableMeta = {
   jsonColumns?: string[];
 };
 
+type DeferredRow = { table: TableMeta; encoded: unknown };
+
 function decode(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(decode);
   if (value && typeof value === "object") {
@@ -27,7 +29,7 @@ function decode(value: unknown): unknown {
   return value;
 }
 
-async function upsertRow(client: PoolClient, table: TableMeta, encoded: unknown) {
+async function upsertRow(client: PoolClient, table: TableMeta, encoded: unknown): Promise<"fk_violation" | undefined> {
   const row = decode(encoded) as Record<string, unknown>;
   const columns = table.columns.filter((column) => Object.hasOwn(row, column));
   const jsonColumns = new Set(table.jsonColumns ?? []);
@@ -90,6 +92,9 @@ async function upsertRow(client: PoolClient, table: TableMeta, encoded: unknown)
         await client.query("ROLLBACK TO SAVEPOINT row_sp2");
         console.warn(`    ⚠️  [Skip Duplicate Key] ${table.name}: ${err.message}`);
       }
+    } else if (err.code === "23503") {
+      // Foreign-key violation — caller will retry in a second pass
+      return "fk_violation";
     } else {
       console.warn(`    ⚠️  [Row Skipped] ${table.name}: ${err.message}`);
     }
@@ -115,6 +120,8 @@ export async function upsertEntireDatabase(customDbUrl?: string, customInputPath
     crlfDelay: Infinity,
   });
   let client: PoolClient | null = null;
+  // Collect rows that failed with FK violations for a second-pass retry
+  const deferredRows: DeferredRow[] = [];
   let current: TableMeta | null = null;
   let currentTableMissing = false;
   let tableRows = 0;
@@ -183,13 +190,23 @@ export async function upsertEntireDatabase(customDbUrl?: string, customInputPath
         tableRows = 0;
         client = await pool.connect();
         await client.query("BEGIN");
+        // Defer FK constraints so rows can be inserted regardless of arrival order.
+        // This works for any DB user (no superuser required).
+        try {
+          await client.query("SET CONSTRAINTS ALL DEFERRED;");
+        } catch {
+          // Non-deferrable constraints: silently continue; second-pass will handle FK retries.
+        }
       } else if (item.type === "row") {
         if (currentTableMissing) {
           // Table could not be created; skip row gracefully
           continue;
         }
         if (!client || !current) throw new Error("Row encountered outside a table.");
-        await upsertRow(client, current, item.data);
+        const result = await upsertRow(client, current, item.data);
+        if (result === "fk_violation") {
+          deferredRows.push({ table: { ...current }, encoded: item.data });
+        }
         tableRows++;
         processed++;
       } else if (item.type === "table_end") {
@@ -216,6 +233,37 @@ export async function upsertEntireDatabase(customDbUrl?: string, customInputPath
     if (declaredTotal === null || processed !== declaredTotal) {
       throw new Error(`Snapshot total ${declaredTotal}; processed ${processed}.`);
     }
+
+    // ── Second pass: retry FK-deferred rows now that parent tables exist ──────
+    if (deferredRows.length > 0) {
+      console.log(`[upsert] Second pass: retrying ${deferredRows.length} FK-deferred rows…`);
+      let retryPass = deferredRows.splice(0);
+      let passNumber = 0;
+      while (retryPass.length > 0 && passNumber++ < 10) {
+        const stillFailing: DeferredRow[] = [];
+        for (const { table, encoded } of retryPass) {
+          const retryClient = await pool.connect();
+          try {
+            await retryClient.query("BEGIN");
+            const res = await upsertRow(retryClient, table, encoded);
+            await retryClient.query("COMMIT");
+            if (res === "fk_violation") stillFailing.push({ table, encoded });
+          } catch (err: any) {
+            await retryClient.query("ROLLBACK");
+            console.warn(`    ⚠️  [Retry Failed] ${table.name}: ${err.message}`);
+          } finally {
+            retryClient.release();
+          }
+        }
+        retryPass = stillFailing;
+      }
+      if (retryPass.length > 0) {
+        console.warn(`[upsert] ⚠️  ${retryPass.length} rows could not be upserted after retry passes (unresolvable FK violations).`);
+      } else {
+        console.log(`[upsert] ✓ All FK-deferred rows successfully upserted in retry pass.`);
+      }
+    }
+
     console.log(`[upsert] Successfully upserted every one of ${processed} records.`);
   } catch (error) {
     if (client) {
