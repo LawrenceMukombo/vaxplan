@@ -132,7 +132,17 @@ export async function upsertEntireDatabase(customDbUrl?: string, customInputPath
   let currentTableMissing = false;
   let tableRows = 0;
   let processed = 0;
-  let declaredTotal: number | null = null;
+  // ── Pre-fetch existing tenants in target DB to bridge any local vs VPS tenant ID discrepancies ──
+  const existingTenantsByCode = new Map<string, string>();
+  try {
+    const res = await pool.query<{ id: string; code: string }>("SELECT id, code FROM public.tenants;");
+    for (const row of res.rows) {
+      if (row.code && row.id) {
+        existingTenantsByCode.set(row.code.toUpperCase(), row.id);
+      }
+    }
+  } catch {}
+  const tenantIdMap = new Map<string, string>();
 
   try {
     for await (const line of lines) {
@@ -209,13 +219,34 @@ export async function upsertEntireDatabase(customDbUrl?: string, customInputPath
           continue;
         }
         if (!client || !current) throw new Error("Row encountered outside a table.");
+
+        // Remap tenant_id dynamically if tenant was pre-existing on target DB with a different UUID
+        if (current.name === "tenants" && item.data && typeof item.data === "object") {
+          const rowObj = item.data as Record<string, any>;
+          const code = String(rowObj.code || "").toUpperCase();
+          const snapshotId = String(rowObj.id || "");
+          if (code && existingTenantsByCode.has(code)) {
+            const targetId = existingTenantsByCode.get(code)!;
+            tenantIdMap.set(snapshotId, targetId);
+            rowObj.id = targetId;
+          } else if (snapshotId) {
+            tenantIdMap.set(snapshotId, snapshotId);
+          }
+        } else if (item.data && typeof item.data === "object") {
+          const rowObj = item.data as Record<string, any>;
+          if (rowObj.tenant_id && tenantIdMap.has(String(rowObj.tenant_id))) {
+            rowObj.tenant_id = tenantIdMap.get(String(rowObj.tenant_id));
+          }
+        }
+
         const result = await upsertRow(client, current, item.data);
         if (result === "fk_violation") {
           deferredRows.push({ table: { ...current }, encoded: item.data });
         }
         tableRows++;
         processed++;
-      } else if (item.type === "table_end") {
+      }
+ else if (item.type === "table_end") {
         if (currentTableMissing && current) {
           console.log(`${current.name}: 0 (table absent in production; skipped)`);
           current = null;
@@ -249,18 +280,23 @@ export async function upsertEntireDatabase(customDbUrl?: string, customInputPath
         const stillFailing: DeferredRow[] = [];
         for (const item of retryPass) {
           const { table } = item;
-          let encoded = item.encoded;
-          // If a row still fails FK checks after pass 3, null out orphaned FK fields ending in _id
-          // (e.g. district_id) so the row itself is ALWAYS preserved in the database.
-          if (passNumber > 3 && encoded && typeof encoded === "object") {
+          if (encoded && typeof encoded === "object") {
             const copy = JSON.parse(JSON.stringify(encoded)) as Record<string, unknown>;
-            for (const key of Object.keys(copy)) {
-              if (key.endsWith("_id") && key !== "id" && key !== "tenant_id") {
-                copy[key] = null;
+            if (copy.tenant_id && tenantIdMap.has(String(copy.tenant_id))) {
+              copy.tenant_id = tenantIdMap.get(String(copy.tenant_id));
+            }
+            // If a row still fails FK checks after pass 3, null out orphaned FK fields ending in _id
+            // (e.g. district_id) so the row itself is ALWAYS preserved in the database.
+            if (passNumber > 3) {
+              for (const key of Object.keys(copy)) {
+                if (key.endsWith("_id") && key !== "id" && key !== "tenant_id") {
+                  copy[key] = null;
+                }
               }
             }
             encoded = copy;
           }
+
           const retryClient = await pool.connect();
           try {
             await retryClient.query("BEGIN");

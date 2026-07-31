@@ -36804,8 +36804,8 @@ function decode(value) {
   }
   return value;
 }
-async function upsertRow(client3, table, encoded) {
-  const row = decode(encoded);
+async function upsertRow(client3, table, encoded2) {
+  const row = decode(encoded2);
   const columns = table.columns.filter((column) => Object.hasOwn(row, column));
   const jsonColumns = new Set(table.jsonColumns ?? []);
   const values = columns.map((column) => {
@@ -36883,7 +36883,17 @@ async function upsertEntireDatabase(customDbUrl, customInputPath) {
   let currentTableMissing = false;
   let tableRows = 0;
   let processed = 0;
-  let declaredTotal = null;
+  const existingTenantsByCode = /* @__PURE__ */ new Map();
+  try {
+    const res = await pool2.query("SELECT id, code FROM public.tenants;");
+    for (const row of res.rows) {
+      if (row.code && row.id) {
+        existingTenantsByCode.set(row.code.toUpperCase(), row.id);
+      }
+    }
+  } catch {
+  }
+  const tenantIdMap = /* @__PURE__ */ new Map();
   try {
     for await (const line of lines) {
       const item = JSON.parse(line);
@@ -36946,6 +36956,23 @@ async function upsertEntireDatabase(customDbUrl, customInputPath) {
           continue;
         }
         if (!client3 || !current) throw new Error("Row encountered outside a table.");
+        if (current.name === "tenants" && item.data && typeof item.data === "object") {
+          const rowObj = item.data;
+          const code = String(rowObj.code || "").toUpperCase();
+          const snapshotId = String(rowObj.id || "");
+          if (code && existingTenantsByCode.has(code)) {
+            const targetId = existingTenantsByCode.get(code);
+            tenantIdMap.set(snapshotId, targetId);
+            rowObj.id = targetId;
+          } else if (snapshotId) {
+            tenantIdMap.set(snapshotId, snapshotId);
+          }
+        } else if (item.data && typeof item.data === "object") {
+          const rowObj = item.data;
+          if (rowObj.tenant_id && tenantIdMap.has(String(rowObj.tenant_id))) {
+            rowObj.tenant_id = tenantIdMap.get(String(rowObj.tenant_id));
+          }
+        }
         const result = await upsertRow(client3, current, item.data);
         if (result === "fk_violation") {
           deferredRows.push({ table: { ...current }, encoded: item.data });
@@ -36984,12 +37011,16 @@ async function upsertEntireDatabase(customDbUrl, customInputPath) {
         const stillFailing = [];
         for (const item of retryPass) {
           const { table } = item;
-          let encoded = item.encoded;
-          if (passNumber > 3 && encoded && typeof encoded === "object") {
+          if (encoded && typeof encoded === "object") {
             const copy = JSON.parse(JSON.stringify(encoded));
-            for (const key of Object.keys(copy)) {
-              if (key.endsWith("_id") && key !== "id" && key !== "tenant_id") {
-                copy[key] = null;
+            if (copy.tenant_id && tenantIdMap.has(String(copy.tenant_id))) {
+              copy.tenant_id = tenantIdMap.get(String(copy.tenant_id));
+            }
+            if (passNumber > 3) {
+              for (const key of Object.keys(copy)) {
+                if (key.endsWith("_id") && key !== "id" && key !== "tenant_id") {
+                  copy[key] = null;
+                }
               }
             }
             encoded = copy;
