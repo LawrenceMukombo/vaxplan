@@ -220,31 +220,27 @@ export async function upsertEntireDatabase(customDbUrl?: string, customInputPath
         }
         if (!client || !current) throw new Error("Row encountered outside a table.");
 
-        // Clean up any stale online tenant record that has the same code but a different ID,
-        // allowing the exact localhost tenant (with all its rich settings and data) to replace it 1-to-1.
+        // Map local snapshot tenant_id to the target online tenant_id by code (VNM, KEN, ZMB, etc.)
+        // so that all settings and child table records (boundaries, facilities, villages, population, etc.)
+        // attach perfectly to the target database tenant without any FK constraint failures.
         if (current.name === "tenants" && item.data && typeof item.data === "object") {
           const rowObj = item.data as Record<string, any>;
           const code = String(rowObj.code || "").toUpperCase();
           const snapshotId = String(rowObj.id || "");
           if (code && existingTenantsByCode.has(code)) {
-            const existingId = existingTenantsByCode.get(code)!;
-            if (existingId !== snapshotId) {
-              console.log(`[upsert] Removing stale online tenant "${code}" (${existingId}) to replace with exact localhost version (${snapshotId})`);
-              try {
-                await client!.query(`DELETE FROM public.tenants WHERE id = $1;`, [existingId]);
-                existingTenantsByCode.delete(code);
-              } catch (err: any) {
-                console.warn(`[upsert] Warning removing stale tenant ${existingId}:`, err.message);
-              }
-            }
+            const targetId = existingTenantsByCode.get(code)!;
+            tenantIdMap.set(snapshotId, targetId);
+            rowObj.id = targetId;
+          } else if (snapshotId) {
+            tenantIdMap.set(snapshotId, snapshotId);
           }
-          if (snapshotId) tenantIdMap.set(snapshotId, snapshotId);
         } else if (item.data && typeof item.data === "object") {
           const rowObj = item.data as Record<string, any>;
           if (rowObj.tenant_id && tenantIdMap.has(String(rowObj.tenant_id))) {
             rowObj.tenant_id = tenantIdMap.get(String(rowObj.tenant_id));
           }
         }
+
 
 
         const result = await upsertRow(client, current, item.data);
