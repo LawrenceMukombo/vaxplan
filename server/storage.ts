@@ -674,12 +674,16 @@ export class DatabaseStorage implements IStorage {
   }
 
   // --- Tenants & IdP configs ---
-  async getTenant(id: string): Promise<Tenant | undefined> {
-    const [t] = await db.select().from(tenants).where(eq(tenants.id, id));
-    return t;
+  async getTenant(idOrCode: string): Promise<Tenant | undefined> {
+    if (!idOrCode) return undefined;
+    const [t] = await db.select().from(tenants).where(eq(tenants.id, idOrCode));
+    if (t) return t;
+    const [tByCode] = await db.select().from(tenants).where(eq(tenants.code, idOrCode.toUpperCase()));
+    return tByCode;
   }
   async getTenantByCode(code: string): Promise<Tenant | undefined> {
-    const [t] = await db.select().from(tenants).where(eq(tenants.code, code));
+    if (!code) return undefined;
+    const [t] = await db.select().from(tenants).where(eq(tenants.code, code.toUpperCase()));
     return t;
   }
   async listActiveTenants(): Promise<Tenant[]> {

@@ -48,14 +48,12 @@ export const tenantContext: RequestHandler = async (req, _res, next) => {
   // if (!req.isAuthenticated?.()) return next();
 
   const headerTenantRaw = req.headers["x-tenant-id"] || req.query["x-tenant-id"];
-  const headerTenantId =
-    typeof headerTenantRaw === "string" && UUID_RE.test(headerTenantRaw)
-      ? headerTenantRaw
-      : null;
+  const headerTenantStr = typeof headerTenantRaw === "string" && headerTenantRaw.trim() ? headerTenantRaw.trim() : null;
 
   if (!req.isAuthenticated?.()) {
-    if (headerTenantId) {
-      req.tenantId = headerTenantId;
+    if (headerTenantStr) {
+      const t = await storage.getTenant(headerTenantStr);
+      req.tenantId = t?.id || (UUID_RE.test(headerTenantStr) ? headerTenantStr : null);
     }
     return next();
   }
@@ -72,7 +70,7 @@ export const tenantContext: RequestHandler = async (req, _res, next) => {
   // cleared, so reads and writes can only ever scope to the user's home tenant.
   // We only pay the extra user lookup when an override is actually in play
   // (the common request has neither header nor viewTenantId, so this is free).
-  const hasOverrideIntent = !!headerTenantId || !!req.session.viewTenantId;
+  const hasOverrideIntent = !!headerTenantStr || !!req.session.viewTenantId;
 
   let isSuperAdmin = false;
   if (hasOverrideIntent && userId) {
@@ -90,12 +88,10 @@ export const tenantContext: RequestHandler = async (req, _res, next) => {
     // tenant below, and ignore the header entirely.
     if (req.session.viewTenantId) delete req.session.viewTenantId;
   } else {
-    // Platform super-admin: accept a well-formed UUID header as the active
-    // tenant override (a tenant *code* or garbage is ignored so it can never
-    // be persisted to the session or reach a uuid column).
-    if (headerTenantId) {
+    // Platform super-admin: accept a tenant UUID or tenant code (e.g. "VNM")
+    if (headerTenantStr) {
       try {
-        const t = await storage.getTenant(headerTenantId);
+        const t = await storage.getTenant(headerTenantStr);
         if (t?.status === "active") {
           req.session.viewTenantId = t.id;
         }
@@ -106,7 +102,7 @@ export const tenantContext: RequestHandler = async (req, _res, next) => {
 
     // viewTenantId override: a super-admin may "visit" another active tenant.
     // Reads and writes both scope to that tenant.
-    if (req.session.viewTenantId && UUID_RE.test(req.session.viewTenantId)) {
+    if (req.session.viewTenantId) {
       try {
         const t = await storage.getTenant(req.session.viewTenantId);
         if (t?.status === "active") {
@@ -119,9 +115,6 @@ export const tenantContext: RequestHandler = async (req, _res, next) => {
         console.error("tenantContext viewTenantId lookup failed:", err);
         delete req.session.viewTenantId;
       }
-    } else if (req.session.viewTenantId) {
-      // Non-UUID value left over from an older client — purge it.
-      delete req.session.viewTenantId;
     }
   }
 

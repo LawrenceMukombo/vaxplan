@@ -3879,12 +3879,16 @@ var init_storage = __esm({
         return rows.length > 0;
       }
       // --- Tenants & IdP configs ---
-      async getTenant(id) {
-        const [t] = await db.select().from(tenants).where((0, import_drizzle_orm3.eq)(tenants.id, id));
-        return t;
+      async getTenant(idOrCode) {
+        if (!idOrCode) return void 0;
+        const [t] = await db.select().from(tenants).where((0, import_drizzle_orm3.eq)(tenants.id, idOrCode));
+        if (t) return t;
+        const [tByCode] = await db.select().from(tenants).where((0, import_drizzle_orm3.eq)(tenants.code, idOrCode.toUpperCase()));
+        return tByCode;
       }
       async getTenantByCode(code) {
-        const [t] = await db.select().from(tenants).where((0, import_drizzle_orm3.eq)(tenants.code, code));
+        if (!code) return void 0;
+        const [t] = await db.select().from(tenants).where((0, import_drizzle_orm3.eq)(tenants.code, code.toUpperCase()));
         return t;
       }
       async listActiveTenants() {
@@ -5860,15 +5864,16 @@ var init_tenantResolver = __esm({
     UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     tenantContext = async (req, _res, next) => {
       const headerTenantRaw = req.headers["x-tenant-id"] || req.query["x-tenant-id"];
-      const headerTenantId = typeof headerTenantRaw === "string" && UUID_RE.test(headerTenantRaw) ? headerTenantRaw : null;
+      const headerTenantStr = typeof headerTenantRaw === "string" && headerTenantRaw.trim() ? headerTenantRaw.trim() : null;
       if (!req.isAuthenticated?.()) {
-        if (headerTenantId) {
-          req.tenantId = headerTenantId;
+        if (headerTenantStr) {
+          const t = await storage.getTenant(headerTenantStr);
+          req.tenantId = t?.id || (UUID_RE.test(headerTenantStr) ? headerTenantStr : null);
         }
         return next();
       }
       const userId = req.user?.claims?.sub || req.user?.id;
-      const hasOverrideIntent = !!headerTenantId || !!req.session.viewTenantId;
+      const hasOverrideIntent = !!headerTenantStr || !!req.session.viewTenantId;
       let isSuperAdmin = false;
       if (hasOverrideIntent && userId) {
         try {
@@ -5881,9 +5886,9 @@ var init_tenantResolver = __esm({
       if (!isSuperAdmin) {
         if (req.session.viewTenantId) delete req.session.viewTenantId;
       } else {
-        if (headerTenantId) {
+        if (headerTenantStr) {
           try {
-            const t = await storage.getTenant(headerTenantId);
+            const t = await storage.getTenant(headerTenantStr);
             if (t?.status === "active") {
               req.session.viewTenantId = t.id;
             }
@@ -5891,7 +5896,7 @@ var init_tenantResolver = __esm({
             console.error("tenantContext header tenant lookup failed:", err);
           }
         }
-        if (req.session.viewTenantId && UUID_RE.test(req.session.viewTenantId)) {
+        if (req.session.viewTenantId) {
           try {
             const t = await storage.getTenant(req.session.viewTenantId);
             if (t?.status === "active") {
@@ -5903,8 +5908,6 @@ var init_tenantResolver = __esm({
             console.error("tenantContext viewTenantId lookup failed:", err);
             delete req.session.viewTenantId;
           }
-        } else if (req.session.viewTenantId) {
-          delete req.session.viewTenantId;
         }
       }
       if (req.session.tenantId) {
@@ -16735,11 +16738,12 @@ async function registerRoutes(httpServer2, app2) {
     }
   });
   function requireAdmin2(req, res, next) {
-    const role = req.user?.dbRole;
-    if (role !== "national_admin") {
-      return res.status(403).json({ message: "Admin role required" });
+    const role = req.user?.dbRole || req.dbUser?.role;
+    const isSuper = req.dbUser?.isPlatformAdmin === true || req.user?.isPlatformAdmin === true;
+    if (isSuper || role === "national_admin" || role === "gis_specialist") {
+      return next();
     }
-    next();
+    return res.status(403).json({ message: "Admin role required" });
   }
   async function loadRole(req, _res, next) {
     if (req.user?.dbRole) return next();
@@ -23678,6 +23682,7 @@ Note from the requester: ${conflict.note}` : ""}`,
       const schema = import_zod3.z.object({
         name: import_zod3.z.string().min(1).max(200).optional(),
         description: import_zod3.z.string().max(2e3).optional(),
+        category: import_zod3.z.string().optional(),
         isActive: import_zod3.z.boolean().optional(),
         usableInPlanning: import_zod3.z.boolean().optional(),
         style: import_zod3.z.record(import_zod3.z.any()).optional()

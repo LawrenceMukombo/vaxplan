@@ -75,10 +75,11 @@ function formatBytes(bytes: number | null): string {
 }
 
 function LayerRow({
-  layer, onDelete, onToggleActive, onTogglePlanning, busy,
+  layer, onDelete, onEdit, onToggleActive, onTogglePlanning, busy,
 }: {
   layer: CustomLayerMeta;
   onDelete: (id: string) => void;
+  onEdit: (layer: CustomLayerMeta) => void;
   onToggleActive: (layer: CustomLayerMeta) => void;
   onTogglePlanning: (layer: CustomLayerMeta) => void;
   busy: boolean;
@@ -114,7 +115,7 @@ function LayerRow({
           )}
         </div>
       </div>
-      <div className="flex items-center gap-4 shrink-0">
+      <div className="flex items-center gap-3 shrink-0">
         <div className="flex items-center gap-2">
           <Switch
             checked={layer.isActive}
@@ -136,11 +137,22 @@ function LayerRow({
         <Button
           size="sm"
           variant="ghost"
-          className="h-7 w-7 p-0 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-destructive transition-all"
+          className="h-8 w-8 p-0 text-muted-foreground hover:text-foreground transition-all"
+          onClick={() => onEdit(layer)}
+          title="Edit layer"
+          data-testid={`button-edit-layer-${layer.id}`}
+        >
+          <Pencil className="h-4 w-4" />
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive transition-all"
           onClick={() => onDelete(layer.id)}
+          title="Delete layer"
           data-testid={`button-delete-layer-${layer.id}`}
         >
-          <Trash2 className="h-3.5 w-3.5" />
+          <Trash2 className="h-4 w-4" />
         </Button>
       </div>
     </div>
@@ -162,9 +174,26 @@ export default function CustomLayers() {
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
 
+  // Edit layer state
+  const [editLayer, setEditLayer] = useState<CustomLayerMeta | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editDescription, setEditDescription] = useState("");
+  const [editCategory, setEditCategory] = useState("road_network");
+  const [editUsableInPlanning, setEditUsableInPlanning] = useState(false);
+  const [editColor, setEditColor] = useState("#2563eb");
+
   const [deleteId, setDeleteId] = useState<string | null>(null);
 
-  const admin = user?.role === "national_admin";
+  const admin = user?.isPlatformAdmin === true || user?.role === "national_admin" || user?.role === "gis_specialist" || (Array.isArray(user?.roles) && user.roles.some((r: string) => r === "national_admin" || r === "gis_specialist"));
+
+  const openEditModal = (layer: CustomLayerMeta) => {
+    setEditLayer(layer);
+    setEditName(layer.name || "");
+    setEditDescription(layer.description || "");
+    setEditCategory(layer.category || "road_network");
+    setEditUsableInPlanning(!!layer.usableInPlanning);
+    setEditColor(layer.style?.color || "#2563eb");
+  };
 
   const { data: layers, isLoading } = useQuery<CustomLayerMeta[]>({
     queryKey: ["/api/custom-layers"],
@@ -319,6 +348,7 @@ export default function CustomLayers() {
                   layer={l}
                   busy={patchMutation.isPending}
                   onDelete={setDeleteId}
+                  onEdit={openEditModal}
                   onToggleActive={(layer) => patchMutation.mutate({ id: layer.id, body: { isActive: !layer.isActive } })}
                   onTogglePlanning={(layer) => patchMutation.mutate({ id: layer.id, body: { usableInPlanning: !layer.usableInPlanning } })}
                 />
@@ -436,6 +466,108 @@ export default function CustomLayers() {
             <Button variant="outline" onClick={() => { setUploadOpen(false); resetForm(); }}>Cancel</Button>
             <Button onClick={handleUpload} disabled={uploading} className="gap-2" data-testid="button-confirm-upload">
               {uploading ? (<><RefreshCw className="h-4 w-4 animate-spin" /> Uploading…</>) : (<><Upload className="h-4 w-4" /> Upload</>)}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Layer dialog */}
+      <Dialog open={!!editLayer} onOpenChange={(o) => !o && setEditLayer(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Pencil className="h-5 w-5 text-primary" /> Edit Custom Layer
+            </DialogTitle>
+            <DialogDescription>
+              Update layer properties, category, color, or planning status.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="edit-layer-name" className="text-xs">Layer Name</Label>
+              <Input
+                id="edit-layer-name"
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+                placeholder="Layer name"
+                data-testid="input-edit-layer-name"
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label className="text-xs">Category</Label>
+                <Select value={editCategory} onValueChange={setEditCategory}>
+                  <SelectTrigger data-testid="select-edit-layer-category"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {CATEGORIES.map((c) => <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="edit-layer-color" className="text-xs">Display Color</Label>
+                <div className="flex items-center gap-2">
+                  <input
+                    id="edit-layer-color"
+                    type="color"
+                    value={editColor}
+                    onChange={(e) => setEditColor(e.target.value)}
+                    className="h-9 w-12 rounded border border-input bg-background cursor-pointer"
+                    data-testid="input-edit-layer-color"
+                  />
+                  <span className="text-xs font-mono text-muted-foreground">{editColor}</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="edit-layer-desc" className="text-xs">Description</Label>
+              <Textarea
+                id="edit-layer-desc"
+                value={editDescription}
+                onChange={(e) => setEditDescription(e.target.value)}
+                placeholder="Notes about this layer"
+                rows={2}
+                data-testid="input-edit-layer-description"
+              />
+            </div>
+
+            <div className="flex items-center justify-between rounded-lg border border-border p-3">
+              <div className="space-y-0.5">
+                <Label className="text-xs font-medium">Usable in planning</Label>
+                <p className="text-[11px] text-muted-foreground">Make this layer available to planning calculations.</p>
+              </div>
+              <Switch
+                checked={editUsableInPlanning}
+                onCheckedChange={setEditUsableInPlanning}
+                data-testid="switch-edit-usable-planning"
+              />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditLayer(null)}>Cancel</Button>
+            <Button
+              onClick={() => {
+                if (!editLayer) return;
+                patchMutation.mutate({
+                  id: editLayer.id,
+                  body: {
+                    name: editName.trim(),
+                    description: editDescription.trim(),
+                    category: editCategory,
+                    usableInPlanning: editUsableInPlanning,
+                    style: { ...(editLayer.style || {}), color: editColor },
+                  },
+                });
+                setEditLayer(null);
+                toast({ title: "Layer updated", description: "Changes saved successfully." });
+              }}
+              disabled={patchMutation.isPending}
+              data-testid="button-save-edit-layer"
+            >
+              Save Changes
             </Button>
           </DialogFooter>
         </DialogContent>

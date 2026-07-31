@@ -2883,11 +2883,12 @@ export async function registerRoutes(
   // ─── Tenant-admin signup inbox ─────────────────────────────────────
   // Only national_admin sees and decides signup requests for their tenant.
   function requireAdmin(req: any, res: any, next: any) {
-    const role = req.user?.dbRole as string | undefined;
-    if (role !== "national_admin") {
-      return res.status(403).json({ message: "Admin role required" });
+    const role = req.user?.dbRole || req.dbUser?.role;
+    const isSuper = req.dbUser?.isPlatformAdmin === true || req.user?.isPlatformAdmin === true;
+    if (isSuper || role === "national_admin" || role === "gis_specialist") {
+      return next();
     }
-    next();
+    return res.status(403).json({ message: "Admin role required" });
   }
   // Tiny middleware to load the caller's role from db (cached on req).
   // Prefers the row already resolved by the global `loadDbUser` middleware so
@@ -11918,6 +11919,7 @@ export async function registerRoutes(
       const schema = z.object({
         name: z.string().min(1).max(200).optional(),
         description: z.string().max(2000).optional(),
+        category: z.string().optional(),
         isActive: z.boolean().optional(),
         usableInPlanning: z.boolean().optional(),
         style: z.record(z.any()).optional(),
