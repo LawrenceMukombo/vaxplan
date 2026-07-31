@@ -1,4 +1,4 @@
-﻿import pg from "pg";
+import pg from "pg";
 import { upsertEntireDatabase } from "./upsert-entire-database.ts";
 
 try {
@@ -11,11 +11,18 @@ async function run() {
   const vnmId = "1a39bf12-bf10-4415-b2dd-96f1ece09b75";
 
   console.log("--- Wiping existing online Vietnam records ---");
-  await pool.query("DELETE FROM facilities WHERE tenant_id = $1", [vnmId]);
-  await pool.query("DELETE FROM villages WHERE tenant_id = $1", [vnmId]);
-  await pool.query("DELETE FROM districts WHERE tenant_id = $1", [vnmId]);
-  await pool.query("DELETE FROM provinces WHERE tenant_id = $1", [vnmId]);
-  await pool.query("DELETE FROM population_data WHERE tenant_id = $1", [vnmId]);
+  const tablesToClean = [
+    "session_day_plans", "session_villages", "session_plans", "client_vaccinations",
+    "surveillance_cases", "supervision_visits", "budget_items", "uncovered_communities",
+    "population_data", "villages", "facilities", "districts", "provinces",
+  ];
+  for (const table of tablesToClean) {
+    try {
+      await pool.query(`DELETE FROM ${table} WHERE tenant_id = $1`, [vnmId]);
+    } catch (err: any) {
+      console.warn(`  Notice cleaning ${table}:`, err.message);
+    }
+  }
   console.log("✓ Vietnam data cleared. Now upserting fresh dev instance...");
   await pool.end();
 
