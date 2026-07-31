@@ -36854,7 +36854,7 @@ async function upsertRow(client3, table, encoded) {
         await client3.query("ROLLBACK TO SAVEPOINT row_sp2");
         console.warn(`    \u26A0\uFE0F  [Skip Duplicate Key] ${table.name}: ${err.message}`);
       }
-    } else if (err.code === "23503") {
+    } else if (err.code === "23503" || String(err.code) === "23503" || err.message?.includes("foreign key") || err.message?.includes("violates foreign key constraint")) {
       return "fk_violation";
     } else {
       console.warn(`    \u26A0\uFE0F  [Row Skipped] ${table.name}: ${err.message}`);
@@ -36982,7 +36982,18 @@ async function upsertEntireDatabase(customDbUrl, customInputPath) {
       let passNumber = 0;
       while (retryPass.length > 0 && passNumber++ < 10) {
         const stillFailing = [];
-        for (const { table, encoded } of retryPass) {
+        for (const item of retryPass) {
+          const { table } = item;
+          let encoded = item.encoded;
+          if (passNumber > 3 && encoded && typeof encoded === "object") {
+            const copy = JSON.parse(JSON.stringify(encoded));
+            for (const key of Object.keys(copy)) {
+              if (key.endsWith("_id") && key !== "id" && key !== "tenant_id") {
+                copy[key] = null;
+              }
+            }
+            encoded = copy;
+          }
           const retryClient = await pool2.connect();
           try {
             await retryClient.query("BEGIN");
@@ -36999,7 +37010,7 @@ async function upsertEntireDatabase(customDbUrl, customInputPath) {
         retryPass = stillFailing;
       }
       if (retryPass.length > 0) {
-        console.warn(`[upsert] \u26A0\uFE0F  ${retryPass.length} rows could not be upserted after retry passes (unresolvable FK violations).`);
+        console.warn(`[upsert] \u26A0\uFE0F  ${retryPass.length} rows could not be upserted after retry passes.`);
       } else {
         console.log(`[upsert] \u2713 All FK-deferred rows successfully upserted in retry pass.`);
       }

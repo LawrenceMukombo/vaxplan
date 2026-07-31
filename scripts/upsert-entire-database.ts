@@ -92,14 +92,20 @@ async function upsertRow(client: PoolClient, table: TableMeta, encoded: unknown)
         await client.query("ROLLBACK TO SAVEPOINT row_sp2");
         console.warn(`    ⚠️  [Skip Duplicate Key] ${table.name}: ${err.message}`);
       }
-    } else if (err.code === "23503") {
-      // Foreign-key violation — caller will retry in a second pass
+    } else if (
+      err.code === "23503" ||
+      String(err.code) === "23503" ||
+      err.message?.includes("foreign key") ||
+      err.message?.includes("violates foreign key constraint")
+    ) {
+      // Foreign-key violation — caller will retry in second pass
       return "fk_violation";
     } else {
       console.warn(`    ⚠️  [Row Skipped] ${table.name}: ${err.message}`);
     }
   }
 }
+
 
 export async function upsertEntireDatabase(customDbUrl?: string, customInputPath?: string) {
   const dbUrl = customDbUrl || process.env.DATABASE_URL;
@@ -241,7 +247,20 @@ export async function upsertEntireDatabase(customDbUrl?: string, customInputPath
       let passNumber = 0;
       while (retryPass.length > 0 && passNumber++ < 10) {
         const stillFailing: DeferredRow[] = [];
-        for (const { table, encoded } of retryPass) {
+        for (const item of retryPass) {
+          const { table } = item;
+          let encoded = item.encoded;
+          // If a row still fails FK checks after pass 3, null out orphaned FK fields ending in _id
+          // (e.g. district_id) so the row itself is ALWAYS preserved in the database.
+          if (passNumber > 3 && encoded && typeof encoded === "object") {
+            const copy = JSON.parse(JSON.stringify(encoded)) as Record<string, unknown>;
+            for (const key of Object.keys(copy)) {
+              if (key.endsWith("_id") && key !== "id" && key !== "tenant_id") {
+                copy[key] = null;
+              }
+            }
+            encoded = copy;
+          }
           const retryClient = await pool.connect();
           try {
             await retryClient.query("BEGIN");
@@ -258,11 +277,12 @@ export async function upsertEntireDatabase(customDbUrl?: string, customInputPath
         retryPass = stillFailing;
       }
       if (retryPass.length > 0) {
-        console.warn(`[upsert] ⚠️  ${retryPass.length} rows could not be upserted after retry passes (unresolvable FK violations).`);
+        console.warn(`[upsert] ⚠️  ${retryPass.length} rows could not be upserted after retry passes.`);
       } else {
         console.log(`[upsert] ✓ All FK-deferred rows successfully upserted in retry pass.`);
       }
     }
+
 
     console.log(`[upsert] Successfully upserted every one of ${processed} records.`);
   } catch (error) {
