@@ -16771,7 +16771,7 @@ async function registerRoutes(httpServer2, app2) {
         });
       }
       const rawPath = typeof req.body?.path === "string" ? req.body.path : "";
-      const path3 = rawPath.split("?")[0].split("#")[0].slice(0, 300) || "/";
+      const path4 = rawPath.split("?")[0].split("#")[0].slice(0, 300) || "/";
       const userId = req.user?.claims?.sub ?? req.user?.id ?? null;
       const fwd = req.headers["x-forwarded-for"];
       const ip = normalizeIp(typeof fwd === "string" ? fwd : req.ip);
@@ -16803,7 +16803,7 @@ async function registerRoutes(httpServer2, app2) {
       }
       const record = {
         userId,
-        path: path3,
+        path: path4,
         ipAddress: ip,
         country,
         region,
@@ -36792,6 +36792,216 @@ var init_stock_ledger_columns = __esm({
   }
 });
 
+// scripts/upsert-entire-database.ts
+var upsert_entire_database_exports = {};
+__export(upsert_entire_database_exports, {
+  upsertEntireDatabase: () => upsertEntireDatabase
+});
+function decode(value) {
+  if (Array.isArray(value)) return value.map(decode);
+  if (value && typeof value === "object") {
+    const tagged = value;
+    if (tagged.$type === "bytea") return Buffer.from(tagged.value || "", "base64");
+    if (tagged.$type === "date") return tagged.value;
+    return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, decode(v)]));
+  }
+  return value;
+}
+async function upsertRow(client3, table, encoded) {
+  const row = decode(encoded);
+  const columns = table.columns.filter((column) => Object.hasOwn(row, column));
+  const jsonColumns = new Set(table.jsonColumns ?? []);
+  const values = columns.map((column) => {
+    const value = row[column];
+    return jsonColumns.has(column) && value !== null && typeof value === "object" ? JSON.stringify(value) : value;
+  });
+  const columnSql = columns.map(import_pg2.default.escapeIdentifier).join(", ");
+  const valueSql = columns.map((_, index2) => `$${index2 + 1}`).join(", ");
+  let conflictSql = "ON CONFLICT DO NOTHING";
+  if (table.name === "tenants") {
+    const updateColumns = columns.filter((col) => col !== "code");
+    conflictSql = `ON CONFLICT (code) DO UPDATE SET ${updateColumns.map((col) => `${import_pg2.default.escapeIdentifier(col)}=EXCLUDED.${import_pg2.default.escapeIdentifier(col)}`).join(",")}`;
+  } else if (table.conflictColumns.length) {
+    const target = table.conflictColumns.map(import_pg2.default.escapeIdentifier).join(", ");
+    const updateColumns = columns.filter((column) => !table.conflictColumns.includes(column));
+    conflictSql = updateColumns.length ? `ON CONFLICT (${target}) DO UPDATE SET ${updateColumns.map((column) => `${import_pg2.default.escapeIdentifier(column)}=EXCLUDED.${import_pg2.default.escapeIdentifier(column)}`).join(",")}` : `ON CONFLICT (${target}) DO NOTHING`;
+  } else {
+    const predicate = columns.map((column, index2) => `${import_pg2.default.escapeIdentifier(column)} IS NOT DISTINCT FROM $${index2 + 1}`).join(" AND ");
+    const exists = await client3.query(
+      `SELECT 1 FROM ${import_pg2.default.escapeIdentifier("public")}.${import_pg2.default.escapeIdentifier(table.name)}
+       WHERE ${predicate} LIMIT 1`,
+      values
+    );
+    if (exists.rowCount) return;
+  }
+  try {
+    await client3.query("SAVEPOINT row_sp");
+    await client3.query(
+      `INSERT INTO ${import_pg2.default.escapeIdentifier("public")}.${import_pg2.default.escapeIdentifier(table.name)}
+       (${columnSql}) OVERRIDING SYSTEM VALUE VALUES (${valueSql}) ${conflictSql}`,
+      values
+    );
+    await client3.query("RELEASE SAVEPOINT row_sp");
+  } catch (err) {
+    await client3.query("ROLLBACK TO SAVEPOINT row_sp");
+    if (err.code === "23505") {
+      try {
+        await client3.query("SAVEPOINT row_sp2");
+        await client3.query(
+          `INSERT INTO ${import_pg2.default.escapeIdentifier("public")}.${import_pg2.default.escapeIdentifier(table.name)}
+           (${columnSql}) OVERRIDING SYSTEM VALUE VALUES (${valueSql}) ON CONFLICT DO NOTHING`,
+          values
+        );
+        await client3.query("RELEASE SAVEPOINT row_sp2");
+      } catch (err2) {
+        await client3.query("ROLLBACK TO SAVEPOINT row_sp2");
+        console.warn(`    \u26A0\uFE0F  [Skip Duplicate Key] ${table.name}: ${err.message}`);
+      }
+    } else {
+      console.warn(`    \u26A0\uFE0F  [Row Skipped] ${table.name}: ${err.message}`);
+    }
+  }
+}
+async function upsertEntireDatabase(customDbUrl, customInputPath) {
+  const dbUrl = customDbUrl || process.env.DATABASE_URL;
+  if (!dbUrl) throw new Error("DATABASE_URL is not set.");
+  const inputPath = import_node_path2.default.resolve(
+    process.cwd(),
+    customInputPath || process.argv[2] || "scratch/local_database_all.jsonl.gz"
+  );
+  if (!import_node_fs2.default.existsSync(inputPath)) {
+    console.warn(`[upsert] Snapshot file not found: ${inputPath} - skipping auto-upsert.`);
+    return;
+  }
+  const pool2 = new import_pg2.default.Pool({ connectionString: dbUrl });
+  const lines = import_node_readline.default.createInterface({
+    input: import_node_fs2.default.createReadStream(inputPath).pipe((0, import_node_zlib.createGunzip)()),
+    crlfDelay: Infinity
+  });
+  let client3 = null;
+  let current = null;
+  let currentTableMissing = false;
+  let tableRows = 0;
+  let processed = 0;
+  let declaredTotal = null;
+  try {
+    for await (const line of lines) {
+      const item = JSON.parse(line);
+      if (item.type === "header") {
+        if (item.format !== "vaxplan-entire-database-jsonl-v1") {
+          throw new Error(`Unsupported snapshot format: ${item.format}`);
+        }
+      } else if (item.type === "table") {
+        current = item;
+        const productionColumnRows = (await pool2.query(
+          `SELECT column_name, data_type FROM information_schema.columns
+             WHERE table_schema='public' AND table_name=$1`,
+          [current.name]
+        )).rows;
+        const columns = productionColumnRows.map((row) => row.column_name);
+        current.jsonColumns = productionColumnRows.filter((row) => row.data_type === "json" || row.data_type === "jsonb").map((row) => row.column_name);
+        currentTableMissing = columns.length === 0;
+        if (currentTableMissing) {
+          console.log(`\u26A0\uFE0F  Production table "${current.name}" does not exist. Creating table on the fly...`);
+          const colDefs = current.columns.map((col) => {
+            if (col === "id") return `"id" text PRIMARY KEY`;
+            return `${import_pg2.default.escapeIdentifier(col)} text`;
+          }).join(", ");
+          try {
+            await pool2.query(`CREATE TABLE IF NOT EXISTS ${import_pg2.default.escapeIdentifier("public")}.${import_pg2.default.escapeIdentifier(current.name)} (${colDefs});`);
+            console.log(`   \u2713 Created table "${current.name}" in production database.`);
+            currentTableMissing = false;
+          } catch (err) {
+            console.warn(`   \u26A0\uFE0F  Failed creating missing table "${current.name}":`, err.message);
+          }
+        }
+        if (currentTableMissing) continue;
+        const missing = current.columns.filter((column) => !columns.includes(column));
+        if (missing.length) {
+          console.log(`\u26A0\uFE0F  Safely adding ${missing.length} missing columns to ${current.name}: ${missing.join(", ")}`);
+          for (const col of missing) {
+            try {
+              await pool2.query(`ALTER TABLE ${import_pg2.default.escapeIdentifier(current.name)} ADD COLUMN IF NOT EXISTS ${import_pg2.default.escapeIdentifier(col)} text;`);
+            } catch (err) {
+              console.warn(`    Warning auto-adding column ${col}:`, err.message);
+            }
+          }
+          const refreshedCols = (await pool2.query(
+            `SELECT column_name, data_type FROM information_schema.columns
+               WHERE table_schema='public' AND table_name=$1`,
+            [current.name]
+          )).rows;
+          const refreshedNames = refreshedCols.map((row) => row.column_name);
+          current.columns = current.columns.filter((col) => refreshedNames.includes(col));
+        }
+        tableRows = 0;
+        client3 = await pool2.connect();
+        await client3.query("BEGIN");
+      } else if (item.type === "row") {
+        if (currentTableMissing) {
+          continue;
+        }
+        if (!client3 || !current) throw new Error("Row encountered outside a table.");
+        await upsertRow(client3, current, item.data);
+        tableRows++;
+        processed++;
+      } else if (item.type === "table_end") {
+        if (currentTableMissing && current) {
+          console.log(`${current.name}: 0 (table absent in production; skipped)`);
+          current = null;
+          currentTableMissing = false;
+          continue;
+        }
+        if (!client3 || !current) throw new Error("Table end encountered without a table.");
+        if (tableRows !== item.rowCount) {
+          throw new Error(`${current.name}: expected ${item.rowCount}, processed ${tableRows}`);
+        }
+        await client3.query("COMMIT");
+        client3.release();
+        client3 = null;
+        console.log(`${current.name}: ${tableRows}`);
+        current = null;
+        currentTableMissing = false;
+      } else if (item.type === "footer") {
+        declaredTotal = item.totalRows;
+      }
+    }
+    if (declaredTotal === null || processed !== declaredTotal) {
+      throw new Error(`Snapshot total ${declaredTotal}; processed ${processed}.`);
+    }
+    console.log(`[upsert] Successfully upserted every one of ${processed} records.`);
+  } catch (error) {
+    if (client3) {
+      await client3.query("ROLLBACK");
+      client3.release();
+    }
+    throw error;
+  } finally {
+    await pool2.end();
+  }
+}
+var import_node_fs2, import_node_path2, import_node_readline, import_node_zlib, import_pg2;
+var init_upsert_entire_database = __esm({
+  "scripts/upsert-entire-database.ts"() {
+    "use strict";
+    import_node_fs2 = __toESM(require("node:fs"), 1);
+    import_node_path2 = __toESM(require("node:path"), 1);
+    import_node_readline = __toESM(require("node:readline"), 1);
+    import_node_zlib = require("node:zlib");
+    import_pg2 = __toESM(require("pg"), 1);
+    try {
+      process.loadEnvFile?.();
+    } catch {
+    }
+    if (process.argv[1]?.includes("upsert-entire-database")) {
+      upsertEntireDatabase().catch((error) => {
+        console.error(error);
+        process.exitCode = 1;
+      });
+    }
+  }
+});
+
 // server/services/uce/workers.ts
 var workers_exports = {};
 __export(workers_exports, {
@@ -37033,13 +37243,13 @@ var init_index = __esm({
     app.use((0, import_compression.default)({ level: 6, threshold: 1024 }));
     app.use(
       import_express9.default.json({
-        limit: "250mb",
+        limit: "50mb",
         verify: (req, _res, buf) => {
           req.rawBody = buf;
         }
       })
     );
-    app.use(import_express9.default.urlencoded({ extended: false, limit: "250mb" }));
+    app.use(import_express9.default.urlencoded({ extended: false, limit: "50mb" }));
     NATIVE_ALLOWED_ORIGINS = /* @__PURE__ */ new Set([
       "https://localhost",
       // Capacitor Android (androidScheme: "https")
@@ -37073,7 +37283,7 @@ var init_index = __esm({
     });
     app.use((req, res, next) => {
       const start = Date.now();
-      const path3 = req.path;
+      const path4 = req.path;
       let capturedJsonResponse = void 0;
       const originalResJson = res.json;
       res.json = function(bodyJson, ...args) {
@@ -37082,8 +37292,8 @@ var init_index = __esm({
       };
       res.on("finish", () => {
         const duration = Date.now() - start;
-        if (path3.startsWith("/api")) {
-          let logLine = `${req.method} ${path3} ${res.statusCode} in ${duration}ms`;
+        if (path4.startsWith("/api")) {
+          let logLine = `${req.method} ${path4} ${res.statusCode} in ${duration}ms`;
           if (capturedJsonResponse) {
             logLine += ` :: ${inspectPayload(capturedJsonResponse)}`;
           }
@@ -37142,6 +37352,9 @@ var init_index = __esm({
             ({ applyStockLedgerColumnsMigration: applyStockLedgerColumnsMigration2 }) => applyStockLedgerColumnsMigration2(db2).then(() => log("stock ledger columns migration complete", "db")).catch((err) => log(`stock ledger columns migration warning: ${err?.message ?? err}`, "db"))
           ).catch((err) => log(`stock ledger migration import failed: ${err?.message ?? err}`, "db"))
         ).catch((err) => log(`stock ledger db import failed: ${err?.message ?? err}`, "db"));
+        Promise.resolve().then(() => (init_upsert_entire_database(), upsert_entire_database_exports)).then(({ upsertEntireDatabase: upsertEntireDatabase2 }) => {
+          upsertEntireDatabase2().then(() => log("auto-upsert from local_database_all.jsonl.gz complete", "db")).catch((err) => log(`auto-upsert warning: ${err?.message ?? err}`, "db"));
+        }).catch((err) => log(`auto-upsert import failed: ${err?.message ?? err}`, "db"));
       }
       setupRealtime(httpServer, sessionMiddleware);
       if (skipDbBootstrap) {

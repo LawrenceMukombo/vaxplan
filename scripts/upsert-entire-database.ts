@@ -4,12 +4,10 @@ import readline from "node:readline";
 import { createGunzip } from "node:zlib";
 import pg, { type PoolClient } from "pg";
 
-const databaseUrl = process.env.DATABASE_URL;
-if (!databaseUrl) throw new Error("DATABASE_URL is not set.");
-const inputPath = path.resolve(
-  process.cwd(),
-  process.argv[2] || "scratch/local_database_all.jsonl.gz",
-);
+try {
+  // @ts-ignore
+  process.loadEnvFile?.();
+} catch {}
 
 type TableMeta = {
   name: string;
@@ -98,9 +96,20 @@ async function upsertRow(client: PoolClient, table: TableMeta, encoded: unknown)
   }
 }
 
-async function main() {
-  if (!fs.existsSync(inputPath)) throw new Error(`Snapshot not found: ${inputPath}`);
-  const pool = new pg.Pool({ connectionString: databaseUrl });
+export async function upsertEntireDatabase(customDbUrl?: string, customInputPath?: string) {
+  const dbUrl = customDbUrl || process.env.DATABASE_URL;
+  if (!dbUrl) throw new Error("DATABASE_URL is not set.");
+  const inputPath = path.resolve(
+    process.cwd(),
+    customInputPath || process.argv[2] || "scratch/local_database_all.jsonl.gz",
+  );
+
+  if (!fs.existsSync(inputPath)) {
+    console.warn(`[upsert] Snapshot file not found: ${inputPath} - skipping auto-upsert.`);
+    return;
+  }
+
+  const pool = new pg.Pool({ connectionString: dbUrl });
   const lines = readline.createInterface({
     input: fs.createReadStream(inputPath).pipe(createGunzip()),
     crlfDelay: Infinity,
@@ -207,7 +216,7 @@ async function main() {
     if (declaredTotal === null || processed !== declaredTotal) {
       throw new Error(`Snapshot total ${declaredTotal}; processed ${processed}.`);
     }
-    console.log(`Successfully upserted every one of ${processed} records.`);
+    console.log(`[upsert] Successfully upserted every one of ${processed} records.`);
   } catch (error) {
     if (client) {
       await client.query("ROLLBACK");
@@ -219,7 +228,10 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  console.error(error);
-  process.exitCode = 1;
-});
+// Execute if run directly from CLI
+if (process.argv[1]?.includes("upsert-entire-database")) {
+  upsertEntireDatabase().catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
+}

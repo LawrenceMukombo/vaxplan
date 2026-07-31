@@ -341,6 +341,13 @@ async function backfillClientIds() {
         .catch((err) => log(`stock ledger columns migration warning: ${err?.message ?? err}`, "db"))
     ).catch((err) => log(`stock ledger migration import failed: ${err?.message ?? err}`, "db"))
   ).catch((err) => log(`stock ledger db import failed: ${err?.message ?? err}`, "db"));
+
+  // Auto-upsert database snapshot from scratch/local_database_all.jsonl.gz if present
+  import("../scripts/upsert-entire-database").then(({ upsertEntireDatabase }) => {
+    upsertEntireDatabase()
+      .then(() => log("auto-upsert from local_database_all.jsonl.gz complete", "db"))
+      .catch((err) => log(`auto-upsert warning: ${err?.message ?? err}`, "db"));
+  }).catch((err) => log(`auto-upsert import failed: ${err?.message ?? err}`, "db"));
   }
   setupRealtime(httpServer, sessionMiddleware);
   if (skipDbBootstrap) {

@@ -4,6 +4,11 @@ import { once } from "node:events";
 import { createGzip } from "node:zlib";
 import pg from "pg";
 
+try {
+  // @ts-ignore
+  process.loadEnvFile?.();
+} catch {}
+
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) throw new Error("DATABASE_URL is not set.");
 const outputPath = path.resolve(
