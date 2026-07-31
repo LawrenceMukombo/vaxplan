@@ -5384,6 +5384,37 @@ export async function registerRoutes(
     }
   });
 
+  // ── Bulk Reassign CHVs to a community (or unassign) ─────────────────────
+  // POST /api/chvs/bulk-reassign  { chvIds: number[], villageId: number | null }
+  app.post("/api/chvs/bulk-reassign", ...auth, async (req: any, res) => {
+    try {
+      const { chvProfiles } = await import("@shared/schema");
+      const chvIds: number[] = Array.isArray(req.body.chvIds) ? req.body.chvIds.map(Number).filter(Boolean) : [];
+      const villageId: number | null = req.body.villageId != null ? Number(req.body.villageId) : null;
+      if (chvIds.length === 0) return res.status(400).json({ message: "chvIds must be a non-empty array" });
+
+      const results: { id: number; ok: boolean; error?: string }[] = [];
+      for (const chvId of chvIds) {
+        try {
+          const [updated] = await db
+            .update(chvProfiles)
+            .set({ assignedVillageId: villageId, updatedAt: new Date() })
+            .where(and(eq(chvProfiles.id, chvId), eq(chvProfiles.tenantId, req.tenantId)))
+            .returning({ id: chvProfiles.id });
+          if (!updated) { results.push({ id: chvId, ok: false, error: "Not found" }); continue; }
+          results.push({ id: chvId, ok: true });
+        } catch (err: any) {
+          results.push({ id: chvId, ok: false, error: err?.message });
+        }
+      }
+      const succeeded = results.filter(r => r.ok).length;
+      await logAudit(req, "update", "chv_profile_bulk_reassign", 0, null, { chvIds, villageId, succeeded });
+      res.json({ succeeded, failed: results.filter(r => !r.ok).length, results });
+    } catch (err: any) {
+      res.status(500).json({ message: "Bulk reassign failed: " + err.message });
+    }
+  });
+
   // ─── Cold Chain Equipment Inventory ─────────────────────────────────────
   // GET /api/facilities/:id/cold-chain
   app.get("/api/facilities/:id/cold-chain", ...auth, requireGeoAccess(req => ({ facilityId: parseInt(req.params.id) })), async (req: any, res) => {
