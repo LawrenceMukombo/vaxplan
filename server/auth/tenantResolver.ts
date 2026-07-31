@@ -53,7 +53,7 @@ export const tenantContext: RequestHandler = async (req, _res, next) => {
   if (!req.isAuthenticated?.()) {
     if (headerTenantStr) {
       const t = await storage.getTenant(headerTenantStr);
-      req.tenantId = t?.id || (UUID_RE.test(headerTenantStr) ? headerTenantStr : null);
+      req.tenantId = t?.id || (UUID_RE.test(headerTenantStr) ? headerTenantStr : undefined);
     }
     return next();
   }

@@ -34,7 +34,7 @@ import { apiRequest } from "@/lib/queryClient";
 import { useAuth } from "@/hooks/useAuth";
 import {
   Layers, Upload, Trash2, Info, CheckCircle, Map as MapIcon,
-  Image as ImageIcon, RefreshCw,
+  Image as ImageIcon, RefreshCw, Pencil,
 } from "lucide-react";
 
 interface CustomLayerMeta {

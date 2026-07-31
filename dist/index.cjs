@@ -5868,7 +5868,7 @@ var init_tenantResolver = __esm({
       if (!req.isAuthenticated?.()) {
         if (headerTenantStr) {
           const t = await storage.getTenant(headerTenantStr);
-          req.tenantId = t?.id || (UUID_RE.test(headerTenantStr) ? headerTenantStr : null);
+          req.tenantId = t?.id || (UUID_RE.test(headerTenantStr) ? headerTenantStr : void 0);
         }
         return next();
       }
@@ -36899,6 +36899,7 @@ async function upsertEntireDatabase(customDbUrl, customInputPath) {
   } catch {
   }
   const tenantIdMap = /* @__PURE__ */ new Map();
+  let declaredTotal = null;
   try {
     for await (const line of lines) {
       const item = JSON.parse(line);

@@ -143,6 +143,7 @@ export async function upsertEntireDatabase(customDbUrl?: string, customInputPath
     }
   } catch {}
   const tenantIdMap = new Map<string, string>();
+  let declaredTotal: number | null = null;
 
   try {
     for await (const line of lines) {
