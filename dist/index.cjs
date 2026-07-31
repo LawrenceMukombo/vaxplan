@@ -36804,8 +36804,8 @@ function decode(value) {
   }
   return value;
 }
-async function upsertRow(client3, table, encoded2) {
-  const row = decode(encoded2);
+async function upsertRow(client3, table, encoded) {
+  const row = decode(encoded);
   const columns = table.columns.filter((column) => Object.hasOwn(row, column));
   const jsonColumns = new Set(table.jsonColumns ?? []);
   const values = columns.map((column) => {
@@ -37017,6 +37017,7 @@ async function upsertEntireDatabase(customDbUrl, customInputPath) {
         const stillFailing = [];
         for (const item of retryPass) {
           const { table } = item;
+          let encoded = item.encoded;
           if (encoded && typeof encoded === "object") {
             const copy = JSON.parse(JSON.stringify(encoded));
             if (copy.tenant_id && tenantIdMap.has(String(copy.tenant_id))) {

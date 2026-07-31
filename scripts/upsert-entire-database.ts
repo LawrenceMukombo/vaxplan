@@ -288,6 +288,7 @@ export async function upsertEntireDatabase(customDbUrl?: string, customInputPath
         const stillFailing: DeferredRow[] = [];
         for (const item of retryPass) {
           const { table } = item;
+          let encoded = item.encoded;
           if (encoded && typeof encoded === "object") {
             const copy = JSON.parse(JSON.stringify(encoded)) as Record<string, unknown>;
             if (copy.tenant_id && tenantIdMap.has(String(copy.tenant_id))) {
@@ -304,6 +305,7 @@ export async function upsertEntireDatabase(customDbUrl?: string, customInputPath
             }
             encoded = copy;
           }
+
 
           const retryClient = await pool.connect();
           try {
