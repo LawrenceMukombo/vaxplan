@@ -30964,10 +30964,7 @@ function serveStatic(app2) {
     );
   }
   app2.use(import_express6.default.static(distPath));
-  app2.use("*", (req, res) => {
-    if (req.originalUrl.startsWith("/api")) {
-      return res.status(404).json({ message: `API endpoint ${req.originalUrl} not found` });
-    }
+  app2.use("*", (_req, res) => {
     res.sendFile(import_path5.default.resolve(distPath, "index.html"));
   });
 }

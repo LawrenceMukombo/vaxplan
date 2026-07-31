@@ -32,7 +32,10 @@ import {
   Database,
   UserCog,
   ListChecks,
+  Pencil,
+  Archive,
 } from "lucide-react";
+
 
 interface PublicTenant {
   id: string;
@@ -114,39 +117,48 @@ const ISO_ALPHA3_TO_2: Record<string, string> = {
   USA: "us", GBR: "gb", CAN: "ca", AUS: "au", FRA: "fr",
   DEU: "de", ITA: "it", ESP: "es", PRT: "pt", CHE: "ch",
   IND: "in", CHN: "cn", JPN: "jp", KOR: "kr", SGP: "sg",
+  // South-East Asia
+  VNM: "vn", THA: "th", MYS: "my", IDN: "id", PHL: "ph",
+  MMR: "mm", KHM: "kh", LAO: "la", BGD: "bd", NPL: "np",
+  // Pacific
+  FJI: "fj", SLB: "sb", VUT: "vu", WSM: "ws", TON: "to",
 };
 
-function CountryCard({ tenant }: { tenant: PublicTenant }) {
+
+function CountryCard({
+  tenant,
+  onEdit,
+  onArchive,
+}: {
+  tenant: PublicTenant;
+  onEdit?: (t: PublicTenant) => void;
+  onArchive?: (t: PublicTenant) => void;
+}) {
   const s = tenant.settings ?? {};
   const demo = s.demographics ?? {};
+  const adminLabels: Record<string, string> = s.adminLevelLabels ?? {};
+  const adminLabelValues = Object.values(adminLabels).filter(Boolean);
+  const code2 = ISO_ALPHA3_TO_2[(tenant.countryCode ?? "").toUpperCase()];
+  const lat = Array.isArray(s.mapCenter) ? Number(s.mapCenter[0]).toFixed(2) : null;
+  const lng = Array.isArray(s.mapCenter) ? Number(s.mapCenter[1]).toFixed(2) : null;
+
   return (
-    <Card className="border border-border/60 shadow-sm hover:shadow-md transition-shadow">
+    <Card className="border border-border/60 shadow-sm hover:shadow-md transition-shadow flex flex-col">
       <CardHeader className="pb-3">
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-center gap-3">
-            {/* Original Code: rendered standard Globe icon for every country card
-            <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-              <Globe className="h-5 w-5 text-primary" />
-            </div>
-            */}
-            {/* Updated Code: Exposing high-fidelity country flags with CDNs and smooth fallback mechanisms */}
+            {/* Country flag */}
             <div className="h-10 w-10 rounded-xl overflow-hidden bg-primary/5 flex items-center justify-center shrink-0 border border-border shadow-sm">
-              {(() => {
-                const code2 = ISO_ALPHA3_TO_2[tenant.countryCode.toUpperCase()];
-                if (code2) {
-                  return (
-                    <img
-                      src={`https://flagcdn.com/w80/${code2}.png`}
-                      alt={`${tenant.name} Flag`}
-                      className="h-full w-full object-cover transition-opacity duration-300 hover:opacity-90 animate-in fade-in"
-                      onError={(e) => {
-                        e.currentTarget.style.display = "none";
-                      }}
-                    />
-                  );
-                }
-                return <Globe className="h-5 w-5 text-primary" />;
-              })()}
+              {code2 ? (
+                <img
+                  src={`https://flagcdn.com/w80/${code2}.png`}
+                  alt={`${tenant.name} flag`}
+                  className="h-full w-full object-cover"
+                  onError={(e) => { e.currentTarget.style.display = "none"; }}
+                />
+              ) : (
+                <Globe className="h-5 w-5 text-primary" />
+              )}
             </div>
             <div>
               <CardTitle className="text-base leading-tight">{tenant.name}</CardTitle>
@@ -156,71 +168,107 @@ function CountryCard({ tenant }: { tenant: PublicTenant }) {
               </div>
             </div>
           </div>
+          {/* Status badge */}
           <Badge
             className={
               tenant.status === "active"
-                ? "bg-emerald-500/10 text-emerald-600 border-emerald-200"
-                : "bg-amber-500/10 text-amber-600"
+                ? "bg-emerald-500/10 text-emerald-600 border-emerald-200 shrink-0"
+                : "bg-amber-500/10 text-amber-600 shrink-0"
             }
             variant="secondary"
           >
             <Activity className="h-3 w-3 mr-1" />
-            {tenant.status}
+            {tenant.status ?? "active"}
           </Badge>
         </div>
       </CardHeader>
-      <CardContent className="space-y-3 text-sm">
+
+      <CardContent className="space-y-3 text-sm flex-1">
+        {/* Coordinates + Currency row */}
         <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs">
-          {s.mapCenter && (
-            <div className="flex items-center gap-1.5 text-muted-foreground">
-              <MapPin className="h-3 w-3" />
-              <span>
-                {Array.isArray(s.mapCenter)
-                  ? `${Number(s.mapCenter[0]).toFixed(2)}°, ${Number(s.mapCenter[1]).toFixed(2)}°`
-                  : "—"}
-              </span>
-            </div>
-          )}
-          {s.currency && (
-            <div className="flex items-center gap-1.5 text-muted-foreground">
-              <DollarSign className="h-3 w-3" />
-              <span>{s.currencySymbol ?? ""} {s.currency}</span>
-            </div>
-          )}
-          {demo.births != null && (
-            <div className="flex items-center gap-1.5 text-muted-foreground">
-              <Users className="h-3 w-3" />
-              <span>Births: {(demo.births * 100).toFixed(1)}%</span>
-            </div>
-          )}
-          {demo.under1 != null && (
-            <div className="flex items-center gap-1.5 text-muted-foreground">
-              <Users className="h-3 w-3" />
-              <span>Under-1: {(demo.under1 * 100).toFixed(1)}%</span>
-            </div>
-          )}
+          <div className="flex items-center gap-1.5 text-muted-foreground">
+            <MapPin className="h-3 w-3 shrink-0" />
+            <span>
+              {lat !== null && lng !== null
+                ? `${lat}°, ${lng}°`
+                : <span className="italic">No map centre set</span>}
+            </span>
+          </div>
+          <div className="flex items-center gap-1.5 text-muted-foreground">
+            <DollarSign className="h-3 w-3 shrink-0" />
+            <span>
+              {s.currencySymbol || s.currency
+                ? `${s.currencySymbol ?? ""} ${s.currency ?? ""}`
+                : <span className="italic">No currency set</span>}
+            </span>
+          </div>
+          <div className="flex items-center gap-1.5 text-muted-foreground">
+            <Users className="h-3 w-3 shrink-0" />
+            <span>Births: {demo.births != null ? `${(demo.births * 100).toFixed(1)}%` : "—"}</span>
+          </div>
+          <div className="flex items-center gap-1.5 text-muted-foreground">
+            <Users className="h-3 w-3 shrink-0" />
+            <span>Under-1: {demo.under1 != null ? `${(demo.under1 * 100).toFixed(1)}%` : "—"}</span>
+          </div>
         </div>
-        {s.adminLevelLabels && (
-          <div className="flex flex-wrap gap-1">
-            {Object.values(s.adminLevelLabels as Record<string, string>).map((lbl) => (
+
+        {/* Admin level badges */}
+        <div className="flex flex-wrap gap-1">
+          {adminLabelValues.length > 0 ? (
+            adminLabelValues.map((lbl) => (
               <Badge key={lbl} variant="outline" className="text-[10px]">
                 <Layers className="h-2.5 w-2.5 mr-1" />
                 {lbl}
               </Badge>
-            ))}
-          </div>
-        )}
+            ))
+          ) : (
+            <span className="text-[10px] text-muted-foreground italic">No admin levels configured</span>
+          )}
+        </div>
       </CardContent>
+
+      {/* Edit / Archive actions — only shown to platform admins */}
+      {(onEdit || onArchive) && (
+        <div className="px-6 pb-4 flex gap-2 border-t pt-3 mt-auto">
+          {onEdit && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5 text-xs"
+              onClick={() => onEdit(tenant)}
+              data-testid={`btn-edit-${tenant.code}`}
+            >
+              <Pencil className="h-3.5 w-3.5" />
+              Edit
+            </Button>
+          )}
+          {onArchive && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="gap-1.5 text-xs text-destructive hover:text-destructive"
+              onClick={() => onArchive(tenant)}
+              data-testid={`btn-archive-${tenant.code}`}
+            >
+              <Archive className="h-3.5 w-3.5" />
+              Archive
+            </Button>
+          )}
+        </div>
+      )}
     </Card>
   );
 }
+
 
 export default function CountryOnboarding() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const { user, isLoading: authLoading } = useAuth();
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [editTenant, setEditTenant] = useState<PublicTenant | null>(null);
   const [form, setForm] = useState<NewCountryForm>(DEFAULTS);
+
 
   const isPlatformAdmin = (user as any)?.isPlatformAdmin === true;
 
@@ -275,15 +323,16 @@ export default function CountryOnboarding() {
     }
   });
 
-  // Use the authenticated tenant list endpoint for admin views
+  // Use the authenticated tenant list endpoint for admin views (full settings included)
   const { data: allTenants, isLoading: loadingAll } = useQuery<PublicTenant[]>({
     queryKey: ["/api/admin/tenants"],
     queryFn: async () => {
       if (!navigator.onLine) return [];
-      const r = await fetch("/api/public/tenants", { credentials: "include" });
-      if (!r.ok) throw new Error(await r.text());
+      const r = await fetch("/api/admin/tenants", { credentials: "include" });
+      if (!r.ok) return [];
       return r.json();
     },
+    enabled: isPlatformAdmin,
   });
 
   const provision = useMutation({
@@ -307,9 +356,99 @@ export default function CountryOnboarding() {
     },
   });
 
+  const updateMutation = useMutation({
+    mutationFn: async ({ id, payload }: { id: string; payload: object }) =>
+      apiRequest("PATCH", `/api/admin/tenants/${id}`, payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/public/tenants"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/tenants"] });
+      setEditTenant(null);
+      toast({ title: "Country Updated", description: "Settings saved successfully." });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Update failed", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const archiveMutation = useMutation({
+    mutationFn: async (id: string) =>
+      apiRequest("DELETE", `/api/admin/tenants/${id}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/public/tenants"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/tenants"] });
+      toast({ title: "Country archived" });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Archive failed", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const openEdit = (t: PublicTenant) => {
+    const s = t.settings ?? {};
+    const demo = (s as any).demographics ?? {};
+    const lbl = (s as any).adminLevelLabels ?? {};
+    const center = Array.isArray((s as any).mapCenter) ? (s as any).mapCenter : [0, 20];
+    setEditTenant(t);
+    setForm({
+      name: t.name ?? "",
+      code: t.code ?? "",
+      countryCode: t.countryCode ?? "",
+      mapLat: String(center[0] ?? 0),
+      mapLng: String(center[1] ?? 20),
+      mapZoom: String((s as any).mapZoom ?? 6),
+      currency: (s as any).currency ?? "USD",
+      currencySymbol: (s as any).currencySymbol ?? "$",
+      births: String(((demo.births ?? 0.035) * 100).toFixed(1)),
+      under1: String(((demo.under1 ?? 0.032) * 100).toFixed(1)),
+      pregnant: String(((demo.pregnant ?? 0.036) * 100).toFixed(1)),
+      schoolEntry: String(((demo.schoolEntry ?? 0.03) * 100).toFixed(1)),
+      schoolExit: String(((demo.schoolExit ?? 0.025) * 100).toFixed(1)),
+      adminLevelL1: lbl.level1 ?? "Region",
+      adminLevelL2: lbl.level2 ?? "Province",
+      adminLevelL3: lbl.level3 ?? "District",
+      adminLevelL4: lbl.level4 ?? "Ward",
+      epiSchedule: (s as any).epiSchedule ?? "WHO_EPI_STANDARD",
+      fiscalYearStart: (s as any).fiscalYearStart ?? "01-01",
+    });
+  };
+
+  const handleSaveEdit = () => {
+    if (!editTenant) return;
+    updateMutation.mutate({
+      id: editTenant.id,
+      payload: {
+        name: form.name.trim(),
+        code: form.code.trim().toUpperCase(),
+        countryCode: form.countryCode.trim().toUpperCase(),
+        settings: {
+          currency: form.currency.trim().toUpperCase() || "USD",
+          currencySymbol: form.currencySymbol.trim() || "$",
+          mapCenter: [parseFloat(form.mapLat) || 0, parseFloat(form.mapLng) || 20],
+          mapZoom: parseInt(form.mapZoom) || 6,
+          epiSchedule: form.epiSchedule.trim() || "WHO_EPI_STANDARD",
+          fiscalYearStart: form.fiscalYearStart.trim() || "01-01",
+          adminLevelLabels: {
+            level1: form.adminLevelL1 || "Region",
+            level2: form.adminLevelL2 || "Province",
+            level3: form.adminLevelL3 || "District",
+            level4: form.adminLevelL4 || "Ward",
+          },
+          demographics: {
+            births: (parseFloat(form.births) || 3.5) / 100,
+            under1: (parseFloat(form.under1) || 3.2) / 100,
+            pregnant: (parseFloat(form.pregnant) || 3.6) / 100,
+            schoolEntry: (parseFloat(form.schoolEntry) || 3.0) / 100,
+            schoolExit: (parseFloat(form.schoolExit) || 2.5) / 100,
+          },
+        },
+      },
+    });
+  };
+
   const updateField = (key: keyof NewCountryForm) =>
     (e: React.ChangeEvent<HTMLInputElement>) =>
       setForm((prev) => ({ ...prev, [key]: e.target.value }));
+
 
   const handleSubmit = () => {
     if (!form.name.trim() || !form.code.trim() || !form.countryCode.trim()) {
@@ -528,7 +667,12 @@ export default function CountryOnboarding() {
         ) : (
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {displayTenants.map((t) => (
-              <CountryCard key={t.id} tenant={t} />
+              <CountryCard
+                key={t.id}
+                tenant={t}
+                onEdit={isPlatformAdmin ? openEdit : undefined}
+                onArchive={isPlatformAdmin ? (t) => archiveMutation.mutate(t.id) : undefined}
+              />
             ))}
           </div>
         )}
@@ -786,6 +930,149 @@ export default function CountryOnboarding() {
                 <><RefreshCw className="h-4 w-4 animate-spin" /> Provisioning…</>
               ) : (
                 <><CheckCircle className="h-4 w-4" /> Provision Country</>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ─── Edit Country Dialog ────────────────── */}
+      <Dialog open={!!editTenant} onOpenChange={(open) => { if (!open) { setEditTenant(null); setForm(DEFAULTS); } }}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Pencil className="h-5 w-5 text-primary" />
+              Edit Country: {editTenant?.name}
+            </DialogTitle>
+            <DialogDescription>
+              Update the settings for this country tenant. All changes are saved immediately.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-5 py-2">
+            {/* Identity */}
+            <div className="space-y-3">
+              <h3 className="text-sm font-semibold text-primary flex items-center gap-1.5">
+                <Globe className="h-4 w-4" /> Country Identity
+              </h3>
+              <div className="grid sm:grid-cols-2 gap-4">
+                <div className="sm:col-span-2 space-y-1.5">
+                  <Label htmlFor="edit-country-name" className="text-xs">Ministry of Health / Country Name</Label>
+                  <Input id="edit-country-name" value={form.name} onChange={updateField("name")} placeholder="e.g. Republic of Kenya Ministry of Health" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="edit-tenant-code" className="text-xs">Tenant Code</Label>
+                  <Input id="edit-tenant-code" value={form.code} onChange={updateField("code")} placeholder="e.g. KEN" className="font-mono" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="edit-iso-code" className="text-xs">ISO-3166 Alpha-3 Code</Label>
+                  <Input id="edit-iso-code" value={form.countryCode} onChange={updateField("countryCode")} placeholder="e.g. KEN" className="font-mono" maxLength={3} />
+                </div>
+              </div>
+            </div>
+
+            <Separator />
+
+            {/* Demographics */}
+            <div className="space-y-3">
+              <h3 className="text-sm font-semibold text-primary flex items-center gap-1.5">
+                <Users className="h-4 w-4" /> WHO Demographic Ratios (Annual %)
+              </h3>
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+                {([
+                  ["births", "Annual Births"],
+                  ["under1", "Infants (<1yr)"],
+                  ["pregnant", "Pregnant Women"],
+                  ["schoolEntry", "School Entry"],
+                  ["schoolExit", "School Exit"],
+                ] as const).map(([key, label]) => (
+                  <div key={key} className="space-y-1.5">
+                    <Label className="text-xs">{label}</Label>
+                    <Input value={form[key]} onChange={updateField(key)} placeholder="3.5" className="font-mono text-sm" />
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <Separator />
+
+            {/* Currency */}
+            <div className="space-y-3">
+              <h3 className="text-sm font-semibold text-primary flex items-center gap-1.5">
+                <DollarSign className="h-4 w-4" /> Currency
+              </h3>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <Label htmlFor="edit-currency" className="text-xs">Currency Code</Label>
+                  <Input id="edit-currency" value={form.currency} onChange={updateField("currency")} placeholder="USD" className="font-mono" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="edit-currency-symbol" className="text-xs">Currency Symbol</Label>
+                  <Input id="edit-currency-symbol" value={form.currencySymbol} onChange={updateField("currencySymbol")} placeholder="$" className="font-mono" />
+                </div>
+              </div>
+            </div>
+
+            <Separator />
+
+            {/* Map Centre */}
+            <div className="space-y-3">
+              <h3 className="text-sm font-semibold text-primary flex items-center gap-1.5">
+                <MapPin className="h-4 w-4" /> Map Centre & Zoom
+              </h3>
+              <div className="grid grid-cols-3 gap-3">
+                <div className="space-y-1.5">
+                  <Label htmlFor="edit-map-lat" className="text-xs">Latitude</Label>
+                  <Input id="edit-map-lat" value={form.mapLat} onChange={updateField("mapLat")} placeholder="-1.29" className="font-mono text-sm" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="edit-map-lng" className="text-xs">Longitude</Label>
+                  <Input id="edit-map-lng" value={form.mapLng} onChange={updateField("mapLng")} placeholder="36.82" className="font-mono text-sm" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="edit-map-zoom" className="text-xs">Default Zoom</Label>
+                  <Input id="edit-map-zoom" value={form.mapZoom} onChange={updateField("mapZoom")} placeholder="6" className="font-mono text-sm" />
+                </div>
+              </div>
+            </div>
+
+            <Separator />
+
+            {/* Admin Hierarchy */}
+            <div className="space-y-3">
+              <h3 className="text-sm font-semibold text-primary flex items-center gap-1.5">
+                <Layers className="h-4 w-4" /> Administrative Hierarchy Labels
+              </h3>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                {([
+                  ["adminLevelL1", "Level 1"],
+                  ["adminLevelL2", "Level 2"],
+                  ["adminLevelL3", "Level 3"],
+                  ["adminLevelL4", "Level 4"],
+                ] as const).map(([key, label]) => (
+                  <div key={key} className="space-y-1.5">
+                    <Label className="text-xs">{label}</Label>
+                    <Input value={form[key as keyof NewCountryForm]} onChange={updateField(key as keyof NewCountryForm)} placeholder={label} className="text-sm" />
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => { setEditTenant(null); setForm(DEFAULTS); }}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleSaveEdit}
+              disabled={updateMutation.isPending}
+              className="gap-2 font-semibold"
+              data-testid="button-save-edit"
+            >
+              {updateMutation.isPending ? (
+                <><RefreshCw className="h-4 w-4 animate-spin" /> Saving…</>
+              ) : (
+                <><CheckCircle className="h-4 w-4" /> Save Changes</>
               )}
             </Button>
           </DialogFooter>
