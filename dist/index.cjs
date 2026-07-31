@@ -9957,7 +9957,9 @@ var init_catalogue = __esm({
     router2 = (0, import_express4.Router)();
     router2.get("/vaccines", isAuthenticated, requireTenant, async (req, res) => {
       try {
-        const results = await db.select().from(catalogueVaccines).where((0, import_drizzle_orm13.eq)(catalogueVaccines.tenantId, req.tenantId)).orderBy(catalogueVaccines.name);
+        const conditions = [(0, import_drizzle_orm13.eq)(catalogueVaccines.tenantId, req.tenantId)];
+        if (req.query.activeOnly === "true") conditions.push((0, import_drizzle_orm13.eq)(catalogueVaccines.active, true));
+        const results = await db.select().from(catalogueVaccines).where((0, import_drizzle_orm13.and)(...conditions)).orderBy(catalogueVaccines.name);
         res.json(results);
       } catch (err) {
         console.error(err);
@@ -9996,7 +9998,9 @@ var init_catalogue = __esm({
     });
     router2.get("/schedules", isAuthenticated, requireTenant, async (req, res) => {
       try {
-        const results = await db.select().from(catalogueScheduleDoses).where((0, import_drizzle_orm13.eq)(catalogueScheduleDoses.tenantId, req.tenantId)).orderBy(catalogueScheduleDoses.doseNumber);
+        const conditions = [(0, import_drizzle_orm13.eq)(catalogueScheduleDoses.tenantId, req.tenantId)];
+        if (req.query.activeOnly === "true") conditions.push((0, import_drizzle_orm13.eq)(catalogueScheduleDoses.active, true));
+        const results = await db.select().from(catalogueScheduleDoses).where((0, import_drizzle_orm13.and)(...conditions)).orderBy(catalogueScheduleDoses.doseNumber);
         res.json(results);
       } catch (err) {
         console.error(err);
@@ -10025,7 +10029,9 @@ var init_catalogue = __esm({
     });
     router2.get("/commodities", isAuthenticated, requireTenant, async (req, res) => {
       try {
-        const results = await db.select().from(catalogueCommodities).where((0, import_drizzle_orm13.eq)(catalogueCommodities.tenantId, req.tenantId)).orderBy(catalogueCommodities.name);
+        const conditions = [(0, import_drizzle_orm13.eq)(catalogueCommodities.tenantId, req.tenantId)];
+        if (req.query.activeOnly === "true") conditions.push((0, import_drizzle_orm13.eq)(catalogueCommodities.active, true));
+        const results = await db.select().from(catalogueCommodities).where((0, import_drizzle_orm13.and)(...conditions)).orderBy(catalogueCommodities.name);
         res.json(results);
       } catch (err) {
         console.error(err);
@@ -10054,7 +10060,9 @@ var init_catalogue = __esm({
     });
     router2.get("/wastage-thresholds", isAuthenticated, requireTenant, async (req, res) => {
       try {
-        const results = await db.select().from(catalogueWastageThresholds).where((0, import_drizzle_orm13.eq)(catalogueWastageThresholds.tenantId, req.tenantId));
+        const conditions = [(0, import_drizzle_orm13.eq)(catalogueWastageThresholds.tenantId, req.tenantId)];
+        if (req.query.activeOnly === "true") conditions.push((0, import_drizzle_orm13.eq)(catalogueWastageThresholds.active, true));
+        const results = await db.select().from(catalogueWastageThresholds).where((0, import_drizzle_orm13.and)(...conditions));
         res.json(results);
       } catch (err) {
         console.error(err);

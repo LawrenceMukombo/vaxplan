@@ -11,6 +11,8 @@ import { useToast } from "@/hooks/use-toast";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import { CatalogueItemDialog } from "@/components/CatalogueItemDialog";
 
+import { Switch } from "@/components/ui/switch";
+
 const TABS = [
   { id: "vaccines", label: "Vaccine Products", type: "vaccine" },
   { id: "schedules", label: "Schedule Doses", type: "schedule" },
@@ -63,6 +65,28 @@ export default function CatalogueAdmin() {
     queryKey: ["/api/catalogue/wastage-thresholds"],
   });
 
+  const toggleMutation = useMutation({
+    mutationFn: async ({ endpoint, id, active, name }: { endpoint: string; id: number; active: boolean; name: string }) => {
+      const res = await fetch(`/api/catalogue/${endpoint}/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ active })
+      });
+      if (!res.ok) throw new Error(await res.text());
+      return { endpoint, id, active, name };
+    },
+    onSuccess: ({ endpoint, name, active }) => {
+      toast({
+        title: active ? "Item Allowed" : "Item Disallowed",
+        description: `"${name}" is now ${active ? "allowed" : "disallowed"} for this country.`
+      });
+      queryClient.invalidateQueries({ queryKey: [`/api/catalogue/${endpoint}`] });
+    },
+    onError: (err: any) => {
+      toast({ variant: "destructive", title: "Update Failed", description: err.message });
+    }
+  });
+
   const seedMutation = useMutation({
     mutationFn: async () => {
       const res = await fetch("/api/catalogue/seed", { method: "POST" });
@@ -103,7 +127,8 @@ export default function CatalogueAdmin() {
                 <TableHead>Antigen</TableHead>
                 <TableHead>Doses/Vial</TableHead>
                 <TableHead>Status</TableHead>
-                <TableHead></TableHead>
+                <TableHead>Allowed for Country</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -114,7 +139,18 @@ export default function CatalogueAdmin() {
                   <TableCell>{v.antigenName}</TableCell>
                   <TableCell>{v.dosesPerVial}</TableCell>
                   <TableCell>
-                    <Badge variant={v.approvalStatus === 'published' ? 'default' : 'secondary'}>{v.approvalStatus}</Badge>
+                    <Badge variant={v.approvalStatus === 'published' || v.approvalStatus === 'approved' ? 'default' : 'secondary'}>{v.approvalStatus}</Badge>
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex items-center gap-2">
+                      <Switch
+                        checked={v.active ?? true}
+                        onCheckedChange={(checked) => toggleMutation.mutate({ endpoint: "vaccines", id: v.id, active: checked, name: v.name })}
+                      />
+                      <Badge variant={(v.active ?? true) ? "default" : "outline"} className={(v.active ?? true) ? "bg-emerald-600 hover:bg-emerald-700 text-white" : ""}>
+                        {(v.active ?? true) ? "Allowed" : "Disallowed"}
+                      </Badge>
+                    </div>
                   </TableCell>
                   <TableCell className="text-right">
                     <Button variant="ghost" size="icon" onClick={() => handleEdit(v)}><Edit2 className="h-4 w-4" /></Button>
@@ -122,7 +158,7 @@ export default function CatalogueAdmin() {
                 </TableRow>
               ))}
               {vaccines.length === 0 && (
-                <TableRow><TableCell colSpan={6} className="text-center py-8 text-muted-foreground">No vaccines found. Click "Seed Default Catalogue" to start.</TableCell></TableRow>
+                <TableRow><TableCell colSpan={7} className="text-center py-8 text-muted-foreground">No vaccines found. Click "Seed Default Catalogue" to start.</TableCell></TableRow>
               )}
             </TableBody>
           </Table>
@@ -147,7 +183,8 @@ export default function CatalogueAdmin() {
                 <TableHead>Dose #</TableHead>
                 <TableHead>Target Pop</TableHead>
                 <TableHead>Linked Vaccine</TableHead>
-                <TableHead></TableHead>
+                <TableHead>Allowed for Country</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -158,12 +195,23 @@ export default function CatalogueAdmin() {
                   <TableCell>{s.doseNumber}</TableCell>
                   <TableCell className="capitalize">{s.targetPopulationGroup}</TableCell>
                   <TableCell>{vaccines.find((v: any) => v.id === s.vaccineId)?.name || 'Unknown'}</TableCell>
+                  <TableCell>
+                    <div className="flex items-center gap-2">
+                      <Switch
+                        checked={s.active ?? true}
+                        onCheckedChange={(checked) => toggleMutation.mutate({ endpoint: "schedules", id: s.id, active: checked, name: s.name })}
+                      />
+                      <Badge variant={(s.active ?? true) ? "default" : "outline"} className={(s.active ?? true) ? "bg-emerald-600 hover:bg-emerald-700 text-white" : ""}>
+                        {(s.active ?? true) ? "Allowed" : "Disallowed"}
+                      </Badge>
+                    </div>
+                  </TableCell>
                   <TableCell className="text-right">
                     <Button variant="ghost" size="icon" onClick={() => handleEdit(s)}><Edit2 className="h-4 w-4" /></Button>
                   </TableCell>
                 </TableRow>
               ))}
-              {schedules.length === 0 && <TableRow><TableCell colSpan={6} className="text-center py-8 text-muted-foreground">No schedules found.</TableCell></TableRow>}
+              {schedules.length === 0 && <TableRow><TableCell colSpan={7} className="text-center py-8 text-muted-foreground">No schedules found.</TableCell></TableRow>}
             </TableBody>
           </Table>
         )}
@@ -187,23 +235,38 @@ export default function CatalogueAdmin() {
                 <TableHead>Wastage Factor</TableHead>
                 <TableHead>Min Acceptable (%)</TableHead>
                 <TableHead>Max Acceptable (%)</TableHead>
-                <TableHead></TableHead>
+                <TableHead>Allowed for Country</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {wastage.map((w: any) => (
-                <TableRow key={w.id}>
-                  <TableCell className="font-medium">{vaccines.find((v: any) => v.id === w.vaccineId)?.name || 'Unknown'}</TableCell>
-                  <TableCell>{w.wastageRate}%</TableCell>
-                  <TableCell>{w.wastageFactor}</TableCell>
-                  <TableCell>{w.minAcceptable}%</TableCell>
-                  <TableCell>{w.maxAcceptable}%</TableCell>
-                  <TableCell className="text-right">
-                    <Button variant="ghost" size="icon" onClick={() => handleEdit(w)}><Edit2 className="h-4 w-4" /></Button>
-                  </TableCell>
-                </TableRow>
-              ))}
-              {wastage.length === 0 && <TableRow><TableCell colSpan={6} className="text-center py-8 text-muted-foreground">No thresholds found.</TableCell></TableRow>}
+              {wastage.map((w: any) => {
+                const vaccineName = vaccines.find((v: any) => v.id === w.vaccineId)?.name || 'Threshold';
+                return (
+                  <TableRow key={w.id}>
+                    <TableCell className="font-medium">{vaccineName}</TableCell>
+                    <TableCell>{w.wastageRate}%</TableCell>
+                    <TableCell>{w.wastageFactor}</TableCell>
+                    <TableCell>{w.minAcceptable}%</TableCell>
+                    <TableCell>{w.maxAcceptable}%</TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-2">
+                        <Switch
+                          checked={w.active ?? true}
+                          onCheckedChange={(checked) => toggleMutation.mutate({ endpoint: "wastage-thresholds", id: w.id, active: checked, name: vaccineName })}
+                        />
+                        <Badge variant={(w.active ?? true) ? "default" : "outline"} className={(w.active ?? true) ? "bg-emerald-600 hover:bg-emerald-700 text-white" : ""}>
+                          {(w.active ?? true) ? "Allowed" : "Disallowed"}
+                        </Badge>
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <Button variant="ghost" size="icon" onClick={() => handleEdit(w)}><Edit2 className="h-4 w-4" /></Button>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+              {wastage.length === 0 && <TableRow><TableCell colSpan={7} className="text-center py-8 text-muted-foreground">No thresholds found.</TableCell></TableRow>}
             </TableBody>
           </Table>
         )}
@@ -228,7 +291,8 @@ export default function CatalogueAdmin() {
                   <TableHead>Code</TableHead>
                   <TableHead>Pack Size</TableHead>
                   <TableHead>Stock Managed</TableHead>
-                  <TableHead></TableHead>
+                  <TableHead>Allowed for Country</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -238,12 +302,23 @@ export default function CatalogueAdmin() {
                     <TableCell className="font-mono text-xs">{c.commodityCode}</TableCell>
                     <TableCell>{c.packSize}</TableCell>
                     <TableCell>{c.stockManaged ? <Badge variant="default">Yes</Badge> : <Badge variant="secondary">No</Badge>}</TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-2">
+                        <Switch
+                          checked={c.active ?? true}
+                          onCheckedChange={(checked) => toggleMutation.mutate({ endpoint: "commodities", id: c.id, active: checked, name: c.name })}
+                        />
+                        <Badge variant={(c.active ?? true) ? "default" : "outline"} className={(c.active ?? true) ? "bg-emerald-600 hover:bg-emerald-700 text-white" : ""}>
+                          {(c.active ?? true) ? "Allowed" : "Disallowed"}
+                        </Badge>
+                      </div>
+                    </TableCell>
                     <TableCell className="text-right">
                       <Button variant="ghost" size="icon" onClick={() => handleEdit(c)}><Edit2 className="h-4 w-4" /></Button>
                     </TableCell>
                   </TableRow>
                 ))}
-                {items.length === 0 && <TableRow><TableCell colSpan={5} className="text-center py-8 text-muted-foreground">No items found.</TableCell></TableRow>}
+                {items.length === 0 && <TableRow><TableCell colSpan={6} className="text-center py-8 text-muted-foreground">No items found.</TableCell></TableRow>}
               </TableBody>
             </Table>
           )}

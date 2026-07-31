@@ -1201,12 +1201,13 @@ export default function ClientLogbook() {
   });
 
   const { data: scheduleDoses } = useQuery<CatalogueScheduleDose[]>({
-    queryKey: ["/api/catalogue/schedules"],
+    queryKey: ["/api/catalogue/schedules", "activeOnly"],
     queryFn: async () => {
       if (!navigator.onLine) return [];
-      const res = await fetch("/api/catalogue/schedules", { credentials: "include" });
+      const res = await fetch("/api/catalogue/schedules?activeOnly=true", { credentials: "include" });
       if (!res.ok) return [];
-      return res.json();
+      const list = await res.json();
+      return Array.isArray(list) ? list.filter((s: any) => s.active !== false) : [];
     },
   });
 

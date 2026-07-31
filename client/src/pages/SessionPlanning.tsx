@@ -387,12 +387,13 @@ export default function SessionPlanning({
   // Tenant antigen / dose schedule — drives the Mark Done dialog inputs so
   // counts are captured per the tenant's actual schedule
   const { data: scheduleDoses } = useQuery<CatalogueScheduleDose[]>({
-    queryKey: ["/api/catalogue/schedules"],
+    queryKey: ["/api/catalogue/schedules", "activeOnly"],
     staleTime: 5 * 60 * 1000,
     queryFn: async () => {
-      const res = await fetch("/api/catalogue/schedules");
+      const res = await fetch("/api/catalogue/schedules?activeOnly=true");
       if (!res.ok) throw new Error("Failed to fetch catalogue schedules");
-      return res.json();
+      const list = await res.json();
+      return Array.isArray(list) ? list.filter((s: any) => s.active !== false) : [];
     },
   });
 

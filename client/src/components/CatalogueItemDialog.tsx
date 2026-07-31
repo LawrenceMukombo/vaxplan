@@ -20,6 +20,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
 import {
   insertCatalogueVaccineSchema,
@@ -274,7 +275,41 @@ export function CatalogueItemDialog({ open, onOpenChange, activeTabType, item }:
                     </FormItem>
                   )}
                 />
+                <FormField
+                  control={form.control}
+                  name="active"
+                  render={({ field }) => (
+                    <FormItem className="flex flex-row items-center justify-between rounded-md border p-4">
+                      <div className="space-y-0.5">
+                        <FormLabel>Allowed for Country</FormLabel>
+                        <FormDescription>Enable or disable item across Client Logbook, Stock Ledger, and Microplanning</FormDescription>
+                      </div>
+                      <FormControl>
+                        <Switch checked={field.value ?? true} onCheckedChange={field.onChange} />
+                      </FormControl>
+                    </FormItem>
+                  )}
+                />
               </>
+            )}
+
+            {/* General Active Toggle for non-commodity items */}
+            {!["diluent", "syringe", "safety_box", "ppe", "cold_chain", "recording_tools", "it_equipment", "transport", "stationaries", "social_mob", "other"].includes(activeTabType) && (
+              <FormField
+                control={form.control}
+                name="active"
+                render={({ field }) => (
+                  <FormItem className="flex flex-row items-center justify-between rounded-md border p-4">
+                    <div className="space-y-0.5">
+                      <FormLabel>Allowed for Country</FormLabel>
+                      <FormDescription>Enable or disable item across Client Logbook, Stock Ledger, and Microplanning</FormDescription>
+                    </div>
+                    <FormControl>
+                      <Switch checked={field.value ?? true} onCheckedChange={field.onChange} />
+                    </FormControl>
+                  </FormItem>
+                )}
+              />
             )}
 
             <div className="flex justify-end gap-2 mt-4">

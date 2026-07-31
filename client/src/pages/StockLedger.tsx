@@ -304,21 +304,23 @@ export default function StockLedger() {
 
   // Load vaccine configurations from Country Catalogue
   const { data: vaccineConfigs = [], isLoading: isLoadingConfigs } = useQuery<any[]>({
-    queryKey: ["/api/catalogue/vaccines"],
+    queryKey: ["/api/catalogue/vaccines", "activeOnly"],
     queryFn: async () => {
       // Return physical stock-managed catalogue products
-      const res = await fetch("/api/catalogue/vaccines");
+      const res = await fetch("/api/catalogue/vaccines?activeOnly=true");
       if (!res.ok) throw new Error("Failed to fetch catalogue vaccines");
-      return res.json();
+      const list = await res.json();
+      return Array.isArray(list) ? list.filter((v: any) => v.active !== false) : [];
     },
   });
 
   const { data: catalogueWastageThresholds = [] } = useQuery<CatalogueWastageThreshold[]>({
-    queryKey: ["/api/catalogue/wastage-thresholds"],
+    queryKey: ["/api/catalogue/wastage-thresholds", "activeOnly"],
     queryFn: async () => {
-      const res = await fetch("/api/catalogue/wastage-thresholds");
+      const res = await fetch("/api/catalogue/wastage-thresholds?activeOnly=true");
       if (!res.ok) return [];
-      return res.json();
+      const list = await res.json();
+      return Array.isArray(list) ? list.filter((w: any) => w.active !== false) : [];
     },
   });
   // Pre-fill user facility context

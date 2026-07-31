@@ -38,7 +38,9 @@ function requirePermission(permissionCode: Permission) {
 // --- VACCINES ---
 router.get("/vaccines", isAuthenticated, requireTenant, async (req: any, res) => {
   try {
-    const results = await db.select().from(catalogueVaccines).where(eq(catalogueVaccines.tenantId, req.tenantId)).orderBy(catalogueVaccines.name);
+    const conditions = [eq(catalogueVaccines.tenantId, req.tenantId)];
+    if (req.query.activeOnly === "true") conditions.push(eq(catalogueVaccines.active, true));
+    const results = await db.select().from(catalogueVaccines).where(and(...conditions)).orderBy(catalogueVaccines.name);
     res.json(results);
   } catch (err: any) {
     console.error(err);
@@ -82,7 +84,9 @@ router.patch("/vaccines/:id", isAuthenticated, requireTenant, requirePermission(
 // --- SCHEDULE DOSES ---
 router.get("/schedules", isAuthenticated, requireTenant, async (req: any, res) => {
   try {
-    const results = await db.select().from(catalogueScheduleDoses).where(eq(catalogueScheduleDoses.tenantId, req.tenantId)).orderBy(catalogueScheduleDoses.doseNumber);
+    const conditions = [eq(catalogueScheduleDoses.tenantId, req.tenantId)];
+    if (req.query.activeOnly === "true") conditions.push(eq(catalogueScheduleDoses.active, true));
+    const results = await db.select().from(catalogueScheduleDoses).where(and(...conditions)).orderBy(catalogueScheduleDoses.doseNumber);
     res.json(results);
   } catch (err: any) {
     console.error(err);
@@ -116,7 +120,9 @@ router.patch("/schedules/:id", isAuthenticated, requireTenant, requirePermission
 // --- COMMODITIES ---
 router.get("/commodities", isAuthenticated, requireTenant, async (req: any, res) => {
   try {
-    const results = await db.select().from(catalogueCommodities).where(eq(catalogueCommodities.tenantId, req.tenantId)).orderBy(catalogueCommodities.name);
+    const conditions = [eq(catalogueCommodities.tenantId, req.tenantId)];
+    if (req.query.activeOnly === "true") conditions.push(eq(catalogueCommodities.active, true));
+    const results = await db.select().from(catalogueCommodities).where(and(...conditions)).orderBy(catalogueCommodities.name);
     res.json(results);
   } catch (err: any) {
     console.error(err);
@@ -149,7 +155,9 @@ router.patch("/commodities/:id", isAuthenticated, requireTenant, requirePermissi
 // --- WASTAGE THRESHOLDS ---
 router.get("/wastage-thresholds", isAuthenticated, requireTenant, async (req: any, res) => {
   try {
-    const results = await db.select().from(catalogueWastageThresholds).where(eq(catalogueWastageThresholds.tenantId, req.tenantId));
+    const conditions = [eq(catalogueWastageThresholds.tenantId, req.tenantId)];
+    if (req.query.activeOnly === "true") conditions.push(eq(catalogueWastageThresholds.active, true));
+    const results = await db.select().from(catalogueWastageThresholds).where(and(...conditions));
     res.json(results);
   } catch (err: any) {
     console.error(err);
