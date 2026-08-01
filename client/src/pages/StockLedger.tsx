@@ -833,7 +833,7 @@ export default function StockLedger() {
 
       if (type === "receipt" || type === "adjustment") {
         soh[normName] += doses;
-      } else if (type === "issue" || type === "loss") {
+      } else if (["issue", "loss", "administered", "wasted", "expired", "transfer", "transfer_out"].includes(type)) {
         soh[normName] -= doses;
       }
     });

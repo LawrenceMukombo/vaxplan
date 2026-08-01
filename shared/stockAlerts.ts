@@ -64,7 +64,7 @@ export function computeStockOnHand(
     const doses = Number(tx.quantityDoses ?? 0);
     if (tx.transactionType === "receipt" || tx.transactionType === "adjustment") {
       soh[normName] += doses;
-    } else if (tx.transactionType === "issue" || tx.transactionType === "loss") {
+    } else if (["issue", "loss", "administered", "wasted", "expired", "transfer", "transfer_out"].includes(tx.transactionType)) {
       soh[normName] -= doses;
     }
   }

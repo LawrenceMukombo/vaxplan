@@ -138,6 +138,13 @@ export function GeoCascadeFilter({
   const districts = providedDistricts ?? fetchedDistricts ?? [];
   const facilities = providedFacilities ?? fetchedFacilities ?? [];
   const regions = providedRegions ?? fetchedRegions ?? [];
+  const usesDistrictLevel = tenantInfo?.settings?.hasDistricts !== false;
+
+  useEffect(() => {
+    if (!usesDistrictLevel && districtId !== null) {
+      onDistrictChange(null);
+    }
+  }, [usesDistrictLevel, districtId, onDistrictChange]);
 
   // Enforce preselection via useEffect
   useEffect(() => {
@@ -206,12 +213,17 @@ export function GeoCascadeFilter({
       if (user?.facilityId) {
         list = list.filter((f) => Number(f.id) === Number(user.facilityId));
       }
-    } else if (districtId) {
+    } else if (usesDistrictLevel && districtId) {
       list = list.filter(
         (f) => Number((f as any).districtId) === Number(districtId),
       );
     } else if (provinceId) {
       list = list.filter((f) => {
+        const directProvinceId = Number((f as any).provinceId);
+        if (Number.isFinite(directProvinceId) && directProvinceId === Number(provinceId)) {
+          return true;
+        }
+
         const d = districts.find(
           (dd) => Number(dd.id) === Number((f as any).districtId),
         );
@@ -219,17 +231,17 @@ export function GeoCascadeFilter({
       });
     }
     return [...list].sort((a, b) => a.name.localeCompare(b.name));
-  }, [facilities, districts, provinceId, districtId, showFacility, isFacilityUser, user?.facilityId]);
+  }, [facilities, districts, provinceId, districtId, showFacility, usesDistrictLevel, isFacilityUser, user?.facilityId]);
 
   // Lock status considering user-role scopes
   const provinceLocked = isProvinceUser || isDistrictUser || isFacilityUser;
-  const districtLocked = isDistrictUser || isFacilityUser || (strictCascade && !provinceId);
-  const facilityLocked = isFacilityUser || (strictCascade && (!provinceId || !districtId));
+  const districtLocked = !usesDistrictLevel || isDistrictUser || isFacilityUser || (strictCascade && !provinceId);
+  const facilityLocked = isFacilityUser || (strictCascade && (!provinceId || (usesDistrictLevel && !districtId)));
 
   const hasSelection =
     (showRegion && regionId && !provinceLocked) ||
     (provinceId !== null && !provinceLocked) ||
-    (districtId !== null && !districtLocked) ||
+    (usesDistrictLevel && districtId !== null && !districtLocked) ||
     (showFacility && facilityId && !facilityLocked);
 
   const clearAll = () => {
@@ -253,8 +265,8 @@ export function GeoCascadeFilter({
     onProvinceChange(id);
     onDistrictChange(null);
     if (showFacility && onFacilityChange) onFacilityChange(null);
-    setFacilitySelectOpen(false);
-    setDistrictSelectOpen(id !== null);
+    setDistrictSelectOpen(usesDistrictLevel && id !== null);
+    setFacilitySelectOpen(showFacility && !usesDistrictLevel && id !== null);
   };
 
   const handleDistrict = (val: string) => {
@@ -355,42 +367,42 @@ export function GeoCascadeFilter({
         </Select>
       </div>
 
-      {/* District — locked until Province selected in strict mode */}
-      <div className="min-w-[180px] flex-1 max-w-[240px]">
-        <label className={`text-xs font-medium mb-1 flex items-center gap-1 ${districtLocked ? "text-muted-foreground/50" : "text-muted-foreground"}`}>
-          {districtLabel}
-          {districtLocked && <Lock className="h-2.5 w-2.5 opacity-60" />}
-        </label>
-        <Select
-          value={districtId?.toString() ?? "all"}
-          onValueChange={handleDistrict}
-          open={districtSelectOpen && !districtLocked && filteredDistricts.length > 0}
-          onOpenChange={setDistrictSelectOpen}
-          disabled={districtLocked || filteredDistricts.length === 0}
-        >
-          <SelectTrigger
-            data-testid={`${testIdPrefix}-select-district`}
-            className={districtLocked ? "opacity-50 cursor-not-allowed" : ""}
+      {usesDistrictLevel && (
+        <div className="min-w-[180px] flex-1 max-w-[240px]">
+          <label className={`text-xs font-medium mb-1 flex items-center gap-1 ${districtLocked ? "text-muted-foreground/50" : "text-muted-foreground"}`}>
+            {districtLabel}
+            {districtLocked && <Lock className="h-2.5 w-2.5 opacity-60" />}
+          </label>
+          <Select
+            value={districtId?.toString() ?? "all"}
+            onValueChange={handleDistrict}
+            open={districtSelectOpen && !districtLocked && filteredDistricts.length > 0}
+            onOpenChange={setDistrictSelectOpen}
+            disabled={districtLocked || filteredDistricts.length === 0}
           >
-            <SelectValue
-              placeholder={
-                districtLocked
-                  ? `Select ${provinceLabel.toLowerCase()} first`
-                  : `All ${districtLabel}s`
-              }
-            />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All {districtLabel}s</SelectItem>
-            {filteredDistricts.map((d) => (
-              <SelectItem key={d.id} value={d.id.toString()}>
-                {d.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-
+            <SelectTrigger
+              data-testid={`${testIdPrefix}-select-district`}
+              className={districtLocked ? "opacity-50 cursor-not-allowed" : ""}
+            >
+              <SelectValue
+                placeholder={
+                  districtLocked
+                    ? `Select ${provinceLabel.toLowerCase()} first`
+                    : `All ${districtLabel}s`
+                }
+              />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All {districtLabel}s</SelectItem>
+              {filteredDistricts.map((d) => (
+                <SelectItem key={d.id} value={d.id.toString()}>
+                  {d.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
       {/* Facility — locked until District selected in strict mode */}
       {showFacility && (
         <div className="min-w-[200px] flex-1 max-w-[280px]">
@@ -413,7 +425,7 @@ export function GeoCascadeFilter({
               <SelectValue
                 placeholder={
                   facilityLocked
-                    ? `Select ${districtLabel.toLowerCase()} first`
+                    ? `Select ${(usesDistrictLevel ? districtLabel : provinceLabel).toLowerCase()} first`
                     : `All ${pluralize(facilityLabel).toLowerCase()}`
                 }
               />

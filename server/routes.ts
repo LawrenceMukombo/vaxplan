@@ -19695,17 +19695,13 @@ Instructions:
       const balance: Record<string, number> = {};
 
       for (const t of txns) {
-        const name = t.vaccineName || "Unknown";
+        const name = normalizeStockVaccineName(t.vaccineName || "Unknown");
         if (!balance[name]) balance[name] = 0;
         const qty = t.quantityDoses;
-        if (t.transactionType === "receipt") {
+        if (t.transactionType === "receipt" || t.transactionType === "adjustment") {
           balance[name] += qty;
-        } else if (t.transactionType === "issue") {
+        } else if (["issue", "loss", "administered", "wasted", "expired", "transfer", "transfer_out"].includes(t.transactionType)) {
           balance[name] -= qty;
-        } else if (t.transactionType === "loss") {
-          balance[name] -= qty;
-        } else if (t.transactionType === "adjustment") {
-          balance[name] += qty;
         }
       }
 

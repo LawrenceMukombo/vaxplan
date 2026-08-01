@@ -1095,6 +1095,10 @@ export default function ClientLogbook() {
     ? (adminFacilityId || 0)
     : (user?.facilityId || facilities?.[0]?.id || 1);
 
+  const vaccinationFacilityId = vaccinateClient?.facilityId
+    ? Number(vaccinateClient.facilityId)
+    : Number(activeFacilityId || 0);
+
   // Scoped Demographics and Catchment Queries
   const { data: clients, isLoading: loadingClients } = useQuery<Client[]>({
     queryKey: ["/api/clients", { facilityId: geoFilterFacilityId, districtId: geoFilterDistrictId, provinceId: geoFilterProvinceId }],
@@ -1212,14 +1216,14 @@ export default function ClientLogbook() {
   });
 
   const { data: vaccinationStockRows } = useQuery<StockTransaction[]>({
-    queryKey: ["/api/stock/ledger", { facilityId: activeFacilityId, forBatchLog: true }],
+    queryKey: ["/api/stock/ledger", { facilityId: vaccinationFacilityId, forBatchLog: true }],
     queryFn: async () => {
-      if (!navigator.onLine || !activeFacilityId) return [];
-      const res = await fetch(`/api/stock/ledger?facilityId=${activeFacilityId}`, { credentials: "include" });
+      if (!navigator.onLine || !vaccinationFacilityId) return [];
+      const res = await fetch(`/api/stock/ledger?facilityId=${vaccinationFacilityId}`, { credentials: "include" });
       if (!res.ok) return [];
       return res.json();
     },
-    enabled: isVaccinateOpen && !!activeFacilityId,
+    enabled: isVaccinateOpen && !!vaccinationFacilityId,
   });
 
   useEffect(() => {
@@ -4214,6 +4218,9 @@ export default function ClientLogbook() {
                   <p className="text-xs text-muted-foreground mt-0.5">
                     Unique ID: <span className="font-mono">{vaccinateClient.clientId || "Pending Generation"}</span>
                   </p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Stock facility: <span className="font-medium text-foreground">{getFacilityName(vaccinationFacilityId || vaccinateClient.facilityId)}</span>
+                  </p>
                 </div>
                 <Badge className="bg-indigo-500/10 text-indigo-500 border-none capitalize">
                   {vaccinateClient.clientType === "child" ? `${vaccinateClient.gender}, Child` : "Pregnant Woman"}
@@ -4368,6 +4375,7 @@ export default function ClientLogbook() {
                     const selectedRows = gridRows.filter(r => r.checked && !r.statusInfo.disabled);
                     const payload = selectedRows.map(r => ({
                       vaccineConfigId: r.vaccineConfigId,
+                      scheduleDoseId: r.scheduleDoseId ?? null,
                       vaccineName: r.vaccineName,
                       administeredDate: r.administeredDate,
                       expiryDate: r.expiryDate || null,
