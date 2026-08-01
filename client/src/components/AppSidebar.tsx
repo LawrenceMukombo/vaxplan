@@ -1,4 +1,4 @@
-﻿import { useLocation, Link } from "wouter";
+import { useLocation, Link } from "wouter";
 import { useState } from "react";
 import { versionLabel } from "@/lib/version";
 import {
@@ -51,6 +51,7 @@ import {
   Building,
   Hospital,
   Bell,
+  Snowflake,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { useQuery } from "@tanstack/react-query";
@@ -100,6 +101,7 @@ const planningNavItems = [
   { title: "Plan Health", path: "/plan-health", icon: ClipboardCheck },
   { title: "Sessions", path: "/all-sessions", icon: CalendarDays },
   { title: "Stock Ledger", path: "/stock", icon: Package },
+  { title: "Cold Chain Inventory", path: "/cold-chain", icon: Snowflake },
   { title: "Hard-to-Reach", path: "/htr", icon: AlertTriangle },
   { title: "Field Readiness", path: "/field-readiness", icon: Radio },
 ];

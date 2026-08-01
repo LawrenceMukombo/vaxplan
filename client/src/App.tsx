@@ -66,6 +66,7 @@ const CustomLayers = lazy(() => import("@/pages/CustomLayers"));
 const ClientLogbook = lazy(() => import("@/pages/ClientLogbook"));
 const Defaulters = lazy(() => import("@/pages/Defaulters"));
 const StockLedger = lazy(() => import("@/pages/StockLedger"));
+const ColdChainInventory = lazy(() => import("@/pages/ColdChainInventory"));
 const SessionDayPlans = lazy(() => import("@/pages/SessionDayPlans"));
 const SessionHistory = lazy(() => import("@/pages/SessionHistory"));
 const HisIntegrations = lazy(() => import("@/pages/HisIntegrations"));
@@ -353,6 +354,7 @@ function AuthenticatedRouter({ user }: { user: User }) {
       <Route path="/stock">
         {modules.stock !== false ? <StockLedger /> : <ModuleDisabled moduleName="Stock Ledger" />}
       </Route>
+      <Route path="/cold-chain" component={ColdChainInventory} />
       <Route path="/htr">
         {modules.htr !== false ? <HardToReach /> : <ModuleDisabled moduleName="Hard-to-Reach Scores" />}
       </Route>

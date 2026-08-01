@@ -5416,6 +5416,71 @@ export async function registerRoutes(
   });
 
   // ─── Cold Chain Equipment Inventory ─────────────────────────────────────
+  // GET /api/cold-chain (All CCE for tenant with joined facility metadata)
+  app.get("/api/cold-chain", ...auth, async (req: any, res) => {
+    try {
+      const { coldChainEquipment, facilities } = await import("@shared/schema");
+      const { facilityId, equipmentType, condition, powerSource } = req.query;
+
+      const conditions: any[] = [
+        eq(coldChainEquipment.tenantId, req.tenantId),
+        eq(coldChainEquipment.isActive, true),
+      ];
+
+      if (facilityId) conditions.push(eq(coldChainEquipment.facilityId, Number(facilityId)));
+      if (equipmentType && equipmentType !== "all") conditions.push(eq(coldChainEquipment.equipmentType, String(equipmentType)));
+      if (condition && condition !== "all") conditions.push(eq(coldChainEquipment.condition, String(condition)));
+      if (powerSource && powerSource !== "all") conditions.push(eq(coldChainEquipment.powerSource, String(powerSource)));
+
+      const rows = await db
+        .select({
+          id: coldChainEquipment.id,
+          facilityId: coldChainEquipment.facilityId,
+          facilityName: facilities.name,
+          facilityCode: facilities.code,
+          provinceId: facilities.provinceId,
+          districtId: facilities.districtId,
+          equipmentType: coldChainEquipment.equipmentType,
+          brand: coldChainEquipment.brand,
+          model: coldChainEquipment.model,
+          serialNumber: coldChainEquipment.serialNumber,
+          catalogNumber: coldChainEquipment.catalogNumber,
+          capacityLiters: coldChainEquipment.capacityLiters,
+          netStorageCapacityLiters: coldChainEquipment.netStorageCapacityLiters,
+          temperatureMin: coldChainEquipment.temperatureMin,
+          temperatureMax: coldChainEquipment.temperatureMax,
+          powerSource: coldChainEquipment.powerSource,
+          energyConsumptionKwhDay: coldChainEquipment.energyConsumptionKwhDay,
+          manufactureYear: coldChainEquipment.manufactureYear,
+          installationDate: coldChainEquipment.installationDate,
+          purchaseCost: coldChainEquipment.purchaseCost,
+          purchaseCurrency: coldChainEquipment.purchaseCurrency,
+          warrantyExpiry: coldChainEquipment.warrantyExpiry,
+          supplier: coldChainEquipment.supplier,
+          donorFunded: coldChainEquipment.donorFunded,
+          fundingSource: coldChainEquipment.fundingSource,
+          condition: coldChainEquipment.condition,
+          lastServiceDate: coldChainEquipment.lastServiceDate,
+          nextServiceDue: coldChainEquipment.nextServiceDue,
+          lastTemperatureCheck: coldChainEquipment.lastTemperatureCheck,
+          maintenanceNotes: coldChainEquipment.maintenanceNotes,
+          isActive: coldChainEquipment.isActive,
+          notes: coldChainEquipment.notes,
+          externalId: coldChainEquipment.externalId,
+          createdAt: coldChainEquipment.createdAt,
+          updatedAt: coldChainEquipment.updatedAt,
+        })
+        .from(coldChainEquipment)
+        .leftJoin(facilities, eq(coldChainEquipment.facilityId, facilities.id))
+        .where(and(...conditions))
+        .orderBy(facilities.name, coldChainEquipment.equipmentType);
+
+      res.json(rows);
+    } catch (err: any) {
+      res.status(500).json({ message: "Failed to fetch cold chain inventory: " + err.message });
+    }
+  });
+
   // GET /api/facilities/:id/cold-chain
   app.get("/api/facilities/:id/cold-chain", ...auth, requireGeoAccess(req => ({ facilityId: parseInt(req.params.id) })), async (req: any, res) => {
     try {
