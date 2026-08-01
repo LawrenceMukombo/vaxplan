@@ -147,6 +147,7 @@ router.post("/commodities", isAuthenticated, requireTenant, requirePermission("m
       consumptionRule: req.body.consumptionRule || {},
       active: req.body.active ?? true,
       ...req.body,
+      linkedVaccineId: (req.body.linkedVaccineId && req.body.linkedVaccineId !== "none" && req.body.linkedVaccineId !== 0 && req.body.linkedVaccineId !== "0") ? Number(req.body.linkedVaccineId) : null,
       tenantId: req.tenantId
     };
     const data = insertCatalogueCommoditySchema.parse(rawPayload);

@@ -188,8 +188,10 @@ export function CatalogueItemDialog({ open, onOpenChange, activeTabType, item }:
     if (data.dosesPerVial !== undefined) data.dosesPerVial = Number(data.dosesPerVial) || 1;
     if (data.doseNumber !== undefined) data.doseNumber = Number(data.doseNumber) || 1;
     if (data.vaccineId !== undefined && data.vaccineId !== "") data.vaccineId = Number(data.vaccineId);
-    if (data.linkedVaccineId !== undefined && data.linkedVaccineId !== "") {
-      data.linkedVaccineId = data.linkedVaccineId === "none" ? null : Number(data.linkedVaccineId);
+    if (!data.linkedVaccineId || data.linkedVaccineId === "none" || data.linkedVaccineId === "0" || data.linkedVaccineId === 0) {
+      data.linkedVaccineId = null;
+    } else {
+      data.linkedVaccineId = Number(data.linkedVaccineId);
     }
     if (data.packSize !== undefined) data.packSize = Number(data.packSize) || 1;
     if (data.minimumStockThreshold !== undefined) data.minimumStockThreshold = Number(data.minimumStockThreshold) || 0;
