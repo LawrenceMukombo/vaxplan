@@ -2817,7 +2817,7 @@ var insertResearchInterestSubmissionSchema = (0, import_drizzle_zod.createInsert
   createdAt: true,
   updatedAt: true
 });
-var commodityTypeEnum = (0, import_pg_core.pgEnum)("commodity_type", ["diluent", "syringe", "safety_box", "ppe", "cold_chain", "other"]);
+var commodityTypeEnum = (0, import_pg_core.pgEnum)("commodity_type", ["diluent", "syringe", "safety_box", "ppe", "cold_chain", "other", "recording_tools", "it_equipment", "transport", "stationaries", "social_mob"]);
 var doseClassificationEnum = (0, import_pg_core.pgEnum)("dose_classification", ["routine", "campaign", "outbreak", "school_based", "other"]);
 var catalogueVaccines = (0, import_pg_core.pgTable)("catalogue_vaccines", {
   id: (0, import_pg_core.integer)("id").primaryKey().generatedAlwaysAsIdentity(),

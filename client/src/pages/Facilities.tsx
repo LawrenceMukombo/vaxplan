@@ -94,7 +94,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { Plus, Building2, Users, Thermometer, Filter, X, Pencil, Trash2 } from "lucide-react";
 */
 // Updated Code: Added Snowflake, Wrench, AlertTriangle, RefreshCw icons for Cold Chain tab
-import { Plus, Building2, Users, Thermometer, X, Pencil, Trash2, Download, Upload, Snowflake, Wrench, AlertTriangle, RefreshCw, CheckCircle2, Loader2, SlidersHorizontal, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ArrowUpDown, Check, Contact, Search, MapPin, History } from "lucide-react";
+import { Plus, Building2, Users, Thermometer, X, Pencil, Trash2, Download, Upload, Snowflake, Wrench, AlertTriangle, RefreshCw, CheckCircle2, Loader2, SlidersHorizontal, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ArrowUpDown, Check, Contact, Search, MapPin, History, UserMinus, ArrowLeftRight } from "lucide-react";
 import { GeoCascadeFilter } from "@/components/GeoCascadeFilter";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useAuth } from "@/hooks/useAuth";
@@ -3849,6 +3849,7 @@ export default function Facilities() {
             provinces={provinces || []} 
             allDistricts={allDistricts || []} 
             facilities={filteredFacilities} 
+            villages={villages || []}
             selectedProvinceId={selectedProvinceId}
             selectedDistrictId={selectedDistrictId}
             selectedFacilityId={selectedFacilityId}
@@ -5328,18 +5329,22 @@ interface CommunityWorkersTabProps {
     provinces: any[];
     allDistricts: any[];
     facilities: any[];
+    villages: Village[];
     selectedProvinceId: number | null;
     selectedDistrictId: number | null;
     selectedFacilityId: number | null;
   }
 
-function CommunityWorkersTab({ provinces, allDistricts, facilities, selectedProvinceId, selectedDistrictId, selectedFacilityId }: CommunityWorkersTabProps) {
+function CommunityWorkersTab({ provinces, allDistricts, facilities, villages, selectedProvinceId, selectedDistrictId, selectedFacilityId }: CommunityWorkersTabProps) {
   const { toast } = useToast();
   const [selectedChwId, setSelectedChwId] = useState<number | null>(null);
   const [selectedChwData, setSelectedChwData] = useState<any>(null);
   const [chwDialogOpen, setChwDialogOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [selectedChwIds, setSelectedChwIds] = useState<Set<number>>(new Set());
+  const [bulkVillageId, setBulkVillageId] = useState("none");
+  const [assignmentBusyId, setAssignmentBusyId] = useState<number | null>(null);
         
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
@@ -5354,6 +5359,7 @@ function CommunityWorkersTab({ provinces, allDistricts, facilities, selectedProv
     contactPhone: true,
     facilityName: true,
     villageName: true,
+    assignment: true,
     campaignRole: true,
     trainingStatus: true,
     yearsOfService: true,
@@ -5399,6 +5405,11 @@ function CommunityWorkersTab({ provinces, allDistricts, facilities, selectedProv
     if (selectedFacilityId) params.append("facilityId", selectedFacilityId.toString());
     return `/api/chvs?${params.toString()}`;
   }, [page, pageSize, debouncedSearch, sortBy, sortOrder, selectedProvinceId, selectedDistrictId, selectedFacilityId]);
+
+  useEffect(() => {
+    setSelectedChwIds(new Set());
+    setBulkVillageId("none");
+  }, [queryUrl]);
 
   // Fetch Community Workers
   const { data, isLoading, error } = useQuery<{
@@ -5595,6 +5606,122 @@ function CommunityWorkersTab({ provinces, allDistricts, facilities, selectedProv
   const chwList = data?.data || [];
   const total = data?.total || 0;
   const totalPages = data?.totalPages || 1;
+  const activeColumnCount = Object.values(visibleCols).filter(Boolean).length + 1;
+
+  const communityOptionsByFacility = useMemo(() => {
+    const map = new Map<number, Village[]>();
+    (villages || []).forEach((v: any) => {
+      const facilityId = Number(v.assignedFacilityId);
+      if (!facilityId) return;
+      if (!map.has(facilityId)) map.set(facilityId, []);
+      map.get(facilityId)!.push(v);
+    });
+    map.forEach((list) => {
+      list.sort((a: any, b: any) => String(a.name || "").localeCompare(String(b.name || "")));
+    });
+    return map;
+  }, [villages]);
+
+  const invalidateChvViews = async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: [queryUrl] }),
+      queryClient.invalidateQueries({ queryKey: ["/api/chvs"] }),
+      queryClient.invalidateQueries({ queryKey: ["/api/chvs?pageSize=10000"] }),
+      queryClient.invalidateQueries({ queryKey: ["/api/chvs/coverage"] }),
+      queryClient.invalidateQueries({ queryKey: ["/api/villages"] }),
+    ]);
+  };
+
+  const assignmentMutation = useMutation({
+    mutationFn: async ({ chvId, villageId }: { chvId: number; villageId: number | null }) => {
+      setAssignmentBusyId(chvId);
+      return apiRequest("PATCH", "/api/chvs/" + chvId, { villageId });
+    },
+    onSuccess: async (_res, vars) => {
+      await invalidateChvViews();
+      toast({
+        title: vars.villageId ? "Community assigned" : "Community unassigned",
+        description: "The CHV assignment has been updated.",
+      });
+    },
+    onError: (error: any) => {
+      toast({ title: "Assignment failed", description: error.message, variant: "destructive" });
+    },
+    onSettled: () => setAssignmentBusyId(null),
+  });
+
+  const bulkAssignmentMutation = useMutation({
+    mutationFn: async ({ chvIds, villageId }: { chvIds: number[]; villageId: number | null }) => {
+      return apiRequest("POST", "/api/chvs/bulk-reassign", { chvIds, villageId });
+    },
+    onSuccess: async (res: any, vars) => {
+      await invalidateChvViews();
+      setSelectedChwIds(new Set());
+      setBulkVillageId("none");
+      toast({
+        title: vars.villageId ? "Selected CHVs assigned" : "Selected CHVs unassigned",
+        description: res?.succeeded != null ? `
+          ${res.succeeded} worker(s) updated successfully.`.trim() : "Assignments updated successfully.",
+      });
+    },
+    onError: (error: any) => {
+      toast({ title: "Bulk assignment failed", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const selectedRows = chwList.filter((chw: any) => selectedChwIds.has(Number(chw.id)));
+  const selectedFacilityIds = Array.from(new Set(selectedRows.map((chw: any) => Number(chw.facilityId)).filter(Boolean)));
+  const selectedSingleFacilityId = selectedFacilityIds.length === 1 ? selectedFacilityIds[0] : null;
+  const bulkCommunityOptions = selectedSingleFacilityId ? communityOptionsByFacility.get(selectedSingleFacilityId) || [] : [];
+  const allPageSelected = chwList.length > 0 && chwList.every((chw: any) => selectedChwIds.has(Number(chw.id)));
+
+  const toggleSelectedChw = (id: number) => {
+    setSelectedChwIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const togglePageSelection = () => {
+    setSelectedChwIds(prev => {
+      const next = new Set(prev);
+      if (allPageSelected) {
+        chwList.forEach((chw: any) => next.delete(Number(chw.id)));
+      } else {
+        chwList.forEach((chw: any) => next.add(Number(chw.id)));
+      }
+      return next;
+    });
+  };
+
+  const handleAssignmentChange = (chw: any, value: string) => {
+    const nextVillageId = value === "none" ? null : Number(value);
+    const currentVillageId = chw.villageId ? Number(chw.villageId) : null;
+    if (currentVillageId === nextVillageId) return;
+    assignmentMutation.mutate({ chvId: Number(chw.id), villageId: nextVillageId });
+  };
+
+  const handleBulkAssign = () => {
+    if (!selectedSingleFacilityId) {
+      toast({
+        title: "Select one facility at a time",
+        description: "Bulk community assignment is limited to CHVs from the same facility.",
+        variant: "destructive",
+      });
+      return;
+    }
+    if (bulkVillageId === "none") {
+      toast({ title: "Choose a community", description: "Select the target community before assigning workers.", variant: "destructive" });
+      return;
+    }
+    bulkAssignmentMutation.mutate({ chvIds: Array.from(selectedChwIds), villageId: Number(bulkVillageId) });
+  };
+
+  const handleBulkUnassign = () => {
+    bulkAssignmentMutation.mutate({ chvIds: Array.from(selectedChwIds), villageId: null });
+  };
 
   return (
     <>
@@ -5679,12 +5806,58 @@ function CommunityWorkersTab({ provinces, allDistricts, facilities, selectedProv
               </PopoverContent>
             </Popover>
           </div>
-        </div>        {/* Directory Table */}
+        </div>
+
+        {selectedChwIds.size > 0 && (
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 rounded-lg border border-primary/25 bg-primary/5 p-3">
+            <div>
+              <p className="text-sm font-semibold text-foreground">{selectedChwIds.size} CHV(s) selected</p>
+              <p className="text-xs text-muted-foreground">
+                {selectedSingleFacilityId
+                  ? "Assign selected workers to a community served by the same facility, or unassign them."
+                  : "Select workers from one facility to bulk assign a community; unassign works across mixed facilities."}
+              </p>
+            </div>
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+              <Select value={bulkVillageId} onValueChange={setBulkVillageId} disabled={!selectedSingleFacilityId || bulkCommunityOptions.length === 0 || bulkAssignmentMutation.isPending}>
+                <SelectTrigger className="h-9 w-full sm:w-[260px] bg-background">
+                  <SelectValue placeholder="Target community" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Select community</SelectItem>
+                  {bulkCommunityOptions.map((v: any) => (
+                    <SelectItem key={v.id} value={String(v.id)}>{v.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Button size="sm" onClick={handleBulkAssign} disabled={!selectedSingleFacilityId || bulkVillageId === "none" || bulkAssignmentMutation.isPending}>
+                <ArrowLeftRight className="h-4 w-4 mr-2" />
+                Assign selected
+              </Button>
+              <Button size="sm" variant="outline" onClick={handleBulkUnassign} disabled={bulkAssignmentMutation.isPending}>
+                <UserMinus className="h-4 w-4 mr-2" />
+                Unassign selected
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => { setSelectedChwIds(new Set()); setBulkVillageId("none"); }} disabled={bulkAssignmentMutation.isPending}>
+                Clear
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {/* Directory Table */}
         <div className="border rounded-lg overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-sm text-left border-collapse">
               <thead className="bg-muted/50 text-muted-foreground text-xs uppercase font-semibold">
                 <tr className="border-b">
+                  <th className="px-4 py-3 w-10">
+                    <Checkbox
+                      aria-label="Select all CHVs on this page"
+                      checked={allPageSelected}
+                      onCheckedChange={togglePageSelection}
+                    />
+                  </th>
                   {visibleCols.name && (
                     <th onClick={() => handleSort("name")} className="px-4 py-3 cursor-pointer hover:bg-muted/70 transition-colors">
                       <div className="flex items-center gap-1.5">
@@ -5719,6 +5892,7 @@ function CommunityWorkersTab({ provinces, allDistricts, facilities, selectedProv
                       </div>
                     </th>
                   )}
+                  {visibleCols.assignment && <th className="px-4 py-3 min-w-[260px]">Assign / Unassign</th>}
                   {visibleCols.campaignRole && <th className="px-4 py-3">Campaign Role</th>}
                   {visibleCols.employmentStatus && <th className="px-4 py-3">Employment Status</th>}
                   {visibleCols.supervisorName && <th className="px-4 py-3">Supervisor</th>}
@@ -5739,6 +5913,7 @@ function CommunityWorkersTab({ provinces, allDistricts, facilities, selectedProv
                 {isLoading ? (
                   Array.from({ length: pageSize }).map((_, idx) => (
                     <tr key={idx} className="hover:bg-muted/10">
+                      <td className="px-4 py-3.5"><Skeleton className="h-4 w-4" /></td>
                       {Object.values(visibleCols).map((visible, cidx) => visible && (
                         <td key={cidx} className="px-4 py-3.5"><Skeleton className="h-4 w-28" /></td>
                       ))}
@@ -5746,13 +5921,13 @@ function CommunityWorkersTab({ provinces, allDistricts, facilities, selectedProv
                   ))
                 ) : error ? (
                   <tr>
-                    <td colSpan={Object.values(visibleCols).filter(Boolean).length} className="px-4 py-8 text-center text-destructive">
+                    <td colSpan={activeColumnCount} className="px-4 py-8 text-center text-destructive">
                       {error.message || "Failed to load community health volunteers registry. Please check your network connection."}
                     </td>
                   </tr>
                 ) : chwList.length === 0 ? (
                   <tr>
-                    <td colSpan={Object.values(visibleCols).filter(Boolean).length} className="px-4 py-12 text-center text-muted-foreground italic">
+                    <td colSpan={activeColumnCount} className="px-4 py-12 text-center text-muted-foreground italic">
                       No community workers found matching the selected search query and cascading filters.
                     </td>
                   </tr>
@@ -5761,8 +5936,15 @@ function CommunityWorkersTab({ provinces, allDistricts, facilities, selectedProv
                     <tr
                       key={chw.id}
                       className="hover:bg-muted/30 transition-colors cursor-pointer"
-                      onClick={() => { setSelectedChwId(chw.id); setChwDialogOpen(true); }}
+                      onClick={() => { setSelectedChwId(chw.id); setSelectedChwData(chw); setChwDialogOpen(true); }}
                     >
+                      <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                        <Checkbox
+                          aria-label={`Select ${chw.name}`}
+                          checked={selectedChwIds.has(Number(chw.id))}
+                          onCheckedChange={() => toggleSelectedChw(Number(chw.id))}
+                        />
+                      </td>
                       {visibleCols.name && (
                         <td className="px-4 py-3 font-semibold text-foreground">
                           <div className="flex items-center gap-2">
@@ -5804,6 +5986,46 @@ function CommunityWorkersTab({ provinces, allDistricts, facilities, selectedProv
                           {chw.villageName || <span className="italic text-muted-foreground">-</span>}
                         </td>
                       )}
+                      {visibleCols.assignment && (() => {
+                        const rowCommunities = communityOptionsByFacility.get(Number(chw.facilityId)) || [];
+                        const busy = assignmentBusyId === Number(chw.id);
+                        return (
+                          <td className="px-4 py-3 min-w-[260px]" onClick={(e) => e.stopPropagation()}>
+                            <div className="flex items-center gap-2">
+                              <Select
+                                value={chw.villageId ? String(chw.villageId) : "none"}
+                                onValueChange={(value) => handleAssignmentChange(chw, value)}
+                                disabled={busy || rowCommunities.length === 0}
+                              >
+                                <SelectTrigger className="h-8 w-[190px] bg-background">
+                                  <SelectValue placeholder="Assign community" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="none">Unassigned</SelectItem>
+                                  {rowCommunities.map((v: any) => (
+                                    <SelectItem key={v.id} value={String(v.id)}>{v.name}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                              {chw.villageId && (
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                                  disabled={busy}
+                                  title="Unassign community"
+                                  onClick={() => handleAssignmentChange(chw, "none")}
+                                >
+                                  <UserMinus className="h-4 w-4" />
+                                </Button>
+                              )}
+                            </div>
+                            <p className="mt-1 text-[10px] text-muted-foreground">
+                              {rowCommunities.length > 0 ? "Assign, reassign, or clear this worker's community." : "No communities are linked to this facility."}
+                            </p>
+                          </td>
+                        );
+                      })()}
                       {visibleCols.campaignRole && (
                         <td className="px-4 py-3">
                           <ChvRoleColor role={chw.campaignRole} />

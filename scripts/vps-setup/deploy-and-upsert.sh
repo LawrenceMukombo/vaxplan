@@ -1,99 +1,121 @@
 #!/bin/bash
 # =============================================================================
-# VaxPlan — Safe Deploy, Schema Update & Seeding (Upsert) Script
-# Run this on the Hostinger VPS to safely update data without dropping tables.
+# VaxPlan - Safe Deploy, Schema Update & Tenant Configuration Upsert
+# Run this on the Hostinger VPS to safely update code and tenant configuration.
 # Usage: bash /var/www/vaxplan/scripts/vps-setup/deploy-and-upsert.sh
 # =============================================================================
-set -e
+set -euo pipefail
 
 APP_DIR="/var/www/vaxplan"
 DOCS_DIR="/var/www/doc.vaxplan.org"
+HEALTH_PORT="${PORT:-5005}"
 
 echo ""
-echo "╔══════════════════════════════════════════════════╗"
-echo "║   VaxPlan Safe Deploy & Seeding (Upsert)         ║"
-echo "║   Time: $(date '+%Y-%m-%d %H:%M:%S UTC')         ║"
-echo "╚══════════════════════════════════════════════════╝"
+echo "============================================================"
+echo " VaxPlan Safe Deploy & Tenant Configuration Upsert"
+echo " Time: $(date '+%Y-%m-%d %H:%M:%S UTC')"
+echo "============================================================"
 echo ""
 
 cd "$APP_DIR"
 
-# Load env variables from .env file
 if [ -f ".env" ]; then
-  echo "⚙️  Loading environment configuration..."
-  # Automatically heal and migrate any leftover Neon URL in the .env file
+  echo "Loading environment configuration..."
   if grep -q "neon.tech" .env; then
-    echo "⚠️  Detected deprecated Neon database URL in .env. Migrating to local Hostinger PostgreSQL..."
-    sed -i 's|DATABASE_URL=.*|DATABASE_URL=postgresql://postgres:postgres@localhost:5432/vaxplan|' .env
+    echo "ERROR: .env still points to a Neon database URL."
+    echo "The deployment SOP forbids this script from rewriting protected config."
+    echo "Update DATABASE_URL manually to the intended Hostinger PostgreSQL database, then rerun."
+    exit 1
   fi
-  DATABASE_URL=$(grep DATABASE_URL .env | cut -d '=' -f2-)
+  DATABASE_URL=$(grep '^DATABASE_URL=' .env | cut -d '=' -f2-)
 else
-  echo "❌ Error: .env file not found at $APP_DIR/.env"
+  echo "ERROR: .env file not found at $APP_DIR/.env"
   exit 1
 fi
 
-# ── 0. Database Backup ──────────────────────────────────────────────────────────
+if [ -z "${DATABASE_URL:-}" ]; then
+  echo "ERROR: DATABASE_URL is missing in .env"
+  exit 1
+fi
+
+# 0. Database Backup
 echo ""
-echo "🗄️  0. Backing up production database..."
+echo "0. Backing up production database..."
 mkdir -p backups
 BACKUP_FILE="backups/backup_$(date +%Y%m%d_%H%M%S).sql"
 pg_dump "$DATABASE_URL" -f "$BACKUP_FILE"
-echo "✅ Database backup saved to: $BACKUP_FILE"
+echo "Database backup saved to: $BACKUP_FILE"
 
-# ── 1. Pull latest code ──────────────────────────────────────────────────────────
+# 1. Pull latest code
 echo ""
-echo "📥 1. Pulling latest from GitHub (main)..."
+echo "1. Pulling latest from GitHub (main)..."
 git fetch origin
-git reset --hard origin/codex/secure-logout-offline-guard
-echo "✅ Code updated to: $(git log --oneline -1)"
+git reset --hard origin/main
+echo "Code updated to: $(git log --oneline -1)"
 
-# ── 2. Install production dependencies ───────────────────────────────────────────
+# 2. Install dependencies
 echo ""
-echo "📦 2. Installing production dependencies..."
+echo "2. Installing dependencies..."
 npm install --legacy-peer-deps --no-audit --no-fund
-echo "      ✓ Dependencies installed."
+echo "Dependencies installed."
 
-# ── 3. Database Schema Push (Safe) ──────────────────────────────────────────────
+# 3. Database Schema Push (Safe)
 echo ""
-echo "🗄️  3. Applying schema updates safely (without dropping tables)..."
+echo "3. Applying schema updates safely..."
 node --env-file=.env scripts/migrate.js
-echo "✅ Schema synced"
+echo "Schema synced."
 
-# ── 4. Upsert/Seed Development Records ──────────────────────────────────────────
+# 4. Tenant and platform configuration upsert
 echo ""
-echo "🌱 4. Seeding & upserting development data (idempotent)..."
+echo "4. Upserting tenant settings and platform configuration..."
+npx tsx --env-file=.env scripts/upsert-tenant-configurations.ts
 
-echo "👥 Upserting demo users & operational records..."
+echo "Upserting demo operational records where applicable..."
 npx tsx --env-file=.env server/migrations/006-seed-demo-operational.ts
 
-echo "🇿🇲 Upserting Zambia demo accounts..."
+echo "Upserting Zambia demo accounts..."
 npx tsx --env-file=.env scripts/seed-zambia-demo-accounts.ts
 
-echo "✅ Seeding complete."
+if [ -f "scripts/seed-ssd-accounts.ts" ]; then
+  echo "Upserting South Sudan demo accounts..."
+  npx tsx --env-file=.env scripts/seed-ssd-accounts.ts
+fi
 
-# ── 5. Upload Docs Site ──────────────────────────────────────────────────────────
-echo ""
-echo "📄 5. Uploading documentation to doc.vaxplan.org..."
-sudo mkdir -p "$DOCS_DIR"
-sudo cp -r docs-site/* "$DOCS_DIR"/
-sudo chown -R www-data:www-data "$DOCS_DIR"
-sudo chmod -R 755 "$DOCS_DIR"
-echo "✅ Documentation site updated"
+echo "Configuration upsert complete."
 
-# ── 6. Restart server ────────────────────────────────────────────────────────────
+# 5. Build production assets
 echo ""
-echo "🔄 6. Restarting VaxPlan server under PM2..."
+echo "5. Building production assets..."
+npm run build
+echo "Build complete."
+
+# 6. Upload docs site if present
+echo ""
+echo "6. Updating documentation site if docs-site exists..."
+if [ -d "docs-site" ]; then
+  sudo mkdir -p "$DOCS_DIR"
+  sudo cp -r docs-site/* "$DOCS_DIR"/
+  sudo chown -R www-data:www-data "$DOCS_DIR"
+  sudo chmod -R 755 "$DOCS_DIR"
+  echo "Documentation site updated."
+else
+  echo "docs-site directory not found; skipping documentation upload."
+fi
+
+# 7. Restart server
+echo ""
+echo "7. Restarting VaxPlan server under PM2..."
 pm2 restart vaxplan --update-env || pm2 start dist/index.cjs --name vaxplan --update-env
 sleep 5
 
-# ── 7. Health check ──────────────────────────────────────────────────────────────
+# 8. Health check
 echo ""
-echo "🔍 7. Running health check (polling port 5005 for up to 30 seconds)..."
+echo "8. Running health check on port $HEALTH_PORT..."
 SUCCESS=0
 for i in {1..6}; do
-  HTTP=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:5005/api/public/tenants 2>/dev/null || echo "000")
+  HTTP=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:${HEALTH_PORT}/api/public/tenants" 2>/dev/null || echo "000")
   if [ "$HTTP" = "200" ]; then
-    echo "✅ Health check: HTTP $HTTP (port 5005) — VaxPlan is live and operational!"
+    echo "Health check: HTTP $HTTP - VaxPlan is live."
     SUCCESS=1
     break
   fi
@@ -102,9 +124,9 @@ for i in {1..6}; do
 done
 
 if [ "$SUCCESS" -ne 1 ]; then
-  echo "❌ Health check failed after 30 seconds. PM2 status:"
+  echo "ERROR: Health check failed after 30 seconds. PM2 status:"
   pm2 status
-  echo "📄 Printing last 30 lines of pm2 logs for debugging:"
+  echo "Last 30 lines of pm2 logs:"
   pm2 logs vaxplan --lines 30 --no-daemon &
   PID_LOGS=$!
   sleep 3
@@ -113,7 +135,7 @@ if [ "$SUCCESS" -ne 1 ]; then
 fi
 
 echo ""
-echo "╔══════════════════════════════════════════════════╗"
-echo "║   🎉 Safe deployment and seeding complete!      ║"
-echo "╚══════════════════════════════════════════════════╝"
+echo "============================================================"
+echo " Safe deployment and tenant configuration upsert complete."
+echo "============================================================"
 echo ""

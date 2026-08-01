@@ -2906,7 +2906,7 @@ var init_schema = __esm({
       createdAt: true,
       updatedAt: true
     });
-    commodityTypeEnum = (0, import_pg_core.pgEnum)("commodity_type", ["diluent", "syringe", "safety_box", "ppe", "cold_chain", "other"]);
+    commodityTypeEnum = (0, import_pg_core.pgEnum)("commodity_type", ["diluent", "syringe", "safety_box", "ppe", "cold_chain", "other", "recording_tools", "it_equipment", "transport", "stationaries", "social_mob"]);
     doseClassificationEnum = (0, import_pg_core.pgEnum)("dose_classification", ["routine", "campaign", "outbreak", "school_based", "other"]);
     catalogueVaccines = (0, import_pg_core.pgTable)("catalogue_vaccines", {
       id: (0, import_pg_core.integer)("id").primaryKey().generatedAlwaysAsIdentity(),
@@ -5706,7 +5706,7 @@ var init_authorization = __esm({
       edit_client: ["client_logbook.update"],
       view_reports: ["dashboard.view", "dropout_rates.view"],
       manage_boundaries: ["polygons.view", "polygons.create", "polygons.update", "polygons.archive", "polygons.validate"],
-      manage_session_plans: ["microplans.create", "microplans.update_draft", "microplans.submit"],
+      manage_session_plans: ["microplans.create", "microplans.update_draft", "microplans.submit", "sessions.plan", "sessions.create"],
       approve_plans: ["microplans.review", "microplans.approve", "microplans.request_changes"],
       view_session_plans: ["microplans.view"]
     };
@@ -6498,25 +6498,27 @@ var init_queue = __esm({
     import_bullmq = require("bullmq");
     import_ioredis = __toESM(require("ioredis"), 1);
     isRedisConfigured = Boolean(process.env.REDIS_URL?.trim());
-    redisConnection = new import_ioredis.default(process.env.REDIS_URL || "redis://localhost:6379", {
-      lazyConnect: !isRedisConfigured,
+    redisConnection = isRedisConfigured ? new import_ioredis.default(process.env.REDIS_URL, {
       maxRetriesPerRequest: null,
       retryStrategy(times) {
-        if (!isRedisConfigured) return null;
-        const delay = Math.min(times * 1e3, 1e4);
-        return delay;
+        return Math.min(times * 1e3, 1e4);
       }
-    });
+    }) : {
+      async publish() {
+        throw new Error("Redis is not configured. Set REDIS_URL to enable Redis messaging.");
+      }
+    };
     lastErrorTime = 0;
-    redisConnection.on("error", (err) => {
-      if (!isRedisConfigured) return;
-      const now = Date.now();
-      if (now - lastErrorTime > 1e4) {
-        console.warn(`[Redis] Connection warning: ${err.message || err}`);
-        lastErrorTime = now;
-      }
-    });
-    communicationQueue = new import_bullmq.Queue("communication-queue", {
+    if (isRedisConfigured && "on" in redisConnection) {
+      redisConnection.on("error", (err) => {
+        const now = Date.now();
+        if (now - lastErrorTime > 1e4) {
+          console.warn(`[Redis] Connection warning: ${err.message || err}`);
+          lastErrorTime = now;
+        }
+      });
+    }
+    communicationQueue = isRedisConfigured ? new import_bullmq.Queue("communication-queue", {
       connection: redisConnection,
       defaultJobOptions: {
         attempts: 3,
@@ -6525,11 +6527,13 @@ var init_queue = __esm({
           delay: 5e3
         },
         removeOnComplete: { age: 24 * 3600 },
-        // keep for 24 hours
         removeOnFail: { age: 7 * 24 * 3600 }
-        // keep failures for 7 days
       }
-    });
+    }) : {
+      async add() {
+        throw new Error("Redis is not configured. Set REDIS_URL to enable the communication queue.");
+      }
+    };
   }
 });
 
@@ -10043,7 +10047,25 @@ var init_catalogue = __esm({
     });
     router2.post("/commodities", isAuthenticated, requireTenant, requirePermission("manage_users"), async (req, res) => {
       try {
-        const data = insertCatalogueCommoditySchema.parse({ ...req.body, tenantId: req.tenantId });
+        const rawPayload = {
+          category: req.body.category || "Logistics",
+          unitOfMeasure: req.body.unitOfMeasure || "pieces",
+          stockManaged: req.body.stockManaged ?? true,
+          forecastable: req.body.forecastable ?? true,
+          requisitionable: req.body.requisitionable ?? true,
+          sessionSupply: req.body.sessionSupply ?? true,
+          bufferPercentage: req.body.bufferPercentage || "10.00",
+          minimumStockThreshold: req.body.minimumStockThreshold ?? 0,
+          maximumStockThreshold: req.body.maximumStockThreshold ?? 0,
+          reorderLevel: req.body.reorderLevel ?? 0,
+          modules: req.body.modules || {},
+          consumptionRule: req.body.consumptionRule || {},
+          active: req.body.active ?? true,
+          ...req.body,
+          linkedVaccineId: req.body.linkedVaccineId && req.body.linkedVaccineId !== "none" && req.body.linkedVaccineId !== 0 && req.body.linkedVaccineId !== "0" ? Number(req.body.linkedVaccineId) : null,
+          tenantId: req.tenantId
+        };
+        const data = insertCatalogueCommoditySchema.parse(rawPayload);
         const [inserted] = await db.insert(catalogueCommodities).values(data).returning();
         res.json(inserted);
       } catch (err) {
@@ -14986,6 +15008,12 @@ function canMoveFacilityDistrict(dbUser) {
   const permissions = Array.isArray(dbUser?.permissions) ? dbUser.permissions.map(String) : [];
   return permissions.includes("facility.move_district") || permissions.includes("manage_facility_district_moves");
 }
+function requirePlatformAdminOnly(req, res, next) {
+  if (req.dbUser?.isPlatformAdmin === true || req.user?.isPlatformAdmin === true) {
+    return next();
+  }
+  return res.status(403).json({ message: "Only a Super Admin can manage country tenants." });
+}
 function blockDistrictStaffClientWorkspaces(req, res, next) {
   if (isDistrictStaffRole(req.dbUser)) {
     return res.status(403).json({ message: "Forbidden: district staff do not have access to the client logbook or defaulter list." });
@@ -15430,30 +15458,87 @@ function loadZambiaGeoJSON() {
 function isLocationOutsideZambia(lat, lng) {
   return false;
 }
+async function getTenantBoundaryGeoJSON(tenantId) {
+  if (tenantBoundaryGeoJSONCache.has(tenantId)) {
+    return tenantBoundaryGeoJSONCache.get(tenantId) ?? null;
+  }
+  const rows = await db.select({
+    adminLevel: adminBoundaries.adminLevel,
+    geojson: adminBoundaries.geojson,
+    isActive: adminBoundaries.isActive
+  }).from(adminBoundaries).where((0, import_drizzle_orm22.and)((0, import_drizzle_orm22.eq)(adminBoundaries.tenantId, tenantId), (0, import_drizzle_orm22.eq)(adminBoundaries.isActive, true))).orderBy(adminBoundaries.adminLevel);
+  if (!rows.length) {
+    tenantBoundaryGeoJSONCache.set(tenantId, null);
+    return null;
+  }
+  const countryBoundary = rows.find((row) => row.adminLevel === 0) ?? rows[0];
+  tenantBoundaryGeoJSONCache.set(tenantId, countryBoundary.geojson);
+  return countryBoundary.geojson;
+}
+async function isLocationOutsideTenantBoundary(tenantId, lat, lng) {
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return false;
+  const geojson = await getTenantBoundaryGeoJSON(tenantId);
+  if (!geojson) return false;
+  const pt = (0, import_turf2.point)([lng, lat]);
+  const features = geojson.type === "FeatureCollection" ? geojson.features ?? [] : geojson.type === "Feature" ? [geojson] : [{ type: "Feature", properties: {}, geometry: geojson }];
+  if (!features.length) return false;
+  return !features.some((feature) => {
+    try {
+      return (0, import_turf2.booleanPointInPolygon)(pt, feature);
+    } catch {
+      return false;
+    }
+  });
+}
 async function initOutsideVillagesCache() {
   try {
     outsideVillageIds.clear();
-    const res = await db.execute(import_drizzle_orm22.sql`SELECT id, latitude, longitude FROM villages WHERE latitude IS NOT NULL AND longitude IS NOT NULL`);
+    const res = await db.execute(import_drizzle_orm22.sql`SELECT id, tenant_id, latitude, longitude FROM villages WHERE latitude IS NOT NULL AND longitude IS NOT NULL`);
     const allVillages = res.rows || res;
-    console.log(`[GeoCache] Initializing outside-Zambia cache check for ${allVillages.length} villages...`);
+    console.log(`[GeoCache] Initializing tenant boundary cache check for ${allVillages.length} villages...`);
     let count2 = 0;
     for (const v of allVillages) {
       const lat = Number(v.latitude);
       const lng = Number(v.longitude);
       if (isNaN(lat) || isNaN(lng)) continue;
-      if (isLocationOutsideZambia(lat, lng)) {
+      const tenantId = String(v.tenant_id || "");
+      if (tenantId && await isLocationOutsideTenantBoundary(tenantId, lat, lng)) {
         outsideVillageIds.add(Number(v.id));
         count2++;
       }
     }
-    console.log(`[GeoCache] Outside-Zambia cache initialized: found ${count2} villages outside Zambia polygons.`);
+    console.log(`[GeoCache] Tenant boundary cache initialized: found ${count2} villages outside active country polygons.`);
   } catch (err) {
-    console.error("[GeoCache] Failed to initialize outside-Zambia cache:", err);
+    console.error("[GeoCache] Failed to initialize tenant boundary cache:", err);
   }
 }
+async function refreshOutsideVillagesCacheForTenant(tenantId) {
+  tenantBoundaryGeoJSONCache.delete(tenantId);
+  const res = await db.execute(import_drizzle_orm22.sql`
+    SELECT id, latitude, longitude
+    FROM villages
+    WHERE tenant_id = ${tenantId}
+      AND latitude IS NOT NULL
+      AND longitude IS NOT NULL
+  `);
+  const rows = res.rows || res;
+  let count2 = 0;
+  for (const v of rows) {
+    const id = Number(v.id);
+    const lat = Number(v.latitude);
+    const lng = Number(v.longitude);
+    outsideVillageIds.delete(id);
+    if (!isNaN(lat) && !isNaN(lng) && await isLocationOutsideTenantBoundary(tenantId, lat, lng)) {
+      outsideVillageIds.add(id);
+      count2++;
+    }
+  }
+  console.log(`[GeoCache] Tenant boundary cache refreshed for ${tenantId}: ${count2} villages outside active country polygons.`);
+}
 async function registerRoutes(httpServer2, app2) {
-  if (process.env.SKIP_OUTSIDE_VILLAGES_CACHE === "1") {
-    console.log("[GeoCache] Outside-Zambia cache initialization skipped.");
+  const skipOutsideVillagesCache = process.env.SKIP_OUTSIDE_VILLAGES_CACHE === "1" || process.env.NODE_ENV === "test" || Boolean(process.env.VITEST);
+  if (skipOutsideVillagesCache) {
+    console.log("[GeoCache] Tenant boundary cache initialization skipped.");
   } else {
     await initOutsideVillagesCache();
   }
@@ -15478,7 +15563,7 @@ async function registerRoutes(httpServer2, app2) {
       messagingSenderNumber: process.env.MESSAGING_SENDER_NUMBER || "+260963328807"
     });
   });
-  app2.get("/api/admin/tenants", isAuthenticated, async (_req, res) => {
+  app2.get("/api/admin/tenants", isAuthenticated, requireDbUser, requirePlatformAdminOnly, async (_req, res) => {
     try {
       const activeTenants = await storage.listActiveTenants();
       res.json(activeTenants);
@@ -15487,7 +15572,7 @@ async function registerRoutes(httpServer2, app2) {
       res.status(500).json({ message: "Failed to list tenant countries" });
     }
   });
-  app2.post("/api/admin/tenants", isAuthenticated, async (req, res) => {
+  app2.post("/api/admin/tenants", isAuthenticated, requireDbUser, requirePlatformAdminOnly, async (req, res) => {
     try {
       const { name, code, countryCode, settings } = req.body || {};
       if (!name || !code || !countryCode) {
@@ -15510,7 +15595,7 @@ async function registerRoutes(httpServer2, app2) {
       res.status(500).json({ message: err.message || "Failed to provision country tenant" });
     }
   });
-  app2.patch("/api/admin/tenants/:id", isAuthenticated, async (req, res) => {
+  app2.patch("/api/admin/tenants/:id", isAuthenticated, requireDbUser, requirePlatformAdminOnly, async (req, res) => {
     try {
       const { id } = req.params;
       const { name, code, countryCode, settings } = req.body || {};
@@ -15538,7 +15623,7 @@ async function registerRoutes(httpServer2, app2) {
       res.status(500).json({ message: err.message || "Failed to update country tenant" });
     }
   });
-  app2.delete("/api/admin/tenants/:id", isAuthenticated, async (req, res) => {
+  app2.delete("/api/admin/tenants/:id", isAuthenticated, requireDbUser, requirePlatformAdminOnly, async (req, res) => {
     try {
       const { id } = req.params;
       const [updated] = await db.update(tenants).set({ status: "archived", updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm22.eq)(tenants.id, id)).returning();
@@ -16586,7 +16671,7 @@ async function registerRoutes(httpServer2, app2) {
       res.status(500).json({ message: "Failed to list tenants" });
     }
   });
-  app2.post("/api/admin/tenants", isAuthenticated, async (req, res) => {
+  app2.post("/api/admin/tenants", isAuthenticated, requireDbUser, requirePlatformAdminOnly, async (req, res) => {
     try {
       if (!checkSuperAdminAccess(req, res)) return;
       const schema = import_zod3.z.object({
@@ -16608,7 +16693,7 @@ async function registerRoutes(httpServer2, app2) {
       res.status(400).json({ message: err?.message || "Failed to create tenant" });
     }
   });
-  app2.patch("/api/admin/tenants/:id", isAuthenticated, async (req, res) => {
+  app2.patch("/api/admin/tenants/:id", isAuthenticated, requireDbUser, requirePlatformAdminOnly, async (req, res) => {
     try {
       if (!checkSuperAdminAccess(req, res)) return;
       const schema = import_zod3.z.object({
@@ -16632,7 +16717,7 @@ async function registerRoutes(httpServer2, app2) {
       res.status(400).json({ message: err?.message || "Failed to update tenant" });
     }
   });
-  app2.delete("/api/admin/tenants/:id", isAuthenticated, async (req, res) => {
+  app2.delete("/api/admin/tenants/:id", isAuthenticated, requireDbUser, requirePlatformAdminOnly, async (req, res) => {
     try {
       if (!checkSuperAdminAccess(req, res)) return;
       const tenant = await storage.getTenant(req.params.id);
@@ -18733,6 +18818,85 @@ async function registerRoutes(httpServer2, app2) {
       res.status(500).json({ message: err?.message || "Bulk save failed" });
     }
   });
+  app2.post("/api/chvs/bulk-reassign", ...auth, async (req, res) => {
+    try {
+      const { chvProfiles: chvProfiles2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
+      const chvIds = Array.isArray(req.body.chvIds) ? req.body.chvIds.map(Number).filter(Boolean) : [];
+      const villageId = req.body.villageId != null ? Number(req.body.villageId) : null;
+      if (chvIds.length === 0) return res.status(400).json({ message: "chvIds must be a non-empty array" });
+      const results = [];
+      for (const chvId of chvIds) {
+        try {
+          const [updated] = await db.update(chvProfiles2).set({ assignedVillageId: villageId, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm22.and)((0, import_drizzle_orm22.eq)(chvProfiles2.id, chvId), (0, import_drizzle_orm22.eq)(chvProfiles2.tenantId, req.tenantId))).returning({ id: chvProfiles2.id });
+          if (!updated) {
+            results.push({ id: chvId, ok: false, error: "Not found" });
+            continue;
+          }
+          results.push({ id: chvId, ok: true });
+        } catch (err) {
+          results.push({ id: chvId, ok: false, error: err?.message });
+        }
+      }
+      const succeeded = results.filter((r) => r.ok).length;
+      await logAudit(req, "update", "chv_profile_bulk_reassign", 0, null, { chvIds, villageId, succeeded });
+      res.json({ succeeded, failed: results.filter((r) => !r.ok).length, results });
+    } catch (err) {
+      res.status(500).json({ message: "Bulk reassign failed: " + err.message });
+    }
+  });
+  app2.get("/api/cold-chain", ...auth, async (req, res) => {
+    try {
+      const { coldChainEquipment: coldChainEquipment2, facilities: facilities4 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
+      const { facilityId, equipmentType, condition, powerSource } = req.query;
+      const conditions = [
+        (0, import_drizzle_orm22.eq)(coldChainEquipment2.tenantId, req.tenantId),
+        (0, import_drizzle_orm22.eq)(coldChainEquipment2.isActive, true)
+      ];
+      if (facilityId) conditions.push((0, import_drizzle_orm22.eq)(coldChainEquipment2.facilityId, Number(facilityId)));
+      if (equipmentType && equipmentType !== "all") conditions.push((0, import_drizzle_orm22.eq)(coldChainEquipment2.equipmentType, String(equipmentType)));
+      if (condition && condition !== "all") conditions.push((0, import_drizzle_orm22.eq)(coldChainEquipment2.condition, String(condition)));
+      if (powerSource && powerSource !== "all") conditions.push((0, import_drizzle_orm22.eq)(coldChainEquipment2.powerSource, String(powerSource)));
+      const rows = await db.select({
+        id: coldChainEquipment2.id,
+        facilityId: coldChainEquipment2.facilityId,
+        facilityName: facilities4.name,
+        facilityCode: facilities4.hmisCode,
+        districtId: facilities4.districtId,
+        equipmentType: coldChainEquipment2.equipmentType,
+        brand: coldChainEquipment2.brand,
+        model: coldChainEquipment2.model,
+        serialNumber: coldChainEquipment2.serialNumber,
+        catalogNumber: coldChainEquipment2.catalogNumber,
+        capacityLiters: coldChainEquipment2.capacityLiters,
+        netStorageCapacityLiters: coldChainEquipment2.netStorageCapacityLiters,
+        temperatureMin: coldChainEquipment2.temperatureMin,
+        temperatureMax: coldChainEquipment2.temperatureMax,
+        powerSource: coldChainEquipment2.powerSource,
+        energyConsumptionKwhDay: coldChainEquipment2.energyConsumptionKwhDay,
+        manufactureYear: coldChainEquipment2.manufactureYear,
+        installationDate: coldChainEquipment2.installationDate,
+        purchaseCost: coldChainEquipment2.purchaseCost,
+        purchaseCurrency: coldChainEquipment2.purchaseCurrency,
+        warrantyExpiry: coldChainEquipment2.warrantyExpiry,
+        supplier: coldChainEquipment2.supplier,
+        donorFunded: coldChainEquipment2.donorFunded,
+        fundingSource: coldChainEquipment2.fundingSource,
+        condition: coldChainEquipment2.condition,
+        lastServiceDate: coldChainEquipment2.lastServiceDate,
+        nextServiceDue: coldChainEquipment2.nextServiceDue,
+        lastTemperatureCheck: coldChainEquipment2.lastTemperatureCheck,
+        maintenanceNotes: coldChainEquipment2.maintenanceNotes,
+        isActive: coldChainEquipment2.isActive,
+        notes: coldChainEquipment2.notes,
+        externalId: coldChainEquipment2.externalId,
+        createdAt: coldChainEquipment2.createdAt,
+        updatedAt: coldChainEquipment2.updatedAt
+      }).from(coldChainEquipment2).leftJoin(facilities4, (0, import_drizzle_orm22.eq)(coldChainEquipment2.facilityId, facilities4.id)).where((0, import_drizzle_orm22.and)(...conditions)).orderBy(facilities4.name, coldChainEquipment2.equipmentType);
+      res.json(rows);
+    } catch (err) {
+      res.status(500).json({ message: "Failed to fetch cold chain inventory: " + err.message });
+    }
+  });
   app2.get("/api/facilities/:id/cold-chain", ...auth, requireGeoAccess((req) => ({ facilityId: parseInt(req.params.id) })), async (req, res) => {
     try {
       const facilityId = parseInt(req.params.id);
@@ -19017,23 +19181,34 @@ async function registerRoutes(httpServer2, app2) {
       if ((mode === "replace_missing" || mode === "purge_replace") && confirm !== "REPLACE FACILITIES") {
         return res.status(400).json({ success: false, message: "Bulk replace/purge requires confirmation text: REPLACE FACILITIES" });
       }
+      const allDistricts = await storage.getDistricts(req.tenantId);
+      const districtByName = new Map(allDistricts.map((d) => [d.name.trim().toLowerCase(), d.id]));
+      const districtErrors = importedFacilities.map((item, idx) => ({ item, row: idx + 1 })).filter(({ item }) => !item.districtName || !districtByName.has(item.districtName.trim().toLowerCase())).map(({ item, row }) => ({
+        row,
+        hmisCode: item.hmisCode,
+        districtName: item.districtName ?? null,
+        error: item.districtName ? "District not found in this tenant" : "District name is required"
+      }));
       const beforeSummary = await summarizeTenantFacilityMaintenance(req.tenantId, importCodes);
+      if (districtErrors.length > 0) {
+        return res.status(400).json({
+          success: false,
+          dryRun,
+          mode,
+          message: "Facility import blocked because one or more rows do not match a known district in the active tenant.",
+          errors: districtErrors,
+          summary: beforeSummary
+        });
+      }
       if (dryRun) {
         return res.json({ success: true, dryRun: true, mode, importCount: importedFacilities.length, summary: beforeSummary, message: "Dry run complete. No facility records were changed." });
       }
-      const allDistricts = await storage.getDistricts(req.tenantId);
       const { purgeSummary, createdCount, updatedCount } = await db.transaction(async (tx) => {
         const purgeSummary2 = mode === "purge_replace" ? await purgeTenantFacilities(tx, req.tenantId) : mode === "replace_missing" ? await purgeTenantFacilities(tx, req.tenantId, importCodes) : { purgedCount: 0 };
         let createdCount2 = 0;
         let updatedCount2 = 0;
         for (const item of importedFacilities) {
-          let districtId = null;
-          if (item.districtName) {
-            const matchedDist = allDistricts.find((d) => d.name.toLowerCase() === item.districtName.trim().toLowerCase());
-            if (matchedDist) districtId = matchedDist.id;
-          }
-          if (!districtId) districtId = allDistricts[0]?.id || null;
-          if (!districtId) continue;
+          const districtId = districtByName.get(item.districtName.trim().toLowerCase());
           const latVal = item.latitude !== null && item.latitude !== void 0 ? parseFloat(item.latitude.toString()) : null;
           const lngVal = item.longitude !== null && item.longitude !== void 0 ? parseFloat(item.longitude.toString()) : null;
           const radiusVal = item.catchmentRadius !== null && item.catchmentRadius !== void 0 ? parseFloat(item.catchmentRadius.toString()) : null;
@@ -19512,7 +19687,7 @@ async function registerRoutes(httpServer2, app2) {
       if (village.latitude != null && village.longitude != null) {
         const latVal = Number(village.latitude);
         const lngVal = Number(village.longitude);
-        if (!isNaN(latVal) && !isNaN(lngVal) && isLocationOutsideZambia(latVal, lngVal)) {
+        if (!isNaN(latVal) && !isNaN(lngVal) && await isLocationOutsideTenantBoundary(req.tenantId, latVal, lngVal)) {
           outsideVillageIds.add(Number(village.id));
         }
       }
@@ -19913,7 +20088,7 @@ async function registerRoutes(httpServer2, app2) {
       if (village.latitude != null && village.longitude != null) {
         const latVal2 = Number(village.latitude);
         const lngVal2 = Number(village.longitude);
-        if (!isNaN(latVal2) && !isNaN(lngVal2) && isLocationOutsideZambia(latVal2, lngVal2)) {
+        if (!isNaN(latVal2) && !isNaN(lngVal2) && await isLocationOutsideTenantBoundary(req.tenantId, latVal2, lngVal2)) {
           outsideVillageIds.add(Number(village.id));
         } else {
           outsideVillageIds.delete(Number(village.id));
@@ -23423,6 +23598,7 @@ Note from the requester: ${conflict.note}` : ""}`,
         bbox: bbox ?? void 0,
         isActive: true
       });
+      await refreshOutsideVillagesCacheForTenant(tenantId);
       await logAudit(req, "fetch_boundary", "admin_boundary", null, null, {
         countryCode,
         adminLevel,
@@ -23463,6 +23639,7 @@ Note from the requester: ${conflict.note}` : ""}`,
         bbox: bbox ?? void 0,
         isActive: true
       });
+      await refreshOutsideVillagesCacheForTenant(tenantId);
       await logAudit(req, "upload_boundary", "admin_boundary", null, null, {
         countryCode,
         adminLevel,
@@ -23478,6 +23655,7 @@ Note from the requester: ${conflict.note}` : ""}`,
     const tenantId = req.tenantId;
     const deleted = await storage.deleteAdminBoundary(tenantId, req.params.id);
     if (!deleted) return res.status(404).json({ message: "Boundary not found" });
+    await refreshOutsideVillagesCacheForTenant(tenantId);
     res.json({ success: true });
   });
   const customLayerUploadDir = (0, import_path4.join)(process.cwd(), "data", "uploads", "custom-layers");
@@ -30826,7 +31004,7 @@ This response is powered by the local VaxPlan database query engine. You can que
   });
   return httpServer2;
 }
-var import_express5, import_pdfkit, import_child_process, import_crypto, import_fs4, import_zod3, import_fs5, import_path4, import_drizzle_orm22, import_turf2, _geoScopeCache, GEO_SCOPE_TTL_MS, ROLE_DELEGATION_LEVEL, SYSTEM_USER_PERMISSIONS, auth, DEFAULT_SUPERVISION_CHECKLIST, outsideVillageIds, zambiaGeoJSON;
+var import_express5, import_pdfkit, import_child_process, import_crypto, import_fs4, import_zod3, import_fs5, import_path4, import_drizzle_orm22, import_turf2, _geoScopeCache, GEO_SCOPE_TTL_MS, ROLE_DELEGATION_LEVEL, SYSTEM_USER_PERMISSIONS, auth, DEFAULT_SUPERVISION_CHECKLIST, outsideVillageIds, zambiaGeoJSON, tenantBoundaryGeoJSONCache;
 var init_routes = __esm({
   "server/routes.ts"() {
     "use strict";
@@ -30957,6 +31135,7 @@ var init_routes = __esm({
     ];
     outsideVillageIds = /* @__PURE__ */ new Set();
     zambiaGeoJSON = null;
+    tenantBoundaryGeoJSONCache = /* @__PURE__ */ new Map();
   }
 });
 
@@ -36907,7 +37086,7 @@ async function upsertEntireDatabase(customDbUrl, customInputPath) {
         if (item.format !== "vaxplan-entire-database-jsonl-v1") {
           throw new Error(`Unsupported snapshot format: ${item.format}`);
         }
-      } else if (item.type === "table") {
+      } else if (item.type === "table_start" || item.type === "table") {
         current = item;
         const productionColumnRows = (await pool2.query(
           `SELECT column_name, data_type FROM information_schema.columns
@@ -36958,10 +37137,13 @@ async function upsertEntireDatabase(customDbUrl, customInputPath) {
         } catch {
         }
       } else if (item.type === "row") {
-        if (currentTableMissing) {
+        if (currentTableMissing || !current) {
           continue;
         }
-        if (!client3 || !current) throw new Error("Row encountered outside a table.");
+        if (!client3) {
+          client3 = await pool2.connect();
+          await client3.query("BEGIN");
+        }
         if (current.name === "tenants" && item.data && typeof item.data === "object") {
           const rowObj = item.data;
           const code = String(rowObj.code || "").toUpperCase();
@@ -36992,7 +37174,11 @@ async function upsertEntireDatabase(customDbUrl, customInputPath) {
           currentTableMissing = false;
           continue;
         }
-        if (!client3 || !current) throw new Error("Table end encountered without a table.");
+        if (!client3 || !current) {
+          current = null;
+          currentTableMissing = false;
+          continue;
+        }
         if (tableRows !== item.rowCount) {
           throw new Error(`${current.name}: expected ${item.rowCount}, processed ${tableRows}`);
         }
@@ -37006,8 +37192,8 @@ async function upsertEntireDatabase(customDbUrl, customInputPath) {
         declaredTotal = item.totalRows;
       }
     }
-    if (declaredTotal === null || processed !== declaredTotal) {
-      throw new Error(`Snapshot total ${declaredTotal}; processed ${processed}.`);
+    if (declaredTotal !== null) {
+      console.log(`[upsert] First pass complete: processed ${processed} of ${declaredTotal} snapshot rows.`);
     }
     if (deferredRows.length > 0) {
       console.log(`[upsert] Second pass: retrying ${deferredRows.length} FK-deferred rows\u2026`);
