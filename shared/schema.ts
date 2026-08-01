@@ -3483,7 +3483,7 @@ export type InsertResearchInterestSubmission = z.infer<typeof insertResearchInte
 // COUNTRY IMMUNIZATION CATALOGUE
 // ============================================================================
 
-export const commodityTypeEnum = pgEnum("commodity_type", ["diluent", "syringe", "safety_box", "ppe", "cold_chain", "other", "recording_tools", "it_equipment"]);
+export const commodityTypeEnum = pgEnum("commodity_type", ["diluent", "syringe", "safety_box", "ppe", "cold_chain", "other", "recording_tools", "it_equipment", "transport", "stationaries", "social_mob"]);
 export const doseClassificationEnum = pgEnum("dose_classification", ["routine", "campaign", "outbreak", "school_based", "other"]);
 
 // Master Vaccine Products (Stock-managed entities)
