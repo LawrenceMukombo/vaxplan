@@ -37,10 +37,114 @@ interface Props {
   item?: any;
 }
 
+const getTabMeta = (type: string) => {
+  switch (type) {
+    case "vaccine":
+      return {
+        title: "Vaccine Product",
+        namePlaceholder: "e.g. Measles-Rubella (MR) Vaccine",
+        codePlaceholder: "e.g. vaccine_mr",
+        category: "Vaccines",
+      };
+    case "schedule":
+      return {
+        title: "Schedule Dose",
+        namePlaceholder: "e.g. MR-1 (9 Months)",
+        codePlaceholder: "e.g. mr_1",
+        category: "Schedule Doses",
+      };
+    case "wastage":
+      return {
+        title: "Wastage Threshold",
+        namePlaceholder: "",
+        codePlaceholder: "",
+        category: "Wastage Thresholds",
+      };
+    case "diluent":
+      return {
+        title: "Diluent",
+        namePlaceholder: "e.g. MR Vaccine Diluent 10-dose",
+        codePlaceholder: "e.g. diluent_mr",
+        category: "Diluents",
+      };
+    case "syringe":
+      return {
+        title: "Injection Device",
+        namePlaceholder: "e.g. Auto-Disable Syringe 0.5ml",
+        codePlaceholder: "e.g. syringe_ad_05ml",
+        category: "Injection Devices",
+      };
+    case "safety_box":
+      return {
+        title: "Safety Box",
+        namePlaceholder: "e.g. Safety Box 5 Litre",
+        codePlaceholder: "e.g. safety_box_5l",
+        category: "Safety Boxes",
+      };
+    case "ppe":
+      return {
+        title: "PPE Item",
+        namePlaceholder: "e.g. Surgical Gloves (Large)",
+        codePlaceholder: "e.g. ppe_gloves_l",
+        category: "PPE",
+      };
+    case "cold_chain":
+      return {
+        title: "Cold Chain Equipment",
+        namePlaceholder: "e.g. Vaccine Carrier 1.6L",
+        codePlaceholder: "e.g. cold_carrier_16l",
+        category: "Cold Chain",
+      };
+    case "recording_tools":
+      return {
+        title: "Recording Tool",
+        namePlaceholder: "e.g. Daily Immunization Tallysheet",
+        codePlaceholder: "e.g. rec_tallysheet",
+        category: "Recording Tools",
+      };
+    case "it_equipment":
+      return {
+        title: "IT Equipment",
+        namePlaceholder: 'e.g. Tablet 10" for Digital Registry',
+        codePlaceholder: "e.g. it_tablet_10",
+        category: "IT Equipment",
+      };
+    case "transport":
+      return {
+        title: "Transport Asset",
+        namePlaceholder: "e.g. Motorcycle for Outreach Visits",
+        codePlaceholder: "e.g. trsp_motorcycle",
+        category: "Transport",
+      };
+    case "stationaries":
+      return {
+        title: "Stationery Item",
+        namePlaceholder: "e.g. Permanent Markers (Pack of 10)",
+        codePlaceholder: "e.g. stat_markers",
+        category: "Stationery",
+      };
+    case "social_mob":
+      return {
+        title: "Social Mobilization Material",
+        namePlaceholder: "e.g. Immunization Poster (A2)",
+        codePlaceholder: "e.g. sm_poster_a2",
+        category: "Social Mobilization",
+      };
+    default:
+      return {
+        title: "Commodity Item",
+        namePlaceholder: "e.g. Cotton Wool (500g Roll)",
+        codePlaceholder: "e.g. oth_cotton_wool",
+        category: "Other Commodities",
+      };
+  }
+};
+
 export function CatalogueItemDialog({ open, onOpenChange, activeTabType, item }: Props) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const isEditing = !!item;
+  const tabMeta = getTabMeta(activeTabType);
 
   // Fetch vaccines list for dropdowns (linking schedule doses, wastage thresholds, or diluents)
   const { data: vaccines = [] } = useQuery<any[]>({
@@ -61,7 +165,7 @@ export function CatalogueItemDialog({ open, onOpenChange, activeTabType, item }:
           productId: "",
           name: "",
           antigenName: "",
-          category: "Vaccine",
+          category: "Vaccines",
           presentation: "Liquid",
           dosesPerVial: 10,
           unitOfMeasure: "vials",
@@ -126,7 +230,7 @@ export function CatalogueItemDialog({ open, onOpenChange, activeTabType, item }:
           type: activeTabType,
           commodityCode: "",
           name: "",
-          category: activeTabType.replace("_", " ").toUpperCase(),
+          category: tabMeta.category,
           unitOfMeasure: "pieces",
           packSize: 100,
           bufferPercentage: "10.00",
@@ -219,7 +323,7 @@ export function CatalogueItemDialog({ open, onOpenChange, activeTabType, item }:
       <DialogContent className="sm:max-w-[650px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>
-            {isEditing ? "Edit" : "Add"} {activeTabType.replace("_", " ").toUpperCase()} Item
+            {isEditing ? "Edit" : "Add"} {tabMeta.title}
           </DialogTitle>
         </DialogHeader>
         <Form {...form}>
@@ -233,7 +337,7 @@ export function CatalogueItemDialog({ open, onOpenChange, activeTabType, item }:
                   <FormItem>
                     <FormLabel>Item Name</FormLabel>
                     <FormControl>
-                      <Input placeholder="e.g. Auto-disable syringes 0.5ml" {...field} required />
+                      <Input placeholder={tabMeta.namePlaceholder} {...field} required />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -252,7 +356,7 @@ export function CatalogueItemDialog({ open, onOpenChange, activeTabType, item }:
                       <FormItem>
                         <FormLabel>Product Code / ID</FormLabel>
                         <FormControl>
-                          <Input placeholder="vaccine_penta" {...field} required />
+                          <Input placeholder={tabMeta.codePlaceholder} {...field} required />
                         </FormControl>
                         <FormMessage />
                       </FormItem>
@@ -265,7 +369,7 @@ export function CatalogueItemDialog({ open, onOpenChange, activeTabType, item }:
                       <FormItem>
                         <FormLabel>Antigen Name</FormLabel>
                         <FormControl>
-                          <Input placeholder="DTP-HepB-Hib" {...field} required />
+                          <Input placeholder="e.g. Measles-Rubella" {...field} required />
                         </FormControl>
                         <FormMessage />
                       </FormItem>
@@ -450,7 +554,7 @@ export function CatalogueItemDialog({ open, onOpenChange, activeTabType, item }:
                       <FormItem>
                         <FormLabel>Dose Code</FormLabel>
                         <FormControl>
-                          <Input placeholder="penta_1" {...field} required />
+                          <Input placeholder={tabMeta.codePlaceholder} {...field} required />
                         </FormControl>
                         <FormMessage />
                       </FormItem>
@@ -507,7 +611,7 @@ export function CatalogueItemDialog({ open, onOpenChange, activeTabType, item }:
                       <FormItem>
                         <FormLabel>Target Age</FormLabel>
                         <FormControl>
-                          <Input placeholder="6 weeks" {...field} />
+                          <Input placeholder="9 months" {...field} />
                         </FormControl>
                       </FormItem>
                     )}
@@ -519,7 +623,7 @@ export function CatalogueItemDialog({ open, onOpenChange, activeTabType, item }:
                       <FormItem>
                         <FormLabel>Min Age (Days)</FormLabel>
                         <FormControl>
-                          <Input placeholder="42" {...field} />
+                          <Input placeholder="270" {...field} />
                         </FormControl>
                       </FormItem>
                     )}
@@ -567,7 +671,7 @@ export function CatalogueItemDialog({ open, onOpenChange, activeTabType, item }:
                       <FormItem>
                         <FormLabel>Route</FormLabel>
                         <FormControl>
-                          <Input placeholder="Intramuscular" {...field} />
+                          <Input placeholder="Subcutaneous" {...field} />
                         </FormControl>
                       </FormItem>
                     )}
@@ -727,7 +831,7 @@ export function CatalogueItemDialog({ open, onOpenChange, activeTabType, item }:
                       <FormItem>
                         <FormLabel>Commodity Code</FormLabel>
                         <FormControl>
-                          <Input placeholder="tallysheet" {...field} required />
+                          <Input placeholder={tabMeta.codePlaceholder} {...field} required />
                         </FormControl>
                         <FormMessage />
                       </FormItem>
@@ -740,7 +844,7 @@ export function CatalogueItemDialog({ open, onOpenChange, activeTabType, item }:
                       <FormItem>
                         <FormLabel>Category</FormLabel>
                         <FormControl>
-                          <Input placeholder="Logistics" {...field} />
+                          <Input placeholder={tabMeta.category} {...field} />
                         </FormControl>
                         <FormMessage />
                       </FormItem>
