@@ -132,7 +132,24 @@ router.get("/commodities", isAuthenticated, requireTenant, async (req: any, res)
 
 router.post("/commodities", isAuthenticated, requireTenant, requirePermission("manage_users"), async (req: any, res) => {
   try {
-    const data = insertCatalogueCommoditySchema.parse({ ...req.body, tenantId: req.tenantId });
+    const rawPayload = {
+      category: req.body.category || "Logistics",
+      unitOfMeasure: req.body.unitOfMeasure || "pieces",
+      stockManaged: req.body.stockManaged ?? true,
+      forecastable: req.body.forecastable ?? true,
+      requisitionable: req.body.requisitionable ?? true,
+      sessionSupply: req.body.sessionSupply ?? true,
+      bufferPercentage: req.body.bufferPercentage || "10.00",
+      minimumStockThreshold: req.body.minimumStockThreshold ?? 0,
+      maximumStockThreshold: req.body.maximumStockThreshold ?? 0,
+      reorderLevel: req.body.reorderLevel ?? 0,
+      modules: req.body.modules || {},
+      consumptionRule: req.body.consumptionRule || {},
+      active: req.body.active ?? true,
+      ...req.body,
+      tenantId: req.tenantId
+    };
+    const data = insertCatalogueCommoditySchema.parse(rawPayload);
     const [inserted] = await db.insert(catalogueCommodities).values(data).returning();
     res.json(inserted);
   } catch (err: any) {

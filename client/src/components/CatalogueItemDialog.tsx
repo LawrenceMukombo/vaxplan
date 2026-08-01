@@ -17,6 +17,7 @@ import {
   FormDescription,
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Switch } from "@/components/ui/switch";
@@ -65,8 +66,12 @@ export function CatalogueItemDialog({ open, onOpenChange, activeTabType, item }:
           dosesPerVial: 10,
           unitOfMeasure: "vials",
           storageTemperature: "+2 to +8 °C",
+          wastageThreshold: "10.00",
           approvalStatus: "published",
           active: true,
+          stockManaged: true,
+          forecastable: true,
+          requisitionable: true,
           requiresInjectionDevice: true,
           requiresSafetyBox: true,
           requiresDiluent: false,
@@ -84,8 +89,15 @@ export function CatalogueItemDialog({ open, onOpenChange, activeTabType, item }:
           name: "",
           doseNumber: 1,
           vaccineId: vaccines[0]?.id || "",
-          classification: "routine",
+          targetAge: "infants",
+          minimumAge: "0",
+          maximumAge: "365",
+          minimumInterval: "28",
           targetPopulationGroup: "infants",
+          route: "Intramuscular",
+          site: "Anterolateral thigh",
+          classification: "routine",
+          stockDeducting: true,
           approvalStatus: "published",
           active: true,
         };
@@ -101,6 +113,7 @@ export function CatalogueItemDialog({ open, onOpenChange, activeTabType, item }:
           minAcceptable: "0.00",
           maxAcceptable: "15.00",
           strategy: "routine",
+          notes: "",
           active: true,
         };
   } else {
@@ -113,13 +126,18 @@ export function CatalogueItemDialog({ open, onOpenChange, activeTabType, item }:
           type: activeTabType,
           commodityCode: "",
           name: "",
-          packSize: 100,
+          category: activeTabType.replace("_", " ").toUpperCase(),
           unitOfMeasure: "pieces",
+          packSize: 100,
+          bufferPercentage: "10.00",
+          minimumStockThreshold: 0,
+          maximumStockThreshold: 0,
+          reorderLevel: 0,
           stockManaged: true,
           forecastable: true,
           requisitionable: true,
           sessionSupply: true,
-          bufferPercentage: "10.00",
+          linkedVaccineId: null,
           active: true,
         };
   }
@@ -154,7 +172,7 @@ export function CatalogueItemDialog({ open, onOpenChange, activeTabType, item }:
       return res.json();
     },
     onSuccess: () => {
-      toast({ title: "Success", description: "Item saved successfully." });
+      toast({ title: "Success", description: "Catalogue item saved successfully." });
       queryClient.invalidateQueries({ queryKey: [queryKey] });
       onOpenChange(false);
     },
@@ -166,7 +184,7 @@ export function CatalogueItemDialog({ open, onOpenChange, activeTabType, item }:
   const onSubmit = (rawData: any) => {
     const data = { ...rawData };
 
-    // Explicit type coercion & fallbacks
+    // Explicit type coercion & numerical formatting
     if (data.dosesPerVial !== undefined) data.dosesPerVial = Number(data.dosesPerVial) || 1;
     if (data.doseNumber !== undefined) data.doseNumber = Number(data.doseNumber) || 1;
     if (data.vaccineId !== undefined && data.vaccineId !== "") data.vaccineId = Number(data.vaccineId);
@@ -174,7 +192,15 @@ export function CatalogueItemDialog({ open, onOpenChange, activeTabType, item }:
       data.linkedVaccineId = data.linkedVaccineId === "none" ? null : Number(data.linkedVaccineId);
     }
     if (data.packSize !== undefined) data.packSize = Number(data.packSize) || 1;
+    if (data.minimumStockThreshold !== undefined) data.minimumStockThreshold = Number(data.minimumStockThreshold) || 0;
+    if (data.maximumStockThreshold !== undefined) data.maximumStockThreshold = Number(data.maximumStockThreshold) || 0;
+    if (data.reorderLevel !== undefined) data.reorderLevel = Number(data.reorderLevel) || 0;
+
     if (data.active === undefined) data.active = true;
+
+    // Ensure default empty objects for jsonb fields
+    if (!data.modules) data.modules = {};
+    if (!data.consumptionRule) data.consumptionRule = {};
 
     // Ensure type matches active tab for commodities
     if (!["vaccine", "schedule", "wastage"].includes(activeTabType)) {
@@ -188,7 +214,7 @@ export function CatalogueItemDialog({ open, onOpenChange, activeTabType, item }:
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[550px] max-h-[90vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-[650px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>
             {isEditing ? "Edit" : "Add"} {activeTabType.replace("_", " ").toUpperCase()} Item
@@ -213,7 +239,7 @@ export function CatalogueItemDialog({ open, onOpenChange, activeTabType, item }:
               />
             )}
 
-            {/* VACCINE FIELDS */}
+            {/* ── VACCINE FIELDS ────────────────────────────────── */}
             {activeTabType === "vaccine" && (
               <>
                 <div className="grid grid-cols-2 gap-4">
@@ -245,20 +271,7 @@ export function CatalogueItemDialog({ open, onOpenChange, activeTabType, item }:
                   />
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
-                  <FormField
-                    control={form.control}
-                    name="dosesPerVial"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Doses Per Vial</FormLabel>
-                        <FormControl>
-                          <Input type="number" min={1} {...field} required />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
+                <div className="grid grid-cols-3 gap-4">
                   <FormField
                     control={form.control}
                     name="presentation"
@@ -281,50 +294,150 @@ export function CatalogueItemDialog({ open, onOpenChange, activeTabType, item }:
                       </FormItem>
                     )}
                   />
+                  <FormField
+                    control={form.control}
+                    name="dosesPerVial"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Doses Per Vial</FormLabel>
+                        <FormControl>
+                          <Input type="number" min={1} {...field} required />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="unitOfMeasure"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Unit of Measure</FormLabel>
+                        <FormControl>
+                          <Input placeholder="vials" {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
                 </div>
 
-                <div className="grid grid-cols-3 gap-2 border rounded-md p-3">
+                <div className="grid grid-cols-2 gap-4">
                   <FormField
                     control={form.control}
-                    name="routineUse"
+                    name="storageTemperature"
                     render={({ field }) => (
-                      <FormItem className="flex items-center space-x-2 space-y-0">
+                      <FormItem>
+                        <FormLabel>Storage Temperature</FormLabel>
                         <FormControl>
-                          <Checkbox checked={field.value} onCheckedChange={field.onChange} />
+                          <Input placeholder="+2 to +8 °C" {...field} />
                         </FormControl>
-                        <FormLabel className="text-xs font-normal">Routine</FormLabel>
+                        <FormMessage />
                       </FormItem>
                     )}
                   />
                   <FormField
                     control={form.control}
-                    name="campaignUse"
+                    name="wastageThreshold"
                     render={({ field }) => (
-                      <FormItem className="flex items-center space-x-2 space-y-0">
+                      <FormItem>
+                        <FormLabel>Default Wastage Threshold (%)</FormLabel>
                         <FormControl>
-                          <Checkbox checked={field.value} onCheckedChange={field.onChange} />
+                          <Input placeholder="10.00" {...field} />
                         </FormControl>
-                        <FormLabel className="text-xs font-normal">Campaign</FormLabel>
+                        <FormMessage />
                       </FormItem>
                     )}
                   />
-                  <FormField
-                    control={form.control}
-                    name="outbreakUse"
-                    render={({ field }) => (
-                      <FormItem className="flex items-center space-x-2 space-y-0">
-                        <FormControl>
-                          <Checkbox checked={field.value} onCheckedChange={field.onChange} />
-                        </FormControl>
-                        <FormLabel className="text-xs font-normal">Outbreak</FormLabel>
-                      </FormItem>
-                    )}
-                  />
+                </div>
+
+                <div className="border rounded-md p-3 space-y-2">
+                  <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Device Requirements</span>
+                  <div className="grid grid-cols-3 gap-2">
+                    <FormField
+                      control={form.control}
+                      name="requiresDiluent"
+                      render={({ field }) => (
+                        <FormItem className="flex items-center space-x-2 space-y-0">
+                          <FormControl>
+                            <Checkbox checked={field.value} onCheckedChange={field.onChange} />
+                          </FormControl>
+                          <FormLabel className="text-xs font-normal">Diluent</FormLabel>
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name="requiresInjectionDevice"
+                      render={({ field }) => (
+                        <FormItem className="flex items-center space-x-2 space-y-0">
+                          <FormControl>
+                            <Checkbox checked={field.value} onCheckedChange={field.onChange} />
+                          </FormControl>
+                          <FormLabel className="text-xs font-normal">AD Syringe</FormLabel>
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name="requiresSafetyBox"
+                      render={({ field }) => (
+                        <FormItem className="flex items-center space-x-2 space-y-0">
+                          <FormControl>
+                            <Checkbox checked={field.value} onCheckedChange={field.onChange} />
+                          </FormControl>
+                          <FormLabel className="text-xs font-normal">Safety Box</FormLabel>
+                        </FormItem>
+                      )}
+                    />
+                  </div>
+                </div>
+
+                <div className="border rounded-md p-3 space-y-2">
+                  <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Programme Context</span>
+                  <div className="grid grid-cols-3 gap-2">
+                    <FormField
+                      control={form.control}
+                      name="routineUse"
+                      render={({ field }) => (
+                        <FormItem className="flex items-center space-x-2 space-y-0">
+                          <FormControl>
+                            <Checkbox checked={field.value} onCheckedChange={field.onChange} />
+                          </FormControl>
+                          <FormLabel className="text-xs font-normal">Routine</FormLabel>
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name="campaignUse"
+                      render={({ field }) => (
+                        <FormItem className="flex items-center space-x-2 space-y-0">
+                          <FormControl>
+                            <Checkbox checked={field.value} onCheckedChange={field.onChange} />
+                          </FormControl>
+                          <FormLabel className="text-xs font-normal">Campaign (SIA)</FormLabel>
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name="outbreakUse"
+                      render={({ field }) => (
+                        <FormItem className="flex items-center space-x-2 space-y-0">
+                          <FormControl>
+                            <Checkbox checked={field.value} onCheckedChange={field.onChange} />
+                          </FormControl>
+                          <FormLabel className="text-xs font-normal">Outbreak</FormLabel>
+                        </FormItem>
+                      )}
+                    />
+                  </div>
                 </div>
               </>
             )}
 
-            {/* SCHEDULE DOSE FIELDS */}
+            {/* ── SCHEDULE DOSE FIELDS ──────────────────────────── */}
             {activeTabType === "schedule" && (
               <>
                 <div className="grid grid-cols-2 gap-4">
@@ -361,7 +474,7 @@ export function CatalogueItemDialog({ open, onOpenChange, activeTabType, item }:
                   name="vaccineId"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Linked Vaccine</FormLabel>
+                      <FormLabel>Linked Vaccine Product</FormLabel>
                       <Select
                         value={field.value ? field.value.toString() : ""}
                         onValueChange={(val) => field.onChange(Number(val))}
@@ -383,50 +496,168 @@ export function CatalogueItemDialog({ open, onOpenChange, activeTabType, item }:
                     </FormItem>
                   )}
                 />
+
+                <div className="grid grid-cols-3 gap-4">
+                  <FormField
+                    control={form.control}
+                    name="targetAge"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Target Age</FormLabel>
+                        <FormControl>
+                          <Input placeholder="6 weeks" {...field} />
+                        </FormControl>
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="minimumAge"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Min Age (Days)</FormLabel>
+                        <FormControl>
+                          <Input placeholder="42" {...field} />
+                        </FormControl>
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="minimumInterval"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Min Interval (Days)</FormLabel>
+                        <FormControl>
+                          <Input placeholder="28" {...field} />
+                        </FormControl>
+                      </FormItem>
+                    )}
+                  />
+                </div>
+
+                <div className="grid grid-cols-3 gap-4">
+                  <FormField
+                    control={form.control}
+                    name="targetPopulationGroup"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Target Group</FormLabel>
+                        <Select value={field.value} onValueChange={field.onChange}>
+                          <FormControl>
+                            <SelectTrigger><SelectValue placeholder="Select..." /></SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            <SelectItem value="infants">Infants (&lt;1 yr)</SelectItem>
+                            <SelectItem value="children">Children (1-5 yrs)</SelectItem>
+                            <SelectItem value="girls">Adolescent Girls</SelectItem>
+                            <SelectItem value="pregnant_women">Pregnant Women</SelectItem>
+                            <SelectItem value="adults">Adults</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="route"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Route</FormLabel>
+                        <FormControl>
+                          <Input placeholder="Intramuscular" {...field} />
+                        </FormControl>
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="classification"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Classification</FormLabel>
+                        <Select value={field.value} onValueChange={field.onChange}>
+                          <FormControl>
+                            <SelectTrigger><SelectValue placeholder="Select..." /></SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            <SelectItem value="routine">Routine</SelectItem>
+                            <SelectItem value="campaign">Campaign</SelectItem>
+                            <SelectItem value="outbreak">Outbreak</SelectItem>
+                            <SelectItem value="school_based">School-based</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </FormItem>
+                    )}
+                  />
+                </div>
               </>
             )}
 
-            {/* WASTAGE THRESHOLD FIELDS */}
+            {/* ── WASTAGE THRESHOLD FIELDS ──────────────────────── */}
             {activeTabType === "wastage" && (
               <>
-                <FormField
-                  control={form.control}
-                  name="vaccineId"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Vaccine</FormLabel>
-                      <Select
-                        value={field.value ? field.value.toString() : ""}
-                        onValueChange={(val) => field.onChange(Number(val))}
-                      >
-                        <FormControl>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select vaccine..." />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          {vaccines.map((v: any) => (
-                            <SelectItem key={v.id} value={v.id.toString()}>
-                              {v.name} ({v.productId})
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
                 <div className="grid grid-cols-2 gap-4">
+                  <FormField
+                    control={form.control}
+                    name="vaccineId"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Vaccine Product</FormLabel>
+                        <Select
+                          value={field.value ? field.value.toString() : ""}
+                          onValueChange={(val) => field.onChange(Number(val))}
+                        >
+                          <FormControl>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Select vaccine..." />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            {vaccines.map((v: any) => (
+                              <SelectItem key={v.id} value={v.id.toString()}>
+                                {v.name} ({v.productId})
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="strategy"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Strategy</FormLabel>
+                        <Select value={field.value || "routine"} onValueChange={field.onChange}>
+                          <FormControl>
+                            <SelectTrigger><SelectValue placeholder="Select..." /></SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            <SelectItem value="routine">Routine</SelectItem>
+                            <SelectItem value="fixed">Fixed Post</SelectItem>
+                            <SelectItem value="outreach">Outreach</SelectItem>
+                            <SelectItem value="campaign">Campaign / SIA</SelectItem>
+                            <SelectItem value="htr">Hard-to-Reach</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </FormItem>
+                    )}
+                  />
+                </div>
+
+                <div className="grid grid-cols-4 gap-3">
                   <FormField
                     control={form.control}
                     name="wastageRate"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Wastage Rate (%)</FormLabel>
+                        <FormLabel>Wastage %</FormLabel>
                         <FormControl>
                           <Input placeholder="10.00" {...field} required />
                         </FormControl>
-                        <FormMessage />
                       </FormItem>
                     )}
                   />
@@ -435,22 +666,58 @@ export function CatalogueItemDialog({ open, onOpenChange, activeTabType, item }:
                     name="wastageFactor"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Wastage Factor</FormLabel>
+                        <FormLabel>Factor</FormLabel>
                         <FormControl>
                           <Input placeholder="1.11" {...field} required />
                         </FormControl>
-                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="minAcceptable"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Min %</FormLabel>
+                        <FormControl>
+                          <Input placeholder="0.00" {...field} />
+                        </FormControl>
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="maxAcceptable"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Max %</FormLabel>
+                        <FormControl>
+                          <Input placeholder="15.00" {...field} />
+                        </FormControl>
                       </FormItem>
                     )}
                   />
                 </div>
+
+                <FormField
+                  control={form.control}
+                  name="notes"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Operational Notes</FormLabel>
+                      <FormControl>
+                        <Textarea placeholder="Operational guidelines or wastage thresholds rationale..." {...field} />
+                      </FormControl>
+                    </FormItem>
+                  )}
+                />
               </>
             )}
 
-            {/* COMMODITIES FIELDS */}
+            {/* ── COMMODITIES FIELDS ────────────────────────────── */}
             {isCommodity && (
               <>
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-3 gap-4">
                   <FormField
                     control={form.control}
                     name="commodityCode"
@@ -458,12 +725,53 @@ export function CatalogueItemDialog({ open, onOpenChange, activeTabType, item }:
                       <FormItem>
                         <FormLabel>Commodity Code</FormLabel>
                         <FormControl>
-                          <Input placeholder={`ppe_gloves`} {...field} required />
+                          <Input placeholder="tallysheet" {...field} required />
                         </FormControl>
                         <FormMessage />
                       </FormItem>
                     )}
                   />
+                  <FormField
+                    control={form.control}
+                    name="category"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Category</FormLabel>
+                        <FormControl>
+                          <Input placeholder="Logistics" {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="unitOfMeasure"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Unit of Measure</FormLabel>
+                        <Select value={field.value || "pieces"} onValueChange={field.onChange}>
+                          <FormControl>
+                            <SelectTrigger><SelectValue placeholder="Select..." /></SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            <SelectItem value="pieces">pieces</SelectItem>
+                            <SelectItem value="boxes">boxes</SelectItem>
+                            <SelectItem value="vials">vials</SelectItem>
+                            <SelectItem value="kits">kits</SelectItem>
+                            <SelectItem value="units">units</SelectItem>
+                            <SelectItem value="packs">packs</SelectItem>
+                            <SelectItem value="pairs">pairs</SelectItem>
+                            <SelectItem value="rolls">rolls</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+
+                <div className="grid grid-cols-4 gap-3">
                   <FormField
                     control={form.control}
                     name="packSize"
@@ -473,7 +781,42 @@ export function CatalogueItemDialog({ open, onOpenChange, activeTabType, item }:
                         <FormControl>
                           <Input type="number" min={1} {...field} required />
                         </FormControl>
-                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="bufferPercentage"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Buffer %</FormLabel>
+                        <FormControl>
+                          <Input placeholder="10.00" {...field} />
+                        </FormControl>
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="minimumStockThreshold"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Min Stock</FormLabel>
+                        <FormControl>
+                          <Input type="number" min={0} {...field} />
+                        </FormControl>
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="reorderLevel"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Reorder Lvl</FormLabel>
+                        <FormControl>
+                          <Input type="number" min={0} {...field} />
+                        </FormControl>
                       </FormItem>
                     )}
                   />
@@ -509,25 +852,63 @@ export function CatalogueItemDialog({ open, onOpenChange, activeTabType, item }:
                   />
                 )}
 
-                <FormField
-                  control={form.control}
-                  name="stockManaged"
-                  render={({ field }) => (
-                    <FormItem className="flex flex-row items-start space-x-3 space-y-0 rounded-md border p-4">
-                      <FormControl>
-                        <Checkbox checked={field.value} onCheckedChange={field.onChange} />
-                      </FormControl>
-                      <div className="space-y-1 leading-none">
-                        <FormLabel>Stock Managed</FormLabel>
-                        <FormDescription>Track inventory levels in stock ledger</FormDescription>
-                      </div>
-                    </FormItem>
-                  )}
-                />
+                <div className="border rounded-md p-3 space-y-2">
+                  <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Inventory &amp; Operational Controls</span>
+                  <div className="grid grid-cols-2 gap-3">
+                    <FormField
+                      control={form.control}
+                      name="stockManaged"
+                      render={({ field }) => (
+                        <FormItem className="flex items-center space-x-2 space-y-0">
+                          <FormControl>
+                            <Checkbox checked={field.value} onCheckedChange={field.onChange} />
+                          </FormControl>
+                          <FormLabel className="text-xs font-normal">Track in Stock Ledger</FormLabel>
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name="forecastable"
+                      render={({ field }) => (
+                        <FormItem className="flex items-center space-x-2 space-y-0">
+                          <FormControl>
+                            <Checkbox checked={field.value} onCheckedChange={field.onChange} />
+                          </FormControl>
+                          <FormLabel className="text-xs font-normal">Include in Supply Forecasting</FormLabel>
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name="requisitionable"
+                      render={({ field }) => (
+                        <FormItem className="flex items-center space-x-2 space-y-0">
+                          <FormControl>
+                            <Checkbox checked={field.value} onCheckedChange={field.onChange} />
+                          </FormControl>
+                          <FormLabel className="text-xs font-normal">Allow Stock Orders / Requisitions</FormLabel>
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name="sessionSupply"
+                      render={({ field }) => (
+                        <FormItem className="flex items-center space-x-2 space-y-0">
+                          <FormControl>
+                            <Checkbox checked={field.value} onCheckedChange={field.onChange} />
+                          </FormControl>
+                          <FormLabel className="text-xs font-normal">Daily Session Supply Lists</FormLabel>
+                        </FormItem>
+                      )}
+                    />
+                  </div>
+                </div>
               </>
             )}
 
-            {/* ACTIVE SWITCH */}
+            {/* ── ACTIVE SWITCH ────────────────────────────────── */}
             <FormField
               control={form.control}
               name="active"
