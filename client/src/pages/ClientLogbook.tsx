@@ -1241,7 +1241,7 @@ export default function ClientLogbook() {
     queryKey: ["/api/me/tenant"],
     queryFn: async () => {
       if (!navigator.onLine) {
-        return { name: "Ministry of Health", code: "SSD", countryCode: "SSD" };
+        return { name: "Ministry of Health", code: user?.tenantId || "", countryCode: "" };
       }
       const res = await fetch("/api/me/tenant", { credentials: "include" });
       if (!res.ok) throw new Error("Failed to load tenant info");
@@ -1316,7 +1316,7 @@ export default function ClientLogbook() {
         const localClient = {
           ...data,
           id: localId,
-          tenantId: user?.tenantId ?? "SSD",
+          tenantId: user?.tenantId ?? "",
           createdAt: Date.now() as any,
           updatedAt: Date.now() as any,
           _syncedAt: 0,
@@ -1328,7 +1328,7 @@ export default function ClientLogbook() {
 
         // Queue in offline sync outbox
         await enqueueOutbox({
-          tenantId: user?.tenantId ?? "SSD",
+          tenantId: user?.tenantId ?? "",
           entityType: "client",
           method: "POST",
           url: "/api/clients",
@@ -1371,7 +1371,7 @@ export default function ClientLogbook() {
         };
         await offlineDb.clients.put(localClient as any);
         await enqueueOutbox({
-          tenantId: user?.tenantId ?? "SSD",
+          tenantId: user?.tenantId ?? "",
           entityType: "client",
           method: "PATCH",
           url: `/api/clients/${selectedClient.id}`,
@@ -1410,7 +1410,7 @@ export default function ClientLogbook() {
           ...data,
           id: localId,
           clientId,
-          tenantId: user?.tenantId ?? "SSD",
+          tenantId: user?.tenantId ?? "",
           _syncedAt: 0,
           _localOnly: true,
         };
@@ -1420,7 +1420,7 @@ export default function ClientLogbook() {
 
         // Queue in offline sync outbox
         await enqueueOutbox({
-          tenantId: user?.tenantId ?? "SSD",
+          tenantId: user?.tenantId ?? "",
           entityType: "vaccination",
           method: "POST",
           url: `/api/clients/${clientId}/vaccinate`,
@@ -1464,7 +1464,7 @@ export default function ClientLogbook() {
             ...item,
             id: localId,
             clientId,
-            tenantId: user?.tenantId ?? "SSD",
+            tenantId: user?.tenantId ?? "",
             _syncedAt: 0,
             _localOnly: true,
           };
@@ -1472,7 +1472,7 @@ export default function ClientLogbook() {
           results.push(localVac);
         }
         await enqueueOutbox({
-          tenantId: user?.tenantId ?? "SSD",
+          tenantId: user?.tenantId ?? "",
           entityType: "vaccination_batch",
           method: "POST",
           url: `/api/clients/${clientId}/vaccinate-batch`,
@@ -4501,7 +4501,7 @@ export default function ClientLogbook() {
           `}} />
 
           {selectedClient && (() => {
-            const tenantCode = tenant?.code || user?.tenantId || "SSD";
+            const tenantCode = tenant?.code || tenant?.countryCode || user?.tenantId || "MOH";
             
             const findVaccination = (code: string, name: string) => {
               return clientVaccinations?.find(
@@ -5248,4 +5248,3 @@ export default function ClientLogbook() {
     </div>
   );
 }
-

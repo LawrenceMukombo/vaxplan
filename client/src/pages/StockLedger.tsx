@@ -881,7 +881,7 @@ export default function StockLedger() {
         const newId = -Math.floor(Math.random() * 1000000);
         const localTxn = {
           id: newId,
-          tenantId: user?.tenantId ?? "SSD",
+          tenantId: user?.tenantId ?? "",
           facilityId: data.facilityId,
           productId: data.productId,
           vaccineName: vaccineConfigs?.find(c => c.id === data.productId)?.name || data.vaccineName,
@@ -903,7 +903,7 @@ export default function StockLedger() {
 
         // Queue to sync outbox
         await enqueueOutbox({
-          tenantId: user?.tenantId ?? "SSD",
+          tenantId: user?.tenantId ?? "",
           entityType: "stockTransaction",
           method: "POST",
           url: "/api/stock/transaction",
@@ -956,7 +956,7 @@ export default function StockLedger() {
         } else {
           // Sync-enabled transaction: queue deletion to outbox
           await enqueueOutbox({
-            tenantId: user?.tenantId ?? "SSD",
+            tenantId: user?.tenantId ?? "",
             entityType: "stockTransaction",
             method: "DELETE",
             url: `/api/stock/transaction/${txId}`,

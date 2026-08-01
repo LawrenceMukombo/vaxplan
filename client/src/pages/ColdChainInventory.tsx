@@ -164,11 +164,20 @@ export default function ColdChainInventory() {
     return districts.filter((d: any) => d.provinceId === Number(selectedProvinceId));
   }, [districts, selectedProvinceId]);
 
+  const districtMap = useMemo(() => {
+    const map = new Map<number, any>();
+    districts.forEach((d: any) => map.set(d.id, d));
+    return map;
+  }, [districts]);
+
   // Main Filtered Data
   const filteredEquipment = useMemo(() => {
     return rawEquipment.filter((item) => {
+      const dist = districtMap.get(item.districtId || 0);
+      const itemProvinceId = dist ? dist.provinceId : item.provinceId ?? null;
+
       // Province / District Filter
-      if (selectedProvinceId !== "all" && item.provinceId !== Number(selectedProvinceId)) return false;
+      if (selectedProvinceId !== "all" && itemProvinceId !== Number(selectedProvinceId)) return false;
       if (selectedDistrictId !== "all" && item.districtId !== Number(selectedDistrictId)) return false;
 
       // Type / Condition / Power Source

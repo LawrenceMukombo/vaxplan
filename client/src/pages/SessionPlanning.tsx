@@ -430,7 +430,7 @@ export default function SessionPlanning({
       if (!res.ok) throw new Error("Failed to load session-village links");
       const data = (await res.json()) as Array<{ sessionId: number; villageId: number }>;
       try {
-        const tenantId = user?.tenantId ?? "SSD";
+        const tenantId = user?.tenantId ?? "";
         const now = Date.now();
         await offlineDb.transaction("rw", offlineDb.sessionVillageLinks, async () => {
           await offlineDb.sessionVillageLinks.clear();
@@ -697,7 +697,7 @@ export default function SessionPlanning({
         const newId = -Math.floor(Math.random() * 1000000);
         const localSession = {
           id: newId,
-          tenantId: user?.tenantId ?? "SSD",
+          tenantId: user?.tenantId ?? "",
           facilityId: data.facilityId,
           microplanId: (data as any).microplanId,
           planType: planTypeFilter,
@@ -724,7 +724,7 @@ export default function SessionPlanning({
 
         // Queue to sync outbox
         await enqueueOutbox({
-          tenantId: user?.tenantId ?? "SSD",
+          tenantId: user?.tenantId ?? "",
           entityType: "sessionPlan",
           method: "POST",
           url: "/api/sessions",
@@ -830,7 +830,7 @@ export default function SessionPlanning({
         }
 
         if (incomingVillageIds) {
-          const tenantId = user?.tenantId ?? "SSD";
+          const tenantId = user?.tenantId ?? "";
           // Durable Dexie mirror — survives dialog close/reopen and refresh.
           try {
             await offlineDb.transaction("rw", offlineDb.sessionVillageLinks, async () => {
@@ -879,7 +879,7 @@ export default function SessionPlanning({
         });
 
         await enqueueOutbox({
-          tenantId: user?.tenantId ?? "SSD",
+          tenantId: user?.tenantId ?? "",
           entityType: "sessionPlan",
           method: "PATCH",
           url: `/api/sessions/${id}`,
@@ -1318,7 +1318,7 @@ export default function SessionPlanning({
       const payload = { perAntigen: counts, totals };
       if (!navigator.onLine) {
         await enqueueOutbox({
-          tenantId: user?.tenantId ?? "SSD",
+          tenantId: user?.tenantId ?? "",
           entityType: "sessionPlan",
           method: "POST",
           url: `/api/sessions/${id}/mark-done`,

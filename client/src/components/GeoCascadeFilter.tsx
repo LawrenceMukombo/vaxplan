@@ -1,9 +1,4 @@
-/* Original Code:
-import { useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
-import {
-*/
-import { useMemo, useEffect } from "react";
+import { useMemo, useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/useAuth";
 import {
@@ -92,49 +87,8 @@ export function GeoCascadeFilter({
   testIdPrefix = "geo",
   strictCascade = true,
 }: GeoCascadeFilterProps) {
-  /* Original Code:
-  // Tenant context — used as a cache scope so switching countries refetches.
-  const { data: tenantInfo } = useQuery<any>({
-    queryKey: ["/api/me/tenant"],
-  });
-
-  const { data: fetchedRegions } = useQuery<Region[]>({
-    queryKey: ["/api/regions", tenantInfo?.id],
-    queryFn: () => fetchJson<Region[]>("/api/regions"),
-    enabled: showRegion && providedRegions === undefined && !!tenantInfo?.id,
-  });
-
-  const { data: fetchedProvinces } = useQuery<Province[]>({
-    queryKey: ["/api/provinces", tenantInfo?.id],
-    queryFn: () => fetchJson<Province[]>("/api/provinces"),
-    enabled: providedProvinces === undefined && !!tenantInfo?.id,
-  });
-
-  const { data: fetchedDistricts } = useQuery<District[]>({
-    queryKey: ["/api/districts", tenantInfo?.id],
-    queryFn: () => fetchJson<District[]>("/api/districts"),
-    enabled: providedDistricts === undefined && !!tenantInfo?.id,
-  });
-
-  const { data: fetchedFacilities } = useQuery<Facility[]>({
-    queryKey: ["/api/facilities", tenantInfo?.id],
-    queryFn: () => fetchJson<Facility[]>("/api/facilities"),
-    enabled:
-      showFacility &&
-      providedFacilities === undefined &&
-      !!tenantInfo?.id,
-  });
-
-  const provinces = providedProvinces ?? fetchedProvinces ?? [];
-  const districts = providedDistricts ?? fetchedDistricts ?? [];
-  const facilities = providedFacilities ?? fetchedFacilities ?? [];
-  const regions = providedRegions ?? fetchedRegions ?? [];
-
-  const sortedRegions = useMemo(
-    () => [...regions].sort((a, b) => a.name.localeCompare(b.name)),
-    [regions],
-  );
-  */
+  const [districtSelectOpen, setDistrictSelectOpen] = useState(false);
+  const [facilitySelectOpen, setFacilitySelectOpen] = useState(false);
   const { user } = useAuth();
   
   // Resolve user role scoping
@@ -218,57 +172,7 @@ export function GeoCascadeFilter({
     [regions],
   );
 
-  /* Original Code:
-  const sortedProvinces = useMemo(() => {
-    const list = showRegion && regionId
-      ? provinces.filter((p) => Number((p as any).regionId) === Number(regionId))
-      : provinces;
-    return [...list].sort((a, b) => a.name.localeCompare(b.name));
-  }, [provinces, regionId, showRegion]);
-
-  const filteredDistricts = useMemo(() => {
-    const list = provinceId
-      ? districts.filter((d) => Number((d as any).provinceId) === Number(provinceId))
-      : districts;
-    return [...list].sort((a, b) => a.name.localeCompare(b.name));
-  }, [districts, provinceId]);
-
-  const filteredFacilities = useMemo(() => {
-    if (!showFacility) return [];
-    const list = districtId
-      ? facilities.filter(
-          (f) => Number((f as any).districtId) === Number(districtId),
-        )
-      : provinceId
-      ? facilities.filter((f) => {
-          const d = districts.find(
-            (dd) => Number(dd.id) === Number((f as any).districtId),
-          );
-          return d && Number((d as any).provinceId) === Number(provinceId);
-        })
-      : facilities;
-    return [...list].sort((a, b) => a.name.localeCompare(b.name));
-  }, [facilities, districts, provinceId, districtId, showFacility]);
-
-  // Smart cascade: downstream selectors are locked when strictCascade is on
-  // and the parent has not yet been selected.
-  const districtLocked = strictCascade && !provinceId;
-  const facilityLocked = strictCascade && (!provinceId || !districtId);
-
-  const hasSelection =
-    (showRegion && regionId) ||
-    provinceId !== null ||
-    districtId !== null ||
-    (showFacility && facilityId);
-
-  const clearAll = () => {
-    if (showRegion && onRegionChange) onRegionChange(null);
-    onProvinceChange(null);
-    onDistrictChange(null);
-    if (showFacility && onFacilityChange) onFacilityChange(null);
-  };
-  */
-
+  
   const sortedProvinces = useMemo(() => {
     let list = provinces;
     if (isProvinceUser || isDistrictUser || isFacilityUser) {
@@ -349,12 +253,16 @@ export function GeoCascadeFilter({
     onProvinceChange(id);
     onDistrictChange(null);
     if (showFacility && onFacilityChange) onFacilityChange(null);
+    setFacilitySelectOpen(false);
+    setDistrictSelectOpen(id !== null);
   };
 
   const handleDistrict = (val: string) => {
     const id = val === "all" ? null : Number(val);
     onDistrictChange(id);
     if (showFacility && onFacilityChange) onFacilityChange(null);
+    setDistrictSelectOpen(false);
+    setFacilitySelectOpen(showFacility && id !== null);
   };
 
   const handleFacility = (val: string) => {
@@ -456,6 +364,8 @@ export function GeoCascadeFilter({
         <Select
           value={districtId?.toString() ?? "all"}
           onValueChange={handleDistrict}
+          open={districtSelectOpen && !districtLocked && filteredDistricts.length > 0}
+          onOpenChange={setDistrictSelectOpen}
           disabled={districtLocked || filteredDistricts.length === 0}
         >
           <SelectTrigger
@@ -492,6 +402,8 @@ export function GeoCascadeFilter({
           <Select
             value={facilityId?.toString() ?? "all"}
             onValueChange={handleFacility}
+            open={facilitySelectOpen && !facilityLocked && filteredFacilities.length > 0}
+            onOpenChange={setFacilitySelectOpen}
             disabled={facilityLocked || filteredFacilities.length === 0}
           >
             <SelectTrigger

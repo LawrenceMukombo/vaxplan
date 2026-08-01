@@ -48,7 +48,7 @@ export const PERMISSION_ALIASES: Record<string, Permission[]> = {
   edit_client: ["client_logbook.update"],
   view_reports: ["dashboard.view", "dropout_rates.view"],
   manage_boundaries: ["polygons.view", "polygons.create", "polygons.update", "polygons.archive", "polygons.validate"],
-  manage_session_plans: ["microplans.create", "microplans.update_draft", "microplans.submit"],
+  manage_session_plans: ["microplans.create", "microplans.update_draft", "microplans.submit", "sessions.plan", "sessions.create"],
   approve_plans: ["microplans.review", "microplans.approve", "microplans.request_changes"],
   view_session_plans: ["microplans.view"],
 };

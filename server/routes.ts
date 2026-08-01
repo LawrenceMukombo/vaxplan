@@ -351,6 +351,13 @@ function canMoveFacilityDistrict(dbUser: any): boolean {
   return permissions.includes("facility.move_district") || permissions.includes("manage_facility_district_moves");
 }
 
+function requirePlatformAdminOnly(req: any, res: any, next: any) {
+  if (req.dbUser?.isPlatformAdmin === true || req.user?.isPlatformAdmin === true) {
+    return next();
+  }
+  return res.status(403).json({ message: "Only a Super Admin can manage country tenants." });
+}
+
 function blockDistrictStaffClientWorkspaces(req: any, res: any, next: any) {
   if (isDistrictStaffRole(req.dbUser)) {
     return res.status(403).json({ message: "Forbidden: district staff do not have access to the client logbook or defaulter list." });
@@ -1143,9 +1150,10 @@ export async function sendApprovalSmsForMicroplan(tenantId: string, microplanId:
   }
 }
 
-// Geofence cache for Zambia boundaries to filter out-of-bounds villages dynamically
+// Per-tenant geofence cache for filtering out-of-bounds villages dynamically.
 export const outsideVillageIds = new Set<number>();
 let zambiaGeoJSON: any = null;
+const tenantBoundaryGeoJSONCache = new Map<string, any | null>();
 
 export function loadZambiaGeoJSON() {
   if (zambiaGeoJSON) return zambiaGeoJSON;
@@ -1162,35 +1170,111 @@ export function isLocationOutsideZambia(lat: number, lng: number): boolean {
   return false;
 }
 
+async function getTenantBoundaryGeoJSON(tenantId: string): Promise<any | null> {
+  if (tenantBoundaryGeoJSONCache.has(tenantId)) {
+    return tenantBoundaryGeoJSONCache.get(tenantId) ?? null;
+  }
+
+  const rows = await db
+    .select({
+      adminLevel: adminBoundaries.adminLevel,
+      geojson: adminBoundaries.geojson,
+      isActive: adminBoundaries.isActive,
+    })
+    .from(adminBoundaries)
+    .where(and(eq(adminBoundaries.tenantId, tenantId), eq(adminBoundaries.isActive, true)))
+    .orderBy(adminBoundaries.adminLevel);
+
+  if (!rows.length) {
+    tenantBoundaryGeoJSONCache.set(tenantId, null);
+    return null;
+  }
+
+  const countryBoundary = rows.find((row) => row.adminLevel === 0) ?? rows[0];
+  tenantBoundaryGeoJSONCache.set(tenantId, countryBoundary.geojson);
+  return countryBoundary.geojson;
+}
+
+async function isLocationOutsideTenantBoundary(tenantId: string, lat: number, lng: number): Promise<boolean> {
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return false;
+  const geojson = await getTenantBoundaryGeoJSON(tenantId);
+  if (!geojson) return false;
+
+  const pt = turfPoint([lng, lat]);
+  const features = geojson.type === "FeatureCollection"
+    ? geojson.features ?? []
+    : geojson.type === "Feature"
+      ? [geojson]
+      : [{ type: "Feature", properties: {}, geometry: geojson }];
+
+  if (!features.length) return false;
+  return !features.some((feature: any) => {
+    try {
+      return turfBooleanPointInPolygon(pt, feature);
+    } catch {
+      return false;
+    }
+  });
+}
+
 export async function initOutsideVillagesCache() {
   try {
     outsideVillageIds.clear();
-    const res = await db.execute(dsql`SELECT id, latitude, longitude FROM villages WHERE latitude IS NOT NULL AND longitude IS NOT NULL`);
+    const res = await db.execute(dsql`SELECT id, tenant_id, latitude, longitude FROM villages WHERE latitude IS NOT NULL AND longitude IS NOT NULL`);
     const allVillages = res.rows || res;
-    console.log(`[GeoCache] Initializing outside-Zambia cache check for ${allVillages.length} villages...`);
+    console.log(`[GeoCache] Initializing tenant boundary cache check for ${allVillages.length} villages...`);
     let count = 0;
     for (const v of allVillages) {
       const lat = Number(v.latitude);
       const lng = Number(v.longitude);
       if (isNaN(lat) || isNaN(lng)) continue;
-      if (isLocationOutsideZambia(lat, lng)) {
+      const tenantId = String(v.tenant_id || "");
+      if (tenantId && await isLocationOutsideTenantBoundary(tenantId, lat, lng)) {
         outsideVillageIds.add(Number(v.id));
         count++;
       }
     }
-    console.log(`[GeoCache] Outside-Zambia cache initialized: found ${count} villages outside Zambia polygons.`);
+    console.log(`[GeoCache] Tenant boundary cache initialized: found ${count} villages outside active country polygons.`);
   } catch (err) {
-    console.error("[GeoCache] Failed to initialize outside-Zambia cache:", err);
+    console.error("[GeoCache] Failed to initialize tenant boundary cache:", err);
   }
+}
+
+async function refreshOutsideVillagesCacheForTenant(tenantId: string) {
+  tenantBoundaryGeoJSONCache.delete(tenantId);
+  const res = await db.execute(dsql`
+    SELECT id, latitude, longitude
+    FROM villages
+    WHERE tenant_id = ${tenantId}
+      AND latitude IS NOT NULL
+      AND longitude IS NOT NULL
+  `);
+  const rows = res.rows || res;
+  let count = 0;
+  for (const v of rows) {
+    const id = Number(v.id);
+    const lat = Number(v.latitude);
+    const lng = Number(v.longitude);
+    outsideVillageIds.delete(id);
+    if (!isNaN(lat) && !isNaN(lng) && await isLocationOutsideTenantBoundary(tenantId, lat, lng)) {
+      outsideVillageIds.add(id);
+      count++;
+    }
+  }
+  console.log(`[GeoCache] Tenant boundary cache refreshed for ${tenantId}: ${count} villages outside active country polygons.`);
 }
 
 export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
-  // Initialize outside-Zambia cache check unless disabled for local startup.
-  if (process.env.SKIP_OUTSIDE_VILLAGES_CACHE === "1") {
-    console.log("[GeoCache] Outside-Zambia cache initialization skipped.");
+  // Initialize tenant boundary cache unless disabled for local/test startup.
+  const skipOutsideVillagesCache =
+    process.env.SKIP_OUTSIDE_VILLAGES_CACHE === "1" ||
+    process.env.NODE_ENV === "test" ||
+    Boolean(process.env.VITEST);
+  if (skipOutsideVillagesCache) {
+    console.log("[GeoCache] Tenant boundary cache initialization skipped.");
   } else {
     await initOutsideVillagesCache();
   }
@@ -1218,7 +1302,7 @@ export async function registerRoutes(
   });
 
   // ─── Country Onboarding Tenant Administration Endpoints ──────────────────────
-  app.get("/api/admin/tenants", isAuthenticated, async (_req, res) => {
+  app.get("/api/admin/tenants", isAuthenticated, requireDbUser, requirePlatformAdminOnly, async (_req, res) => {
     try {
       const activeTenants = await storage.listActiveTenants();
       res.json(activeTenants);
@@ -1228,7 +1312,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/admin/tenants", isAuthenticated, async (req: any, res) => {
+  app.post("/api/admin/tenants", isAuthenticated, requireDbUser, requirePlatformAdminOnly, async (req: any, res) => {
     try {
       const { name, code, countryCode, settings } = req.body || {};
       if (!name || !code || !countryCode) {
@@ -1255,7 +1339,7 @@ export async function registerRoutes(
     }
   });
 
-  app.patch("/api/admin/tenants/:id", isAuthenticated, async (req: any, res) => {
+  app.patch("/api/admin/tenants/:id", isAuthenticated, requireDbUser, requirePlatformAdminOnly, async (req: any, res) => {
     try {
       const { id } = req.params;
       const { name, code, countryCode, settings } = req.body || {};
@@ -1291,7 +1375,7 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/admin/tenants/:id", isAuthenticated, async (req: any, res) => {
+  app.delete("/api/admin/tenants/:id", isAuthenticated, requireDbUser, requirePlatformAdminOnly, async (req: any, res) => {
     try {
       const { id } = req.params;
       const [updated] = await db.update(tenants)
@@ -2700,7 +2784,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/admin/tenants", isAuthenticated, async (req: any, res) => {
+  app.post("/api/admin/tenants", isAuthenticated, requireDbUser, requirePlatformAdminOnly, async (req: any, res) => {
     try {
       if (!checkSuperAdminAccess(req, res)) return;
       const schema = z.object({
@@ -2723,7 +2807,7 @@ export async function registerRoutes(
     }
   });
 
-  app.patch("/api/admin/tenants/:id", isAuthenticated, async (req: any, res) => {
+  app.patch("/api/admin/tenants/:id", isAuthenticated, requireDbUser, requirePlatformAdminOnly, async (req: any, res) => {
     try {
       if (!checkSuperAdminAccess(req, res)) return;
       const schema = z.object({
@@ -2749,7 +2833,7 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/admin/tenants/:id", isAuthenticated, async (req: any, res) => {
+  app.delete("/api/admin/tenants/:id", isAuthenticated, requireDbUser, requirePlatformAdminOnly, async (req: any, res) => {
     try {
       if (!checkSuperAdminAccess(req, res)) return;
       const tenant = await storage.getTenant(req.params.id);
@@ -5437,8 +5521,7 @@ export async function registerRoutes(
           id: coldChainEquipment.id,
           facilityId: coldChainEquipment.facilityId,
           facilityName: facilities.name,
-          facilityCode: facilities.code,
-          provinceId: facilities.provinceId,
+          facilityCode: facilities.hmisCode,
           districtId: facilities.districtId,
           equipmentType: coldChainEquipment.equipmentType,
           brand: coldChainEquipment.brand,
@@ -5769,12 +5852,33 @@ export async function registerRoutes(
         return res.status(400).json({ success: false, message: "Bulk replace/purge requires confirmation text: REPLACE FACILITIES" });
     }
 
+      const allDistricts = await storage.getDistricts(req.tenantId);
+      const districtByName = new Map(allDistricts.map((d) => [d.name.trim().toLowerCase(), d.id]));
+      const districtErrors = importedFacilities
+        .map((item, idx) => ({ item, row: idx + 1 }))
+        .filter(({ item }) => !item.districtName || !districtByName.has(item.districtName.trim().toLowerCase()))
+        .map(({ item, row }) => ({
+          row,
+          hmisCode: item.hmisCode,
+          districtName: item.districtName ?? null,
+          error: item.districtName ? "District not found in this tenant" : "District name is required",
+        }));
+
       const beforeSummary = await summarizeTenantFacilityMaintenance(req.tenantId, importCodes);
+      if (districtErrors.length > 0) {
+        return res.status(400).json({
+          success: false,
+          dryRun,
+          mode,
+          message: "Facility import blocked because one or more rows do not match a known district in the active tenant.",
+          errors: districtErrors,
+          summary: beforeSummary,
+        });
+      }
+
       if (dryRun) {
         return res.json({ success: true, dryRun: true, mode, importCount: importedFacilities.length, summary: beforeSummary, message: "Dry run complete. No facility records were changed." });
-    }
-
-      const allDistricts = await storage.getDistricts(req.tenantId);
+      }
       const { purgeSummary, createdCount, updatedCount } = await db.transaction(async (tx) => {
         const purgeSummary =
           mode === "purge_replace"
@@ -5786,13 +5890,7 @@ export async function registerRoutes(
         let updatedCount = 0;
 
         for (const item of importedFacilities) {
-          let districtId: number | null = null;
-          if (item.districtName) {
-            const matchedDist = allDistricts.find(d => d.name.toLowerCase() === item.districtName!.trim().toLowerCase());
-            if (matchedDist) districtId = matchedDist.id;
-          }
-          if (!districtId) districtId = allDistricts[0]?.id || null;
-          if (!districtId) continue;
+          const districtId = districtByName.get(item.districtName!.trim().toLowerCase())!;
 
           const latVal = item.latitude !== null && item.latitude !== undefined ? parseFloat(item.latitude.toString()) : null;
           const lngVal = item.longitude !== null && item.longitude !== undefined ? parseFloat(item.longitude.toString()) : null;
@@ -6411,7 +6509,7 @@ export async function registerRoutes(
       if (village.latitude != null && village.longitude != null) {
         const latVal = Number(village.latitude);
         const lngVal = Number(village.longitude);
-        if (!isNaN(latVal) && !isNaN(lngVal) && isLocationOutsideZambia(latVal, lngVal)) {
+        if (!isNaN(latVal) && !isNaN(lngVal) && await isLocationOutsideTenantBoundary(req.tenantId, latVal, lngVal)) {
           outsideVillageIds.add(Number(village.id));
         }
       }
@@ -6989,7 +7087,7 @@ export async function registerRoutes(
       if (village.latitude != null && village.longitude != null) {
         const latVal = Number(village.latitude);
         const lngVal = Number(village.longitude);
-        if (!isNaN(latVal) && !isNaN(lngVal) && isLocationOutsideZambia(latVal, lngVal)) {
+        if (!isNaN(latVal) && !isNaN(lngVal) && await isLocationOutsideTenantBoundary(req.tenantId, latVal, lngVal)) {
           outsideVillageIds.add(Number(village.id));
         } else {
           outsideVillageIds.delete(Number(village.id));
@@ -11744,6 +11842,8 @@ export async function registerRoutes(
         isActive: true,
       });
 
+      await refreshOutsideVillagesCacheForTenant(tenantId);
+
       await logAudit(req, "fetch_boundary", "admin_boundary", null, null, {
         countryCode, adminLevel, levelName, featureCount, source,
       });
@@ -11787,6 +11887,8 @@ export async function registerRoutes(
         isActive: true,
       });
 
+      await refreshOutsideVillagesCacheForTenant(tenantId);
+
       await logAudit(req, "upload_boundary", "admin_boundary", null, null, {
         countryCode, adminLevel, levelName, featureCount,
       });
@@ -11802,6 +11904,7 @@ export async function registerRoutes(
     const tenantId = req.tenantId as string;
     const deleted = await storage.deleteAdminBoundary(tenantId, req.params.id);
     if (!deleted) return res.status(404).json({ message: "Boundary not found" });
+    await refreshOutsideVillagesCacheForTenant(tenantId);
     res.json({ success: true });
   });
 
@@ -21469,8 +21572,3 @@ Instructions:
   return httpServer;
 
 }
-
-
-
-
-

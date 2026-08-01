@@ -1,9 +1,24 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { EntityHistoryService } from "../services/entityHistoryService";
 import { AsOfDateService } from "../services/asOfDateService";
+import { db } from "../db";
+import { entityHistoryVersions, tenants } from "@shared/schema";
+import { eq } from "drizzle-orm";
 
 describe("EntityHistoryService and Temporal Versioning", () => {
   const tenantId = "test-tenant-1";
+
+  beforeEach(async () => {
+    await db.delete(entityHistoryVersions).where(eq(entityHistoryVersions.tenantId, tenantId));
+    await db
+      .insert(tenants)
+      .values({ id: tenantId, code: "TST", name: "Test Tenant", countryCode: "TST", status: "active", settings: {} })
+      .onConflictDoNothing();
+  });
+
+  afterAll(async () => {
+    await db.delete(tenants).where(eq(tenants.id, tenantId));
+  });
 
   it("should create initial entity change proposal", async () => {
     const created = await EntityHistoryService.createChange(
