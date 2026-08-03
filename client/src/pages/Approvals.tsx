@@ -23,6 +23,8 @@ import {
   FileText,
   AlertTriangle,
   User,
+  Undo2,
+  History,
 } from "lucide-react";
 import type {
   ApprovalRequest,
@@ -43,13 +45,30 @@ import { ChangeApprovalScreen } from "@/components/history/ChangeApprovalScreen"
 export default function Approvals() {
   const { toast } = useToast();
   const [selectedRequest, setSelectedRequest] = useState<ApprovalRequest | null>(null);
-  const [actionType, setActionType] = useState<"approve" | "reject" | null>(null);
+  const [actionType, setActionType] = useState<"approve" | "reject" | "return" | null>(null);
+  const [historyMicroplanId, setHistoryMicroplanId] = useState<number | null>(null);
   const [comment, setComment] = useState("");
 
   const { data: requests, isLoading } = useQuery<ApprovalRequest[]>({
     queryKey: ["/api/approvals"],
   });
 
+  const { data: versionHistory = [], isLoading: historyLoading } = useQuery<Array<{
+    id: number;
+    versionLabel: string;
+    eventType: string;
+    status: string;
+    reason: string | null;
+    createdAt: string;
+  }>>({
+    queryKey: ["/api/microplans", historyMicroplanId, "versions"],
+    queryFn: async () => {
+      const response = await fetch("/api/microplans/" + historyMicroplanId + "/versions", { credentials: "include" });
+      if (!response.ok) throw new Error("Failed to load microplan history");
+      return response.json();
+    },
+    enabled: historyMicroplanId !== null,
+  });
   const { data: tenant } = useQuery<Tenant>({
     queryKey: ["/api/me/tenant"],
   });
@@ -119,11 +138,11 @@ export default function Approvals() {
       comments,
     }: {
       id: number;
-      action: "approve" | "reject";
+      action: "approve" | "reject" | "return";
       comments: string;
     }) => {
       return apiRequest("PATCH", `/api/approvals/${id}`, {
-        status: action === "approve" ? "approved" : "rejected",
+        status: action === "approve" ? "approved" : action === "return" ? "returned" : "rejected",
         comments,
       });
     },
@@ -133,8 +152,8 @@ export default function Approvals() {
       setActionType(null);
       setComment("");
       toast({
-        title: variables.action === "approve" ? "Approved" : "Rejected",
-        description: `The request has been ${variables.action}d successfully.`,
+        title: variables.action === "approve" ? "Approved" : variables.action === "return" ? "Returned for correction" : "Rejected",
+        description: variables.action === "return" ? "The microplan is editable again and the correction reason was preserved." : "The request was updated successfully.",
       });
     },
     onError: (error) => {
@@ -170,6 +189,9 @@ export default function Approvals() {
   );
   const approvedRequests = enrichWithGeo(
     applyGeoFilter(requests?.filter((r) => r.status === "approved") || []),
+  );
+  const returnedRequests = enrichWithGeo(
+    applyGeoFilter(requests?.filter((r) => r.status === "returned") || []),
   );
   const rejectedRequests = enrichWithGeo(
     applyGeoFilter(requests?.filter((r) => r.status === "rejected") || []),
@@ -264,31 +286,62 @@ export default function Approvals() {
       key: "actions",
       header: "Actions",
       render: (item: ApprovalRequest) => {
-        if (item.status !== "pending") return null;
+        const isMicroplan = item.entityType === "microplan";
         return (
           <div className="flex items-center gap-1">
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => {
-                setSelectedRequest(item);
-                setActionType("approve");
-              }}
-              data-testid={`button-approve-${item.id}`}
-            >
-              <CheckCircle className="h-4 w-4 text-green-600" />
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => {
-                setSelectedRequest(item);
-                setActionType("reject");
-              }}
-              data-testid={`button-reject-${item.id}`}
-            >
-              <XCircle className="h-4 w-4 text-destructive" />
-            </Button>
+            {isMicroplan && (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => setHistoryMicroplanId(item.entityId)}
+                title="Version history"
+                data-testid={"button-history-" + item.id}
+              >
+                <History className="h-4 w-4" />
+              </Button>
+            )}
+            {item.status === "pending" && (
+              <>
+                {isMicroplan && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      setSelectedRequest(item);
+                      setActionType("return");
+                    }}
+                    data-testid={"button-revert-" + item.id}
+                  >
+                    <Undo2 className="mr-1 h-4 w-4" />
+                    Revert
+                  </Button>
+                )}
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => {
+                    setSelectedRequest(item);
+                    setActionType("approve");
+                  }}
+                  title="Approve"
+                  data-testid={"button-approve-" + item.id}
+                >
+                  <CheckCircle className="h-4 w-4 text-green-600" />
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => {
+                    setSelectedRequest(item);
+                    setActionType("reject");
+                  }}
+                  title="Reject permanently"
+                  data-testid={"button-reject-" + item.id}
+                >
+                  <XCircle className="h-4 w-4 text-destructive" />
+                </Button>
+              </>
+            )}
           </div>
         );
       },
@@ -410,6 +463,9 @@ export default function Approvals() {
           <TabsTrigger value="approved" data-testid="tab-approved">
             Approved
           </TabsTrigger>
+          <TabsTrigger value="returned" data-testid="tab-returned">
+            Returned ({returnedRequests.length})
+          </TabsTrigger>
           <TabsTrigger value="rejected" data-testid="tab-rejected">
             Rejected
           </TabsTrigger>
@@ -447,6 +503,19 @@ export default function Approvals() {
           </Card>
         </TabsContent>
 
+        <TabsContent value="returned" className="mt-4">
+          <Card>
+            <CardContent className="p-6">
+              <DataTable
+                data={returnedRequests}
+                columns={columns}
+                searchable
+                searchKeys={["entityType", "currentLevel"]}
+                emptyMessage="No requests have been returned for correction."
+              />
+            </CardContent>
+          </Card>
+        </TabsContent>
         <TabsContent value="rejected" className="mt-4">
           <Card>
             <CardContent className="p-6">
@@ -473,7 +542,7 @@ export default function Approvals() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>
-              {actionType === "approve" ? "Approve Request" : "Reject Request"}
+              {actionType === "approve" ? "Approve Request" : actionType === "return" ? "Return for Correction" : "Reject Request"}
             </DialogTitle>
           </DialogHeader>
 
@@ -492,12 +561,14 @@ export default function Approvals() {
 
             <div className="space-y-2">
               <label className="text-sm font-medium">
-                Comments {actionType === "reject" && "(Required)"}
+                Comments {actionType !== "approve" && "(Required)"}
               </label>
               <Textarea
                 placeholder={
                   actionType === "approve"
                     ? "Optional comments..."
+                    : actionType === "return"
+                    ? "Describe the corrections required..."
                     : "Please provide a reason for rejection..."
                 }
                 value={comment}
@@ -523,7 +594,7 @@ export default function Approvals() {
                 onClick={handleAction}
                 disabled={
                   actionMutation.isPending ||
-                  (actionType === "reject" && !comment.trim())
+                  (actionType !== "approve" && !comment.trim())
                 }
                 data-testid="button-confirm-action"
               >
@@ -531,6 +602,8 @@ export default function Approvals() {
                   ? "Processing..."
                   : actionType === "approve"
                   ? "Approve"
+                  : actionType === "return"
+                  ? "Return for correction"
                   : "Reject"}
               </Button>
             </div>
@@ -538,6 +611,38 @@ export default function Approvals() {
         </DialogContent>
       </Dialog>
 
+      <Dialog open={historyMicroplanId !== null} onOpenChange={(open) => !open && setHistoryMicroplanId(null)}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Microplan Version History</DialogTitle>
+          </DialogHeader>
+          <div className="max-h-[60vh] space-y-2 overflow-y-auto">
+            {historyLoading ? (
+              <Skeleton className="h-24 w-full" />
+            ) : versionHistory.length === 0 ? (
+              <p className="py-8 text-center text-sm text-muted-foreground">
+                No checkpoints exist yet. A version is created when the plan is submitted, returned, rejected, or approved.
+              </p>
+            ) : (
+              versionHistory.map((version) => (
+                <div key={version.id} className="flex items-start justify-between gap-4 rounded-md border p-3">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <Badge variant="outline">{version.versionLabel}</Badge>
+                      <span className="font-medium capitalize">{version.eventType.replace(/_/g, " ")}</span>
+                      <ApprovalBadge status={version.status as any} />
+                    </div>
+                    {version.reason && <p className="mt-2 text-sm text-muted-foreground">{version.reason}</p>}
+                  </div>
+                  <time className="whitespace-nowrap text-xs text-muted-foreground">
+                    {format(new Date(version.createdAt), "MMM d, yyyy HH:mm")}
+                  </time>
+                </div>
+              ))
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
       <Card>
         <CardHeader>
           <CardTitle className="text-lg">Approval Hierarchy</CardTitle>

@@ -39,6 +39,8 @@ import { applySettlementsGisMigration } from "./migrations/024-settlements-gis-m
 import { applyPolygonPlanningMigration } from "./migrations/026-polygon-planning";
 import { applyPolygonLifecycleMigration } from "./migrations/028-polygon-lifecycle";
 import { upsertPolygonPermissionsForAllTenants } from "./migrations/029-polygon-permissions-all-tenants";
+import { applyMicroplanVersionControlMigration } from "./migrations/030-microplan-version-control";
+import { upsertMicroplanVersionPermissionsForAllTenants } from "./migrations/031-microplan-version-permissions";
 const app = express();
 const httpServer = createServer(app);
 const skipDbBootstrap = process.env.SKIP_DB_BOOTSTRAP === '1';
@@ -347,6 +349,13 @@ async function backfillClientIds() {
       .then(() => log("polygon permissions upserted for all tenants", "db"))
       .catch((err) => log("polygon permission upsert warning: " + String(err?.message ?? err), "db"))
   ).catch((err) => log("polygon permission upsert db import failed: " + String(err?.message ?? err), "db"));
+  // Immutable microplan snapshots and all-tenant workflow permissions.
+  import("./db").then(({ db }) =>
+    applyMicroplanVersionControlMigration(db as any)
+      .then(() => upsertMicroplanVersionPermissionsForAllTenants(db as any))
+      .then(() => log("microplan version control and permissions ready", "db"))
+      .catch((err) => log("microplan version control migration warning: " + String(err?.message ?? err), "db"))
+  ).catch((err) => log("microplan version control db import failed: " + String(err?.message ?? err), "db"));
   // Stock ledger columns upgrade (migration 027)
   import("./db").then(({ db }) =>
     import("./migrations/027-stock-ledger-columns").then(({ applyStockLedgerColumnsMigration }) =>

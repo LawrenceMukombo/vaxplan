@@ -275,6 +275,8 @@ export const ROLE_PERMISSIONS: Record<string, Permission[]> = {
 */
 export const ROLE_PERMISSIONS: Record<string, Permission[]> = {
   facility_clerk: [
+    "microplan.view_history",
+    "microplan.compare_versions",
     "polygon.view",
     "polygon.create",
     "polygon.edit",
@@ -294,6 +296,8 @@ export const ROLE_PERMISSIONS: Record<string, Permission[]> = {
     "view_budget",
   ],
   facility_in_charge: [
+    "microplan.view_history",
+    "microplan.compare_versions",
     "polygon.view",
     "polygon.create",
     "polygon.edit",
@@ -320,6 +324,9 @@ export const ROLE_PERMISSIONS: Record<string, Permission[]> = {
     "manage_reports",
   ],
   district_manager: [
+    "microplan.view_history",
+    "microplan.compare_versions",
+    "microplan.return_for_correction",
     "polygon.view",
     "polygon.view_history",
     "polygon.compare_versions",
@@ -335,6 +342,9 @@ export const ROLE_PERMISSIONS: Record<string, Permission[]> = {
     "view_reports",
   ],
   provincial_coordinator: [
+    "microplan.view_history",
+    "microplan.compare_versions",
+    "microplan.return_for_correction",
     "polygon.view",
     "polygon.view_history",
     "polygon.compare_versions",
@@ -369,6 +379,24 @@ export const ROLE_PERMISSIONS: Record<string, Permission[]> = {
     "temporal.propose_change",
   ],
   national_admin: [
+    "polygon.view",
+    "polygon.create",
+    "polygon.edit",
+    "polygon.delete_draft",
+    "polygon.archive",
+    "polygon.replace",
+    "polygon.approve",
+    "polygon.override_validation",
+    "polygon.view_history",
+    "polygon.compare_versions",
+    "polygon.recalculate_population",
+    "microplan.view_history",
+    "microplan.compare_versions",
+    "microplan.return_for_correction",
+    "microplan.restore_version",
+    "microplan.rebaseline",
+    "microplan.view_audit",
+    "microplan.export_version",
     "view_clients",
     "create_client",
     "edit_client",

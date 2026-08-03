@@ -811,6 +811,26 @@ export const microplans = pgTable("microplans", {
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 }, (table) => [index("idx_microplans_tenant").on(table.tenantId)]);
+// Immutable checkpoints for the microplan lifecycle. The microplans row remains
+// the stable identity used by existing modules; each workflow transition stores
+// a complete, tenant-scoped snapshot here so review and restoration never rely
+// on mutable live rows alone.
+export const microplanVersions = pgTable("microplan_versions", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  microplanId: integer("microplan_id").notNull().references(() => microplans.id, { onDelete: "cascade" }),
+  versionNumber: integer("version_number").notNull(),
+  versionLabel: varchar("version_label", { length: 50 }).notNull(),
+  eventType: varchar("event_type", { length: 50 }).notNull(),
+  status: varchar("status", { length: 50 }).notNull(),
+  reason: text("reason"),
+  snapshot: jsonb("snapshot").notNull(),
+  createdByUserId: varchar("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => [
+  index("idx_microplan_versions_tenant_plan").on(table.tenantId, table.microplanId),
+  unique("uq_microplan_versions_plan_number").on(table.microplanId, table.versionNumber),
+]);
 
 
 // Session Plans (Vaccination) - Modified to include microplanId link, custom polygon geofencing geojson, and isAchieved tick status.
@@ -1299,6 +1319,13 @@ export const microplansRelations = relations(microplans, ({ one, many }) => ({
   tenant: one(tenants, { fields: [microplans.tenantId], references: [tenants.id] }),
   facility: one(facilities, { fields: [microplans.facilityId], references: [facilities.id] }),
   sessionPlans: many(sessionPlans),
+  versions: many(microplanVersions),
+}));
+export const microplanVersionsRelations = relations(microplanVersions, ({ one }) => ({
+  microplan: one(microplans, {
+    fields: [microplanVersions.microplanId],
+    references: [microplans.id],
+  }),
 }));
 
 export const sessionPlansRelations = relations(sessionPlans, ({ one, many }) => ({

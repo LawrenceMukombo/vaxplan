@@ -65,8 +65,8 @@ export const PERMISSION_ALIASES: Record<string, Permission[]> = {
     "polygon.compare_versions",
     "polygon.recalculate_population",
   ],
-  manage_session_plans: ["microplans.create", "microplans.update_draft", "microplans.submit", "sessions.plan", "sessions.create"],
-  approve_plans: ["microplans.review", "microplans.approve", "microplans.request_changes"],
+  manage_session_plans: ["microplans.create", "microplans.update_draft", "microplans.submit", "sessions.plan", "sessions.create", "microplan.view_history", "microplan.compare_versions"],
+  approve_plans: ["microplans.review", "microplans.approve", "microplans.request_changes", "microplan.view_history", "microplan.compare_versions", "microplan.return_for_correction"],
   view_session_plans: ["microplans.view"],
 };
 

@@ -30,6 +30,13 @@ import { surveillanceRouter } from "./routes/surveillance";
 import vgieRouter from "./routes/vgie";
 import { researchRouter } from "./routes/research";
 import { registerPolygonLifecycleRoutes } from "./routes/polygonLifecycle";
+import {
+  compareMicroplanSnapshots,
+  createMicroplanVersion,
+  getMicroplanVersion,
+  listMicroplanVersions,
+  restoreMicroplanVersionAsDraft,
+} from "./services/microplanVersionService";
 import catalogueRouter from "./routes/catalogue";
 import { VgieService } from "./services/vgieService";
 import {
@@ -11373,6 +11380,66 @@ export async function registerRoutes(
   });
 
   // ─── Approvals ────────────────────────────────────────
+  // Microplan version history is additive and tenant scoped. Historical
+  // snapshots are immutable; restore always creates a new editable draft.
+  app.get("/api/microplans/:id/versions", ...auth, requirePermission("microplan.view_history"), async (req: any, res) => {
+    try {
+      const microplanId = Number(req.params.id);
+      const plan = await storage.getMicroplan(req.tenantId, microplanId);
+      if (!plan) return res.status(404).json({ message: "Microplan not found" });
+      res.json(await listMicroplanVersions(db as any, req.tenantId, microplanId));
+    } catch (error) {
+      console.error("Error listing microplan versions:", error);
+      res.status(500).json({ message: "Failed to list microplan versions" });
+    }
+  });
+
+  app.get("/api/microplans/:id/versions/:versionId", ...auth, requirePermission("microplan.view_history"), async (req: any, res) => {
+    try {
+      const version = await getMicroplanVersion(db as any, req.tenantId, Number(req.params.id), Number(req.params.versionId));
+      if (!version) return res.status(404).json({ message: "Microplan version not found" });
+      res.json(version);
+    } catch (error) {
+      console.error("Error fetching microplan version:", error);
+      res.status(500).json({ message: "Failed to fetch microplan version" });
+    }
+  });
+
+  app.get("/api/microplans/:id/compare-versions/:leftId/:rightId", ...auth, requirePermission("microplan.compare_versions"), async (req: any, res) => {
+    try {
+      const microplanId = Number(req.params.id);
+      const left = await getMicroplanVersion(db as any, req.tenantId, microplanId, Number(req.params.leftId));
+      const right = await getMicroplanVersion(db as any, req.tenantId, microplanId, Number(req.params.rightId));
+      if (!left || !right) return res.status(404).json({ message: "One or both microplan versions were not found" });
+      res.json({ left: left.versionLabel, right: right.versionLabel, changes: compareMicroplanSnapshots(left.snapshot, right.snapshot) });
+    } catch (error) {
+      console.error("Error comparing microplan versions:", error);
+      res.status(500).json({ message: "Failed to compare microplan versions" });
+    }
+  });
+
+  app.post("/api/microplans/:id/versions/:versionId/restore", ...auth, requirePermission("microplan.restore_version"), async (req: any, res) => {
+    try {
+      const reason = String(req.body?.reason || "").trim();
+      if (!reason) return res.status(400).json({ message: "A restoration reason is required" });
+      const version = await restoreMicroplanVersionAsDraft(db as any, {
+        tenantId: req.tenantId,
+        microplanId: Number(req.params.id),
+        versionId: Number(req.params.versionId),
+        userId: req.user.claims.sub,
+        reason,
+      });
+      await logAudit(req, "restore_version", "microplan", Number(req.params.id), null, {
+        sourceVersionId: Number(req.params.versionId),
+        restoredVersionId: version.id,
+        reason,
+      });
+      res.status(201).json(version);
+    } catch (error: any) {
+      console.error("Error restoring microplan version:", error);
+      res.status(error?.message?.includes("not found") ? 404 : 400).json({ message: error?.message || "Failed to restore microplan version" });
+    }
+  });
   // Read + decision endpoints are restricted to roles that can actually
   // approve (district/provincial/national). Submitting an approval request
   // (POST) stays open to any authenticated tenant user so facility staff
@@ -11441,6 +11508,15 @@ export async function registerRoutes(
               updatedAt: now,
             })
             .where(and(eq(microplans.id, data.entityId), eq(microplans.tenantId, req.tenantId)));
+
+          await createMicroplanVersion(db as any, {
+            tenantId: req.tenantId,
+            microplanId: data.entityId,
+            userId: req.user.claims.sub,
+            eventType: "submitted",
+            status: "pending",
+            reason: data.comments || null,
+          });
 
           // Notify district officials immediately
           const mp = await storage.getMicroplan(req.tenantId, data.entityId);
@@ -11520,9 +11596,16 @@ export async function registerRoutes(
       const entityId = parseInt(req.params.id);
       const oldRequest = await storage.getApprovalRequest(req.tenantId, entityId);
       const { status, comments } = req.body;
+      const allowedStatuses = new Set(["approved", "rejected", "returned"]);
+      if (!allowedStatuses.has(status)) {
+        return res.status(400).json({ message: "Status must be approved, rejected, or returned" });
+      }
+      if ((status === "rejected" || status === "returned") && !String(comments || "").trim()) {
+        return res.status(400).json({ message: "A correction or rejection reason is required" });
+      }
       const updateData: any = { status };
       if (comments) updateData.comments = comments;
-      if (status === "approved" || status === "rejected") {
+      if (status === "approved" || status === "rejected" || status === "returned") {
         updateData.resolvedAt = new Date();
         updateData.resolvedById = req.user.claims.sub;
       }
@@ -11557,6 +11640,14 @@ export async function registerRoutes(
             const oldMp = await storage.getMicroplan(req.tenantId, request.entityId);
             const updatedMp = await storage.updateMicroplan(req.tenantId, request.entityId, { status: "approved" } as any);
             if (updatedMp && oldMp && oldMp.status !== "approved") {
+              await createMicroplanVersion(db as any, {
+                tenantId: req.tenantId,
+                microplanId: updatedMp.id,
+                userId: req.user.claims.sub,
+                eventType: "approved",
+                status: "approved",
+                reason: comments || null,
+              });
               try {
                 const seeded = await seedQuarterlySupervisionVisits(req.tenantId, updatedMp, req.user?.claims?.sub ?? null);
                 if (seeded.length > 0) {
@@ -11587,10 +11678,23 @@ export async function registerRoutes(
       // no "rejected" value, so "draft" is the closest editable state.
       // If the microplan was previously approved (mid-cycle revoke), cancel
       // its auto-seeded supervisory visits to mirror the direct-patch route.
-      if (status === "rejected" && request.entityType === "microplan") {
+      if ((status === "rejected" || status === "returned") && request.entityType === "microplan") {
         try {
           const oldMp = await storage.getMicroplan(req.tenantId, request.entityId);
-          await storage.updateMicroplan(req.tenantId, request.entityId, { status: "draft" } as any);
+          await storage.updateMicroplan(req.tenantId, request.entityId, {
+            status: "draft",
+            districtEditReason: String(comments || "").trim(),
+            submittedAt: null,
+            autoApproveAt: null,
+          } as any);
+          await createMicroplanVersion(db as any, {
+            tenantId: req.tenantId,
+            microplanId: request.entityId,
+            userId: req.user.claims.sub,
+            eventType: status === "returned" ? "returned" : "rejected",
+            status: status === "returned" ? "returned" : "rejected",
+            reason: String(comments || "").trim(),
+          });
           if (oldMp?.status === "approved") {
             const result = await cancelSeededSupervisionVisitsForMicroplan(
               req.tenantId,
@@ -11600,7 +11704,7 @@ export async function registerRoutes(
             if (result.deletedIds.length > 0 || result.cancelledIds.length > 0) {
               await logAudit(req, "auto_cancel_supervision_visits", "microplan", request.entityId, null, {
                 microplanId: request.entityId,
-                reason: "approval_rejected",
+                reason: status === "returned" ? "approval_returned" : "approval_rejected",
                 newStatus: "draft",
                 deletedVisitIds: result.deletedIds,
                 cancelledVisitIds: result.cancelledIds,
