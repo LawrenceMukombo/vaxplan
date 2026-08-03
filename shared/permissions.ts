@@ -275,6 +275,13 @@ export const ROLE_PERMISSIONS: Record<string, Permission[]> = {
 */
 export const ROLE_PERMISSIONS: Record<string, Permission[]> = {
   facility_clerk: [
+    "polygon.view",
+    "polygon.create",
+    "polygon.edit",
+    "polygon.replace",
+    "polygon.delete_draft",
+    "polygon.view_history",
+    "polygon.compare_versions",
     "view_clients",
     "create_client",
     "log_immunization",
@@ -287,6 +294,15 @@ export const ROLE_PERMISSIONS: Record<string, Permission[]> = {
     "view_budget",
   ],
   facility_in_charge: [
+    "polygon.view",
+    "polygon.create",
+    "polygon.edit",
+    "polygon.replace",
+    "polygon.delete_draft",
+    "polygon.archive",
+    "polygon.view_history",
+    "polygon.compare_versions",
+    "polygon.recalculate_population",
     "view_clients",
     "create_client",
     "edit_client",
@@ -304,6 +320,11 @@ export const ROLE_PERMISSIONS: Record<string, Permission[]> = {
     "manage_reports",
   ],
   district_manager: [
+    "polygon.view",
+    "polygon.view_history",
+    "polygon.compare_versions",
+    "polygon.approve",
+    "polygon.override_validation",
     "view_clients",
     "view_session_plans",
     "approve_plans",
@@ -314,6 +335,11 @@ export const ROLE_PERMISSIONS: Record<string, Permission[]> = {
     "view_reports",
   ],
   provincial_coordinator: [
+    "polygon.view",
+    "polygon.view_history",
+    "polygon.compare_versions",
+    "polygon.approve",
+    "polygon.override_validation",
     "view_clients",
     "view_session_plans",
     "approve_plans",
@@ -329,6 +355,15 @@ export const ROLE_PERMISSIONS: Record<string, Permission[]> = {
     "view_mobilization",
     "view_budget",
     "manage_boundaries",
+    "polygon.view",
+    "polygon.create",
+    "polygon.edit",
+    "polygon.delete_draft",
+    "polygon.archive",
+    "polygon.replace",
+    "polygon.view_history",
+    "polygon.compare_versions",
+    "polygon.recalculate_population",
     "temporal.view",
     "temporal.view_history",
     "temporal.propose_change",
@@ -412,7 +447,3 @@ export const ROLE_PERMISSIONS: Record<string, Permission[]> = {
     "temporal.review_change",
   ],
 };
-
-
-
-

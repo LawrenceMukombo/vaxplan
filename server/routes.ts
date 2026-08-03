@@ -29,6 +29,7 @@ import { dispatchNotification } from "./services/uce";
 import { surveillanceRouter } from "./routes/surveillance";
 import vgieRouter from "./routes/vgie";
 import { researchRouter } from "./routes/research";
+import { registerPolygonLifecycleRoutes } from "./routes/polygonLifecycle";
 import catalogueRouter from "./routes/catalogue";
 import { VgieService } from "./services/vgieService";
 import {
@@ -763,6 +764,17 @@ const SYSTEM_USER_PERMISSIONS: { code: string; name: string; description: string
   { code: "permissions.view", name: "View Permission Registry", description: "View available system permissions." },
   { code: "permissions.assign", name: "Manage Permission Registry", description: "Create, edit, or retire permission registry entries." },
   { code: "permissions.super_admin", name: "Super Delegation", description: "Allows exceptional delegation above the caller's role level." },
+  { code: "polygon.view", name: "View Polygons", description: "View official and draft polygons within assigned scope." },
+  { code: "polygon.create", name: "Create Polygons", description: "Create draft polygons within assigned scope." },
+  { code: "polygon.edit", name: "Edit Polygons", description: "Create versioned polygon corrections within assigned scope." },
+  { code: "polygon.delete_draft", name: "Delete Unused Draft Polygons", description: "Permanently delete draft polygons that have no historical use." },
+  { code: "polygon.archive", name: "Archive Polygons", description: "Archive polygon versions while preserving history." },
+  { code: "polygon.replace", name: "Replace Polygons", description: "Propose replacement geometry as a new version." },
+  { code: "polygon.approve", name: "Approve Polygon Changes", description: "Approve or reject submitted polygon versions." },
+  { code: "polygon.override_validation", name: "Override Polygon Warnings", description: "Approve configured polygon warnings with a recorded reason." },
+  { code: "polygon.view_history", name: "View Polygon History", description: "View prior and proposed polygon versions." },
+  { code: "polygon.compare_versions", name: "Compare Polygon Versions", description: "Compare geometry, area, population, and planning impact." },
+  { code: "polygon.recalculate_population", name: "Recalculate Polygon Population", description: "Recalculate population for a polygon version from configured sources." },
   { code: "view_reports", name: "View Reports", description: "Legacy alias for dashboard and reporting access." },
   { code: "dashboard.view", name: "View Dashboard", description: "View dashboard indicators and summary metrics." },
   { code: "reports.view", name: "View Reports", description: "View generated reports and summaries." },
@@ -19768,8 +19780,8 @@ Instructions:
           eq(gisPolygons.tenantId, req.tenantId),
           eq(gisPolygons.ownerType, "facility"),
           eq(gisPolygons.ownerId, facilityId),
-          eq(gisPolygons.status, "draft")
-        )).limit(1);
+          inArray(gisPolygons.status, ["draft", "submitted_for_review", "needs_correction"])
+        )).orderBy(desc(gisPolygons.version)).limit(1);
 
       res.json({
         catchmentPolygon: activeGeo?.geometry || row.catchmentPolygon || null,
@@ -19828,6 +19840,23 @@ Instructions:
 
       const { geojson, gridPopulation, status = 'active' } = req.body;
       const { gisPolygons } = await import("@shared/schema");
+
+      if (status === "active") {
+        const [currentActive] = await db.select({ id: gisPolygons.id }).from(gisPolygons)
+          .where(and(
+            eq(gisPolygons.tenantId, req.tenantId),
+            eq(gisPolygons.ownerType, "facility"),
+            eq(gisPolygons.ownerId, facilityId),
+            eq(gisPolygons.isActive, true),
+            eq(gisPolygons.status, "active")
+          )).limit(1);
+        if (currentActive) {
+          return res.status(409).json({
+            code: "POLYGON_VERSION_REQUIRED",
+            message: "This approved catchment cannot be overwritten. Use the polygon edit or replace workflow to create a reviewable version."
+          });
+        }
+      }
 
       if (status === 'clear_draft') {
         await db.update(gisPolygons).set({ status: "archived", isActive: false, updatedAt: new Date() })
@@ -19890,6 +19919,7 @@ Instructions:
         tenantId: req.tenantId,
         ownerType: "facility",
         ownerId: facilityId,
+        parentFacilityId: facilityId,
         polygonType: "catchment" as "custom" | "catchment" | "outreach_area" | "administrative_boundary",
         geometry: geojson as any,
         centroid: centroid as any,
@@ -19900,6 +19930,10 @@ Instructions:
         populationMethod: popMethod,
         confidence: confidence,
         status: status,
+        version: 1,
+        isActive: status === "active",
+        validFrom: status === "active" ? new Date() : null,
+        changeType: "created",
         validationStatus: "valid",
         approvalStatus: status === "active" ? "approved" : "draft",
         createdBy: createdBy,
@@ -20008,8 +20042,8 @@ Instructions:
           eq(gisPolygons.tenantId, req.tenantId),
           eq(gisPolygons.ownerType, "village"),
           eq(gisPolygons.ownerId, villageId),
-          eq(gisPolygons.status, "draft")
-        )).limit(1);
+          inArray(gisPolygons.status, ["draft", "submitted_for_review", "needs_correction"])
+        )).orderBy(desc(gisPolygons.version)).limit(1);
 
       res.json({
         catchmentPolygon: activeGeo?.geometry || row.catchmentPolygon || row.boundary || null,
@@ -20082,6 +20116,23 @@ Instructions:
 
       const { geojson, griddedPopulation, polygonColor, populationSourceLabel, status = 'active', overrideReason } = req.body;
       const { gisPolygons } = await import("@shared/schema");
+
+      if (status === "active") {
+        const [currentActive] = await db.select({ id: gisPolygons.id }).from(gisPolygons)
+          .where(and(
+            eq(gisPolygons.tenantId, req.tenantId),
+            eq(gisPolygons.ownerType, "village"),
+            eq(gisPolygons.ownerId, villageId),
+            eq(gisPolygons.isActive, true),
+            eq(gisPolygons.status, "active")
+          )).limit(1);
+        if (currentActive) {
+          return res.status(409).json({
+            code: "POLYGON_VERSION_REQUIRED",
+            message: "This approved community boundary cannot be overwritten. Use the polygon edit or replace workflow to create a reviewable version."
+          });
+        }
+      }
 
       if (status === 'clear_draft') {
         await db.update(gisPolygons).set({ status: "archived", isActive: false, updatedAt: new Date() })
@@ -20182,6 +20233,7 @@ Instructions:
         tenantId: req.tenantId,
         ownerType: "village",
         ownerId: villageId,
+        parentFacilityId: village.facilityId || null,
         polygonType: "catchment" as "custom" | "catchment" | "outreach_area" | "administrative_boundary",
         geometry: geojson as any,
         centroid: centroid as any,
@@ -20192,6 +20244,10 @@ Instructions:
         populationMethod: popMethod,
         confidence: confidence,
         status: status,
+        version: 1,
+        isActive: status === "active",
+        validFrom: status === "active" ? new Date() : null,
+        changeType: "created",
         validationStatus: "valid",
         approvalStatus: status === "active" ? "approved" : "draft",
         overrideReason: overrideReason || null,
@@ -21588,6 +21644,11 @@ Instructions:
     }
   });
 
+  registerPolygonLifecycleRoutes(app, {
+    auth,
+    canAccessGeo: userCanAccessGeo,
+    logAudit,
+  });
   return httpServer;
 
 }

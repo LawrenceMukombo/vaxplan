@@ -3636,7 +3636,18 @@ export const gisPolygons = pgTable("gis_polygons", {
   method: varchar("method", { length: 100 }),
   status: varchar("status", { length: 50 }).default("active"),
   version: integer("version").default(1),
+  previousVersionId: integer("previous_version_id"),
+  replacedVersionId: integer("replaced_version_id"),
+  parentFacilityId: integer("parent_facility_id"),
   isActive: boolean("is_active").default(true),
+  validFrom: timestamp("valid_from").defaultNow(),
+  validTo: timestamp("valid_to"),
+  changeType: varchar("change_type", { length: 50 }).default("created"),
+  changeReason: text("change_reason"),
+  submittedBy: varchar("submitted_by", { length: 255 }),
+  submittedAt: timestamp("submitted_at"),
+  rejectionReason: text("rejection_reason"),
+  metadataJson: jsonb("metadata_json").default({}),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
   centroid: jsonb("centroid"),
@@ -3654,6 +3665,7 @@ export const gisPolygons = pgTable("gis_polygons", {
 }, (table) => ({
   tenantIdx: index("idx_gis_polygons_tenant").on(table.tenantId),
   ownerIdx: index("idx_gis_polygons_owner").on(table.ownerType, table.ownerId),
+  ownerVersionIdx: index("idx_gis_polygons_owner_version").on(table.tenantId, table.ownerType, table.ownerId, table.version),
 }));
 
 export const gisPolygonsRelations = relations(gisPolygons, ({ one }) => ({
@@ -3988,4 +4000,3 @@ export type StockReferenceHistoryVersion = typeof stockReferenceHistoryVersions.
 export const insertReportEntitySnapshotSchema = createInsertSchema(reportEntitySnapshots);
 export const selectReportEntitySnapshotSchema = createSelectSchema(reportEntitySnapshots);
 export type ReportEntitySnapshot = typeof reportEntitySnapshots.$inferSelect;
-

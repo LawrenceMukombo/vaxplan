@@ -37,6 +37,8 @@ import { up as applyResearchHubSchema } from "./migrations/022-research-hub-sche
 import { applySafeGeometryFixes } from "./migrations/023-safe-geometry";
 import { applySettlementsGisMigration } from "./migrations/024-settlements-gis-microplanning";
 import { applyPolygonPlanningMigration } from "./migrations/026-polygon-planning";
+import { applyPolygonLifecycleMigration } from "./migrations/028-polygon-lifecycle";
+import { upsertPolygonPermissionsForAllTenants } from "./migrations/029-polygon-permissions-all-tenants";
 const app = express();
 const httpServer = createServer(app);
 const skipDbBootstrap = process.env.SKIP_DB_BOOTSTRAP === '1';
@@ -333,6 +335,18 @@ async function backfillClientIds() {
       .catch((err) => log(`polygon planning metadata migration warning: ${err?.message ?? err}`, "db"))
   ).catch((err) => log(`polygon planning metadata db import failed: ${err?.message ?? err}`, "db"));
 
+  // Versioned polygon lifecycle, approval, and impact metadata (migration 028)
+  import("./db").then(({ db }) =>
+    applyPolygonLifecycleMigration(db as any)
+      .then(() => log("polygon lifecycle migration complete", "db"))
+      .catch((err) => log(`polygon lifecycle migration warning: ${err?.message ?? err}`, "db"))
+  ).catch((err) => log(`polygon lifecycle migration db import failed: ${err?.message ?? err}`, "db"));
+  // Idempotently merge polygon permissions into every tenant role configuration.
+  import("./db").then(({ db }) =>
+    upsertPolygonPermissionsForAllTenants(db as any)
+      .then(() => log("polygon permissions upserted for all tenants", "db"))
+      .catch((err) => log("polygon permission upsert warning: " + String(err?.message ?? err), "db"))
+  ).catch((err) => log("polygon permission upsert db import failed: " + String(err?.message ?? err), "db"));
   // Stock ledger columns upgrade (migration 027)
   import("./db").then(({ db }) =>
     import("./migrations/027-stock-ledger-columns").then(({ applyStockLedgerColumnsMigration }) =>

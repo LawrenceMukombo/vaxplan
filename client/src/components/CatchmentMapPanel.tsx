@@ -16,7 +16,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  MapContainer, TileLayer, Polygon, Marker, Popup, useMap,
+  MapContainer, TileLayer, Polygon, Marker, Popup, GeoJSON, useMap,
 } from "react-leaflet";
 import L from "leaflet";
 import { usePersistedBasemap, BasemapTileLayer, BasemapSwitcher } from "@/components/map/BasemapToggle";
@@ -30,6 +30,8 @@ import type {
 
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/useAuth";
+import { hasAnyPermission } from "@/lib/accessControl";
 import { PolygonIntelligenceCard, type IntelligenceResult } from "@/components/PolygonIntelligenceCard";
 import "leaflet/dist/leaflet.css";
 
@@ -85,6 +87,31 @@ export interface CatchmentPolygon extends PolygonPlanningMeta {
   locked: boolean;
 }
 
+type LifecycleAction = "edit" | "replace";
+type LifecycleEntity = { entityType: "facility" | "village"; entityId: number; action: LifecycleAction; originalCoords: [number, number][] };
+type LifecycleValidation = {
+  valid: boolean;
+  blockingErrors: Array<{ code: string; message: string; geometry?: any }>;
+  warnings: Array<{ code: string; message: string; geometry?: any }>;
+  information: Array<{ code: string; message: string }>;
+  areaSqKm?: number;
+  centroid?: { latitude: number; longitude: number } | null;
+};
+type LifecycleVersion = {
+  id: number;
+  version: number;
+  status: string;
+  approvalStatus?: string | null;
+  changeType?: string | null;
+  changeReason?: string | null;
+  areaSqKm?: string | number | null;
+  populationEstimate?: number | null;
+  createdBy?: string | null;
+  approvedBy?: string | null;
+  validFrom?: string | null;
+  createdAt?: string | null;
+  geometry?: any;
+};
 interface ExtractResult {
   villages: Array<{ id: number; name: string; latitude?: number; longitude?: number }>;
   settlements: Array<{ id: number; name: string; latitude: number; longitude: number; populationEstimate?: number }>;
@@ -276,6 +303,40 @@ function DrawingController({
   return null;
 }
 
+function VertexEditor({
+  coords,
+  color,
+  onChange,
+}: {
+  coords: [number, number][];
+  color: string;
+  onChange: (coords: [number, number][]) => void;
+}) {
+  const icon = L.divIcon({
+    className: "",
+    html: '<span style="display:block;width:14px;height:14px;border-radius:50%;background:' + color + ';border:3px solid white;box-shadow:0 1px 5px rgba(0,0,0,.45)"></span>',
+    iconSize: [14, 14],
+    iconAnchor: [7, 7],
+  });
+  return (
+    <>
+      {coords.map((position, index) => (
+        <Marker
+          key={"vertex-" + index}
+          position={position}
+          icon={icon}
+          draggable
+          eventHandlers={{
+            drag: (event: any) => {
+              const point = event.target.getLatLng();
+              onChange(coords.map((coord, coordIndex) => coordIndex === index ? [point.lat, point.lng] : coord));
+            },
+          }}
+        />
+      ))}
+    </>
+  );
+}
 // --- Fit map to polygon after draw -------------------------------------------
 function FitToPolygon({ coords }: { coords: [number, number][] | null }) {
   const map = useMap();
@@ -341,6 +402,15 @@ export function CatchmentMapPanel({
   communities, onCommunityPopUpdate, onExtractedCommunities,
 }: Props) {
   const { toast } = useToast();
+  const { user } = useAuth();
+  const canCreatePolygon = hasAnyPermission(user, ["polygon.create", "manage_boundaries"]);
+  const canEditPolygon = hasAnyPermission(user, ["polygon.edit", "manage_boundaries"]);
+  const canReplacePolygon = hasAnyPermission(user, ["polygon.replace", "manage_boundaries"]);
+  const canViewHistory = hasAnyPermission(user, ["polygon.view_history", "manage_boundaries"]);
+  const canApprovePolygon = hasAnyPermission(user, ["polygon.approve"]);
+  const canDeleteDraft = hasAnyPermission(user, ["polygon.delete_draft", "manage_boundaries"]);
+  const canArchivePolygon = hasAnyPermission(user, ["polygon.archive", "manage_boundaries"]);
+  const canRecalculatePopulation = hasAnyPermission(user, ["polygon.recalculate_population", "manage_boundaries"]);
   const [catchment, setCatchment] = useState<CatchmentPolygon | null>(null);
   const [communityPolygons, setCommunityPolygons] = useState<CommunityPolygon[]>([]);
   const [drawMode, setDrawMode] = useState<"catchment" | "community" | null>(null);
@@ -357,31 +427,182 @@ export function CatchmentMapPanel({
   const [intelligenceData, setIntelligenceData] = useState<IntelligenceResult | null>(null);
   const [suggesting, setSuggesting] = useState(false);
   const catchingRef = useRef(false);
+  const [lifecycleEdit, setLifecycleEdit] = useState<LifecycleEntity | null>(null);
+  const [lifecycleValidation, setLifecycleValidation] = useState<LifecycleValidation | null>(null);
+  const [validationBusy, setValidationBusy] = useState(false);
+  const [pendingVersion, setPendingVersion] = useState<LifecycleVersion | null>(null);
+  const [historyOwner, setHistoryOwner] = useState<{ entityType: "facility" | "village"; entityId: number; name: string } | null>(null);
+  const [historyRows, setHistoryRows] = useState<LifecycleVersion[]>([]);
+  const [historyBusy, setHistoryBusy] = useState(false);
+  const [comparison, setComparison] = useState<any | null>(null);
 
+  const activeLifecycleCoords = lifecycleEdit?.entityType === "facility"
+    ? catchment?.coords
+    : communityPolygons.find((poly) => poly.communityId === lifecycleEdit?.entityId)?.coords;
+
+  useEffect(() => {
+    if (!lifecycleEdit || !activeLifecycleCoords || activeLifecycleCoords.length < 3) {
+      setLifecycleValidation(null);
+      return;
+    }
+    const timer = window.setTimeout(async () => {
+      setValidationBusy(true);
+      try {
+        const result = await apiRequest<LifecycleValidation>(
+          "POST",
+          "/api/polygons/" + lifecycleEdit.entityType + "/" + lifecycleEdit.entityId + "/validate",
+          { geometry: { type: "Polygon", coordinates: [toGeoRing(activeLifecycleCoords)] } },
+        );
+        setLifecycleValidation(result);
+      } catch (error: any) {
+        const data = error?.data || error;
+        setLifecycleValidation(data?.blockingErrors ? data : {
+          valid: false,
+          blockingErrors: [{ code: "VALIDATION_FAILED", message: error?.message || "Polygon validation failed." }],
+          warnings: [],
+          information: [],
+        });
+      } finally {
+        setValidationBusy(false);
+      }
+    }, 350);
+    return () => window.clearTimeout(timer);
+  }, [lifecycleEdit, activeLifecycleCoords]);
+
+  const beginFacilityLifecycle = (action: LifecycleAction) => {
+    if (!catchment) return;
+    setLifecycleEdit({ entityType: "facility", entityId: facilityId, action, originalCoords: catchment.coords.map((coord) => [...coord] as [number, number]) });
+    setPendingVersion(null);
+    setLifecycleValidation(null);
+    if (action === "edit") {
+      setCatchment((current) => current ? { ...current, locked: false } : current);
+    } else {
+      setDrawMode("catchment");
+    }
+  };
+
+  const selectedCommunityRecord = communities.find((community) => community.name === selectedCommunity);
+  const selectedCommunityPolygon = communityPolygons.find((polygon) => polygon.communityName === selectedCommunity);
+
+  const beginCommunityLifecycle = (action: LifecycleAction) => {
+    if (!selectedCommunityRecord?.villageId || !selectedCommunityPolygon) return;
+    setLifecycleEdit({
+      entityType: "village",
+      entityId: selectedCommunityRecord.villageId,
+      action,
+      originalCoords: selectedCommunityPolygon.coords.map((coord) => [...coord] as [number, number]),
+    });
+    setPendingVersion(null);
+    setLifecycleValidation(null);
+    if (action === "edit") {
+      setCommunityPolygons((rows) => rows.map((polygon) => polygon.communityName === selectedCommunity ? { ...polygon, saved: false } : polygon));
+    } else {
+      setDrawMode("community");
+    }
+  };
+
+  const cancelLifecycleEdit = () => {
+    if (!lifecycleEdit) return;
+    if (lifecycleEdit.entityType === "facility") {
+      setCatchment((current) => current ? { ...current, coords: lifecycleEdit.originalCoords, locked: true } : current);
+    } else {
+      setCommunityPolygons((rows) => rows.map((polygon) => polygon.communityId === lifecycleEdit.entityId
+        ? { ...polygon, coords: lifecycleEdit.originalCoords, saved: true }
+        : polygon));
+    }
+    setLifecycleEdit(null);
+    setLifecycleValidation(null);
+    setPendingVersion(null);
+  };
+
+  const loadHistory = async (entityType: "facility" | "village", entityId: number, name: string) => {
+    setHistoryOwner({ entityType, entityId, name });
+    setHistoryBusy(true);
+    setComparison(null);
+    try {
+      const rows = await apiRequest<LifecycleVersion[]>("GET", "/api/polygons/" + entityType + "/" + entityId + "/history");
+      setHistoryRows(rows);
+    } catch (error: any) {
+      toast({ title: "History unavailable", description: error?.message, variant: "destructive" });
+      setHistoryRows([]);
+    } finally {
+      setHistoryBusy(false);
+    }
+  };
+
+  const refreshHistory = async () => {
+    if (historyOwner) await loadHistory(historyOwner.entityType, historyOwner.entityId, historyOwner.name);
+  };
+
+  const lifecycleVersionAction = async (version: LifecycleVersion, action: "submit" | "approve" | "reject" | "archive" | "delete" | "recalculate-population") => {
+    try {
+      if (action === "delete") {
+        await apiRequest("DELETE", "/api/polygons/" + version.id + "/draft");
+      } else {
+        const body: any = {};
+        if (action === "reject") {
+          const reason = window.prompt("Why is this polygon being rejected?");
+          if (!reason?.trim()) return;
+          body.reason = reason.trim();
+        }
+        if (action === "archive") {
+          const reason = window.prompt("Why is this polygon being archived?");
+          if (!reason?.trim()) return;
+          body.reason = reason.trim();
+        }
+        if (action === "approve") {
+          const reason = window.prompt("If this polygon has warnings, record the override reason. Otherwise leave blank.");
+          if (reason?.trim()) body.overrideReason = reason.trim();
+        }
+        await apiRequest("POST", "/api/polygons/" + version.id + "/" + action, body);
+      }
+      toast({ title: "Polygon updated", description: "The lifecycle action was recorded successfully." });
+      await refreshHistory();
+    } catch (error: any) {
+      toast({ title: "Polygon action failed", description: error?.message, variant: "destructive" });
+    }
+  };
+
+  const compareLatestVersions = async () => {
+    if (!historyOwner || historyRows.length < 2) return;
+    const [to, from] = historyRows;
+    try {
+      const result = await apiRequest<any>("GET", "/api/polygons/" + historyOwner.entityType + "/" + historyOwner.entityId + "/compare?fromVersionId=" + from.id + "&toVersionId=" + to.id);
+      setComparison(result);
+    } catch (error: any) {
+      toast({ title: "Comparison failed", description: error?.message, variant: "destructive" });
+    }
+  };
   // --- Load existing polygons on mount ---------------------------------------
   useEffect(() => {
     if (!facilityId) return;
     apiRequest<any>("GET", `/api/facilities/${facilityId}/catchment-polygon`)
       .then((r) => {
-        const coords = coordsFromGeoJson(r?.catchmentPolygon);
+        const display = r?.catchmentPolygon ? r : { ...r, ...(r?.draftPolygonDetails || {}), catchmentPolygon: r?.draftPolygon };
+        const coords = coordsFromGeoJson(display?.catchmentPolygon);
         if (coords) {
-          const meta = metaFromResponse(r);
+          const meta = metaFromResponse(display);
           setCatchment({
             coords,
-            gridPopulation: r.catchmentGridPopulation ?? meta.populationEstimate ?? undefined,
+            gridPopulation: display.catchmentGridPopulation ?? display.populationEstimate ?? meta.populationEstimate ?? undefined,
             under5Population: meta.underFive ?? undefined,
             locked: true,
             ...meta,
           });
+          if (!r?.catchmentPolygon && r?.draftPolygonDetails) {
+            setPendingVersion(r.draftPolygonDetails);
+            setHistoryOwner({ entityType: "facility", entityId: facilityId, name: facilityName });
+          }
         }
       }).catch(() => {});
     communities.forEach((c) => {
       if (!c.villageId) return;
       apiRequest<any>("GET", `/api/villages/${c.villageId}/community-polygon`)
         .then((r) => {
-          const coords = coordsFromGeoJson(r?.catchmentPolygon);
+          const display = r?.catchmentPolygon ? r : { ...r, ...(r?.draftPolygonDetails || {}), catchmentPolygon: r?.draftPolygon };
+          const coords = coordsFromGeoJson(display?.catchmentPolygon);
           if (coords) {
-            const meta = metaFromResponse(r);
+            const meta = metaFromResponse(display);
             setCommunityPolygons((prev) => {
               if (prev.some((p) => p.communityName === c.name)) return prev;
               return [...prev, {
@@ -389,12 +610,16 @@ export function CatchmentMapPanel({
                 communityId: c.villageId,
                 color: r.polygonColor || PALETTE[prev.length % PALETTE.length],
                 coords,
-                griddedPopulation: r.griddedPopulation ?? meta.populationEstimate ?? undefined,
+                griddedPopulation: display.griddedPopulation ?? display.populationEstimate ?? meta.populationEstimate ?? undefined,
                 under5Population: meta.underFive ?? undefined,
                 saved: true,
                 ...meta,
               }];
             });
+            if (!r?.catchmentPolygon && r?.draftPolygonDetails) {
+              setPendingVersion(r.draftPolygonDetails);
+              setHistoryOwner({ entityType: "village", entityId: c.villageId!, name: c.name });
+            }
           }
         }).catch(() => {});
     });
@@ -444,8 +669,8 @@ export function CatchmentMapPanel({
     setDrawMode(null);
 
     const type = mode === "catchment" ? "facility" : "village";
-    const village = communities.find(c => c.name === selectedCommunity);
-    const ownerId = mode === "catchment" ? facilityId : (village ? village.villageId : undefined);
+    const village = communities.find((community) => community.name === selectedCommunity);
+    const ownerId = mode === "catchment" ? facilityId : village?.villageId;
 
     setLoadingPop(true);
     const intel = await estimatePolygonPop(coords, type, ownerId);
@@ -460,9 +685,9 @@ export function CatchmentMapPanel({
       setCatchment({ coords, gridPopulation: total || undefined, under5Population: under5 || undefined, populationEstimate: total || undefined, underFive: under5 || undefined, locked: false, ...localMeta });
       setFitCoords(coords);
       toast({
-        title: "Catchment drawn",
+        title: lifecycleEdit?.action === "replace" ? "Replacement boundary drawn" : "Catchment drawn",
         description: total
-          ? `~${total.toLocaleString()} people - ${under5.toLocaleString()} under-5 (grid population)`
+          ? "~" + total.toLocaleString() + " people - " + under5.toLocaleString() + " under-5 (grid population)"
           : "Polygon ready - click Save to persist.",
       });
       return;
@@ -484,16 +709,30 @@ export function CatchmentMapPanel({
       }
     }
 
-    const existingIdx = communityPolygons.findIndex((p) => p.communityName === selectedCommunity);
-    const color = existingIdx >= 0 ? communityPolygons[existingIdx].color : PALETTE[communityPolygons.length % PALETTE.length];
-    const entry: CommunityPolygon = { communityName: selectedCommunity, color, coords, griddedPopulation: total || undefined, under5Population: under5 || undefined, populationEstimate: total || undefined, underFive: under5 || undefined, saved: false, ...localMeta };
+    const existingIndex = communityPolygons.findIndex((polygon) => polygon.communityName === selectedCommunity);
+    const color = existingIndex >= 0 ? communityPolygons[existingIndex].color : PALETTE[communityPolygons.length % PALETTE.length];
+    const entry: CommunityPolygon = {
+      communityName: selectedCommunity,
+      communityId: village?.villageId,
+      color,
+      coords,
+      griddedPopulation: total || undefined,
+      under5Population: under5 || undefined,
+      populationEstimate: total || undefined,
+      underFive: under5 || undefined,
+      saved: false,
+      ...localMeta,
+    };
 
-    setCommunityPolygons((prev) =>
-      existingIdx >= 0 ? prev.map((p, i) => i === existingIdx ? entry : p) : [...prev, entry]
+    setCommunityPolygons((previous) =>
+      existingIndex >= 0 ? previous.map((polygon, index) => index === existingIndex ? entry : polygon) : [...previous, entry],
     );
     if (total) onCommunityPopUpdate(selectedCommunity, total);
-    toast({ title: `"${selectedCommunity}" drawn`, description: total ? `~${total.toLocaleString()} people - ${under5.toLocaleString()} under-5` : "Click Save to persist." });
-  }, [drawMode, selectedCommunity, catchment, communityPolygons, hasOverlap, onCommunityPopUpdate, toast]);
+    toast({
+      title: lifecycleEdit?.action === "replace" ? "Replacement boundary drawn" : '"' + selectedCommunity + '" drawn',
+      description: total ? "~" + total.toLocaleString() + " people - " + under5.toLocaleString() + " under-5" : "Click Save to persist.",
+    });
+  }, [drawMode, selectedCommunity, catchment, communityPolygons, hasOverlap, onCommunityPopUpdate, toast, lifecycleEdit, facilityId, facilityLat, facilityLng, communities]);
 
   // --- Save catchment ---------------------------------------------------------
   const saveCatchment = async () => {
@@ -501,81 +740,106 @@ export function CatchmentMapPanel({
     catchingRef.current = true;
     setSaving(true);
     try {
-      const saved = await apiRequest<any>("PATCH", `/api/facilities/${facilityId}/catchment-polygon`, {
-        geojson: { type: "Polygon", coordinates: [toGeoRing(catchment.coords)] },
-      });
+      let saved: any;
+      const lifecycleAction = lifecycleEdit?.entityType === "facility" ? lifecycleEdit.action : "created";
+      const isLifecycleSave = true;
+      if (isLifecycleSave) {
+        if (lifecycleValidation && !lifecycleValidation.valid) {
+          throw new Error("Resolve the blocking polygon validation errors before saving.");
+        }
+        const reason = window.prompt(lifecycleAction === "created"
+          ? "Describe why this facility catchment is being created:"
+          : "Describe why this boundary is being " + (lifecycleAction === "replace" ? "replaced" : "changed") + ":");
+        if (!reason?.trim()) return;
+        const result = await apiRequest<any>(
+          "POST",
+          "/api/polygons/facility/" + facilityId + "/" + (lifecycleAction === "created" ? "create" : lifecycleAction),
+          { geometry: { type: "Polygon", coordinates: [toGeoRing(catchment.coords)] }, changeReason: reason.trim() },
+        );
+        setPendingVersion(result.polygon);
+        setHistoryOwner({ entityType: "facility", entityId: facilityId, name: facilityName });
+        saved = { ...result.polygon, catchmentGridPopulation: result.polygon.populationEstimate, population: result.population };
+      }
       const meta = metaFromResponse(saved);
-      setCatchment((p) => p ? {
-        ...p,
+      setCatchment((polygon) => polygon ? {
+        ...polygon,
         locked: true,
-        gridPopulation: saved.catchmentGridPopulation ?? saved.population?.totalPopulation ?? p.gridPopulation,
-        under5Population: saved.population?.underFive ?? p.under5Population,
+        gridPopulation: saved.catchmentGridPopulation ?? saved.population?.totalPopulation ?? polygon.gridPopulation,
+        under5Population: saved.population?.underFive ?? polygon.under5Population,
         ...meta,
-      } : p);
+      } : polygon);
+      if (isLifecycleSave) {
+        setLifecycleEdit(null);
+        setLifecycleValidation(null);
+      }
       toast({
-        title: "Facility catchment saved",
-        description: `${(saved.population?.totalPopulation ?? catchment.gridPopulation ?? 0).toLocaleString()} people · ${saved.areaSqKm?.toFixed?.(2) ?? saved.areaSqKm ?? "?"} km²`,
+        title: isLifecycleSave ? "Facility boundary draft created" : "Facility catchment saved",
+        description: (saved.population?.totalPopulation ?? catchment.gridPopulation ?? 0).toLocaleString() + " people; " + (saved.areaSqKm?.toFixed?.(2) ?? saved.areaSqKm ?? "?") + " km2",
       });
-    } catch (e: any) {
-      toast({ title: "Save failed", description: e?.message, variant: "destructive" });
-    } finally { setSaving(false); catchingRef.current = false; }
+    } catch (error: any) {
+      toast({ title: "Save failed", description: error?.message, variant: "destructive" });
+    } finally {
+      setSaving(false);
+      catchingRef.current = false;
+    }
   };
-  // Save community polygon -------------------------------------------------
-  const saveCommunity = async (poly: CommunityPolygon) => {
-    const comm = communities.find((c) => c.name === poly.communityName);
-    if (!comm?.villageId) {
+
+  // --- Save community polygon -------------------------------------------------
+  const saveCommunity = async (polygon: CommunityPolygon) => {
+    const community = communities.find((item) => item.name === polygon.communityName);
+    if (!community?.villageId) {
       toast({ title: "Register community first", description: "Save the community record before drawing its polygon.", variant: "destructive" });
       return;
     }
 
-    // Check if within facility catchment
-    let isWithin = true;
-    if (catchment) {
-      try {
-        const catchPoly = turf.polygon([toGeoRing(catchment.coords)]);
-        const childPoly = turf.polygon([toGeoRing(poly.coords)]);
-        isWithin = turf.booleanWithin(childPoly, catchPoly);
-      } catch (e) {
-        console.warn("Within check failed:", e);
-      }
-    }
-
-    let overrideReason: string | undefined = undefined;
-    if (!isWithin) {
-      const reason = window.prompt("This community is outside the facility catchment area. An override reason is required to save:");
-      if (reason === null) {
-        return; // User cancelled
-      }
-      if (!reason.trim()) {
-        toast({ title: "Save blocked", description: "An override reason is required to save a community outside the catchment area.", variant: "destructive" });
-        return;
-      }
-      overrideReason = reason;
-    }
-
     setSaving(true);
     try {
-      const saved = await apiRequest<any>("PATCH", `/api/villages/${comm.villageId}/community-polygon`, {
-        geojson: { type: "Polygon", coordinates: [toGeoRing(poly.coords)] },
-        polygonColor: poly.color,
-        overrideReason: overrideReason
-      });
+      let saved: any;
+      const lifecycleAction = lifecycleEdit?.entityType === "village" && lifecycleEdit.entityId === community.villageId
+        ? lifecycleEdit.action
+        : "created";
+      const isLifecycleSave = true;
+      if (isLifecycleSave) {
+        if (lifecycleValidation && !lifecycleValidation.valid) {
+          throw new Error("Resolve the blocking polygon validation errors before saving.");
+        }
+        const reason = window.prompt(lifecycleAction === "created"
+          ? "Describe why this community boundary is being created:"
+          : "Describe why this community boundary is being " + (lifecycleAction === "replace" ? "replaced" : "changed") + ":");
+        if (!reason?.trim()) return;
+        const result = await apiRequest<any>(
+          "POST",
+          "/api/polygons/village/" + community.villageId + "/" + (lifecycleAction === "created" ? "create" : lifecycleAction),
+          { geometry: { type: "Polygon", coordinates: [toGeoRing(polygon.coords)] }, changeReason: reason.trim() },
+        );
+        setPendingVersion(result.polygon);
+        setHistoryOwner({ entityType: "village", entityId: community.villageId, name: polygon.communityName });
+        saved = { ...result.polygon, griddedPopulation: result.polygon.populationEstimate, population: result.population };
+      }
+
       const meta = metaFromResponse(saved);
-      setCommunityPolygons((prev) => prev.map((p) => p.communityName === poly.communityName ? {
-        ...p,
+      setCommunityPolygons((previous) => previous.map((item) => item.communityName === polygon.communityName ? {
+        ...item,
         saved: true,
-        griddedPopulation: saved.griddedPopulation ?? saved.population?.totalPopulation ?? p.griddedPopulation,
-        under5Population: saved.population?.underFive ?? p.under5Population,
+        griddedPopulation: saved.griddedPopulation ?? saved.population?.totalPopulation ?? item.griddedPopulation,
+        under5Population: saved.population?.underFive ?? item.under5Population,
         ...meta,
-      } : p));
+      } : item));
+      if (isLifecycleSave) {
+        setLifecycleEdit(null);
+        setLifecycleValidation(null);
+      }
       toast({
-        title: `"${poly.communityName}" saved`,
-        description: `${(saved.population?.totalPopulation ?? poly.griddedPopulation ?? 0).toLocaleString()} people · ${saved.areaSqKm?.toFixed?.(2) ?? saved.areaSqKm ?? "?"} km²`,
+        title: isLifecycleSave ? "Community boundary draft created" : '"' + polygon.communityName + '" saved',
+        description: (saved.population?.totalPopulation ?? polygon.griddedPopulation ?? 0).toLocaleString() + " people; " + (saved.areaSqKm?.toFixed?.(2) ?? saved.areaSqKm ?? "?") + " km2",
       });
-    } catch (e: any) {
-      toast({ title: "Save failed", description: e?.message, variant: "destructive" });
-    } finally { setSaving(false); }
+    } catch (error: any) {
+      toast({ title: "Save failed", description: error?.message, variant: "destructive" });
+    } finally {
+      setSaving(false);
+    }
   };
+
   // Save all ----------------------------------------------------------------
   const saveAll = async () => {
     let count = 0;
@@ -665,7 +929,7 @@ export function CatchmentMapPanel({
         <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Catchment:</span>
 
         {!catchment ? (
-          <button type="button" disabled={!!drawMode} onClick={() => setDrawMode("catchment")}
+          <button type="button" disabled={!!drawMode || !canCreatePolygon} onClick={() => setDrawMode("catchment")}
             className="rounded-md bg-blue-600 px-3 py-1.5 text-white text-xs font-medium hover:bg-blue-700 disabled:opacity-50">
              Draw HF Catchment
           </button>
@@ -688,8 +952,18 @@ export function CatchmentMapPanel({
             )}
             {catchment.locked && (
               <>
-                <button type="button" onClick={() => setCatchment((p) => p ? { ...p, locked: false } : p)}
-                  className="rounded-md border px-2.5 py-1 text-xs hover:bg-muted"> Edit</button>
+                {canEditPolygon && (
+                  <button type="button" onClick={() => beginFacilityLifecycle("edit")}
+                    className="rounded-md border px-2.5 py-1 text-xs hover:bg-muted">Edit vertices</button>
+                )}
+                {canReplacePolygon && (
+                  <button type="button" onClick={() => beginFacilityLifecycle("replace")}
+                    className="rounded-md border px-2.5 py-1 text-xs hover:bg-muted">Replace</button>
+                )}
+                {canViewHistory && (
+                  <button type="button" onClick={() => loadHistory("facility", facilityId, facilityName)}
+                    className="rounded-md border px-2.5 py-1 text-xs hover:bg-muted">History</button>
+                )}
                 <button type="button" onClick={() => setFitCoords(catchment.coords)}
                   className="rounded-md border px-2.5 py-1 text-xs hover:bg-muted"> Fit</button>
               </>
@@ -715,11 +989,28 @@ export function CatchmentMapPanel({
             </option>
           ))}
         </select>
-        <button type="button" disabled={!selectedCommunity || !!drawMode || !catchment}
-          onClick={() => setDrawMode("community")}
-          className="rounded-md bg-orange-500 px-3 py-1.5 text-white text-xs font-medium hover:bg-orange-600 disabled:opacity-50">
-           Draw Polygon
-        </button>
+        {!selectedCommunityPolygon ? (
+          <button type="button" disabled={!selectedCommunity || !!drawMode || !catchment || !canCreatePolygon}
+            onClick={() => setDrawMode("community")}
+            className="rounded-md bg-orange-500 px-3 py-1.5 text-white text-xs font-medium hover:bg-orange-600 disabled:opacity-50">
+            Draw Polygon
+          </button>
+        ) : (
+          <>
+            {canEditPolygon && (
+              <button type="button" disabled={!!drawMode} onClick={() => beginCommunityLifecycle("edit")}
+                className="rounded-md border px-2.5 py-1 text-xs hover:bg-muted disabled:opacity-50">Edit vertices</button>
+            )}
+            {canReplacePolygon && (
+              <button type="button" disabled={!!drawMode} onClick={() => beginCommunityLifecycle("replace")}
+                className="rounded-md border px-2.5 py-1 text-xs hover:bg-muted disabled:opacity-50">Replace</button>
+            )}
+            {canViewHistory && selectedCommunityRecord?.villageId && (
+              <button type="button" onClick={() => loadHistory("village", selectedCommunityRecord.villageId!, selectedCommunity)}
+                className="rounded-md border px-2.5 py-1 text-xs hover:bg-muted">History</button>
+            )}
+          </>
+        )}
 
         <div className="h-4 w-px bg-border mx-1" />
 
@@ -739,6 +1030,24 @@ export function CatchmentMapPanel({
         </button>
       </div>
 
+      {lifecycleEdit && (
+        <div className={"rounded-md border px-3 py-2 text-xs " + (lifecycleValidation?.valid === false ? "border-red-300 bg-red-50 text-red-800" : "border-blue-200 bg-blue-50 text-blue-800")}>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <strong>{lifecycleEdit.action === "replace" ? "Replacement draft" : "Boundary correction"} in progress</strong>
+            <button type="button" onClick={cancelLifecycleEdit} className="rounded border bg-white px-2 py-1">Cancel changes</button>
+          </div>
+          {validationBusy && <p className="mt-1">Validating geometry...</p>}
+          {lifecycleValidation?.blockingErrors.map((issue) => <p key={issue.code} className="mt-1 font-medium">Blocked: {issue.message}</p>)}
+          {lifecycleValidation?.warnings.map((issue) => <p key={issue.code} className="mt-1 text-amber-800">Warning: {issue.message}</p>)}
+          {lifecycleValidation?.valid && <p className="mt-1 text-green-700">Geometry is valid. Saving creates a new draft version; the active boundary remains unchanged.</p>}
+        </div>
+      )}
+      {pendingVersion && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-900">
+          <span><strong>Draft version {pendingVersion.version} created.</strong> Review and submit it for approval when ready.</span>
+          <button type="button" onClick={() => lifecycleVersionAction(pendingVersion, "submit")} className="rounded bg-emerald-700 px-3 py-1.5 font-medium text-white">Submit for approval</button>
+        </div>
+      )}
       {/* -- Drawing instructions -- */}
       {drawMode && (
         <div className="flex items-center gap-3 rounded-md border border-blue-200 bg-blue-50 px-3 py-2">
@@ -827,6 +1136,20 @@ export function CatchmentMapPanel({
             <Popup><strong>{facilityName}</strong><br />Health Facility</Popup>
           </Marker>
 
+          {lifecycleEdit?.action === "edit" && lifecycleEdit.entityType === "facility" && catchment && (
+            <VertexEditor
+              coords={catchment.coords}
+              color="#1a56db"
+              onChange={(coords) => setCatchment((current) => current ? { ...current, coords, locked: false, ...localPolygonMeta(coords, facilityLat, facilityLng) } : current)}
+            />
+          )}
+          {lifecycleEdit?.action === "edit" && lifecycleEdit.entityType === "village" && selectedCommunityPolygon && (
+            <VertexEditor
+              coords={selectedCommunityPolygon.coords}
+              color={selectedCommunityPolygon.color}
+              onChange={(coords) => setCommunityPolygons((rows) => rows.map((polygon) => polygon.communityId === lifecycleEdit.entityId ? { ...polygon, coords, saved: false, ...localPolygonMeta(coords, facilityLat, facilityLng) } : polygon))}
+            />
+          )}
           <DrawingController mode={drawMode} onClose={() => setDrawMode(null)} onPolygonComplete={handlePolygonComplete} />
           <FitToPolygon coords={fitCoords} />
           <GeolocateButton />
@@ -866,6 +1189,75 @@ export function CatchmentMapPanel({
         </div>
       </div>
 
+      {historyOwner && (
+        <section className="rounded-lg border bg-card p-3 text-xs">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h4 className="text-sm font-semibold">Boundary history: {historyOwner.name}</h4>
+              <p className="text-muted-foreground">Every approved, rejected, replaced, and draft geometry is retained for audit and comparison.</p>
+            </div>
+            <div className="flex gap-2">
+              {historyRows.length > 1 && <button type="button" onClick={compareLatestVersions} className="rounded border px-3 py-1.5">Compare latest versions</button>}
+              <button type="button" onClick={() => { setHistoryOwner(null); setComparison(null); }} className="rounded border px-3 py-1.5">Close</button>
+            </div>
+          </div>
+          {historyBusy ? (
+            <p className="mt-3">Loading boundary history...</p>
+          ) : (
+            <div className="mt-3 overflow-x-auto">
+              <table className="w-full min-w-[760px] border-collapse">
+                <thead><tr className="border-b bg-muted/50 text-left"><th className="p-2">Version</th><th className="p-2">Status</th><th className="p-2">Change</th><th className="p-2">Reason</th><th className="p-2">Area</th><th className="p-2">Population</th><th className="p-2">Date</th><th className="p-2">Actions</th></tr></thead>
+                <tbody>
+                  {historyRows.map((version) => (
+                    <tr key={version.id} className="border-b align-top">
+                      <td className="p-2 font-semibold">v{version.version}</td>
+                      <td className="p-2">{version.status}{version.approvalStatus && version.approvalStatus !== version.status ? " / " + version.approvalStatus : ""}</td>
+                      <td className="p-2">{version.changeType || "-"}</td>
+                      <td className="max-w-[240px] p-2">{version.changeReason || "-"}</td>
+                      <td className="p-2">{version.areaSqKm == null ? "-" : Number(version.areaSqKm).toFixed(2) + " km2"}</td>
+                      <td className="p-2">{version.populationEstimate?.toLocaleString() ?? "-"}</td>
+                      <td className="p-2">{version.createdAt ? new Date(version.createdAt).toLocaleDateString() : "-"}</td>
+                      <td className="p-2">
+                        <div className="flex flex-wrap gap-1">
+                          {(version.status === "draft" || version.status === "needs_correction") && <button type="button" onClick={() => lifecycleVersionAction(version, "submit")} className="rounded border px-2 py-1">Submit</button>}
+                          {version.status === "submitted_for_review" && canApprovePolygon && <button type="button" onClick={() => lifecycleVersionAction(version, "approve")} className="rounded border border-green-300 px-2 py-1 text-green-700">Approve</button>}
+                          {version.status === "submitted_for_review" && canApprovePolygon && <button type="button" onClick={() => lifecycleVersionAction(version, "reject")} className="rounded border border-red-300 px-2 py-1 text-red-700">Reject</button>}
+                          {version.status === "draft" && canDeleteDraft && <button type="button" onClick={() => lifecycleVersionAction(version, "delete")} className="rounded border px-2 py-1">Delete draft</button>}
+                          {version.status !== "draft" && version.status !== "archived" && canArchivePolygon && <button type="button" onClick={() => lifecycleVersionAction(version, "archive")} className="rounded border px-2 py-1">Archive</button>}
+                          {canRecalculatePopulation && <button type="button" onClick={() => lifecycleVersionAction(version, "recalculate-population")} className="rounded border px-2 py-1">Recalculate population</button>}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {historyRows.length === 0 && <p className="p-3 text-muted-foreground">No version history is available yet.</p>}
+            </div>
+          )}
+          {comparison && (
+            <div className="mt-4 grid gap-3 lg:grid-cols-[1fr_280px]">
+              <div className="h-[300px] overflow-hidden rounded border">
+                <MapContainer center={center} zoom={11} style={{ height: "100%", width: "100%" }}>
+                  <BasemapTileLayer basemap={basemap} />
+                  {comparison.from?.geometry && <GeoJSON data={comparison.from.geometry} style={{ color: "#64748b", weight: 3, fillOpacity: 0.08 }} />}
+                  {comparison.to?.geometry && <GeoJSON data={comparison.to.geometry} style={{ color: "#0f9f6e", weight: 3, fillOpacity: 0.14 }} />}
+                </MapContainer>
+              </div>
+              <div className="rounded border p-3">
+                <h5 className="font-semibold">Change impact</h5>
+                <dl className="mt-2 space-y-1">
+                  <div className="flex justify-between"><dt>Area change</dt><dd>{Number(comparison.comparison?.areaDifferenceSqKm || 0).toFixed(2)} km2</dd></div>
+                  <div className="flex justify-between"><dt>Population change</dt><dd>{Number(comparison.comparison?.populationDifference || 0).toLocaleString()}</dd></div>
+                  <div className="flex justify-between"><dt>Communities</dt><dd>{comparison.impact?.communities ?? 0}</dd></div>
+                  <div className="flex justify-between"><dt>Microplans</dt><dd>{comparison.impact?.microplans ?? 0}</dd></div>
+                  <div className="flex justify-between"><dt>Reports</dt><dd>{comparison.impact?.reports ?? 0}</dd></div>
+                  <div className="flex justify-between"><dt>Sessions</dt><dd>{comparison.impact?.sessionPlans ?? 0}</dd></div>
+                </dl>
+              </div>
+            </div>
+          )}
+        </section>
+      )}
       <PolygonIntelligenceCard data={intelligenceData} />
 
       {/* -- Population balance panel -- */}
@@ -964,15 +1356,3 @@ export function CatchmentMapPanel({
     </div>
   );
 }
-
-
-
-
-
-
-
-
-
-
-
-
