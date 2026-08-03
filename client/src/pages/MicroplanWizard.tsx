@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useRoute } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -538,6 +538,19 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
     enabled: !!facilityId,
   });
 
+  const { data: facilityChvs = [] } = useQuery<any[]>({
+    queryKey: ["/api/facilities", facilityId, "chvs", planType],
+    queryFn: async () => {
+      const res = await fetch(`/api/facilities/${facilityId}/chvs?planType=${planType}`, {
+        credentials: "include",
+      });
+      if (!res.ok) return [];
+      return res.json();
+    },
+    enabled: !!facilityId,
+    staleTime: 60_000,
+  });
+
   const { data: dbPopulation } = useQuery<any[]>({
     queryKey: ["/api/population", facilityId, year],
     enabled: !microplanId && !!facilityId && !!year,
@@ -937,6 +950,8 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
     latLngDirty?: boolean;
     focalPersonName?: string;
     focalPersonPhone?: string;
+    focalChvId?: number | string | null;
+    focalPersonSource?: string;
     communicationContactMade?: boolean;
     outsideFollowUpCheck?: boolean;
     // Cross-border coordination (Sheet 1.1 / 1.2)
@@ -955,6 +970,9 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
     // Sheet 1.0 - Direct population capture
     totalCatchmentPopulation?: string | number;
     under5Population?: string | number;
+    distanceToFacility?: string | number | null;
+    distanceKm?: string | number | null;
+    travelTimeMinutes?: string | number | null;
     // Population columns - dual source
     gridPop?: string;          // WorldPop / gridded raster estimate (auto-fetched)
     surveyPop?: string;        // NSO / HMIS / Survey / Census (manual entry)
@@ -1054,6 +1072,32 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
       .join("|"),
   ]);
 
+  // Fill missing total/under-5 values from already captured target infants or
+  // community population sources so Step 2 does not ask users to retype data.
+  useEffect(() => {
+    if (!communities.length) return;
+    setCommunities((prev) => {
+      let changed = false;
+      const next = prev.map((row) => {
+        const target = planningNumber(row.targetPopulation);
+        const sourceTotal = planningNumber(row.surveyPop ?? row.totalCatchmentPopulation ?? row.gridPop);
+        const estimatedTotal = sourceTotal || (target > 0 ? Math.round(target / 0.04) : 0);
+        const estimatedUnder5 = estimatedTotal > 0 ? Math.round(estimatedTotal * 0.17) : (target > 0 ? target * 5 : 0);
+        const patch: Partial<CommunityRow> = {};
+        if ((!row.totalCatchmentPopulation || Number(row.totalCatchmentPopulation) <= 0) && estimatedTotal > 0) {
+          patch.totalCatchmentPopulation = String(estimatedTotal);
+          if (!row.surveyPop && sourceTotal) patch.surveyPop = String(sourceTotal);
+        }
+        if ((!row.under5Population || Number(row.under5Population) <= 0) && estimatedUnder5 > 0) {
+          patch.under5Population = String(estimatedUnder5);
+        }
+        if (Object.keys(patch).length === 0) return row;
+        changed = true;
+        return { ...row, ...patch };
+      });
+      return changed ? next : prev;
+    });
+  }, [communities.map((row) => [row.rowId, row.targetPopulation, row.surveyPop ?? "", row.gridPop ?? "", row.totalCatchmentPopulation ?? "", row.under5Population ?? ""].join(":")).join("|")]);
   useEffect(() => {
     const total = communities.reduce((sum, row) => sum + (parseInt(row.targetPopulation || "0", 10) || 0), 0);
     if (total <= 0) return;
@@ -1118,11 +1162,13 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
         settlementType: (v as any).settlementType ?? "village",
         highRisk: !!(v as any).highRisk,
         highRiskReason: (v as any).highRiskReason ?? undefined,
-        // Sheet 1.0 population
-        totalCatchmentPopulation: (v as any).totalCatchmentPopulation ?? undefined,
-        under5Population: (v as any).under5Population ?? undefined,
+        // Sheet 1.0 population and access metadata
+        totalCatchmentPopulation: (v as any).totalCatchmentPopulation ?? (v as any).population ?? undefined,
+        under5Population: (v as any).under5Population ?? ((v as any).population != null ? Math.round(Number((v as any).population) * 0.17) : undefined),
+        distanceToFacility: (v as any).distanceToFacility ?? undefined,
+        travelTimeMinutes: (v as any).travelTimeMinutes ?? undefined,
         gridPop: (v as any).griddedPopulation != null ? String((v as any).griddedPopulation) : undefined,
-        surveyPop: (v as any).totalCatchmentPopulation != null ? String((v as any).totalCatchmentPopulation) : undefined,
+        surveyPop: (v as any).totalCatchmentPopulation != null ? String((v as any).totalCatchmentPopulation) : ((v as any).population != null ? String((v as any).population) : undefined),
       })),
     );
   }, [facilityVillages, communities.length, excludedReady]);
@@ -1326,6 +1372,104 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
     }
   }
 
+  const calendarSignature = calendar
+    .map((c) => [c.rowId, c.villageId ?? "", c.name, c.scheduledDate, c.sessionType].join("~"))
+    .join("|");
+  const communitySignature = communities
+    .map((c) => [c.rowId, c.villageId ?? "", c.name, c.targetPopulation, c.strategy, c.focalPersonName ?? "", c.focalPersonPhone ?? "", c.distanceToFacility ?? ""].join("~"))
+    .join("|");
+
+  function getCalendarCommunity(row: CalendarRow): CommunityRow | undefined {
+    return communities.find(
+      (c) =>
+        (row.villageId != null && c.villageId === row.villageId) ||
+        c.rowId === row.rowId ||
+        c.name.trim().toLowerCase() === row.name.trim().toLowerCase(),
+    );
+  }
+
+  function getSessionLabel(row: CalendarRow): string {
+    return `${row.name} - ${row.scheduledDate || "date not set"}`;
+  }
+
+  function getSessionTarget(row: CalendarRow): string {
+    const community = getCalendarCommunity(row);
+    const target = planningNumber(community?.targetPopulation);
+    return String(target);
+  }
+
+  function getSessionDistance(row: CalendarRow): string {
+    const community = getCalendarCommunity(row);
+    const distance = community?.distanceToFacility;
+    const parsed = distance == null || distance === "" ? NaN : Number(distance);
+    return Number.isFinite(parsed) && parsed >= 0 ? String(parsed) : "0";
+  }
+
+  function defaultStaffName(roleHints: string[]): string {
+    const roster = staffRoster ?? [];
+    const hit = roster.find((s: any) => {
+      const haystack = `${s.role ?? ""} ${s.position ?? ""} ${s.title ?? ""}`.toLowerCase();
+      return roleHints.some((hint) => haystack.includes(hint));
+    }) ?? roster[0];
+    return hit?.name ?? hit?.fullName ?? "";
+  }
+
+  function findCommunityChv(community: CommunityRow | undefined): any | undefined {
+    if (!community) return undefined;
+    return facilityChvs.find((c: any) => {
+      if (community.villageId != null && Number(c.villageId) === Number(community.villageId)) return true;
+      const unit = String(c.communityUnit ?? "").trim().toLowerCase();
+      return !!community.name && unit === community.name.trim().toLowerCase();
+    });
+  }
+
+  function getDefaultFocal(row: CalendarRow): { focalPoint: string; focalPhone: string } {
+    const community = getCalendarCommunity(row);
+    const communityName = community?.focalPersonName?.trim() || "";
+    const communityPhone = community?.focalPersonPhone?.trim() || "";
+    if (communityName || communityPhone) {
+      return { focalPoint: communityName, focalPhone: communityPhone };
+    }
+    const chv = findCommunityChv(community);
+    if (chv) {
+      return {
+        focalPoint: String(chv.name ?? chv.fullName ?? ""),
+        focalPhone: String(chv.contactPhone ?? chv.phone ?? ""),
+      };
+    }
+    const staff = (staffRoster ?? []).find((s: any) => {
+      const role = String(s.role ?? s.position ?? "").toLowerCase();
+      return role.includes("in_charge") || role.includes("in-charge") || role.includes("supervisor");
+    });
+    return {
+      focalPoint: String(staff?.name ?? staff?.fullName ?? ""),
+      focalPhone: String(staff?.contactPhone ?? staff?.phone ?? ""),
+    };
+  }
+
+  useEffect(() => {
+    if (!communities.length || !facilityChvs.length) return;
+    setCommunities((prev) => {
+      let changed = false;
+      const next = prev.map((row) => {
+        if (row.focalPersonName?.trim() || row.focalPersonPhone?.trim()) return row;
+        const chv = findCommunityChv(row);
+        if (!chv) return row;
+        changed = true;
+        return {
+          ...row,
+          focalChvId: chv.id,
+          focalPersonName: chv.name ?? chv.fullName ?? "",
+          focalPersonPhone: chv.contactPhone ?? chv.phone ?? "",
+          focalPersonSource: "CHV registry",
+        };
+      });
+      return changed ? next : prev;
+    });
+  }, [communitySignature, facilityChvs]);
+  function rowsChanged<T>(a: T[], b: T[]): boolean {
+    return JSON.stringify(a) !== JSON.stringify(b);
+  }
   type StaffRow = {
     rowId: string;
     sessionLabel: string;
@@ -1342,24 +1486,29 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
   };
   const [staffing, setStaffing] = useState<StaffRow[]>([]);
   useEffect(() => {
-    if (!calendar.length) return;
     setStaffing((prev) => {
-      if (prev.length === calendar.length) return prev;
-      return calendar.map((c) => ({
-        rowId: c.rowId,
-        sessionLabel: `${c.name} - ${c.scheduledDate}`,
-        vaccinator: "",
-        recorder: "",
-        supervisor: "",
-        teamType: "fixed",
-        target: "0",
-        perDiem: "0",
-        vitaminABlueCaps: "0",
-        vitaminARedCaps: "0",
-        scissorsCount: "0",
-      }));
+      if (!calendar.length) return prev.length ? [] : prev;
+      const prevById = new Map(prev.map((row) => [row.rowId, row]));
+      const next = calendar.map((c) => {
+        const existing = prevById.get(c.rowId);
+        const defaultTarget = getSessionTarget(c);
+        return {
+          rowId: c.rowId,
+          sessionLabel: getSessionLabel(c),
+          vaccinator: existing?.vaccinator ?? defaultStaffName(["vaccinator", "nurse"]),
+          recorder: existing?.recorder ?? defaultStaffName(["recorder", "data", "clerk"]),
+          supervisor: existing?.supervisor ?? defaultStaffName(["supervisor", "in-charge", "in_charge"]),
+          teamType: existing?.teamType ?? (c.sessionType === "static" ? "fixed" : "house_to_house"),
+          target: existing?.target && existing.target !== "0" ? existing.target : defaultTarget,
+          perDiem: existing?.perDiem ?? "0",
+          vitaminABlueCaps: existing?.vitaminABlueCaps ?? "0",
+          vitaminARedCaps: existing?.vitaminARedCaps ?? "0",
+          scissorsCount: existing?.scissorsCount ?? "0",
+        };
+      });
+      return rowsChanged(prev, next) ? next : prev;
     });
-  }, [calendar]);
+  }, [calendarSignature, communitySignature, staffRoster]);
 
   type VaccineRow = {
     id?: number;
@@ -1417,19 +1566,25 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
   };
   const [mobilization, setMobilization] = useState<MobRow[]>([]);
   useEffect(() => {
-    if (!calendar.length) return;
     setMobilization((prev) => {
-      if (prev.length === calendar.length) return prev;
-      return calendar.map((c) => ({
-        rowId: c.rowId,
-        sessionLabel: `${c.name} - ${c.scheduledDate}`,
-        channels: ["megaphone"],
-        focalPoint: "",
-        focalPhone: "",
-        iec: [],
-      }));
+      if (!calendar.length) return prev.length ? [] : prev;
+      const prevById = new Map(prev.map((row) => [row.rowId, row]));
+      const next = calendar.map((c) => {
+        const existing = prevById.get(c.rowId);
+        const focal = getDefaultFocal(c);
+        return {
+          rowId: c.rowId,
+          sessionLabel: getSessionLabel(c),
+          channels: existing?.channels?.length ? existing.channels : ["megaphone"],
+          focalPoint: existing?.focalPoint?.trim() ? existing.focalPoint : focal.focalPoint,
+          focalPhone: existing?.focalPhone?.trim() ? existing.focalPhone : focal.focalPhone,
+          iec: existing?.iec ?? [],
+          ...(existing?.id ? { id: existing.id } : {}),
+        };
+      });
+      return rowsChanged(prev, next) ? next : prev;
     });
-  }, [calendar]);
+  }, [calendarSignature, communitySignature, facilityChvs, staffRoster]);
 
   // Rehydrate Step 7 by matching saved mobilization activities back to their
   // session row via the description prefix that this wizard writes.
@@ -1482,7 +1637,7 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
   type TransportRow = {
     rowId: string;
     sessionLabel: string;
-    mode: "walking" | "road" | "boat" | "air";
+    mode: "walking" | "road" | "car" | "motorbike" | "donkey" | "boat" | "air" | "chopper";
     distanceKm: string;
     fuelLitres: string;
     vehicle: string;
@@ -1490,20 +1645,24 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
   };
   const [transport, setTransport] = useState<TransportRow[]>([]);
   useEffect(() => {
-    if (!calendar.length) return;
     setTransport((prev) => {
-      if (prev.length === calendar.length) return prev;
-      return calendar.map((c) => ({
-        rowId: c.rowId,
-        sessionLabel: `${c.name} - ${c.scheduledDate}`,
-        mode: "road",
-        distanceKm: "0",
-        fuelLitres: "0",
-        vehicle: "",
-        cleared: false,
-      }));
+      if (!calendar.length) return prev.length ? [] : prev;
+      const prevById = new Map(prev.map((row) => [row.rowId, row]));
+      const next = calendar.map((c) => {
+        const existing = prevById.get(c.rowId);
+        return {
+          rowId: c.rowId,
+          sessionLabel: getSessionLabel(c),
+          mode: existing?.mode ?? (c.sessionType === "mobile" ? "motorbike" : c.sessionType === "outreach" ? "road" : "walking"),
+          distanceKm: existing?.distanceKm && existing.distanceKm !== "0" ? existing.distanceKm : getSessionDistance(c),
+          fuelLitres: existing?.fuelLitres ?? "0",
+          vehicle: existing?.vehicle ?? "",
+          cleared: existing?.cleared ?? false,
+        };
+      });
+      return rowsChanged(prev, next) ? next : prev;
     });
-  }, [calendar]);
+  }, [calendarSignature, communitySignature]);
 
   // Rehydrate Step 5 (staffing) + Step 8 (transport) from saved session day
   // plans. Fetched once per session whose id we know, so resaves PATCH the
@@ -2291,7 +2450,20 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
             year,
             totalPopulation: target,
             approvalStatus: "draft",
-            metadata: { strategy: row.strategy, type: row.type },
+                        metadata: {
+              strategy: row.strategy,
+              type: row.type,
+              focalPersonName: row.focalPersonName || null,
+              focalPersonPhone: row.focalPersonPhone || null,
+              focalChvId: row.focalChvId ?? null,
+              focalPersonSource:
+                row.focalPersonSource ||
+                (row.focalChvId ? "CHV registry" : row.focalPersonName ? "Community register" : null),
+              communicationContactMade: !!row.communicationContactMade,
+              outsideFollowUpCheck: !!row.outsideFollowUpCheck,
+              totalCatchmentPopulation: row.totalCatchmentPopulation ?? null,
+              under5Population: row.under5Population ?? null,
+            },
           });
         }
         if (popItems.length > 0) {
@@ -2650,7 +2822,7 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
           const wast = parseFloat(v.wastage || "0");
           const dosesReq = target * v.doses;
           const dosesWithWastage = Math.ceil(dosesReq * (1 + wast / 100));
-          
+
           let dosesPerVial = 10;
           const nameUpper = v.name.toUpperCase();
           if (nameUpper.includes("BCG")) dosesPerVial = 20;
@@ -2661,7 +2833,7 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
           else if (nameUpper.includes("ROTA")) dosesPerVial = 1;
           else if (nameUpper.includes("MR") || nameUpper.includes("MEASLES")) dosesPerVial = 10;
           else if (nameUpper.includes("TT") || nameUpper.includes("TD")) dosesPerVial = 10;
-          
+
           const vials = Math.ceil(dosesWithWastage / dosesPerVial);
           const clientId = `vr-${i}`;
           indexByClientId.set(clientId, i);
@@ -2936,6 +3108,17 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
   }
 
   async function handleNext() {
+    const stepErrors = validationErrors.filter((error) => error.step === active);
+    if (stepErrors.length > 0) {
+      const first = stepErrors[0];
+      setErrorFocus({ step: first.step, rowId: first.id, message: first.message });
+      toast({
+        title: `Step ${active} needs attention`,
+        description: first.message,
+        variant: "destructive",
+      });
+      return;
+    }
     // Capture the dispatched snapshot before the save so edits made during the
     // request aren't wrongly marked clean (mirrors the auto-save fix).
     const snap = snapshotForStep(active);
@@ -2947,6 +3130,79 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
     }
   }
 
+  function buildSubmissionSnapshot() {
+    const generatedAt = new Date().toISOString();
+    const totalBudget = budget.reduce(
+      (sum, b) => sum + Number(b.quantity || 0) * Number(b.unitCost || 0),
+      0,
+    );
+    const communityRows = communities.map((row, index) => ({
+      rowId: row.rowId ?? `community-${index + 1}`,
+      id: row.id ?? null,
+      villageId: row.villageId ?? null,
+      name: row.name,
+      type: row.type ?? row.settlementType ?? "village",
+      targetPopulation: Number(row.targetPopulation || 0),
+      totalCatchmentPopulation: Number(row.totalCatchmentPopulation || row.surveyPop || 0),
+      under5Population: Number(row.under5Population || 0),
+      source: row.source ?? "nso",
+      strategy: row.strategy ?? "static",
+      focalChvId: row.focalChvId ?? null,
+      focalPersonName: row.focalPersonName || "",
+      focalPersonPhone: row.focalPersonPhone || "",
+      focalPersonSource: row.focalPersonSource || (row.focalChvId ? "CHV registry" : ""),
+      communicationContactMade: !!row.communicationContactMade,
+      outsideFollowUpCheck: !!row.outsideFollowUpCheck,
+      highRisk: !!row.highRisk,
+      highRiskReason: row.highRiskReason || "",
+      isCrossBorder: !!row.isCrossBorder,
+      borderCountry: row.borderCountry || "",
+      latitude: row.latitude ?? null,
+      longitude: row.longitude ?? null,
+      distanceToFacility: row.distanceToFacility ?? row.distanceKm ?? null,
+    }));
+
+    return {
+      schemaVersion: 1,
+      generatedAt,
+      submittedBy: user ? {
+        id: user.id,
+        name: `${user.firstName || ""} ${user.lastName || ""}`.trim() || user.email || "",
+        role: user.role || "",
+      } : null,
+      microplan: {
+        id: microplanId,
+        name,
+        planType,
+        year,
+        quarter,
+        facilityId,
+        facilityName: facility?.name ?? "",
+        districtId: facility?.districtId ?? null,
+      },
+      coverage,
+      communities: communityRows,
+      risk,
+      sessionCalendar: calendar,
+      staffing,
+      vaccineForecast: vaccines,
+      coldChain,
+      mobilization,
+      transport,
+      budget,
+      budgetTotal: totalBudget,
+      supervision,
+      facilityStaff: staffRoster,
+      facilityChvs,
+      referenceSources: [
+        "microplan wizard state",
+        "facility village registry",
+        "facility CHV registry",
+        "facility staff roster",
+        "stock ledger balance endpoint",
+      ],
+    };
+  }
   async function handleSubmit() {
     if (!microplanId) {
       toast({ title: "Nothing to submit yet", variant: "destructive" });
@@ -2955,6 +3211,20 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
     busyRef.current = true;
     setBusy(true);
     try {
+      const prevStaffing = (microplan as any)?.staffing;
+      const prevStaffingObj =
+        prevStaffing && typeof prevStaffing === "object" && !Array.isArray(prevStaffing)
+          ? prevStaffing
+          : {};
+      await patchMicroplan(microplanId, {
+        staffing: {
+          ...prevStaffingObj,
+          roster: staffing,
+          submissionSnapshot: buildSubmissionSnapshot(),
+          submissionSnapshotUpdatedAt: new Date().toISOString(),
+        },
+      });
+
       // File a real approval request so the microplan flows through the same
       // hierarchical approvals pipeline used by session plans, population and
       // budget items. The server-side POST /api/approvals handler mirrors the
@@ -3188,6 +3458,33 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
       });
     }
 
+    // 5. Vaccine forecasting (Step 6)
+    if (!vaccines || vaccines.length === 0) {
+      errors.push({
+        step: 6,
+        id: "vaccines-empty",
+        message: "Vaccines: Vaccine requirements must be available before continuing.",
+      });
+    } else {
+      vaccines.forEach((v, idx) => {
+        const target = parseInt(v.target || "0", 10);
+        const wastage = parseFloat(v.wastage || "0");
+        if (!Number.isFinite(target) || target <= 0) {
+          errors.push({
+            step: 6,
+            id: `vr-${idx}`,
+            message: `Vaccines: ${v.name} target population must be greater than 0.`,
+          });
+        }
+        if (!Number.isFinite(wastage) || wastage < 0) {
+          errors.push({
+            step: 6,
+            id: `vr-${idx}`,
+            message: `Vaccines: ${v.name} wastage percentage must be valid.`,
+          });
+        }
+      });
+    }
     // 5. Mobilization (Step 7)
     if (!mobilization || mobilization.length === 0) {
       errors.push({
@@ -3231,8 +3528,42 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
       });
     }
 
+    // 6. Logistics & transport (Step 8)
+    if (!transport || transport.length === 0) {
+      errors.push({
+        step: 8,
+        id: "transport-empty",
+        message: "Logistics: Transport rows are missing. Finish Step 4 first.",
+      });
+    } else {
+      transport.forEach((t, idx) => {
+        const label = t.sessionLabel || `Session ${idx + 1}`;
+        if (!t.sessionLabel || !/\d{4}-\d{2}-\d{2}/.test(t.sessionLabel)) {
+          errors.push({
+            step: 8,
+            id: `transport-date-missing-${idx}`,
+            message: `Logistics: ${label} is missing the session date from Step 4.`,
+          });
+        }
+        const distance = parseFloat(t.distanceKm || "0");
+        if (!Number.isFinite(distance) || distance < 0) {
+          errors.push({
+            step: 8,
+            id: `transport-distance-invalid-${idx}`,
+            message: `Logistics: Distance for ${label} must be a valid number.`,
+          });
+        }
+        if (!t.mode) {
+          errors.push({
+            step: 8,
+            id: `transport-mode-missing-${idx}`,
+            message: `Logistics: Transport mode is required for ${label}.`,
+          });
+        }
+      });
+    }
     return errors;
-  }, [communities, calendar, staffing, staffRoster, mobilization, budget]);
+  }, [communities, calendar, staffing, staffRoster, vaccines, mobilization, transport, budget]);
 
   const { data: readiness } = useQuery<any>({
     queryKey: ["/api/microplans/readiness", facilityId, year],
@@ -3585,6 +3916,8 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
                   excludedVillages={excludedFacilityVillages}
                   excludedDetails={excludedDetails}
                   readOnly={isReadOnly}
+                  facilityChvs={facilityChvs}
+                  planType={planType}
                   onRestoreVillage={(v) => {
                     setCommunities([
                       ...communities,
@@ -3938,5 +4271,3 @@ import {
   SavedMicroplansPanel,
   Step12
 } from './MicroplanWizardSteps';
-
-

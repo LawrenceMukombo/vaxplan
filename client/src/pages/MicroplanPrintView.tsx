@@ -29,6 +29,23 @@ import type {
   Province,
 } from "@shared/schema";
 
+type PrintCommunity = {
+  id: number | string;
+  name: string;
+  type: string;
+  targetPopulation: number;
+  source: string;
+  strategy: string;
+  focalPersonName: string;
+  focalPersonPhone: string;
+  focalPersonSource?: string;
+  communicationContactMade: boolean;
+  outsideFollowUpCheck: boolean;
+  distanceToFacility?: string | number | null;
+  latitude?: string | number | null;
+  longitude?: string | number | null;
+};
+
 type MicroplanHydration = {
   microplan: Microplan;
   sessions: SessionPlan[];
@@ -200,7 +217,31 @@ export default function MicroplanPrintView() {
     },
   });
 
-  const mappedCommunities = useMemo(() => {
+  const submissionSnapshot = useMemo(() => {
+    const staffObj = (microplan as any)?.staffing;
+    if (!staffObj || typeof staffObj !== "object" || Array.isArray(staffObj)) return null;
+    return staffObj.submissionSnapshot ?? null;
+  }, [microplan]);
+
+  const mappedCommunities = useMemo<PrintCommunity[]>(() => {
+    if (Array.isArray((submissionSnapshot as any)?.communities) && (submissionSnapshot as any).communities.length > 0) {
+      return (submissionSnapshot as any).communities.map((c: any, index: number) => ({
+        id: c.villageId ?? c.id ?? `snapshot-community-${index}`,
+        name: c.name ?? `Community ${index + 1}`,
+        type: c.type || "village",
+        targetPopulation: Number(c.targetPopulation || 0),
+        source: c.source || "nso",
+        strategy: c.strategy || "static",
+        focalPersonName: c.focalPersonName || "",
+        focalPersonPhone: c.focalPersonPhone || "",
+        focalPersonSource: c.focalPersonSource || (c.focalChvId ? "CHV registry" : ""),
+        communicationContactMade: !!c.communicationContactMade,
+        outsideFollowUpCheck: !!c.outsideFollowUpCheck,
+        distanceToFacility: c.distanceToFacility ?? null,
+        latitude: c.latitude ?? null,
+        longitude: c.longitude ?? null,
+      }));
+    }
     if (!villages || !facility || !hydration) return [];
     const excluded = new Set(hydration.excludedVillageIds ?? []);
 
@@ -235,6 +276,7 @@ export default function MicroplanPrintView() {
         strategy: meta.strategy || (v.isHardToReach ? "outreach" : "static"),
         focalPersonName: v.focalPersonName || (popRecord?.metadata as any)?.focalPersonName || "",
         focalPersonPhone: v.focalPersonPhone || (popRecord?.metadata as any)?.focalPersonPhone || "",
+        focalPersonSource: (popRecord?.metadata as any)?.focalPersonSource || ((popRecord?.metadata as any)?.focalChvId ? "CHV registry" : ""),
         communicationContactMade: v.focalPersonCommChecked || (popRecord?.metadata as any)?.communicationContactMade || false,
         outsideFollowUpCheck: v.outsideFollowUpMade || (popRecord?.metadata as any)?.outsideFollowUpCheck || false,
         distanceToFacility: v.distanceToFacility,
@@ -242,7 +284,7 @@ export default function MicroplanPrintView() {
         longitude: v.longitude,
       };
     });
-  }, [villages, facility, hydration]);
+  }, [villages, facility, hydration, submissionSnapshot]);
 
   // Map center calculation
   const mapCenter = useMemo<[number, number]>(() => {
@@ -258,6 +300,9 @@ export default function MicroplanPrintView() {
 
   // Rehydrate staffing roster details from microplan staffing JSONB field
   const staffingRoster = useMemo(() => {
+    if (Array.isArray((submissionSnapshot as any)?.staffing) && (submissionSnapshot as any).staffing.length > 0) {
+      return (submissionSnapshot as any).staffing;
+    }
     if (!microplan) return [];
     const staffObj = (microplan as any).staffing;
     if (staffObj && Array.isArray(staffObj.roster)) {
@@ -277,7 +322,7 @@ export default function MicroplanPrintView() {
         perDiem: 0,
       };
     });
-  }, [microplan, hydration?.sessions]);
+  }, [microplan, hydration?.sessions, submissionSnapshot]);
 
   // Rehydrate supportive supervision details
   const mappedSupervision = useMemo(() => {
@@ -501,30 +546,30 @@ export default function MicroplanPrintView() {
 
       // Sheet 5: Cold Chain
       const ccHeaders = [
-        "Facility / Hub", 
-        "RI Service Provided", 
-        "Is SIA Post", 
-        "Number of Teams", 
-        "OPV Doses Forecasted", 
-        "Vaccine Carriers Req", 
-        "Vaccine Carriers Avail", 
+        "Facility / Hub",
+        "RI Service Provided",
+        "Is SIA Post",
+        "Number of Teams",
+        "OPV Doses Forecasted",
+        "Vaccine Carriers Req",
+        "Vaccine Carriers Avail",
         "Vaccine Carrier Shortage",
         "Cold Boxes Req",
         "Cold Boxes Avail",
         "Cold Box Shortage"
       ];
-      
+
       const carrierShortage = Math.max(0, reqCarriers - availableCarriers);
       const coldBoxShortage = Math.max(0, reqColdBoxes - availableColdBoxes);
-      
+
       const ccSummaryRow = [
-        facility?.name || "—", 
-        "Yes", 
-        isCampaign ? "Yes" : "No", 
-        hydration?.sessions?.length || 0, 
+        facility?.name || "—",
+        "Yes",
+        isCampaign ? "Yes" : "No",
+        hydration?.sessions?.length || 0,
         targetPopulationTotal * 2,
-        reqCarriers, 
-        availableCarriers, 
+        reqCarriers,
+        availableCarriers,
         carrierShortage,
         reqColdBoxes,
         availableColdBoxes,
@@ -535,7 +580,7 @@ export default function MicroplanPrintView() {
         "", // blank column spacer
         "Equipment Type", "Brand", "Model", "Serial Number", "Catalog Number", "Capacity (L)", "Power Source", "Condition", "Status"
       ];
-      
+
       const ccInventoryRows = (dbColdChain || []).map((e: any) => [
         "", // spacer
         e.equipmentType || "—",
@@ -808,7 +853,7 @@ export default function MicroplanPrintView() {
             <p className="text-xs text-muted-foreground font-sans">Configure print formats, download workbook, or print plan</p>
           </div>
         </div>
-        
+
         <div className="flex items-center gap-3 flex-wrap">
           {/* Print Size Selection */}
           <div className="flex items-center gap-2">
@@ -839,7 +884,7 @@ export default function MicroplanPrintView() {
 
       {/* Printable Area */}
       <div className="flex flex-col gap-8 w-full max-w-[1200px] mx-auto bg-white p-6 md:p-10 border rounded-2xl shadow-sm print:shadow-none print:border-0 print:p-0 print:max-w-none">
-        
+
         {/* Document Header */}
         <div className="flex items-start justify-between border-b pb-4 border-border">
           <div className="space-y-1">
@@ -934,6 +979,7 @@ export default function MicroplanPrintView() {
                 <th className="p-2 font-bold border">Delivery Strategy</th>
                 <th className="p-2 font-bold border">Focal Person</th>
                 <th className="p-2 font-bold border">Focal Phone</th>
+                <th className="p-2 font-bold border">Source</th>
                 <th className="p-2 font-bold border text-center">Contact Made</th>
                 <th className="p-2 font-bold border text-center">Follow-up confirmed</th>
               </tr>
@@ -941,7 +987,7 @@ export default function MicroplanPrintView() {
             <tbody>
               {mappedCommunities.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="p-4 text-center text-muted-foreground">No communities registered.</td>
+                  <td colSpan={9} className="p-4 text-center text-muted-foreground">No communities registered.</td>
                 </tr>
               ) : (
                 mappedCommunities.map((c) => {
@@ -955,6 +1001,7 @@ export default function MicroplanPrintView() {
                       <td className="p-2 border capitalize">{c.strategy}</td>
                       <td className="p-2 border">{c.focalPersonName || "—"}</td>
                       <td className="p-2 border">{c.focalPersonPhone || "—"}</td>
+                      <td className="p-2 border">{c.focalPersonSource || "—"}</td>
                       <td className="p-2 border text-center">
                         {c.communicationContactMade ? (
                           <Check className="h-4 w-4 text-emerald-600 mx-auto" />

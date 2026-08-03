@@ -17750,6 +17750,22 @@ async function registerRoutes(httpServer2, app2) {
       const scope = await getGeoScope(dbUser, req.tenantId);
       const all = await storage.getFacilities(req.tenantId, districtId);
       const result = scope.all ? all : all.filter((f) => scope.facilityIds.has(f.id));
+      const [districtRows, provinceRows] = await Promise.all([
+        db.select({ id: districts.id, name: districts.name, provinceId: districts.provinceId }).from(districts).where((0, import_drizzle_orm22.eq)(districts.tenantId, req.tenantId)),
+        db.select({ id: provinces.id, name: provinces.name }).from(provinces).where((0, import_drizzle_orm22.eq)(provinces.tenantId, req.tenantId))
+      ]);
+      const districtMap = new Map(districtRows.map((d) => [Number(d.id), d]));
+      const provinceMap = new Map(provinceRows.map((p) => [Number(p.id), p]));
+      const enrichFacilityAdmin = (facility) => {
+        const district = districtMap.get(Number(facility.districtId));
+        const province = district ? provinceMap.get(Number(district.provinceId)) : void 0;
+        return {
+          ...facility,
+          districtName: district?.name ?? null,
+          provinceId: district?.provinceId ?? null,
+          provinceName: province?.name ?? null
+        };
+      };
       try {
         const staffCounts = await db.select({
           facilityId: facilityStaff.facilityId,
@@ -17760,7 +17776,7 @@ async function registerRoutes(httpServer2, app2) {
           if (row.facilityId) countMap.set(row.facilityId, Number(row.count));
         }
         const withCounts = result.map((f) => ({
-          ...f,
+          ...enrichFacilityAdmin(f),
           liveStaffCount: countMap.get(f.id) ?? 0
         }));
         res.set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
@@ -17769,7 +17785,7 @@ async function registerRoutes(httpServer2, app2) {
         console.warn("[facilities] Could not compute live staff counts:", countErr);
       }
       res.set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
-      res.json(result);
+      res.json(result.map(enrichFacilityAdmin));
     } catch (error) {
       console.error("Error fetching facilities:", error);
       res.status(500).json({ message: "Failed to fetch facilities" });

@@ -101,7 +101,8 @@ import {
   toDateInputValue,
   isAtLeastDaysAhead,
 } from "@shared/schedulingDates";
-import { 
+import { normalizeStockVaccineName } from "@shared/vaccineSchedule";
+import {
   StepDef, STEPS, ANTIGENS, BUDGET_CATEGORIES, FUNDING_SOURCES, WhatToDo,
   ExcludedVillageDetail, currentQuarter, formatRemovedAt
 } from './MicroplanWizard';
@@ -996,6 +997,8 @@ export function Step2({
   onClearError,
   targetInfants = 0,
   readOnly,
+  facilityChvs = [],
+  planType = "routine",
 }: {
   communities: any[];
   setCommunities: (v: any[]) => void;
@@ -1010,6 +1013,8 @@ export function Step2({
   onClearError?: () => void;
   targetInfants?: number;
   readOnly?: boolean;
+  facilityChvs?: any[];
+  planType?: string;
 }) {
   const { data: tenant } = useQuery<any>({ queryKey: ["/api/me/tenant"] });
   const settings = tenant?.settings?.demographics || {};
@@ -1244,6 +1249,100 @@ export function Step2({
     if (errorRowId && `pop-${i}` === errorRowId) onClearError?.();
   };
 
+  const [showFocalChvForm, setShowFocalChvForm] = useState(false);
+  const [savingFocalChv, setSavingFocalChv] = useState(false);
+  const [focalChvForm, setFocalChvForm] = useState({
+    name: "",
+    contactPhone: "",
+    nrc: "",
+    gender: "female",
+  });
+
+  const normalizeText = (value: unknown) => String(value ?? "").trim().toLowerCase();
+  const selectedCommunity = selectedIdx !== null ? communities[selectedIdx] : null;
+  const safeFacilityChvs = Array.isArray(facilityChvs) ? facilityChvs : [];
+  const matchedCommunityChvs = selectedCommunity
+    ? safeFacilityChvs.filter((chv: any) => {
+        if (!chv) return false;
+        if (selectedCommunity.villageId != null && Number(chv.villageId) === Number(selectedCommunity.villageId)) return true;
+        return normalizeText(chv.communityUnit) === normalizeText(selectedCommunity.name);
+      })
+    : [];
+  const matchedCommunityChvIds = new Set(matchedCommunityChvs.map((chv: any) => String(chv.id)));
+  const communityChvOptions = selectedCommunity
+    ? [
+        ...matchedCommunityChvs,
+        ...safeFacilityChvs.filter((chv: any) => chv && !matchedCommunityChvIds.has(String(chv.id))),
+      ]
+    : safeFacilityChvs;
+
+  function assignFocalChv(index: number, chv: any) {
+    update(index, {
+      focalChvId: chv.id,
+      focalPersonName: chv.name ?? chv.fullName ?? "",
+      focalPersonPhone: chv.contactPhone ?? chv.phone ?? "",
+      focalPersonSource: "CHV registry",
+      communicationContactMade: !!(chv.contactPhone ?? chv.phone),
+    });
+  }
+
+  async function addFocalChv() {
+    if (selectedIdx === null || !facility?.id) return;
+    if (!focalChvForm.name.trim()) {
+      toast({ title: "CHV name is required", variant: "destructive" });
+      return;
+    }
+    const routinePlan = planType !== "campaign";
+    if (routinePlan) {
+      const nrcPattern = /^\d{6}\/\d{2}\/\d{1}$/;
+      if (!nrcPattern.test(focalChvForm.nrc.trim())) {
+        toast({
+          title: "NRC required for CHV registry",
+          description: "Enter NRC as XXXXXX/XX/X, or use the manual focal person fields if NRC is not available.",
+          variant: "destructive",
+        });
+        return;
+      }
+    }
+    setSavingFocalChv(true);
+    try {
+      const community = communities[selectedIdx];
+      const body = {
+        name: focalChvForm.name.trim(),
+        fullName: focalChvForm.name.trim(),
+        nrc: focalChvForm.nrc.trim() || null,
+        gender: focalChvForm.gender,
+        contactPhone: focalChvForm.contactPhone.trim() || null,
+        phone: focalChvForm.contactPhone.trim() || null,
+        educationLevel: "Secondary",
+        trainingStatus: "trained",
+        campaignRole: "social_mobilizer",
+        communityUnit: community?.name || "",
+        villageId: community?.villageId ? Number(community.villageId) : null,
+        active: true,
+        employmentStatus: "Active - In-service",
+      };
+      const created = await apiRequest<any>(
+        "POST",
+        `/api/facilities/${facility.id}/chvs?planType=${planType}`,
+        body,
+      );
+      assignFocalChv(selectedIdx, created);
+      queryClient.invalidateQueries({ queryKey: [`/api/facilities/${facility.id}/chvs`, planType] });
+      queryClient.invalidateQueries({ queryKey: ["/api/facilities", facility.id, "chvs", planType] });
+      setFocalChvForm({ name: "", contactPhone: "", nrc: "", gender: "female" });
+      setShowFocalChvForm(false);
+      toast({ title: "CHV added and assigned" });
+    } catch (e: any) {
+      toast({
+        title: "Could not add CHV",
+        description: e?.message ?? String(e),
+        variant: "destructive",
+      });
+    } finally {
+      setSavingFocalChv(false);
+    }
+  }
   const runEstimate = async (index: number, radiusKm: number) => {
     const c = communities[index];
     if (!c) return;
@@ -2325,25 +2424,112 @@ export function Step2({
               <X className="h-4 w-4" />
             </Button>
           </CardHeader>
-          <CardContent className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 pt-4">
-            <div>
-              <Label className="text-xs font-semibold">Focal Person Name</Label>
-              <Input
-                placeholder="Focal point name"
-                className="mt-1"
-                value={communities[selectedIdx].focalPersonName || ""}
-                onChange={(e) => update(selectedIdx, { focalPersonName: e.target.value })}
-              />
+          <CardContent className="space-y-4 pt-4">
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(260px,1.3fr)_auto]">
+              <div>
+                <Label className="text-xs font-semibold">Registered CHV focal person</Label>
+                <Select
+                  value={communities[selectedIdx].focalChvId ? String(communities[selectedIdx].focalChvId) : "__manual__"}
+                  onValueChange={(value) => {
+                    if (value === "__manual__") {
+                      update(selectedIdx, { focalChvId: null, focalPersonSource: "Manual entry" });
+                      return;
+                    }
+                    const selected = safeFacilityChvs.find((chv: any) => String(chv.id) === value);
+                    if (selected) assignFocalChv(selectedIdx, selected);
+                  }}
+                >
+                  <SelectTrigger className="mt-1">
+                    <SelectValue placeholder="Choose a registered CHV" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__manual__">Manual focal person</SelectItem>
+                    {communityChvOptions.map((chv: any) => (
+                      <SelectItem key={chv.id} value={String(chv.id)}>
+                        {(chv.name ?? chv.fullName ?? "Unnamed CHV")}
+                        {(chv.contactPhone || chv.phone) ? ` - ${chv.contactPhone || chv.phone}` : ""}
+                        {chv.communityUnit ? ` (${chv.communityUnit})` : ""}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  Matched CHVs for this community appear first; other facility CHVs remain available if the focal person covers more than one community.
+                </p>
+              </div>
+              <div className="flex items-end">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowFocalChvForm((v) => !v)}
+                  disabled={readOnly}
+                >
+                  <Plus className="mr-1 h-3 w-3" /> Add CHV here
+                </Button>
+              </div>
             </div>
-            <div>
-              <Label className="text-xs font-semibold">Focal Person Phone</Label>
-              <Input
-                placeholder="+260..."
-                className="mt-1"
-                value={communities[selectedIdx].focalPersonPhone || ""}
-                onChange={(e) => update(selectedIdx, { focalPersonPhone: e.target.value })}
-              />
-            </div>
+
+            {showFocalChvForm && (
+              <div className="grid gap-3 rounded-md border bg-muted/20 p-3 md:grid-cols-4">
+                <div>
+                  <Label className="text-xs font-semibold">CHV full name *</Label>
+                  <Input
+                    className="mt-1"
+                    value={focalChvForm.name}
+                    onChange={(e) => setFocalChvForm({ ...focalChvForm, name: e.target.value })}
+                    placeholder="e.g. Ban Hio Yet"
+                  />
+                </div>
+                <div>
+                  <Label className="text-xs font-semibold">Phone</Label>
+                  <Input
+                    className="mt-1"
+                    value={focalChvForm.contactPhone}
+                    onChange={(e) => setFocalChvForm({ ...focalChvForm, contactPhone: e.target.value })}
+                    placeholder="+84..."
+                  />
+                </div>
+                <div>
+                  <Label className="text-xs font-semibold">NRC / ID {planType !== "campaign" ? "*" : ""}</Label>
+                  <Input
+                    className="mt-1"
+                    value={focalChvForm.nrc}
+                    onChange={(e) => setFocalChvForm({ ...focalChvForm, nrc: e.target.value })}
+                    placeholder="123456/78/9"
+                  />
+                </div>
+                <div className="flex items-end gap-2">
+                  <Button type="button" size="sm" onClick={addFocalChv} disabled={savingFocalChv}>
+                    {savingFocalChv ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <Plus className="mr-1 h-3 w-3" />}
+                    Save & assign
+                  </Button>
+                  <Button type="button" size="sm" variant="ghost" onClick={() => setShowFocalChvForm(false)}>
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div>
+                <Label className="text-xs font-semibold">Focal Person Name</Label>
+                <Input
+                  placeholder="Focal point name"
+                  className="mt-1"
+                  value={communities[selectedIdx].focalPersonName || ""}
+                  onChange={(e) => update(selectedIdx, { focalPersonName: e.target.value, focalPersonSource: "Manual entry" })}
+                />
+              </div>
+              <div>
+                <Label className="text-xs font-semibold">Focal Person Phone</Label>
+                <Input
+                  placeholder="+260..."
+                  className="mt-1"
+                  value={communities[selectedIdx].focalPersonPhone || ""}
+                  onChange={(e) => update(selectedIdx, { focalPersonPhone: e.target.value, focalPersonSource: communities[selectedIdx].focalPersonSource || "Manual entry" })}
+                />
+              </div>
             <div className="flex items-center gap-2 pt-6">
               <Checkbox
                 id="comm-contact"
@@ -2363,6 +2549,7 @@ export function Step2({
               <Label htmlFor="outside-followup" className="text-xs font-medium cursor-pointer select-none">
                 Outside Follow-Up Required
               </Label>
+            </div>
             </div>
           </CardContent>
           {/* Cross-Border Coordination Section */}
@@ -2543,8 +2730,8 @@ export function Step2({
           </DialogHeader>
 
           {estimate && (
-            <CommunityPopulationIntelligence 
-              lat={estimate.lat} 
+            <CommunityPopulationIntelligence
+              lat={estimate.lat}
               lng={estimate.lng}
               initialRadiusKm={2}
               onAcceptEstimate={(total) => {
@@ -4600,7 +4787,13 @@ export function Step6({
   const stockMap = new Map<string, number>();
   if (stockBalance && Array.isArray(stockBalance.stock)) {
     stockBalance.stock.forEach((s: any) => {
-      stockMap.set(s.antigen.toUpperCase(), s.balance);
+      const key = normalizeStockVaccineName(String(s.antigen ?? s.vaccineName ?? ""));
+      if (key) stockMap.set(key, Number(s.balance ?? s.quantityDoses ?? 0));
+    });
+  } else if (stockBalance && typeof stockBalance === "object") {
+    Object.entries(stockBalance).forEach(([name, balance]) => {
+      const key = normalizeStockVaccineName(name);
+      if (key) stockMap.set(key, Number(balance ?? 0));
     });
   }
 
@@ -4610,14 +4803,14 @@ export function Step6({
     const w = parseFloat(v.wastage || "0");
     const dosesReq = tgt * v.doses;
     const requiredDoses = Math.ceil(dosesReq * (1 + w / 100));
-    
+
     // We assume 10 doses per vial
     const requiredVials = Math.ceil(requiredDoses / 10);
-    
-    const stockAvailable = stockMap.get(v.name.toUpperCase()) ?? 0;
+
+    const stockAvailable = stockMap.get(normalizeStockVaccineName(v.name)) ?? 0;
     const shortageDoses = Math.max(0, requiredDoses - stockAvailable);
     const shortageVials = Math.ceil(shortageDoses / 10);
-    
+
     return {
       antigen: v.name,
       requiredDoses,
@@ -4644,7 +4837,7 @@ export function Step6({
               </p>
             </div>
           </div>
-          
+
           <table className="w-full text-xs text-left border-collapse mt-2">
             <thead>
               <tr className="border-b border-border text-muted-foreground font-semibold">
@@ -4745,7 +4938,7 @@ export function Step6({
           </table>
         </div>
       </div>
-      
+
       <div className="rounded-md border bg-muted/30 p-3 space-y-4">
         <div className="flex items-center justify-between">
           <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
@@ -5251,7 +5444,7 @@ export function StepChvProfile({ facilityId, villages, planType = "routine" }: {
   });
 
   const [form, setForm] = useState<any>({
-    name: "", nrc: "", gender: "female", yearsOfService: "", educationLevel: "Secondary",
+    name: "", nrc: "", contactPhone: "", gender: "female", yearsOfService: "", educationLevel: "Secondary",
     trainingStatus: "trained", communityUnit: "", campaignRole: "social_mobilizer",
     villageId: "", active: true,
     employmentStatus: "Active - In-service", supervisorId: "",
@@ -5260,7 +5453,7 @@ export function StepChvProfile({ facilityId, villages, planType = "routine" }: {
   const [editId, setEditId] = useState<number | null>(null);
 
   function resetForm() {
-    setForm({ name: "", nrc: "", gender: "female", yearsOfService: "", educationLevel: "Secondary", trainingStatus: "trained", communityUnit: "", campaignRole: "social_mobilizer", villageId: "", active: true, employmentStatus: "Active - In-service", supervisorId: "" });
+    setForm({ name: "", nrc: "", contactPhone: "", gender: "female", yearsOfService: "", educationLevel: "Secondary", trainingStatus: "trained", communityUnit: "", campaignRole: "social_mobilizer", villageId: "", active: true, employmentStatus: "Active - In-service", supervisorId: "" });
     setEditId(null);
   }
 
@@ -5290,6 +5483,8 @@ export function StepChvProfile({ facilityId, villages, planType = "routine" }: {
         body: JSON.stringify({
           ...form,
           nrc: form.nrc ? form.nrc.trim() : null,
+          contactPhone: form.contactPhone ? form.contactPhone.trim() : null,
+          phone: form.contactPhone ? form.contactPhone.trim() : null,
           yearsOfService: form.yearsOfService ? Number(form.yearsOfService) : null,
           villageId: form.villageId ? Number(form.villageId) : null,
           employmentStatus: form.employmentStatus,
@@ -5332,6 +5527,10 @@ export function StepChvProfile({ facilityId, villages, planType = "routine" }: {
           <div>
             <Label className="text-xs">National Registration Card (NRC)</Label>
             <Input value={form.nrc} onChange={(e) => setForm({ ...form, nrc: e.target.value })} placeholder="XXXXXX/XX/X (e.g. 123456/78/9)" />
+          </div>
+          <div>
+            <Label className="text-xs">Contact Phone</Label>
+            <Input value={form.contactPhone} onChange={(e) => setForm({ ...form, contactPhone: e.target.value })} placeholder="+260..." />
           </div>
           <div>
             <Label className="text-xs">Gender</Label>
@@ -5427,7 +5626,7 @@ export function StepChvProfile({ facilityId, villages, planType = "routine" }: {
         <div className="overflow-x-auto rounded-md border">
           <table className="w-full text-sm">
             <thead className="bg-muted/50">
-              <tr>{["Name","Gender","Role","Education","Training","Village",""].map((h) => (
+              <tr>{["Name","Gender","Phone","Role","Education","Training","Village",""].map((h) => (
                 <th key={h} className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">{h}</th>
               ))}</tr>
             </thead>
@@ -5436,6 +5635,7 @@ export function StepChvProfile({ facilityId, villages, planType = "routine" }: {
                 <tr key={c.id} className="border-t hover:bg-muted/30">
                   <td className="px-3 py-2 font-medium">{c.name}</td>
                   <td className="px-3 py-2 capitalize">{c.gender}</td>
+                  <td className="px-3 py-2">{c.contactPhone || c.phone || "-"}</td>
                   <td className="px-3 py-2">{CHV_CAMPAIGN_ROLES.find((r) => r.value === c.campaignRole)?.label ?? c.campaignRole}</td>
                   <td className="px-3 py-2">{c.educationLevel}</td>
                   <td className="px-3 py-2">
@@ -5446,7 +5646,7 @@ export function StepChvProfile({ facilityId, villages, planType = "routine" }: {
                   <td className="px-3 py-2">{c.villageId ? (villageMap[String(c.villageId)] ?? `ID ${c.villageId}`) : "-"}</td>
                   <td className="px-3 py-2">
                     <div className="flex gap-1">
-                      <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => { setEditId(c.id); setForm({ name: c.name, nrc: c.nrc || "", gender: c.gender||"female", yearsOfService: c.yearsOfService??"", educationLevel: c.educationLevel||"Secondary", trainingStatus: c.trainingStatus||"trained", communityUnit: c.communityUnit||"", campaignRole: c.campaignRole||"social_mobilizer", villageId: c.villageId??"", active: c.active, employmentStatus: c.employmentStatus || "Active - In-service", supervisorId: c.supervisorId?.toString() || "" }); }}>
+                      <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => { setEditId(c.id); setForm({ name: c.name, nrc: c.nrc || "", contactPhone: c.contactPhone || c.phone || "", gender: c.gender||"female", yearsOfService: c.yearsOfService??"", educationLevel: c.educationLevel||"Secondary", trainingStatus: c.trainingStatus||"trained", communityUnit: c.communityUnit||"", campaignRole: c.campaignRole||"social_mobilizer", villageId: c.villageId??"", active: c.active, employmentStatus: c.employmentStatus || "Active - In-service", supervisorId: c.supervisorId?.toString() || "" }); }}>
                         <Pencil className="h-3 w-3" />
                       </Button>
                       <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-destructive hover:text-destructive" onClick={() => handleDelete(c.id)}>
@@ -6674,12 +6874,3 @@ export function Step12({
     </div>
   );
 }
-
-
-
-
-
-
-
-
-

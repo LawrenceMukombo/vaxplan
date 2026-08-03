@@ -4120,6 +4120,29 @@ export async function registerRoutes(
       const all = await storage.getFacilities(req.tenantId, districtId);
       const result = scope.all ? all : all.filter((f) => scope.facilityIds.has(f.id));
 
+      const [districtRows, provinceRows] = await Promise.all([
+        db
+          .select({ id: districts.id, name: districts.name, provinceId: districts.provinceId })
+          .from(districts)
+          .where(eq(districts.tenantId, req.tenantId)),
+        db
+          .select({ id: provinces.id, name: provinces.name })
+          .from(provinces)
+          .where(eq(provinces.tenantId, req.tenantId)),
+      ]);
+      const districtMap = new Map(districtRows.map((d) => [Number(d.id), d]));
+      const provinceMap = new Map(provinceRows.map((p) => [Number(p.id), p]));
+      const enrichFacilityAdmin = (facility: any) => {
+        const district = districtMap.get(Number(facility.districtId));
+        const province = district ? provinceMap.get(Number(district.provinceId)) : undefined;
+        return {
+          ...facility,
+          districtName: district?.name ?? null,
+          provinceId: district?.provinceId ?? null,
+          provinceName: province?.name ?? null,
+        };
+      };
+
       // Augment with live staff count from facility_staff table so the Facilities
       // module shows real headcounts instead of the rarely-updated staffCount field.
       try {
@@ -4136,7 +4159,7 @@ export async function registerRoutes(
           if (row.facilityId) countMap.set(row.facilityId, Number(row.count));
         }
         const withCounts = result.map((f) => ({
-          ...f,
+          ...enrichFacilityAdmin(f),
           liveStaffCount: countMap.get(f.id) ?? 0,
         }));
         res.set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
@@ -4146,7 +4169,7 @@ export async function registerRoutes(
       }
 
       res.set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
-      res.json(result);
+      res.json(result.map(enrichFacilityAdmin));
     } catch (error) {
       console.error("Error fetching facilities:", error);
       res.status(500).json({ message: "Failed to fetch facilities" });

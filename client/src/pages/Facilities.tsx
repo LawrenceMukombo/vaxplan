@@ -523,13 +523,17 @@ export default function Facilities() {
     setSelectedCommIds([]);
   }, [selectedProvinceId, selectedDistrictId, selectedFacilityId]);
 
+  const tenantQueryKey = tenantInfo?.id ?? "pending";
+
   const { data: regions, isLoading: loadingRegions } = useQuery<Region[]>({
-    queryKey: ["/api/regions"],
+    queryKey: ["/api/regions", tenantQueryKey],
+    enabled: !!tenantInfo?.id,
   });
 
   // Fetch all provinces for the tenant.
   const { data: provinces, isLoading: loadingProvinces } = useQuery<Province[]>({
-    queryKey: ["/api/provinces"],
+    queryKey: ["/api/provinces", tenantQueryKey],
+    enabled: !!tenantInfo?.id,
     queryFn: async () => {
       const res = await fetch("/api/provinces", { credentials: "include" });
       if (!res.ok) throw new Error("Failed to fetch provinces");
@@ -539,7 +543,8 @@ export default function Facilities() {
 
   // Fetch all districts for the tenant to power lookup functions, client-side cascading, and dialog form selects.
   const { data: allDistricts, isLoading: loadingDistricts } = useQuery<District[]>({
-    queryKey: ["/api/districts"],
+    queryKey: ["/api/districts", tenantQueryKey],
+    enabled: !!tenantInfo?.id,
     queryFn: async () => {
       const res = await fetch("/api/districts", { credentials: "include" });
       if (!res.ok) throw new Error("Failed to fetch districts");
@@ -548,7 +553,8 @@ export default function Facilities() {
   });
 
   const { data: facilities, isLoading: loadingFacilities } = useQuery<Facility[]>({
-    queryKey: ["/api/facilities"],
+    queryKey: ["/api/facilities", tenantQueryKey],
+    enabled: !!tenantInfo?.id,
     queryFn: async () => {
       const res = await fetch("/api/facilities", { credentials: "include", headers: { "Cache-Control": "no-cache" } });
       if (!res.ok) throw new Error("Failed to fetch facilities");
@@ -576,7 +582,8 @@ export default function Facilities() {
   }, [location, facilities]);
 
   const { data: villages, isLoading: loadingVillages } = useQuery<Village[]>({
-    queryKey: ["/api/villages"],
+    queryKey: ["/api/villages", tenantQueryKey],
+    enabled: !!tenantInfo?.id,
     queryFn: async () => {
       const res = await fetch("/api/villages", { credentials: "include" });
       if (!res.ok) throw new Error("Failed to fetch villages");
@@ -1498,13 +1505,22 @@ export default function Facilities() {
     queryKey: ["/api/population"],
   });
 
-  // Updated Code: Lookup names from allDistricts full collection
-  const getDistrictName = (districtId: number) => {
+  // Resolve admin labels from the row first, then fall back to tenant-scoped lookup lists.
+  const getDistrictName = (source: number | { districtId?: number | string | null; districtName?: string | null }) => {
+    if (typeof source === "object" && source?.districtName) return source.districtName;
+    const districtId = typeof source === "object" ? source?.districtId : source;
     const district = allDistricts?.find(d => Number(d.id) === Number(districtId));
     return district?.name || "Unknown";
   };
 
-  const getProvinceName = (districtId: number) => {
+  const getProvinceName = (source: number | { districtId?: number | string | null; provinceId?: number | string | null; provinceName?: string | null }) => {
+    if (typeof source === "object" && source?.provinceName) return source.provinceName;
+    const directProvinceId = typeof source === "object" ? source?.provinceId : null;
+    if (directProvinceId) {
+      const directProvince = provinces?.find(p => Number(p.id) === Number(directProvinceId));
+      if (directProvince?.name) return directProvince.name;
+    }
+    const districtId = typeof source === "object" ? source?.districtId : source;
     const district = allDistricts?.find(d => Number(d.id) === Number(districtId));
     if (!district) return "Unknown";
     const province = provinces?.find(p => Number(p.id) === Number(district.provinceId));
@@ -1562,13 +1578,13 @@ export default function Facilities() {
       key: "province",
       header: "Province",
       sortable: true,
-      render: (item: Facility) => getProvinceName(item.districtId),
+      render: (item: Facility) => getProvinceName(item as any),
     },
     {
       key: "district",
       header: "District",
       sortable: true,
-      render: (item: Facility) => getDistrictName(item.districtId),
+      render: (item: Facility) => getDistrictName(item as any),
     },
     */
     // Updated Code: Use dynamic multi-tenant terminology labels for administrative levels
@@ -1576,13 +1592,13 @@ export default function Facilities() {
       key: "province",
       header: adminLabels.level1 || "Province",
       sortable: true,
-      render: (item: Facility) => getProvinceName(item.districtId),
+      render: (item: Facility) => getProvinceName(item as any),
     },
     {
       key: "district",
       header: adminLabels.level2 || "District",
       sortable: true,
-      render: (item: Facility) => getDistrictName(item.districtId),
+      render: (item: Facility) => getDistrictName(item as any),
     },
     {
       key: "name",
