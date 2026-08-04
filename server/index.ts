@@ -41,6 +41,7 @@ import { applyPolygonLifecycleMigration } from "./migrations/028-polygon-lifecyc
 import { upsertPolygonPermissionsForAllTenants } from "./migrations/029-polygon-permissions-all-tenants";
 import { applyMicroplanVersionControlMigration } from "./migrations/030-microplan-version-control";
 import { upsertMicroplanVersionPermissionsForAllTenants } from "./migrations/031-microplan-version-permissions";
+import { realignIdentitySequences } from "./services/identitySequences";
 const app = express();
 const httpServer = createServer(app);
 const skipDbBootstrap = process.env.SKIP_DB_BOOTSTRAP === '1';
@@ -343,19 +344,16 @@ async function backfillClientIds() {
       .then(() => log("polygon lifecycle migration complete", "db"))
       .catch((err) => log(`polygon lifecycle migration warning: ${err?.message ?? err}`, "db"))
   ).catch((err) => log(`polygon lifecycle migration db import failed: ${err?.message ?? err}`, "db"));
-  // Idempotently merge polygon permissions into every tenant role configuration.
-  import("./db").then(({ db }) =>
-    upsertPolygonPermissionsForAllTenants(db as any)
-      .then(() => log("polygon permissions upserted for all tenants", "db"))
-      .catch((err) => log("polygon permission upsert warning: " + String(err?.message ?? err), "db"))
-  ).catch((err) => log("polygon permission upsert db import failed: " + String(err?.message ?? err), "db"));
-  // Immutable microplan snapshots and all-tenant workflow permissions.
-  import("./db").then(({ db }) =>
-    applyMicroplanVersionControlMigration(db as any)
-      .then(() => upsertMicroplanVersionPermissionsForAllTenants(db as any))
-      .then(() => log("microplan version control and permissions ready", "db"))
-      .catch((err) => log("microplan version control migration warning: " + String(err?.message ?? err), "db"))
-  ).catch((err) => log("microplan version control db import failed: " + String(err?.message ?? err), "db"));
+  // Identity-backed permission and version-control setup must run in order.
+  // Snapshot UPSERTs preserve explicit IDs, so realign sequences before these
+  // startup inserts and permission merges touch user_roles/user_permissions.
+  import("./db").then(async ({ db }) => {
+    await applyMicroplanVersionControlMigration(db as any);
+    await realignIdentitySequences(db as any);
+    await upsertPolygonPermissionsForAllTenants(db as any);
+    await upsertMicroplanVersionPermissionsForAllTenants(db as any);
+    log("identity sequences and all-tenant lifecycle permissions ready", "db");
+  }).catch((err) => log("identity sequence and lifecycle permission warning: " + String(err?.message ?? err), "db"));
   // Stock ledger columns upgrade (migration 027)
   import("./db").then(({ db }) =>
     import("./migrations/027-stock-ledger-columns").then(({ applyStockLedgerColumnsMigration }) =>
@@ -365,10 +363,18 @@ async function backfillClientIds() {
     ).catch((err) => log(`stock ledger migration import failed: ${err?.message ?? err}`, "db"))
   ).catch((err) => log(`stock ledger db import failed: ${err?.message ?? err}`, "db"));
 
-  // Auto-upsert database snapshot from scratch/local_database_all.jsonl.gz if present
+  // Auto-upsert database snapshot from scratch/local_database_all.jsonl.gz if present.
+  // Refresh sequences and all-tenant permissions afterward so imported tenants
+  // and explicit snapshot IDs are immediately safe for normal app inserts.
   import("../scripts/upsert-entire-database").then(({ upsertEntireDatabase }) => {
     upsertEntireDatabase()
-      .then(() => log("auto-upsert from local_database_all.jsonl.gz complete", "db"))
+      .then(async () => {
+        const { db } = await import("./db");
+        await realignIdentitySequences(db as any);
+        await upsertPolygonPermissionsForAllTenants(db as any);
+        await upsertMicroplanVersionPermissionsForAllTenants(db as any);
+        log("auto-upsert complete; sequences and all-tenant permissions refreshed", "db");
+      })
       .catch((err) => log(`auto-upsert warning: ${err?.message ?? err}`, "db"));
   }).catch((err) => log(`auto-upsert import failed: ${err?.message ?? err}`, "db"));
   }

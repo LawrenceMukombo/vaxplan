@@ -3,6 +3,7 @@ import path from "node:path";
 import readline from "node:readline";
 import { createGunzip } from "node:zlib";
 import pg, { type PoolClient } from "pg";
+import { REALIGN_IDENTITY_SEQUENCES_SQL } from "../server/services/identitySequences";
 
 try {
   // @ts-ignore
@@ -333,6 +334,10 @@ export async function upsertEntireDatabase(customDbUrl?: string, customInputPath
       }
     }
 
+
+    console.log("[upsert] Realigning PostgreSQL identity sequences after snapshot UPSERT...");
+    await pool.query(REALIGN_IDENTITY_SEQUENCES_SQL);
+    console.log("[upsert] Identity sequences realigned after snapshot UPSERT.");
 
     console.log(`[upsert] Successfully upserted every one of ${processed} records.`);
   } catch (error) {

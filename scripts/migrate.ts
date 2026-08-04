@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import pg from 'pg';
+import { REALIGN_IDENTITY_SEQUENCES_SQL } from '../server/services/identitySequences';
 
 // Load .env file for local development (Node 20.12+ built-in, no dotenv package needed)
 try {
@@ -292,6 +293,10 @@ async function run() {
     } catch (err: any) {
       console.warn('[Warning] Tenant alignment skipped:', err.message);
     }
+
+    console.log('Realigning PostgreSQL identity sequences after migrations and UPSERT-safe upgrades...');
+    await client.query(REALIGN_IDENTITY_SEQUENCES_SQL);
+    console.log('Post-migration PostgreSQL identity sequences realigned.');
 
     console.log('All database migrations applied successfully.');
   } catch (err: any) {
