@@ -2640,9 +2640,9 @@ export default function StockLedger() {
 
       {/* dialog 1: Add transaction */}
       <Dialog open={txnDialogOpen} onOpenChange={setTxnDialogOpen}>
-        <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
+        <DialogContent className="sm:max-w-xl md:max-w-2xl w-full max-h-[90vh] overflow-y-auto overflow-x-hidden p-6 shadow-2xl">
           <DialogHeader>
-            <DialogTitle>Stock Card Registry Action</DialogTitle>
+            <DialogTitle className="text-lg font-bold">Stock Card Registry Action</DialogTitle>
           </DialogHeader>
 
           <Form {...txnForm}>
@@ -2660,13 +2660,14 @@ export default function StockLedger() {
                 expiryDate: showExpiry ? (d.expiryDate || new Date().toISOString().split("T")[0]) : new Date("2099-12-31").toISOString().split("T")[0],
                 vvmStatus: showVVM ? d.vvmStatus : 1,
               });
-            })} className="space-y-4 pt-4">
+            })} className="space-y-4 pt-2">
               {/* Category Tabs inside Dialog */}
-              <div className="space-y-1.5">
-                <label className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
-                  Product Category Tab
+              <div className="space-y-2 bg-muted/20 p-3 rounded-xl border border-border/40">
+                <label className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                  <span>🏷️</span>
+                  <span>Select Product Category</span>
                 </label>
-                <div className="flex items-center gap-1 overflow-x-auto pb-1 scrollbar-none">
+                <div className="flex flex-wrap items-center gap-1.5">
                   {[
                     { id: "all", label: "All Items", icon: "📦" },
                     { id: "vaccine", label: "Vaccines", icon: "💉" },
@@ -2691,10 +2692,10 @@ export default function StockLedger() {
                             txnForm.setValue("productId", firstProd.id);
                           }
                         }}
-                        className={`px-2.5 py-1 text-xs rounded-lg whitespace-nowrap transition-all flex items-center gap-1.5 border ${
+                        className={`px-3 py-1.5 text-xs rounded-lg transition-all flex items-center gap-1.5 border font-medium ${
                           isActive
                             ? "bg-primary text-primary-foreground border-primary font-semibold shadow-xs"
-                            : "bg-muted/50 text-muted-foreground border-border/40 hover:bg-muted hover:text-foreground"
+                            : "bg-background text-muted-foreground border-border/50 hover:bg-muted hover:text-foreground"
                         }`}
                       >
                         <span>{tab.icon}</span>
