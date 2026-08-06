@@ -13,6 +13,16 @@ import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useToast } from "@/hooks/use-toast";
@@ -367,6 +377,23 @@ export default function SupervisionTemplates() {
     },
   });
 
+  const [deletingTemplate, setDeletingTemplate] = useState<ChecklistTemplate | null>(null);
+
+  const deleteMutation = useMutation({
+    mutationFn: async (id: number) => {
+      return apiRequest("DELETE", `/api/supervision-checklist-templates/${id}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/supervision-checklist-templates"] });
+      toast({ title: "Checklist Deleted", description: "The checklist template has been deleted permanently." });
+      setDeletingTemplate(null);
+      setEditing(null);
+    },
+    onError: (err: Error) => {
+      toast({ title: "Delete Failed", description: err.message, variant: "destructive" });
+    },
+  });
+
   const selectedItem = useMemo(() => items.find((i) => i.id === selectedItemId), [items, selectedItemId]);
 
   // Preview score calculation
@@ -438,10 +465,23 @@ export default function SupervisionTemplates() {
                   <span>{tpl.items?.length || 0} Questions</span>
                   <span>v{tpl.version || 1}.0</span>
                 </div>
-                <Button variant="outline" size="sm" className="w-full gap-1.5" onClick={() => openEditor(tpl)}>
-                  <Pencil className="h-3.5 w-3.5" />
-                  Edit Checklist Builder
-                </Button>
+                <div className="flex gap-2">
+                  <Button variant="outline" size="sm" className="flex-1 gap-1.5" onClick={() => openEditor(tpl)}>
+                    <Pencil className="h-3.5 w-3.5" />
+                    Edit Builder
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-1.5 border-destructive/40 text-destructive hover:bg-destructive/10"
+                    onClick={() => setDeletingTemplate(tpl)}
+                    title="Delete entire checklist template"
+                    data-testid={`button-delete-checklist-${tpl.id}`}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                    Delete
+                  </Button>
+                </div>
               </CardContent>
             </Card>
           ))}
@@ -553,6 +593,18 @@ export default function SupervisionTemplates() {
               <Button variant="ghost" size="sm" onClick={() => setEditing(null)}>
                 Cancel
               </Button>
+              {editing?.id && !isNew && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5 border-destructive/40 text-destructive hover:bg-destructive/10 font-semibold"
+                  onClick={() => setDeletingTemplate(editing)}
+                  data-testid="button-delete-current-checklist"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  Delete Checklist
+                </Button>
+              )}
             </div>
           </div>
 
@@ -942,6 +994,31 @@ export default function SupervisionTemplates() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Delete Checklist Confirmation Dialog */}
+      <AlertDialog open={!!deletingTemplate} onOpenChange={(open) => !open && setDeletingTemplate(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-destructive flex items-center gap-2">
+              <Trash2 className="h-5 w-5 text-destructive" />
+              Delete Checklist Template?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete <strong>"{deletingTemplate?.name}"</strong>? This will permanently remove the entire supervision checklist and all its authored questions. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => deletingTemplate?.id && deleteMutation.mutate(deletingTemplate.id)}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              data-testid="confirm-delete-checklist"
+            >
+              {deleteMutation.isPending ? "Deleting..." : "Delete Checklist"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
