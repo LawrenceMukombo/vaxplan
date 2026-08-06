@@ -3,6 +3,7 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useAuth } from "@/hooks/useAuth";
+import * as XLSX from "@e965/xlsx";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -20,7 +21,7 @@ import {
   MapPin, Image as ImageIcon, ToggleLeft, Hash, Type as TypeIcon, ListChecks,
   CheckSquare, Star, Calendar as CalendarIcon, ShieldAlert, Repeat, GitBranch,
   ChevronDown, ChevronRight, FileUp, Database, Eye, CheckCircle2, AlertTriangle,
-  HelpCircle, Sparkles, Layers, Sliders, Play, Copy, RefreshCw, FileText, Download
+  HelpCircle, Sparkles, Layers, Sliders, Play, Copy, RefreshCw, FileText, Download, Upload
 } from "lucide-react";
 import {
   CHECKLIST_QUESTION_TYPES,
@@ -138,6 +139,103 @@ export default function SupervisionTemplates() {
       const defaultSec = { id: `sec-${Date.now()}`, title: "Facility Readiness & Service Delivery", displayOrder: 1 };
       setSections([defaultSec]);
       setItems([newItem(defaultSec.id)]);
+    }
+  };
+
+  const parseAndAppendQuestions = (rawRows: any[], mode: "append" | "replace") => {
+    if (!rawRows || rawRows.length === 0) return;
+
+    const newSectionsMap: Record<string, ChecklistSection> = {};
+    const newItems: ChecklistTemplateItem[] = [];
+
+    const baseSecId = sections[0]?.id || `sec-${Date.now()}`;
+    if (sections.length === 0) {
+      newSectionsMap[baseSecId] = { id: baseSecId, title: "General Findings", displayOrder: 1 };
+    } else {
+      sections.forEach((s) => { newSectionsMap[s.id] = s; });
+    }
+
+    rawRows.forEach((r: any, idx: number) => {
+      const secTitle = r.sectionTitle || r.section || r["Section Title"] || r["Section"] || "General Findings";
+      let matchedSecId = Object.keys(newSectionsMap).find(
+        (id) => newSectionsMap[id].title.toLowerCase() === secTitle.toLowerCase()
+      );
+
+      if (!matchedSecId) {
+        matchedSecId = `sec-imp-${Date.now()}-${idx}`;
+        newSectionsMap[matchedSecId] = {
+          id: matchedSecId,
+          title: secTitle,
+          displayOrder: Object.keys(newSectionsMap).length + 1,
+        };
+      }
+
+      const qText = r.questionText || r.question || r["Question Text"] || r["Question"] || `Question ${idx + 1}`;
+      const qType = (r.answerType || r.type || r["Answer Type"] || "yes_no").toLowerCase() as ChecklistQuestionType;
+      const opts = typeof r.options === "string" ? r.options.split("|").map((o: string) => o.trim()).filter(Boolean) : (Array.isArray(r.options) ? r.options : []);
+
+      newItems.push({
+        id: `q-imp-${Date.now()}-${idx}`,
+        sectionId: matchedSecId,
+        label: qText,
+        type: qType,
+        options: opts,
+        isScored: r.isScored === true || r.isScored === "true" || r.isScored === 1 || qType === "yes_no" || qType === "yes_no_na",
+        weight: parseFloat(r.weight || "1.0") || 1.0,
+        prefillSourceKey: r.prefillSourceKey || r["Prefill Source"] || null,
+        conditionalOnQuestionId: r.conditionalOnQuestionId || null,
+        conditionalValue: r.conditionalValue || null,
+      });
+    });
+
+    const updatedSectionsList = Object.values(newSectionsMap);
+    setSections(updatedSectionsList);
+
+    if (mode === "replace") {
+      setItems(newItems);
+    } else {
+      setItems((prev) => [...prev, ...newItems]);
+    }
+
+    toast({
+      title: "Questions Imported",
+      description: `Successfully loaded ${newItems.length} questions into ${updatedSectionsList.length} sections.`,
+    });
+    setImportOpen(false);
+  };
+
+  const handleSupervisionFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const fileName = file.name.toLowerCase();
+    const reader = new FileReader();
+
+    if (fileName.endsWith(".json")) {
+      reader.onload = (event) => {
+        try {
+          const json = JSON.parse(event.target?.result as string);
+          const rows = Array.isArray(json) ? json : (json.items || json.questions || [json]);
+          parseAndAppendQuestions(rows, "append");
+        } catch (err: any) {
+          toast({ title: "Invalid JSON", description: err?.message, variant: "destructive" });
+        }
+      };
+      reader.readAsText(file);
+    } else {
+      reader.onload = (event) => {
+        try {
+          const data = new Uint8Array(event.target?.result as ArrayBuffer);
+          const workbook = XLSX.read(data, { type: "array" });
+          const firstSheet = workbook.SheetNames[0];
+          const worksheet = workbook.Sheets[firstSheet];
+          const rawRows = XLSX.utils.sheet_to_json(worksheet);
+          parseAndAppendQuestions(rawRows, "append");
+        } catch (err: any) {
+          toast({ title: "File Error", description: "Failed to parse CSV/Excel file.", variant: "destructive" });
+        }
+      };
+      reader.readAsArrayBuffer(file);
     }
   };
 
@@ -331,6 +429,26 @@ export default function SupervisionTemplates() {
               <Button variant="outline" size="sm" className="gap-1.5" onClick={addSection}>
                 <Layers className="h-3.5 w-3.5" />
                 Add Section
+              </Button>
+
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5 border-indigo-500/30 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/30"
+                onClick={() => setImportOpen(true)}
+              >
+                <FileUp className="h-3.5 w-3.5" />
+                Import Questions
+              </Button>
+
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5 border-emerald-500/30 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/30"
+                onClick={() => window.open("/api/supervision/templates/import-template", "_self")}
+              >
+                <Download className="h-3.5 w-3.5" />
+                Sample CSV
               </Button>
 
               <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setPreviewOpen(true)}>
@@ -643,6 +761,57 @@ export default function SupervisionTemplates() {
           </div>
           <DialogFooter>
             <Button onClick={() => setPreviewOpen(false)}>Close Preview</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ─── Import Supervision Checklist / Questions Modal ───────────────────────── */}
+      <Dialog open={importOpen} onOpenChange={setImportOpen}>
+        <DialogContent className="max-w-xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 font-bold">
+              <FileUp className="h-5 w-5 text-indigo-600 dark:text-indigo-400" />
+              Import Supervision Checklist & Questions
+            </DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground">
+              Upload a CSV, Excel (.xlsx, .xls) or JSON file containing checklist questions and sections.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            <div className="border-2 border-dashed border-indigo-200 dark:border-indigo-900/50 hover:border-indigo-500 rounded-2xl p-6 text-center space-y-3 bg-indigo-50/20 dark:bg-indigo-950/10">
+              <Upload className="h-8 w-8 mx-auto text-indigo-600 dark:text-indigo-400" />
+              <p className="text-xs font-semibold">Select File to Import Questions</p>
+              <label className="cursor-pointer inline-block">
+                <input
+                  type="file"
+                  accept=".csv,.xlsx,.xls,.json"
+                  onChange={handleSupervisionFile}
+                  className="hidden"
+                />
+                <Button type="button" size="sm" className="gap-2 bg-indigo-600 hover:bg-indigo-500 text-white">
+                  <FileUp className="h-4 w-4" /> Browse CSV / Excel / JSON
+                </Button>
+              </label>
+            </div>
+
+            <div className="flex items-center justify-between text-xs pt-2">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="gap-1.5 text-emerald-600 dark:text-emerald-400"
+                onClick={() => window.open("/api/supervision/templates/import-template", "_self")}
+              >
+                <Download className="h-3.5 w-3.5" /> Download Sample CSV Template
+              </Button>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => setImportOpen(false)}>
+              Cancel
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

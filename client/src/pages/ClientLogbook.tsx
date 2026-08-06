@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { DataTable } from "@/components/DataTable";
 import { GeoCascadeFilter } from "@/components/GeoCascadeFilter";
+import * as XLSX from "@e965/xlsx";
 import { buildGeoMaps, withGeoColumns } from "@/lib/geoHierarchy";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -121,7 +122,11 @@ import {
   Share2,
   BadgeCheck,
   Loader2,
-  PenLine
+  PenLine,
+  FileUp,
+  Upload,
+  Download,
+  CheckCircle
 } from "lucide-react";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import { Command, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem } from "@/components/ui/command";
@@ -1872,6 +1877,115 @@ export default function ClientLogbook() {
     return { catchmentVillages: catchment, otherVillages: other };
   }, [villages, activeFacilityId]);
 
+  // Bulk Client Upload & Import Wizard state
+  const [isBulkUploadOpen, setIsBulkUploadOpen] = useState(false);
+  const [bulkStep, setBulkStep] = useState<1 | 2 | 3>(1);
+  const [parsedRows, setParsedRows] = useState<any[]>([]);
+  const [validationResult, setValidationResult] = useState<any | null>(null);
+  const [isValidating, setIsValidating] = useState(false);
+  const [isCommitting, setIsCommitting] = useState(false);
+  const [commitSummary, setCommitSummary] = useState<any | null>(null);
+  const [selectedFacilityForImport, setSelectedFacilityForImport] = useState<number | null>(null);
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const fileName = file.name.toLowerCase();
+    const reader = new FileReader();
+
+    if (fileName.endsWith(".json")) {
+      reader.onload = (event) => {
+        try {
+          const json = JSON.parse(event.target?.result as string);
+          const rows = Array.isArray(json) ? json : [json];
+          processParsedRows(rows);
+        } catch (err: any) {
+          toast({ title: "Invalid JSON File", description: err?.message || "JSON parsing failed", variant: "destructive" });
+        }
+      };
+      reader.readAsText(file);
+    } else {
+      reader.onload = (event) => {
+        try {
+          const data = new Uint8Array(event.target?.result as ArrayBuffer);
+          const workbook = XLSX.read(data, { type: "array" });
+          const firstSheet = workbook.SheetNames[0];
+          const worksheet = workbook.Sheets[firstSheet];
+          const rawRows = XLSX.utils.sheet_to_json(worksheet);
+          processParsedRows(rawRows);
+        } catch (err: any) {
+          toast({ title: "File Read Error", description: "Failed to parse CSV/Excel file.", variant: "destructive" });
+        }
+      };
+      reader.readAsArrayBuffer(file);
+    }
+  };
+
+  const processParsedRows = async (rows: any[]) => {
+    if (!rows || rows.length === 0) {
+      toast({ title: "Empty File", description: "No records found in uploaded file.", variant: "destructive" });
+      return;
+    }
+
+    const mapped = rows.map((r: any) => ({
+      uniqueId: r.uniqueId || r.id || r["Unique ID"] || r["unique_id"] || "",
+      firstName: r.firstName || r["First Name"] || r.first_name || (r.name ? r.name.split(" ")[0] : ""),
+      lastName: r.lastName || r["Last Name"] || r.last_name || (r.name ? r.name.split(" ").slice(1).join(" ") : ""),
+      sex: (r.sex || r.gender || r["Gender"] || r["Sex"] || "female").toLowerCase(),
+      dateOfBirth: r.dateOfBirth || r["Date of Birth"] || r.dob || r["dob"] || "",
+      caregiverName: r.caregiverName || r.parentName || r["Caregiver Name"] || r["Parent Name"] || "",
+      caregiverPhone: r.caregiverPhone || r.contactPhone || r["Phone"] || r["Contact Phone"] || "",
+      provinceName: r.provinceName || r["Province"] || "",
+      districtName: r.districtName || r["District"] || "",
+      facilityName: r.facilityName || r["Facility"] || "",
+      communityName: r.communityName || r.villageName || r["Community"] || "",
+      clientType: (r.clientType || r["Client Type"] || "child").toLowerCase(),
+      status: (r.status || r["Status"] || "resident").toLowerCase(),
+    }));
+
+    setParsedRows(mapped);
+    setIsValidating(true);
+
+    try {
+      const res = await apiRequest<any>("POST", "/api/clients/import", { rows: mapped });
+      setValidationResult(res);
+      setBulkStep(2);
+    } catch (err: any) {
+      toast({ title: "Validation Failed", description: err?.message || "Failed to validate batch", variant: "destructive" });
+    } finally {
+      setIsValidating(false);
+    }
+  };
+
+  const handleCommitImport = async () => {
+    if (!validationResult || !validationResult.validRows || validationResult.validRows.length === 0) {
+      toast({ title: "No Valid Rows", description: "There are no valid client rows to import.", variant: "destructive" });
+      return;
+    }
+
+    setIsCommitting(true);
+    try {
+      const targetFacId = selectedFacilityForImport || user?.facilityId || facilities?.[0]?.id || 1;
+      const res = await apiRequest<any>("POST", "/api/clients/import-commit", {
+        rows: validationResult.validRows,
+        defaultFacilityId: targetFacId,
+      });
+
+      setCommitSummary(res);
+      setBulkStep(3);
+      queryClient.invalidateQueries({ queryKey: ["/api/clients"] });
+      toast({
+        title: "Import Successful",
+        description: `Successfully registered ${res.importedCount} client records into Client Logbook.`,
+      });
+    } catch (err: any) {
+      toast({ title: "Import Failed", description: err?.message || "Could not commit client import", variant: "destructive" });
+    } finally {
+      setIsCommitting(false);
+    }
+  };
+
   // villageFormSchema and villageForm moved up to avoid block-scope forward references
 
   const createVillageMutation = useMutation({
@@ -2555,12 +2669,27 @@ export default function ClientLogbook() {
           <Button
             variant="outline"
             onClick={() => {
-              window.open("/api/clients/import-template", "_blank");
+              window.open("/api/clients/import-template?format=csv", "_self");
             }}
-            className="flex items-center gap-1.5 text-xs"
+            className="flex items-center gap-1.5 text-xs border-emerald-500/30 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/30"
           >
-            <FileSpreadsheet className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
-            Import Template
+            <Download className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+            Download Sample CSV
+          </Button>
+
+          <Button
+            variant="outline"
+            onClick={() => {
+              setBulkStep(1);
+              setValidationResult(null);
+              setCommitSummary(null);
+              setParsedRows([]);
+              setIsBulkUploadOpen(true);
+            }}
+            className="flex items-center gap-1.5 text-xs border-indigo-500/30 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/30"
+          >
+            <FileUp className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
+            Bulk Upload Clients
           </Button>
 
           <Button
@@ -5264,6 +5393,190 @@ export default function ClientLogbook() {
               </div>
             );
           })()}
+        </DialogContent>
+      </Dialog>
+      {/* ─── Bulk Client Upload & Import Wizard Dialog ─────────────────────── */}
+      <Dialog open={isBulkUploadOpen} onOpenChange={setIsBulkUploadOpen}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-xl font-bold">
+              <FileUp className="h-5 w-5 text-indigo-600 dark:text-indigo-400" />
+              Bulk Client Upload & Import Wizard
+            </DialogTitle>
+          </DialogHeader>
+
+          {/* Stepper Header */}
+          <div className="flex items-center justify-between border-b pb-4 mb-4">
+            <div className={`flex items-center gap-2 font-medium text-xs ${bulkStep === 1 ? "text-indigo-600 font-bold" : "text-muted-foreground"}`}>
+              <span className="w-6 h-6 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold">1</span>
+              Select File & Facility
+            </div>
+            <div className="h-px bg-border flex-1 mx-4" />
+            <div className={`flex items-center gap-2 font-medium text-xs ${bulkStep === 2 ? "text-indigo-600 font-bold" : "text-muted-foreground"}`}>
+              <span className="w-6 h-6 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold">2</span>
+              Validate & Preview
+            </div>
+            <div className="h-px bg-border flex-1 mx-4" />
+            <div className={`flex items-center gap-2 font-medium text-xs ${bulkStep === 3 ? "text-emerald-600 font-bold" : "text-muted-foreground"}`}>
+              <span className="w-6 h-6 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center font-bold">3</span>
+              Import Complete
+            </div>
+          </div>
+
+          {/* Step 1: Upload File & Facility */}
+          {bulkStep === 1 && (
+            <div className="space-y-6 py-2">
+              <div className="bg-slate-50 dark:bg-slate-900/50 p-4 rounded-xl border border-slate-200 dark:border-slate-800 space-y-3">
+                <label className="text-xs font-semibold text-muted-foreground">Select Target Health Facility</label>
+                <Select
+                  value={selectedFacilityForImport ? String(selectedFacilityForImport) : String(user?.facilityId || facilities?.[0]?.id || 1)}
+                  onValueChange={(val) => setSelectedFacilityForImport(Number(val))}
+                >
+                  <SelectTrigger className="w-full bg-background">
+                    <SelectValue placeholder="Select facility" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {facilities?.map((f: any) => (
+                      <SelectItem key={f.id} value={String(f.id)}>
+                        {f.name} ({f.facilityType || "Health Facility"})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="border-2 border-dashed border-indigo-200 dark:border-indigo-900/50 hover:border-indigo-500 rounded-2xl p-8 text-center space-y-4 bg-indigo-50/20 dark:bg-indigo-950/10 transition-colors">
+                <div className="mx-auto w-14 h-14 rounded-2xl bg-indigo-100 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 flex items-center justify-center">
+                  <Upload className="h-7 w-7" />
+                </div>
+                <div>
+                  <h3 className="text-base font-semibold">Upload CSV, Excel (.xlsx, .xls) or JSON</h3>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Drag and drop your client register file or click browse.
+                  </p>
+                </div>
+                <div className="flex items-center justify-center gap-3">
+                  <label className="cursor-pointer">
+                    <input
+                      type="file"
+                      accept=".csv,.xlsx,.xls,.json"
+                      onChange={handleFileUpload}
+                      className="hidden"
+                    />
+                    <Button type="button" variant="default" className="gap-2 bg-indigo-600 hover:bg-indigo-500 text-white">
+                      <FileUp className="h-4 w-4" /> Browse File
+                    </Button>
+                  </label>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => window.open("/api/clients/import-template?format=csv", "_self")}
+                    className="gap-2 border-emerald-500/30 text-emerald-600 dark:text-emerald-400"
+                  >
+                    <Download className="h-4 w-4" /> Sample CSV Template
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Step 2: Validate & Preview */}
+          {bulkStep === 2 && validationResult && (
+            <div className="space-y-5 py-2">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className="p-4 rounded-xl bg-indigo-50 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-900/50">
+                  <p className="text-xs font-semibold text-indigo-600 dark:text-indigo-400">Total Uploaded</p>
+                  <p className="text-2xl font-bold mt-1 text-indigo-900 dark:text-indigo-200">{validationResult.totalRows}</p>
+                </div>
+                <div className="p-4 rounded-xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-900/50">
+                  <p className="text-xs font-semibold text-emerald-600 dark:text-emerald-400">Ready to Import</p>
+                  <p className="text-2xl font-bold mt-1 text-emerald-900 dark:text-emerald-200">{validationResult.validRows?.length || 0}</p>
+                </div>
+                <div className="p-4 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/50">
+                  <p className="text-xs font-semibold text-amber-600 dark:text-amber-400">Duplicate Candidates</p>
+                  <p className="text-2xl font-bold mt-1 text-amber-900 dark:text-amber-200">{validationResult.duplicateCandidates?.length || 0}</p>
+                </div>
+              </div>
+
+              {validationResult.errors?.length > 0 && (
+                <div className="p-4 rounded-xl bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900/50 space-y-2">
+                  <p className="text-xs font-semibold text-red-600 dark:text-red-400 flex items-center gap-1.5">
+                    <XCircle className="h-4 w-4" /> Row Validation Errors ({validationResult.errors.length})
+                  </p>
+                  <div className="max-h-28 overflow-y-auto space-y-1 text-xs text-red-700 dark:text-red-300">
+                    {validationResult.errors.map((err: any, idx: number) => (
+                      <p key={idx}>Row #{err.rowIndex + 1}: {err.message} ({err.field})</p>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Data Preview Table */}
+              <div className="border rounded-xl overflow-hidden">
+                <div className="bg-muted px-4 py-2 text-xs font-bold text-muted-foreground">
+                  Parsed Data Preview (First {Math.min(parsedRows.length, 10)} rows)
+                </div>
+                <div className="max-h-60 overflow-x-auto overflow-y-auto text-xs">
+                  <table className="w-full text-left border-collapse">
+                    <thead className="bg-muted/50 border-b">
+                      <tr>
+                        <th className="p-2">Name</th>
+                        <th className="p-2">Sex</th>
+                        <th className="p-2">DOB</th>
+                        <th className="p-2">Caregiver</th>
+                        <th className="p-2">Phone</th>
+                        <th className="p-2">Type</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {parsedRows.slice(0, 10).map((r, i) => (
+                        <tr key={i}>
+                          <td className="p-2 font-medium">{r.firstName} {r.lastName}</td>
+                          <td className="p-2 capitalize">{r.sex}</td>
+                          <td className="p-2">{r.dateOfBirth}</td>
+                          <td className="p-2">{r.caregiverName || "—"}</td>
+                          <td className="p-2">{r.caregiverPhone || "—"}</td>
+                          <td className="p-2 capitalize">{r.clientType}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-3 pt-2">
+                <Button variant="outline" onClick={() => setBulkStep(1)}>Back</Button>
+                <Button
+                  onClick={handleCommitImport}
+                  disabled={isCommitting || !validationResult.validRows?.length}
+                  className="bg-emerald-600 hover:bg-emerald-500 text-white gap-2"
+                >
+                  {isCommitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />}
+                  Commit Import ({validationResult.validRows?.length || 0} Clients)
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* Step 3: Success Summary */}
+          {bulkStep === 3 && commitSummary && (
+            <div className="space-y-6 py-6 text-center">
+              <div className="mx-auto w-16 h-16 rounded-full bg-emerald-100 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
+                <CheckCircle className="h-8 w-8" />
+              </div>
+              <div className="space-y-2">
+                <h3 className="text-xl font-bold text-emerald-900 dark:text-emerald-100">Import Batch Committed!</h3>
+                <p className="text-sm text-muted-foreground">
+                  Successfully imported <span className="font-bold text-foreground">{commitSummary.importedCount}</span> client records into the health facility register.
+                </p>
+              </div>
+              <div className="flex justify-center gap-3 pt-2">
+                <Button onClick={() => setIsBulkUploadOpen(false)} className="bg-primary text-primary-foreground font-semibold px-6">
+                  Done & View Logbook
+                </Button>
+              </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>

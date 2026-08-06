@@ -12896,26 +12896,53 @@ export async function registerRoutes(
     }
   });
 
-  // GET /api/clients/import-template — Download Client Logbook import template columns
+  // GET /api/supervision/templates/import-template — Download Supportive Supervision CSV sample template
+  app.get("/api/supervision/templates/import-template", isAuthenticated, requireTenant, async (req: any, res) => {
+    const csvHeader = "sectionTitle,questionText,answerType,options,isScored,weight,prefillSourceKey,conditionalOnQuestionId,conditionalValue\n";
+    const sampleRow1 = "Cold Chain & Equipment,Are all vaccines stored between +2°C and +8°C?,yes_no,,true,1.0,cold_chain_temp,,\n";
+    const sampleRow2 = "Vaccine Stock & Logistics,Is there any stock-out of bOPV or Measles-Rubella?,yes_no_na,,true,1.0,stock_status,,\n";
+    const sampleRow3 = "Staffing & Training,Select vaccinator on duty,person_selector,,false,0.0,staff_roster,,\n";
+    const csvContent = csvHeader + sampleRow1 + sampleRow2 + sampleRow3;
+
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", 'attachment; filename="supervision_checklist_import_template.csv"');
+    return res.status(200).send(csvContent);
+  });
+
+  // GET /api/clients/import-template — Download Client Logbook import template CSV file or JSON schema
   app.get("/api/clients/import-template", isAuthenticated, requireTenant, async (req: any, res) => {
-    res.json({
-      format: "csv_or_xlsx",
-      columns: [
-        "uniqueId",
-        "firstName",
-        "lastName",
-        "sex",
-        "dateOfBirth",
-        "caregiverName",
-        "caregiverPhone",
-        "provinceName",
-        "districtName",
-        "facilityName",
-        "communityName",
-        "clientType",
-        "status",
-      ],
-    });
+    const format = (req.query.format || "").toString().toLowerCase();
+
+    if (format === "json" || req.headers.accept?.includes("application/json")) {
+      return res.json({
+        format: "csv_or_xlsx",
+        columns: [
+          "uniqueId",
+          "firstName",
+          "lastName",
+          "sex",
+          "dateOfBirth",
+          "caregiverName",
+          "caregiverPhone",
+          "provinceName",
+          "districtName",
+          "facilityName",
+          "communityName",
+          "clientType",
+          "status",
+        ],
+      });
+    }
+
+    // Default: CSV File Download Attachment
+    const csvHeader = "uniqueId,firstName,lastName,sex,dateOfBirth,caregiverName,caregiverPhone,provinceName,districtName,facilityName,communityName,clientType,status\n";
+    const sampleRow1 = "CHILD-1001,Mubita,Kaluwe,male,2025-11-12,Grace Kaluwe,+260971234567,Central Province,Kabwe District,Kabwe Urban Health Centre,Bwacha 1,child,resident\n";
+    const sampleRow2 = "CHILD-1002,Chileshe,Mwamba,female,2026-01-05,Mary Mwamba,+260979876543,Central Province,Kabwe District,Kabwe Urban Health Centre,Bwacha 2,child,resident\n";
+    const csvContent = csvHeader + sampleRow1 + sampleRow2;
+
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", 'attachment; filename="vaxplan_client_import_template.csv"');
+    return res.status(200).send(csvContent);
   });
 
   // POST /api/clients/import — Bulk client import with duplicate candidate detection & validation
@@ -12934,6 +12961,52 @@ export async function registerRoutes(
       res.json(validation);
     } catch (err: any) {
       res.status(400).json({ message: err?.message || "Client import validation failed" });
+    }
+  });
+
+  // POST /api/clients/import-commit — Insert validated client import records into database
+  app.post("/api/clients/import-commit", isAuthenticated, requireTenant, requireDbUser, async (req: any, res) => {
+    try {
+      const { rows, defaultFacilityId } = req.body || {};
+      if (!Array.isArray(rows) || rows.length === 0) {
+        return res.status(400).json({ message: "No client rows provided to commit" });
+      }
+
+      const targetFacilityId = Number(defaultFacilityId || req.user?.facilityId);
+      if (!targetFacilityId || isNaN(targetFacilityId)) {
+        return res.status(400).json({ message: "Facility selection is required for importing clients" });
+      }
+
+      const insertedClients = [];
+      for (const row of rows) {
+        const fullName = `${row.firstName || ''} ${row.lastName || ''}`.trim() || row.name || "Unnamed Client";
+        const dob = row.dateOfBirth ? new Date(row.dateOfBirth) : new Date();
+
+        const [created] = await db
+          .insert(clients)
+          .values({
+            tenantId: req.tenantId,
+            facilityId: Number(row.facilityId || targetFacilityId),
+            villageId: Number(row.villageId) || 1,
+            name: fullName,
+            clientType: row.clientType || "child",
+            dateOfBirth: dob,
+            gender: (row.sex || row.gender || "female").toLowerCase() === "male" ? "male" : "female",
+            parentName: row.caregiverName || row.parentName || null,
+            contactPhone: row.caregiverPhone || row.contactPhone || null,
+            catchmentStatus: row.status || "resident",
+          })
+          .returning();
+        insertedClients.push(created);
+      }
+
+      res.status(201).json({
+        success: true,
+        importedCount: insertedClients.length,
+        clients: insertedClients,
+      });
+    } catch (err: any) {
+      res.status(400).json({ message: err?.message || "Failed to commit client import" });
     }
   });
 
