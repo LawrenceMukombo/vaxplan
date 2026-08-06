@@ -1008,19 +1008,31 @@ export default function Facilities() {
       result = result.filter(f => Number(f.id) === Number(selectedFacilityId));
     } else if (selectedDistrictId) {
       result = result.filter(f => Number(f.districtId) === Number(selectedDistrictId));
-    } else if (selectedProvinceId && allDistricts) {
-      const districtIds = allDistricts
+    } else if (selectedProvinceId) {
+      const districtIds = (allDistricts || [])
         .filter(d => Number(d.provinceId) === Number(selectedProvinceId))
         .map(d => Number(d.id));
-      result = result.filter(f => districtIds.includes(Number(f.districtId)));
-    } else if (selectedRegionId && provinces && allDistricts) {
-      const provinceIds = provinces
+      result = result.filter(f => {
+        const directProvId = Number((f as any).provinceId);
+        if (Number.isFinite(directProvId) && directProvId > 0 && directProvId === Number(selectedProvinceId)) {
+          return true;
+        }
+        return districtIds.includes(Number(f.districtId));
+      });
+    } else if (selectedRegionId) {
+      const provinceIds = (provinces || [])
         .filter(p => Number(p.regionId) === Number(selectedRegionId))
         .map(p => Number(p.id));
-      const districtIds = allDistricts
+      const districtIds = (allDistricts || [])
         .filter(d => provinceIds.includes(Number(d.provinceId)))
         .map(d => Number(d.id));
-      result = result.filter(f => districtIds.includes(Number(f.districtId)));
+      result = result.filter(f => {
+        const directProvId = Number((f as any).provinceId);
+        if (Number.isFinite(directProvId) && directProvId > 0 && provinceIds.includes(directProvId)) {
+          return true;
+        }
+        return districtIds.includes(Number(f.districtId));
+      });
     }
     
     return result;
@@ -1033,13 +1045,25 @@ export default function Facilities() {
       result = result.filter(v => Number(v.assignedFacilityId) === Number(selectedFacilityId));
     } else if (selectedDistrictId) {
       result = result.filter(v => Number(v.districtId) === Number(selectedDistrictId));
-    } else if (selectedProvinceId && allDistricts) {
-      const distIds = allDistricts.filter(d => Number(d.provinceId) === Number(selectedProvinceId)).map(d => Number(d.id));
-      result = result.filter(v => distIds.includes(Number(v.districtId)));
-    } else if (selectedRegionId && provinces && allDistricts) {
-      const provIds = provinces.filter(p => Number(p.regionId) === Number(selectedRegionId)).map(p => Number(p.id));
-      const distIds = allDistricts.filter(d => provIds.includes(Number(d.provinceId))).map(d => Number(d.id));
-      result = result.filter(v => distIds.includes(Number(v.districtId)));
+    } else if (selectedProvinceId) {
+      const distIds = (allDistricts || []).filter(d => Number(d.provinceId) === Number(selectedProvinceId)).map(d => Number(d.id));
+      result = result.filter(v => {
+        const directProvId = Number((v as any).provinceId);
+        if (Number.isFinite(directProvId) && directProvId > 0 && directProvId === Number(selectedProvinceId)) {
+          return true;
+        }
+        return distIds.includes(Number(v.districtId));
+      });
+    } else if (selectedRegionId) {
+      const provIds = (provinces || []).filter(p => Number(p.regionId) === Number(selectedRegionId)).map(p => Number(p.id));
+      const distIds = (allDistricts || []).filter(d => provIds.includes(Number(d.provinceId))).map(d => Number(d.id));
+      result = result.filter(v => {
+        const directProvId = Number((v as any).provinceId);
+        if (Number.isFinite(directProvId) && directProvId > 0 && provIds.includes(directProvId)) {
+          return true;
+        }
+        return distIds.includes(Number(v.districtId));
+      });
     }
     return result;
   }, [villages, allDistricts, provinces, selectedRegionId, selectedProvinceId, selectedDistrictId, selectedFacilityId]);

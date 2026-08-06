@@ -309,8 +309,13 @@ export default function Supervision() {
       if (facilityFilter !== null && Number(f.id) !== facilityFilter) return false;
       if (districtFilter !== null && Number(f.districtId) !== districtFilter) return false;
       if (provinceFilter !== null) {
-        const d = districtById.get(Number(f.districtId));
-        if (!d || Number(d.provinceId) !== provinceFilter) return false;
+        const directProvId = Number((f as any).provinceId);
+        if (Number.isFinite(directProvId) && directProvId > 0 && directProvId === provinceFilter) {
+          // direct match
+        } else {
+          const d = districtById.get(Number(f.districtId));
+          if (!d || Number(d.provinceId) !== provinceFilter) return false;
+        }
       }
       return true;
     });
