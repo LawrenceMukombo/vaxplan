@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { queryClient, apiRequest } from "@/lib/queryClient";
@@ -31,7 +31,7 @@ import {
   MapPin, Image as ImageIcon, ToggleLeft, Hash, Type as TypeIcon, ListChecks,
   CheckSquare, Star, Calendar as CalendarIcon, ShieldAlert, Repeat, GitBranch,
   ChevronDown, ChevronRight, FileUp, Database, Eye, CheckCircle2, AlertTriangle,
-  HelpCircle, Sparkles, Layers, Sliders, Play, Copy, RefreshCw, FileText, Download, Upload
+  HelpCircle, Sparkles, Layers, Sliders, Play, Copy, RefreshCw, FileText, Download, Upload, Shuffle
 } from "lucide-react";
 import {
   CHECKLIST_QUESTION_TYPES,
@@ -126,6 +126,58 @@ export default function SupervisionTemplates() {
   const [importText, setImportText] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Auto-Save state
+  const [autoSaveStatus, setAutoSaveStatus] = useState<"saved" | "saving" | "idle">("idle");
+  const [lastSavedTime, setLastSavedTime] = useState<string | null>(null);
+  const autoSaveTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Auto-scroll selected question into view
+  useEffect(() => {
+    if (selectedItemId) {
+      const el = document.getElementById(`q-card-${selectedItemId}`);
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
+    }
+  }, [selectedItemId]);
+
+  // Auto-Save Effect
+  useEffect(() => {
+    if (!editing) return;
+    setAutoSaveStatus("saving");
+    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+
+    autoSaveTimerRef.current = setTimeout(() => {
+      try {
+        const draftPayload = {
+          editingId: editing.id || 0,
+          name,
+          description,
+          category,
+          applicableLevel,
+          sections,
+          items,
+          savedAt: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
+        };
+        localStorage.setItem("vaxplan_supervision_template_draft", JSON.stringify(draftPayload));
+        setLastSavedTime(draftPayload.savedAt);
+        setAutoSaveStatus("saved");
+      } catch (err) {
+        console.warn("Auto-save draft error:", err);
+      }
+    }, 1000);
+
+    return () => {
+      if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+    };
+  }, [name, description, category, applicableLevel, sections, items, editing]);
+
+  const clearAutoSaveDraft = () => {
+    localStorage.removeItem("vaxplan_supervision_template_draft");
+    setAutoSaveStatus("idle");
+    setLastSavedTime(null);
+  };
+
   const openEditor = (tpl?: ChecklistTemplate) => {
     if (tpl) {
       setEditing(tpl);
@@ -189,11 +241,41 @@ export default function SupervisionTemplates() {
       setActive(true);
       setCategory("supervision");
       setApplicableLevel("facility");
-      const defaultSec = { id: `sec-${Date.now()}`, title: "Facility Readiness & Service Delivery", displayOrder: 1 };
-      setSections([defaultSec]);
-      const initialItem = newItem(defaultSec.id);
-      setItems([initialItem]);
-      setSelectedItemId(initialItem.id);
+
+      // Check if saved draft exists
+      const savedDraft = localStorage.getItem("vaxplan_supervision_template_draft");
+      let restoredFromDraft = false;
+      if (savedDraft) {
+        try {
+          const draft = JSON.parse(savedDraft);
+          if (draft.name || (draft.items && draft.items.length > 0)) {
+            setName(draft.name || "");
+            setDescription(draft.description || "");
+            if (draft.category) setCategory(draft.category);
+            if (draft.applicableLevel) setApplicableLevel(draft.applicableLevel);
+            if (Array.isArray(draft.sections) && draft.sections.length > 0) setSections(draft.sections);
+            if (Array.isArray(draft.items) && draft.items.length > 0) {
+              setItems(draft.items);
+              setSelectedItemId(draft.items[0].id);
+            }
+            restoredFromDraft = true;
+            toast({
+              title: "Auto-Saved Draft Restored",
+              description: `Loaded uncommitted template draft from ${draft.savedAt || "previous session"}.`,
+            });
+          }
+        } catch (e) {
+          console.warn("Draft restore parse error:", e);
+        }
+      }
+
+      if (!restoredFromDraft) {
+        const defaultSec = { id: `sec-${Date.now()}`, title: "Facility Readiness & Service Delivery", displayOrder: 1 };
+        setSections([defaultSec]);
+        const initialItem = newItem(defaultSec.id);
+        setItems([initialItem]);
+        setSelectedItemId(initialItem.id);
+      }
     }
   };
 
@@ -348,17 +430,49 @@ export default function SupervisionTemplates() {
     const temp = copy[idx];
     copy[idx] = copy[nextIdx];
     copy[nextIdx] = temp;
-    setSections(copy);
+    setSections(copy.map((s, i) => ({ ...s, displayOrder: i + 1 })));
   };
 
-  const moveQuestion = (idx: number, dir: -1 | 1) => {
-    const nextIdx = idx + dir;
-    if (nextIdx < 0 || nextIdx >= items.length) return;
-    const copy = [...items];
-    const temp = copy[idx];
-    copy[idx] = copy[nextIdx];
-    copy[nextIdx] = temp;
-    setItems(copy);
+  const shuffleSections = () => {
+    setSections((prev) => {
+      const shuffled = [...prev];
+      for (let i = shuffled.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+      }
+      return shuffled.map((s, idx) => ({ ...s, displayOrder: idx + 1 }));
+    });
+    toast({ title: "Sections Shuffled", description: "Randomized section positions." });
+  };
+
+  const moveQuestionInSec = (secQuestions: ChecklistTemplateItem[], idxInSec: number, dir: -1 | 1) => {
+    const nextIdx = idxInSec + dir;
+    if (nextIdx < 0 || nextIdx >= secQuestions.length) return;
+    const item1 = secQuestions[idxInSec];
+    const item2 = secQuestions[nextIdx];
+    setItems((prev) => {
+      const gIdx1 = prev.findIndex((i) => i.id === item1.id);
+      const gIdx2 = prev.findIndex((i) => i.id === item2.id);
+      if (gIdx1 === -1 || gIdx2 === -1) return prev;
+      const copy = [...prev];
+      copy[gIdx1] = item2;
+      copy[gIdx2] = item1;
+      return copy;
+    });
+  };
+
+  const shuffleSectionQuestions = (secId: string) => {
+    setItems((prev) => {
+      const secItems = prev.filter((i) => i.sectionId === secId);
+      const otherItems = prev.filter((i) => i.sectionId !== secId);
+      const shuffled = [...secItems];
+      for (let i = shuffled.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+      }
+      return [...otherItems, ...shuffled];
+    });
+    toast({ title: "Questions Shuffled", description: "Randomized question order in this section." });
   };
 
   const duplicateQuestion = (it: ChecklistTemplateItem) => {
@@ -393,6 +507,7 @@ export default function SupervisionTemplates() {
     },
     onSuccess: (resData: any) => {
       queryClient.invalidateQueries({ queryKey: ["/api/supervision-checklist-templates"] });
+      clearAutoSaveDraft();
       toast({ title: "Template Saved", description: "Supervision checklist template saved successfully." });
       if (resData && typeof resData === "object" && resData.id) {
         setEditing(resData);
@@ -412,6 +527,7 @@ export default function SupervisionTemplates() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/supervision-checklist-templates"] });
+      clearAutoSaveDraft();
       toast({ title: "Checklist Deleted", description: "The checklist template has been deleted permanently." });
       setDeletingTemplate(null);
       setEditing(null);
@@ -567,8 +683,19 @@ export default function SupervisionTemplates() {
               </Select>
             </div>
 
-            {/* ALWAYS-VISIBLE STICKY ADD QUESTION & QUICK ACTIONS */}
-            <div className="flex items-center gap-2">
+            {/* ALWAYS-VISIBLE STICKY ADD QUESTION, SHUFFLE & AUTO-SAVE ACTIONS */}
+            <div className="flex items-center gap-2 flex-wrap">
+              {autoSaveStatus === "saving" && (
+                <Badge variant="outline" className="text-amber-600 dark:text-amber-400 bg-amber-500/10 border-amber-500/30 text-[11px] gap-1 animate-pulse" data-testid="badge-autosave-saving">
+                  <RefreshCw className="h-3 w-3 animate-spin" /> Saving draft...
+                </Badge>
+              )}
+              {autoSaveStatus === "saved" && lastSavedTime && (
+                <Badge variant="outline" className="text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border-emerald-500/30 text-[11px] gap-1" data-testid="badge-autosave-saved">
+                  <CheckCircle2 className="h-3 w-3 text-emerald-500" /> Auto-saved {lastSavedTime}
+                </Badge>
+              )}
+
               <Button
                 variant="default"
                 size="sm"
@@ -581,6 +708,18 @@ export default function SupervisionTemplates() {
               <Button variant="outline" size="sm" className="gap-1.5" onClick={addSection}>
                 <Layers className="h-3.5 w-3.5" />
                 Add Section
+              </Button>
+
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5 border-indigo-500/30 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/30"
+                onClick={shuffleSections}
+                title="Shuffle section order"
+                data-testid="button-shuffle-sections"
+              >
+                <Shuffle className="h-3.5 w-3.5" />
+                Shuffle Sections
               </Button>
 
               <Button
@@ -617,7 +756,14 @@ export default function SupervisionTemplates() {
                 <CheckCircle2 className="h-4 w-4" />
                 Save & Publish
               </Button>
-              <Button variant="ghost" size="sm" onClick={() => setEditing(null)}>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  clearAutoSaveDraft();
+                  setEditing(null);
+                }}
+              >
                 Cancel
               </Button>
               {editing?.id && !isNew && (
@@ -710,6 +856,39 @@ export default function SupervisionTemplates() {
                         />
                       </div>
                       <div className="flex items-center gap-1">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={(e) => { e.stopPropagation(); moveSection(sIdx, -1); }}
+                          disabled={sIdx === 0}
+                          className="h-7 w-7 p-0"
+                          title="Move Section Up"
+                          data-testid={`move-section-up-${sec.id}`}
+                        >
+                          <ArrowUp className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={(e) => { e.stopPropagation(); moveSection(sIdx, 1); }}
+                          disabled={sIdx === sections.length - 1}
+                          className="h-7 w-7 p-0"
+                          title="Move Section Down"
+                          data-testid={`move-section-down-${sec.id}`}
+                        >
+                          <ArrowDown className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={(e) => { e.stopPropagation(); shuffleSectionQuestions(sec.id); }}
+                          className="h-7 px-2 text-xs gap-1 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/30"
+                          title="Shuffle / Randomize question order in this section"
+                          data-testid={`shuffle-section-${sec.id}`}
+                        >
+                          <Shuffle className="h-3.5 w-3.5" />
+                          Shuffle Qs
+                        </Button>
                         <Button variant="ghost" size="sm" onClick={() => addQuestionToSection(sec.id)} className="h-7 text-xs gap-1 text-primary">
                           <Plus className="h-3.5 w-3.5" />
                           Add Question
@@ -730,10 +909,11 @@ export default function SupervisionTemplates() {
                             const IconComp = TYPE_ICON[it.type] || ToggleLeft;
                             return (
                               <div
+                                id={`q-card-${it.id}`}
                                 key={it.id}
                                 onClick={() => setSelectedItemId(it.id)}
                                 className={`p-3 rounded-lg border transition-all cursor-pointer space-y-2 ${
-                                  selectedItemId === it.id ? "border-primary bg-primary/5 ring-1 ring-primary/30" : "border-border/60 hover:border-border"
+                                  selectedItemId === it.id ? "border-primary bg-primary/5 ring-2 ring-primary/40 shadow-sm" : "border-border/60 hover:border-border"
                                 }`}
                               >
                                 <div className="flex items-start justify-between gap-2">
@@ -750,6 +930,35 @@ export default function SupervisionTemplates() {
                                     />
                                   </div>
                                   <div className="flex items-center gap-1 shrink-0">
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        moveQuestionInSec(secQuestions, idx, -1);
+                                      }}
+                                      disabled={idx === 0}
+                                      className="h-7 w-7 p-0"
+                                      title="Move Question Up"
+                                      data-testid={`move-question-up-${it.id}`}
+                                    >
+                                      <ArrowUp className="h-3.5 w-3.5" />
+                                    </Button>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        moveQuestionInSec(secQuestions, idx, 1);
+                                      }}
+                                      disabled={idx === secQuestions.length - 1}
+                                      className="h-7 w-7 p-0"
+                                      title="Move Question Down"
+                                      data-testid={`move-question-down-${it.id}`}
+                                    >
+                                      <ArrowDown className="h-3.5 w-3.5" />
+                                    </Button>
+
                                     <Select
                                       value={it.type}
                                       onValueChange={(v: any) => setItems((prev) => prev.map((i) => (i.id === it.id ? { ...i, type: v } : i)))}
@@ -848,7 +1057,7 @@ export default function SupervisionTemplates() {
              </div>
 
             {/* Right Panel: Selected Question Settings & Logic Drawer */}
-            <Card className="lg:col-span-3 border-border/60">
+            <Card className="lg:col-span-3 border-border/60 sticky top-20 max-h-[calc(100vh-6rem)] overflow-y-auto shadow-sm">
               <CardHeader className="p-3 border-b border-border/40">
                 <CardTitle className="text-sm font-semibold flex items-center gap-1.5">
                   <Sliders className="h-4 w-4 text-primary" />
@@ -858,6 +1067,32 @@ export default function SupervisionTemplates() {
               <CardContent className="p-3 space-y-4">
                 {selectedItem ? (
                   <div className="space-y-3 text-xs">
+                    <div>
+                      <Label className="text-xs font-semibold flex items-center gap-1.5 text-primary">
+                        <Layers className="h-3.5 w-3.5" />
+                        Section Location
+                      </Label>
+                      <Select
+                        value={selectedItem.sectionId}
+                        onValueChange={(targetSecId) => {
+                          setItems((prev) =>
+                            prev.map((i) => (i.id === selectedItem.id ? { ...i, sectionId: targetSecId } : i))
+                          );
+                        }}
+                      >
+                        <SelectTrigger className="h-8 text-xs mt-1 bg-background" data-testid="select-drawer-section">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {sections.map((s) => (
+                            <SelectItem key={s.id} value={s.id} className="text-xs font-medium">
+                              {s.title}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
                     <div>
                       <Label className="text-xs font-semibold">Question Prompt Label</Label>
                       <Textarea
