@@ -3739,13 +3739,13 @@ export function MapView({
   }, [showVillageMarkers, visibleVillagesFiltered, selectedFacilityId, communityRoutes, villages]);
 
   const activeClusteredVillages = useMemo(() => {
-    if (showVillageMarkers) return filteredVillages;
+    if (showVillageMarkers) return visibleVillagesFiltered;
     if (selectedFacilityId && communityRoutes && communityRoutes.length > 0) {
       const routedVillageIds = new Set(communityRoutes.map((r: any) => Number(r.villageId)));
       return villages.filter((v) => routedVillageIds.has(v.id));
     }
     return [];
-  }, [showVillageMarkers, filteredVillages, selectedFacilityId, communityRoutes, villages]);
+  }, [showVillageMarkers, visibleVillagesFiltered, selectedFacilityId, communityRoutes, villages]);
 
   // Viewport bounds pruning for session pins and unserved places to optimize map rendering performance
   const visibleSessionMapPins = useMemo(() => {
@@ -6691,7 +6691,7 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
             {/* Original Code commented out for backward-compatibility:
             visibleFacilities
             */}
-            {visibleFacilities
+            {visibleFacilitiesFiltered
               .filter((f) => f.latitude && f.longitude)
               .map((facility) => (
               /* Original Code commented out for backward-compatibility:
