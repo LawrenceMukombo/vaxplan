@@ -745,11 +745,15 @@ export default function SupervisionTemplates() {
                                         e.stopPropagation();
                                         setSelectedItemId(it.id);
                                       }}
-                                      className="h-7 px-2.5 text-xs gap-1 border-primary/40 text-primary hover:bg-primary/10 font-semibold"
+                                      className={`h-7 px-2.5 text-xs gap-1 font-semibold transition-colors ${
+                                        selectedItemId === it.id
+                                          ? "bg-primary text-primary-foreground hover:bg-primary/90 border-transparent shadow-sm"
+                                          : "border-primary/40 text-primary bg-background hover:bg-primary/10 hover:text-primary"
+                                      }`}
                                       title="Edit question logic, options, and parameters"
                                       data-testid={`edit-question-${it.id}`}
                                     >
-                                      <Pencil className="h-3.5 w-3.5" />
+                                      <Pencil className={`h-3.5 w-3.5 ${selectedItemId === it.id ? "text-primary-foreground" : "text-primary"}`} />
                                       <span>Edit</span>
                                     </Button>
                                     <Button
