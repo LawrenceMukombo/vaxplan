@@ -10,6 +10,7 @@ export async function applyStockLedgerColumnsMigration(db: NodePgDatabase<any>):
     `);
     await db.execute(sql`
       ALTER TABLE stock_transactions 
+      DROP CONSTRAINT IF EXISTS stock_transactions_product_id_fkey,
       ADD COLUMN IF NOT EXISTS balance_before integer,
       ADD COLUMN IF NOT EXISTS balance_after integer,
       ADD COLUMN IF NOT EXISTS source_module varchar(100),

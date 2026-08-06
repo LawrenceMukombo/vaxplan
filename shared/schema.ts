@@ -1867,7 +1867,7 @@ export const stockTransactions = pgTable("stock_transactions", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
   tenantId: varchar("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
   facilityId: integer("facility_id").notNull().references(() => facilities.id, { onDelete: "cascade" }),
-  productId: integer("product_id").notNull().references(() => catalogueVaccines.id, { onDelete: "restrict" }), // Must link to catalogue physical product
+  productId: integer("product_id").notNull(), // Links to catalogue vaccine ID or commodity ID (10000 + id)
   productCode: varchar("product_code", { length: 100 }), // snapshot of product code
   vaccineName: varchar("vaccine_name", { length: 100 }), // Legacy / Snapshot name
   transactionType: varchar("transaction_type", { length: 50 }).notNull(), // 'receipt', 'issue', 'loss', 'adjustment'
