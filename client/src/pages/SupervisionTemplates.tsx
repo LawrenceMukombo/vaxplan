@@ -594,6 +594,36 @@ export default function SupervisionTemplates() {
     }, 0);
   };
 
+  const getCleanQuestionText = (text: string) => {
+    if (!text) return "";
+    return text.replace(/^\s*(?:\[\d+\]|\d+[\.\)])\s*/, "").trim();
+  };
+
+  const orderedItems = useMemo(() => {
+    const knownSecIds = new Set(sections.map((s) => s.id));
+    const result: ChecklistTemplateItem[] = [];
+
+    sections.forEach((sec, sIdx) => {
+      const secQs = items.filter((i) => {
+        const itemSecId = i.sectionId || "sec-default";
+        if (itemSecId === sec.id) return true;
+        if (!knownSecIds.has(itemSecId) && sIdx === 0) return true;
+        return false;
+      });
+      result.push(...secQs);
+    });
+
+    return result;
+  }, [sections, items]);
+
+  const questionNumberMap = useMemo(() => {
+    const map = new Map<string, number>();
+    orderedItems.forEach((q, idx) => {
+      map.set(q.id, idx + 1);
+    });
+    return map;
+  }, [orderedItems]);
+
   const [activeCategoryFilter, setActiveCategoryFilter] = useState<string>("all");
 
   const categoryTemplates = useMemo(() => {
@@ -1002,21 +1032,28 @@ export default function SupervisionTemplates() {
                       </div>
                       {!collapsedSections[sec.id] && (
                         <div className="pl-4 space-y-1 text-[11px]">
-                          {secQuestions.map((q) => (
-                            <div
-                              key={q.id}
-                              onClick={() => setSelectedItemId(q.id)}
-                              className={`p-1.5 rounded cursor-pointer truncate flex items-center justify-between transition-colors ${
-                                selectedItemId === q.id ? "bg-primary/10 font-bold text-primary border border-primary/30" : "hover:bg-muted text-muted-foreground"
-                              }`}
-                            >
-                              <span className="truncate flex-1">{q.label || "Untitled Question"}</span>
-                              <div className="flex items-center gap-1 shrink-0 ml-1">
-                                <Pencil className="h-3 w-3 text-muted-foreground hover:text-primary" />
-                                {q.isAutoPrefill && <RefreshCw className="h-3 w-3 text-emerald-500" />}
+                          {secQuestions.map((q) => {
+                            const qNum = questionNumberMap.get(q.id) || 1;
+                            const cleanText = getCleanQuestionText(q.label);
+                            return (
+                              <div
+                                key={q.id}
+                                onClick={() => setSelectedItemId(q.id)}
+                                className={`p-1.5 rounded cursor-pointer truncate flex items-center justify-between transition-colors ${
+                                  selectedItemId === q.id ? "bg-primary/10 font-bold text-primary border border-primary/30" : "hover:bg-muted text-muted-foreground"
+                                }`}
+                              >
+                                <span className="truncate flex-1 font-mono text-[11px]">
+                                  <span className="text-primary font-bold mr-1">[{qNum}]</span>
+                                  {cleanText || "Untitled Question"}
+                                </span>
+                                <div className="flex items-center gap-1 shrink-0 ml-1">
+                                  <Pencil className="h-3 w-3 text-muted-foreground hover:text-primary" />
+                                  {q.isAutoPrefill && <RefreshCw className="h-3 w-3 text-emerald-500" />}
+                                </div>
                               </div>
-                            </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       )}
                     </div>
@@ -1119,6 +1156,8 @@ export default function SupervisionTemplates() {
                         ) : (
                           secQuestions.map((it, idx) => {
                             const IconComp = TYPE_ICON[it.type] || ToggleLeft;
+                            const qNum = questionNumberMap.get(it.id) || 1;
+                            const cleanText = getCleanQuestionText(it.label);
                             return (
                               <div
                                 id={`q-card-${it.id}`}
@@ -1131,8 +1170,11 @@ export default function SupervisionTemplates() {
                                 <div className="flex items-start justify-between gap-2">
                                   <div className="flex items-center gap-2 flex-1 min-w-0">
                                     <IconComp className="h-4 w-4 text-primary shrink-0" />
+                                    <Badge variant="secondary" className="font-mono text-xs font-bold text-primary bg-primary/10 border border-primary/20 shrink-0">
+                                      [{qNum}]
+                                    </Badge>
                                     <Input
-                                      value={it.label}
+                                      value={cleanText}
                                       onChange={(e) => {
                                         const label = e.target.value;
                                         setItems((prev) => prev.map((i) => (i.id === it.id ? { ...i, label } : i)));
@@ -1285,7 +1327,7 @@ export default function SupervisionTemplates() {
                         Section Location
                       </Label>
                       <Select
-                        value={selectedItem.sectionId}
+                        value={selectedItem.sectionId || "sec-default"}
                         onValueChange={(targetSecId) => {
                           setItems((prev) =>
                             prev.map((i) => (i.id === selectedItem.id ? { ...i, sectionId: targetSecId } : i))
@@ -1306,9 +1348,14 @@ export default function SupervisionTemplates() {
                     </div>
 
                     <div>
-                      <Label className="text-xs font-semibold">Question Prompt Label</Label>
+                      <Label className="text-xs font-semibold flex items-center gap-1.5">
+                        <Badge variant="outline" className="font-mono text-[11px] font-bold text-primary bg-primary/10 border-primary/30">
+                          [{questionNumberMap.get(selectedItem.id) || 1}]
+                        </Badge>
+                        Question Prompt Label
+                      </Label>
                       <Textarea
-                        value={selectedItem.label}
+                        value={getCleanQuestionText(selectedItem.label)}
                         onChange={(e) => {
                           const label = e.target.value;
                           setItems((prev) => prev.map((i) => (i.id === selectedItem.id ? { ...i, label } : i)));
@@ -1434,13 +1481,17 @@ export default function SupervisionTemplates() {
                             <SelectItem value="none" className="text-xs text-muted-foreground">
                               None (Always Visible)
                             </SelectItem>
-                            {items
+                            {orderedItems
                               .filter((i) => i.id !== selectedItem.id)
-                              .map((i) => (
-                                <SelectItem key={i.id} value={i.id} className="text-xs truncate">
-                                  {i.label.length > 50 ? i.label.slice(0, 50) + "..." : i.label}
-                                </SelectItem>
-                              ))}
+                              .map((i) => {
+                                const pNum = questionNumberMap.get(i.id) || 1;
+                                const pText = getCleanQuestionText(i.label);
+                                return (
+                                  <SelectItem key={i.id} value={i.id} className="text-xs truncate">
+                                    [{pNum}] {pText.length > 45 ? pText.slice(0, 45) + "..." : pText}
+                                  </SelectItem>
+                                );
+                              })}
                           </SelectContent>
                         </Select>
                       </div>
@@ -1534,14 +1585,21 @@ export default function SupervisionTemplates() {
               <Badge className={`bg-${risk.color}-500/10 text-${risk.color}-600 border-${risk.color}-500/30`}>{risk.label}</Badge>
             </div>
             <ScrollArea className="h-64 space-y-3 p-2 border rounded-md">
-              {items.map((it) => (
-                <div key={it.id} className="p-2 border-b text-xs space-y-1">
-                  <div className="font-semibold">{it.label || "Untitled Question"}</div>
-                  <Badge variant="outline" className="text-[9px]">
-                    {typeLabel(it.type)}
-                  </Badge>
-                </div>
-              ))}
+              {orderedItems.map((it) => {
+                const qNum = questionNumberMap.get(it.id) || 1;
+                const cleanText = getCleanQuestionText(it.label);
+                return (
+                  <div key={it.id} className="p-2 border-b text-xs space-y-1">
+                    <div className="font-semibold">
+                      <span className="text-primary font-bold mr-1">[{qNum}]</span>
+                      {cleanText || "Untitled Question"}
+                    </div>
+                    <Badge variant="outline" className="text-[9px]">
+                      {typeLabel(it.type)}
+                    </Badge>
+                  </div>
+                );
+              })}
             </ScrollArea>
           </div>
           <DialogFooter>
