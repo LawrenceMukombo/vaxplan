@@ -594,6 +594,21 @@ export default function SupervisionTemplates() {
     }, 0);
   };
 
+  const [activeCategoryFilter, setActiveCategoryFilter] = useState<string>("all");
+
+  const categoryTemplates = useMemo(() => {
+    return templates.filter((t) => (t.category || "supervision") === category);
+  }, [templates, category]);
+
+  const otherTemplates = useMemo(() => {
+    return templates.filter((t) => (t.category || "supervision") !== category);
+  }, [templates, category]);
+
+  const filteredMainTemplates = useMemo(() => {
+    if (activeCategoryFilter === "all") return templates;
+    return templates.filter((t) => (t.category || "supervision") === activeCategoryFilter);
+  }, [templates, activeCategoryFilter]);
+
   const selectedItem = useMemo(() => items.find((i) => i.id === selectedItemId), [items, selectedItemId]);
 
   // Preview score calculation
@@ -613,6 +628,16 @@ export default function SupervisionTemplates() {
       if (!knownSecIds.has(itemSecId) && sIdx === 0) return true;
       return false;
     });
+  };
+
+  const getCategoryLabel = (cat: string) => {
+    switch (cat) {
+      case "supervision": return "Supervision";
+      case "campaign": return "Campaign";
+      case "pce": return "PCE";
+      case "h2h": return "House-to-House";
+      default: return cat.toUpperCase();
+    }
   };
 
   return (
@@ -645,46 +670,94 @@ export default function SupervisionTemplates() {
 
       {/* Main Content Area */}
       {!editing ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {templates.map((tpl) => (
-            <Card key={tpl.id} className="hover:shadow-md transition-all border-border/60">
-              <CardHeader className="pb-2">
-                <div className="flex items-start justify-between">
-                  <Badge variant="outline" className="uppercase text-[10px] tracking-wider font-semibold border-primary/30 text-primary">
-                    {tpl.category}
-                  </Badge>
-                  <Badge variant={tpl.isActive ? "default" : "secondary"}>
-                    {tpl.isActive ? "Active" : "Inactive"}
-                  </Badge>
-                </div>
-                <CardTitle className="text-lg mt-2">{tpl.name}</CardTitle>
-                <CardDescription className="line-clamp-2 text-xs">{tpl.description || "No description provided."}</CardDescription>
-              </CardHeader>
-              <CardContent className="pt-2 space-y-3">
-                <div className="flex items-center justify-between text-xs text-muted-foreground">
-                  <span>{tpl.items?.length || 0} Questions</span>
-                  <span>v{tpl.version || 1}.0</span>
-                </div>
-                <div className="flex gap-2">
-                  <Button variant="outline" size="sm" className="flex-1 gap-1.5" onClick={() => openEditor(tpl)}>
-                    <Pencil className="h-3.5 w-3.5" />
-                    Edit Builder
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="gap-1.5 border-destructive/40 text-destructive hover:bg-destructive/10"
-                    onClick={() => setDeletingTemplate(tpl)}
-                    title="Delete entire checklist template"
-                    data-testid={`button-delete-checklist-${tpl.id}`}
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                    Delete
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
+        <div className="space-y-4">
+          {/* Category Filter Pills */}
+          <div className="flex flex-wrap items-center gap-2 border-b border-border/40 pb-3">
+            <span className="text-xs font-semibold text-muted-foreground mr-1">Filter Type:</span>
+            {[
+              { id: "all", label: "All Checklists", count: templates.length },
+              { id: "supervision", label: "Supervision", count: templates.filter((t) => t.category === "supervision").length },
+              { id: "campaign", label: "Campaign", count: templates.filter((t) => t.category === "campaign").length },
+              { id: "pce", label: "PCE", count: templates.filter((t) => t.category === "pce").length },
+              { id: "h2h", label: "House-to-House", count: templates.filter((t) => t.category === "h2h").length },
+            ].map((tab) => (
+              <Button
+                key={tab.id}
+                variant={activeCategoryFilter === tab.id ? "default" : "outline"}
+                size="sm"
+                onClick={() => setActiveCategoryFilter(tab.id)}
+                className={`h-8 text-xs gap-1.5 font-semibold ${
+                  activeCategoryFilter === tab.id
+                    ? "bg-primary text-primary-foreground shadow-sm"
+                    : "border-border/60 text-muted-foreground hover:text-foreground"
+                }`}
+                data-testid={`filter-category-${tab.id}`}
+              >
+                <span>{tab.label}</span>
+                <Badge
+                  variant="secondary"
+                  className={`text-[10px] px-1.5 py-0 ${
+                    activeCategoryFilter === tab.id ? "bg-primary-foreground/20 text-primary-foreground" : "bg-muted"
+                  }`}
+                >
+                  {tab.count}
+                </Badge>
+              </Button>
+            ))}
+          </div>
+
+          {filteredMainTemplates.length === 0 ? (
+            <div className="text-center py-12 border border-dashed border-border/80 rounded-xl space-y-3 bg-muted/20">
+              <ClipboardList className="h-10 w-10 mx-auto text-muted-foreground" />
+              <div className="font-semibold text-sm">No {getCategoryLabel(activeCategoryFilter)} Checklists Found</div>
+              <p className="text-xs text-muted-foreground">Create a new {getCategoryLabel(activeCategoryFilter)} checklist template or select another filter.</p>
+              <Button size="sm" onClick={() => openEditor()} className="gap-1.5 mt-2">
+                <Plus className="h-4 w-4" /> Create {getCategoryLabel(activeCategoryFilter)} Template
+              </Button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {filteredMainTemplates.map((tpl) => (
+                <Card key={tpl.id} className="hover:shadow-md transition-all border-border/60">
+                  <CardHeader className="pb-2">
+                    <div className="flex items-start justify-between">
+                      <Badge variant="outline" className="uppercase text-[10px] tracking-wider font-semibold border-primary/30 text-primary">
+                        {getCategoryLabel(tpl.category)}
+                      </Badge>
+                      <Badge variant={tpl.isActive ? "default" : "secondary"}>
+                        {tpl.isActive ? "Active" : "Inactive"}
+                      </Badge>
+                    </div>
+                    <CardTitle className="text-lg mt-2">{tpl.name}</CardTitle>
+                    <CardDescription className="line-clamp-2 text-xs">{tpl.description || "No description provided."}</CardDescription>
+                  </CardHeader>
+                  <CardContent className="pt-2 space-y-3">
+                    <div className="flex items-center justify-between text-xs text-muted-foreground">
+                      <span>{tpl.items?.length || 0} Questions</span>
+                      <span>v{tpl.version || 1}.0</span>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button variant="outline" size="sm" className="flex-1 gap-1.5" onClick={() => openEditor(tpl)}>
+                        <Pencil className="h-3.5 w-3.5" />
+                        Edit Builder
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="gap-1.5 border-destructive/40 text-destructive hover:bg-destructive/10"
+                        onClick={() => setDeletingTemplate(tpl)}
+                        title="Delete entire checklist template"
+                        data-testid={`button-delete-checklist-${tpl.id}`}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                        Delete
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
         </div>
       ) : (
         /* Full Builder Canvas */
@@ -731,13 +804,30 @@ export default function SupervisionTemplates() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="new" className="text-xs font-semibold text-indigo-600 dark:text-indigo-400">
-                        + Create New Checklist
+                        + Create New Checklist ({getCategoryLabel(category)})
                       </SelectItem>
-                      {templates.map((t) => (
-                        <SelectItem key={t.id} value={String(t.id)} className="text-xs">
+                      {categoryTemplates.length > 0 && (
+                        <div className="px-2 py-1 text-[10px] font-bold text-primary uppercase tracking-wider bg-primary/10 rounded mt-1">
+                          {getCategoryLabel(category)} Checklists ({categoryTemplates.length})
+                        </div>
+                      )}
+                      {categoryTemplates.map((t) => (
+                        <SelectItem key={t.id} value={String(t.id)} className="text-xs font-semibold">
                           {t.name} (v{t.version || 1}.0 — {t.items?.length || 0} Qs) {t.isActive ? "✓ Active" : ""}
                         </SelectItem>
                       ))}
+                      {otherTemplates.length > 0 && (
+                        <>
+                          <div className="px-2 py-1 text-[10px] font-bold text-muted-foreground uppercase tracking-wider bg-muted/40 rounded mt-2">
+                            Other Categories ({otherTemplates.length})
+                          </div>
+                          {otherTemplates.map((t) => (
+                            <SelectItem key={t.id} value={String(t.id)} className="text-xs text-muted-foreground">
+                              [{getCategoryLabel(t.category)}] {t.name} (v{t.version || 1}.0 — {t.items?.length || 0} Qs)
+                            </SelectItem>
+                          ))}
+                        </>
+                      )}
                     </SelectContent>
                   </Select>
                 </div>
@@ -749,7 +839,7 @@ export default function SupervisionTemplates() {
                   className="w-56 md:w-72 h-9 font-semibold text-sm"
                 />
                 <Select value={category} onValueChange={(v: any) => setCategory(v)}>
-                  <SelectTrigger className="w-32 h-9 text-xs">
+                  <SelectTrigger className="w-36 h-9 text-xs font-bold border-primary/40 bg-background" data-testid="select-category-type">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
