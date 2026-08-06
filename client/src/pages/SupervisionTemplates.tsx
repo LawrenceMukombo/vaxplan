@@ -125,10 +125,52 @@ export default function SupervisionTemplates() {
       setActive(tpl.isActive);
       setCategory(tpl.category);
       setApplicableLevel(tpl.applicableLevel || "facility");
-      setSections(tpl.sections && tpl.sections.length > 0 ? tpl.sections : [
-        { id: "sec-default", title: "General Supervision Findings", displayOrder: 1 }
-      ]);
-      setItems(tpl.items || []);
+
+      const loadedItems = tpl.items || [];
+      let loadedSections = Array.isArray(tpl.sections) && tpl.sections.length > 0 ? [...tpl.sections] : [];
+
+      const referencedSecIds = new Set(
+        loadedItems.map((i) => i.sectionId).filter(Boolean) as string[]
+      );
+
+      if (loadedSections.length === 0) {
+        if (referencedSecIds.size > 0) {
+          loadedSections = Array.from(referencedSecIds).map((secId, idx) => ({
+            id: secId,
+            title: secId === "sec-default" ? "General Supervision Findings" : `Section ${idx + 1}`,
+            displayOrder: idx + 1,
+          }));
+        } else {
+          loadedSections = [
+            { id: "sec-default", title: "General Supervision Findings", displayOrder: 1 }
+          ];
+        }
+      } else {
+        const existingSecIds = new Set(loadedSections.map((s) => s.id));
+        referencedSecIds.forEach((secId) => {
+          if (!existingSecIds.has(secId)) {
+            loadedSections.push({
+              id: secId,
+              title: secId === "sec-default" ? "General Supervision Findings" : `Additional Section (${secId})`,
+              displayOrder: loadedSections.length + 1,
+            });
+          }
+        });
+      }
+
+      const firstSecId = loadedSections[0]?.id || "sec-default";
+      const normalizedItems = loadedItems.map((item) => ({
+        ...item,
+        sectionId: item.sectionId || firstSecId,
+      }));
+
+      setSections(loadedSections);
+      setItems(normalizedItems);
+      if (normalizedItems.length > 0) {
+        setSelectedItemId(normalizedItems[0].id);
+      } else {
+        setSelectedItemId(null);
+      }
     } else {
       setEditing({ id: 0, tenantId: "", name: "", category: "supervision", items: [], isActive: true });
       setIsNew(true);
@@ -139,7 +181,9 @@ export default function SupervisionTemplates() {
       setApplicableLevel("facility");
       const defaultSec = { id: `sec-${Date.now()}`, title: "Facility Readiness & Service Delivery", displayOrder: 1 };
       setSections([defaultSec]);
-      setItems([newItem(defaultSec.id)]);
+      const initialItem = newItem(defaultSec.id);
+      setItems([initialItem]);
+      setSelectedItemId(initialItem.id);
     }
   };
 
@@ -334,6 +378,16 @@ export default function SupervisionTemplates() {
 
   const risk = useMemo(() => getRiskClassification(previewScore), [previewScore]);
 
+  const getQuestionsForSection = (secId: string, sIdx: number) => {
+    const knownSecIds = new Set(sections.map((s) => s.id));
+    return items.filter((i) => {
+      const itemSecId = i.sectionId || "sec-default";
+      if (itemSecId === secId) return true;
+      if (!knownSecIds.has(itemSecId) && sIdx === 0) return true;
+      return false;
+    });
+  };
+
   return (
     <div className="p-4 md:p-6 space-y-6 max-w-7xl mx-auto">
       {/* Header */}
@@ -517,7 +571,7 @@ export default function SupervisionTemplates() {
               </CardHeader>
               <CardContent className="p-2 space-y-2">
                 {sections.map((sec, sIdx) => {
-                  const secQuestions = items.filter((i) => (i.sectionId || "sec-default") === sec.id);
+                  const secQuestions = getQuestionsForSection(sec.id, sIdx);
                   return (
                     <div key={sec.id} className="p-2 rounded border border-border/50 bg-muted/30 space-y-1">
                       <div className="flex items-center justify-between gap-1">
@@ -558,7 +612,7 @@ export default function SupervisionTemplates() {
             {/* Middle Panel: Sections & Question Cards Canvas */}
             <div className="lg:col-span-6 space-y-4">
               {sections.map((sec, sIdx) => {
-                const secQuestions = items.filter((i) => (i.sectionId || "sec-default") === sec.id);
+                const secQuestions = getQuestionsForSection(sec.id, sIdx);
                 const isCollapsed = collapsedSections[sec.id];
                 return (
                   <Card key={sec.id} className="border-border/80 shadow-sm">
