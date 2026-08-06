@@ -34,6 +34,7 @@ import {
   PopulationOverlayLegend,
 } from "@/components/PopulationOverlay";
 import { FacilityCascadePicker } from "@/components/FacilityCascadePicker";
+import { FacilityDetailDrawer } from "./FacilityDetailDrawer";
 import { useAuth } from "@/hooks/useAuth";
 import { usePersistedBasemap, type Basemap, BasemapTileLayer, BasemapSwitcher, BASEMAP_ITEMS } from "@/components/map/BasemapToggle";
 import { CARTO_POSITRON_ATTRIBUTION, CARTO_VOYAGER_ATTRIBUTION } from "@/data/dataSources";
@@ -1757,6 +1758,13 @@ export function MapView({
   mode = "planning",
 }: MapViewProps) {
   const { user } = useAuth();
+  const isNationalAdminOrManager = useMemo(() => {
+    if (!user) return false;
+    const role = (user.role || "").toLowerCase();
+    const roles: string[] = Array.isArray(user.roles) ? user.roles.map((r: any) => String(r).toLowerCase()) : [];
+    const allowed = ["platform_admin", "national_admin", "national_manager", "gis_specialist", "provincial_coordinator", "district_manager", "admin", "manager"];
+    return allowed.includes(role) || roles.some((r) => allowed.includes(r));
+  }, [user]);
   const { theme, systemTheme } = useTheme();
   const [, setLocation] = useLocation();
   const mapRef = useRef<L.Map>(null);
@@ -8896,168 +8904,31 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
             */}
 
             {selectedFacilityId ? (
-              // Enriched Detail & Routes Panel
-              <div className="flex flex-col h-full overflow-hidden select-none">
-                <CardHeader className="p-4 pb-2 border-b flex flex-col space-y-2 bg-card/50">
-                  <div className="flex items-center justify-between">
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="h-7 px-2 -ml-2 text-xs font-semibold text-primary hover:text-primary/80 gap-1"
-                      onClick={() => setSelectedFacilityId(null)}
-                    >
-                      <ChevronLeft className="h-4 w-4" />
-                      Back to List
-                    </Button>
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      className="h-6 w-6 rounded-full hover:bg-muted"
-                      onClick={() => togglePanel("facilities")}
-                    >
-                      <X className="h-3.5 w-3.5" />
-                    </Button>
-                  </div>
-
-                  {(() => {
-                    const fac = facilities.find((f) => f.id === selectedFacilityId);
-                    if (!fac) return null;
-                    return (
-                      <>
-                        <div className="flex items-start justify-between gap-1.5 pt-1">
-                          <h3 className="font-bold text-sm text-foreground leading-tight">
-                            {fac.name}
-                          </h3>
-                          <Badge variant="outline" className="text-[9px] shrink-0 font-mono py-0.2 px-1 bg-background/50 uppercase">
-                            {fac.hmisCode}
-                          </Badge>
-                        </div>
-                        <div className="flex flex-wrap gap-1.5 pt-0.5">
-                          <span className="text-[9px] text-muted-foreground bg-muted px-1.5 py-0.2 rounded capitalize">
-                            {fac.facilityType?.toLowerCase().replace(/_/g, " ") || "Facility"}
-                          </span>
-                          {fac.hasRefrigerator && (
-                            <span className="flex items-center gap-0.5 text-[9px] text-blue-600 bg-blue-50 dark:bg-blue-950/40 px-1.5 py-0.2 rounded font-medium">
-                              <Thermometer className="h-2.5 w-2.5" />
-                              Cold Chain
-                            </span>
-                          )}
-                          {fac.hasPower && (
-                            <span className="flex items-center gap-0.5 text-[9px] text-amber-600 bg-amber-50 dark:bg-amber-950/40 px-1.5 py-0.2 rounded font-medium">
-                              <Zap className="h-2.5 w-2.5" />
-                              Power
-                            </span>
-                          )}
-                          {fac.staffCount && fac.staffCount > 0 && (
-                            <span className="text-[9px] text-muted-foreground bg-muted px-1.5 py-0.2 rounded">
-                              Staff: {fac.staffCount}
-                            </span>
-                          )}
-                        </div>
-                      </>
-                    );
-                  })()}
-                </CardHeader>
-
-                {/* Metrics Summary */}
-                <div className="p-3 bg-muted/30 border-b flex items-center justify-between text-[11px] text-muted-foreground px-4 gap-2">
-                  <div className="text-center flex-1">
-                    <p className="text-[9px] uppercase font-bold text-muted-foreground/70">Communities</p>
-                    <p className="font-bold text-foreground mt-0.5">{communityRoutes.length}</p>
-                  </div>
-                  <div className="text-center flex-1 border-x border-border/30">
-                    <p className="text-[9px] uppercase font-bold text-muted-foreground/70">Avg Distance</p>
-                    <p className="font-bold text-foreground mt-0.5">
-                      {communityRoutes.length > 0
-                        ? (
-                            communityRoutes.reduce((sum, r) => sum + (r.distanceToFacility || 0), 0) /
-                            communityRoutes.length
-                          ).toFixed(1)
-                        : "0"}{" "}
-                      km
-                    </p>
-                  </div>
-                  <div className="text-center flex-1">
-                    <p className="text-[9px] uppercase font-bold text-muted-foreground/70">Avg Travel</p>
-                    <p className="font-bold text-foreground mt-0.5">
-                      {communityRoutes.length > 0
-                        ? Math.round(
-                            communityRoutes.reduce((sum, r) => sum + (r.drivingTimeMinutes || 0), 0) /
-                              communityRoutes.length
-                          )
-                        : "0"}{" "}
-                      mins
-                    </p>
-                  </div>
-                </div>
-
-                <CardContent className="flex-1 overflow-y-auto p-3 space-y-3 custom-scrollbar">
-                  {communityRoutes.length > 0 ? (
-                    communityRoutes.map((route: any) => {
-                      return (
-                        <div
-                          key={`route-item-${route.villageId}`}
-                          className="p-3 rounded-lg border border-border/50 bg-card/45 hover:bg-accent/40 transition-all duration-150 select-none cursor-pointer"
-                          onClick={() => {
-                            if (route.routeGeometry && route.routeGeometry.length > 0 && mapRef.current) {
-                              const [lng, lat] = route.routeGeometry[route.routeGeometry.length - 1];
-                              mapRef.current.setView([lat, lng], 14);
-                            }
-                          }}
-                        >
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="font-bold text-xs text-foreground truncate">
-                              {route.villageName}
-                            </span>
-                            <Badge
-                              variant="outline"
-                              className={`text-[9px] font-bold py-0.2 px-1.5 capitalize rounded ${
-                                route.accessibilityScore === "Difficult"
-                                  ? "bg-rose-500/10 text-rose-600 border-rose-500/20"
-                                  : route.accessibilityScore === "Moderate"
-                                  ? "bg-amber-500/10 text-amber-600 border-amber-500/20"
-                                  : "bg-emerald-500/10 text-emerald-600 border-emerald-500/20"
-                              }`}
-                            >
-                              {route.accessibilityScore}
-                            </Badge>
-                          </div>
-
-                          <div className="text-[10px] text-muted-foreground mt-1.5 mb-2">
-                            Linked HF: <strong className="text-foreground/80">{facilities?.find(f => f.id === Number(selectedFacilityId))?.name || route.facilityName || "Assigned Facility"}</strong>
-                          </div>
-
-                          <div className="grid grid-cols-2 gap-2 mt-2 text-[10px] text-muted-foreground">
-                            <div className="flex items-center gap-1.5">
-                              <span className="text-xs">🚗</span>
-                              <span>Road: <strong>{route.distanceToFacility} km</strong> ({route.drivingTimeMinutes}m)</span>
-                            </div>
-                            <div className="flex items-center gap-1.5">
-                              <span className="text-xs">🚶</span>
-                              <span>Walk: <strong>{route.walkingTimeMinutes}m</strong></span>
-                            </div>
-                          </div>
-
-                          <div className="flex items-center justify-between text-[9px] text-muted-foreground/80 mt-2 pt-2 border-t border-border/20">
-                            <span>Mode: <strong className="capitalize">{route.transportMode}</strong></span>
-                            <span>Season: <strong>{route.seasonalAccessibility}</strong></span>
-                          </div>
-
-                          <div className="text-[9px] text-muted-foreground/60 mt-1 truncate">
-                            Route: <strong className="text-foreground/75 font-normal">{route.referralRoute}</strong>
-                          </div>
-                        </div>
-                      );
-                    })
-                  ) : (
-                    <div className="flex flex-col items-center justify-center h-48 text-center p-4">
-                      <MapPin className="h-8 w-8 text-muted-foreground/40 mb-2" />
-                      <p className="text-xs font-semibold text-muted-foreground">No community routes found</p>
-                      <p className="text-[11px] text-muted-foreground/75 mt-0.5">This facility might not have assigned communities.</p>
-                    </div>
-                  )}
-                </CardContent>
-              </div>
+              <FacilityDetailDrawer
+                facility={facilities.find((f) => f.id === selectedFacilityId)}
+                provinceName={provinceLookup.get(Number(districtLookup.get(Number(facilities.find((f) => f.id === selectedFacilityId)?.districtId))?.provinceId))?.name || "Province"}
+                districtName={districtLookup.get(Number(facilities.find((f) => f.id === selectedFacilityId)?.districtId))?.name || "District"}
+                communityRoutes={communityRoutes || []}
+                activeSessionPlans={activeSessionPlans.filter((p: any) => Number(p.facilityId) === Number(selectedFacilityId))}
+                onClose={() => setSelectedFacilityId(null)}
+                onEdit={(fac) => {
+                  setLocation(`/facilities?id=${fac.id}`);
+                }}
+                onDeletePolygon={async () => {
+                  if (!selectedFacilityId) return;
+                  const facName = facilities.find((f) => f.id === selectedFacilityId)?.name || "Facility";
+                  if (!window.confirm(`Are you sure you want to delete the catchment polygon for ${facName}?`)) return;
+                  try {
+                    await apiRequest("DELETE", `/api/facilities/${selectedFacilityId}/catchment-polygon`);
+                    queryClient.invalidateQueries({ queryKey: ["/api/facilities"] });
+                    queryClient.invalidateQueries({ queryKey: [`/api/facilities/${selectedFacilityId}/catchment-polygon`] });
+                    toast({ title: "Catchment polygon deleted", description: `Facility catchment polygon for ${facName} deleted.` });
+                  } catch (err: any) {
+                    toast({ title: "Delete failed", description: err?.message || "Failed to delete polygon", variant: "destructive" });
+                  }
+                }}
+                canDeletePolygon={isNationalAdminOrManager}
+              />
             ) : (
               // Standard list of facilities
               <div className="flex flex-col h-full overflow-hidden select-none">

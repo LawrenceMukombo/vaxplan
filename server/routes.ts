@@ -20198,6 +20198,84 @@ Instructions:
     }
   });
 
+  // DELETE /api/facilities/:id/catchment-polygon — delete facility catchment polygon (National Admin & Managers)
+  app.delete("/api/facilities/:id/catchment-polygon", isAuthenticated, requireTenant, async (req: any, res) => {
+    try {
+      const facilityId = parseInt(req.params.id, 10);
+      if (isNaN(facilityId)) return res.status(400).json({ message: "Invalid facility id" });
+
+      const dbUser = req.dbUser ?? (await storage.getUser(getCurrentUserId(req)));
+      if (!dbUser) return res.status(403).json({ message: "Forbidden: User context not resolved" });
+      req.dbUser = dbUser;
+
+      const userRole = (dbUser.role || "").toLowerCase();
+      const userRoles: string[] = Array.isArray(dbUser.roles)
+        ? dbUser.roles.map((r: any) => String(r).toLowerCase())
+        : [];
+      const allowedRoles = [
+        "platform_admin",
+        "national_admin",
+        "national_manager",
+        "gis_specialist",
+        "provincial_coordinator",
+        "district_manager",
+        "admin",
+        "manager",
+      ];
+      const isAllowed = allowedRoles.includes(userRole) || userRoles.some((r) => allowedRoles.includes(r));
+
+      if (!isAllowed) {
+        return res.status(403).json({
+          message: "Forbidden: Only National Admins and Managers can delete facility catchment polygons."
+        });
+      }
+
+      const [facility] = await db
+        .select()
+        .from(facilities)
+        .where(and(eq(facilities.id, facilityId), eq(facilities.tenantId, req.tenantId)))
+        .limit(1);
+      if (!facility) return res.status(404).json({ message: "Facility not found" });
+
+      const { gisPolygons, facilityCatchments } = await import("@shared/schema");
+
+      // Archive active and draft polygons in gisPolygons table
+      await db
+        .update(gisPolygons)
+        .set({ status: "archived", isActive: false, validTo: new Date(), updatedAt: new Date() })
+        .where(
+          and(
+            eq(gisPolygons.tenantId, req.tenantId),
+            eq(gisPolygons.ownerType, "facility"),
+            eq(gisPolygons.ownerId, facilityId)
+          )
+        );
+
+      // Clear catchment fields in facilities table
+      await db
+        .update(facilities)
+        .set({
+          catchmentPolygon: null,
+          catchmentRadius: null,
+          catchmentGridPopulation: 0,
+          updatedAt: new Date(),
+        })
+        .where(and(eq(facilities.id, facilityId), eq(facilities.tenantId, req.tenantId)));
+
+      // Delete records from facilityCatchments table
+      await db
+        .delete(facilityCatchments)
+        .where(and(eq(facilityCatchments.facilityId, facilityId), eq(facilityCatchments.tenantId, req.tenantId)));
+
+      await logAudit(req, "delete_facility_catchment_polygon", "facilities", facilityId, facility, null);
+
+      res.json({ success: true, message: "Facility catchment polygon deleted successfully." });
+    } catch (err: any) {
+      console.error("DELETE /api/facilities/:id/catchment-polygon error:", err);
+      res.status(500).json({ message: err?.message || "Failed to delete catchment polygon" });
+    }
+  });
+
   // GET /api/villages/:id/community-polygon — return stored polygon + pop estimate
   app.get("/api/villages/:id/community-polygon", isAuthenticated, requireTenant, async (req: any, res) => {
     try {
@@ -20510,6 +20588,80 @@ Instructions:
       });
     } catch (err: any) {
       res.status(500).json({ message: err?.message || "Failed to save community polygon" });
+    }
+  });
+
+  // DELETE /api/villages/:id/community-polygon — delete community polygon (National Admin & Managers)
+  app.delete("/api/villages/:id/community-polygon", isAuthenticated, requireTenant, async (req: any, res) => {
+    try {
+      const villageId = parseInt(req.params.id, 10);
+      if (isNaN(villageId)) return res.status(400).json({ message: "Invalid village id" });
+
+      const dbUser = req.dbUser ?? (await storage.getUser(getCurrentUserId(req)));
+      if (!dbUser) return res.status(403).json({ message: "Forbidden: User context not resolved" });
+      req.dbUser = dbUser;
+
+      const userRole = (dbUser.role || "").toLowerCase();
+      const userRoles: string[] = Array.isArray(dbUser.roles)
+        ? dbUser.roles.map((r: any) => String(r).toLowerCase())
+        : [];
+      const allowedRoles = [
+        "platform_admin",
+        "national_admin",
+        "national_manager",
+        "gis_specialist",
+        "provincial_coordinator",
+        "district_manager",
+        "admin",
+        "manager",
+      ];
+      const isAllowed = allowedRoles.includes(userRole) || userRoles.some((r) => allowedRoles.includes(r));
+
+      if (!isAllowed) {
+        return res.status(403).json({
+          message: "Forbidden: Only National Admins and Managers can delete community polygons."
+        });
+      }
+
+      const [village] = await db
+        .select()
+        .from(villages)
+        .where(and(eq(villages.id, villageId), eq(villages.tenantId, req.tenantId)))
+        .limit(1);
+      if (!village) return res.status(404).json({ message: "Village not found" });
+
+      const { gisPolygons } = await import("@shared/schema");
+
+      // Archive active and draft polygons in gisPolygons table
+      await db
+        .update(gisPolygons)
+        .set({ status: "archived", isActive: false, validTo: new Date(), updatedAt: new Date() })
+        .where(
+          and(
+            eq(gisPolygons.tenantId, req.tenantId),
+            eq(gisPolygons.ownerType, "village"),
+            eq(gisPolygons.ownerId, villageId)
+          )
+        );
+
+      // Clear catchment and boundary fields in villages table
+      await db
+        .update(villages)
+        .set({
+          catchmentPolygon: null,
+          boundary: null,
+          griddedPopulation: null,
+          polygonColor: null,
+          updatedAt: new Date(),
+        })
+        .where(and(eq(villages.id, villageId), eq(villages.tenantId, req.tenantId)));
+
+      await logAudit(req, "delete_community_polygon", "village", villageId, village, null);
+
+      res.json({ success: true, message: "Community polygon deleted successfully." });
+    } catch (err: any) {
+      console.error("DELETE /api/villages/:id/community-polygon error:", err);
+      res.status(500).json({ message: err?.message || "Failed to delete community polygon" });
     }
   });
 

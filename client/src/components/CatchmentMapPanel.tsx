@@ -28,6 +28,7 @@ import type {
 } from "geojson";
 
 
+import { useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
@@ -411,6 +412,54 @@ export function CatchmentMapPanel({
   const canDeleteDraft = hasAnyPermission(user, ["polygon.delete_draft", "manage_boundaries"]);
   const canArchivePolygon = hasAnyPermission(user, ["polygon.archive", "manage_boundaries"]);
   const canRecalculatePopulation = hasAnyPermission(user, ["polygon.recalculate_population", "manage_boundaries"]);
+
+  const queryClient = useQueryClient();
+  const userRole = (user?.role || "").toLowerCase();
+  const userRoles: string[] = Array.isArray(user?.roles) ? user?.roles.map((r: any) => String(r).toLowerCase()) : [];
+  const allowedAdminManagerRoles = ["platform_admin", "national_admin", "national_manager", "gis_specialist", "provincial_coordinator", "district_manager", "admin", "manager"];
+  const isNationalAdminOrManager = allowedAdminManagerRoles.includes(userRole) || userRoles.some(r => allowedAdminManagerRoles.includes(r));
+  const canDeleteActivePolygon = isNationalAdminOrManager || hasAnyPermission(user, ["polygon.delete", "polygon.archive", "manage_boundaries"]);
+
+  const [deletingFacilityCatchment, setDeletingFacilityCatchment] = useState(false);
+  const [deletingCommunityId, setDeletingCommunityId] = useState<number | null>(null);
+
+  const handleDeleteFacilityCatchment = async () => {
+    if (!facilityId) return;
+    const confirmed = window.confirm(`Are you sure you want to delete the facility catchment polygon for ${facilityName}? This will reset the catchment boundary and population estimate.`);
+    if (!confirmed) return;
+
+    setDeletingFacilityCatchment(true);
+    try {
+      await apiRequest("DELETE", `/api/facilities/${facilityId}/catchment-polygon`);
+      setCatchment(null);
+      queryClient.invalidateQueries({ queryKey: ["/api/facilities"] });
+      queryClient.invalidateQueries({ queryKey: [`/api/facilities/${facilityId}/catchment-polygon`] });
+      toast({ title: "Catchment polygon deleted", description: `The facility catchment polygon for ${facilityName} has been deleted.` });
+    } catch (err: any) {
+      toast({ title: "Delete failed", description: err?.message || "Failed to delete catchment polygon", variant: "destructive" });
+    } finally {
+      setDeletingFacilityCatchment(false);
+    }
+  };
+
+  const handleDeleteCommunityPolygon = async (villageId: number) => {
+    const communityName = selectedCommunity || "this community";
+    const confirmed = window.confirm(`Are you sure you want to delete the community polygon for ${communityName}? This will reset the community boundary.`);
+    if (!confirmed) return;
+
+    setDeletingCommunityId(villageId);
+    try {
+      await apiRequest("DELETE", `/api/villages/${villageId}/community-polygon`);
+      setCommunityPolygons((prev) => prev.filter((p) => p.communityId !== villageId && p.communityName !== communityName));
+      queryClient.invalidateQueries({ queryKey: ["/api/villages"] });
+      queryClient.invalidateQueries({ queryKey: [`/api/villages/${villageId}/community-polygon`] });
+      toast({ title: "Community polygon deleted", description: `The community polygon for ${communityName} has been deleted.` });
+    } catch (err: any) {
+      toast({ title: "Delete failed", description: err?.message || "Failed to delete community polygon", variant: "destructive" });
+    } finally {
+      setDeletingCommunityId(null);
+    }
+  };
   const [catchment, setCatchment] = useState<CatchmentPolygon | null>(null);
   const [communityPolygons, setCommunityPolygons] = useState<CommunityPolygon[]>([]);
   const [drawMode, setDrawMode] = useState<"catchment" | "community" | null>(null);
@@ -964,15 +1013,29 @@ export function CatchmentMapPanel({
                   <button type="button" onClick={() => loadHistory("facility", facilityId, facilityName)}
                     className="rounded-md border px-2.5 py-1 text-xs hover:bg-muted">History</button>
                 )}
+                {canDeleteActivePolygon && (
+                  <button type="button" onClick={handleDeleteFacilityCatchment} disabled={deletingFacilityCatchment}
+                    className="rounded-md border border-red-300 bg-red-50 text-red-700 px-2.5 py-1 text-xs font-medium hover:bg-red-100 disabled:opacity-50">
+                    {deletingFacilityCatchment ? "Deleting..." : "Delete Catchment"}
+                  </button>
+                )}
                 <button type="button" onClick={() => setFitCoords(catchment.coords)}
                   className="rounded-md border px-2.5 py-1 text-xs hover:bg-muted"> Fit</button>
               </>
             )}
             {!catchment.locked && (
-              <button type="button" onClick={autoSuggestCatchment} disabled={suggesting}
-                  className="rounded-md border border-purple-300 bg-purple-50 px-2.5 py-1 text-xs font-medium text-purple-700 hover:bg-purple-100 disabled:opacity-50">
-                  {suggesting ? " Auto-suggesting..." : " Auto-suggest"}
-              </button>
+              <>
+                <button type="button" onClick={autoSuggestCatchment} disabled={suggesting}
+                    className="rounded-md border border-purple-300 bg-purple-50 px-2.5 py-1 text-xs font-medium text-purple-700 hover:bg-purple-100 disabled:opacity-50">
+                    {suggesting ? " Auto-suggesting..." : " Auto-suggest"}
+                </button>
+                {canDeleteActivePolygon && (
+                  <button type="button" onClick={handleDeleteFacilityCatchment} disabled={deletingFacilityCatchment}
+                    className="rounded-md border border-red-300 bg-red-50 text-red-700 px-2.5 py-1 text-xs font-medium hover:bg-red-100 disabled:opacity-50">
+                    {deletingFacilityCatchment ? "Deleting..." : "Delete Catchment"}
+                  </button>
+                )}
+              </>
             )}
           </>
         )}
@@ -1009,17 +1072,15 @@ export function CatchmentMapPanel({
               <button type="button" onClick={() => loadHistory("village", selectedCommunityRecord.villageId!, selectedCommunity)}
                 className="rounded-md border px-2.5 py-1 text-xs hover:bg-muted">History</button>
             )}
+            {canDeleteActivePolygon && selectedCommunityRecord?.villageId && (
+              <button type="button" onClick={() => handleDeleteCommunityPolygon(selectedCommunityRecord.villageId!)} disabled={deletingCommunityId === selectedCommunityRecord.villageId}
+                className="rounded-md border border-red-300 bg-red-50 text-red-700 px-2.5 py-1 text-xs font-medium hover:bg-red-100 disabled:opacity-50">
+                {deletingCommunityId === selectedCommunityRecord.villageId ? "Deleting..." : "Delete Polygon"}
+              </button>
+            )}
           </>
         )}
 
-        <div className="h-4 w-px bg-border mx-1" />
-
-        {/* Commented out original local toggle button in favor of floating BasemapSwitcher
-        <button type="button" onClick={() => setTileLayer((t) => t === "positron" ? "voyager" : "positron")}
-          className="rounded-md border px-2.5 py-1 text-xs hover:bg-muted">
-          {tileLayer === "positron" ? " Voyager" : " Positron"}
-        </button>
-        */}
         <button type="button" disabled={!catchment || extracting} onClick={extractCommunities}
           className="rounded-md border border-sky-300 bg-sky-50 px-2.5 py-1 text-xs font-medium text-sky-700 hover:bg-sky-100 disabled:opacity-50">
           {extracting ? " Extracting..." : " Extract Communities"}
