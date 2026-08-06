@@ -472,6 +472,50 @@ export default function SupervisionTemplates() {
     if (selectedItemId === id) setSelectedItemId(null);
   };
 
+  const [deletingSection, setDeletingSection] = useState<ChecklistSection | null>(null);
+
+  const confirmDeleteSection = (keepQuestions: boolean) => {
+    if (!deletingSection) return;
+    const secId = deletingSection.id;
+
+    if (sections.length <= 1) {
+      toast({
+        title: "Cannot Delete Section",
+        description: "A checklist template must contain at least one section.",
+        variant: "destructive",
+      });
+      setDeletingSection(null);
+      return;
+    }
+
+    const remainingSections = sections.filter((s) => s.id !== secId);
+    const fallbackSecId = remainingSections[0]?.id || "sec-default";
+
+    setSections(remainingSections);
+
+    if (keepQuestions) {
+      setItems((prev) =>
+        prev.map((i) => (i.sectionId === secId ? { ...i, sectionId: fallbackSecId } : i))
+      );
+      toast({
+        title: "Section Removed",
+        description: `Section deleted. Questions were moved to "${remainingSections[0]?.title || "General Findings"}".`,
+      });
+    } else {
+      const secQuestionIds = new Set(items.filter((i) => i.sectionId === secId).map((i) => i.id));
+      setItems((prev) => prev.filter((i) => i.sectionId !== secId));
+      if (selectedItemId && secQuestionIds.has(selectedItemId)) {
+        setSelectedItemId(null);
+      }
+      toast({
+        title: "Section & Questions Deleted",
+        description: "Section and all its contained questions were removed.",
+      });
+    }
+
+    setDeletingSection(null);
+  };
+
   const saveMutation = useMutation({
     mutationFn: async () => {
       const payload = {
@@ -925,6 +969,27 @@ export default function SupervisionTemplates() {
                         <Button variant="ghost" size="sm" onClick={() => addQuestionToSection(sec.id)} className="h-7 text-xs gap-1 text-primary">
                           <Plus className="h-3.5 w-3.5" />
                           Add Question
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (sections.length <= 1) {
+                              toast({
+                                title: "Cannot Delete Section",
+                                description: "A checklist template must contain at least one section.",
+                                variant: "destructive",
+                              });
+                              return;
+                            }
+                            setDeletingSection(sec);
+                          }}
+                          className="h-7 w-7 p-0 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                          title="Delete Section"
+                          data-testid={`delete-section-${sec.id}`}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
                         </Button>
                       </div>
                     </CardHeader>
@@ -1477,6 +1542,48 @@ export default function SupervisionTemplates() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Delete Section Confirmation Dialog */}
+      <AlertDialog open={!!deletingSection} onOpenChange={(open) => !open && setDeletingSection(null)}>
+        <AlertDialogContent className="max-w-md">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-destructive flex items-center gap-2 font-bold">
+              <Trash2 className="h-5 w-5 text-destructive" />
+              Delete Section "{deletingSection?.title}"?
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-xs text-muted-foreground space-y-2">
+              <p>
+                This section currently contains{" "}
+                <strong>
+                  {items.filter((i) => i.sectionId === deletingSection?.id).length} question(s)
+                </strong>.
+              </p>
+              <p>Would you like to preserve the questions by moving them to another section, or delete both the section and all its contained questions?</p>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="flex-col sm:flex-row gap-2">
+            <AlertDialogCancel className="text-xs">Cancel</AlertDialogCancel>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => confirmDeleteSection(true)}
+              className="text-xs border-primary/40 text-primary hover:bg-primary/10 font-semibold"
+              data-testid="confirm-delete-section-keep-questions"
+            >
+              Move Questions (Delete Section)
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => confirmDeleteSection(false)}
+              className="text-xs bg-destructive text-destructive-foreground hover:bg-destructive/90 font-semibold"
+              data-testid="confirm-delete-section-all"
+            >
+              Delete Section & Questions
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Delete Checklist Confirmation Dialog */}
       <AlertDialog open={!!deletingTemplate} onOpenChange={(open) => !open && setDeletingTemplate(null)}>
