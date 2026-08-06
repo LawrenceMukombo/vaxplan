@@ -535,7 +535,9 @@ export default function SupervisionTemplates() {
     onSuccess: (resData: any) => {
       queryClient.invalidateQueries({ queryKey: ["/api/supervision-checklist-templates"] });
       toast({ title: "Template Saved", description: active ? "Checklist validated and published successfully." : "Draft saved successfully." });
-      if (resData && typeof resData === "object" && resData.id) {
+      if (active) {
+        setEditing(null);
+      } else if (resData && typeof resData === "object" && resData.id) {
         setEditing(resData);
         setIsNew(false);
       }
