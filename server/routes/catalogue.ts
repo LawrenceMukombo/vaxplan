@@ -279,22 +279,25 @@ router.post("/seed", isAuthenticated, requireTenant, requirePermission("manage_u
     }
 
     const seedCommodities = [
-      { commodityCode: 'diluent_bcg', type: 'diluent', name: 'BCG diluent', linkedVaccineId: getVaxId('vaccine_bcg'), packSize: 100 },
-      { commodityCode: 'diluent_mr', type: 'diluent', name: 'MR diluent', linkedVaccineId: getVaxId('vaccine_mr'), packSize: 100 },
-      { commodityCode: 'diluent_yf', type: 'diluent', name: 'Yellow Fever diluent', linkedVaccineId: getVaxId('vaccine_yellow_fever'), packSize: 100 },
-      { commodityCode: 'syringe_05ml_ad', type: 'syringe', name: 'Auto-disable syringes 0.5ml', packSize: 100 },
-      { commodityCode: 'syringe_005ml_ad', type: 'syringe', name: 'Auto-disable syringes 0.05ml (BCG)', packSize: 100 },
-      { commodityCode: 'syringe_reconstitution_2ml', type: 'syringe', name: 'Reconstitution syringes 2ml', packSize: 100 },
-      { commodityCode: 'syringe_reconstitution_5ml', type: 'syringe', name: 'Reconstitution syringes 5ml', packSize: 100 },
-      { commodityCode: 'safety_box_5l', type: 'safety_box', name: 'Safety boxes 5L', packSize: 25 },
-      { commodityCode: 'ppe_gloves', type: 'ppe', name: 'Gloves', packSize: 100, stockManaged: false },
-      { commodityCode: 'ppe_masks', type: 'ppe', name: 'Masks', packSize: 50, stockManaged: false },
-      { commodityCode: 'ppe_sanitizer', type: 'ppe', name: 'Hand sanitizer', packSize: 1, stockManaged: false },
-      { commodityCode: 'cold_chain_vaccine_carrier', type: 'cold_chain', name: 'Vaccine carriers', packSize: 1, stockManaged: true },
+      { commodityCode: 'diluent_bcg', type: 'diluent', name: 'BCG diluent', linkedVaccineId: getVaxId('vaccine_bcg'), packSize: 100, stockManaged: true },
+      { commodityCode: 'diluent_mr', type: 'diluent', name: 'MR diluent', linkedVaccineId: getVaxId('vaccine_mr'), packSize: 100, stockManaged: true },
+      { commodityCode: 'diluent_yf', type: 'diluent', name: 'Yellow Fever diluent', linkedVaccineId: getVaxId('vaccine_yellow_fever'), packSize: 100, stockManaged: true },
+      { commodityCode: 'syringe_05ml_ad', type: 'syringe', name: 'Auto-disable syringes 0.5ml', packSize: 100, stockManaged: true },
+      { commodityCode: 'syringe_005ml_ad', type: 'syringe', name: 'Auto-disable syringes 0.05ml (BCG)', packSize: 100, stockManaged: true },
+      { commodityCode: 'syringe_reconstitution_2ml', type: 'syringe', name: 'Reconstitution syringes 2ml', packSize: 100, stockManaged: true },
+      { commodityCode: 'syringe_reconstitution_5ml', type: 'syringe', name: 'Reconstitution syringes 5ml', packSize: 100, stockManaged: true },
+      { commodityCode: 'safety_box_5l', type: 'safety_box', name: 'Safety boxes 5L', packSize: 25, stockManaged: true },
+      { commodityCode: 'ppe_gloves', type: 'ppe', name: 'Examination Gloves', packSize: 100, stockManaged: true },
+      { commodityCode: 'ppe_masks', type: 'ppe', name: 'Masks', packSize: 50, stockManaged: true },
+      { commodityCode: 'ppe_sanitizer', type: 'ppe', name: 'Hand sanitizer (500ml)', packSize: 1, stockManaged: true },
+      { commodityCode: 'cold_chain_vaccine_carrier', type: 'cold_chain', name: 'Vaccine carriers (4L)', packSize: 1, stockManaged: true },
       { commodityCode: 'cold_chain_ice_pack', type: 'cold_chain', name: 'Ice packs', packSize: 1, stockManaged: true },
-      { commodityCode: 'other_cotton_wool', type: 'other', name: 'Cotton wool', packSize: 1, stockManaged: false },
-      { commodityCode: 'other_tally_sheets', type: 'other', name: 'Session tally sheets', packSize: 100, stockManaged: false },
-      { commodityCode: 'other_vaccination_cards', type: 'other', name: 'Vaccination cards', packSize: 100, stockManaged: true }
+      { commodityCode: 'cold_chain_foam_pad', type: 'cold_chain', name: 'Foam pads', packSize: 1, stockManaged: true },
+      { commodityCode: 'other_cotton_wool', type: 'other', name: 'Absorbent Cotton wool (500g)', packSize: 1, stockManaged: true },
+      { commodityCode: 'other_tally_sheets', type: 'other', name: 'EPI Session tally sheets', packSize: 100, stockManaged: true },
+      { commodityCode: 'other_vaccination_cards', type: 'other', name: 'Child Health Immunization cards (HBR)', packSize: 100, stockManaged: true },
+      { commodityCode: 'other_register_book', type: 'other', name: 'Facility Immunization Register Book', packSize: 1, stockManaged: true },
+      { commodityCode: 'other_aefi_form', type: 'other', name: 'AEFI Investigation & Reporting Form', packSize: 1, stockManaged: true }
     ];
 
     for (const c of seedCommodities) {

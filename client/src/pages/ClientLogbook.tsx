@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { DataTable } from "@/components/DataTable";
 import { GeoCascadeFilter } from "@/components/GeoCascadeFilter";
@@ -5456,17 +5456,24 @@ export default function ClientLogbook() {
                   </p>
                 </div>
                 <div className="flex items-center justify-center gap-3">
-                  <label className="cursor-pointer">
-                    <input
-                      type="file"
-                      accept=".csv,.xlsx,.xls,.json"
-                      onChange={handleFileUpload}
-                      className="hidden"
-                    />
-                    <Button type="button" variant="default" className="gap-2 bg-indigo-600 hover:bg-indigo-500 text-white">
-                      <FileUp className="h-4 w-4" /> Browse File
-                    </Button>
-                  </label>
+                  <input
+                    id="bulk-client-file-input"
+                    type="file"
+                    accept=".csv,.xlsx,.xls,.json"
+                    onChange={(e) => {
+                      handleFileUpload(e);
+                      if (e.target) e.target.value = "";
+                    }}
+                    className="hidden"
+                  />
+                  <Button
+                    type="button"
+                    variant="default"
+                    className="gap-2 bg-indigo-600 hover:bg-indigo-500 text-white cursor-pointer"
+                    onClick={() => document.getElementById("bulk-client-file-input")?.click()}
+                  >
+                    <FileUp className="h-4 w-4" /> Browse File
+                  </Button>
                   <Button
                     type="button"
                     variant="outline"

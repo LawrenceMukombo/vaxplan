@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { queryClient, apiRequest } from "@/lib/queryClient";
@@ -114,6 +114,7 @@ export default function SupervisionTemplates() {
   const [importOpen, setImportOpen] = useState(false);
   const [questionBankOpen, setQuestionBankOpen] = useState(false);
   const [importText, setImportText] = useState("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const openEditor = (tpl?: ChecklistTemplate) => {
     if (tpl) {
@@ -782,17 +783,24 @@ export default function SupervisionTemplates() {
             <div className="border-2 border-dashed border-indigo-200 dark:border-indigo-900/50 hover:border-indigo-500 rounded-2xl p-6 text-center space-y-3 bg-indigo-50/20 dark:bg-indigo-950/10">
               <Upload className="h-8 w-8 mx-auto text-indigo-600 dark:text-indigo-400" />
               <p className="text-xs font-semibold">Select File to Import Questions</p>
-              <label className="cursor-pointer inline-block">
-                <input
-                  type="file"
-                  accept=".csv,.xlsx,.xls,.json"
-                  onChange={handleSupervisionFile}
-                  className="hidden"
-                />
-                <Button type="button" size="sm" className="gap-2 bg-indigo-600 hover:bg-indigo-500 text-white">
-                  <FileUp className="h-4 w-4" /> Browse CSV / Excel / JSON
-                </Button>
-              </label>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".csv,.xlsx,.xls,.json"
+                onChange={(e) => {
+                  handleSupervisionFile(e);
+                  if (e.target) e.target.value = "";
+                }}
+                className="hidden"
+              />
+              <Button
+                type="button"
+                size="sm"
+                className="gap-2 bg-indigo-600 hover:bg-indigo-500 text-white cursor-pointer"
+                onClick={() => fileInputRef.current?.click()}
+              >
+                <FileUp className="h-4 w-4" /> Browse CSV / Excel / JSON
+              </Button>
             </div>
 
             <div className="flex items-center justify-between text-xs pt-2">

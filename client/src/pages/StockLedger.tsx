@@ -314,6 +314,44 @@ export default function StockLedger() {
     },
   });
 
+  // Load non-vaccine commodities from Country Catalogue
+  const { data: catalogueCommodities = [] } = useQuery<any[]>({
+    queryKey: ["/api/catalogue/commodities", "activeOnly"],
+    queryFn: async () => {
+      const res = await fetch("/api/catalogue/commodities?activeOnly=true");
+      if (!res.ok) return [];
+      const list = await res.json();
+      return Array.isArray(list) ? list.filter((c: any) => c.active !== false) : [];
+    },
+  });
+
+  // Combine vaccineConfigs + catalogueCommodities into unified products list
+  const allCatalogueProducts = useMemo(() => {
+    const vaxItems = (vaccineConfigs || []).map((v: any) => ({
+      id: v.id,
+      name: v.name,
+      category: "vaccine",
+      dosesPerVial: v.dosesPerVial || 10,
+      vvmType: v.vvmType || "Type 30",
+      code: v.productId || v.name,
+      stockManaged: true,
+      active: true,
+    }));
+
+    const commItems = (catalogueCommodities || []).map((c: any) => ({
+      id: 10000 + c.id,
+      name: c.name,
+      category: c.type || "commodity",
+      dosesPerVial: c.packSize || 1,
+      vvmType: "N/A",
+      code: c.commodityCode || c.name,
+      stockManaged: true,
+      active: true,
+    }));
+
+    return [...vaxItems, ...commItems];
+  }, [vaccineConfigs, catalogueCommodities]);
+
   const { data: catalogueWastageThresholds = [] } = useQuery<CatalogueWastageThreshold[]>({
     queryKey: ["/api/catalogue/wastage-thresholds", "activeOnly"],
     queryFn: async () => {
@@ -1499,9 +1537,9 @@ export default function StockLedger() {
           {/* Active Balances SOH Cards */}
           <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-4">
             {Array.from(new Set(
-              vaccineConfigs?.filter(c => c.active && c.stockManaged).map(c => normalizeStockVaccineName(c.name)) ?? []
+              allCatalogueProducts.map(c => normalizeStockVaccineName(c.name))
             )).map((normName) => {
-              const config = vaccineConfigs?.find(c => c.active && c.stockManaged && normalizeStockVaccineName(c.name) === normName);
+              const config = allCatalogueProducts.find(c => normalizeStockVaccineName(c.name) === normName);
               const wastageRate = resolveDisplayWastageRate(config, catalogueWastageThresholds, normName);
               const status = antigenStatusByName.get(normName);
               const balance = status?.balance ?? stockOnHand[normName] ?? 0;
@@ -2443,11 +2481,11 @@ export default function StockLedger() {
 
           <Form {...txnForm}>
             <form onSubmit={txnForm.handleSubmit((d) => {
-              const vaccine = vaccineConfigs?.find(c => c.id === d.productId);
+              const product = allCatalogueProducts.find(c => c.id === d.productId);
               saveTxnMutation.mutate({
                 ...d,
-                vaccineName: vaccine?.name || "",
-                productCode: vaccine?.productId || "",
+                vaccineName: product?.name || "",
+                productCode: product?.code || "",
               });
             })} className="space-y-4 pt-4">
               <FormField
@@ -2455,17 +2493,17 @@ export default function StockLedger() {
                 name="productId"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Product</FormLabel>
+                    <FormLabel>Product / Catalogue Supply</FormLabel>
                     <Select onValueChange={(val) => field.onChange(parseInt(val))} value={field.value?.toString() || ""}>
                       <FormControl>
                         <SelectTrigger>
-                          <SelectValue placeholder="Pick product" />
+                          <SelectValue placeholder="Pick vaccine or session supply" />
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
-                        {vaccineConfigs?.filter(c => c.active && c.stockManaged).map((c) => (
+                        {allCatalogueProducts.map((c) => (
                           <SelectItem key={c.id} value={c.id.toString()}>
-                            {c.name}
+                            {c.name} {c.category !== "vaccine" ? `[${c.category.toUpperCase()}]` : ""}
                           </SelectItem>
                         ))}
                       </SelectContent>
