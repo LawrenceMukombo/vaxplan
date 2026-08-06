@@ -4027,3 +4027,118 @@ export type StockReferenceHistoryVersion = typeof stockReferenceHistoryVersions.
 export const insertReportEntitySnapshotSchema = createInsertSchema(reportEntitySnapshots);
 export const selectReportEntitySnapshotSchema = createSelectSchema(reportEntitySnapshots);
 export type ReportEntitySnapshot = typeof reportEntitySnapshots.$inferSelect;
+
+// --- Supervision Question Bank & Versioning Schemas ---
+export const supervisionQuestionBank = pgTable("supervision_question_bank", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  category: varchar("category", { length: 100 }).notNull().default("supervision"),
+  programModule: varchar("program_module", { length: 100 }).default("epi"),
+  indicatorMapping: varchar("indicator_mapping", { length: 255 }),
+  dataElementMapping: varchar("data_element_mapping", { length: 255 }),
+  questionText: text("question_text").notNull(),
+  shortLabel: varchar("short_label", { length: 200 }),
+  answerType: varchar("answer_type", { length: 50 }).notNull().default("yes_no"),
+  options: jsonb("options").default([]),
+  scoreWeight: decimal("score_weight", { precision: 5, scale: 2 }).default("1.0"),
+  helpText: text("help_text"),
+  tags: jsonb("tags").default([]),
+  isGlobal: boolean("is_global").default(false),
+  createdByUserId: varchar("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => ({
+  tenantIdx: index("idx_sup_qbank_tenant").on(table.tenantId),
+  categoryIdx: index("idx_sup_qbank_category").on(table.tenantId, table.category),
+}));
+
+export const supervisionTemplateVersions = pgTable("supervision_template_versions", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  templateId: integer("template_id").notNull(),
+  versionNumber: integer("version_number").notNull().default(1),
+  name: varchar("name", { length: 255 }).notNull(),
+  category: varchar("category", { length: 100 }).notNull().default("supervision"),
+  description: text("description"),
+  applicableLevel: varchar("applicable_level", { length: 50 }).default("facility"),
+  sections: jsonb("sections").default([]).notNull(),
+  items: jsonb("items").default([]).notNull(),
+  status: varchar("status", { length: 50 }).notNull().default("published"),
+  changeSummary: text("change_summary"),
+  publishedByUserId: varchar("published_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  publishedAt: timestamp("published_at").defaultNow().notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => ({
+  tenantIdx: index("idx_sup_tmpl_vers_tenant").on(table.tenantId),
+  tmplVersionIdx: index("idx_sup_tmpl_vers_num").on(table.tenantId, table.templateId, table.versionNumber),
+}));
+
+export const supervisionTemplateAuditLogs = pgTable("supervision_template_audit_logs", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  templateId: integer("template_id").notNull(),
+  action: varchar("action", { length: 100 }).notNull(), // created, draft_updated, published, archived, duplicated, imported
+  performedByUserId: varchar("performed_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  performedByUserName: varchar("performed_by_user_name", { length: 255 }),
+  reason: text("reason"),
+  metadata: jsonb("metadata").default({}),
+  timestamp: timestamp("timestamp").defaultNow().notNull(),
+}, (table) => ({
+  tenantIdx: index("idx_sup_tmpl_audit_tenant").on(table.tenantId),
+}));
+
+// --- Client Bulk Management Schemas ---
+export const clientImportBatches = pgTable("client_import_batches", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  fileName: varchar("file_name", { length: 255 }).notNull(),
+  fileType: varchar("file_type", { length: 20 }).notNull().default("csv"),
+  totalRows: integer("total_rows").notNull().default(0),
+  validRows: integer("valid_rows").notNull().default(0),
+  invalidRows: integer("invalid_rows").notNull().default(0),
+  duplicateRows: integer("duplicate_rows").notNull().default(0),
+  importedCount: integer("imported_count").notNull().default(0),
+  status: varchar("status", { length: 50 }).notNull().default("completed"),
+  errors: jsonb("errors").default([]),
+  importedByUserId: varchar("imported_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => ({
+  tenantIdx: index("idx_client_import_tenant").on(table.tenantId),
+}));
+
+export const clientDuplicateCandidates = pgTable("client_duplicate_candidates", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  primaryClientId: varchar("primary_client_id").notNull().references(() => clients.id, { onDelete: "cascade" }),
+  duplicateClientId: varchar("duplicate_client_id").notNull().references(() => clients.id, { onDelete: "cascade" }),
+  matchReason: varchar("match_reason", { length: 255 }).notNull(), // e.g. "Facility + Name + DOB", "Phone + Child Name"
+  confidenceScore: decimal("confidence_score", { precision: 5, scale: 2 }).default("0.90"),
+  status: varchar("status", { length: 50 }).notNull().default("pending"), // pending, merged, dismissed
+  detectedAt: timestamp("detected_at").defaultNow().notNull(),
+}, (table) => ({
+  tenantIdx: index("idx_client_dupes_tenant").on(table.tenantId),
+  primaryClientIdx: index("idx_client_dupes_primary").on(table.primaryClientId),
+}));
+
+export const clientBulkActionLogs = pgTable("client_bulk_action_logs", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  actionType: varchar("action_type", { length: 100 }).notNull(), // archive, restore, delete, assign_facility, status_update, add_tag, remove_tag
+  affectedCount: integer("affected_count").notNull().default(0),
+  clientIds: jsonb("client_ids").notNull().default([]),
+  reason: text("reason"),
+  performedByUserId: varchar("performed_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  performedByUserName: varchar("performed_by_user_name", { length: 255 }),
+  metadata: jsonb("metadata").default({}),
+  timestamp: timestamp("timestamp").defaultNow().notNull(),
+}, (table) => ({
+  tenantIdx: index("idx_client_bulk_log_tenant").on(table.tenantId),
+}));
+
+export const insertSupervisionQuestionBankSchema = createInsertSchema(supervisionQuestionBank);
+export const selectSupervisionQuestionBankSchema = createSelectSchema(supervisionQuestionBank);
+export type SupervisionQuestionBankItem = typeof supervisionQuestionBank.$inferSelect;
+
+export const insertClientImportBatchSchema = createInsertSchema(clientImportBatches);
+export const selectClientImportBatchSchema = createSelectSchema(clientImportBatches);
+export type ClientImportBatch = typeof clientImportBatches.$inferSelect;

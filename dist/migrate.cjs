@@ -26,6 +26,62 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
 var import_node_fs = __toESM(require("node:fs"), 1);
 var import_node_path = __toESM(require("node:path"), 1);
 var import_pg = __toESM(require("pg"), 1);
+
+// server/services/identitySequences.ts
+var import_drizzle_orm = require("drizzle-orm");
+var REALIGN_IDENTITY_SEQUENCES_SQL = `
+DO $$
+DECLARE
+  sequence_row record;
+  maximum_id bigint;
+BEGIN
+  FOR sequence_row IN
+    SELECT
+      table_namespace.nspname AS schema_name,
+      table_class.relname AS table_name,
+      table_attribute.attname AS column_name,
+      pg_get_serial_sequence(
+        format('%I.%I', table_namespace.nspname, table_class.relname),
+        table_attribute.attname
+      ) AS sequence_name
+    FROM pg_class table_class
+    JOIN pg_namespace table_namespace
+      ON table_namespace.oid = table_class.relnamespace
+    JOIN pg_attribute table_attribute
+      ON table_attribute.attrelid = table_class.oid
+    WHERE table_class.relkind IN ('r', 'p')
+      AND table_namespace.nspname = 'public'
+      AND table_attribute.attnum > 0
+      AND NOT table_attribute.attisdropped
+      AND pg_get_serial_sequence(
+        format('%I.%I', table_namespace.nspname, table_class.relname),
+        table_attribute.attname
+      ) IS NOT NULL
+  LOOP
+    EXECUTE format(
+      'SELECT max(%I) FROM %I.%I',
+      sequence_row.column_name,
+      sequence_row.schema_name,
+      sequence_row.table_name
+    ) INTO maximum_id;
+
+    IF maximum_id IS NULL THEN
+      EXECUTE format(
+        'SELECT setval(%L::regclass, 1, false)',
+        sequence_row.sequence_name
+      );
+    ELSE
+      EXECUTE format(
+        'SELECT setval(%L::regclass, %s, true)',
+        sequence_row.sequence_name,
+        maximum_id
+      );
+    END IF;
+  END LOOP;
+END $$;
+`;
+
+// scripts/migrate.ts
 try {
   process.loadEnvFile?.();
 } catch {
@@ -184,9 +240,9 @@ async function run() {
       "ALTER TABLE gis_polygons ADD COLUMN IF NOT EXISTS archived_at timestamptz;",
       "ALTER TABLE gis_polygons ADD COLUMN IF NOT EXISTS metadata jsonb;"
     ];
-    for (const sql of customUpgrades) {
+    for (const sql2 of customUpgrades) {
       try {
-        await client.query(sql);
+        await client.query(sql2);
       } catch (err) {
         if (!err.message.includes("already exists")) {
           console.warn(`[Warning] Failed custom migration statement: ${err.message}`);
@@ -247,6 +303,9 @@ async function run() {
     } catch (err) {
       console.warn("[Warning] Tenant alignment skipped:", err.message);
     }
+    console.log("Realigning PostgreSQL identity sequences after migrations and UPSERT-safe upgrades...");
+    await client.query(REALIGN_IDENTITY_SEQUENCES_SQL);
+    console.log("Post-migration PostgreSQL identity sequences realigned.");
     console.log("All database migrations applied successfully.");
   } catch (err) {
     console.error("Migration runner failed:", err.message);

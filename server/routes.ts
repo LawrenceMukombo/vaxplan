@@ -1,6 +1,8 @@
 import { DenominatorHarmonisationService } from "./services/denominatorHarmonisationService.js";
 import { EntityHistoryService } from "./services/entityHistoryService";
 import { AsOfDateService } from "./services/asOfDateService";
+import { getSupervisionPrefillBundle } from "./services/supervisionPrefillService";
+import { validateClientImportBatch, checkClientHasLinkedRecords } from "./services/clientBulkService";
 import express, { type Express, type Request } from "express";
 import { createServer, type Server } from "http";
 import PDFDocument from "pdfkit";
@@ -93,6 +95,9 @@ import {
   budgetItems,
   // [Cleaned up legacy commented-out code block, lines 82-84]
   clients,
+  supervisionQuestionBank,
+  supervisionTemplateVersions,
+  clientBulkActionLogs,
   mobilizationActivities,
   clientVaccinations,
   monthlyReports,
@@ -12891,6 +12896,105 @@ export async function registerRoutes(
     }
   });
 
+  // GET /api/clients/import-template — Download Client Logbook import template columns
+  app.get("/api/clients/import-template", isAuthenticated, requireTenant, async (req: any, res) => {
+    res.json({
+      format: "csv_or_xlsx",
+      columns: [
+        "uniqueId",
+        "firstName",
+        "lastName",
+        "sex",
+        "dateOfBirth",
+        "caregiverName",
+        "caregiverPhone",
+        "provinceName",
+        "districtName",
+        "facilityName",
+        "communityName",
+        "clientType",
+        "status",
+      ],
+    });
+  });
+
+  // POST /api/clients/import — Bulk client import with duplicate candidate detection & validation
+  app.post("/api/clients/import", isAuthenticated, requireTenant, async (req: any, res) => {
+    try {
+      const { rows } = req.body || {};
+      if (!Array.isArray(rows) || rows.length === 0) {
+        return res.status(400).json({ message: "No client rows provided for import" });
+      }
+      const validation = await validateClientImportBatch(
+        req.tenantId,
+        req.user?.facilityId || null,
+        req.user?.districtId || null,
+        rows,
+      );
+      res.json(validation);
+    } catch (err: any) {
+      res.status(400).json({ message: err?.message || "Client import validation failed" });
+    }
+  });
+
+  // POST /api/clients/bulk-action — Bulk archive, restore, delete, status update
+  app.post("/api/clients/bulk-action", isAuthenticated, requireTenant, async (req: any, res) => {
+    try {
+      const { actionType, clientIds, reason, facilityId, status, tag } = req.body || {};
+      if (!Array.isArray(clientIds) || clientIds.length === 0) {
+        return res.status(400).json({ message: "No clientIds provided" });
+      }
+
+      // Check linked records before allowing bulk hard deletion
+      if (actionType === "delete") {
+        for (const cid of clientIds) {
+          const check = await checkClientHasLinkedRecords(req.tenantId, cid);
+          if (check.hasLinkedRecords) {
+            return res.status(400).json({
+              message: `Cannot delete client #${cid}: Has ${check.linkedCount} linked activity records (${check.details.join(", ")}). Use safe archive instead.`,
+            });
+          }
+        }
+      }
+
+      if (actionType === "assign_facility" && facilityId) {
+        await db
+          .update(clients)
+          .set({ facilityId: Number(facilityId), updatedAt: new Date() })
+          .where(and(eq(clients.tenantId, req.tenantId), inArray(clients.id, clientIds)));
+      } else if (actionType === "archive") {
+        await db
+          .update(clients)
+          .set({ catchmentStatus: "archived", updatedAt: new Date() })
+          .where(and(eq(clients.tenantId, req.tenantId), inArray(clients.id, clientIds)));
+      } else if (actionType === "restore") {
+        await db
+          .update(clients)
+          .set({ catchmentStatus: "resident", updatedAt: new Date() })
+          .where(and(eq(clients.tenantId, req.tenantId), inArray(clients.id, clientIds)));
+      }
+
+      await db.insert(clientBulkActionLogs).values({
+        tenantId: req.tenantId,
+        actionType,
+        affectedCount: clientIds.length,
+        clientIds,
+        reason: reason || null,
+        performedByUserId: req.dbUser?.id,
+        performedByUserName: req.dbUser?.firstName ? `${req.dbUser.firstName} ${req.dbUser.lastName || ''}`.trim() : req.dbUser?.email,
+      });
+
+      await logAudit(req, `client_bulk_${actionType}`, "clients", null, null, {
+        clientIdsCount: clientIds.length,
+        reason,
+      });
+
+      res.json({ success: true, affectedCount: clientIds.length, actionType });
+    } catch (err: any) {
+      res.status(400).json({ message: err?.message || "Bulk action failed" });
+    }
+  });
+
   // GET /api/clients/:id — Fetch detailed information for a specific client
   app.get("/api/clients/:id", isAuthenticated, requireTenant, async (req: any, res) => {
     try {
@@ -21978,9 +22082,101 @@ Instructions:
       const userId = req.user?.claims?.sub || req.dbUser?.id;
       const corrected = await EntityHistoryService.correctVersion(req.tenantId, changeId, req.body, userId);
       await logAudit(req, "correct_entity_version", "entity_history_versions", changeId, null, corrected);
-      res.json(corrected);
     } catch (err: any) {
       res.status(400).json({ message: err?.message || "Failed to correct version" });
+    }
+  });
+  app.get("/api/supervision/visits/prefill", ...auth, requireTenant, async (req: any, res) => {
+    try {
+      const facilityId = Number(req.query.facilityId);
+      if (!facilityId) {
+        return res.status(400).json({ message: "facilityId is required for supervision prefill" });
+      }
+      const checklistTemplateId = req.query.checklistTemplateId ? Number(req.query.checklistTemplateId) : undefined;
+      const visitDate = req.query.visitDate ? String(req.query.visitDate) : undefined;
+      const bundle = await getSupervisionPrefillBundle(req.tenantId, facilityId, checklistTemplateId, visitDate);
+      res.json(bundle);
+    } catch (err: any) {
+      res.status(400).json({ message: err?.message || "Failed to generate supervision prefill bundle" });
+    }
+  });
+
+  // GET /api/supervision/templates/import-template — Download question import template CSV/XLSX format description
+  app.get("/api/supervision/templates/import-template", ...auth, requireTenant, async (req: any, res) => {
+    res.json({
+      format: "csv_or_xlsx",
+      columns: [
+        "section_name",
+        "section_order",
+        "question_text",
+        "short_label",
+        "answer_type",
+        "required",
+        "count_toward_score",
+        "score_weight",
+        "options",
+        "help_text",
+        "is_auto_prefill",
+        "prefill_source_key",
+        "repeat_enabled",
+        "follow_up_parent_question",
+        "follow_up_condition",
+        "indicator_mapping",
+      ],
+      sample: [
+        {
+          section_name: "Facility Readiness",
+          section_order: 1,
+          question_text: "Total catchment area population",
+          short_label: "Total Pop",
+          answer_type: "auto_prefill",
+          required: "yes",
+          count_toward_score: "no",
+          is_auto_prefill: "yes",
+          prefill_source_key: "total_catchment_population",
+        },
+        {
+          section_name: "Cold Chain and Vaccine Management",
+          section_order: 2,
+          question_text: "Is the primary vaccine refrigerator functional?",
+          short_label: "Fridge Status",
+          answer_type: "yes_no_na",
+          required: "yes",
+          count_toward_score: "yes",
+          score_weight: 1.5,
+          help_text: "Verify temperature log records and current reading",
+        },
+      ],
+    });
+  });
+
+  // GET /api/supervision/question-bank — Question Bank lookup
+  app.get("/api/supervision/question-bank", ...auth, requireTenant, async (req: any, res) => {
+    try {
+      const qb = await db.select().from(supervisionQuestionBank).where(eq(supervisionQuestionBank.tenantId, req.tenantId));
+      res.json(qb);
+    } catch (err: any) {
+      res.status(500).json({ message: err?.message || "Failed to fetch question bank" });
+    }
+  });
+
+  // POST /api/supervision/question-bank — Add question to question bank
+  app.post("/api/supervision/question-bank", ...auth, requireTenant, async (req: any, res) => {
+    try {
+      const [created] = await db
+        .insert(supervisionQuestionBank)
+        .values({
+          tenantId: req.tenantId,
+          questionText: req.body.questionText || req.body.label,
+          category: req.body.category || "supervision",
+          answerType: req.body.answerType || req.body.type || "yes_no",
+          options: req.body.options || [],
+          createdByUserId: req.dbUser?.id,
+        })
+        .returning();
+      res.status(201).json(created);
+    } catch (err: any) {
+      res.status(400).json({ message: err?.message || "Failed to save to question bank" });
     }
   });
 
@@ -21990,5 +22186,4 @@ Instructions:
     logAudit,
   });
   return httpServer;
-
 }

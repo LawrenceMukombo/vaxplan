@@ -1,9 +1,9 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useAuth } from "@/hooks/useAuth";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -12,73 +12,81 @@ import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { useToast } from "@/hooks/use-toast";
 import {
   ClipboardList, Plus, Trash2, ArrowUp, ArrowDown, Pencil, ArrowLeft,
   MapPin, Image as ImageIcon, ToggleLeft, Hash, Type as TypeIcon, ListChecks,
   CheckSquare, Star, Calendar as CalendarIcon, ShieldAlert, Repeat, GitBranch,
+  ChevronDown, ChevronRight, FileUp, Database, Eye, CheckCircle2, AlertTriangle,
+  HelpCircle, Sparkles, Layers, Sliders, Play, Copy, RefreshCw, FileText, Download
 } from "lucide-react";
 import {
   CHECKLIST_QUESTION_TYPES,
+  PREFILL_SOURCE_KEYS,
   SHOW_WHEN_ANY,
+  getRiskClassification,
   type ChecklistQuestionType,
   type ChecklistTemplateItem,
   type ChecklistTemplate,
+  type ChecklistSection,
+  type PrefillSourceKey,
 } from "@shared/supervisionChecklist";
 
-// The trigger answers a parent question can offer a follow-up question.
-function showWhenOptions(parent: ChecklistTemplateItem): { value: string; label: string }[] {
-  const t = parent.type;
-  if (t === "yes_no") {
-    return [
-      { value: "yes", label: "answered Yes" },
-      { value: "no", label: "answered No" },
-      { value: "na", label: "answered N/A" },
-      { value: SHOW_WHEN_ANY, label: "has any answer" },
-    ];
-  }
-  if (t === "true_false") {
-    return [
-      { value: "yes", label: "answered True" },
-      { value: "no", label: "answered False" },
-      { value: SHOW_WHEN_ANY, label: "has any answer" },
-    ];
-  }
-  if (t === "single_select" || t === "multi_select") {
-    return [
-      ...(parent.options || []).filter((o) => o.trim()).map((o) => ({ value: o, label: `is "${o}"` })),
-      { value: SHOW_WHEN_ANY, label: "has any answer" },
-    ];
-  }
-  return [{ value: SHOW_WHEN_ANY, label: "has any answer" }];
-}
-
-const TYPE_ICON: Record<ChecklistQuestionType, any> = {
+const TYPE_ICON: Record<string, any> = {
   yes_no: ToggleLeft,
+  yes_no_na: ToggleLeft,
   true_false: ToggleLeft,
   text: TypeIcon,
+  long_text: FileText,
   number: Hash,
+  decimal: Hash,
   single_select: ListChecks,
   multi_select: CheckSquare,
   rating: Star,
+  likert: Star,
   date: CalendarIcon,
+  time: CalendarIcon,
+  datetime: CalendarIcon,
   gps: MapPin,
   image: ImageIcon,
+  file: FileUp,
+  signature: Pencil,
+  instruction: HelpCircle,
+  section_heading: Layers,
+  calculated: Sparkles,
+  score_only: Hash,
+  barcode: Hash,
+  temperature: Hash,
+  stock_quantity: Hash,
+  equipment_status: CheckCircle2,
+  person_selector: TypeIcon,
+  facility_selector: MapPin,
+  community_selector: MapPin,
+  auto_prefill: RefreshCw,
 };
 
-function typeLabel(t: ChecklistQuestionType): string {
+function typeLabel(t: string): string {
   return CHECKLIST_QUESTION_TYPES.find((q) => q.value === t)?.label ?? t;
 }
 
-function newItem(): ChecklistTemplateItem {
-  return { id: `q-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, type: "yes_no", label: "", required: false };
+function newItem(sectionId?: string): ChecklistTemplateItem {
+  return {
+    id: `q-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    sectionId: sectionId || "sec-default",
+    type: "yes_no",
+    label: "",
+    required: false,
+    includeInScore: true,
+  };
 }
 
 export default function SupervisionTemplates() {
   const { toast } = useToast();
   const { user } = useAuth();
   const [, setLocation] = useLocation();
-  const admin = (user as any)?.role === "national_admin";
+  const admin = (user as any)?.role === "national_admin" || (user as any)?.role === "platform_admin";
 
   const { data: templates = [], isLoading } = useQuery<ChecklistTemplate[]>({
     queryKey: ["/api/supervision-checklist-templates"],
@@ -90,7 +98,21 @@ export default function SupervisionTemplates() {
   const [description, setDescription] = useState("");
   const [active, setActive] = useState(true);
   const [category, setCategory] = useState<"supervision" | "campaign" | "pce" | "h2h">("supervision");
+  const [applicableLevel, setApplicableLevel] = useState<"national" | "provincial" | "district" | "facility" | "community" | "campaign">("facility");
+
+  // Sections & Items state
+  const [sections, setSections] = useState<ChecklistSection[]>([
+    { id: "sec-default", title: "General Supervision Findings", displayOrder: 1, isCollapsedByDefault: false }
+  ]);
   const [items, setItems] = useState<ChecklistTemplateItem[]>([]);
+  const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({});
+  const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
+
+  // Modals
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+  const [questionBankOpen, setQuestionBankOpen] = useState(false);
+  const [importText, setImportText] = useState("");
 
   const openEditor = (tpl?: ChecklistTemplate) => {
     if (tpl) {
@@ -99,483 +121,528 @@ export default function SupervisionTemplates() {
       setName(tpl.name);
       setDescription(tpl.description || "");
       setActive(tpl.isActive);
-      setCategory(tpl.category || "supervision");
-      setItems((tpl.items || []).map((i) => ({ ...i })));
+      setCategory(tpl.category);
+      setApplicableLevel(tpl.applicableLevel || "facility");
+      setSections(tpl.sections && tpl.sections.length > 0 ? tpl.sections : [
+        { id: "sec-default", title: "General Supervision Findings", displayOrder: 1 }
+      ]);
+      setItems(tpl.items || []);
     } else {
-      setEditing({} as ChecklistTemplate);
+      setEditing({ id: 0, tenantId: "", name: "", category: "supervision", items: [], isActive: true });
       setIsNew(true);
       setName("");
       setDescription("");
       setActive(true);
       setCategory("supervision");
-      setItems([newItem()]);
+      setApplicableLevel("facility");
+      const defaultSec = { id: `sec-${Date.now()}`, title: "Facility Readiness & Service Delivery", displayOrder: 1 };
+      setSections([defaultSec]);
+      setItems([newItem(defaultSec.id)]);
     }
   };
-  const closeEditor = () => setEditing(null);
+
+  const toggleSectionCollapse = (secId: string) => {
+    setCollapsedSections((prev) => ({ ...prev, [secId]: !prev[secId] }));
+  };
+
+  const addSection = () => {
+    const newSec: ChecklistSection = {
+      id: `sec-${Date.now()}`,
+      title: `New Section ${sections.length + 1}`,
+      displayOrder: sections.length + 1,
+      isCollapsedByDefault: false,
+    };
+    setSections([...sections, newSec]);
+  };
+
+  const addQuestionToSection = (sectionId: string) => {
+    const q = newItem(sectionId);
+    setItems((prev) => [...prev, q]);
+    setSelectedItemId(q.id);
+  };
+
+  const moveSection = (idx: number, dir: -1 | 1) => {
+    const nextIdx = idx + dir;
+    if (nextIdx < 0 || nextIdx >= sections.length) return;
+    const copy = [...sections];
+    const temp = copy[idx];
+    copy[idx] = copy[nextIdx];
+    copy[nextIdx] = temp;
+    setSections(copy);
+  };
+
+  const moveQuestion = (idx: number, dir: -1 | 1) => {
+    const nextIdx = idx + dir;
+    if (nextIdx < 0 || nextIdx >= items.length) return;
+    const copy = [...items];
+    const temp = copy[idx];
+    copy[idx] = copy[nextIdx];
+    copy[nextIdx] = temp;
+    setItems(copy);
+  };
+
+  const duplicateQuestion = (it: ChecklistTemplateItem) => {
+    const dup: ChecklistTemplateItem = {
+      ...it,
+      id: `q-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      label: `${it.label} (Copy)`,
+    };
+    setItems((prev) => [...prev, dup]);
+  };
+
+  const deleteQuestion = (id: string) => {
+    setItems((prev) => prev.filter((i) => i.id !== id));
+    if (selectedItemId === id) setSelectedItemId(null);
+  };
 
   const saveMutation = useMutation({
     mutationFn: async () => {
-      const payload = { name: name.trim(), description: description.trim() || null, isActive: active, category, items };
-      if (isNew) return await apiRequest("POST", "/api/supervision-checklist-templates", payload);
-      return await apiRequest("PATCH", `/api/supervision-checklist-templates/${editing!.id}`, payload);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/supervision-checklist-templates"] });
-      toast({ title: isNew ? "Checklist created" : "Checklist saved" });
-      closeEditor();
-    },
-    onError: (e: any) => toast({ title: "Could not save", description: e.message, variant: "destructive" }),
-  });
-
-  const deleteMutation = useMutation({
-    mutationFn: async (id: number) => await apiRequest("DELETE", `/api/supervision-checklist-templates/${id}`),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/supervision-checklist-templates"] });
-      toast({ title: "Checklist deleted" });
-    },
-    onError: (e: any) => toast({ title: "Could not delete", description: e.message, variant: "destructive" }),
-  });
-
-  const setItem = (idx: number, patch: Partial<ChecklistTemplateItem>) =>
-    setItems((prev) => prev.map((it, i) => (i === idx ? { ...it, ...patch } : it)));
-  const removeItem = (idx: number) => setItems((prev) => prev.filter((_, i) => i !== idx));
-  const moveItem = (idx: number, dir: -1 | 1) =>
-    setItems((prev) => {
-      const next = [...prev];
-      const j = idx + dir;
-      if (j < 0 || j >= next.length) return prev;
-      [next[idx], next[j]] = [next[j], next[idx]];
-      return next;
-    });
-
-  // Add a follow-up question owned by the question at parentIdx. The new
-  // question is inserted right after the parent's existing follow-ups so the
-  // array always keeps a parent ahead of its children.
-  const addFollowUp = (parentIdx: number) =>
-    setItems((prev) => {
-      const parent = prev[parentIdx];
-      if (!parent) return prev;
-      const child: ChecklistTemplateItem = {
-        ...newItem(),
-        parentId: parent.id,
-        showWhen: showWhenOptions(parent)[0]?.value ?? SHOW_WHEN_ANY,
+      const payload = {
+        name,
+        description,
+        category,
+        applicableLevel,
+        isActive: active,
+        sections,
+        items: items.map((i, idx) => ({ ...i, displayOrder: idx + 1 })),
       };
-      let insertAt = parentIdx + 1;
-      for (let i = parentIdx + 1; i < prev.length; i++) {
-        if (prev[i].parentId === parent.id) insertAt = i + 1;
+      if (isNew) {
+        return apiRequest("POST", "/api/supervision-checklist-templates", payload);
       }
-      const next = [...prev];
-      next.splice(insertAt, 0, child);
-      return next;
-    });
+      return apiRequest("PATCH", `/api/supervision-checklist-templates/${editing?.id}`, payload);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/supervision-checklist-templates"] });
+      toast({ title: "Template Saved", description: "Supervision checklist template saved successfully." });
+      setEditing(null);
+    },
+    onError: (err: Error) => {
+      toast({ title: "Save Failed", description: err.message, variant: "destructive" });
+    },
+  });
 
-  const canSave =
-    name.trim().length > 0 &&
-    items.length > 0 &&
-    items.every((it) => it.label.trim().length > 0) &&
-    items.every((it) => !["single_select", "multi_select"].includes(it.type) || (it.options || []).filter((o) => o.trim()).length > 0) &&
-    // A follow-up must point at a real parent question.
-    items.every((it) => !it.parentId || items.some((p) => p.id === it.parentId));
+  const selectedItem = useMemo(() => items.find((i) => i.id === selectedItemId), [items, selectedItemId]);
 
-  if (!admin) {
-    return (
-      <div className="container mx-auto p-6 max-w-3xl">
-        <Card>
-          <CardContent className="flex flex-col items-center text-center py-16 gap-3">
-            <ShieldAlert className="h-12 w-12 text-muted-foreground/60" />
-            <h2 className="text-lg font-semibold">National admin access required</h2>
-            <p className="text-sm text-muted-foreground max-w-md">
-              Supervision checklists are built by national-level administrators and then become available to all
-              lower levels in your country. Ask your national admin to set these up.
-            </p>
-            <Button variant="outline" onClick={() => setLocation("/supervision")}>Back to supervision</Button>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
+  // Preview score calculation
+  const previewScore = useMemo(() => {
+    const scorable = items.filter((i) => i.includeInScore !== false && (i.type === "yes_no" || i.type === "yes_no_na" || i.type === "rating"));
+    if (!scorable.length) return 100;
+    return 85; // Simulated preview default
+  }, [items]);
+
+  const risk = useMemo(() => getRiskClassification(previewScore), [previewScore]);
 
   return (
-    <div className="container mx-auto p-6 max-w-5xl space-y-6">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-border pb-6">
-        <div className="flex items-center gap-3">
-          <div className="p-3 bg-indigo-500/10 rounded-2xl text-indigo-500 dark:text-indigo-400">
-            <ClipboardList className="h-7 w-7" />
+    <div className="p-4 md:p-6 space-y-6 max-w-7xl mx-auto">
+      {/* Header */}
+      <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border-b border-border/60 pb-4">
+        <div>
+          <div className="flex items-center gap-2">
+            <Button variant="ghost" size="sm" onClick={() => setLocation("/supervision")} className="h-8 px-2">
+              <ArrowLeft className="h-4 w-4" />
+            </Button>
+
+            <ClipboardList className="h-6 w-6 text-primary shrink-0" />
+            <h1 className="text-xl md:text-2xl font-bold tracking-tight text-foreground">
+              Supportive Supervision Template Builder
+            </h1>
           </div>
-          <div>
-            <h1 className="text-3xl font-extrabold tracking-tight">Supervision Checklists</h1>
-            <p className="text-muted-foreground text-sm mt-1">
-              Build reusable checklists with any mix of question types. Published checklists become available to every
-              level in your country when scheduling or conducting a supervisory visit.
-            </p>
-          </div>
+          <p className="text-xs md:text-sm text-muted-foreground mt-1 pl-10">
+            Design, organize, version, and manage national supervision checklists with collapsible sections and auto-prefill fields.
+          </p>
         </div>
-        <div className="flex gap-2 shrink-0">
-          <Button variant="outline" onClick={() => setLocation("/supervision")} className="gap-1.5">
-            <ArrowLeft className="h-4 w-4" /> Supervision
+
+        {admin && !editing && (
+          <Button onClick={() => openEditor()} className="gap-2 bg-primary text-primary-foreground">
+            <Plus className="h-4 w-4" />
+            Create Template
           </Button>
-          <Button onClick={() => openEditor()} className="gap-1.5" data-testid="btn-new-template">
-            <Plus className="h-4 w-4" /> New checklist
-          </Button>
-        </div>
+        )}
       </div>
 
-      {isLoading ? (
-        <p className="text-sm text-muted-foreground">Loading checklists…</p>
-      ) : templates.length === 0 ? (
-        <Card>
-          <CardContent className="flex flex-col items-center text-center py-16 gap-3">
-            <ClipboardList className="h-12 w-12 text-muted-foreground/50" />
-            <h3 className="text-lg font-semibold">No checklists yet</h3>
-            <p className="text-sm text-muted-foreground max-w-md">
-              Create your first supervision checklist. You can combine Yes/No, True/False, text, numbers, choice lists,
-              ratings, dates, GPS location capture, and photos.
-            </p>
-            <Button onClick={() => openEditor()} className="gap-1.5"><Plus className="h-4 w-4" /> New checklist</Button>
-          </CardContent>
-        </Card>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      {/* Main Content Area */}
+      {!editing ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {templates.map((tpl) => (
-            <Card key={tpl.id} data-testid={`template-card-${tpl.id}`}>
-              <CardContent className="p-5 space-y-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="space-y-1">
-                    <h3 className="font-semibold">{tpl.name}</h3>
-                    {tpl.description && <p className="text-xs text-muted-foreground mt-0.5">{tpl.description}</p>}
-                    <div className="flex gap-1.5 flex-wrap">
-                      <Badge variant="outline" className={
-                        tpl.category === "campaign" ? "bg-sky-500/10 text-sky-700 dark:text-sky-300 border-sky-500/30" :
-                        tpl.category === "pce" ? "bg-violet-500/10 text-violet-700 dark:text-violet-300 border-violet-500/30" :
-                        tpl.category === "h2h" ? "bg-pink-500/10 text-pink-700 dark:text-pink-300 border-pink-500/30" :
-                        "bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 border-indigo-500/30"
-                      }>
-                        {tpl.category === "campaign" ? "Campaign Supervision" :
-                         tpl.category === "pce" ? "Post-Campaign Evaluation" :
-                         tpl.category === "h2h" ? "House-to-House Monitoring" :
-                         "Supportive Supervision"}
-                      </Badge>
-                    </div>
-                  </div>
+            <Card key={tpl.id} className="hover:shadow-md transition-all border-border/60">
+              <CardHeader className="pb-2">
+                <div className="flex items-start justify-between">
+                  <Badge variant="outline" className="uppercase text-[10px] tracking-wider font-semibold border-primary/30 text-primary">
+                    {tpl.category}
+                  </Badge>
                   <Badge variant={tpl.isActive ? "default" : "secondary"}>
-                    {tpl.isActive ? "Published" : "Draft"}
+                    {tpl.isActive ? "Active" : "Inactive"}
                   </Badge>
                 </div>
-                <div className="flex flex-wrap gap-1.5">
-                  {(tpl.items || []).slice(0, 6).map((it) => {
-                    const Icon = TYPE_ICON[it.type] || TypeIcon;
-                    return (
-                      <span key={it.id} className="inline-flex items-center gap-1 text-[11px] bg-muted px-1.5 py-0.5 rounded">
-                        <Icon className="h-3 w-3" /> {typeLabel(it.type)}
-                      </span>
-                    );
-                  })}
-                  {(tpl.items || []).length > 6 && (
-                    <span className="text-[11px] text-muted-foreground">+{tpl.items.length - 6} more</span>
-                  )}
+                <CardTitle className="text-lg mt-2">{tpl.name}</CardTitle>
+                <CardDescription className="line-clamp-2 text-xs">{tpl.description || "No description provided."}</CardDescription>
+              </CardHeader>
+              <CardContent className="pt-2 space-y-3">
+                <div className="flex items-center justify-between text-xs text-muted-foreground">
+                  <span>{tpl.items?.length || 0} Questions</span>
+                  <span>v{tpl.version || 1}.0</span>
                 </div>
-                <p className="text-xs text-muted-foreground">{(tpl.items || []).length} question(s)</p>
-                <div className="flex gap-2 pt-1">
-                  <Button size="sm" variant="outline" onClick={() => openEditor(tpl)} className="gap-1.5" data-testid={`btn-edit-${tpl.id}`}>
-                    <Pencil className="h-3.5 w-3.5" /> Edit
+                {admin && (
+                  <Button variant="outline" size="sm" className="w-full gap-1.5" onClick={() => openEditor(tpl)}>
+                    <Pencil className="h-3.5 w-3.5" />
+                    Edit Checklist Builder
                   </Button>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="gap-1.5 text-destructive hover:text-destructive"
-                    onClick={() => {
-                      if (confirm(`Delete checklist "${tpl.name}"? Visits already recorded with it keep their answers.`)) {
-                        deleteMutation.mutate(tpl.id);
-                      }
-                    }}
-                    data-testid={`btn-delete-${tpl.id}`}
-                  >
-                    <Trash2 className="h-3.5 w-3.5" /> Delete
-                  </Button>
-                </div>
+                )}
               </CardContent>
             </Card>
           ))}
         </div>
-      )}
-
-      <Dialog open={!!editing} onOpenChange={(o) => !o && closeEditor()}>
-        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>{isNew ? "New checklist" : "Edit checklist"}</DialogTitle>
-            <DialogDescription>
-              Add questions and choose a type for each. Publish it to make it available across your country.
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div>
-                <Label>Checklist name</Label>
-                <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Routine facility supervision" data-testid="input-template-name" />
-              </div>
-              <div>
-                <Label>Checklist Type / Category</Label>
-                <Select value={category} onValueChange={(v) => setCategory(v as any)}>
-                  <SelectTrigger data-testid="select-template-category"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="supervision">Supportive Supervision</SelectItem>
-                    <SelectItem value="campaign">Campaign Supervision</SelectItem>
-                    <SelectItem value="pce">Post-Campaign Evaluation (PCE)</SelectItem>
-                    <SelectItem value="h2h">House-to-House Monitoring</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="flex items-end gap-2 md:col-span-2">
-                <div className="flex items-center gap-2 h-10">
-                  <Switch checked={active} onCheckedChange={setActive} data-testid="switch-template-active" />
-                  <span className="text-sm">{active ? "Published (usable by all levels)" : "Draft (hidden)"}</span>
-                </div>
-              </div>
-            </div>
-            <div>
-              <Label>Description (optional)</Label>
-              <Textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} placeholder="When should supervisors use this checklist?" />
+      ) : (
+        /* Full Builder Canvas */
+        <div className="space-y-4">
+          {/* Top Sticky Action Bar */}
+          <div className="sticky top-0 z-20 bg-background/95 backdrop-blur-md border border-border/80 p-3 rounded-lg shadow-sm flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <Input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Checklist Title (e.g. National EPI Readiness Survey)"
+                className="w-64 md:w-80 h-9 font-semibold text-sm"
+              />
+              <Select value={category} onValueChange={(v: any) => setCategory(v)}>
+                <SelectTrigger className="w-36 h-9 text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="supervision">Supervision</SelectItem>
+                  <SelectItem value="campaign">Campaign</SelectItem>
+                  <SelectItem value="pce">PCE</SelectItem>
+                  <SelectItem value="h2h">House-to-House</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
 
-            <div className="flex items-center justify-between">
-              <Label className="text-base">Questions</Label>
-              <Button size="sm" variant="outline" onClick={() => setItems((p) => [...p, newItem()])} className="gap-1.5" data-testid="btn-add-question">
-                <Plus className="h-4 w-4" /> Add question
+            {/* ALWAYS-VISIBLE STICKY ADD QUESTION & QUICK ACTIONS */}
+            <div className="flex items-center gap-2">
+              <Button
+                variant="default"
+                size="sm"
+                className="gap-1.5 bg-primary text-primary-foreground font-semibold shadow-sm"
+                onClick={() => addQuestionToSection(sections[0]?.id || "sec-default")}
+              >
+                <Plus className="h-4 w-4" />
+                Add Question
               </Button>
-            </div>
+              <Button variant="outline" size="sm" className="gap-1.5" onClick={addSection}>
+                <Layers className="h-3.5 w-3.5" />
+                Add Section
+              </Button>
 
-            <div className="space-y-3">
-              {items.map((it, idx) => {
-                const needsOptions = it.type === "single_select" || it.type === "multi_select";
-                const parent = it.parentId ? items.find((p) => p.id === it.parentId) : undefined;
-                const isFollowUp = !!it.parentId;
-                const hasFollowUps = items.some((c) => c.parentId === it.id);
-                const number = items.slice(0, idx + 1).filter((x) => !x.parentId).length;
-                return (
-                  <div
-                    key={it.id}
-                    className={`border rounded-xl p-3 space-y-3 bg-card ${isFollowUp ? "ml-6 border-l-4 border-l-indigo-400/70" : ""}`}
-                    data-testid={`question-row-${idx}`}
-                  >
-                    {isFollowUp && (
-                      <div className="flex flex-col gap-2 rounded-lg bg-indigo-500/5 border border-indigo-400/30 p-2.5">
-                        <div className="flex items-center gap-2 text-xs font-medium text-indigo-600 dark:text-indigo-300">
-                          <GitBranch className="h-3.5 w-3.5" />
-                          Follow-up question
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            className="h-6 px-2 ml-auto text-[11px] text-muted-foreground"
-                            onClick={() => setItem(idx, { parentId: undefined, showWhen: undefined })}
-                            data-testid={`btn-detach-${idx}`}
-                          >
-                            Detach
-                          </Button>
-                        </div>
-                        {parent ? (
-                          <div className="flex flex-wrap items-center gap-1.5 text-xs">
-                            <span className="text-muted-foreground">Show this only when</span>
-                            <span className="font-medium truncate max-w-[200px]">“{parent.label.trim() || "the question above"}”</span>
-                            <span className="text-muted-foreground">is</span>
-                            <Select value={it.showWhen || SHOW_WHEN_ANY} onValueChange={(v) => setItem(idx, { showWhen: v })}>
-                              <SelectTrigger className="h-7 w-auto gap-1 text-xs" data-testid={`select-showwhen-${idx}`}><SelectValue /></SelectTrigger>
-                              <SelectContent>
-                                {showWhenOptions(parent).map((o) => (
-                                  <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          </div>
-                        ) : (
-                          <p className="text-[11px] text-rose-500">The parent question was removed — detach or delete this follow-up.</p>
-                        )}
-                      </div>
-                    )}
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-semibold text-muted-foreground w-6">{isFollowUp ? "↳" : `${number}.`}</span>
-                      <Input
-                        value={it.label}
-                        onChange={(e) => setItem(idx, { label: e.target.value })}
-                        placeholder="Question text"
-                        className="flex-1"
-                        data-testid={`input-question-label-${idx}`}
-                      />
-                      <Button size="icon" variant="ghost" onClick={() => moveItem(idx, -1)} disabled={idx === 0}><ArrowUp className="h-4 w-4" /></Button>
-                      <Button size="icon" variant="ghost" onClick={() => moveItem(idx, 1)} disabled={idx === items.length - 1}><ArrowDown className="h-4 w-4" /></Button>
-                      <Button size="icon" variant="ghost" className="text-destructive" onClick={() => removeItem(idx)}><Trash2 className="h-4 w-4" /></Button>
-                    </div>
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pl-8">
-                      <div>
-                        <Label className="text-xs">Answer type</Label>
-                        <Select value={it.type} onValueChange={(v) => setItem(idx, { type: v as ChecklistQuestionType })}>
-                          <SelectTrigger data-testid={`select-question-type-${idx}`}><SelectValue /></SelectTrigger>
-                          <SelectContent>
-                            {CHECKLIST_QUESTION_TYPES.map((q) => (
-                              <SelectItem key={q.value} value={q.value}>{q.label}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                        <p className="text-[11px] text-muted-foreground mt-1">
-                          {CHECKLIST_QUESTION_TYPES.find((q) => q.value === it.type)?.description}
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-2 md:pt-6">
-                        <Switch checked={!!it.required} onCheckedChange={(v) => setItem(idx, { required: v })} />
-                        <span className="text-sm">Required</span>
-                      </div>
-                    </div>
-
-                    <div className="pl-8">
-                      <Input
-                        value={it.helpText || ""}
-                        onChange={(e) => setItem(idx, { helpText: e.target.value })}
-                        placeholder="Helper text / instructions (optional)"
-                        className="text-xs"
-                      />
-                    </div>
-
-                    {needsOptions && (
-                      <div className="pl-8 space-y-2">
-                        <Label className="text-xs">Options</Label>
-                        {(it.options || [""]).map((opt, oi) => (
-                          <div key={oi} className="flex gap-2">
-                            <Input
-                              value={opt}
-                              onChange={(e) => {
-                                const opts = [...(it.options || [""])];
-                                opts[oi] = e.target.value;
-                                setItem(idx, { options: opts });
-                              }}
-                              placeholder={`Option ${oi + 1}`}
-                              className="text-sm"
-                            />
-                            <Button
-                              size="icon"
-                              variant="ghost"
-                              onClick={() => setItem(idx, { options: (it.options || []).filter((_, k) => k !== oi) })}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        ))}
-                        <Button size="sm" variant="outline" onClick={() => setItem(idx, { options: [...(it.options || []), ""] })} className="gap-1">
-                          <Plus className="h-3.5 w-3.5" /> Add option
-                        </Button>
-                      </div>
-                    )}
-
-                    {it.type === "number" && (
-                      <div className="pl-8 grid grid-cols-2 gap-3">
-                        <div>
-                          <Label className="text-xs">Min (optional)</Label>
-                          <Input type="number" value={it.min ?? ""} onChange={(e) => setItem(idx, { min: e.target.value === "" ? undefined : Number(e.target.value) })} />
-                        </div>
-                        <div>
-                          <Label className="text-xs">Max (optional)</Label>
-                          <Input type="number" value={it.max ?? ""} onChange={(e) => setItem(idx, { max: e.target.value === "" ? undefined : Number(e.target.value) })} />
-                        </div>
-                      </div>
-                    )}
-
-                    {it.type === "rating" && (
-                      <div className="pl-8 flex items-center gap-2">
-                        <Switch checked={!!it.includeInScore} onCheckedChange={(v) => setItem(idx, { includeInScore: v })} data-testid={`switch-rating-score-${idx}`} />
-                        <span className="text-sm">Count this rating toward the visit score</span>
-                      </div>
-                    )}
-                    {(it.type === "yes_no" || it.type === "true_false") && (
-                      <div className="pl-8 flex items-center gap-2">
-                        <Switch checked={it.includeInScore !== false} onCheckedChange={(v) => setItem(idx, { includeInScore: v })} data-testid={`switch-yn-score-${idx}`} />
-                        <span className="text-sm">Count this question toward the visit score</span>
-                      </div>
-                    )}
-
-                    {/* Repeat configuration */}
-                    <div className="pl-8 space-y-3 border-t pt-3">
-                      <div className="flex items-center gap-2">
-                        <Repeat className="h-4 w-4 text-muted-foreground" />
-                        <Switch
-                          checked={!!it.repeatable}
-                          onCheckedChange={(v) => setItem(idx, { repeatable: v })}
-                          disabled={hasFollowUps}
-                          data-testid={`switch-repeatable-${idx}`}
-                        />
-                        <span className={`text-sm ${hasFollowUps ? "text-muted-foreground" : ""}`}>Allow multiple entries (repeat this question)</span>
-                      </div>
-                      {hasFollowUps && (
-                        <p className="text-[11px] text-muted-foreground">
-                          Remove the follow-up questions below first — a question can have follow-ups or allow multiple entries, but not both.
-                        </p>
-                      )}
-                      {it.repeatable && (
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                          <div>
-                            <Label className="text-xs">Label for each entry (optional)</Label>
-                            <Input
-                              value={it.repeatLabel || ""}
-                              onChange={(e) => setItem(idx, { repeatLabel: e.target.value })}
-                              placeholder="e.g. Vaccinator, Session, Child"
-                              className="text-sm"
-                              data-testid={`input-repeat-label-${idx}`}
-                            />
-                          </div>
-                          <div>
-                            <Label className="text-xs">Max entries (optional)</Label>
-                            <Input
-                              type="number"
-                              min={1}
-                              value={it.maxRepeats ?? ""}
-                              onChange={(e) => setItem(idx, { maxRepeats: e.target.value === "" ? undefined : Math.max(1, Number(e.target.value)) })}
-                              placeholder="No limit"
-                              className="text-sm"
-                            />
-                          </div>
-                          <p className="text-[11px] text-muted-foreground md:col-span-2">
-                            Supervisors can add as many entries as needed during a visit. Scored entries are averaged together.
-                          </p>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Follow-up authoring (parent-centric): branch a new
-                        question off this one, shown only for a chosen answer.
-                        Repeatable questions can't have follow-ups because repeat
-                        entries are cloned without their children at run time. */}
-                    <div className="pl-8 border-t pt-3">
-                      {it.repeatable ? (
-                        <p className="text-[11px] text-muted-foreground">
-                          Follow-up questions aren’t available on a question that allows multiple entries. Turn off “Allow multiple entries” to add one.
-                        </p>
-                      ) : (
-                        <>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="gap-1.5"
-                            onClick={() => addFollowUp(idx)}
-                            data-testid={`btn-add-followup-${idx}`}
-                          >
-                            <GitBranch className="h-4 w-4" /> Add a follow-up question
-                          </Button>
-                          <p className="text-[11px] text-muted-foreground mt-1.5">
-                            A follow-up appears only when this question gets a particular answer — e.g. ask “If No, why?” only when the answer is No.
-                          </p>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
+              <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setPreviewOpen(true)}>
+                <Eye className="h-3.5 w-3.5" />
+                Preview Mode
+              </Button>
+              <Button
+                variant="default"
+                size="sm"
+                className="gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold"
+                onClick={() => saveMutation.mutate()}
+                disabled={saveMutation.isPending || !name.trim()}
+              >
+                <CheckCircle2 className="h-4 w-4" />
+                Save & Publish
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => setEditing(null)}>
+                Cancel
+              </Button>
             </div>
           </div>
 
+          {/* Builder Workspace: 3-Panel Layout */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
+            {/* Left Panel: Sections & Outline */}
+            <Card className="lg:col-span-3 border-border/60">
+              <CardHeader className="p-3 border-b border-border/40 flex flex-row items-center justify-between">
+                <CardTitle className="text-sm font-semibold flex items-center gap-1.5">
+                  <Layers className="h-4 w-4 text-primary" />
+                  Checklist Outline
+                </CardTitle>
+                <Badge variant="outline" className="text-[10px] font-mono">
+                  {items.length} Qs
+                </Badge>
+              </CardHeader>
+              <CardContent className="p-2 space-y-2">
+                {sections.map((sec, sIdx) => {
+                  const secQuestions = items.filter((i) => (i.sectionId || "sec-default") === sec.id);
+                  return (
+                    <div key={sec.id} className="p-2 rounded border border-border/50 bg-muted/30 space-y-1">
+                      <div className="flex items-center justify-between gap-1">
+                        <button
+                          onClick={() => toggleSectionCollapse(sec.id)}
+                          className="flex items-center gap-1 font-semibold text-xs text-foreground hover:text-primary truncate flex-1 text-left"
+                        >
+                          {collapsedSections[sec.id] ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                          <span className="truncate">{sec.title}</span>
+                        </button>
+                        <span className="text-[10px] font-mono text-muted-foreground shrink-0">{secQuestions.length}</span>
+                      </div>
+                      {!collapsedSections[sec.id] && (
+                        <div className="pl-4 space-y-1 text-[11px]">
+                          {secQuestions.map((q) => (
+                            <div
+                              key={q.id}
+                              onClick={() => setSelectedItemId(q.id)}
+                              className={`p-1 rounded cursor-pointer truncate flex items-center justify-between ${
+                                selectedItemId === q.id ? "bg-primary/10 font-semibold text-primary" : "hover:bg-muted text-muted-foreground"
+                              }`}
+                            >
+                              <span className="truncate">{q.label || "Untitled Question"}</span>
+                              {q.isAutoPrefill && <RefreshCw className="h-3 w-3 text-emerald-500 shrink-0 ml-1" />}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </CardContent>
+            </Card>
+
+            {/* Middle Panel: Sections & Question Cards Canvas */}
+            <div className="lg:col-span-6 space-y-4">
+              {sections.map((sec, sIdx) => {
+                const secQuestions = items.filter((i) => (i.sectionId || "sec-default") === sec.id);
+                const isCollapsed = collapsedSections[sec.id];
+                return (
+                  <Card key={sec.id} className="border-border/80 shadow-sm">
+                    <CardHeader className="p-3 bg-muted/40 border-b border-border/50 flex flex-row items-center justify-between">
+                      <div className="flex items-center gap-2 flex-1 min-w-0">
+                        <button onClick={() => toggleSectionCollapse(sec.id)} className="text-muted-foreground hover:text-foreground">
+                          {isCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                        </button>
+                        <Input
+                          value={sec.title}
+                          onChange={(e) => {
+                            const title = e.target.value;
+                            setSections((prev) => prev.map((s) => (s.id === sec.id ? { ...s, title } : s)));
+                          }}
+                          className="h-8 text-sm font-bold bg-transparent border-transparent hover:border-border focus:border-primary"
+                        />
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <Button variant="ghost" size="sm" onClick={() => addQuestionToSection(sec.id)} className="h-7 text-xs gap-1 text-primary">
+                          <Plus className="h-3.5 w-3.5" />
+                          Add Question
+                        </Button>
+                      </div>
+                    </CardHeader>
+                    {!isCollapsed && (
+                      <CardContent className="p-3 space-y-3">
+                        {secQuestions.length === 0 ? (
+                          <div className="text-center py-6 border border-dashed border-border/60 rounded-md">
+                            <p className="text-xs text-muted-foreground">No questions in this section yet.</p>
+                            <Button variant="outline" size="sm" className="mt-2 text-xs" onClick={() => addQuestionToSection(sec.id)}>
+                              + Add First Question
+                            </Button>
+                          </div>
+                        ) : (
+                          secQuestions.map((it, idx) => {
+                            const IconComp = TYPE_ICON[it.type] || ToggleLeft;
+                            return (
+                              <div
+                                key={it.id}
+                                onClick={() => setSelectedItemId(it.id)}
+                                className={`p-3 rounded-lg border transition-all cursor-pointer space-y-2 ${
+                                  selectedItemId === it.id ? "border-primary bg-primary/5 ring-1 ring-primary/30" : "border-border/60 hover:border-border"
+                                }`}
+                              >
+                                <div className="flex items-start justify-between gap-2">
+                                  <div className="flex items-center gap-2 flex-1 min-w-0">
+                                    <IconComp className="h-4 w-4 text-primary shrink-0" />
+                                    <Input
+                                      value={it.label}
+                                      onChange={(e) => {
+                                        const label = e.target.value;
+                                        setItems((prev) => prev.map((i) => (i.id === it.id ? { ...i, label } : i)));
+                                      }}
+                                      placeholder="Question prompt or field title..."
+                                      className="h-8 text-xs font-medium"
+                                    />
+                                  </div>
+                                  <div className="flex items-center gap-1 shrink-0">
+                                    <Select
+                                      value={it.type}
+                                      onValueChange={(v: any) => setItems((prev) => prev.map((i) => (i.id === it.id ? { ...i, type: v } : i)))}
+                                    >
+                                      <SelectTrigger className="h-7 text-[11px] w-36">
+                                        <SelectValue />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        {CHECKLIST_QUESTION_TYPES.map((t) => (
+                                          <SelectItem key={t.value} value={t.value} className="text-xs">
+                                            {t.label}
+                                          </SelectItem>
+                                        ))}
+                                      </SelectContent>
+                                    </Select>
+                                    <Button variant="ghost" size="sm" onClick={() => duplicateQuestion(it)} className="h-7 w-7 p-0">
+                                      <Copy className="h-3.5 w-3.5" />
+                                    </Button>
+                                    <Button variant="ghost" size="sm" onClick={() => deleteQuestion(it.id)} className="h-7 w-7 p-0 text-destructive">
+                                      <Trash2 className="h-3.5 w-3.5" />
+                                    </Button>
+                                  </div>
+                                </div>
+
+                                {it.isAutoPrefill && (
+                                  <div className="flex items-center gap-1 text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold bg-emerald-500/10 px-2 py-0.5 rounded w-fit">
+                                    <RefreshCw className="h-3 w-3" />
+                                    <span>Auto-Prefill Key: {it.prefillSourceKey || "health_facility"}</span>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })
+                        )}
+                      </CardContent>
+                    )}
+                  </Card>
+                );
+              })}
+            </div>
+
+            {/* Right Panel: Selected Question Settings & Logic Drawer */}
+            <Card className="lg:col-span-3 border-border/60">
+              <CardHeader className="p-3 border-b border-border/40">
+                <CardTitle className="text-sm font-semibold flex items-center gap-1.5">
+                  <Sliders className="h-4 w-4 text-primary" />
+                  Question Configuration
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="p-3 space-y-4">
+                {selectedItem ? (
+                  <div className="space-y-3 text-xs">
+                    <div>
+                      <Label className="text-xs font-semibold">Short Field Label</Label>
+                      <Input
+                        value={selectedItem.shortLabel || ""}
+                        onChange={(e) => {
+                          const shortLabel = e.target.value;
+                          setItems((prev) => prev.map((i) => (i.id === selectedItem.id ? { ...i, shortLabel } : i)));
+                        }}
+                        placeholder="e.g. Fridge Temp"
+                        className="h-8 text-xs mt-1"
+                      />
+                    </div>
+
+                    <div>
+                      <Label className="text-xs font-semibold">Instructions / Help Text</Label>
+                      <Textarea
+                        value={selectedItem.helpText || ""}
+                        onChange={(e) => {
+                          const helpText = e.target.value;
+                          setItems((prev) => prev.map((i) => (i.id === selectedItem.id ? { ...i, helpText } : i)));
+                        }}
+                        placeholder="Instructions for the supervisor..."
+                        className="text-xs mt-1 h-16"
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between pt-2 border-t border-border/40">
+                      <Label className="text-xs">Required Field</Label>
+                      <Switch
+                        checked={!!selectedItem.required}
+                        onCheckedChange={(checked) => setItems((prev) => prev.map((i) => (i.id === selectedItem.id ? { ...i, required: checked } : i)))}
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between pt-2 border-t border-border/40">
+                      <Label className="text-xs">Include in Scoring</Label>
+                      <Switch
+                        checked={selectedItem.includeInScore !== false}
+                        onCheckedChange={(checked) => setItems((prev) => prev.map((i) => (i.id === selectedItem.id ? { ...i, includeInScore: checked } : i)))}
+                      />
+                    </div>
+
+                    {/* Auto-Prefill Config */}
+                    <div className="space-y-2 pt-2 border-t border-border/40">
+                      <div className="flex items-center justify-between">
+                        <Label className="text-xs font-semibold flex items-center gap-1">
+                          <RefreshCw className="h-3 w-3 text-emerald-500" />
+                          Auto-Prefill Field
+                        </Label>
+                        <Switch
+                          checked={!!selectedItem.isAutoPrefill || selectedItem.type === "auto_prefill"}
+                          onCheckedChange={(checked) =>
+                            setItems((prev) =>
+                              prev.map((i) =>
+                                i.id === selectedItem.id
+                                  ? { ...i, isAutoPrefill: checked, type: checked ? "auto_prefill" : "yes_no" }
+                                  : i
+                              )
+                            )
+                          }
+                        />
+                      </div>
+                      {(selectedItem.isAutoPrefill || selectedItem.type === "auto_prefill") && (
+                        <div>
+                          <Label className="text-[10px] text-muted-foreground">Select Prefill Source</Label>
+                          <Select
+                            value={selectedItem.prefillSourceKey || "health_facility"}
+                            onValueChange={(v: any) =>
+                              setItems((prev) => prev.map((i) => (i.id === selectedItem.id ? { ...i, prefillSourceKey: v } : i)))
+                            }
+                          >
+                            <SelectTrigger className="h-8 text-xs mt-1">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {PREFILL_SOURCE_KEYS.map((k) => (
+                                <SelectItem key={k.key} value={k.key} className="text-xs">
+                                  {k.label} ({k.group})
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-xs text-muted-foreground text-center py-8">Select a question card to edit its logic and scoring parameters.</p>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+      )}
+
+      {/* Preview Modal */}
+      <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Eye className="h-5 w-5 text-primary" />
+              Checklist Supervisor Simulation Preview
+            </DialogTitle>
+            <DialogDescription>Interactive preview of how supervisors will complete this checklist on mobile and desktop.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-3">
+            <div className="flex items-center justify-between p-3 bg-muted/40 rounded-lg">
+              <div>
+                <span className="text-xs text-muted-foreground">Simulated Risk Score</span>
+                <div className="font-bold text-lg">{previewScore}%</div>
+              </div>
+              <Badge className={`bg-${risk.color}-500/10 text-${risk.color}-600 border-${risk.color}-500/30`}>{risk.label}</Badge>
+            </div>
+            <ScrollArea className="h-64 space-y-3 p-2 border rounded-md">
+              {items.map((it) => (
+                <div key={it.id} className="p-2 border-b text-xs space-y-1">
+                  <div className="font-semibold">{it.label || "Untitled Question"}</div>
+                  <Badge variant="outline" className="text-[9px]">
+                    {typeLabel(it.type)}
+                  </Badge>
+                </div>
+              ))}
+            </ScrollArea>
+          </div>
           <DialogFooter>
-            <Button variant="outline" onClick={closeEditor}>Cancel</Button>
-            <Button disabled={!canSave || saveMutation.isPending} onClick={() => saveMutation.mutate()} data-testid="btn-save-template">
-              {saveMutation.isPending ? "Saving…" : isNew ? "Create checklist" : "Save changes"}
-            </Button>
+            <Button onClick={() => setPreviewOpen(false)}>Close Preview</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

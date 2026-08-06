@@ -22,6 +22,7 @@ import {
   ClipboardCheck, Calendar, Plus, CheckCircle2, AlertCircle, XCircle, MinusCircle,
   Building2, User, FileText, ListChecks, Trash2, Pencil, Activity, Mail, NotebookPen,
   Settings2, MapPin, Camera, Star, Loader2, Crosshair, MapPinned, Radio, Clock, Wifi,
+  ChevronDown, AlertTriangle,
 } from "lucide-react";
 import { GeoCascadeFilter } from "@/components/GeoCascadeFilter";
 import { useAuth } from "@/hooks/useAuth";
@@ -1264,13 +1265,115 @@ function ConductDialog({ visit, facility, onClose, onSave, isSaving }: { visit: 
   // Number only the visible, top-level (entry-0, non-follow-up) base questions.
   let visibleNumber = 0;
 
+  // Fetch Auto-Prefill Bundle for selected Health Facility
+  const { data: prefillBundle, isLoading: isPrefillLoading } = useQuery({
+    queryKey: ["/api/supervision/visits/prefill", facilityId || visit.facilityId],
+    queryFn: async () => {
+      const fid = facilityId || visit.facilityId;
+      if (!fid) return null;
+      const res = await fetch(`/api/supervision/visits/prefill?facilityId=${fid}`);
+      if (!res.ok) return null;
+      return res.json();
+    },
+    enabled: !!(facilityId || visit.facilityId),
+  });
+
+  const [showDataSources, setShowDataSources] = useState(false);
+
   return (
     <Dialog open={true} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Supervisory visit — {facility?.name || `Facility #${visit.facilityId}`}</DialogTitle>
+          <DialogTitle>Supervisory visit — {facility?.name || prefillBundle?.facility?.facilityName || `Facility #${visit.facilityId}`}</DialogTitle>
           <DialogDescription>Scheduled {new Date(visit.scheduledDate).toLocaleDateString()} · {visit.visitType}</DialogDescription>
         </DialogHeader>
+
+        {/* Auto-Prefilled Facility Summary Header Card */}
+        {prefillBundle && (
+          <Card className="border-primary/20 bg-gradient-to-br from-primary/5 via-background to-background shadow-xs">
+            <CardHeader className="p-3 pb-2 border-b border-border/40 flex flex-row items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Building2 className="h-4 w-4 text-primary shrink-0" />
+                <span className="font-bold text-xs uppercase tracking-wider text-primary">Auto-Prefilled Facility Summary</span>
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 text-[10px] text-muted-foreground gap-1"
+                onClick={() => setShowDataSources(!showDataSources)}
+              >
+                {showDataSources ? "Hide Source Details" : "Data Source Details"}
+                <ChevronDown className={`h-3 w-3 transition-transform ${showDataSources ? "rotate-180" : ""}`} />
+              </Button>
+            </CardHeader>
+            <CardContent className="p-3 text-xs space-y-2.5">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                <div>
+                  <span className="text-[10px] text-muted-foreground">Facility & HMIS</span>
+                  <div className="font-semibold text-foreground truncate">{prefillBundle.facility.facilityName}</div>
+                  <span className="text-[9px] font-mono text-primary">{prefillBundle.facility.hmisCode}</span>
+                </div>
+                <div>
+                  <span className="text-[10px] text-muted-foreground">District / Province</span>
+                  <div className="font-semibold text-foreground truncate">{prefillBundle.facility.districtName}, {prefillBundle.facility.provinceName}</div>
+                </div>
+                <div>
+                  <span className="text-[10px] text-muted-foreground">Visit Dates</span>
+                  <div className="font-semibold text-foreground">Current: {prefillBundle.visit.currentVisitDate}</div>
+                  <div className="text-[10px] text-muted-foreground">Prev: {prefillBundle.visit.previousVisitDate || "None"}</div>
+                </div>
+                <div>
+                  <span className="text-[10px] text-muted-foreground">Contacted Staff</span>
+                  <div className="font-semibold text-foreground truncate">{prefillBundle.contacts?.person1?.name || "Not rostered"}</div>
+                  <div className="text-[9px] text-muted-foreground truncate">{prefillBundle.contacts?.person1?.responsibility || "In-Charge"}</div>
+                </div>
+              </div>
+
+              {/* Denominators & EPI Sites Grid */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2 p-2 bg-muted/40 rounded border border-border/50 text-[11px]">
+                <div>
+                  <span className="text-[10px] text-muted-foreground">Catchment Pop</span>
+                  <div className="font-bold text-foreground">{prefillBundle.population.totalCatchmentPopulation.toLocaleString()}</div>
+                </div>
+                <div>
+                  <span className="text-[10px] text-muted-foreground">Surviving Infants</span>
+                  <div className="font-bold text-primary">{prefillBundle.population.survivingInfants.toLocaleString()}</div>
+                </div>
+                <div>
+                  <span className="text-[10px] text-muted-foreground">Live Births / Pregnant</span>
+                  <div className="font-semibold text-foreground">{prefillBundle.population.liveBirths.toLocaleString()} / {prefillBundle.population.pregnantWomen.toLocaleString()}</div>
+                </div>
+                <div>
+                  <span className="text-[10px] text-muted-foreground">EPI Sites</span>
+                  <div className="font-semibold text-foreground">
+                    Static: {prefillBundle.epiSites.static} | Outreach: {prefillBundle.epiSites.outreach} | Mobile: {prefillBundle.epiSites.mobile}
+                  </div>
+                </div>
+              </div>
+
+              {/* Data Source Expandable Details */}
+              {showDataSources && (
+                <div className="p-2 bg-background rounded border text-[10px] space-y-1 text-muted-foreground">
+                  <div><span className="font-semibold">Population Source:</span> {prefillBundle.population.source} ({prefillBundle.population.sourceYear})</div>
+                  <div><span className="font-semibold">EPI Site Registry:</span> {prefillBundle.epiSites.source}</div>
+                  <div><span className="font-semibold">Prefilled At:</span> {new Date(prefillBundle.metadata.prefilledAt).toLocaleString()}</div>
+                </div>
+              )}
+
+              {/* Warnings */}
+              {prefillBundle.metadata.warnings?.length > 0 && (
+                <div className="space-y-1">
+                  {prefillBundle.metadata.warnings.map((w: string, idx: number) => (
+                    <div key={idx} className="flex items-center gap-1.5 text-[10px] text-amber-600 dark:text-amber-400 bg-amber-500/10 p-1.5 rounded">
+                      <AlertTriangle className="h-3 w-3 shrink-0" />
+                      <span>{w}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
 
         <Tabs defaultValue="checklist" className="mt-2">
           <TabsList>

@@ -2551,17 +2551,30 @@ export default function ClientLogbook() {
             EPI/RED Standard infant and maternal immunization demographic register
           </p>
         </div>
-        <Button
-          onClick={() => {
-            setIsAddClientOpen(true);
-            clientForm.reset();
-          }}
-          className="flex items-center gap-2"
-          data-testid="button-register-client"
-        >
-          <Plus className="h-4 w-4" />
-          Register Client
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant="outline"
+            onClick={() => {
+              window.open("/api/clients/import-template", "_blank");
+            }}
+            className="flex items-center gap-1.5 text-xs"
+          >
+            <FileSpreadsheet className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+            Import Template
+          </Button>
+
+          <Button
+            onClick={() => {
+              setIsAddClientOpen(true);
+              clientForm.reset();
+            }}
+            className="flex items-center gap-2 bg-primary text-primary-foreground font-semibold"
+            data-testid="button-register-client"
+          >
+            <Plus className="h-4 w-4" />
+            Register Client
+          </Button>
+        </div>
       </div>
 
       {/* BULK REMINDER CAMPAIGNS PANEL */}

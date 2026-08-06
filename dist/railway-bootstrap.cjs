@@ -53,6 +53,9 @@ __export(schema_exports, {
   catalogueWastageThresholds: () => catalogueWastageThresholds,
   catchmentConflicts: () => catchmentConflicts,
   chvProfiles: () => chvProfiles,
+  clientBulkActionLogs: () => clientBulkActionLogs,
+  clientDuplicateCandidates: () => clientDuplicateCandidates,
+  clientImportBatches: () => clientImportBatches,
   clientVaccinations: () => clientVaccinations,
   clientVaccinationsRelations: () => clientVaccinationsRelations,
   clients: () => clients,
@@ -113,6 +116,7 @@ __export(schema_exports, {
   insertCatalogueWastageThresholdSchema: () => insertCatalogueWastageThresholdSchema,
   insertCatchmentConflictSchema: () => insertCatchmentConflictSchema,
   insertChvProfileSchema: () => insertChvProfileSchema,
+  insertClientImportBatchSchema: () => insertClientImportBatchSchema,
   insertClientSchema: () => insertClientSchema,
   insertClientVaccinationSchema: () => insertClientVaccinationSchema,
   insertColdChainEquipmentSchema: () => insertColdChainEquipmentSchema,
@@ -156,6 +160,7 @@ __export(schema_exports, {
   insertStockReferenceHistoryVersionSchema: () => insertStockReferenceHistoryVersionSchema,
   insertStockTransactionSchema: () => insertStockTransactionSchema,
   insertSupervisionChecklistTemplateSchema: () => insertSupervisionChecklistTemplateSchema,
+  insertSupervisionQuestionBankSchema: () => insertSupervisionQuestionBankSchema,
   insertSupervisionVisitSchema: () => insertSupervisionVisitSchema,
   insertSurveillanceCaseSchema: () => insertSurveillanceCaseSchema,
   insertTenantIdpConfigSchema: () => insertTenantIdpConfigSchema,
@@ -182,6 +187,8 @@ __export(schema_exports, {
   llgsRelations: () => llgsRelations,
   messageTemplates: () => messageTemplates,
   microplanTypeEnum: () => microplanTypeEnum,
+  microplanVersions: () => microplanVersions,
+  microplanVersionsRelations: () => microplanVersionsRelations,
   microplans: () => microplans,
   microplansRelations: () => microplansRelations,
   mobilizationActivities: () => mobilizationActivities,
@@ -216,6 +223,7 @@ __export(schema_exports, {
   selectCatalogueScheduleDoseSchema: () => selectCatalogueScheduleDoseSchema,
   selectCatalogueVaccineSchema: () => selectCatalogueVaccineSchema,
   selectCatalogueWastageThresholdSchema: () => selectCatalogueWastageThresholdSchema,
+  selectClientImportBatchSchema: () => selectClientImportBatchSchema,
   selectCommunityHistoryVersionSchema: () => selectCommunityHistoryVersionSchema,
   selectEntityHistoryVersionSchema: () => selectEntityHistoryVersionSchema,
   selectFacilityHistoryVersionSchema: () => selectFacilityHistoryVersionSchema,
@@ -223,6 +231,7 @@ __export(schema_exports, {
   selectPopulationHistoryVersionSchema: () => selectPopulationHistoryVersionSchema,
   selectReportEntitySnapshotSchema: () => selectReportEntitySnapshotSchema,
   selectStockReferenceHistoryVersionSchema: () => selectStockReferenceHistoryVersionSchema,
+  selectSupervisionQuestionBankSchema: () => selectSupervisionQuestionBankSchema,
   selectUserAssignmentHistorySchema: () => selectUserAssignmentHistorySchema,
   selectVaccineScheduleHistoryVersionSchema: () => selectVaccineScheduleHistoryVersionSchema,
   selectVgieAlertRuleSchema: () => selectVgieAlertRuleSchema,
@@ -245,6 +254,9 @@ __export(schema_exports, {
   stockTransactions: () => stockTransactions,
   stockTransactionsRelations: () => stockTransactionsRelations,
   supervisionChecklistTemplates: () => supervisionChecklistTemplates,
+  supervisionQuestionBank: () => supervisionQuestionBank,
+  supervisionTemplateAuditLogs: () => supervisionTemplateAuditLogs,
+  supervisionTemplateVersions: () => supervisionTemplateVersions,
   supervisionVisits: () => supervisionVisits,
   surveillanceCases: () => surveillanceCases,
   tenantEmailSettingsSchema: () => tenantEmailSettingsSchema,
@@ -860,6 +872,22 @@ var microplans = (0, import_pg_core.pgTable)("microplans", {
   createdAt: (0, import_pg_core.timestamp)("created_at").defaultNow(),
   updatedAt: (0, import_pg_core.timestamp)("updated_at").defaultNow()
 }, (table) => [(0, import_pg_core.index)("idx_microplans_tenant").on(table.tenantId)]);
+var microplanVersions = (0, import_pg_core.pgTable)("microplan_versions", {
+  id: (0, import_pg_core.integer)("id").primaryKey().generatedAlwaysAsIdentity(),
+  tenantId: (0, import_pg_core.varchar)("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  microplanId: (0, import_pg_core.integer)("microplan_id").notNull().references(() => microplans.id, { onDelete: "cascade" }),
+  versionNumber: (0, import_pg_core.integer)("version_number").notNull(),
+  versionLabel: (0, import_pg_core.varchar)("version_label", { length: 50 }).notNull(),
+  eventType: (0, import_pg_core.varchar)("event_type", { length: 50 }).notNull(),
+  status: (0, import_pg_core.varchar)("status", { length: 50 }).notNull(),
+  reason: (0, import_pg_core.text)("reason"),
+  snapshot: (0, import_pg_core.jsonb)("snapshot").notNull(),
+  createdByUserId: (0, import_pg_core.varchar)("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  createdAt: (0, import_pg_core.timestamp)("created_at").notNull().defaultNow()
+}, (table) => [
+  (0, import_pg_core.index)("idx_microplan_versions_tenant_plan").on(table.tenantId, table.microplanId),
+  (0, import_pg_core.unique)("uq_microplan_versions_plan_number").on(table.microplanId, table.versionNumber)
+]);
 var sessionPlans = (0, import_pg_core.pgTable)("session_plans", {
   id: (0, import_pg_core.integer)("id").primaryKey().generatedAlwaysAsIdentity(),
   tenantId: (0, import_pg_core.varchar)("tenant_id").references(() => tenants.id),
@@ -1246,7 +1274,14 @@ var villagesRelations = (0, import_drizzle_orm.relations)(villages, ({ one, many
 var microplansRelations = (0, import_drizzle_orm.relations)(microplans, ({ one, many }) => ({
   tenant: one(tenants, { fields: [microplans.tenantId], references: [tenants.id] }),
   facility: one(facilities, { fields: [microplans.facilityId], references: [facilities.id] }),
-  sessionPlans: many(sessionPlans)
+  sessionPlans: many(sessionPlans),
+  versions: many(microplanVersions)
+}));
+var microplanVersionsRelations = (0, import_drizzle_orm.relations)(microplanVersions, ({ one }) => ({
+  microplan: one(microplans, {
+    fields: [microplanVersions.microplanId],
+    references: [microplans.id]
+  })
 }));
 var sessionPlansRelations = (0, import_drizzle_orm.relations)(sessionPlans, ({ one, many }) => ({
   facility: one(facilities, {
@@ -2958,7 +2993,18 @@ var gisPolygons = (0, import_pg_core.pgTable)("gis_polygons", {
   method: (0, import_pg_core.varchar)("method", { length: 100 }),
   status: (0, import_pg_core.varchar)("status", { length: 50 }).default("active"),
   version: (0, import_pg_core.integer)("version").default(1),
+  previousVersionId: (0, import_pg_core.integer)("previous_version_id"),
+  replacedVersionId: (0, import_pg_core.integer)("replaced_version_id"),
+  parentFacilityId: (0, import_pg_core.integer)("parent_facility_id"),
   isActive: (0, import_pg_core.boolean)("is_active").default(true),
+  validFrom: (0, import_pg_core.timestamp)("valid_from").defaultNow(),
+  validTo: (0, import_pg_core.timestamp)("valid_to"),
+  changeType: (0, import_pg_core.varchar)("change_type", { length: 50 }).default("created"),
+  changeReason: (0, import_pg_core.text)("change_reason"),
+  submittedBy: (0, import_pg_core.varchar)("submitted_by", { length: 255 }),
+  submittedAt: (0, import_pg_core.timestamp)("submitted_at"),
+  rejectionReason: (0, import_pg_core.text)("rejection_reason"),
+  metadataJson: (0, import_pg_core.jsonb)("metadata_json").default({}),
   createdAt: (0, import_pg_core.timestamp)("created_at").defaultNow(),
   updatedAt: (0, import_pg_core.timestamp)("updated_at").defaultNow(),
   centroid: (0, import_pg_core.jsonb)("centroid"),
@@ -2975,7 +3021,8 @@ var gisPolygons = (0, import_pg_core.pgTable)("gis_polygons", {
   approvedAt: (0, import_pg_core.timestamp)("approved_at")
 }, (table) => ({
   tenantIdx: (0, import_pg_core.index)("idx_gis_polygons_tenant").on(table.tenantId),
-  ownerIdx: (0, import_pg_core.index)("idx_gis_polygons_owner").on(table.ownerType, table.ownerId)
+  ownerIdx: (0, import_pg_core.index)("idx_gis_polygons_owner").on(table.ownerType, table.ownerId),
+  ownerVersionIdx: (0, import_pg_core.index)("idx_gis_polygons_owner_version").on(table.tenantId, table.ownerType, table.ownerId, table.version)
 }));
 var gisPolygonsRelations = (0, import_drizzle_orm.relations)(gisPolygons, ({ one }) => ({
   tenant: one(tenants, {
@@ -3275,6 +3322,113 @@ var insertStockReferenceHistoryVersionSchema = (0, import_drizzle_zod.createInse
 var selectStockReferenceHistoryVersionSchema = (0, import_drizzle_zod.createSelectSchema)(stockReferenceHistoryVersions);
 var insertReportEntitySnapshotSchema = (0, import_drizzle_zod.createInsertSchema)(reportEntitySnapshots);
 var selectReportEntitySnapshotSchema = (0, import_drizzle_zod.createSelectSchema)(reportEntitySnapshots);
+var supervisionQuestionBank = (0, import_pg_core.pgTable)("supervision_question_bank", {
+  id: (0, import_pg_core.integer)("id").primaryKey().generatedAlwaysAsIdentity(),
+  tenantId: (0, import_pg_core.varchar)("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  category: (0, import_pg_core.varchar)("category", { length: 100 }).notNull().default("supervision"),
+  programModule: (0, import_pg_core.varchar)("program_module", { length: 100 }).default("epi"),
+  indicatorMapping: (0, import_pg_core.varchar)("indicator_mapping", { length: 255 }),
+  dataElementMapping: (0, import_pg_core.varchar)("data_element_mapping", { length: 255 }),
+  questionText: (0, import_pg_core.text)("question_text").notNull(),
+  shortLabel: (0, import_pg_core.varchar)("short_label", { length: 200 }),
+  answerType: (0, import_pg_core.varchar)("answer_type", { length: 50 }).notNull().default("yes_no"),
+  options: (0, import_pg_core.jsonb)("options").default([]),
+  scoreWeight: (0, import_pg_core.decimal)("score_weight", { precision: 5, scale: 2 }).default("1.0"),
+  helpText: (0, import_pg_core.text)("help_text"),
+  tags: (0, import_pg_core.jsonb)("tags").default([]),
+  isGlobal: (0, import_pg_core.boolean)("is_global").default(false),
+  createdByUserId: (0, import_pg_core.varchar)("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  createdAt: (0, import_pg_core.timestamp)("created_at").defaultNow().notNull(),
+  updatedAt: (0, import_pg_core.timestamp)("updated_at").defaultNow().notNull()
+}, (table) => ({
+  tenantIdx: (0, import_pg_core.index)("idx_sup_qbank_tenant").on(table.tenantId),
+  categoryIdx: (0, import_pg_core.index)("idx_sup_qbank_category").on(table.tenantId, table.category)
+}));
+var supervisionTemplateVersions = (0, import_pg_core.pgTable)("supervision_template_versions", {
+  id: (0, import_pg_core.integer)("id").primaryKey().generatedAlwaysAsIdentity(),
+  tenantId: (0, import_pg_core.varchar)("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  templateId: (0, import_pg_core.integer)("template_id").notNull(),
+  versionNumber: (0, import_pg_core.integer)("version_number").notNull().default(1),
+  name: (0, import_pg_core.varchar)("name", { length: 255 }).notNull(),
+  category: (0, import_pg_core.varchar)("category", { length: 100 }).notNull().default("supervision"),
+  description: (0, import_pg_core.text)("description"),
+  applicableLevel: (0, import_pg_core.varchar)("applicable_level", { length: 50 }).default("facility"),
+  sections: (0, import_pg_core.jsonb)("sections").default([]).notNull(),
+  items: (0, import_pg_core.jsonb)("items").default([]).notNull(),
+  status: (0, import_pg_core.varchar)("status", { length: 50 }).notNull().default("published"),
+  changeSummary: (0, import_pg_core.text)("change_summary"),
+  publishedByUserId: (0, import_pg_core.varchar)("published_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  publishedAt: (0, import_pg_core.timestamp)("published_at").defaultNow().notNull(),
+  createdAt: (0, import_pg_core.timestamp)("created_at").defaultNow().notNull()
+}, (table) => ({
+  tenantIdx: (0, import_pg_core.index)("idx_sup_tmpl_vers_tenant").on(table.tenantId),
+  tmplVersionIdx: (0, import_pg_core.index)("idx_sup_tmpl_vers_num").on(table.tenantId, table.templateId, table.versionNumber)
+}));
+var supervisionTemplateAuditLogs = (0, import_pg_core.pgTable)("supervision_template_audit_logs", {
+  id: (0, import_pg_core.integer)("id").primaryKey().generatedAlwaysAsIdentity(),
+  tenantId: (0, import_pg_core.varchar)("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  templateId: (0, import_pg_core.integer)("template_id").notNull(),
+  action: (0, import_pg_core.varchar)("action", { length: 100 }).notNull(),
+  // created, draft_updated, published, archived, duplicated, imported
+  performedByUserId: (0, import_pg_core.varchar)("performed_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  performedByUserName: (0, import_pg_core.varchar)("performed_by_user_name", { length: 255 }),
+  reason: (0, import_pg_core.text)("reason"),
+  metadata: (0, import_pg_core.jsonb)("metadata").default({}),
+  timestamp: (0, import_pg_core.timestamp)("timestamp").defaultNow().notNull()
+}, (table) => ({
+  tenantIdx: (0, import_pg_core.index)("idx_sup_tmpl_audit_tenant").on(table.tenantId)
+}));
+var clientImportBatches = (0, import_pg_core.pgTable)("client_import_batches", {
+  id: (0, import_pg_core.varchar)("id").primaryKey().default(import_drizzle_orm.sql`gen_random_uuid()`),
+  tenantId: (0, import_pg_core.varchar)("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  fileName: (0, import_pg_core.varchar)("file_name", { length: 255 }).notNull(),
+  fileType: (0, import_pg_core.varchar)("file_type", { length: 20 }).notNull().default("csv"),
+  totalRows: (0, import_pg_core.integer)("total_rows").notNull().default(0),
+  validRows: (0, import_pg_core.integer)("valid_rows").notNull().default(0),
+  invalidRows: (0, import_pg_core.integer)("invalid_rows").notNull().default(0),
+  duplicateRows: (0, import_pg_core.integer)("duplicate_rows").notNull().default(0),
+  importedCount: (0, import_pg_core.integer)("imported_count").notNull().default(0),
+  status: (0, import_pg_core.varchar)("status", { length: 50 }).notNull().default("completed"),
+  errors: (0, import_pg_core.jsonb)("errors").default([]),
+  importedByUserId: (0, import_pg_core.varchar)("imported_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  createdAt: (0, import_pg_core.timestamp)("created_at").defaultNow().notNull()
+}, (table) => ({
+  tenantIdx: (0, import_pg_core.index)("idx_client_import_tenant").on(table.tenantId)
+}));
+var clientDuplicateCandidates = (0, import_pg_core.pgTable)("client_duplicate_candidates", {
+  id: (0, import_pg_core.integer)("id").primaryKey().generatedAlwaysAsIdentity(),
+  tenantId: (0, import_pg_core.varchar)("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  primaryClientId: (0, import_pg_core.varchar)("primary_client_id").notNull().references(() => clients.id, { onDelete: "cascade" }),
+  duplicateClientId: (0, import_pg_core.varchar)("duplicate_client_id").notNull().references(() => clients.id, { onDelete: "cascade" }),
+  matchReason: (0, import_pg_core.varchar)("match_reason", { length: 255 }).notNull(),
+  // e.g. "Facility + Name + DOB", "Phone + Child Name"
+  confidenceScore: (0, import_pg_core.decimal)("confidence_score", { precision: 5, scale: 2 }).default("0.90"),
+  status: (0, import_pg_core.varchar)("status", { length: 50 }).notNull().default("pending"),
+  // pending, merged, dismissed
+  detectedAt: (0, import_pg_core.timestamp)("detected_at").defaultNow().notNull()
+}, (table) => ({
+  tenantIdx: (0, import_pg_core.index)("idx_client_dupes_tenant").on(table.tenantId),
+  primaryClientIdx: (0, import_pg_core.index)("idx_client_dupes_primary").on(table.primaryClientId)
+}));
+var clientBulkActionLogs = (0, import_pg_core.pgTable)("client_bulk_action_logs", {
+  id: (0, import_pg_core.integer)("id").primaryKey().generatedAlwaysAsIdentity(),
+  tenantId: (0, import_pg_core.varchar)("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  actionType: (0, import_pg_core.varchar)("action_type", { length: 100 }).notNull(),
+  // archive, restore, delete, assign_facility, status_update, add_tag, remove_tag
+  affectedCount: (0, import_pg_core.integer)("affected_count").notNull().default(0),
+  clientIds: (0, import_pg_core.jsonb)("client_ids").notNull().default([]),
+  reason: (0, import_pg_core.text)("reason"),
+  performedByUserId: (0, import_pg_core.varchar)("performed_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  performedByUserName: (0, import_pg_core.varchar)("performed_by_user_name", { length: 255 }),
+  metadata: (0, import_pg_core.jsonb)("metadata").default({}),
+  timestamp: (0, import_pg_core.timestamp)("timestamp").defaultNow().notNull()
+}, (table) => ({
+  tenantIdx: (0, import_pg_core.index)("idx_client_bulk_log_tenant").on(table.tenantId)
+}));
+var insertSupervisionQuestionBankSchema = (0, import_drizzle_zod.createInsertSchema)(supervisionQuestionBank);
+var selectSupervisionQuestionBankSchema = (0, import_drizzle_zod.createSelectSchema)(supervisionQuestionBank);
+var insertClientImportBatchSchema = (0, import_drizzle_zod.createInsertSchema)(clientImportBatches);
+var selectClientImportBatchSchema = (0, import_drizzle_zod.createSelectSchema)(clientImportBatches);
 
 // server/db.ts
 var { Pool } = import_pg.default;
