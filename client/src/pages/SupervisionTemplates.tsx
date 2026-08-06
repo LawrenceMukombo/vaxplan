@@ -615,31 +615,31 @@ export default function SupervisionTemplates() {
 
   return (
     <div className="p-4 md:p-6 space-y-6 max-w-7xl mx-auto">
-      {/* Header */}
-      <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border-b border-border/60 pb-4">
-        <div>
-          <div className="flex items-center gap-2">
-            <Button variant="ghost" size="sm" onClick={() => setLocation("/supervision")} className="h-8 px-2">
-              <ArrowLeft className="h-4 w-4" />
-            </Button>
+      {/* Non-editing top header */}
+      {!editing && (
+        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border-b border-border/60 pb-4">
+          <div>
+            <div className="flex items-center gap-2">
+              <Button variant="ghost" size="sm" onClick={() => setLocation("/supervision")} className="h-8 px-2">
+                <ArrowLeft className="h-4 w-4" />
+              </Button>
 
-            <ClipboardList className="h-6 w-6 text-primary shrink-0" />
-            <h1 className="text-xl md:text-2xl font-bold tracking-tight text-foreground">
-              Supportive Supervision Template Builder
-            </h1>
+              <ClipboardList className="h-6 w-6 text-primary shrink-0" />
+              <h1 className="text-xl md:text-2xl font-bold tracking-tight text-foreground">
+                Supportive Supervision Template Builder
+              </h1>
+            </div>
+            <p className="text-xs md:text-sm text-muted-foreground mt-1 pl-10">
+              Design, organize, version, and manage national supervision checklists with collapsible sections and auto-prefill fields.
+            </p>
           </div>
-          <p className="text-xs md:text-sm text-muted-foreground mt-1 pl-10">
-            Design, organize, version, and manage national supervision checklists with collapsible sections and auto-prefill fields.
-          </p>
-        </div>
 
-        {!editing && (
           <Button onClick={() => openEditor()} className="gap-2 bg-primary text-primary-foreground">
             <Plus className="h-4 w-4" />
             Create Template
           </Button>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* Main Content Area */}
       {!editing ? (
@@ -687,181 +687,203 @@ export default function SupervisionTemplates() {
       ) : (
         /* Full Builder Canvas */
         <div className="space-y-4">
-          {/* Top Sticky Action Bar with Saved Template Switcher */}
-          <div className="sticky top-0 z-20 bg-background/95 backdrop-blur-md border border-border/80 p-3 rounded-lg shadow-sm flex flex-wrap items-center justify-between gap-2">
-            <div className="flex flex-wrap items-center gap-2">
-              <div className="flex items-center gap-1.5 border-r border-border/50 pr-2">
-                <span className="text-xs font-semibold text-muted-foreground shrink-0">Saved Checklists:</span>
-                <Select
-                  value={editing?.id ? String(editing.id) : "new"}
-                  onValueChange={(val) => {
-                    if (val === "new") {
-                      openEditor();
-                    } else {
-                      const tpl = templates.find((t) => String(t.id) === val);
-                      if (tpl) openEditor(tpl);
-                    }
-                  }}
-                >
-                  <SelectTrigger className="w-56 md:w-72 h-9 text-xs font-bold border-indigo-500/40 bg-background" data-testid="select-saved-checklist">
-                    <SelectValue placeholder="Retrieve saved checklist..." />
+          {/* Top Sticky Header & Action Bar Container */}
+          <div className="sticky top-0 z-30 bg-background/95 backdrop-blur-md border border-border/80 p-4 rounded-xl shadow-md space-y-3">
+            {/* Header Title Row */}
+            <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-2 border-b border-border/40 pb-2">
+              <div>
+                <div className="flex items-center gap-2">
+                  <Button variant="ghost" size="sm" onClick={() => setLocation("/supervision")} className="h-7 px-2">
+                    <ArrowLeft className="h-4 w-4" />
+                  </Button>
+
+                  <ClipboardList className="h-5 w-5 text-primary shrink-0" />
+                  <h1 className="text-lg md:text-xl font-bold tracking-tight text-foreground">
+                    Supportive Supervision Template Builder
+                  </h1>
+                </div>
+                <p className="text-xs text-muted-foreground mt-0.5 pl-9">
+                  Design, organize, version, and manage national supervision checklists with collapsible sections and auto-prefill fields.
+                </p>
+              </div>
+            </div>
+
+            {/* Action Toolbar Row */}
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="flex items-center gap-1.5 border-r border-border/50 pr-2">
+                  <span className="text-xs font-semibold text-muted-foreground shrink-0">Saved Checklists:</span>
+                  <Select
+                    value={editing?.id ? String(editing.id) : "new"}
+                    onValueChange={(val) => {
+                      if (val === "new") {
+                        openEditor();
+                      } else {
+                        const tpl = templates.find((t) => String(t.id) === val);
+                        if (tpl) openEditor(tpl);
+                      }
+                    }}
+                  >
+                    <SelectTrigger className="w-56 md:w-72 h-9 text-xs font-bold border-indigo-500/40 bg-background" data-testid="select-saved-checklist">
+                      <SelectValue placeholder="Retrieve saved checklist..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="new" className="text-xs font-semibold text-indigo-600 dark:text-indigo-400">
+                        + Create New Checklist
+                      </SelectItem>
+                      {templates.map((t) => (
+                        <SelectItem key={t.id} value={String(t.id)} className="text-xs">
+                          {t.name} (v{t.version || 1}.0 — {t.items?.length || 0} Qs) {t.isActive ? "✓ Active" : ""}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <Input
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="Checklist Title (e.g. Routine Supportive Supervision)"
+                  className="w-56 md:w-72 h-9 font-semibold text-sm"
+                />
+                <Select value={category} onValueChange={(v: any) => setCategory(v)}>
+                  <SelectTrigger className="w-32 h-9 text-xs">
+                    <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="new" className="text-xs font-semibold text-indigo-600 dark:text-indigo-400">
-                      + Create New Checklist
-                    </SelectItem>
-                    {templates.map((t) => (
-                      <SelectItem key={t.id} value={String(t.id)} className="text-xs">
-                        {t.name} (v{t.version || 1}.0 — {t.items?.length || 0} Qs) {t.isActive ? "✓ Active" : ""}
-                      </SelectItem>
-                    ))}
+                    <SelectItem value="supervision">Supervision</SelectItem>
+                    <SelectItem value="campaign">Campaign</SelectItem>
+                    <SelectItem value="pce">PCE</SelectItem>
+                    <SelectItem value="h2h">House-to-House</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
 
-              <Input
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="Checklist Title (e.g. Routine Supportive Supervision)"
-                className="w-56 md:w-72 h-9 font-semibold text-sm"
-              />
-              <Select value={category} onValueChange={(v: any) => setCategory(v)}>
-                <SelectTrigger className="w-32 h-9 text-xs">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="supervision">Supervision</SelectItem>
-                  <SelectItem value="campaign">Campaign</SelectItem>
-                  <SelectItem value="pce">PCE</SelectItem>
-                  <SelectItem value="h2h">House-to-House</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+              {/* STICKY ACTION BUTTONS */}
+              <div className="flex items-center gap-2 flex-wrap">
+                {isValid ? (
+                  <Badge variant="outline" className="text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border-emerald-500/30 text-[11px] gap-1 font-semibold" data-testid="badge-validation-valid">
+                    <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" /> 100% Valid ({items.length} Qs)
+                  </Badge>
+                ) : (
+                  <Badge
+                    variant="outline"
+                    onClick={() => setValidationModalOpen(true)}
+                    className="text-amber-600 dark:text-amber-400 bg-amber-500/10 border-amber-500/30 text-[11px] gap-1 font-semibold cursor-pointer hover:bg-amber-500/20"
+                    title="Click to view validation issues"
+                    data-testid="badge-validation-warnings"
+                  >
+                    <AlertTriangle className="h-3.5 w-3.5 text-amber-500 animate-pulse" /> {currentValidationErrors.length} Issue(s)
+                  </Badge>
+                )}
 
-            {/* ALWAYS-VISIBLE STICKY ADD QUESTION, VALIDATION STATUS, SAVE DRAFT & SAVE AND SUBMIT */}
-            <div className="flex items-center gap-2 flex-wrap">
-              {isValid ? (
-                <Badge variant="outline" className="text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border-emerald-500/30 text-[11px] gap-1 font-semibold" data-testid="badge-validation-valid">
-                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" /> 100% Valid ({items.length} Qs)
-                </Badge>
-              ) : (
-                <Badge
-                  variant="outline"
-                  onClick={() => setValidationModalOpen(true)}
-                  className="text-amber-600 dark:text-amber-400 bg-amber-500/10 border-amber-500/30 text-[11px] gap-1 font-semibold cursor-pointer hover:bg-amber-500/20"
-                  title="Click to view validation issues"
-                  data-testid="badge-validation-warnings"
+                <Button
+                  variant="default"
+                  size="sm"
+                  className="gap-1.5 bg-primary text-primary-foreground font-semibold shadow-sm"
+                  onClick={() => addQuestionToSection(sections[0]?.id || "sec-default")}
                 >
-                  <AlertTriangle className="h-3.5 w-3.5 text-amber-500 animate-pulse" /> {currentValidationErrors.length} Issue(s)
-                </Badge>
-              )}
+                  <Plus className="h-4 w-4" />
+                  Add Question
+                </Button>
+                <Button variant="outline" size="sm" className="gap-1.5" onClick={addSection}>
+                  <Layers className="h-3.5 w-3.5" />
+                  Add Section
+                </Button>
 
-              <Button
-                variant="default"
-                size="sm"
-                className="gap-1.5 bg-primary text-primary-foreground font-semibold shadow-sm"
-                onClick={() => addQuestionToSection(sections[0]?.id || "sec-default")}
-              >
-                <Plus className="h-4 w-4" />
-                Add Question
-              </Button>
-              <Button variant="outline" size="sm" className="gap-1.5" onClick={addSection}>
-                <Layers className="h-3.5 w-3.5" />
-                Add Section
-              </Button>
-
-              <Button
-                variant="outline"
-                size="sm"
-                className="gap-1.5 border-indigo-500/30 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/30"
-                onClick={shuffleSections}
-                title="Shuffle section order"
-                data-testid="button-shuffle-sections"
-              >
-                <Shuffle className="h-3.5 w-3.5" />
-                Shuffle Sections
-              </Button>
-
-              <Button
-                variant="outline"
-                size="sm"
-                className="gap-1.5 border-indigo-500/30 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/30"
-                onClick={() => setImportOpen(true)}
-              >
-                <FileUp className="h-3.5 w-3.5" />
-                Import Questions
-              </Button>
-
-              <Button
-                variant="outline"
-                size="sm"
-                className="gap-1.5 border-emerald-500/30 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/30"
-                onClick={() => window.open("/api/supervision/templates/import-template", "_self")}
-              >
-                <Download className="h-3.5 w-3.5" />
-                Sample CSV
-              </Button>
-
-              <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setPreviewOpen(true)}>
-                <Eye className="h-3.5 w-3.5" />
-                Preview Mode
-              </Button>
-
-              <Button
-                variant="outline"
-                size="sm"
-                className="gap-1.5 border-primary/40 text-primary font-semibold hover:bg-primary/10"
-                onClick={handleSaveDraft}
-                disabled={saveMutation.isPending || !name.trim()}
-                title="Save template as draft without strict validation"
-                data-testid="button-save-draft"
-              >
-                <Save className="h-3.5 w-3.5" />
-                Save Draft
-              </Button>
-
-              <Button
-                variant="default"
-                size="sm"
-                className={`gap-1.5 font-semibold text-white transition-colors ${
-                  isValid ? "bg-emerald-600 hover:bg-emerald-700 shadow-sm" : "bg-emerald-600/80 hover:bg-emerald-700"
-                }`}
-                onClick={handleSaveAndSubmit}
-                disabled={saveMutation.isPending}
-                title="Run validation checks and save & publish checklist"
-                data-testid="button-save-submit"
-              >
-                <CheckCircle2 className="h-4 w-4" />
-                Save & Submit
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => {
-                  setEditing(null);
-                }}
-              >
-                Cancel
-              </Button>
-              {editing?.id && !isNew && (
                 <Button
                   variant="outline"
                   size="sm"
-                  className="gap-1.5 border-destructive/40 text-destructive hover:bg-destructive/10 font-semibold"
-                  onClick={() => setDeletingTemplate(editing)}
-                  data-testid="button-delete-current-checklist"
+                  className="gap-1.5 border-indigo-500/30 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/30"
+                  onClick={shuffleSections}
+                  title="Shuffle section order"
+                  data-testid="button-shuffle-sections"
                 >
-                  <Trash2 className="h-3.5 w-3.5" />
-                  Delete Checklist
+                  <Shuffle className="h-3.5 w-3.5" />
+                  Shuffle Sections
                 </Button>
-              )}
+
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5 border-indigo-500/30 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/30"
+                  onClick={() => setImportOpen(true)}
+                >
+                  <FileUp className="h-3.5 w-3.5" />
+                  Import Questions
+                </Button>
+
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5 border-emerald-500/30 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/30"
+                  onClick={() => window.open("/api/supervision/templates/import-template", "_self")}
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  Sample CSV
+                </Button>
+
+                <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setPreviewOpen(true)}>
+                  <Eye className="h-3.5 w-3.5" />
+                  Preview Mode
+                </Button>
+
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5 border-primary/40 text-primary font-semibold hover:bg-primary/10"
+                  onClick={handleSaveDraft}
+                  disabled={saveMutation.isPending || !name.trim()}
+                  title="Save template as draft without strict validation"
+                  data-testid="button-save-draft"
+                >
+                  <Save className="h-3.5 w-3.5" />
+                  Save Draft
+                </Button>
+
+                <Button
+                  variant="default"
+                  size="sm"
+                  className={`gap-1.5 font-semibold text-white transition-colors ${
+                    isValid ? "bg-emerald-600 hover:bg-emerald-700 shadow-sm" : "bg-emerald-600/80 hover:bg-emerald-700"
+                  }`}
+                  onClick={handleSaveAndSubmit}
+                  disabled={saveMutation.isPending}
+                  title="Run validation checks and save & publish checklist"
+                  data-testid="button-save-submit"
+                >
+                  <CheckCircle2 className="h-4 w-4" />
+                  Save & Submit
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setEditing(null);
+                  }}
+                >
+                  Cancel
+                </Button>
+                {editing?.id && !isNew && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-1.5 border-destructive/40 text-destructive hover:bg-destructive/10 font-semibold"
+                    onClick={() => setDeletingTemplate(editing)}
+                    data-testid="button-delete-current-checklist"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                    Delete Checklist
+                  </Button>
+                )}
+              </div>
             </div>
           </div>
 
           {/* Builder Workspace: 3-Panel Layout */}
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
             {/* Left Panel: Sections & Outline */}
-            <Card className="lg:col-span-3 border-border/60">
+            <Card className="lg:col-span-3 border-border/60 sticky top-36 max-h-[calc(100vh-10rem)] overflow-y-auto shadow-sm">
               <CardHeader className="p-3 border-b border-border/40 flex flex-row items-center justify-between">
                 <CardTitle className="text-sm font-semibold flex items-center gap-1.5">
                   <Layers className="h-4 w-4 text-primary" />
@@ -1155,7 +1177,7 @@ export default function SupervisionTemplates() {
              </div>
 
             {/* Right Panel: Selected Question Settings & Logic Drawer */}
-            <Card className="lg:col-span-3 border-border/60 sticky top-20 max-h-[calc(100vh-6rem)] overflow-y-auto shadow-sm">
+            <Card className="lg:col-span-3 border-border/60 sticky top-36 max-h-[calc(100vh-10rem)] overflow-y-auto shadow-sm">
               <CardHeader className="p-3 border-b border-border/40">
                 <CardTitle className="text-sm font-semibold flex items-center gap-1.5">
                   <Sliders className="h-4 w-4 text-primary" />
