@@ -518,6 +518,7 @@ export default function SupervisionTemplates() {
 
   const saveMutation = useMutation({
     mutationFn: async () => {
+      const secTitleMap = new Map(sections.map((s) => [s.id, s.title]));
       const payload = {
         name,
         description,
@@ -525,7 +526,11 @@ export default function SupervisionTemplates() {
         applicableLevel,
         isActive: active,
         sections,
-        items: items.map((i, idx) => ({ ...i, displayOrder: idx + 1 })),
+        items: orderedItems.map((i, idx) => ({
+          ...i,
+          sectionTitle: secTitleMap.get(i.sectionId || "sec-default") || "General Supervision Findings",
+          displayOrder: idx + 1,
+        })),
       };
       if (isNew || !editing?.id) {
         return apiRequest("POST", "/api/supervision-checklist-templates", payload);

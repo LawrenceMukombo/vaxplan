@@ -22,7 +22,7 @@ import {
   ClipboardCheck, Calendar, Plus, CheckCircle2, AlertCircle, XCircle, MinusCircle,
   Building2, User, FileText, ListChecks, Trash2, Pencil, Activity, Mail, NotebookPen,
   Settings2, MapPin, Camera, Star, Loader2, Crosshair, MapPinned, Radio, Clock, Wifi,
-  ChevronDown, AlertTriangle,
+  ChevronDown, ChevronRight, AlertTriangle,
 } from "lucide-react";
 import { GeoCascadeFilter } from "@/components/GeoCascadeFilter";
 import { useAuth } from "@/hooks/useAuth";
@@ -1268,6 +1268,30 @@ function ConductDialog({ visit, facility, onClose, onSave, isSaving }: { visit: 
     setChecklist((prev) => prev.filter((c) => c.key !== key));
   };
 
+  const groupedConductSections = useMemo(() => {
+    const groups: { id: string; title: string; items: ChecklistItem[] }[] = [];
+    const map = new Map<string, { id: string; title: string; items: ChecklistItem[] }>();
+
+    checklist.forEach((item) => {
+      const secId = item.sectionId || "sec-default";
+      const secTitle = item.sectionTitle || "General Supervision Findings";
+      if (!map.has(secId)) {
+        const g = { id: secId, title: secTitle, items: [] };
+        map.set(secId, g);
+        groups.push(g);
+      }
+      map.get(secId)!.items.push(item);
+    });
+
+    return groups;
+  }, [checklist]);
+
+  const [collapsedConductSections, setCollapsedConductSections] = useState<Record<string, boolean>>({});
+
+  const toggleConductSection = (secId: string) => {
+    setCollapsedConductSections((prev) => ({ ...prev, [secId]: !prev[secId] }));
+  };
+
   // Number only the visible, top-level (entry-0, non-follow-up) base questions.
   let visibleNumber = 0;
 
@@ -1451,48 +1475,77 @@ function ConductDialog({ visit, facility, onClose, onSave, isSaving }: { visit: 
                 onChange={(loc) => setGps({ lat: loc.lat, lng: loc.lng, accuracy: loc.accuracy })}
               />
             </div>
-            {checklist.map((c) => {
-              if (!isAnswerVisible(c, checklist)) return null;
-              const isFollowUp = !!c.parentId;
-              const repeatIndex = c.repeatIndex ?? 0;
-              const isEntryZero = repeatIndex === 0;
-              if (isEntryZero && !isFollowUp) visibleNumber += 1;
-
-              const instances = c.repeatable ? checklist.filter((x) => (x.baseKey || x.key) === (c.baseKey || c.key)) : [];
-              const isLastInstance = c.repeatable && instances[instances.length - 1]?.key === c.key;
-              const entryLabelBase = c.repeatLabel?.trim() || "Entry";
-              const instanceLabel = c.repeatable ? `${entryLabelBase} ${repeatIndex + 1}` : undefined;
-              const canAddMore = c.repeatable && (!c.maxRepeats || instances.length < c.maxRepeats);
+            {groupedConductSections.map((secGroup) => {
+              const visibleGroupItems = secGroup.items.filter((c) => isAnswerVisible(c, checklist));
+              if (visibleGroupItems.length === 0) return null;
+              const isCollapsed = collapsedConductSections[secGroup.id];
+              const groupAnsweredCount = visibleGroupItems.filter(isAnswered).length;
 
               return (
-                <div key={c.key} className="space-y-2">
-                  <ChecklistQuestion
-                    item={c}
-                    displayNumber={isEntryZero && !isFollowUp ? visibleNumber : undefined}
-                    instanceLabel={instanceLabel}
-                    onRemove={c.repeatable && !isEntryZero ? () => removeRepeat(c.key) : undefined}
-                    setResp={setResp}
-                    setNote={setNote}
-                    setValue={setValue}
-                    defaultCenter={
-                      facility?.latitude != null && facility?.longitude != null
-                        ? [Number(facility.latitude), Number(facility.longitude)]
-                        : null
-                    }
-                  />
-                  {isLastInstance && canAddMore && (
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      className="gap-1.5 ml-1"
-                      onClick={() => addRepeat(c.baseKey || c.key)}
-                      data-testid={`add-repeat-${c.baseKey || c.key}`}
-                    >
-                      <Plus className="h-3.5 w-3.5" /> Add another {entryLabelBase.toLowerCase()}
-                    </Button>
+                <Card key={secGroup.id} className="border-border/80 shadow-xs overflow-hidden">
+                  <CardHeader
+                    className="p-3 bg-muted/40 border-b border-border/50 flex flex-row items-center justify-between cursor-pointer select-none hover:bg-muted/60 transition-colors"
+                    onClick={() => toggleConductSection(secGroup.id)}
+                  >
+                    <div className="flex items-center gap-2 font-bold text-sm text-foreground">
+                      {isCollapsed ? <ChevronRight className="h-4 w-4 text-primary shrink-0" /> : <ChevronDown className="h-4 w-4 text-primary shrink-0" />}
+                      <span>{secGroup.title}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Badge variant="secondary" className="text-[10px] font-mono bg-background border border-border/60">
+                        {groupAnsweredCount} / {visibleGroupItems.length} Answered
+                      </Badge>
+                    </div>
+                  </CardHeader>
+                  {!isCollapsed && (
+                    <CardContent className="p-3 space-y-4">
+                      {secGroup.items.map((c) => {
+                        if (!isAnswerVisible(c, checklist)) return null;
+                        const isFollowUp = !!c.parentId;
+                        const repeatIndex = c.repeatIndex ?? 0;
+                        const isEntryZero = repeatIndex === 0;
+                        if (isEntryZero && !isFollowUp) visibleNumber += 1;
+
+                        const instances = c.repeatable ? checklist.filter((x) => (x.baseKey || x.key) === (c.baseKey || c.key)) : [];
+                        const isLastInstance = c.repeatable && instances[instances.length - 1]?.key === c.key;
+                        const entryLabelBase = c.repeatLabel?.trim() || "Entry";
+                        const instanceLabel = c.repeatable ? `${entryLabelBase} ${repeatIndex + 1}` : undefined;
+                        const canAddMore = c.repeatable && (!c.maxRepeats || instances.length < c.maxRepeats);
+
+                        return (
+                          <div key={c.key} className="space-y-2">
+                            <ChecklistQuestion
+                              item={c}
+                              displayNumber={isEntryZero && !isFollowUp ? visibleNumber : undefined}
+                              instanceLabel={instanceLabel}
+                              onRemove={c.repeatable && !isEntryZero ? () => removeRepeat(c.key) : undefined}
+                              setResp={setResp}
+                              setNote={setNote}
+                              setValue={setValue}
+                              defaultCenter={
+                                facility?.latitude != null && facility?.longitude != null
+                                  ? [Number(facility.latitude), Number(facility.longitude)]
+                                  : null
+                              }
+                            />
+                            {isLastInstance && canAddMore && (
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                className="gap-1.5 ml-1"
+                                onClick={() => addRepeat(c.baseKey || c.key)}
+                                data-testid={`add-repeat-${c.baseKey || c.key}`}
+                              >
+                                <Plus className="h-3.5 w-3.5" /> Add another {entryLabelBase.toLowerCase()}
+                              </Button>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </CardContent>
                   )}
-                </div>
+                </Card>
               );
             })}
           </TabsContent>

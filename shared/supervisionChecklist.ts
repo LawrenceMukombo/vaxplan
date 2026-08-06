@@ -110,6 +110,7 @@ export const SHOW_WHEN_ANY = "__any__";
 export interface ChecklistTemplateItem {
   id: string;
   sectionId?: string;
+  sectionTitle?: string;
   type: ChecklistQuestionType;
   label: string;
   shortLabel?: string;
@@ -196,6 +197,8 @@ export function getRiskClassification(score: number): {
 export interface ChecklistAnswer {
   key: string; // unique per answer instance (== item id, or `${id}__r${n}` for repeats)
   baseKey?: string; // the template item id this answer derives from
+  sectionId?: string;
+  sectionTitle?: string;
   repeatIndex?: number; // 0 for the first/only entry, 1+ for added repeat entries
   label: string;
   type?: ChecklistQuestionType;
@@ -392,6 +395,8 @@ function blankAnswerFor(
   return {
     key,
     baseKey: it.id,
+    sectionId: it.sectionId,
+    sectionTitle: it.sectionTitle,
     repeatIndex,
     label: it.label,
     type: it.type,
