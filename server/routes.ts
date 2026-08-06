@@ -12898,10 +12898,23 @@ export async function registerRoutes(
 
   // GET /api/supervision/templates/import-template — Download Supportive Supervision CSV sample template
   app.get("/api/supervision/templates/import-template", isAuthenticated, requireTenant, async (req: any, res) => {
-    const csvHeader = "sectionTitle,questionText,answerType,options,isScored,weight,prefillSourceKey,conditionalOnQuestionId,conditionalValue\n";
-    const sampleRow1 = "Cold Chain & Equipment,Are all vaccines stored between +2°C and +8°C?,yes_no,,true,1.0,cold_chain_temp,,\n";
-    const sampleRow2 = "Vaccine Stock & Logistics,Is there any stock-out of bOPV or Measles-Rubella?,yes_no_na,,true,1.0,stock_status,,\n";
-    const sampleRow3 = "Staffing & Training,Select vaccinator on duty,person_selector,,false,0.0,staff_roster,,\n";
+    try {
+      const csvPath = "c:/vaxplan/Supportive_Supervision_National_Template.csv";
+      if (_readFileSync && _readFileSync.name) {} // touch
+      const fs = await import("fs");
+      if (fs.existsSync(csvPath)) {
+        res.setHeader("Content-Type", "text/csv; charset=utf-8");
+        res.setHeader("Content-Disposition", 'attachment; filename="Supportive_Supervision_National_Template.csv"');
+        return res.status(200).send(fs.readFileSync(csvPath, "utf-8"));
+      }
+    } catch (e) {
+      console.error("Error reading Supportive_Supervision_National_Template.csv:", e);
+    }
+
+    const csvHeader = "Section Title,Question Text,Answer Type,Options,Is Scored,Weight,Prefill Source\n";
+    const sampleRow1 = "Cold Chain & Equipment,Are all vaccines stored between +2°C and +8°C?,yes_no,Yes | No,true,1.0,cold_chain_temp\n";
+    const sampleRow2 = "Vaccine Stock & Logistics,Is there any stock-out of bOPV or Measles-Rubella?,yes_no_na,Yes | No | N/A,true,1.0,stock_status\n";
+    const sampleRow3 = "Staffing & Training,Select vaccinator on duty,text,,false,0.0,staff_roster\n";
     const csvContent = csvHeader + sampleRow1 + sampleRow2 + sampleRow3;
 
     res.setHeader("Content-Type", "text/csv; charset=utf-8");

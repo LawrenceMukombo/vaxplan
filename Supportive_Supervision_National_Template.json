@@ -1,0 +1,1775 @@
+{
+  "name": "National Supportive Supervision Checklist Template",
+  "category": "supervision",
+  "description": "Full 148-question National Supportive Supervision Checklist for Health Facilities, Immunization Services, Cold Chain, AEFI, and Community Engagement.",
+  "version": 1,
+  "isActive": true,
+  "questions": [
+    {
+      "sectionTitle": "Availability of RI Services",
+      "questionText": "[13] Are routine EPI services being provided at this site?  *",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Availability of RI Services",
+      "questionText": "[14] Provide a reason why a Routine EPI/Immunization is not being done at the site?  * Ask only if: \u201cAre routine EPI services being provided at this site?\u201d includes \u201cNo\u201d",
+      "answerType": "text",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Availability of RI Services",
+      "questionText": "[15] Total number of all staff in the health facility Guidance: Please indicate the total number of all staff in the health facility (Medical, non-medical,administrative, management staff etc)",
+      "answerType": "number",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Availability of RI Services",
+      "questionText": "[16] Is there trained HF staff conducting RI?  *",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Availability of RI Services",
+      "questionText": "[17] How many HF staff conducting RI are trained?  * Ask only if: \u201cIs there trained HF staff conducting RI?\u201d includes \u201cYes\u201d Guidance: Enter zero or a positive number.",
+      "answerType": "number",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Availability of RI Services",
+      "questionText": "[18] Has HF staff received EPI training in last 2 years?  *",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Availability of RI Services",
+      "questionText": "[19] Is there a copy of the National EPI field manual?  *",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Availability of RI Services",
+      "questionText": "[20] Is there an updated HF RI micro-plan?  *",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Availability of RI Services",
+      "questionText": "[21] Is the EPI target population known?  *",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Availability of RI Services",
+      "questionText": "[22] What is the annual headcount estimate EPI target population?  * Ask only if: \u201cIs the EPI target population known?\u201d includes \u201cYes\u201d Guidance: Use annual headcount under one population Enter zero or a positive number.",
+      "answerType": "number",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": "annual_target_pop"
+    },
+    {
+      "sectionTitle": "Availability of RI Services",
+      "questionText": "[23] Is a map of local catchment area displayed?  *",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "RI Session Monitoring",
+      "questionText": "[24] How many Fixed Site sessions planned per month?  * Guidance: Enter zero or a positive number.",
+      "answerType": "number",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "RI Session Monitoring",
+      "questionText": "[25] How many Fixed Site sessions conducted last month?  * Guidance: Enter zero or a positive number.",
+      "answerType": "number",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "RI Session Monitoring",
+      "questionText": "[26] How many children were vaccinated for Penta 1 in the last 3 months for all strategies (Fixed, mobile, outreach session)?  * Guidance: Enter zero or a positive number.",
+      "answerType": "number",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "RI Session Monitoring",
+      "questionText": "[27] How many children were vaccinated for Penta 3 in the last 3 months for all strategies (Fixed, mobile, outreach session)?  * Guidance: Enter zero or a positive number.",
+      "answerType": "number",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "RI Session Monitoring",
+      "questionText": "[28] How many women vaccinated for TT (all doses) in the last Fixed Sessions?  * Guidance: Enter zero or a positive number.",
+      "answerType": "number",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "RI Session Monitoring",
+      "questionText": "[29] How many Mobile visits planned per month?  * Guidance: Enter zero or a positive number.",
+      "answerType": "number",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "RI Session Monitoring",
+      "questionText": "[30] How may Mobile visits conducted during the last month?  * Guidance: Enter zero or a positive number.",
+      "answerType": "number",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "RI Session Monitoring",
+      "questionText": "[31] How many Out-Reach visits planned per month?  * Guidance: Enter zero or a positive number.",
+      "answerType": "number",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "RI Session Monitoring",
+      "questionText": "[32] How many Out-Reach visits conducted last month?  * Guidance: Enter zero or a positive number.",
+      "answerType": "number",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "RI Session Monitoring",
+      "questionText": "[33] Were any immunization sessions cancelled during the previous month?  *",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "RI Session Monitoring",
+      "questionText": "[34] If yes, why were the sessions cancelled?  * Ask only if: \u201cWere any immunization sessions cancelled during the previous month?\u201d includes \u201cYes\u201d",
+      "answerType": "select",
+      "options": [
+        "Option 1",
+        "Option 2",
+        "Option 3"
+      ],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "RI Session Monitoring",
+      "questionText": "[35] Are caregivers advised on when to return?  *",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "RI Session Monitoring",
+      "questionText": "[36] Are you assessing Advocacy, Communication and Social Mobilization/Health Promotion?  *",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Advocacy & Social Mobilization",
+      "questionText": "[37] Does HF have a ACS plan?  *",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Advocacy & Social Mobilization",
+      "questionText": "[38] Is there a ACS plan for hard-to-reach (HTR) population?  *",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Advocacy & Social Mobilization",
+      "questionText": "[39] Are there active community health-related committees?  *",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Advocacy & Social Mobilization",
+      "questionText": "[40] Please provide names of the health related committees in your community  * Ask only if: \u201cAre there active community health-related committees?\u201d includes \u201cYes\u201d",
+      "answerType": "text",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Advocacy & Social Mobilization",
+      "questionText": "[41] How many meetings have been held in the past 3 months out of the total planned?  * Ask only if: \u201cAre there active community health-related committees?\u201d includes \u201cYes\u201d Guidance: Allowed range: 0-3.",
+      "answerType": "number",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Advocacy & Social Mobilization",
+      "questionText": "[42] Are there active community mobilizers?  *",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Advocacy & Social Mobilization",
+      "questionText": "[43] Does the Health Facility have IEC materials for routine immunization (observation)  *",
+      "answerType": "select",
+      "options": [
+        "Poster",
+        "Leaflet",
+        "Banner",
+        "Flipchart",
+        "Booklet",
+        "None"
+      ],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Advocacy & Social Mobilization",
+      "questionText": "[44] If yes, select what material is available (poster, leaflet, banner,)  * Ask only if: \u201cDoes the Health Facility have IEC materials for routine immunization (observation)\u201d is \u201cYes\u201d",
+      "answerType": "select",
+      "options": [
+        "Poster",
+        "Leaflet",
+        "Banner",
+        "Flipchart",
+        "Booklet",
+        "None"
+      ],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Advocacy & Social Mobilization",
+      "questionText": "[45] Is the HF using IEC material?  * Ask only if: \u201cDoes the Health Facility have IEC materials for routine immunization (observation)\u201d is \u201cYes\u201d",
+      "answerType": "select",
+      "options": [
+        "Poster",
+        "Leaflet",
+        "Banner",
+        "Flipchart",
+        "Booklet",
+        "None"
+      ],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Advocacy & Social Mobilization",
+      "questionText": "[46] If yes, please select how the material are being used.  * Ask only if: \u201cIs the HF using IEC material?\u201d is \u201cYes\u201d",
+      "answerType": "select",
+      "options": [
+        "Poster",
+        "Leaflet",
+        "Banner",
+        "Flipchart",
+        "Booklet",
+        "None"
+      ],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Advocacy & Social Mobilization",
+      "questionText": "[47] Are you aware of the four tips/key messages for RI?  *",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Advocacy & Social Mobilization",
+      "questionText": "[48] If yes, please describe them.  * Ask only if: \u201cAre you aware of the four tips/key messages for RI?\u201d is \u201cYes\u201d",
+      "answerType": "select",
+      "options": [
+        "Option 1",
+        "Option 2",
+        "Option 3"
+      ],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Advocacy & Social Mobilization",
+      "questionText": "[49] Did you use any of the four tips/key messages for RI with the last caregiver while providing immunization service?  *",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Advocacy & Social Mobilization",
+      "questionText": "[50] If yes, which messages did you use.  * Ask only if: \u201cDid you use any of the four tips/key messages for RI with the last caregiver while providing immunization service?\u201d is \u201cYes\u201d",
+      "answerType": "select",
+      "options": [
+        "Option 1",
+        "Option 2",
+        "Option 3"
+      ],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Advocacy & Social Mobilization",
+      "questionText": "[51] Does the health facility have Child Health Record Book in stock?  *",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Advocacy & Social Mobilization",
+      "questionText": "[52] If yes, which version is available?  * Ask only if: \u201cDoes the health facility have Child Health Record Book in stock?\u201d is \u201cYes\u201d",
+      "answerType": "select",
+      "options": [
+        "2022 Edition",
+        "2023 Edition",
+        "2024 Revised Edition",
+        "Old Manual"
+      ],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Advocacy & Social Mobilization",
+      "questionText": "[53] Does Health Facility conduct community engagement activities?  *",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Advocacy & Social Mobilization",
+      "questionText": "[54] If yes, how often do you conduct such community engagement activities  * Ask only if: \u201cDoes Health Facility conduct community engagement activities?\u201d is \u201cYes\u201d",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Advocacy & Social Mobilization",
+      "questionText": "[55] If Others (describe)  * Ask only if: \u201cIf yes, how often do you conduct such community engagement activities\u201d is \u201ce) Others (describe)\u201d",
+      "answerType": "text",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Community Engagement & Caregiver Survey",
+      "questionText": "[56] Interviewee  *",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Community Engagement & Caregiver Survey",
+      "questionText": "[57] Have your child/children been fully vaccinated or completed appropriate vaccination according to the age and schedule?  *",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Community Engagement & Caregiver Survey",
+      "questionText": "[58] Please provide the reasons for the delay or no vaccinations.  * Ask only if: \u201cHave your child/children been fully vaccinated OR completed appropriate vaccination according to the age AND schedule?\u201d is \u201cc) Delay vaccination (missed doses)\u201d OR \u201cHave your child/children been fully vaccinated OR completed appropriate vaccination according to the age AND schedule?\u201d is \u201cd) No vaccination at all\u201d",
+      "answerType": "select",
+      "options": [
+        "Distance to facility",
+        "Service cost / fees",
+        "Fear of side effects",
+        "Vaccine stockout",
+        "Caregiver busy",
+        "Religion / Cultural beliefs"
+      ],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Community Engagement & Caregiver Survey",
+      "questionText": "[59] If Others, specify  * Ask only if: \u201cPlease provide the reasons for the delay OR no vaccinations.\u201d is \u201ci) Other (specify)\u201d",
+      "answerType": "select",
+      "options": [
+        "Distance to facility",
+        "Service cost / fees",
+        "Fear of side effects",
+        "Vaccine stockout",
+        "Caregiver busy",
+        "Religion / Cultural beliefs"
+      ],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Community Engagement & Caregiver Survey",
+      "questionText": "[60] Did you/caregiver have the Child Health Record Books (CHRB) to immunization (at home or clinic/vaccination sites)?  *",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Community Engagement & Caregiver Survey",
+      "questionText": "[61] If yes, what edition?  * Ask only if: \u201cDid you/caregiver have the Child Health Record Books (CHRB) to immunization (at home OR clinic/vaccination sites)?\u201d is \u201cYes\u201d",
+      "answerType": "select",
+      "options": [
+        "2022 Edition",
+        "2023 Edition",
+        "2024 Revised Edition",
+        "Old Manual"
+      ],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Community Engagement & Caregiver Survey",
+      "questionText": "[62] If not, why didn\u2019t you have the Child Health Record Books (CHRB)?  * Ask only if: \u201cDid you/caregiver have the Child Health Record Books (CHRB) to immunization (at home OR clinic/vaccination sites)?\u201d is \u201cNo\u201d",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Community Engagement & Caregiver Survey",
+      "questionText": "[63] If Others, specify  * Ask only if: \u201cIf not, why didn\u2019t you have the Child Health Record Books (CHRB)?\u201d is \u201cd) Other (specify)\u201d",
+      "answerType": "text",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Community Engagement & Caregiver Survey",
+      "questionText": "[64] Where did you hear/learn about the benefits of immunization?  *",
+      "answerType": "select",
+      "options": [
+        "Health worker",
+        "Radio / TV",
+        "Community mobilizer",
+        "Religious leader",
+        "School",
+        "Friend / Neighbor",
+        "Social media"
+      ],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Community Engagement & Caregiver Survey",
+      "questionText": "[65] If Others, specify  * Ask only if: \u201cWhere did you hear/learn about the benefits of immunization?\u201d is \u201ci) Other (specify)\u201d",
+      "answerType": "select",
+      "options": [
+        "Health worker",
+        "Radio / TV",
+        "Community mobilizer",
+        "Religious leader",
+        "School",
+        "Friend / Neighbor",
+        "Social media"
+      ],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Community Engagement & Caregiver Survey",
+      "questionText": "[66] Do you own a smart phone and internet access?  *",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Community Engagement & Caregiver Survey",
+      "questionText": "[67] Do you use a social media to access health information?  * Ask only if: \u201cDo you own a smart phone AND internet access?\u201d is \u201cYes\u201d",
+      "answerType": "select",
+      "options": [
+        "Facebook",
+        "WhatsApp",
+        "Telegram",
+        "TikTok",
+        "X (Twitter)",
+        "YouTube"
+      ],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Community Engagement & Caregiver Survey",
+      "questionText": "[68] Do you remember seeing a post about routine immunization information online or on a mobile device over the past one week?  *",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Community Engagement & Caregiver Survey",
+      "questionText": "[69] Which social media do you usually use?  * Ask only if: \u201cDo you own a smart phone AND internet access?\u201d is \u201cYes\u201d",
+      "answerType": "select",
+      "options": [
+        "Facebook",
+        "WhatsApp",
+        "Telegram",
+        "TikTok",
+        "X (Twitter)",
+        "YouTube"
+      ],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Community Engagement & Caregiver Survey",
+      "questionText": "[70] If Others, specify  * Ask only if: \u201cWhich social media do you usually use?\u201d is \u201ce) Other (specify)\u201d",
+      "answerType": "select",
+      "options": [
+        "Facebook",
+        "WhatsApp",
+        "Telegram",
+        "TikTok",
+        "X (Twitter)",
+        "YouTube"
+      ],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Community Engagement & Caregiver Survey",
+      "questionText": "[71] Have your child/children been fully vaccinated or completed appropriate vaccination according to the age and schedule?  *",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Community Engagement & Caregiver Survey",
+      "questionText": "[72] Please provide the reasons for the delay or no vaccinations.  * Ask only if: \u201cHave your child/children been fully vaccinated OR completed appropriate vaccination according to the age AND schedule?\u201d is \u201cc) Delay vaccination (missed doses)\u201d OR \u201cHave your child/children been fully vaccinated OR completed appropriate vaccination according to the age AND schedule?\u201d is \u201cd) No vaccination at all\u201d",
+      "answerType": "select",
+      "options": [
+        "Distance to facility",
+        "Service cost / fees",
+        "Fear of side effects",
+        "Vaccine stockout",
+        "Caregiver busy",
+        "Religion / Cultural beliefs"
+      ],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Community Engagement & Caregiver Survey",
+      "questionText": "[73] If Others, specify  * Ask only if: \u201cPlease provide the reasons for the delay OR no vaccinations.\u201d is \u201ci) Other (specify)\u201d",
+      "answerType": "select",
+      "options": [
+        "Distance to facility",
+        "Service cost / fees",
+        "Fear of side effects",
+        "Vaccine stockout",
+        "Caregiver busy",
+        "Religion / Cultural beliefs"
+      ],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Community Engagement & Caregiver Survey",
+      "questionText": "[74] Did you/caregiver have the Child Health Record Books (CHRB) to immunization (at home or clinic/vaccination sites)?  *",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Community Engagement & Caregiver Survey",
+      "questionText": "[75] If yes, what edition?  * Ask only if: \u201cDid you/caregiver have the Child Health Record Books (CHRB) to immunization (at home OR clinic/vaccination sites)?\u201d is \u201cYes\u201d",
+      "answerType": "select",
+      "options": [
+        "2022 Edition",
+        "2023 Edition",
+        "2024 Revised Edition",
+        "Old Manual"
+      ],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Community Engagement & Caregiver Survey",
+      "questionText": "[76] If not, why didn\u2019t you have the Child Health Record Books (CHRB)?  * Ask only if: \u201cDid you/caregiver have the Child Health Record Books (CHRB) to immunization (at home OR clinic/vaccination sites)?\u201d is \u201cNo\u201d",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Community Engagement & Caregiver Survey",
+      "questionText": "[77] If Others, specify  * Ask only if: \u201cIf not, why didn\u2019t you have the Child Health Record Books (CHRB)?\u201d is \u201cd) Other (specify)\u201d",
+      "answerType": "text",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Community Engagement & Caregiver Survey",
+      "questionText": "[78] Where did you hear/learn about the benefits of immunization?  *",
+      "answerType": "select",
+      "options": [
+        "Health worker",
+        "Radio / TV",
+        "Community mobilizer",
+        "Religious leader",
+        "School",
+        "Friend / Neighbor",
+        "Social media"
+      ],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Community Engagement & Caregiver Survey",
+      "questionText": "[79] If Others, specify  * Ask only if: \u201cWhere did you hear/learn about the benefits of immunization?\u201d is \u201ci) Other (specify)\u201d",
+      "answerType": "select",
+      "options": [
+        "Health worker",
+        "Radio / TV",
+        "Community mobilizer",
+        "Religious leader",
+        "School",
+        "Friend / Neighbor",
+        "Social media"
+      ],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Community Engagement & Caregiver Survey",
+      "questionText": "[80] Do you own a smart phone and internet access?  *",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Community Engagement & Caregiver Survey",
+      "questionText": "[81] Do you use a social media to access health information?  * Ask only if: \u201cDo you own a smart phone AND internet access?\u201d is \u201cYes\u201d",
+      "answerType": "select",
+      "options": [
+        "Facebook",
+        "WhatsApp",
+        "Telegram",
+        "TikTok",
+        "X (Twitter)",
+        "YouTube"
+      ],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Community Engagement & Caregiver Survey",
+      "questionText": "[82] Do you remember seeing a post about routine immunization information online or on a mobile device over the past one week?  *",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Community Engagement & Caregiver Survey",
+      "questionText": "[83] Which social media do you usually use?  * Ask only if: \u201cDo you own a smart phone AND internet access?\u201d is \u201cYes\u201d",
+      "answerType": "select",
+      "options": [
+        "Facebook",
+        "WhatsApp",
+        "Telegram",
+        "TikTok",
+        "X (Twitter)",
+        "YouTube"
+      ],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Community Engagement & Caregiver Survey",
+      "questionText": "[84] If Others, specify  * Ask only if: \u201cWhich social media do you usually use?\u201d is \u201ce) Other (specify)\u201d",
+      "answerType": "select",
+      "options": [
+        "Facebook",
+        "WhatsApp",
+        "Telegram",
+        "TikTok",
+        "X (Twitter)",
+        "YouTube"
+      ],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Community Engagement & Caregiver Survey",
+      "questionText": "[85] Does your male partner help you and take your baby for routine immunization to the health facility/vaccination site?  *",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Community Engagement & Caregiver Survey",
+      "questionText": "[86] Have your child/children been fully vaccinated or completed appropriate vaccination according to the age and schedule?  *",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Community Engagement & Caregiver Survey",
+      "questionText": "[87] Please provide the reasons for the delay or no vaccinations.  * Ask only if: \u201cHave your child/children been fully vaccinated OR completed appropriate vaccination according to the age AND schedule?\u201d is \u201cc) Delay vaccination (missed doses)\u201d OR \u201cHave your child/children been fully vaccinated OR completed appropriate vaccination according to the age AND schedule?\u201d is \u201cd) No vaccination at all\u201d",
+      "answerType": "select",
+      "options": [
+        "Distance to facility",
+        "Service cost / fees",
+        "Fear of side effects",
+        "Vaccine stockout",
+        "Caregiver busy",
+        "Religion / Cultural beliefs"
+      ],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Community Engagement & Caregiver Survey",
+      "questionText": "[88] If Others, specify  * Ask only if: \u201cPlease provide the reasons for the delay OR no vaccinations.\u201d is \u201ci) Other (specify)\u201d",
+      "answerType": "select",
+      "options": [
+        "Distance to facility",
+        "Service cost / fees",
+        "Fear of side effects",
+        "Vaccine stockout",
+        "Caregiver busy",
+        "Religion / Cultural beliefs"
+      ],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Community Engagement & Caregiver Survey",
+      "questionText": "[89] Where did you hear/learn about the benefits of immunization?  *",
+      "answerType": "select",
+      "options": [
+        "Health worker",
+        "Radio / TV",
+        "Community mobilizer",
+        "Religious leader",
+        "School",
+        "Friend / Neighbor",
+        "Social media"
+      ],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Community Engagement & Caregiver Survey",
+      "questionText": "[90] If Others, specify  * Ask only if: \u201cWhere did you hear/learn about the benefits of immunization?\u201d is \u201ci) Other (specify)\u201d",
+      "answerType": "select",
+      "options": [
+        "Health worker",
+        "Radio / TV",
+        "Community mobilizer",
+        "Religious leader",
+        "School",
+        "Friend / Neighbor",
+        "Social media"
+      ],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Community Engagement & Caregiver Survey",
+      "questionText": "[91] Do you own a smart phone and internet access?  *",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Community Engagement & Caregiver Survey",
+      "questionText": "[92] Do you use a social media to access health information?  * Ask only if: \u201cDo you own a smart phone AND internet access?\u201d is \u201cYes\u201d",
+      "answerType": "select",
+      "options": [
+        "Facebook",
+        "WhatsApp",
+        "Telegram",
+        "TikTok",
+        "X (Twitter)",
+        "YouTube"
+      ],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Community Engagement & Caregiver Survey",
+      "questionText": "[93] Do you remember seeing a post about routine immunization information online or on a mobile device over the past one week?  *",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Community Engagement & Caregiver Survey",
+      "questionText": "[94] Which social media do you usually use?  * Ask only if: \u201cDo you own a smart phone AND internet access?\u201d is \u201cYes\u201d",
+      "answerType": "select",
+      "options": [
+        "Facebook",
+        "WhatsApp",
+        "Telegram",
+        "TikTok",
+        "X (Twitter)",
+        "YouTube"
+      ],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Community Engagement & Caregiver Survey",
+      "questionText": "[95] If Others, specify  * Ask only if: \u201cWhich social media do you usually use?\u201d is \u201ce) Other (specify)\u201d",
+      "answerType": "select",
+      "options": [
+        "Facebook",
+        "WhatsApp",
+        "Telegram",
+        "TikTok",
+        "X (Twitter)",
+        "YouTube"
+      ],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Community Engagement & Caregiver Survey",
+      "questionText": "[96] Does your male partner help you and take your baby for routine immunization to the health facility/vaccination site?  *",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Community Engagement & Caregiver Survey",
+      "questionText": "[97] Do you help health workers to mobilize your community for health/routine immunization?  *",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Community Engagement & Caregiver Survey",
+      "questionText": "[98] If yes, how often do you make community mobilization for health/routine immunization?  * Ask only if: \u201cDo you help health workers to mobilize your community for health/routine immunization?\u201d is \u201cYes\u201d",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Community Engagement & Caregiver Survey",
+      "questionText": "[99] How do you hold community meetings /mobilization?  *",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Community Engagement & Caregiver Survey",
+      "questionText": "[100] If Others, specify  * Ask only if: \u201cHow do you hold community meetings /mobilization?\u201d is \u201cOther (specify)\u201d",
+      "answerType": "text",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "AEFI Management",
+      "questionText": "[101] Does the health facility have staff trained in AEFI?  *",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "AEFI Management",
+      "questionText": "[102] How many staff are trained in AEFI?  * Ask only if: \u201cDoes the health facility have staff trained in AEFI?\u201d includes \u201cYes\u201d",
+      "answerType": "number",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "AEFI Management",
+      "questionText": "[103] Did the health facility record any AEFI?  *",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "AEFI Management",
+      "questionText": "[104] How many total number of MAJOR events were reported in the last 3 months  * Ask only if: \u201cDid the health facility record any AEFI?\u201d includes \u201cYes\u201d",
+      "answerType": "number",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "AEFI Management",
+      "questionText": "[105] How many total number of MINOR events were reported in the last 3 months  * Ask only if: \u201cDid the health facility record any AEFI?\u201d includes \u201cYes\u201d",
+      "answerType": "number",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "AEFI Management",
+      "questionText": "[106] Were the AEFI events reported?  * Ask only if: \u201cDid the health facility record any AEFI?\u201d includes \u201cYes\u201d",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "AEFI Management",
+      "questionText": "[107] Is there a AEFI kit available with all supplies?  *",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "AEFI Management",
+      "questionText": "[108] If no, please indicate what is missing  * Ask only if: \u201cIs there a AEFI kit available with all supplies?\u201d includes \u201cNo\u201d",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "AEFI Management",
+      "questionText": "[109] Is there an EPI register on site?  *",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "AEFI Management",
+      "questionText": "[110] Please take a photo of the register Ask only if: \u201cIs there an EPI register on site?\u201d includes \u201cYes\u201d",
+      "answerType": "photo",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "AEFI Management",
+      "questionText": "[111] If yes, are all columns and rows properly filled?  *",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "AEFI Management",
+      "questionText": "[112] Are tally sheet & summary sheet available?  *",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "AEFI Management",
+      "questionText": "[113] Please select which data collection/reporting tools are missing in the health facility",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "AEFI Management",
+      "questionText": "[114] Stock register available?  *",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "AEFI Management",
+      "questionText": "[115] Is the HF sending monthly report to the district/province?  *",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "AEFI Management",
+      "questionText": "[116] Number of reports submitted in the past 3 months  * Ask only if: \u201cIs the HF sending monthly report to the district/province?\u201d includes \u201cYes\u201d Guidance: Allowed range: 0-3.",
+      "answerType": "number",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "AEFI Management",
+      "questionText": "[117] Is there an immunization monitoring chart available?  *",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "AEFI Management",
+      "questionText": "[118] Does the health facility use monitoring chart for RI performance?  * Ask only if: \u201cIs there an immunization monitoring chart available?\u201d includes \u201cYes\u201d",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "AEFI Management",
+      "questionText": "[119] Please take a photo of the register Ask only if: \u201cIs there an immunization monitoring chart available?\u201d includes \u201cYes\u201d",
+      "answerType": "photo",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "AEFI Management",
+      "questionText": "[120] Is there defaulter tracing mechanism?  *",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Cold Chain & Equipment",
+      "questionText": "[121] Is there a functioning coldchain equipment on site?  *",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Cold Chain & Equipment",
+      "questionText": "[122] If yes,what is the type of equipment is available on site?  * Ask only if: \u201cIs there a functioning coldchain equipment on site?\u201d includes \u201cYes\u201d",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Cold Chain & Equipment",
+      "questionText": "[123] The equipment is powered by?  * Ask only if: \u201cIs there a functioning coldchain equipment on site?\u201d includes \u201cYes\u201d",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Cold Chain & Equipment",
+      "questionText": "[124] Freezing storage capacity sufficient?  *",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Cold Chain & Equipment",
+      "questionText": "[125] Is the cold chain equipment placed in the best location with easy acces to the vaccines (not in direct sun,well ventilated) ?  *",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Cold Chain & Equipment",
+      "questionText": "[126] Does health facility have SOPs to guide when the coldchain equipment is malfunctional?  *",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Cold Chain & Equipment",
+      "questionText": "[127] Is there a Fridge Tag present?  *",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Cold Chain & Equipment",
+      "questionText": "[128] Please take a photo of the fridge tag  * Ask only if: \u201cIs there a Fridge Tag present?\u201d includes \u201cYes\u201d",
+      "answerType": "photo",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Cold Chain & Equipment",
+      "questionText": "[129] Is the fridge Tag being used?  * Ask only if: \u201cIs there a Fridge Tag present?\u201d includes \u201cYes\u201d",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Cold Chain & Equipment",
+      "questionText": "[130] Is the temperature chart recorded & displayed?  * Ask only if: \u201cIs the fridge Tag being used?\u201d includes \u201cYes\u201d",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Cold Chain & Equipment",
+      "questionText": "[131] Please take a photo of the chart Ask only if: \u201cIs the temperature chart recorded & displayed?\u201d includes \u201cYes\u201d",
+      "answerType": "photo",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Immunization Waste Management",
+      "questionText": "[132] What method is used for immunization medical waste disposal?  *",
+      "answerType": "select",
+      "options": [
+        "Incinerator",
+        "Open Burning",
+        "Safety Box Burial",
+        "Offsite Facility Disposal"
+      ],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Immunization Waste Management",
+      "questionText": "[133] If other method is used for immunization medical waste disposal, please specify.  * Ask only if: \u201cWhat method is used for immunization medical waste disposal?\u201d includes \u201cOther\u201d",
+      "answerType": "select",
+      "options": [
+        "Incinerator",
+        "Open Burning",
+        "Safety Box Burial",
+        "Offsite Facility Disposal"
+      ],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Immunization Waste Management",
+      "questionText": "[134] Are safety boxes used for sharp disposal?  *",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Immunization Waste Management",
+      "questionText": "[135] Please take a photo of the waste disposal site/facility  *",
+      "answerType": "select",
+      "options": [
+        "Incinerator",
+        "Open Burning",
+        "Safety Box Burial",
+        "Offsite Facility Disposal"
+      ],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Vaccine & Supply Logistics",
+      "questionText": "[136] Does HF use vaccine and supply stock ledger book or mSupply?  *",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Vaccine & Supply Logistics",
+      "questionText": "[137] Does Health Facility conduct vaccine forecasting, minimum & maximum & critical stocks?  *",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Vaccine & Supply Logistics",
+      "questionText": "[138] Is there adequate amount of vaccine and supplies for one month?  *",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Vaccine & Supply Logistics",
+      "questionText": "[139] Was there any stock out of vaccines and supplies during the last month?  *",
+      "answerType": "select",
+      "options": [
+        "BCG",
+        "bOPV",
+        "IPV",
+        "Penta (DTP-HepB-Hib)",
+        "PCV",
+        "Rota",
+        "Measles-Rubella",
+        "HPV",
+        "Tetanus (Td)"
+      ],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Vaccine & Supply Logistics",
+      "questionText": "[140] If yes, please list the stock out vaccines.  * Ask only if: \u201cWas there any stock out of vaccines AND supplies during the last month?\u201d includes \u201cYes\u201d",
+      "answerType": "select",
+      "options": [
+        "BCG",
+        "bOPV",
+        "IPV",
+        "Penta (DTP-HepB-Hib)",
+        "PCV",
+        "Rota",
+        "Measles-Rubella",
+        "HPV",
+        "Tetanus (Td)"
+      ],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Vaccine & Supply Logistics",
+      "questionText": "[141] If yes, please list the stock out supplies.  * Ask only if: \u201cWas there any stock out of vaccines AND supplies during the last month?\u201d includes \u201cYes\u201d",
+      "answerType": "select",
+      "options": [
+        "BCG",
+        "bOPV",
+        "IPV",
+        "Penta (DTP-HepB-Hib)",
+        "PCV",
+        "Rota",
+        "Measles-Rubella",
+        "HPV",
+        "Tetanus (Td)"
+      ],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Vaccine & Supply Logistics",
+      "questionText": "[142] Does the health facility monitor vaccine wastage rate?  *",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Vaccine & Supply Logistics",
+      "questionText": "[143] Is multi vial policy being observed?  *",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Vaccine & Supply Logistics",
+      "questionText": "[144] If No, please explain why  * Ask only if: \u201cIs multi vial policy being observed?\u201d includes \u201cNo\u201d",
+      "answerType": "text",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Vaccine & Supply Logistics",
+      "questionText": "[145] Is there any expired vaccine or supply in the HF?  *",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Vaccine & Supply Logistics",
+      "questionText": "[146] Please provide reasons for expiry of the commodities  * Ask only if: \u201cIs there any expired vaccine OR supply in the HF?\u201d includes \u201cYes\u201d",
+      "answerType": "text",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Vaccine & Supply Logistics",
+      "questionText": "[147] Do the health workers know how to read and interpret the VVM? Guidance: Ask them to describe VVM changes and what they mean",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Vaccine & Supply Logistics",
+      "questionText": "[148] Is there any vaccine with VVM unusable stage in the Refrigerator?  *",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Vaccine & Supply Logistics",
+      "questionText": "[149] Please provide reasons for the unusable VVM vaccines  * Ask only if: \u201cWas there any stock out of vaccines AND supplies during the last month?\u201d includes \u201cYes\u201d",
+      "answerType": "select",
+      "options": [
+        "BCG",
+        "bOPV",
+        "IPV",
+        "Penta (DTP-HepB-Hib)",
+        "PCV",
+        "Rota",
+        "Measles-Rubella",
+        "HPV",
+        "Tetanus (Td)"
+      ],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Cold Chain & Equipment",
+      "questionText": "[150] Number of cold boxes available  * Guidance: Enter zero or a positive number.",
+      "answerType": "number",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Cold Chain & Equipment",
+      "questionText": "[151] Number of vaccine carriers available  * Guidance: Enter zero or a positive number.",
+      "answerType": "number",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Cold Chain & Equipment",
+      "questionText": "[152] Number of ice packs available  * Guidance: Enter zero or a positive number.",
+      "answerType": "number",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Cold Chain & Equipment",
+      "questionText": "[153] When was the last supervisory visit to the HF by district or province?  *",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Cold Chain & Equipment",
+      "questionText": "[154] Did the visiting team make any recommnendations for the health facility team?  *",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Cold Chain & Equipment",
+      "questionText": "[155] Enter number of maximum number of recommendations made during the last visit  * Ask only if: \u201cDid the visiting team make any recommnendations for the health facility team?\u201d includes \u201cYes\u201d Guidance: Maximum allowed: 5.",
+      "answerType": "number",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    }
+  ]
+}
