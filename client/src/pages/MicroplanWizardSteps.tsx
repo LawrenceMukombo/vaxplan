@@ -49,6 +49,7 @@ import {
   Sparkles,
   Calendar,
   Printer,
+  Package,
 } from "lucide-react";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
 import { useToast } from "@/hooks/use-toast";
@@ -4824,6 +4825,75 @@ export function Step6({
 
   const hasAnyShortage = deficiencies.some(d => d.hasShortage);
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // IMMUNIZATION SESSION LOGISTICS CATALOGUE FORECASTING (Syringes, Diluents, PPEs, Data Tools)
+  // ─────────────────────────────────────────────────────────────────────────
+  const totalSessionDays = communities?.length || 1;
+  const totalTargetInfants = targetInfants > 0 ? targetInfants : (sumCommunityUnder1 > 0 ? sumCommunityUnder1 : 50);
+
+  const bcgVaccine = vaccines.find(v => v.name.toUpperCase().includes("BCG"));
+  const bcgTarget = bcgVaccine ? parseInt(bcgVaccine.target || "0", 10) : totalTargetInfants;
+  const bcgWastage = bcgVaccine ? parseFloat(bcgVaccine.wastage || "50") : 50;
+  const bcgDosesWastage = Math.ceil(bcgTarget * 1 * (1 + bcgWastage / 100));
+  const bcgVials = Math.ceil(bcgDosesWastage / 20);
+
+  const mrVaccine = vaccines.find(v => v.name.toUpperCase().includes("MR") || v.name.toUpperCase().includes("MEASLES"));
+  const mrTarget = mrVaccine ? parseInt(mrVaccine.target || "0", 10) : totalTargetInfants;
+  const mrWastage = mrVaccine ? parseFloat(mrVaccine.wastage || "25") : 25;
+  const mrDosesWastage = Math.ceil(mrTarget * 1 * (1 + mrWastage / 100));
+  const mrVials = Math.ceil(mrDosesWastage / 10);
+
+  let otherInjectableDoses = 0;
+  vaccines.forEach(v => {
+    const nameUpper = v.name.toUpperCase();
+    if (!nameUpper.includes("BCG") && !nameUpper.includes("OPV") && !nameUpper.includes("ROTA")) {
+      const tgt = parseInt(v.target || "0", 10);
+      const w = parseFloat(v.wastage || "10");
+      otherInjectableDoses += Math.ceil(tgt * v.doses * (1 + w / 100));
+    }
+  });
+
+  const adSyringes005ml = Math.ceil(bcgDosesWastage * 1.1);
+  const adSyringes05ml = Math.ceil(otherInjectableDoses * 1.1);
+  const reconSyringes5ml = Math.ceil(bcgVials * 1.05);
+  const reconSyringes2ml = Math.ceil(mrVials * 1.05);
+  const totalSyringes = adSyringes005ml + adSyringes05ml + reconSyringes5ml + reconSyringes2ml;
+
+  const safetyBoxes5L = Math.ceil(totalSyringes / 100);
+  const bcgDiluentAmpoules = bcgVials;
+  const mrDiluentAmpoules = mrVials;
+
+  const examinationGlovesPairs = totalSessionDays * 2 * 2;
+  const handSanitizerBottles = Math.ceil(totalSessionDays / 5) || 1;
+  const cottonWoolRolls = Math.ceil(totalSyringes / 250) || 1;
+  const tallySheets = totalSessionDays * 2;
+  const childHealthCards = Math.ceil(totalTargetInfants * 1.05);
+  const registerBooklets = Math.ceil(totalTargetInfants / 200) || 1;
+  const aefiReportForms = 1;
+  const vaccineCarriers = coldChain.carriers || Math.max(1, Math.ceil(totalSessionDays / 3));
+  const icePacks = vaccineCarriers * 4;
+  const foamPads = vaccineCarriers;
+
+  const sessionLogisticsItems = [
+    { category: "Injection Devices", item: "Auto-Disable (AD) Syringes 0.05 ml (BCG)", qty: adSyringes005ml, unit: "pieces", formula: "1 per BCG dose + 10% wastage" },
+    { category: "Injection Devices", item: "Auto-Disable (AD) Syringes 0.5 ml (Penta/PCV/MR/IPV)", qty: adSyringes05ml, unit: "pieces", formula: "1 per injectable dose + 10% wastage" },
+    { category: "Injection Devices", item: "Reconstitution Syringes 5 ml (BCG)", qty: reconSyringes5ml, unit: "pieces", formula: "1 per BCG vial + 5% buffer" },
+    { category: "Injection Devices", item: "Reconstitution Syringes 2 ml (MR)", qty: reconSyringes2ml, unit: "pieces", formula: "1 per MR vial + 5% buffer" },
+    { category: "Diluents", item: "BCG Vaccine Diluent", qty: bcgDiluentAmpoules, unit: "ampoules", formula: "1 ampoule per BCG vial" },
+    { category: "Diluents", item: "MR Vaccine Diluent", qty: mrDiluentAmpoules, unit: "ampoules", formula: "1 ampoule per MR vial" },
+    { category: "Waste Management", item: "Safety Boxes (5 Litre)", qty: safetyBoxes5L, unit: "boxes", formula: "1 box per 100 used syringes" },
+    { category: "PPE & Hygiene", item: "Examination Gloves", qty: examinationGlovesPairs, unit: "pairs", formula: "2 pairs per HCW / session day" },
+    { category: "PPE & Hygiene", item: "Hand Sanitizer (500 ml)", qty: handSanitizerBottles, unit: "bottles", formula: "1 bottle per 5 session days" },
+    { category: "PPE & Hygiene", item: "Absorbent Cotton Wool (500g)", qty: cottonWoolRolls, unit: "rolls", formula: "1 roll per 250 vaccinations" },
+    { category: "Recording Tools", item: "EPI Tallysheets (Routine/Campaign)", qty: tallySheets, unit: "sheets", formula: "2 sheets per session day" },
+    { category: "Recording Tools", item: "Child Health Immunization Cards (HBR)", qty: childHealthCards, unit: "cards", formula: "1 card per target infant + 5% buffer" },
+    { category: "Recording Tools", item: "Facility Immunization Register Book", qty: registerBooklets, unit: "booklets", formula: "1 booklet per 200 infants" },
+    { category: "Recording Tools", item: "AEFI Investigation & Reporting Form", qty: aefiReportForms, unit: "sets", formula: "1 set per health facility" },
+    { category: "Cold Chain Accessories", item: "Vaccine Carriers (4 Litre)", qty: vaccineCarriers, unit: "carriers", formula: "1 per active session day / team" },
+    { category: "Cold Chain Accessories", item: "Cool Water Packs / Ice Packs", qty: icePacks, unit: "packs", formula: "4 icepacks per carrier" },
+    { category: "Cold Chain Accessories", item: "Foam Pads", qty: foamPads, unit: "pads", formula: "1 pad per carrier" },
+  ];
+
   return (
     <div className="space-y-4">
       {hasAnyShortage && (
@@ -4934,6 +5004,55 @@ export function Step6({
                   </tr>
                 );
               })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* ─── BUNDLED IMMUNIZATION SESSION LOGISTICS CATALOGUE ─────────────────── */}
+      <div className="space-y-2 border rounded-xl p-4 bg-slate-50/50 dark:bg-slate-900/40 border-slate-200 dark:border-slate-800">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-sm font-bold flex items-center gap-2 text-foreground">
+              <Package className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
+              Bundled Immunization Session Logistics & Equipment Catalogue
+            </h3>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Automatically calculated for syringes, diluents, safety boxes, PPEs, tallysheets, and data tools based on target doses ({totalTargetInfants} infants / {totalSessionDays} session days).
+            </p>
+          </div>
+          <Badge variant="outline" className="text-xs font-semibold border-indigo-500/30 text-indigo-600 dark:text-indigo-400">
+            {sessionLogisticsItems.length} Logistics Catalogue Items
+          </Badge>
+        </div>
+
+        <div className="overflow-x-auto rounded-lg border border-border bg-card mt-2">
+          <table className="w-full text-xs text-left border-collapse">
+            <thead>
+              <tr className="border-b bg-muted/60 text-muted-foreground font-bold uppercase text-[10px]">
+                <th className="p-2.5">Category</th>
+                <th className="p-2.5">Item Name</th>
+                <th className="p-2.5 text-right">Forecasted Qty</th>
+                <th className="p-2.5">Unit</th>
+                <th className="p-2.5">WHO / EPI Standard Formula</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border/60">
+              {sessionLogisticsItems.map((item, idx) => (
+                <tr key={idx} className="hover:bg-muted/30 transition-colors">
+                  <td className="p-2.5">
+                    <Badge variant="secondary" className="text-[10px] font-medium uppercase tracking-wider">
+                      {item.category}
+                    </Badge>
+                  </td>
+                  <td className="p-2.5 font-semibold text-foreground">{item.item}</td>
+                  <td className="p-2.5 text-right font-mono font-bold text-indigo-600 dark:text-indigo-400">
+                    {item.qty.toLocaleString()}
+                  </td>
+                  <td className="p-2.5 text-muted-foreground capitalize">{item.unit}</td>
+                  <td className="p-2.5 text-muted-foreground italic">{item.formula}</td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>
@@ -5050,6 +5169,31 @@ export function Step6({
                 ))}
               </tbody>
             </table>
+
+            {/* Session Logistics & Equipment Catalogue Table in Requisition Slip */}
+            <div className="mt-6 space-y-2">
+              <h4 className="text-xs font-bold uppercase tracking-wider text-foreground">Bundled Session Supplies & Logistics Requisition</h4>
+              <table className="w-full text-xs text-left border-collapse">
+                <thead>
+                  <tr className="border-b border-black font-semibold text-muted-foreground uppercase text-[10px]">
+                    <th className="py-2">Category</th>
+                    <th className="py-2">Catalogue Item</th>
+                    <th className="py-2 text-right">Required Qty</th>
+                    <th className="py-2">Unit</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y border-b">
+                  {sessionLogisticsItems.map((item, idx) => (
+                    <tr key={idx}>
+                      <td className="py-1.5 font-medium text-muted-foreground text-[10px] uppercase">{item.category}</td>
+                      <td className="py-1.5 font-semibold text-foreground">{item.item}</td>
+                      <td className="py-1.5 text-right font-mono font-bold text-foreground">{item.qty.toLocaleString()}</td>
+                      <td className="py-1.5 text-muted-foreground capitalize text-[10px]">{item.unit}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
 
             {/* Signatures */}
             <div className="grid grid-cols-2 gap-8 pt-12 text-center text-xs mt-8 border-t border-dashed">

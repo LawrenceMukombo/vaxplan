@@ -134,6 +134,8 @@ export interface ChecklistTemplateItem {
   parentId?: string;
   showWhen?: string;
   conditionalOperator?: "equals" | "not_equals" | "contains" | "gt" | "lt" | "between" | "is_empty" | "is_not_empty";
+  conditionalOnQuestionId?: string | null;
+  conditionalValue?: string | null;
 
   // --- Repeat ---
   repeatable?: boolean;
@@ -141,6 +143,8 @@ export interface ChecklistTemplateItem {
   maxRepeats?: number;
 
   // --- Scoring & Auditing ---
+  isScored?: boolean;
+  weight?: number;
   includeInScore?: boolean;
   evidenceRequired?: boolean;
   photoRequired?: boolean;
