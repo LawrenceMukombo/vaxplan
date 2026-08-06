@@ -255,14 +255,19 @@ export function ColdChainTab({ facilityId }: { facilityId: number | null }) {
     try {
       const payload: Record<string, any> = {
         ...form,
-        capacityLiters: form.capacityLiters ? parseFloat(form.capacityLiters) : null,
-        netStorageCapacityLiters: form.netStorageCapacityLiters ? parseFloat(form.netStorageCapacityLiters) : null,
-        temperatureMin: form.temperatureMin ? parseFloat(form.temperatureMin) : null,
-        temperatureMax: form.temperatureMax ? parseFloat(form.temperatureMax) : null,
-        energyConsumptionKwhDay: form.energyConsumptionKwhDay ? parseFloat(form.energyConsumptionKwhDay) : null,
-        manufactureYear: form.manufactureYear ? parseInt(form.manufactureYear) : null,
-        purchaseCost: form.purchaseCost ? parseFloat(form.purchaseCost) : null,
-        powerSource: form.powerSource || null,
+        capacityLiters: form.capacityLiters && !isNaN(parseFloat(form.capacityLiters)) ? parseFloat(form.capacityLiters) : null,
+        netStorageCapacityLiters: form.netStorageCapacityLiters && !isNaN(parseFloat(form.netStorageCapacityLiters)) ? parseFloat(form.netStorageCapacityLiters) : null,
+        temperatureMin: form.temperatureMin && !isNaN(parseFloat(form.temperatureMin)) ? parseFloat(form.temperatureMin) : null,
+        temperatureMax: form.temperatureMax && !isNaN(parseFloat(form.temperatureMax)) ? parseFloat(form.temperatureMax) : null,
+        energyConsumptionKwhDay: form.energyConsumptionKwhDay && !isNaN(parseFloat(form.energyConsumptionKwhDay)) ? parseFloat(form.energyConsumptionKwhDay) : null,
+        manufactureYear: form.manufactureYear && !isNaN(parseInt(form.manufactureYear)) ? parseInt(form.manufactureYear) : null,
+        purchaseCost: form.purchaseCost && !isNaN(parseFloat(form.purchaseCost)) ? parseFloat(form.purchaseCost) : null,
+        powerSource: !form.powerSource || (form.powerSource as string) === "None" ? "none" : form.powerSource,
+        catalogNumber: form.catalogNumber ? form.catalogNumber.trim() : null,
+        serialNumber: form.serialNumber ? form.serialNumber.trim() : null,
+        brand: form.brand ? form.brand.trim() : null,
+        model: form.model ? form.model.trim() : null,
+        notes: form.notes ? form.notes.trim() : null,
       };
 
       const url = editingItem

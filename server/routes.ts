@@ -109,6 +109,7 @@ import {
   insertFacilityStaffSchema,
   notifications,
   users,
+  userPermissions,
 } from "@shared/schema";
 import { expandVaccineSchedule, canonicalizePerAntigen, normalizeStockVaccineName } from "@shared/vaccineSchedule";
 import { isAtLeastDaysAhead, DEFAULT_LEAD_TIME_DAYS } from "@shared/schedulingDates";
@@ -1288,14 +1289,21 @@ export async function registerRoutes(
   app: Express
 ): Promise<Server> {
   // Initialize tenant boundary cache unless disabled for local/test startup.
+  // Production warms this cache in the background so route registration and
+  // form saves are not blocked by a country-wide GIS scan.
   const skipOutsideVillagesCache =
     process.env.SKIP_OUTSIDE_VILLAGES_CACHE === "1" ||
     process.env.NODE_ENV === "test" ||
     Boolean(process.env.VITEST);
+  const blockOutsideVillagesCacheBoot = process.env.BLOCK_OUTSIDE_VILLAGES_CACHE_BOOT === "1";
   if (skipOutsideVillagesCache) {
     console.log("[GeoCache] Tenant boundary cache initialization skipped.");
-  } else {
+  } else if (blockOutsideVillagesCacheBoot) {
     await initOutsideVillagesCache();
+  } else {
+    initOutsideVillagesCache().catch((err) => {
+      console.error("[GeoCache] Failed to initialize tenant boundary cache:", err);
+    });
   }
 
   await setupAuth(app);
@@ -2193,15 +2201,26 @@ export async function registerRoutes(
   // --- CUSTOM USER PERMISSIONS CRUD ENDPOINTS ---
   app.get("/api/user-permissions", isAuthenticated, requireTenant, requireAnyPermission(["permissions.view", "roles.view", "users.assign_permissions", "manage_users"]), async (req: any, res) => {
     try {
-      let permissions = await storage.getUserPermissions(req.tenantId);
-      const existingCodes = new Set(permissions.map((permission: any) => String(permission.code).toLowerCase()));
-
       for (const permission of SYSTEM_USER_PERMISSIONS) {
-        if (existingCodes.has(permission.code.toLowerCase())) continue;
-        await storage.createUserPermission(req.tenantId, permission);
+        await db
+          .insert(userPermissions)
+          .values({
+            tenantId: req.tenantId,
+            code: permission.code.toLowerCase(),
+            name: permission.name,
+            description: permission.description,
+          })
+          .onConflictDoUpdate({
+            target: [userPermissions.tenantId, userPermissions.code],
+            set: {
+              name: permission.name,
+              description: permission.description,
+              updatedAt: new Date(),
+            },
+          });
       }
 
-      permissions = await storage.getUserPermissions(req.tenantId);
+      const permissions = await storage.getUserPermissions(req.tenantId);
       res.json(permissions);
     } catch (err: any) {
       console.error("GET /api/user-permissions failed:", err);
@@ -3912,7 +3931,7 @@ export async function registerRoutes(
       const districtId = req.query.districtId ? parseInt(req.query.districtId as string) : undefined;
       // Cache stable geo-reference lists in the browser for 5 minutes so
       // navigating between pages doesn't re-fetch the same data.
-      res.set("Cache-Control", "no-store, max-age=0, must-revalidate");
+      setCacheHeaders(res, 300);
       res.json(await storage.getLlgs(req.tenantId, districtId));
     } catch (error) {
       console.error("Error fetching LLGs:", error);
@@ -3964,7 +3983,7 @@ export async function registerRoutes(
       const scope = await getGeoScope(dbUser, req.tenantId);
       const regionId = req.query.regionId ? parseInt(req.query.regionId as string) : undefined;
       // Cache stable geo-reference lists in the browser for 5 minutes.
-      res.set("Cache-Control", "no-store, max-age=0, must-revalidate");
+      setCacheHeaders(res, 300);
       const all = await storage.getProvinces(req.tenantId, regionId);
 
       if (scope.all) return res.json(all);
@@ -4053,7 +4072,7 @@ export async function registerRoutes(
       const scope = await getGeoScope(dbUser, req.tenantId);
       const provinceId = req.query.provinceId ? parseInt(req.query.provinceId as string) : undefined;
       // Cache stable geo-reference lists in the browser for 5 minutes.
-      res.set("Cache-Control", "no-store, max-age=0, must-revalidate");
+      setCacheHeaders(res, 300);
       const all = await storage.getDistricts(req.tenantId, provinceId);
 
       const visibleDistrictIds = new Set<number>(scope.districtIds);
@@ -4128,7 +4147,7 @@ export async function registerRoutes(
       const dbUser = req.dbUser!;
       const districtId = req.query.districtId ? parseInt(req.query.districtId as string) : undefined;
 
-      res.set("Cache-Control", "no-store, max-age=0, must-revalidate");
+      setCacheHeaders(res, 300);
 
       // getGeoScope handles all role tiers and respects dataAccessScope:
       //   national_admin / gis_specialist / platform_admin → scope.all = true
@@ -5634,21 +5653,63 @@ export async function registerRoutes(
     try {
       const facilityId = parseInt(req.params.id);
       if (isNaN(facilityId)) return res.status(400).json({ message: "Invalid facility id" });
-      const { coldChainEquipment, insertColdChainEquipmentSchema } = await import("@shared/schema");
-      const parsed = insertColdChainEquipmentSchema.parse({ ...req.body, facilityId });
+      const { coldChainEquipment, insertColdChainEquipmentSchema, users } = await import("@shared/schema");
+
+      // Sanitize input fields: convert empty strings and invalid values to null/defaults
+      const raw = { ...req.body, facilityId };
+      const strFields = [
+        "brand", "model", "serialNumber", "catalogNumber",
+        "powerSource", "installationDate", "purchaseCurrency",
+        "warrantyExpiry", "supplier", "fundingSource",
+        "lastServiceDate", "nextServiceDue", "lastTemperatureCheck",
+        "maintenanceNotes", "notes", "externalId"
+      ];
+      for (const k of strFields) {
+        if (raw[k] !== undefined) {
+          const v = typeof raw[k] === "string" ? raw[k].trim() : raw[k];
+          raw[k] = (v === "" || v === "None" || v === undefined) ? (k === "powerSource" ? "none" : null) : v;
+        }
+      }
+      if (raw.powerSource === "None" || raw.powerSource === "") raw.powerSource = "none";
+
+      const numFields = [
+        "capacityLiters", "netStorageCapacityLiters", "temperatureMin",
+        "temperatureMax", "energyConsumptionKwhDay", "manufactureYear", "purchaseCost"
+      ];
+      for (const k of numFields) {
+        if (raw[k] !== undefined && raw[k] !== null) {
+          if (typeof raw[k] === "string" && raw[k].trim() === "") {
+            raw[k] = null;
+          } else {
+            const n = Number(raw[k]);
+            raw[k] = isNaN(n) ? null : (k === "manufactureYear" ? Math.round(n) : n);
+          }
+        }
+      }
+
+      const parsed = insertColdChainEquipmentSchema.parse(raw);
+
+      // Verify user ID exists in users table to satisfy foreign key constraint
+      let validUserId: string | null = null;
+      if (req.dbUser?.id) {
+        const [u] = await db.select({ id: users.id }).from(users).where(eq(users.id, req.dbUser.id));
+        if (u) validUserId = u.id;
+      }
+
       const [inserted] = await db
         .insert(coldChainEquipment)
         .values({
           ...parsed,
           tenantId: req.tenantId,
-          createdByUserId: req.user?.claims?.sub ?? null,
-          updatedByUserId: req.user?.claims?.sub ?? null,
+          createdByUserId: validUserId,
+          updatedByUserId: validUserId,
         } as any)
         .returning();
       await logAudit(req, "create", "cold_chain_equipment", inserted.id, null, inserted);
       res.status(201).json(inserted);
     } catch (err: any) {
-      res.status(400).json({ message: "Invalid equipment data: " + err.message });
+      console.error("POST /api/facilities/:id/cold-chain error:", err);
+      res.status(400).json({ message: "Invalid equipment data: " + (err.message || String(err)) });
     }
   });
 
@@ -5658,10 +5719,11 @@ export async function registerRoutes(
       const facilityId = parseInt(req.params.id);
       const equipId = parseInt(req.params.equipId);
       if (isNaN(facilityId) || isNaN(equipId)) return res.status(400).json({ message: "Invalid parameters" });
-      const { coldChainEquipment } = await import("@shared/schema");
+      const { coldChainEquipment, users } = await import("@shared/schema");
       const [existing] = await db.select().from(coldChainEquipment)
         .where(and(eq(coldChainEquipment.id, equipId), eq(coldChainEquipment.facilityId, facilityId), eq(coldChainEquipment.tenantId, req.tenantId)));
       if (!existing) return res.status(404).json({ message: "Equipment not found" });
+
       const allowed: any = {};
       for (const k of [
         "equipmentType", "brand", "model", "serialNumber", "catalogNumber",
@@ -5671,16 +5733,38 @@ export async function registerRoutes(
         "condition", "lastServiceDate", "nextServiceDue", "lastTemperatureCheck", "maintenanceNotes",
         "isActive", "notes", "externalId",
       ]) {
-        if (req.body[k] !== undefined) allowed[k] = req.body[k];
+        if (req.body[k] !== undefined) {
+          const val = req.body[k];
+          if (["capacityLiters", "netStorageCapacityLiters", "temperatureMin", "temperatureMax", "energyConsumptionKwhDay", "manufactureYear", "purchaseCost"].includes(k)) {
+            if (val === "" || val === null || val === undefined) allowed[k] = null;
+            else {
+              const n = Number(val);
+              allowed[k] = isNaN(n) ? null : (k === "manufactureYear" ? Math.round(n) : n);
+            }
+          } else if (typeof val === "string") {
+            const trimmed = val.trim();
+            allowed[k] = (trimmed === "" || trimmed === "None") ? (k === "powerSource" ? "none" : null) : trimmed;
+          } else {
+            allowed[k] = val;
+          }
+        }
       }
+
+      let validUserId: string | null = null;
+      if (req.dbUser?.id) {
+        const [u] = await db.select({ id: users.id }).from(users).where(eq(users.id, req.dbUser.id));
+        if (u) validUserId = u.id;
+      }
+
       allowed.updatedAt = new Date();
-      allowed.updatedByUserId = req.user?.claims?.sub ?? null;
+      allowed.updatedByUserId = validUserId;
       const [updated] = await db.update(coldChainEquipment).set(allowed)
         .where(eq(coldChainEquipment.id, equipId)).returning();
       await logAudit(req, "update", "cold_chain_equipment", equipId, existing, updated);
       res.json(updated);
     } catch (err: any) {
-      res.status(400).json({ message: "Failed to update equipment: " + err.message });
+      console.error("PATCH /api/facilities/:id/cold-chain/:equipId error:", err);
+      res.status(400).json({ message: "Failed to update equipment: " + (err.message || String(err)) });
     }
   });
 
@@ -6301,7 +6385,7 @@ export async function registerRoutes(
       const districtId = req.query.districtId ? parseInt(req.query.districtId as string) : undefined;
       const facilityId = req.query.facilityId ? parseInt(req.query.facilityId as string) : undefined;
 
-      res.set("Cache-Control", "no-store, max-age=0, must-revalidate");
+      setCacheHeaders(res, 300);
 
       const scope = await getGeoScope(dbUser, req.tenantId);
       const all = await storage.getVillages(req.tenantId, districtId, facilityId);

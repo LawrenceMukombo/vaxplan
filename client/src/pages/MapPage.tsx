@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { MapView } from "@/components/MapView";
 import type { Facility, Village } from "@shared/schema";
@@ -22,42 +23,7 @@ const FALLBACK_CENTER: [number, number] = [-6.0, 147.0];
 const FALLBACK_ZOOM = 6;
 
 export default function MapPage() {
-  /*
-  // Original queries (commented out to preserve working code while adding offline capabilities):
-  const { data: activeTenantInfo } = useQuery<MyTenant>({
-    queryKey: ["/api/me/tenant"],
-  });
-
-  const { data: tenants } = useQuery<PublicTenant[]>({
-    queryKey: ["/api/public/tenants"],
-  });
-
-  const { data: facilities } = useQuery<Facility[]>({
-    queryKey: ["/api/facilities", "tenant", activeTenantInfo?.id],
-    queryFn: async () => {
-      const res = await fetch("/api/facilities", { credentials: "include" });
-      if (!res.ok) throw new Error("Failed to fetch facilities");
-      return res.json();
-    },
-    enabled: !!activeTenantInfo?.id,
-    staleTime: 0,
-    refetchOnMount: "always",
-  });
-
-  const { data: villages } = useQuery<Village[]>({
-    queryKey: ["/api/villages", "tenant", activeTenantInfo?.id],
-    queryFn: async () => {
-      const res = await fetch("/api/villages", { credentials: "include" });
-      if (!res.ok) throw new Error("Failed to fetch villages");
-      return res.json();
-    },
-    enabled: !!activeTenantInfo?.id,
-    staleTime: 0,
-    refetchOnMount: "always",
-  });
-  */
-
-  // Updated queries with offline fallbacks to Dexie local DB:
+  // Updated queries with offline fallbacks to Dexie local DB & optimal caching:
   const { data: activeTenantInfo } = useQuery<MyTenant>({
     queryKey: ["/api/me/tenant"],
     queryFn: async () => {
@@ -72,8 +38,8 @@ export default function MapPage() {
       localStorage.setItem("vaxplan_active_tenant", JSON.stringify(data));
       return data;
     },
-    staleTime: 0,
-    refetchOnMount: "always",
+    staleTime: 5 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
   });
 
   const { data: tenants } = useQuery<PublicTenant[]>({
@@ -87,7 +53,9 @@ export default function MapPage() {
       const res = await fetch("/api/public/tenants");
       if (!res.ok) throw new Error("Failed to fetch public tenants");
       return res.json();
-    }
+    },
+    staleTime: 10 * 60 * 1000,
+    gcTime: 60 * 60 * 1000,
   });
 
   const { data: facilities } = useQuery<Facility[]>({
@@ -104,8 +72,8 @@ export default function MapPage() {
       return res.json();
     },
     enabled: !!activeTenantInfo?.id,
-    staleTime: 0,
-    refetchOnMount: "always",
+    staleTime: 5 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
   });
 
   const { data: villages } = useQuery<Village[]>({
@@ -122,40 +90,51 @@ export default function MapPage() {
       return res.json();
     },
     enabled: !!activeTenantInfo?.id,
-    staleTime: 0,
-    refetchOnMount: "always",
+    staleTime: 5 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
   });
 
-  const activeTenant = tenants?.find((t) => t.id === activeTenantInfo?.id);
+  const activeTenant = useMemo(
+    () => tenants?.find((t) => t.id === activeTenantInfo?.id),
+    [tenants, activeTenantInfo?.id]
+  );
   const tenantCenter = activeTenant?.settings?.mapCenter;
   const tenantZoom = activeTenant?.settings?.mapZoom;
 
-  // Never render cached records from a previous country while the current
-  // tenant's facility and village queries are refreshing.
-  const scopedFacilities = (facilities ?? []).filter(
-    (facility) => !facility.tenantId || facility.tenantId === activeTenantInfo?.id
-  );
-  const scopedVillages = (villages ?? []).filter(
-    (village) => !village.tenantId || village.tenantId === activeTenantInfo?.id
+  const scopedFacilities = useMemo(
+    () => (facilities ?? []).filter(
+      (facility) => !facility.tenantId || facility.tenantId === activeTenantInfo?.id
+    ),
+    [facilities, activeTenantInfo?.id]
   );
 
-  // correctly parse decimal strings returned by node-postgres to numbers and calculate averages safely.
-  const facilityCoords = scopedFacilities.filter(
-    (f) => f.latitude !== null && f.longitude !== null && !isNaN(Number(f.latitude)) && !isNaN(Number(f.longitude))
+  const scopedVillages = useMemo(
+    () => (villages ?? []).filter(
+      (village) => !village.tenantId || village.tenantId === activeTenantInfo?.id
+    ),
+    [villages, activeTenantInfo?.id]
   );
 
-  let center: [number, number] = tenantCenter ?? FALLBACK_CENTER;
-  let zoom: number = tenantZoom ?? FALLBACK_ZOOM;
+  const { center, zoom } = useMemo(() => {
+    const facilityCoords = scopedFacilities.filter(
+      (f) => f.latitude !== null && f.longitude !== null && !isNaN(Number(f.latitude)) && !isNaN(Number(f.longitude))
+    );
 
-  if (!tenantCenter && facilityCoords.length > 0) {
-    const avgLat =
-      facilityCoords.reduce((s, f) => s + Number(f.latitude), 0) /
-      facilityCoords.length;
-    const avgLng =
-      facilityCoords.reduce((s, f) => s + Number(f.longitude), 0) /
-      facilityCoords.length;
-    center = [avgLat, avgLng];
-  }
+    let calculatedCenter: [number, number] = tenantCenter ?? FALLBACK_CENTER;
+    let calculatedZoom: number = tenantZoom ?? FALLBACK_ZOOM;
+
+    if (!tenantCenter && facilityCoords.length > 0) {
+      const avgLat =
+        facilityCoords.reduce((s, f) => s + Number(f.latitude), 0) /
+        facilityCoords.length;
+      const avgLng =
+        facilityCoords.reduce((s, f) => s + Number(f.longitude), 0) /
+        facilityCoords.length;
+      calculatedCenter = [avgLat, avgLng];
+    }
+
+    return { center: calculatedCenter, zoom: calculatedZoom };
+  }, [scopedFacilities, tenantCenter, tenantZoom]);
 
   return (
     <div className="h-full">
@@ -170,3 +149,4 @@ export default function MapPage() {
     </div>
   );
 }
+

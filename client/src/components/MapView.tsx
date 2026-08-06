@@ -1922,6 +1922,8 @@ export function MapView({
   });
 
   const { data: rasterListData } = useQuery<{ success: boolean; files: Array<{ fileName: string; country: string; resolution: string }> }>({
+    staleTime: 10 * 60 * 1000,
+    gcTime: 60 * 60 * 1000,
     queryKey: ["/api/resources/geotiff/list"],
   });
 
@@ -1957,10 +1959,14 @@ export function MapView({
   }>({
     queryKey: ["/api/indicators/zero-dose"],
     enabled: layers.zeroDoseVillages || layers.underImmunizedVillages,
+    staleTime: 5 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
   });
 
   // Query all public tenants to allow synchronization between raster selection and planning context
   const { data: publicTenants = [] } = useQuery<any[]>({
+    staleTime: 10 * 60 * 1000,
+    gcTime: 60 * 60 * 1000,
     queryKey: ["/api/public/tenants"],
     queryFn: async () => {
       const res = await fetch("/api/public/tenants");
@@ -2094,6 +2100,8 @@ export function MapView({
 
   // Fetch active session plans for visual tracking and click triaging
   const { data: activeSessionPlans = [] } = useQuery<any[]>({
+    staleTime: 5 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
     queryKey: ["/api/sessions"],
     queryFn: async () => {
       if (!navigator.onLine) {
@@ -2110,6 +2118,8 @@ export function MapView({
   // Sessions plotted on the map: planned/in-progress + completed within 30d.
   // Source of truth for the "Session plans" map layer + legend counters.
   const { data: sessionMapPins = [] } = useQuery<any[]>({
+    staleTime: 5 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
     queryKey: ["/api/sessions/map"],
     queryFn: async () => {
       if (!navigator.onLine) return [];
@@ -2121,6 +2131,8 @@ export function MapView({
 
   // Unserved populated places (no session ever + no recorded vaccinations).
   const { data: unservedPlaces = [] } = useQuery<any[]>({
+    staleTime: 5 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
     queryKey: ["/api/unserved-places"],
     queryFn: async () => {
       if (!navigator.onLine) return [];
@@ -2132,6 +2144,8 @@ export function MapView({
 
   // Fetch session villages junction table
   const { data: sessionVillages = [] } = useQuery<any[]>({
+    staleTime: 5 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
     queryKey: ["/api/sessions/villages"],
     queryFn: async () => {
       const res = await fetch("/api/sessions/villages");
@@ -2142,6 +2156,8 @@ export function MapView({
 
   // Fetch master microplans for selection dropdown
   const { data: masterMicroplans = [] } = useQuery<any[]>({
+    staleTime: 5 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
     queryKey: ["/api/microplans"],
     queryFn: async () => {
       const res = await fetch("/api/microplans");
@@ -2152,6 +2168,8 @@ export function MapView({
 
   // Dynamic Geographic and Tenant Lookups for Premium Admin Hierarchy Resolution
   const { data: tenantInfo } = useQuery<any>({
+    staleTime: 5 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
     queryKey: ["/api/me/tenant"],
   });
 
@@ -2435,6 +2453,8 @@ export function MapView({
 
   // Country boundary GeoJSON is loaded early because unserved places are clipped to the active country's polygons.
   const { data: boundaryList } = useQuery<Array<{ id: string; adminLevel: number; levelName: string; isActive: boolean }>>({
+    staleTime: 10 * 60 * 1000,
+    gcTime: 60 * 60 * 1000,
     queryKey: ["/api/boundaries", tenantInfo?.id],
     queryFn: async () => {
       const res = await fetch("/api/boundaries", { credentials: "include" });
@@ -2511,16 +2531,22 @@ export function MapView({
   /*
   // Original Code: Queries were bound to static queryKeys which caused old tenant/country cached data to be served upon switching countries.
   const { data: provinces = [] } = useQuery<any[]>({
+    staleTime: 10 * 60 * 1000,
+    gcTime: 60 * 60 * 1000,
     queryKey: ["/api/provinces"],
     enabled: true,
   });
 
   const { data: districts = [] } = useQuery<any[]>({
+    staleTime: 10 * 60 * 1000,
+    gcTime: 60 * 60 * 1000,
     queryKey: ["/api/districts"],
     enabled: true,
   });
 
   const { data: llgs = [] } = useQuery<any[]>({
+    staleTime: 10 * 60 * 1000,
+    gcTime: 60 * 60 * 1000,
     queryKey: ["/api/llgs"],
     enabled: true,
   });
@@ -2529,6 +2555,8 @@ export function MapView({
   // Updated Code: Scoping provinces, districts, and llgs queries strictly to the active tenantInfo.id to clear caches on tenant switch.
   // Using custom queryFns to bypass queryKey join "/" behavior mapping to invalid URLs, with robust IndexedDB offline fallbacks.
   const { data: provinces = [] } = useQuery<any[]>({
+    staleTime: 10 * 60 * 1000,
+    gcTime: 60 * 60 * 1000,
     queryKey: ["/api/provinces", tenantInfo?.id],
     queryFn: async () => {
       if (!navigator.onLine) {
@@ -2543,6 +2571,8 @@ export function MapView({
   });
 
   const { data: districts = [] } = useQuery<any[]>({
+    staleTime: 10 * 60 * 1000,
+    gcTime: 60 * 60 * 1000,
     queryKey: ["/api/districts", tenantInfo?.id],
     queryFn: async () => {
       if (!navigator.onLine) {
@@ -2557,6 +2587,8 @@ export function MapView({
   });
 
   const { data: llgs = [] } = useQuery<any[]>({
+    staleTime: 10 * 60 * 1000,
+    gcTime: 60 * 60 * 1000,
     queryKey: ["/api/llgs", tenantInfo?.id],
     queryFn: async () => {
       if (!navigator.onLine) {
@@ -2571,6 +2603,8 @@ export function MapView({
   });
 
   const { data: dayPlans = [] } = useQuery<any[]>({
+    staleTime: 5 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
     queryKey: ["/api/session-day-plans", tenantInfo?.id],
     queryFn: async () => {
       if (!navigator.onLine) {
@@ -2586,6 +2620,8 @@ export function MapView({
 
   /* Original Code commented out for backward-compatibility:
   const { data: sessions = [] } = useQuery<any[]>({
+    staleTime: 5 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
     queryKey: ["/api/sessions", tenantInfo?.id],
     queryFn: async () => {
       if (!navigator.onLine) {
@@ -2600,6 +2636,8 @@ export function MapView({
   });
   */
   const { data: sessions = [] } = useQuery<any[]>({
+    staleTime: 5 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
     queryKey: ["/api/sessions", tenantInfo?.id],
     queryFn: async () => {
       if (!navigator.onLine) {
@@ -2614,6 +2652,8 @@ export function MapView({
   });
 
   const { data: communityRoutes = [] } = useQuery<any[]>({
+    staleTime: 5 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
     queryKey: ["/api/facilities", selectedFacilityId, "community-routes"],
     queryFn: async () => {
       if (!selectedFacilityId) return [];
@@ -3743,6 +3783,8 @@ export function MapView({
     const lng = Number(facility.longitude);
 
     setSelectedFacilityId(facility.id);
+    setPanelVis((prev) => ({ ...prev, facilities: true }));
+    setIntelligencePoint({ lat, lng });
 
     mapRef.current?.flyTo([lat, lng], 14, {
       animate: true,
@@ -3864,6 +3906,8 @@ export function MapView({
   // ─── Queries for boundary and catchment data ──────────────────────────
 
 const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
+    staleTime: 10 * 60 * 1000,
+    gcTime: 60 * 60 * 1000,
     queryKey: ["/api/catchments", tenantInfo?.id],
     queryFn: async () => {
       const res = await fetch("/api/catchments", { credentials: "include" });
@@ -3882,6 +3926,7 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
       queryFn: () => fetch(`/api/surveillance/population/choropleth?source=${popChoroplethSource}`, { credentials: "include" }).then((r) => r.json()),
       enabled: layers.populationChoropleth,
       staleTime: 5 * 60 * 1000,
+      gcTime: 30 * 60 * 1000,
     }
   );
   // Memoized cache of catchment bounding boxes to avoid parsing coordinates repeatedly
@@ -6849,6 +6894,17 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
                               }`}>{activeSessions}</span>
                             </div>
                           </div>
+                          <Button
+                            size="sm"
+                            className="w-full mt-2.5 h-7 text-xs font-semibold gap-1 bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedFacilityId(facility.id);
+                              setPanelVis((prev) => ({ ...prev, facilities: true }));
+                            }}
+                          >
+                            View Facility Info & Catchments →
+                          </Button>
                         </div>
                       </div>
                     );
