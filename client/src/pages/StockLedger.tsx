@@ -113,14 +113,14 @@ import {
 const transactionFormSchema = z.object({
   facilityId: z.number({ required_error: "Pick a facility" }),
   productId: z.number({ required_error: "Product is required" }),
-  vaccineName: z.string().optional(),
+  vaccineName: z.string().optional().nullable(),
   transactionType: z.enum(["receipt", "issue", "loss", "adjustment"]),
-  quantityDoses: z.number().min(1, "Quantity must be at least 1 dose"),
-  batchNumber: z.string().min(1, "Batch number is required"),
-  expiryDate: z.string().min(1, "Expiry date is required"),
-  vvmStatus: z.number().min(1).max(4),
-  supplierOrRecipient: z.string().min(1, "Supplier/Recipient name is required"),
-  notes: z.string().optional(),
+  quantityDoses: z.number().min(1, "Quantity must be at least 1"),
+  batchNumber: z.string().optional().nullable(),
+  expiryDate: z.string().optional().nullable(),
+  vvmStatus: z.number().optional().nullable(),
+  supplierOrRecipient: z.string().optional().nullable(),
+  notes: z.string().optional().nullable(),
   productCode: z.string().optional().nullable(),
 });
 
@@ -335,6 +335,7 @@ export default function StockLedger() {
   
   // Dialog Open States
   const [txnDialogOpen, setTxnDialogOpen] = useState(false);
+  const [activeDialogCategoryTab, setActiveDialogCategoryTab] = useState<string>("all");
   const [reportDialogOpen, setReportDialogOpen] = useState(false);
 
   // Wizard Steps for Monthly Report
@@ -1066,6 +1067,10 @@ export default function StockLedger() {
       if (!navigator.onLine) {
         // Generate a random temporary negative ID
         const newId = -Math.floor(Math.random() * 1000000);
+        const cleanExpiryIso = (data.expiryDate && !isNaN(new Date(data.expiryDate).getTime()))
+          ? new Date(data.expiryDate).toISOString()
+          : new Date("2099-12-31T00:00:00.000Z").toISOString();
+
         const localTxn = {
           id: newId,
           tenantId: user?.tenantId ?? "",
@@ -1074,10 +1079,10 @@ export default function StockLedger() {
           vaccineName: vaccineConfigs?.find(c => c.id === data.productId)?.name || data.vaccineName,
           transactionType: data.transactionType,
           quantityDoses: data.quantityDoses,
-          batchNumber: data.batchNumber,
-          expiryDate: new Date(data.expiryDate).toISOString() as any,
-          vvmStatus: data.vvmStatus,
-          supplierOrRecipient: data.supplierOrRecipient,
+          batchNumber: data.batchNumber || "N/A",
+          expiryDate: cleanExpiryIso as any,
+          vvmStatus: data.vvmStatus || 1,
+          supplierOrRecipient: data.supplierOrRecipient || "National Store",
           transactionDate: new Date().toISOString() as any,
           notes: data.notes ?? null,
           recordedByUserId: user?.id ?? null,
@@ -1096,16 +1101,24 @@ export default function StockLedger() {
           url: "/api/stock/transaction",
           body: JSON.stringify({
             ...data,
-            expiryDate: new Date(data.expiryDate).toISOString(),
+            batchNumber: data.batchNumber || "N/A",
+            expiryDate: cleanExpiryIso,
+            vvmStatus: data.vvmStatus || 1,
           }),
         });
 
         return localTxn;
       }
 
+      const cleanExpiryIso = (data.expiryDate && !isNaN(new Date(data.expiryDate).getTime()))
+        ? new Date(data.expiryDate).toISOString()
+        : new Date("2099-12-31T00:00:00.000Z").toISOString();
+
       return apiRequest("POST", "/api/stock/transaction", {
         ...data,
-        expiryDate: new Date(data.expiryDate).toISOString(),
+        batchNumber: data.batchNumber || "N/A",
+        expiryDate: cleanExpiryIso,
+        vvmStatus: data.vvmStatus || 1,
       });
     },
     onSuccess: () => {
@@ -2648,6 +2661,50 @@ export default function StockLedger() {
                 vvmStatus: showVVM ? d.vvmStatus : 1,
               });
             })} className="space-y-4 pt-4">
+              {/* Category Tabs inside Dialog */}
+              <div className="space-y-1.5">
+                <label className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+                  Product Category Tab
+                </label>
+                <div className="flex items-center gap-1 overflow-x-auto pb-1 scrollbar-none">
+                  {[
+                    { id: "all", label: "All Items", icon: "📦" },
+                    { id: "vaccine", label: "Vaccines", icon: "💉" },
+                    { id: "diluent", label: "Diluents", icon: "💧" },
+                    { id: "syringe", label: "Syringes", icon: "💉" },
+                    { id: "ppe", label: "PPE", icon: "🛡️" },
+                    { id: "tally_sheet", label: "Tally Sheets", icon: "📋" },
+                    { id: "cold_chain", label: "Cold Chain", icon: "❄️" },
+                  ].map((tab) => {
+                    const isActive = activeDialogCategoryTab === tab.id;
+                    return (
+                      <button
+                        key={tab.id}
+                        type="button"
+                        onClick={() => {
+                          setActiveDialogCategoryTab(tab.id);
+                          const matchingGroups = groupedCatalogueProducts.filter(
+                            (g) => tab.id === "all" || g.groupId === tab.id
+                          );
+                          const firstProd = matchingGroups[0]?.items[0];
+                          if (firstProd) {
+                            txnForm.setValue("productId", firstProd.id);
+                          }
+                        }}
+                        className={`px-2.5 py-1 text-xs rounded-lg whitespace-nowrap transition-all flex items-center gap-1.5 border ${
+                          isActive
+                            ? "bg-primary text-primary-foreground border-primary font-semibold shadow-xs"
+                            : "bg-muted/50 text-muted-foreground border-border/40 hover:bg-muted hover:text-foreground"
+                        }`}
+                      >
+                        <span>{tab.icon}</span>
+                        <span>{tab.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
               <FormField
                 control={txnForm.control}
                 name="productId"
@@ -2661,19 +2718,21 @@ export default function StockLedger() {
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent className="max-h-[350px]">
-                        {groupedCatalogueProducts.map((group) => (
-                          <SelectGroup key={group.groupId}>
-                            <SelectLabel className="px-2 py-1 text-xs font-bold uppercase text-muted-foreground bg-muted/30 flex items-center gap-1.5 sticky top-0 backdrop-blur">
-                              <span>{group.icon}</span>
-                              <span>{group.groupLabel}</span>
-                            </SelectLabel>
-                            {group.items.map((c) => (
-                              <SelectItem key={c.id} value={c.id.toString()}>
-                                {c.name}
-                              </SelectItem>
-                            ))}
-                          </SelectGroup>
-                        ))}
+                        {groupedCatalogueProducts
+                          .filter((g) => activeDialogCategoryTab === "all" || g.groupId === activeDialogCategoryTab)
+                          .map((group) => (
+                            <SelectGroup key={group.groupId}>
+                              <SelectLabel className="px-2 py-1 text-xs font-bold uppercase text-muted-foreground bg-muted/30 flex items-center gap-1.5 sticky top-0 backdrop-blur">
+                                <span>{group.icon}</span>
+                                <span>{group.groupLabel}</span>
+                              </SelectLabel>
+                              {group.items.map((c) => (
+                                <SelectItem key={c.id} value={c.id.toString()}>
+                                  {c.name}
+                                </SelectItem>
+                              ))}
+                            </SelectGroup>
+                          ))}
                       </SelectContent>
                     </Select>
                     <FormMessage />

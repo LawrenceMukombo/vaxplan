@@ -14688,11 +14688,16 @@ export async function registerRoutes(
       // Zod validation is failing on stock card transaction saves because Drizzle-Zod expects `expiryDate` and `transactionDate`
       // to be JavaScript Date objects, but the client submits them as ISO strings. We pre-parse these values and also supply
       // the verified `tenantId` to ensure strict multi-tenant validation succeeds.
+      const rawExp = req.body.expiryDate;
+      const cleanExp = (rawExp && !isNaN(new Date(rawExp).getTime())) ? new Date(rawExp) : new Date("2099-12-31T00:00:00.000Z");
+
       const payload = {
         ...req.body,
         tenantId: req.tenantId,
-        expiryDate: req.body.expiryDate ? new Date(req.body.expiryDate) : undefined,
-        transactionDate: req.body.transactionDate ? new Date(req.body.transactionDate) : new Date(),
+        batchNumber: req.body.batchNumber ? String(req.body.batchNumber) : "N/A",
+        expiryDate: cleanExp,
+        vvmStatus: typeof req.body.vvmStatus === "number" ? req.body.vvmStatus : 1,
+        transactionDate: req.body.transactionDate && !isNaN(new Date(req.body.transactionDate).getTime()) ? new Date(req.body.transactionDate) : new Date(),
       };
 
       const parsed = insertStockTransactionSchema.parse(payload);
