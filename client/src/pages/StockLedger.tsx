@@ -113,15 +113,15 @@ import {
 const transactionFormSchema = z.object({
   facilityId: z.number({ required_error: "Pick a facility" }),
   productId: z.number({ required_error: "Product is required" }),
-  vaccineName: z.string().optional().nullable(),
+  vaccineName: z.string().optional(),
   transactionType: z.enum(["receipt", "issue", "loss", "adjustment"]),
   quantityDoses: z.number().min(1, "Quantity must be at least 1"),
-  batchNumber: z.string().optional().nullable(),
-  expiryDate: z.string().optional().nullable(),
-  vvmStatus: z.number().optional().nullable(),
-  supplierOrRecipient: z.string().optional().nullable(),
-  notes: z.string().optional().nullable(),
-  productCode: z.string().optional().nullable(),
+  batchNumber: z.string().optional(),
+  expiryDate: z.string().optional(),
+  vvmStatus: z.number().optional(),
+  supplierOrRecipient: z.string().optional(),
+  notes: z.string().optional(),
+  productCode: z.string().optional(),
 });
 
 type TransactionFormValues = z.infer<typeof transactionFormSchema>;
