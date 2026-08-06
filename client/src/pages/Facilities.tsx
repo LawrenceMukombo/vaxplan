@@ -2880,9 +2880,34 @@ export default function Facilities() {
                               >
                                 {saveCatchmentMutation.isPending ? "Saving..." : "Save Facility Polygon"}
                               </Button>
+
+                              {editingFacility?.id && (
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="outline"
+                                  className="text-red-600 border-red-200 hover:bg-red-50 dark:hover:bg-red-950/30 gap-1"
+                                  onClick={async () => {
+                                    if (!editingFacility?.id) return;
+                                    if (!window.confirm(`Are you sure you want to delete the catchment polygon for ${editingFacility.name}?`)) return;
+                                    try {
+                                      await apiRequest("DELETE", `/api/facilities/${editingFacility.id}/catchment-polygon`);
+                                      setCatchmentPoints([]);
+                                      queryClient.invalidateQueries({ queryKey: ["/api/facilities"] });
+                                      queryClient.invalidateQueries({ queryKey: [`/api/facilities/${editingFacility.id}/catchments`] });
+                                      toast({ title: "Catchment Polygon Deleted", description: "Facility catchment polygon has been removed." });
+                                    } catch (err: any) {
+                                      toast({ title: "Delete Failed", description: err?.message || "Failed to delete catchment polygon", variant: "destructive" });
+                                    }
+                                  }}
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                  Delete Polygon
+                                </Button>
+                              )}
                             </div>
                           </div>
-                          
+
                           <div className="flex-1 relative z-0">
                             <MapContainer
                               center={facilityMapCenter}

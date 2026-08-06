@@ -11,8 +11,23 @@ import {
 
 async function throwIfResNotOk(res: Response) {
   if (!res.ok) {
-    const text = (await res.text()) || res.statusText;
-    throw new Error(`${res.status}: ${text}`);
+    let errorMsg = res.statusText || `HTTP ${res.status}`;
+    try {
+      const text = await res.text();
+      if (text.trim().startsWith("<!DOCTYPE") || text.trim().startsWith("<html")) {
+        errorMsg = `Server error (${res.status}): Endpoint unavailable or server initializing.`;
+      } else {
+        try {
+          const json = JSON.parse(text);
+          errorMsg = json.message || json.error || text;
+        } catch {
+          errorMsg = text || errorMsg;
+        }
+      }
+    } catch {
+      // fallback to statusText
+    }
+    throw new Error(errorMsg);
   }
 }
 
@@ -572,7 +587,18 @@ export async function apiRequest<T = unknown>(
     }
     return undefined as T;
   }
-  const resultData = await res.json();
+  let resultData: any;
+  const contentType = res.headers.get("content-type") || "";
+  if (contentType.includes("application/json")) {
+    resultData = await res.json();
+  } else {
+    const textData = await res.text();
+    try {
+      resultData = JSON.parse(textData);
+    } catch {
+      resultData = { success: true, message: textData };
+    }
+  }
 
   // After success write on server, update local IndexedDB cache in background
   try {
