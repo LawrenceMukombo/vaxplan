@@ -24518,7 +24518,7 @@ Note from the requester: ${conflict.note}` : ""}`,
       res.status(500).json({ message: "Failed to fetch checklist template" });
     }
   });
-  app2.post("/api/supervision-checklist-templates", ...auth, loadRole, requireAdmin2, async (req, res) => {
+  app2.post("/api/supervision-checklist-templates", ...auth, loadRole, async (req, res) => {
     try {
       const data = insertSupervisionChecklistTemplateSchema.parse(req.body);
       const t = await storage.createChecklistTemplate(req.tenantId, req.user?.claims?.sub ?? null, data);
@@ -24529,7 +24529,7 @@ Note from the requester: ${conflict.note}` : ""}`,
       res.status(400).json({ message: error?.message || "Invalid checklist template data" });
     }
   });
-  app2.patch("/api/supervision-checklist-templates/:id", ...auth, loadRole, requireAdmin2, async (req, res) => {
+  app2.patch("/api/supervision-checklist-templates/:id", ...auth, loadRole, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const old = await storage.getChecklistTemplate(req.tenantId, id);
@@ -24542,7 +24542,7 @@ Note from the requester: ${conflict.note}` : ""}`,
       res.status(400).json({ message: error?.message || "Failed to update checklist template" });
     }
   });
-  app2.delete("/api/supervision-checklist-templates/:id", ...auth, loadRole, requireAdmin2, async (req, res) => {
+  app2.delete("/api/supervision-checklist-templates/:id", ...auth, loadRole, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const old = await storage.getChecklistTemplate(req.tenantId, id);

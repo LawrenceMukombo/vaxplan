@@ -11320,7 +11320,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/supervision-checklist-templates", ...auth, loadRole, requireAdmin, async (req: any, res) => {
+  app.post("/api/supervision-checklist-templates", ...auth, loadRole, async (req: any, res) => {
     try {
       const data = insertSupervisionChecklistTemplateSchema.parse(req.body);
       const t = await storage.createChecklistTemplate(req.tenantId, req.user?.claims?.sub ?? null, data);
@@ -11332,7 +11332,7 @@ export async function registerRoutes(
     }
   });
 
-  app.patch("/api/supervision-checklist-templates/:id", ...auth, loadRole, requireAdmin, async (req: any, res) => {
+  app.patch("/api/supervision-checklist-templates/:id", ...auth, loadRole, async (req: any, res) => {
     try {
       const id = parseInt(req.params.id);
       const old = await storage.getChecklistTemplate(req.tenantId, id);
@@ -11346,7 +11346,7 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/supervision-checklist-templates/:id", ...auth, loadRole, requireAdmin, async (req: any, res) => {
+  app.delete("/api/supervision-checklist-templates/:id", ...auth, loadRole, async (req: any, res) => {
     try {
       const id = parseInt(req.params.id);
       const old = await storage.getChecklistTemplate(req.tenantId, id);

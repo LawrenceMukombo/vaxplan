@@ -305,15 +305,18 @@ export default function SupervisionTemplates() {
         sections,
         items: items.map((i, idx) => ({ ...i, displayOrder: idx + 1 })),
       };
-      if (isNew) {
+      if (isNew || !editing?.id) {
         return apiRequest("POST", "/api/supervision-checklist-templates", payload);
       }
       return apiRequest("PATCH", `/api/supervision-checklist-templates/${editing?.id}`, payload);
     },
-    onSuccess: () => {
+    onSuccess: (resData: any) => {
       queryClient.invalidateQueries({ queryKey: ["/api/supervision-checklist-templates"] });
       toast({ title: "Template Saved", description: "Supervision checklist template saved successfully." });
-      setEditing(null);
+      if (resData && typeof resData === "object" && resData.id) {
+        setEditing(resData);
+        setIsNew(false);
+      }
     },
     onError: (err: Error) => {
       toast({ title: "Save Failed", description: err.message, variant: "destructive" });
@@ -351,7 +354,7 @@ export default function SupervisionTemplates() {
           </p>
         </div>
 
-        {admin && !editing && (
+        {!editing && (
           <Button onClick={() => openEditor()} className="gap-2 bg-primary text-primary-foreground">
             <Plus className="h-4 w-4" />
             Create Template
@@ -381,12 +384,10 @@ export default function SupervisionTemplates() {
                   <span>{tpl.items?.length || 0} Questions</span>
                   <span>v{tpl.version || 1}.0</span>
                 </div>
-                {admin && (
-                  <Button variant="outline" size="sm" className="w-full gap-1.5" onClick={() => openEditor(tpl)}>
-                    <Pencil className="h-3.5 w-3.5" />
-                    Edit Checklist Builder
-                  </Button>
-                )}
+                <Button variant="outline" size="sm" className="w-full gap-1.5" onClick={() => openEditor(tpl)}>
+                  <Pencil className="h-3.5 w-3.5" />
+                  Edit Checklist Builder
+                </Button>
               </CardContent>
             </Card>
           ))}
@@ -394,17 +395,46 @@ export default function SupervisionTemplates() {
       ) : (
         /* Full Builder Canvas */
         <div className="space-y-4">
-          {/* Top Sticky Action Bar */}
+          {/* Top Sticky Action Bar with Saved Template Switcher */}
           <div className="sticky top-0 z-20 bg-background/95 backdrop-blur-md border border-border/80 p-3 rounded-lg shadow-sm flex flex-wrap items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="flex items-center gap-1.5 border-r border-border/50 pr-2">
+                <span className="text-xs font-semibold text-muted-foreground shrink-0">Saved Checklists:</span>
+                <Select
+                  value={editing?.id ? String(editing.id) : "new"}
+                  onValueChange={(val) => {
+                    if (val === "new") {
+                      openEditor();
+                    } else {
+                      const tpl = templates.find((t) => String(t.id) === val);
+                      if (tpl) openEditor(tpl);
+                    }
+                  }}
+                >
+                  <SelectTrigger className="w-56 md:w-72 h-9 text-xs font-bold border-indigo-500/40 bg-background" data-testid="select-saved-checklist">
+                    <SelectValue placeholder="Retrieve saved checklist..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="new" className="text-xs font-semibold text-indigo-600 dark:text-indigo-400">
+                      + Create New Checklist
+                    </SelectItem>
+                    {templates.map((t) => (
+                      <SelectItem key={t.id} value={String(t.id)} className="text-xs">
+                        {t.name} (v{t.version || 1}.0 — {t.items?.length || 0} Qs) {t.isActive ? "✓ Active" : ""}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
               <Input
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="Checklist Title (e.g. National EPI Readiness Survey)"
-                className="w-64 md:w-80 h-9 font-semibold text-sm"
+                placeholder="Checklist Title (e.g. Routine Supportive Supervision)"
+                className="w-56 md:w-72 h-9 font-semibold text-sm"
               />
               <Select value={category} onValueChange={(v: any) => setCategory(v)}>
-                <SelectTrigger className="w-36 h-9 text-xs">
+                <SelectTrigger className="w-32 h-9 text-xs">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
