@@ -215,7 +215,180 @@ export interface ChecklistAnswer {
   includeInScore?: boolean;
 }
 
-function blankAnswerFor(it: ChecklistTemplateItem, key: string, repeatIndex: number): ChecklistAnswer {
+export interface FacilityPrefillContext {
+  facility?: {
+    id?: number | string;
+    name?: string;
+    province?: string;
+    district?: string;
+    type?: string;
+    facilityType?: string;
+    latitude?: number | string;
+    longitude?: number | string;
+    lat?: number | string;
+    lng?: number | string;
+    contactPerson?: string;
+    inCharge?: string;
+    contactName?: string;
+    phone?: string;
+    contactPhone?: string;
+    phoneNumber?: string;
+  };
+  province?: string;
+  district?: string;
+  facilityName?: string;
+  facilityType?: string;
+  contactPerson?: string;
+  contactPhone?: string;
+  visitDate?: string;
+  scheduledDate?: string;
+  gps?: { lat: number | string; lng: number | string } | string;
+  user?: {
+    username?: string;
+    name?: string;
+    role?: string;
+    organization?: string;
+    affiliation?: string;
+  };
+}
+
+export function resolvePrefillValue(
+  label: string,
+  prefillKey?: string,
+  ctx?: FacilityPrefillContext
+): any {
+  if (!ctx) return undefined;
+
+  const labelLower = (label || "").toLowerCase();
+  const fac = ctx.facility || {};
+  const usr = ctx.user || {};
+
+  // 1. Province
+  if (
+    prefillKey === "province" ||
+    (labelLower.includes("province") && !labelLower.includes("provincial hospital"))
+  ) {
+    const prov = fac.province || ctx.province || "";
+    if (prov) return prov;
+  }
+
+  // 2. District
+  if (
+    prefillKey === "district" ||
+    (labelLower.includes("district") && !labelLower.includes("district hospital"))
+  ) {
+    const dist = fac.district || ctx.district || "";
+    if (dist) return dist;
+  }
+
+  // 3. Health Facility Name
+  if (
+    prefillKey === "health_facility" ||
+    (labelLower.includes("health facility") &&
+      !labelLower.includes("type of health facility") &&
+      !labelLower.includes("other health facility") &&
+      !labelLower.includes("which monitor"))
+  ) {
+    const fname = fac.name || ctx.facilityName || "";
+    if (fname) return fname;
+  }
+
+  // 4. Type of Health Facility visited
+  if (
+    prefillKey === "facility_type" ||
+    labelLower.includes("type of health facility")
+  ) {
+    const ftype = fac.type || fac.facilityType || ctx.facilityType || "";
+    if (ftype) return ftype;
+  }
+
+  // 5. GPS location
+  if (
+    prefillKey === "gps_location" ||
+    labelLower.includes("gps location") ||
+    labelLower.includes("gps")
+  ) {
+    if (ctx.gps) {
+      return typeof ctx.gps === "string" ? ctx.gps : `${ctx.gps.lat}, ${ctx.gps.lng}`;
+    }
+    const lat = fac.latitude ?? fac.lat;
+    const lng = fac.longitude ?? fac.lng;
+    if (lat != null && lng != null) {
+      return `${lat}, ${lng}`;
+    }
+  }
+
+  // 6. Date of supportive supervision
+  if (
+    prefillKey === "visit_date_current" ||
+    labelLower.includes("date of supportive supervision") ||
+    labelLower.includes("visit date")
+  ) {
+    const dateVal = ctx.scheduledDate || ctx.visitDate || new Date().toISOString().split("T")[0];
+    return dateVal;
+  }
+
+  // 7. Name of RI Focal Person / OIC
+  if (
+    prefillKey === "focal_person_name" ||
+    prefillKey === "contacted_person_1" ||
+    labelLower.includes("name of ri focal person") ||
+    labelLower.includes("oic")
+  ) {
+    const nameVal = fac.contactPerson || fac.inCharge || fac.contactName || ctx.contactPerson || "";
+    if (nameVal) return nameVal;
+  }
+
+  // 8. Contact no. of RI Focal Person / OIC
+  if (
+    prefillKey === "focal_person_phone" ||
+    labelLower.includes("contact no.") ||
+    labelLower.includes("contact number")
+  ) {
+    const phoneVal = fac.contactPhone || fac.phone || fac.phoneNumber || ctx.contactPhone || "";
+    if (phoneVal) return phoneVal;
+  }
+
+  // 9. Which monitor visited the health facility
+  if (
+    prefillKey === "monitor_type" ||
+    labelLower.includes("which monitor visited")
+  ) {
+    const monVal = usr.organization || usr.affiliation || (usr.role === "national_admin" ? "NDoH" : "PHA/DHO/HF");
+    if (monVal) return monVal;
+  }
+
+  return undefined;
+}
+
+export function autoPrefillChecklist(
+  checklist: ChecklistAnswer[],
+  ctx?: FacilityPrefillContext
+): ChecklistAnswer[] {
+  if (!ctx || !checklist || checklist.length === 0) return checklist;
+
+  return checklist.map((ans) => {
+    // Only prefill if the answer has no value populated yet
+    const hasExisting = ans.value !== undefined && ans.value !== null && ans.value !== "";
+    if (hasExisting) return ans;
+
+    const val = resolvePrefillValue(ans.label, ans.baseKey, ctx);
+    if (val !== undefined && val !== "") {
+      return { ...ans, value: val };
+    }
+
+    return ans;
+  });
+}
+
+function blankAnswerFor(
+  it: ChecklistTemplateItem,
+  key: string,
+  repeatIndex: number,
+  facilityContext?: FacilityPrefillContext
+): ChecklistAnswer {
+  const prefilled = resolvePrefillValue(it.label, it.prefillSourceKey || it.id, facilityContext);
+
   return {
     key,
     baseKey: it.id,
@@ -223,7 +396,7 @@ function blankAnswerFor(it: ChecklistTemplateItem, key: string, repeatIndex: num
     label: it.label,
     type: it.type,
     response: it.type === "yes_no" || it.type === "true_false" ? "" : undefined,
-    value: it.type === "multi_select" ? [] : undefined,
+    value: prefilled !== undefined ? prefilled : (it.type === "multi_select" ? [] : undefined),
     note: "",
     helpText: it.helpText,
     required: it.required,
@@ -240,8 +413,15 @@ function blankAnswerFor(it: ChecklistTemplateItem, key: string, repeatIndex: num
 // Turn an authored template into a blank set of answers for a new visit. Each
 // item seeds a single (entry-0) answer; repeatable questions get extra entries
 // added during the visit.
-export function templateToAnswers(items: ChecklistTemplateItem[]): ChecklistAnswer[] {
-  return (items || []).map((it) => blankAnswerFor(it, it.id, 0));
+export function templateToAnswers(
+  items: ChecklistTemplateItem[],
+  facilityContext?: FacilityPrefillContext
+): ChecklistAnswer[] {
+  const answers = (items || []).map((it) => blankAnswerFor(it, it.id, 0, facilityContext));
+  if (facilityContext) {
+    return autoPrefillChecklist(answers, facilityContext);
+  }
+  return answers;
 }
 
 // Build a fresh, empty repeat entry from an existing answer of the same question.

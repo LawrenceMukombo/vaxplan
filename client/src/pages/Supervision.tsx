@@ -28,6 +28,7 @@ import { GeoCascadeFilter } from "@/components/GeoCascadeFilter";
 import { useAuth } from "@/hooks/useAuth";
 import {
   templateToAnswers,
+  autoPrefillChecklist,
   computeChecklistScore,
   isAnswerVisible,
   makeRepeatAnswer,
@@ -1282,6 +1283,29 @@ function ConductDialog({ visit, facility, onClose, onSave, isSaving }: { visit: 
     },
     enabled: !!(facilityId || visit.facilityId),
   });
+
+  const { user } = useAuth();
+
+  useEffect(() => {
+    if (!prefillBundle && !facility) return;
+    const ctx = {
+      facility: {
+        name: facility?.name || prefillBundle?.facility?.facilityName,
+        province: facility?.province || prefillBundle?.facility?.provinceName,
+        district: facility?.district || prefillBundle?.facility?.districtName,
+        type: facility?.type || facility?.facilityType || prefillBundle?.facility?.facilityType,
+        latitude: facility?.latitude || prefillBundle?.facility?.latitude,
+        longitude: facility?.longitude || prefillBundle?.facility?.longitude,
+        contactPerson: facility?.contactPerson || facility?.inCharge || prefillBundle?.contacts?.person1?.name,
+        contactPhone: facility?.contactPhone || facility?.phone || prefillBundle?.contacts?.person1?.phone,
+      },
+      user: user ? { username: (user as any).username, role: (user as any).role, organization: (user as any).organization } : undefined,
+      visitDate: visit.scheduledDate ? visit.scheduledDate.slice(0, 10) : new Date().toISOString().split("T")[0],
+      gps: gps || undefined,
+    };
+
+    setChecklist((prev) => autoPrefillChecklist(prev, ctx));
+  }, [prefillBundle, facility, user, gps, visit.scheduledDate]);
 
   const [showDataSources, setShowDataSources] = useState(false);
 
