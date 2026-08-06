@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { useLocation } from "wouter";
+import { clearClientAuthStorage, broadcastLogout } from "@/lib/authSession";
 
 // Records page navigations and keeps a logged-in user counted as "online" for
 // the dashboard "Site activity" panel.
@@ -44,6 +45,7 @@ export function useAnalyticsTracker(enabled: boolean) {
   };
 
   const transmit = (path: string, heartbeat: boolean) => {
+    if (!enabled) return;
     if (typeof navigator !== "undefined" && !navigator.onLine) return;
     const body: Record<string, unknown> = { path, heartbeat };
     if (coords.current) {
@@ -56,9 +58,16 @@ export function useAnalyticsTracker(enabled: boolean) {
       credentials: "include",
       body: JSON.stringify(body),
       keepalive: true,
-    }).catch(() => {
-      // non-critical — ignore
-    });
+    })
+      .then((res) => {
+        if (res.status === 401 && typeof window !== "undefined") {
+          clearClientAuthStorage({ reason: "unauthenticated", message: "Session expired. Please sign in again." });
+          broadcastLogout("unauthenticated");
+        }
+      })
+      .catch(() => {
+        // non-critical — ignore
+      });
   };
 
   const send = (path: string, heartbeat: boolean) => {

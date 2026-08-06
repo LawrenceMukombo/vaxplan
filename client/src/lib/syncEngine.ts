@@ -24,6 +24,7 @@ import {
   setDbFingerprint,
 } from "./offlineDb";
 import { onNetworkChange, isOnline } from "./platformNetwork";
+import { clearClientAuthStorage, broadcastLogout } from "./authSession";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -313,6 +314,15 @@ class SyncEngine {
         body: JSON.stringify({ mutations: pending }),
       });
 
+      if (resp.status === 401) {
+        if (typeof window !== "undefined") {
+          clearClientAuthStorage({ reason: "unauthenticated", message: "Session expired. Please sign in again." });
+          broadcastLogout("unauthenticated");
+        }
+        this.setState({ status: "idle", currentStage: "", progressPercent: 0, errorMessage: null });
+        return;
+      }
+
       if (!resp.ok) throw new Error(`Batch sync failed: ${resp.status}`);
 
       const { results } = (await resp.json()) as BatchResult;
@@ -413,6 +423,15 @@ class SyncEngine {
     const resp = await fetch(`/api/sync/pull?${params}`, {
       credentials: "include",
     });
+
+    if (resp.status === 401) {
+      if (typeof window !== "undefined") {
+        clearClientAuthStorage({ reason: "unauthenticated", message: "Session expired. Please sign in again." });
+        broadcastLogout("unauthenticated");
+      }
+      this.setState({ status: "idle", currentStage: "", progressPercent: 0, errorMessage: null });
+      return;
+    }
 
     if (!resp.ok) throw new Error(`Pull failed: ${resp.status}`);
 
