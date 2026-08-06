@@ -197,6 +197,22 @@ export default function SupervisionTemplates() {
     }
   };
 
+  const normalizeQuestionType = (rawType: any): ChecklistQuestionType => {
+    if (!rawType) return "yes_no";
+    const t = String(rawType).toLowerCase().trim();
+    if (t === "select" || t === "single" || t === "choice" || t === "radio" || t === "single_select") return "single_select";
+    if (t === "multiselect" || t === "checkboxes" || t === "multi" || t === "multi_select") return "multi_select";
+    if (t === "num" || t === "integer" || t === "count" || t === "number") return "number";
+    if (t === "photo" || t === "picture" || t === "camera" || t === "image") return "image";
+    if (t === "guidance" || t === "info" || t === "note" || t === "instruction") return "instruction";
+    if (t === "bool" || t === "checkbox" || t === "yesno" || t === "yes_no") return "yes_no";
+    if (t === "yesnona" || t === "yes_no_na") return "yes_no_na";
+    
+    const valid = CHECKLIST_QUESTION_TYPES.find((q) => q.value === t);
+    if (valid) return valid.value;
+    return "text";
+  };
+
   const parseAndAppendQuestions = (rawRows: any[], mode: "append" | "replace") => {
     if (!rawRows || rawRows.length === 0) return;
 
@@ -226,8 +242,18 @@ export default function SupervisionTemplates() {
       }
 
       const qText = r.questionText || r.question || r["Question Text"] || r["Question"] || `Question ${idx + 1}`;
-      const qType = (r.answerType || r.type || r["Answer Type"] || "yes_no").toLowerCase() as ChecklistQuestionType;
-      const opts = typeof r.options === "string" ? r.options.split("|").map((o: string) => o.trim()).filter(Boolean) : (Array.isArray(r.options) ? r.options : []);
+      const rawType = r.answerType || r.type || r["Answer Type"] || r["type"] || "yes_no";
+      const qType = normalizeQuestionType(rawType);
+
+      const rawOpts = r.options || r["Options"] || r["Choices"] || [];
+      const opts = typeof rawOpts === "string" 
+        ? rawOpts.split("|").map((o: string) => o.trim()).filter(Boolean) 
+        : (Array.isArray(rawOpts) ? rawOpts.map((o: any) => String(o).trim()) : []);
+
+      const helpText = r.helpText || r.guidance || r["Help Text"] || r["Guidance"] || null;
+      const condParent = r.conditionalOnQuestionId || r.conditionalOnQuestion || r["Conditional Parent"] || null;
+      const condVal = r.conditionalValue || r["Conditional Value"] || null;
+      const prefill = r.prefillSourceKey || r["Prefill Source"] || null;
 
       newItems.push({
         id: `q-imp-${Date.now()}-${idx}`,
@@ -235,11 +261,12 @@ export default function SupervisionTemplates() {
         label: qText,
         type: qType,
         options: opts,
+        helpText: helpText,
         isScored: r.isScored === true || r.isScored === "true" || r.isScored === 1 || qType === "yes_no" || qType === "yes_no_na",
         weight: parseFloat(r.weight || "1.0") || 1.0,
-        prefillSourceKey: r.prefillSourceKey || r["Prefill Source"] || null,
-        conditionalOnQuestionId: r.conditionalOnQuestionId || null,
-        conditionalValue: r.conditionalValue || null,
+        prefillSourceKey: prefill,
+        conditionalOnQuestionId: condParent,
+        conditionalValue: condVal,
       });
     });
 
@@ -782,23 +809,43 @@ export default function SupervisionTemplates() {
                                     </Button>
                                   </div>
                                 </div>
+                                {it.conditionalOnQuestionId && (
+                                   <div className="flex items-center gap-1.5 text-[10px] text-indigo-600 dark:text-indigo-400 font-semibold bg-indigo-500/10 px-2 py-0.5 rounded w-fit border border-indigo-500/20">
+                                     <GitBranch className="h-3 w-3 shrink-0" />
+                                     <span>Follow-up Q (Ask if parent answer = "{it.conditionalValue || 'Yes'}")</span>
+                                   </div>
+                                 )}
 
-                                {it.isAutoPrefill && (
-                                  <div className="flex items-center gap-1 text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold bg-emerald-500/10 px-2 py-0.5 rounded w-fit">
-                                    <RefreshCw className="h-3 w-3" />
-                                    <span>Auto-Prefill Key: {it.prefillSourceKey || "health_facility"}</span>
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          })
-                        )}
-                      </CardContent>
-                    )}
-                  </Card>
-                );
-              })}
-            </div>
+                                 {it.helpText && (
+                                   <p className="text-[11px] text-muted-foreground italic pl-6">{it.helpText}</p>
+                                 )}
+
+                                 {it.options && it.options.length > 0 && (
+                                   <div className="flex flex-wrap gap-1 pl-6 pt-0.5">
+                                     {it.options.map((opt, oIdx) => (
+                                       <Badge key={oIdx} variant="secondary" className="text-[10px] bg-muted/60 font-normal">
+                                         {opt}
+                                       </Badge>
+                                     ))}
+                                   </div>
+                                 )}
+
+                                 {it.isAutoPrefill && (
+                                   <div className="flex items-center gap-1 text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold bg-emerald-500/10 px-2 py-0.5 rounded w-fit ml-6">
+                                     <RefreshCw className="h-3 w-3" />
+                                     <span>Auto-Prefill Key: {it.prefillSourceKey || "health_facility"}</span>
+                                   </div>
+                                 )}
+                               </div>
+                             );
+                           })
+                         )}
+                       </CardContent>
+                     )}
+                   </Card>
+                 );
+               })}
+             </div>
 
             {/* Right Panel: Selected Question Settings & Logic Drawer */}
             <Card className="lg:col-span-3 border-border/60">
@@ -811,6 +858,65 @@ export default function SupervisionTemplates() {
               <CardContent className="p-3 space-y-4">
                 {selectedItem ? (
                   <div className="space-y-3 text-xs">
+                    <div>
+                      <Label className="text-xs font-semibold">Question Prompt Label</Label>
+                      <Textarea
+                        value={selectedItem.label}
+                        onChange={(e) => {
+                          const label = e.target.value;
+                          setItems((prev) => prev.map((i) => (i.id === selectedItem.id ? { ...i, label } : i)));
+                        }}
+                        placeholder="Question prompt or field title..."
+                        className="text-xs mt-1 h-14 font-medium"
+                        data-testid="input-drawer-question-label"
+                      />
+                    </div>
+
+                    <div>
+                      <Label className="text-xs font-semibold">Question Type</Label>
+                      <Select
+                        value={normalizeQuestionType(selectedItem.type)}
+                        onValueChange={(v: any) =>
+                          setItems((prev) =>
+                            prev.map((i) => (i.id === selectedItem.id ? { ...i, type: v as ChecklistQuestionType } : i))
+                          )
+                        }
+                      >
+                        <SelectTrigger className="h-8 text-xs mt-1 bg-background" data-testid="select-drawer-question-type">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {CHECKLIST_QUESTION_TYPES.map((t) => (
+                            <SelectItem key={t.value} value={t.value} className="text-xs">
+                              {t.label} ({t.value})
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    {(normalizeQuestionType(selectedItem.type) === "single_select" ||
+                      normalizeQuestionType(selectedItem.type) === "multi_select") && (
+                      <div className="space-y-1">
+                        <Label className="text-xs font-semibold">Choice Options (Pipe | Separated)</Label>
+                        <Textarea
+                          value={selectedItem.options ? selectedItem.options.join(" | ") : ""}
+                          onChange={(e) => {
+                            const raw = e.target.value;
+                            const options = raw
+                              .split("|")
+                              .map((o) => o.trim())
+                              .filter(Boolean);
+                            setItems((prev) => prev.map((i) => (i.id === selectedItem.id ? { ...i, options } : i)));
+                          }}
+                          placeholder="Option 1 | Option 2 | Option 3"
+                          className="text-xs h-16 font-mono"
+                          data-testid="input-drawer-options"
+                        />
+                        <p className="text-[10px] text-muted-foreground">Separate each choice with a vertical bar (|).</p>
+                      </div>
+                    )}
+
                     <div>
                       <Label className="text-xs font-semibold">Short Field Label</Label>
                       <Input
@@ -833,7 +939,7 @@ export default function SupervisionTemplates() {
                           setItems((prev) => prev.map((i) => (i.id === selectedItem.id ? { ...i, helpText } : i)));
                         }}
                         placeholder="Instructions for the supervisor..."
-                        className="text-xs mt-1 h-16"
+                        className="text-xs mt-1 h-14"
                       />
                     </div>
 
@@ -841,7 +947,9 @@ export default function SupervisionTemplates() {
                       <Label className="text-xs">Required Field</Label>
                       <Switch
                         checked={!!selectedItem.required}
-                        onCheckedChange={(checked) => setItems((prev) => prev.map((i) => (i.id === selectedItem.id ? { ...i, required: checked } : i)))}
+                        onCheckedChange={(checked) =>
+                          setItems((prev) => prev.map((i) => (i.id === selectedItem.id ? { ...i, required: checked } : i)))
+                        }
                       />
                     </div>
 
@@ -849,8 +957,62 @@ export default function SupervisionTemplates() {
                       <Label className="text-xs">Include in Scoring</Label>
                       <Switch
                         checked={selectedItem.includeInScore !== false}
-                        onCheckedChange={(checked) => setItems((prev) => prev.map((i) => (i.id === selectedItem.id ? { ...i, includeInScore: checked } : i)))}
+                        onCheckedChange={(checked) =>
+                          setItems((prev) => prev.map((i) => (i.id === selectedItem.id ? { ...i, includeInScore: checked } : i)))
+                        }
                       />
+                    </div>
+
+                    {/* Follow-up / Conditional Display Logic */}
+                    <div className="space-y-2 pt-2 border-t border-border/40">
+                      <Label className="text-xs font-semibold flex items-center gap-1.5 text-indigo-600 dark:text-indigo-400">
+                        <GitBranch className="h-3.5 w-3.5" />
+                        Follow-Up / Conditional Display
+                      </Label>
+                      <div>
+                        <Label className="text-[10px] text-muted-foreground">Parent Question (Condition)</Label>
+                        <Select
+                          value={selectedItem.conditionalOnQuestionId || "none"}
+                          onValueChange={(v) => {
+                            const val = v === "none" ? null : v;
+                            setItems((prev) =>
+                              prev.map((i) => (i.id === selectedItem.id ? { ...i, conditionalOnQuestionId: val } : i))
+                            );
+                          }}
+                        >
+                          <SelectTrigger className="h-8 text-xs mt-1" data-testid="select-drawer-conditional-parent">
+                            <SelectValue placeholder="No parent condition (Always show)" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none" className="text-xs text-muted-foreground">
+                              None (Always Visible)
+                            </SelectItem>
+                            {items
+                              .filter((i) => i.id !== selectedItem.id)
+                              .map((i) => (
+                                <SelectItem key={i.id} value={i.id} className="text-xs truncate">
+                                  {i.label.length > 50 ? i.label.slice(0, 50) + "..." : i.label}
+                                </SelectItem>
+                              ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      {selectedItem.conditionalOnQuestionId && (
+                        <div>
+                          <Label className="text-[10px] text-muted-foreground">Show when Parent Answer equals</Label>
+                          <Input
+                            value={selectedItem.conditionalValue || ""}
+                            onChange={(e) => {
+                              const conditionalValue = e.target.value;
+                              setItems((prev) => prev.map((i) => (i.id === selectedItem.id ? { ...i, conditionalValue } : i)));
+                            }}
+                            placeholder="e.g. Yes or No"
+                            className="h-8 text-xs mt-1"
+                            data-testid="input-drawer-conditional-value"
+                          />
+                        </div>
+                      )}
                     </div>
 
                     {/* Auto-Prefill Config */}
@@ -866,7 +1028,7 @@ export default function SupervisionTemplates() {
                             setItems((prev) =>
                               prev.map((i) =>
                                 i.id === selectedItem.id
-                                  ? { ...i, isAutoPrefill: checked, type: checked ? "auto_prefill" : "yes_no" }
+                                  ? { ...i, isAutoPrefill: checked }
                                   : i
                               )
                             )
@@ -898,7 +1060,7 @@ export default function SupervisionTemplates() {
                     </div>
                   </div>
                 ) : (
-                  <p className="text-xs text-muted-foreground text-center py-8">Select a question card to edit its logic and scoring parameters.</p>
+                  <p className="text-xs text-muted-foreground text-center py-8">Select a question card to edit its type, follow-up logic, choices, and scoring parameters.</p>
                 )}
               </CardContent>
             </Card>
