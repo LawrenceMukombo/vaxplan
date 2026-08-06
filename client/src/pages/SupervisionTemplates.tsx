@@ -31,7 +31,7 @@ import {
   MapPin, Image as ImageIcon, ToggleLeft, Hash, Type as TypeIcon, ListChecks,
   CheckSquare, Star, Calendar as CalendarIcon, ShieldAlert, Repeat, GitBranch,
   ChevronDown, ChevronRight, FileUp, Database, Eye, CheckCircle2, AlertTriangle,
-  HelpCircle, Sparkles, Layers, Sliders, Play, Copy, RefreshCw, FileText, Download, Upload, Shuffle
+  HelpCircle, Sparkles, Layers, Sliders, Play, Copy, RefreshCw, FileText, Download, Upload, Shuffle, Save
 } from "lucide-react";
 import {
   CHECKLIST_QUESTION_TYPES,
@@ -78,6 +78,59 @@ const TYPE_ICON: Record<string, any> = {
   auto_prefill: RefreshCw,
 };
 
+export interface TemplateValidationError {
+  type: "title" | "section" | "question_label" | "question_options" | "conditional";
+  message: string;
+  itemId?: string;
+  sectionId?: string;
+}
+
+export function validateTemplate(
+  titleName: string,
+  secList: ChecklistSection[],
+  itemList: ChecklistTemplateItem[]
+): TemplateValidationError[] {
+  const errs: TemplateValidationError[] = [];
+
+  if (!titleName || !titleName.trim()) {
+    errs.push({ type: "title", message: "Checklist Title is required." });
+  }
+
+  if (!secList || secList.length === 0) {
+    errs.push({ type: "section", message: "At least one section must be created." });
+  } else {
+    secList.forEach((s, idx) => {
+      if (!s.title || !s.title.trim()) {
+        errs.push({ type: "section", message: `Section #${idx + 1} is missing a section title.`, sectionId: s.id });
+      }
+    });
+  }
+
+  if (!itemList || itemList.length === 0) {
+    errs.push({ type: "question_label", message: "At least one question is required in the checklist." });
+  } else {
+    itemList.forEach((it, idx) => {
+      if (!it.label || !it.label.trim()) {
+        errs.push({
+          type: "question_label",
+          message: `Question #${idx + 1} prompt cannot be empty.`,
+          itemId: it.id,
+        });
+      }
+      const normType = (it.type || "yes_no").toLowerCase();
+      if ((normType === "single_select" || normType === "multi_select" || normType === "select") && (!it.options || it.options.length === 0)) {
+        errs.push({
+          type: "question_options",
+          message: `Question #${idx + 1} ("${(it.label || "Untitled").slice(0, 35)}") is a choice question but has no choice options specified.`,
+          itemId: it.id,
+        });
+      }
+    });
+  }
+
+  return errs;
+}
+
 function typeLabel(t: string): string {
   return CHECKLIST_QUESTION_TYPES.find((q) => q.value === t)?.label ?? t;
 }
@@ -119,17 +172,13 @@ export default function SupervisionTemplates() {
   const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({});
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
 
-  // Modals
+  // Modals & Validation state
   const [previewOpen, setPreviewOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [questionBankOpen, setQuestionBankOpen] = useState(false);
+  const [validationModalOpen, setValidationModalOpen] = useState(false);
   const [importText, setImportText] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  // Auto-Save state
-  const [autoSaveStatus, setAutoSaveStatus] = useState<"saved" | "saving" | "idle">("idle");
-  const [lastSavedTime, setLastSavedTime] = useState<string | null>(null);
-  const autoSaveTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   // Auto-scroll selected question into view
   useEffect(() => {
@@ -140,43 +189,6 @@ export default function SupervisionTemplates() {
       }
     }
   }, [selectedItemId]);
-
-  // Auto-Save Effect
-  useEffect(() => {
-    if (!editing) return;
-    setAutoSaveStatus("saving");
-    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
-
-    autoSaveTimerRef.current = setTimeout(() => {
-      try {
-        const draftPayload = {
-          editingId: editing.id || 0,
-          name,
-          description,
-          category,
-          applicableLevel,
-          sections,
-          items,
-          savedAt: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
-        };
-        localStorage.setItem("vaxplan_supervision_template_draft", JSON.stringify(draftPayload));
-        setLastSavedTime(draftPayload.savedAt);
-        setAutoSaveStatus("saved");
-      } catch (err) {
-        console.warn("Auto-save draft error:", err);
-      }
-    }, 1000);
-
-    return () => {
-      if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
-    };
-  }, [name, description, category, applicableLevel, sections, items, editing]);
-
-  const clearAutoSaveDraft = () => {
-    localStorage.removeItem("vaxplan_supervision_template_draft");
-    setAutoSaveStatus("idle");
-    setLastSavedTime(null);
-  };
 
   const openEditor = (tpl?: ChecklistTemplate) => {
     if (tpl) {
@@ -242,40 +254,11 @@ export default function SupervisionTemplates() {
       setCategory("supervision");
       setApplicableLevel("facility");
 
-      // Check if saved draft exists
-      const savedDraft = localStorage.getItem("vaxplan_supervision_template_draft");
-      let restoredFromDraft = false;
-      if (savedDraft) {
-        try {
-          const draft = JSON.parse(savedDraft);
-          if (draft.name || (draft.items && draft.items.length > 0)) {
-            setName(draft.name || "");
-            setDescription(draft.description || "");
-            if (draft.category) setCategory(draft.category);
-            if (draft.applicableLevel) setApplicableLevel(draft.applicableLevel);
-            if (Array.isArray(draft.sections) && draft.sections.length > 0) setSections(draft.sections);
-            if (Array.isArray(draft.items) && draft.items.length > 0) {
-              setItems(draft.items);
-              setSelectedItemId(draft.items[0].id);
-            }
-            restoredFromDraft = true;
-            toast({
-              title: "Auto-Saved Draft Restored",
-              description: `Loaded uncommitted template draft from ${draft.savedAt || "previous session"}.`,
-            });
-          }
-        } catch (e) {
-          console.warn("Draft restore parse error:", e);
-        }
-      }
-
-      if (!restoredFromDraft) {
-        const defaultSec = { id: `sec-${Date.now()}`, title: "Facility Readiness & Service Delivery", displayOrder: 1 };
-        setSections([defaultSec]);
-        const initialItem = newItem(defaultSec.id);
-        setItems([initialItem]);
-        setSelectedItemId(initialItem.id);
-      }
+      const defaultSec = { id: `sec-${Date.now()}`, title: "Facility Readiness & Service Delivery", displayOrder: 1 };
+      setSections([defaultSec]);
+      const initialItem = newItem(defaultSec.id);
+      setItems([initialItem]);
+      setSelectedItemId(initialItem.id);
     }
   };
 
@@ -507,8 +490,7 @@ export default function SupervisionTemplates() {
     },
     onSuccess: (resData: any) => {
       queryClient.invalidateQueries({ queryKey: ["/api/supervision-checklist-templates"] });
-      clearAutoSaveDraft();
-      toast({ title: "Template Saved", description: "Supervision checklist template saved successfully." });
+      toast({ title: "Template Saved", description: active ? "Checklist validated and published successfully." : "Draft saved successfully." });
       if (resData && typeof resData === "object" && resData.id) {
         setEditing(resData);
         setIsNew(false);
@@ -527,7 +509,6 @@ export default function SupervisionTemplates() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/supervision-checklist-templates"] });
-      clearAutoSaveDraft();
       toast({ title: "Checklist Deleted", description: "The checklist template has been deleted permanently." });
       setDeletingTemplate(null);
       setEditing(null);
@@ -536,6 +517,36 @@ export default function SupervisionTemplates() {
       toast({ title: "Delete Failed", description: err.message, variant: "destructive" });
     },
   });
+
+  const currentValidationErrors = useMemo(() => {
+    return validateTemplate(name, sections, items);
+  }, [name, sections, items]);
+
+  const isValid = currentValidationErrors.length === 0;
+
+  const handleSaveDraft = () => {
+    setActive(false);
+    setTimeout(() => {
+      saveMutation.mutate();
+    }, 0);
+  };
+
+  const handleSaveAndSubmit = () => {
+    const errs = validateTemplate(name, sections, items);
+    if (errs.length > 0) {
+      setValidationModalOpen(true);
+      toast({
+        title: "Validation Check Failed",
+        description: `Please fix the ${errs.length} validation issue(s) before publishing.`,
+        variant: "destructive",
+      });
+      return;
+    }
+    setActive(true);
+    setTimeout(() => {
+      saveMutation.mutate();
+    }, 0);
+  };
 
   const selectedItem = useMemo(() => items.find((i) => i.id === selectedItemId), [items, selectedItemId]);
 
@@ -683,16 +694,21 @@ export default function SupervisionTemplates() {
               </Select>
             </div>
 
-            {/* ALWAYS-VISIBLE STICKY ADD QUESTION, SHUFFLE & AUTO-SAVE ACTIONS */}
+            {/* ALWAYS-VISIBLE STICKY ADD QUESTION, VALIDATION STATUS, SAVE DRAFT & SAVE AND SUBMIT */}
             <div className="flex items-center gap-2 flex-wrap">
-              {autoSaveStatus === "saving" && (
-                <Badge variant="outline" className="text-amber-600 dark:text-amber-400 bg-amber-500/10 border-amber-500/30 text-[11px] gap-1 animate-pulse" data-testid="badge-autosave-saving">
-                  <RefreshCw className="h-3 w-3 animate-spin" /> Saving draft...
+              {isValid ? (
+                <Badge variant="outline" className="text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border-emerald-500/30 text-[11px] gap-1 font-semibold" data-testid="badge-validation-valid">
+                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" /> 100% Valid ({items.length} Qs)
                 </Badge>
-              )}
-              {autoSaveStatus === "saved" && lastSavedTime && (
-                <Badge variant="outline" className="text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border-emerald-500/30 text-[11px] gap-1" data-testid="badge-autosave-saved">
-                  <CheckCircle2 className="h-3 w-3 text-emerald-500" /> Auto-saved {lastSavedTime}
+              ) : (
+                <Badge
+                  variant="outline"
+                  onClick={() => setValidationModalOpen(true)}
+                  className="text-amber-600 dark:text-amber-400 bg-amber-500/10 border-amber-500/30 text-[11px] gap-1 font-semibold cursor-pointer hover:bg-amber-500/20"
+                  title="Click to view validation issues"
+                  data-testid="badge-validation-warnings"
+                >
+                  <AlertTriangle className="h-3.5 w-3.5 text-amber-500 animate-pulse" /> {currentValidationErrors.length} Issue(s)
                 </Badge>
               )}
 
@@ -746,21 +762,38 @@ export default function SupervisionTemplates() {
                 <Eye className="h-3.5 w-3.5" />
                 Preview Mode
               </Button>
+
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5 border-primary/40 text-primary font-semibold hover:bg-primary/10"
+                onClick={handleSaveDraft}
+                disabled={saveMutation.isPending || !name.trim()}
+                title="Save template as draft without strict validation"
+                data-testid="button-save-draft"
+              >
+                <Save className="h-3.5 w-3.5" />
+                Save Draft
+              </Button>
+
               <Button
                 variant="default"
                 size="sm"
-                className="gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold"
-                onClick={() => saveMutation.mutate()}
-                disabled={saveMutation.isPending || !name.trim()}
+                className={`gap-1.5 font-semibold text-white transition-colors ${
+                  isValid ? "bg-emerald-600 hover:bg-emerald-700 shadow-sm" : "bg-emerald-600/80 hover:bg-emerald-700"
+                }`}
+                onClick={handleSaveAndSubmit}
+                disabled={saveMutation.isPending}
+                title="Run validation checks and save & publish checklist"
+                data-testid="button-save-submit"
               >
                 <CheckCircle2 className="h-4 w-4" />
-                Save & Publish
+                Save & Submit
               </Button>
               <Button
                 variant="ghost"
                 size="sm"
                 onClick={() => {
-                  clearAutoSaveDraft();
                   setEditing(null);
                 }}
               >
@@ -1391,6 +1424,55 @@ export default function SupervisionTemplates() {
           <DialogFooter>
             <Button variant="outline" size="sm" onClick={() => setImportOpen(false)}>
               Cancel
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ─── Validation Issues Summary Dialog ───────────────────────── */}
+      <Dialog open={validationModalOpen} onOpenChange={setValidationModalOpen}>
+        <DialogContent className="max-w-xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-amber-600 dark:text-amber-400 font-bold">
+              <AlertTriangle className="h-5 w-5" />
+              Checklist Validation Summary ({currentValidationErrors.length} Issue{currentValidationErrors.length === 1 ? "" : "s"})
+            </DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground">
+              Please fix the following validation items before submitting this supervision checklist.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-2 py-2 max-h-96 overflow-y-auto">
+            {currentValidationErrors.map((err, idx) => (
+              <div
+                key={idx}
+                className="p-3 rounded-lg border border-amber-500/30 bg-amber-500/10 flex items-center justify-between gap-3 text-xs"
+              >
+                <div className="flex items-center gap-2 text-foreground font-medium flex-1">
+                  <ShieldAlert className="h-4 w-4 text-amber-500 shrink-0" />
+                  <span>{err.message}</span>
+                </div>
+                {err.itemId && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 text-[11px] shrink-0 gap-1 border-amber-500/40 text-amber-600 dark:text-amber-400 hover:bg-amber-500/20 font-semibold"
+                    onClick={() => {
+                      setSelectedItemId(err.itemId!);
+                      setValidationModalOpen(false);
+                    }}
+                  >
+                    <Pencil className="h-3 w-3" />
+                    Fix Question
+                  </Button>
+                )}
+              </div>
+            ))}
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => setValidationModalOpen(false)}>
+              Close & Fix Issues
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -12898,18 +12898,15 @@ export async function registerRoutes(
 
   // GET /api/supervision/templates/import-template — Download Supportive Supervision CSV sample template
   app.get("/api/supervision/templates/import-template", isAuthenticated, requireTenant, async (req: any, res) => {
-    try {
+      const fullCsvPath = "c:/vaxplan/Supportive_Supervision_National_Full_Template.csv";
       const csvPath = "c:/vaxplan/Supportive_Supervision_National_Template.csv";
-      if (_readFileSync && _readFileSync.name) {} // touch
       const fs = await import("fs");
-      if (fs.existsSync(csvPath)) {
+      const targetPath = fs.existsSync(fullCsvPath) ? fullCsvPath : (fs.existsSync(csvPath) ? csvPath : null);
+      if (targetPath) {
         res.setHeader("Content-Type", "text/csv; charset=utf-8");
         res.setHeader("Content-Disposition", 'attachment; filename="Supportive_Supervision_National_Template.csv"');
-        return res.status(200).send(fs.readFileSync(csvPath, "utf-8"));
+        return res.status(200).send(fs.readFileSync(targetPath, "utf-8"));
       }
-    } catch (e) {
-      console.error("Error reading Supportive_Supervision_National_Template.csv:", e);
-    }
 
     const csvHeader = "Section Title,Question Text,Answer Type,Options,Is Scored,Weight,Prefill Source\n";
     const sampleRow1 = "Cold Chain & Equipment,Are all vaccines stored between +2°C and +8°C?,yes_no,Yes | No,true,1.0,cold_chain_temp\n";
