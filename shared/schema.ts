@@ -2261,6 +2261,7 @@ export const supervisionChecklistTemplates = pgTable(
     name: varchar("name", { length: 200 }).notNull(),
     category: varchar("category", { length: 50 }).notNull().default("supervision"),
     description: text("description"),
+    sections: jsonb("sections").default([]).notNull(), // ChecklistSection[]
     items: jsonb("items").default([]).notNull(), // ChecklistTemplateItem[]
     isActive: boolean("is_active").notNull().default(true), // published & usable by lower levels
     createdByUserId: varchar("created_by_user_id").references(() => users.id, { onDelete: "set null" }),

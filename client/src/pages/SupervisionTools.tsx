@@ -366,44 +366,82 @@ export default function SupervisionTools() {
                     ? [Number(facilityObj.latitude), Number(facilityObj.longitude)] as [number, number]
                     : null;
 
-                  return checklistItems.map((c) => {
-                    if (!isAnswerVisible(c, checklistItems)) return null;
-                    const isFollowUp = !!c.parentId;
-                    const repeatIndex = c.repeatIndex ?? 0;
-                    const isEntryZero = repeatIndex === 0;
-                    if (isEntryZero && !isFollowUp) visibleNumber += 1;
+                  const isAnswered = (a: ChecklistAnswer) => {
+                    if (a.response) return true;
+                    if (Array.isArray(a.value)) return a.value.length > 0;
+                    return a.value !== undefined && a.value !== null && a.value !== "";
+                  };
 
-                    const instances = c.repeatable ? checklistItems.filter((x) => (x.baseKey || x.key) === (c.baseKey || c.key)) : [];
-                    const isLastInstance = c.repeatable && instances[instances.length - 1]?.key === c.key;
-                    const entryLabelBase = c.repeatLabel?.trim() || "Entry";
-                    const instanceLabel = c.repeatable ? `${entryLabelBase} ${repeatIndex + 1}` : undefined;
-                    const canAddMore = c.repeatable && (!c.maxRepeats || instances.length < c.maxRepeats);
+                  const groups: { id: string; title: string; items: ChecklistAnswer[] }[] = [];
+                  const map = new Map<string, { id: string; title: string; items: ChecklistAnswer[] }>();
+
+                  checklistItems.forEach((item) => {
+                    const secId = item.sectionId || "sec-default";
+                    const secTitle = item.sectionTitle || "General Supervision Findings";
+                    if (!map.has(secId)) {
+                      const g = { id: secId, title: secTitle, items: [] };
+                      map.set(secId, g);
+                      groups.push(g);
+                    }
+                    map.get(secId)!.items.push(item);
+                  });
+
+                  return groups.map((secGroup) => {
+                    const visibleGroupItems = secGroup.items.filter((c) => isAnswerVisible(c, checklistItems));
+                    if (visibleGroupItems.length === 0) return null;
+                    const groupAnsweredCount = visibleGroupItems.filter(isAnswered).length;
 
                     return (
-                      <div key={c.key} className="space-y-2">
-                        <ChecklistQuestion
-                          item={c}
-                          displayNumber={isEntryZero && !isFollowUp ? visibleNumber : undefined}
-                          instanceLabel={instanceLabel}
-                          onRemove={c.repeatable && !isEntryZero ? () => removeRepeat(c.key) : undefined}
-                          setResp={setResp}
-                          setNote={setNote}
-                          setValue={setValue}
-                          defaultCenter={defaultCenter}
-                        />
-                        {isLastInstance && canAddMore && (
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            className="gap-1.5 ml-1"
-                            onClick={() => addRepeat(c.baseKey || c.key)}
-                            data-testid={`add-repeat-${c.baseKey || c.key}`}
-                          >
-                            <Plus className="h-3.5 w-3.5" /> Add another {entryLabelBase.toLowerCase()}
-                          </Button>
-                        )}
-                      </div>
+                      <Card key={secGroup.id} className="border-border/80 shadow-xs overflow-hidden">
+                        <CardHeader className="p-2.5 bg-muted/40 border-b border-border/50 flex flex-row items-center justify-between">
+                          <span className="font-bold text-xs text-foreground">{secGroup.title}</span>
+                          <Badge variant="secondary" className="text-[10px] font-mono bg-background border border-border/60">
+                            {groupAnsweredCount} / {visibleGroupItems.length} Answered
+                          </Badge>
+                        </CardHeader>
+                        <CardContent className="p-3 space-y-3">
+                          {secGroup.items.map((c) => {
+                            if (!isAnswerVisible(c, checklistItems)) return null;
+                            const isFollowUp = !!c.parentId;
+                            const repeatIndex = c.repeatIndex ?? 0;
+                            const isEntryZero = repeatIndex === 0;
+                            if (isEntryZero && !isFollowUp) visibleNumber += 1;
+
+                            const instances = c.repeatable ? checklistItems.filter((x) => (x.baseKey || x.key) === (c.baseKey || c.key)) : [];
+                            const isLastInstance = c.repeatable && instances[instances.length - 1]?.key === c.key;
+                            const entryLabelBase = c.repeatLabel?.trim() || "Entry";
+                            const instanceLabel = c.repeatable ? `${entryLabelBase} ${repeatIndex + 1}` : undefined;
+                            const canAddMore = c.repeatable && (!c.maxRepeats || instances.length < c.maxRepeats);
+
+                            return (
+                              <div key={c.key} className="space-y-2">
+                                <ChecklistQuestion
+                                  item={c}
+                                  displayNumber={isEntryZero && !isFollowUp ? visibleNumber : undefined}
+                                  instanceLabel={instanceLabel}
+                                  onRemove={c.repeatable && !isEntryZero ? () => removeRepeat(c.key) : undefined}
+                                  setResp={setResp}
+                                  setNote={setNote}
+                                  setValue={setValue}
+                                  defaultCenter={defaultCenter}
+                                />
+                                {isLastInstance && canAddMore && (
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="outline"
+                                    className="gap-1.5 ml-1"
+                                    onClick={() => addRepeat(c.baseKey || c.key)}
+                                    data-testid={`add-repeat-${c.baseKey || c.key}`}
+                                  >
+                                    <Plus className="h-3.5 w-3.5" /> Add another {entryLabelBase.toLowerCase()}
+                                  </Button>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </CardContent>
+                      </Card>
                     );
                   });
                 })()}

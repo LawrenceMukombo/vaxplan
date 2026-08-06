@@ -209,9 +209,16 @@ export default function SupervisionTemplates() {
 
       if (loadedSections.length === 0) {
         if (referencedSecIds.size > 0) {
+          const itemTitleMap = new Map<string, string>();
+          loadedItems.forEach((it) => {
+            if (it.sectionId && it.sectionTitle && !itemTitleMap.has(it.sectionId)) {
+              itemTitleMap.set(it.sectionId, it.sectionTitle);
+            }
+          });
+
           loadedSections = Array.from(referencedSecIds).map((secId, idx) => ({
             id: secId,
-            title: secId === "sec-default" ? "General Supervision Findings" : `Section ${idx + 1}`,
+            title: itemTitleMap.get(secId) || (secId === "sec-default" ? "General Supervision Findings" : `Section ${idx + 1}`),
             displayOrder: idx + 1,
           }));
         } else {
@@ -223,9 +230,10 @@ export default function SupervisionTemplates() {
         const existingSecIds = new Set(loadedSections.map((s) => s.id));
         referencedSecIds.forEach((secId) => {
           if (!existingSecIds.has(secId)) {
+            const foundItem = loadedItems.find((it) => it.sectionId === secId);
             loadedSections.push({
               id: secId,
-              title: secId === "sec-default" ? "General Supervision Findings" : `Additional Section (${secId})`,
+              title: foundItem?.sectionTitle || (secId === "sec-default" ? "General Supervision Findings" : `Section ${loadedSections.length + 1}`),
               displayOrder: loadedSections.length + 1,
             });
           }
@@ -323,6 +331,7 @@ export default function SupervisionTemplates() {
       newItems.push({
         id: `q-imp-${Date.now()}-${idx}`,
         sectionId: matchedSecId,
+        sectionTitle: secTitle,
         label: qText,
         type: qType,
         options: opts,
