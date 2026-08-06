@@ -29,7 +29,9 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
@@ -60,7 +62,8 @@ import {
   Eye,
   Download,
   FileSpreadsheet,
-  FileJson
+  FileJson,
+  Snowflake,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -203,6 +206,83 @@ function resolveDisplayWastageRate(
   }
 
   return legacyCatalogueRate ?? standardRate ?? 10;
+}
+
+export function getProductCategoryGroup(product: { name: string; category: string }): {
+  groupId: "vaccine" | "diluent" | "syringe" | "ppe" | "tally_sheet" | "cold_chain";
+  groupLabel: string;
+  icon: string;
+} {
+  const name = (product.name || "").toLowerCase();
+  const cat = (product.category || "").toLowerCase();
+
+  // 1. Tally Sheets & Administrative Tools
+  if (
+    cat === "recording_tools" ||
+    cat === "stationaries" ||
+    name.includes("tally") ||
+    name.includes("vaccination card") ||
+    name.includes("immunization card") ||
+    name.includes("hbr") ||
+    name.includes("register book") ||
+    name.includes("aefi form") ||
+    name.includes("reporting form")
+  ) {
+    return { groupId: "tally_sheet", groupLabel: "Session Tally Sheets & Administrative Tools", icon: "📋" };
+  }
+
+  // 2. Cold Chain Equipment & Storage Supplies
+  if (
+    cat === "cold_chain" ||
+    cat === "cce" ||
+    name.includes("vaccine carrier") ||
+    name.includes("ice pack") ||
+    name.includes("foam pad") ||
+    name.includes("cold box") ||
+    name.includes("refrigerator") ||
+    name.includes("freezer") ||
+    name.includes("sdd") ||
+    name.includes("fridge-tag") ||
+    name.includes("temperature logger")
+  ) {
+    return { groupId: "cold_chain", groupLabel: "Cold Chain Equipment & Storage Supplies", icon: "❄️" };
+  }
+
+  // 3. Vaccines & Biologicals
+  if (cat === "vaccine" || cat === "biological") {
+    return { groupId: "vaccine", groupLabel: "Vaccines & Biologicals", icon: "💉" };
+  }
+
+  // 4. Diluents
+  if (cat === "diluent" || name.includes("diluent")) {
+    return { groupId: "diluent", groupLabel: "Vaccine Diluents", icon: "💧" };
+  }
+
+  // 5. Syringes & Injection Equipment
+  if (
+    cat === "syringe" ||
+    cat === "safety_box" ||
+    name.includes("syringe") ||
+    name.includes("auto-disable") ||
+    name.includes("reconstitution") ||
+    name.includes("safety box")
+  ) {
+    return { groupId: "syringe", groupLabel: "Syringes & Injection Equipment", icon: "💉" };
+  }
+
+  // 6. PPE & Medical Consumables
+  if (
+    cat === "ppe" ||
+    name.includes("gloves") ||
+    name.includes("mask") ||
+    name.includes("sanitizer") ||
+    name.includes("cotton wool") ||
+    name.includes("swab")
+  ) {
+    return { groupId: "ppe", groupLabel: "PPE & Medical Consumables", icon: "🛡️" };
+  }
+
+  return { groupId: "tally_sheet", groupLabel: "Other Session Supplies", icon: "📦" };
 }
 
 export default function StockLedger() {
@@ -351,6 +431,43 @@ export default function StockLedger() {
 
     return [...vaxItems, ...commItems];
   }, [vaccineConfigs, catalogueCommodities]);
+
+  const groupedCatalogueProducts = useMemo(() => {
+    const map = new Map<
+      string,
+      { groupId: string; groupLabel: string; icon: string; items: typeof allCatalogueProducts }
+    >();
+
+    const order = ["vaccine", "diluent", "syringe", "ppe", "tally_sheet", "cold_chain"];
+
+    allCatalogueProducts.forEach((p) => {
+      const meta = getProductCategoryGroup(p);
+      if (!map.has(meta.groupId)) {
+        map.set(meta.groupId, {
+          groupId: meta.groupId,
+          groupLabel: meta.groupLabel,
+          icon: meta.icon,
+          items: [],
+        });
+      }
+      map.get(meta.groupId)!.items.push(p);
+    });
+
+    return Array.from(map.values()).sort(
+      (a, b) => order.indexOf(a.groupId) - order.indexOf(b.groupId)
+    );
+  }, [allCatalogueProducts]);
+
+  const { data: facilityColdChainEquipment = [] } = useQuery<any[]>({
+    queryKey: ["/api/cold-chain", selectedFacilityId],
+    queryFn: async () => {
+      if (!selectedFacilityId) return [];
+      const res = await fetch(`/api/cold-chain?facilityId=${selectedFacilityId}`);
+      if (!res.ok) return [];
+      return res.json();
+    },
+    enabled: !!selectedFacilityId,
+  });
 
   const { data: catalogueWastageThresholds = [] } = useQuery<CatalogueWastageThreshold[]>({
     queryKey: ["/api/catalogue/wastage-thresholds", "activeOnly"],
@@ -895,6 +1012,38 @@ export default function StockLedger() {
     },
   });
 
+  const selectedProductIdValue = txnForm.watch("productId");
+
+  const selectedProductMeta = useMemo(() => {
+    if (!selectedProductIdValue) return null;
+    const p = allCatalogueProducts.find((c) => c.id === selectedProductIdValue);
+    if (!p) return null;
+    const grp = getProductCategoryGroup(p);
+    return {
+      product: p,
+      group: grp,
+      isVaccine: grp.groupId === "vaccine",
+      isDiluent: grp.groupId === "diluent",
+      isSyringeOrPpe: grp.groupId === "syringe" || grp.groupId === "ppe",
+      isTallySheet: grp.groupId === "tally_sheet",
+      isColdChain: grp.groupId === "cold_chain",
+      showBatchNumber: grp.groupId !== "tally_sheet" && grp.groupId !== "cold_chain",
+      showExpiryDate: grp.groupId !== "tally_sheet" && grp.groupId !== "cold_chain",
+      showVVMStatus: grp.groupId === "vaccine",
+      showEquipmentPicker: grp.groupId === "cold_chain",
+      quantityLabel:
+        grp.groupId === "vaccine"
+          ? "Quantity (Doses)"
+          : grp.groupId === "diluent"
+          ? "Quantity (Vials/Ampoules)"
+          : grp.groupId === "tally_sheet"
+          ? "Quantity (Packs/Sheets/Books)"
+          : grp.groupId === "cold_chain"
+          ? "Quantity (Units)"
+          : "Quantity (Units/Boxes)",
+    };
+  }, [selectedProductIdValue, allCatalogueProducts]);
+
   useEffect(() => {
     if (selectedFacilityId) {
       txnForm.setValue("facilityId", selectedFacilityId);
@@ -1221,10 +1370,14 @@ export default function StockLedger() {
 
       {/* Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-        <TabsList className="grid w-full grid-cols-2 max-w-[400px]">
+        <TabsList className="grid w-full grid-cols-3 max-w-[620px]">
           <TabsTrigger value="ledger" className="gap-1.5">
             <Package className="h-4 w-4" />
             <span>Stock Ledger Cards</span>
+          </TabsTrigger>
+          <TabsTrigger value="coldchain" className="gap-1.5" onClick={() => setLocation("/cold-chain")}>
+            <Snowflake className="h-4 w-4 text-cyan-500" />
+            <span>Cold Chain Inventory ↗</span>
           </TabsTrigger>
           <TabsTrigger value="reports" className="gap-1.5">
             <FileText className="h-4 w-4" />
@@ -2482,10 +2635,17 @@ export default function StockLedger() {
           <Form {...txnForm}>
             <form onSubmit={txnForm.handleSubmit((d) => {
               const product = allCatalogueProducts.find(c => c.id === d.productId);
+              const showBatch = selectedProductMeta ? selectedProductMeta.showBatchNumber : true;
+              const showExpiry = selectedProductMeta ? selectedProductMeta.showExpiryDate : true;
+              const showVVM = selectedProductMeta ? selectedProductMeta.showVVMStatus : true;
+
               saveTxnMutation.mutate({
                 ...d,
                 vaccineName: product?.name || "",
                 productCode: product?.code || "",
+                batchNumber: showBatch ? (d.batchNumber || "N/A") : "N/A",
+                expiryDate: showExpiry ? (d.expiryDate || new Date().toISOString().split("T")[0]) : new Date("2099-12-31").toISOString().split("T")[0],
+                vvmStatus: showVVM ? d.vvmStatus : 1,
               });
             })} className="space-y-4 pt-4">
               <FormField
@@ -2497,14 +2657,22 @@ export default function StockLedger() {
                     <Select onValueChange={(val) => field.onChange(parseInt(val))} value={field.value?.toString() || ""}>
                       <FormControl>
                         <SelectTrigger>
-                          <SelectValue placeholder="Pick vaccine or session supply" />
+                          <SelectValue placeholder="Pick vaccine, supply, or tally sheet" />
                         </SelectTrigger>
                       </FormControl>
-                      <SelectContent>
-                        {allCatalogueProducts.map((c) => (
-                          <SelectItem key={c.id} value={c.id.toString()}>
-                            {c.name} {c.category !== "vaccine" ? `[${c.category.toUpperCase()}]` : ""}
-                          </SelectItem>
+                      <SelectContent className="max-h-[350px]">
+                        {groupedCatalogueProducts.map((group) => (
+                          <SelectGroup key={group.groupId}>
+                            <SelectLabel className="px-2 py-1 text-xs font-bold uppercase text-muted-foreground bg-muted/30 flex items-center gap-1.5 sticky top-0 backdrop-blur">
+                              <span>{group.icon}</span>
+                              <span>{group.groupLabel}</span>
+                            </SelectLabel>
+                            {group.items.map((c) => (
+                              <SelectItem key={c.id} value={c.id.toString()}>
+                                {c.name}
+                              </SelectItem>
+                            ))}
+                          </SelectGroup>
                         ))}
                       </SelectContent>
                     </Select>
@@ -2529,8 +2697,8 @@ export default function StockLedger() {
                         <SelectContent>
                           <SelectItem value="receipt">Receipt (Arrival)</SelectItem>
                           <SelectItem value="issue">Issue (Deployment)</SelectItem>
-                          <SelectItem value="loss">Loss (Wastage)</SelectItem>
-                          <SelectItem value="adjustment">Adjustment (+)</SelectItem>
+                          <SelectItem value="loss">Loss (Wastage / Damage)</SelectItem>
+                          <SelectItem value="adjustment">Adjustment (+/-)</SelectItem>
                         </SelectContent>
                       </Select>
                       <FormMessage />
@@ -2543,12 +2711,13 @@ export default function StockLedger() {
                   name="quantityDoses"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Quantity (Doses)</FormLabel>
+                      <FormLabel>{selectedProductMeta?.quantityLabel || "Quantity"}</FormLabel>
                       <FormControl>
                         <Input
                           type="number"
+                          min={1}
                           {...field}
-                          onChange={(e) => field.onChange(parseInt(e.target.value))}
+                          onChange={(e) => field.onChange(parseInt(e.target.value) || 0)}
                         />
                       </FormControl>
                       <FormMessage />
@@ -2557,63 +2726,106 @@ export default function StockLedger() {
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <FormField
-                  control={txnForm.control}
-                  name="batchNumber"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Batch Number</FormLabel>
-                      <FormControl>
-                        <Input placeholder="e.g. BCG-9923" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
+              {/* Linked Cold Chain Equipment Picker (Only for Cold Chain Equipment items) */}
+              {selectedProductMeta?.showEquipmentPicker && (
+                <div className="p-3 bg-cyan-500/10 border border-cyan-500/30 rounded-lg space-y-2">
+                  <FormLabel className="text-xs font-semibold text-cyan-700 dark:text-cyan-300 flex items-center gap-1.5">
+                    <span>❄️ Linked Cold Chain Equipment (Inventory)</span>
+                  </FormLabel>
+                  <Select
+                    onValueChange={(val) => {
+                      const equip = facilityColdChainEquipment.find((e: any) => String(e.id) === val);
+                      if (equip) {
+                        txnForm.setValue("notes", `Linked Equipment: ${equip.brand || ""} ${equip.model || equip.equipmentType} (Serial: ${equip.serialNumber || "N/A"}) - ${equip.condition || "Working"}`);
+                      }
+                    }}
+                  >
+                    <SelectTrigger className="bg-background">
+                      <SelectValue placeholder="Pick registered facility cold chain unit..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {facilityColdChainEquipment.length > 0 ? (
+                        facilityColdChainEquipment.map((eq: any) => (
+                          <SelectItem key={eq.id} value={eq.id.toString()}>
+                            [{eq.equipmentType?.toUpperCase()}] {eq.brand} {eq.model} — {eq.condition || "Working"} (SN: {eq.serialNumber || "N/A"})
+                          </SelectItem>
+                        ))
+                      ) : (
+                        <SelectItem value="__none__" disabled>
+                          No registered cold chain equipment found for this facility
+                        </SelectItem>
+                      )}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-[11px] text-muted-foreground">
+                    Pulls active equipment records directly from the Cold Chain Inventory tab.
+                  </p>
+                </div>
+              )}
 
-                <FormField
-                  control={txnForm.control}
-                  name="expiryDate"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Expiry Date</FormLabel>
-                      <FormControl>
-                        <Input type="date" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <FormField
-                  control={txnForm.control}
-                  name="vvmStatus"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>VVM Status</FormLabel>
-                      <Select
-                        onValueChange={(v) => field.onChange(parseInt(v))}
-                        defaultValue={field.value.toString()}
-                      >
+              {/* Batch Number & Expiry Date (Hidden for Session Tally Sheets & Cold Chain Equipment) */}
+              {(selectedProductMeta ? selectedProductMeta.showBatchNumber : true) && (
+                <div className="grid grid-cols-2 gap-4">
+                  <FormField
+                    control={txnForm.control}
+                    name="batchNumber"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Batch Number</FormLabel>
                         <FormControl>
-                          <SelectTrigger>
-                            <SelectValue placeholder="VVM" />
-                          </SelectTrigger>
+                          <Input placeholder="e.g. BCG-9923" {...field} />
                         </FormControl>
-                        <SelectContent>
-                          <SelectItem value="1">Stage 1: Good</SelectItem>
-                          <SelectItem value="2">Stage 2: Use First</SelectItem>
-                          <SelectItem value="3">Stage 3: Discard</SelectItem>
-                          <SelectItem value="4">Stage 4: Discarded</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={txnForm.control}
+                    name="expiryDate"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Expiry Date</FormLabel>
+                        <FormControl>
+                          <Input type="date" {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+              )}
+
+              {/* VVM Status & Supplier/Recipient */}
+              <div className={(selectedProductMeta ? selectedProductMeta.showVVMStatus : true) ? "grid grid-cols-2 gap-4" : "space-y-4"}>
+                {(selectedProductMeta ? selectedProductMeta.showVVMStatus : true) && (
+                  <FormField
+                    control={txnForm.control}
+                    name="vvmStatus"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>VVM Status</FormLabel>
+                        <Select
+                          onValueChange={(v) => field.onChange(parseInt(v))}
+                          defaultValue={field.value?.toString() || "1"}
+                        >
+                          <FormControl>
+                            <SelectTrigger>
+                              <SelectValue placeholder="VVM Stage" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            <SelectItem value="1">Stage 1: Good</SelectItem>
+                            <SelectItem value="2">Stage 2: Use First</SelectItem>
+                            <SelectItem value="3">Stage 3: Discard</SelectItem>
+                            <SelectItem value="4">Stage 4: Discarded</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                )}
 
                 <FormField
                   control={txnForm.control}
@@ -2622,7 +2834,7 @@ export default function StockLedger() {
                     <FormItem>
                       <FormLabel>Supplier / Recipient</FormLabel>
                       <FormControl>
-                        <Input placeholder="e.g. National Store" {...field} />
+                        <Input placeholder="e.g. National Store / Health Center" {...field} />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
