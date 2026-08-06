@@ -536,12 +536,15 @@ export default function SupervisionTemplates() {
                             <div
                               key={q.id}
                               onClick={() => setSelectedItemId(q.id)}
-                              className={`p-1 rounded cursor-pointer truncate flex items-center justify-between ${
-                                selectedItemId === q.id ? "bg-primary/10 font-semibold text-primary" : "hover:bg-muted text-muted-foreground"
+                              className={`p-1.5 rounded cursor-pointer truncate flex items-center justify-between transition-colors ${
+                                selectedItemId === q.id ? "bg-primary/10 font-bold text-primary border border-primary/30" : "hover:bg-muted text-muted-foreground"
                               }`}
                             >
-                              <span className="truncate">{q.label || "Untitled Question"}</span>
-                              {q.isAutoPrefill && <RefreshCw className="h-3 w-3 text-emerald-500 shrink-0 ml-1" />}
+                              <span className="truncate flex-1">{q.label || "Untitled Question"}</span>
+                              <div className="flex items-center gap-1 shrink-0 ml-1">
+                                <Pencil className="h-3 w-3 text-muted-foreground hover:text-primary" />
+                                {q.isAutoPrefill && <RefreshCw className="h-3 w-3 text-emerald-500" />}
+                              </div>
                             </div>
                           ))}
                         </div>
@@ -629,10 +632,42 @@ export default function SupervisionTemplates() {
                                         ))}
                                       </SelectContent>
                                     </Select>
-                                    <Button variant="ghost" size="sm" onClick={() => duplicateQuestion(it)} className="h-7 w-7 p-0">
+                                    <Button
+                                      variant={selectedItemId === it.id ? "default" : "outline"}
+                                      size="sm"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setSelectedItemId(it.id);
+                                      }}
+                                      className="h-7 px-2.5 text-xs gap-1 border-primary/40 text-primary hover:bg-primary/10 font-semibold"
+                                      title="Edit question logic, options, and parameters"
+                                      data-testid={`edit-question-${it.id}`}
+                                    >
+                                      <Pencil className="h-3.5 w-3.5" />
+                                      <span>Edit</span>
+                                    </Button>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        duplicateQuestion(it);
+                                      }}
+                                      className="h-7 w-7 p-0"
+                                      title="Duplicate Question"
+                                    >
                                       <Copy className="h-3.5 w-3.5" />
                                     </Button>
-                                    <Button variant="ghost" size="sm" onClick={() => deleteQuestion(it.id)} className="h-7 w-7 p-0 text-destructive">
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        deleteQuestion(it.id);
+                                      }}
+                                      className="h-7 w-7 p-0 text-destructive"
+                                      title="Delete Question"
+                                    >
                                       <Trash2 className="h-3.5 w-3.5" />
                                     </Button>
                                   </div>
