@@ -5,6 +5,7 @@ import {
   provinces,
   tenants,
   users,
+  facilityStaff,
   populationData,
   sessionPlans,
 } from "@shared/schema";
@@ -16,12 +17,16 @@ export interface SupervisionPrefillBundle {
     facilityName: string;
     hmisCode: string;
     facilityType: string;
+    latitude: number | null;
+    longitude: number | null;
     districtId: number | null;
     districtName: string;
     provinceId: number | null;
     provinceName: string;
     countryId: string;
     countryName: string;
+    contactPerson?: string | null;
+    contactPhone?: string | null;
   };
   visit: {
     currentVisitDate: string;
@@ -112,39 +117,73 @@ export async function getSupervisionPrefillBundle(
     warnings.push("No previous supervision visit record found for this facility.");
   }
 
-  // 3. Fetch Staff Contacts
+  // 3. Fetch Staff Contacts (Check facilityStaff first, then users, then facility master)
   let person1: { name: string; responsibility: string; source: string } | undefined;
   let person2: { name: string; responsibility: string; source: string } | undefined;
   let person3: { name: string; responsibility: string; source: string } | undefined;
 
-  const staffList = await db
-    .select()
-    .from(users)
-    .where(and(eq(users.tenantId, tenantId), eq(users.facilityId, facilityId)))
-    .limit(5);
+  let staffList: any[] = [];
+  try {
+    staffList = await db
+      .select()
+      .from(facilityStaff)
+      .where(and(eq(facilityStaff.tenantId, tenantId), eq(facilityStaff.facilityId, facilityId)))
+      .limit(5);
+  } catch (err) {
+    // fallback
+  }
 
-  if (staffList.length > 0) {
+  if (staffList && staffList.length > 0) {
     person1 = {
-      name: `${staffList[0].firstName || ''} ${staffList[0].lastName || ''}`.trim() || staffList[0].email || "Facility Staff",
-      responsibility: staffList[0].role || "Facility In-Charge",
+      name: staffList[0].fullName || staffList[0].name || "Facility Staff",
+      responsibility: staffList[0].position || staffList[0].role || "Facility In-Charge",
       source: "staff_roster",
     };
     if (staffList.length > 1) {
       person2 = {
-        name: `${staffList[1].firstName || ''} ${staffList[1].lastName || ''}`.trim() || staffList[1].email || "EPI Officer",
-        responsibility: staffList[1].role || "EPI Focal Person",
+        name: staffList[1].fullName || staffList[1].name || "EPI Officer",
+        responsibility: staffList[1].position || staffList[1].role || "EPI Focal Person",
         source: "staff_roster",
       };
     }
     if (staffList.length > 2) {
       person3 = {
-        name: `${staffList[2].firstName || ''} ${staffList[2].lastName || ''}`.trim() || staffList[2].email || "Cold Chain Staff",
-        responsibility: staffList[2].role || "Cold Chain Nurse",
+        name: staffList[2].fullName || staffList[2].name || "Cold Chain Staff",
+        responsibility: staffList[2].position || staffList[2].role || "Cold Chain Nurse",
         source: "staff_roster",
       };
     }
   } else {
-    warnings.push("No facility in-charge or staff roster entries found for this facility.");
+    const userList = await db
+      .select()
+      .from(users)
+      .where(and(eq(users.tenantId, tenantId), eq(users.facilityId, facilityId)))
+      .limit(5);
+
+    if (userList && userList.length > 0) {
+      person1 = {
+        name: `${userList[0].firstName || ''} ${userList[0].lastName || ''}`.trim() || userList[0].email || "Facility Staff",
+        responsibility: userList[0].role || "Facility In-Charge",
+        source: "user_roster",
+      };
+      if (userList.length > 1) {
+        person2 = {
+          name: `${userList[1].firstName || ''} ${userList[1].lastName || ''}`.trim() || userList[1].email || "EPI Officer",
+          responsibility: userList[1].role || "EPI Focal Person",
+          source: "user_roster",
+        };
+      }
+    } else if ((facility as any).contactPerson || (facility as any).inCharge) {
+      const cName = ((facility as any).contactPerson || (facility as any).inCharge || "").trim();
+      const cPhone = (facility.contactPhone || (facility as any).phone || "").trim();
+      person1 = {
+        name: cName + (cPhone ? ` (${cPhone})` : ""),
+        responsibility: "Facility In-Charge",
+        source: "facility_master",
+      };
+    } else {
+      warnings.push("No facility in-charge or staff roster entries found for this facility.");
+    }
   }
 
   // 4. Fetch Population Denominators
@@ -203,12 +242,16 @@ export async function getSupervisionPrefillBundle(
       facilityName: facility.name,
       hmisCode: facility.hmisCode || `FAC-${facility.id}`,
       facilityType: facility.facilityType || "Health Facility",
+      latitude: facility.latitude != null ? Number(facility.latitude) : null,
+      longitude: facility.longitude != null ? Number(facility.longitude) : null,
       districtId: district ? district.id : null,
       districtName: district ? district.name : "N/A",
       provinceId: province ? province.id : null,
       provinceName: province ? province.name : "N/A",
       countryId: tenant ? tenant.id : tenantId,
       countryName: tenant ? tenant.name : tenantId,
+      contactPerson: (facility as any).contactPerson || (facility as any).inCharge || null,
+      contactPhone: facility.contactPhone || (facility as any).phone || null,
     },
     visit: {
       currentVisitDate: formattedVisitDate,

@@ -226,10 +226,10 @@ export interface FacilityPrefillContext {
     district?: string;
     type?: string;
     facilityType?: string;
-    latitude?: number | string;
-    longitude?: number | string;
-    lat?: number | string;
-    lng?: number | string;
+    latitude?: number | string | null;
+    longitude?: number | string | null;
+    lat?: number | string | null;
+    lng?: number | string | null;
     contactPerson?: string;
     inCharge?: string;
     contactName?: string;

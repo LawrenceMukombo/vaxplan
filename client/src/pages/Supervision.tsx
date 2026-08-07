@@ -1312,20 +1312,28 @@ function ConductDialog({ visit, facility, onClose, onSave, isSaving }: { visit: 
 
   useEffect(() => {
     if (!prefillBundle && !facility) return;
+
+    const lat = facility?.latitude != null ? Number(facility.latitude) : (prefillBundle?.facility?.latitude != null ? Number(prefillBundle.facility.latitude) : null);
+    const lng = facility?.longitude != null ? Number(facility.longitude) : (prefillBundle?.facility?.longitude != null ? Number(prefillBundle.facility.longitude) : null);
+
+    if (!gps && lat != null && lng != null) {
+      setGps({ lat, lng });
+    }
+
     const ctx = {
       facility: {
         name: facility?.name || prefillBundle?.facility?.facilityName,
         province: facility?.province || prefillBundle?.facility?.provinceName,
         district: facility?.district || prefillBundle?.facility?.districtName,
         type: facility?.type || facility?.facilityType || prefillBundle?.facility?.facilityType,
-        latitude: facility?.latitude || prefillBundle?.facility?.latitude,
-        longitude: facility?.longitude || prefillBundle?.facility?.longitude,
+        latitude: lat,
+        longitude: lng,
         contactPerson: facility?.contactPerson || facility?.inCharge || prefillBundle?.contacts?.person1?.name,
         contactPhone: facility?.contactPhone || facility?.phone || prefillBundle?.contacts?.person1?.phone,
       },
       user: user ? { username: (user as any).username, role: (user as any).role, organization: (user as any).organization } : undefined,
       visitDate: visit.scheduledDate ? visit.scheduledDate.slice(0, 10) : new Date().toISOString().split("T")[0],
-      gps: gps || undefined,
+      gps: gps || (lat != null && lng != null ? { lat, lng } : undefined),
     };
 
     setChecklist((prev) => autoPrefillChecklist(prev, ctx));
@@ -1377,7 +1385,7 @@ function ConductDialog({ visit, facility, onClose, onSave, isSaving }: { visit: 
                 </div>
                 <div>
                   <span className="text-[10px] text-muted-foreground">Contacted Staff</span>
-                  <div className="font-semibold text-foreground truncate">{prefillBundle.contacts?.person1?.name || "Not rostered"}</div>
+                  <div className="font-semibold text-foreground truncate">{prefillBundle.contacts?.person1?.name || prefillBundle.facility.contactPerson || "Not rostered"}</div>
                   <div className="text-[9px] text-muted-foreground truncate">{prefillBundle.contacts?.person1?.responsibility || "In-Charge"}</div>
                 </div>
               </div>
@@ -1428,6 +1436,7 @@ function ConductDialog({ visit, facility, onClose, onSave, isSaving }: { visit: 
           </Card>
         )}
 
+        {/* Form Conduct Body */}
         <Tabs defaultValue="checklist" className="mt-2">
           <TabsList>
             <TabsTrigger value="checklist">Checklist</TabsTrigger>
@@ -1435,51 +1444,53 @@ function ConductDialog({ visit, facility, onClose, onSave, isSaving }: { visit: 
           </TabsList>
 
           <TabsContent value="checklist" className="space-y-3 mt-3">
-            {/* Progress + live score header */}
-            <div className="rounded-xl border bg-gradient-to-br from-primary/5 to-transparent p-4 space-y-3 sticky top-0 z-10 backdrop-blur supports-[backdrop-filter]:bg-background/70">
-              <div className="flex items-center justify-between gap-3 flex-wrap">
-                <div className="flex items-center gap-2 text-sm font-medium">
-                  <ListChecks className="h-4 w-4 text-primary" />
-                  {answeredCount} of {totalCount} answered
-                </div>
-                <Badge variant="outline" className={`text-sm ${score >= 80 ? STATUS_STYLES.conducted : score >= 60 ? "bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/30" : STATUS_STYLES.missed}`}>
-                  Current score: {score}%
-                </Badge>
-              </div>
-              <Progress value={pct} className="h-2" data-testid="checklist-progress" />
-              <p className="text-xs text-muted-foreground">
-                Score = average of the scored questions (Yes/No, True/False, and any ratings the author counts). Follow-up questions appear based on earlier answers.
-              </p>
+            {/* Progress header & checklist overall score */}
+            <div className="flex flex-col gap-1.5 bg-muted/30 p-3 rounded-lg border">
+            <div className="flex items-center justify-between text-xs font-medium">
+              <span className="flex items-center gap-1.5">
+                <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                <span>{answeredCount} of {totalCount} answered</span>
+              </span>
+              <Badge variant={pct === 100 ? "default" : "secondary"} className="font-mono text-xs">
+                Current score: {score}%
+              </Badge>
             </div>
+            <Progress value={pct} className="h-1.5" />
+            <p className="text-xs text-muted-foreground">
+              Score = average of the scored questions (Yes/No, True/False, and any ratings the author counts). Follow-up questions appear based on earlier answers.
+            </p>
+          </div>
 
-            {/* Visit location — smart Province → District → Facility cascade + GPS */}
-            <div className="rounded-xl border bg-card p-4 space-y-3" data-testid="conduct-location-card">
-              <div className="flex items-center gap-2 text-sm font-semibold">
-                <MapPinned className="h-4 w-4 text-indigo-500" /> Visit location
-              </div>
-              <p className="text-xs text-muted-foreground">
-                Confirm where this visit took place. Pick the Province, District and Health Facility, then capture the on-site GPS point.
-              </p>
-              <FacilityCascadePicker
-                value={facilityId}
-                onChange={(id) => setFacilityId(id)}
-                showLabels
-              />
-              <LocationPickerMap
-                value={gps}
-                defaultCenter={
-                  facility?.latitude != null && facility?.longitude != null
-                    ? [Number(facility.latitude), Number(facility.longitude)]
-                    : null
-                }
-                onChange={(loc) => setGps({ lat: loc.lat, lng: loc.lng, accuracy: loc.accuracy })}
-              />
+          {/* Visit location — smart Province → District → Facility cascade + GPS */}
+          <div className="rounded-xl border bg-card p-4 space-y-3" data-testid="conduct-location-card">
+            <div className="flex items-center gap-2 text-sm font-semibold">
+              <MapPinned className="h-4 w-4 text-indigo-500" /> Visit location
             </div>
-            {groupedConductSections.map((secGroup) => {
-              const visibleGroupItems = secGroup.items.filter((c) => isAnswerVisible(c, checklist));
-              if (visibleGroupItems.length === 0) return null;
-              const isCollapsed = collapsedConductSections[secGroup.id];
-              const groupAnsweredCount = visibleGroupItems.filter(isAnswered).length;
+            <p className="text-xs text-muted-foreground">
+              Confirm where this visit took place. Pick the Province, District and Health Facility, then capture the on-site GPS point.
+            </p>
+            <FacilityCascadePicker
+              value={facilityId}
+              onChange={(id) => setFacilityId(id)}
+              showLabels
+            />
+            <LocationPickerMap
+              value={gps}
+              defaultCenter={
+                facility?.latitude != null && facility?.longitude != null
+                  ? [Number(facility.latitude), Number(facility.longitude)]
+                  : prefillBundle?.facility?.latitude != null && prefillBundle?.facility?.longitude != null
+                    ? [Number(prefillBundle.facility.latitude), Number(prefillBundle.facility.longitude)]
+                    : null
+              }
+              onChange={(loc) => setGps({ lat: loc.lat, lng: loc.lng, accuracy: loc.accuracy })}
+            />
+          </div>
+          {groupedConductSections.map((secGroup) => {
+            const visibleGroupItems = secGroup.items.filter((c) => isAnswerVisible(c, checklist));
+            if (visibleGroupItems.length === 0) return null;
+            const isCollapsed = collapsedConductSections[secGroup.id];
+            const groupAnsweredCount = visibleGroupItems.filter(isAnswered).length;
 
               return (
                 <Card key={secGroup.id} className="border-border/80 shadow-xs overflow-hidden">

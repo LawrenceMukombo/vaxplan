@@ -111,26 +111,21 @@ export default function LocationPickerMap({ value, onChange, defaultCenter, heig
     );
   };
 
+  const activePin: [number, number] | null = value
+    ? [value.lat, value.lng]
+    : defaultCenter || null;
+
   return (
     <div className="space-y-2">
       <div className="rounded-lg overflow-hidden border" style={{ height }}>
         <MapContainer center={start} zoom={startZoom} style={{ height: "100%", width: "100%" }} scrollWheelZoom>
-          {/* Commented out original static TileLayer and replaced with dynamic BasemapTileLayer */}
-          {/*
-          <TileLayer
-            attribution={CARTO_POSITRON_ATTRIBUTION}
-            url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
-            maxNativeZoom={19}
-            maxZoom={22}
-          />
-          */}
           <BasemapTileLayer basemap={basemap} />
           <InvalidateSize />
           <ClickToPlace onPick={(lat, lng) => onChange({ lat, lng })} />
           <FlyTo center={flyCenter} />
-          {value && (
+          {activePin && (
             <Marker
-              position={[value.lat, value.lng]}
+              position={activePin}
               icon={PIN_ICON}
               draggable
               eventHandlers={{
