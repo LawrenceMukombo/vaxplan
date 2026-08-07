@@ -345,17 +345,28 @@ export default function SupervisionTemplates() {
     });
 
     const updatedSectionsList = Object.values(newSectionsMap);
-    setSections(updatedSectionsList);
+    const finalItemsList = mode === "replace" ? newItems : [...items, ...newItems];
 
-    if (mode === "replace") {
-      setItems(newItems);
-    } else {
-      setItems((prev) => [...prev, ...newItems]);
-    }
+    // Auto-prune any section that has 0 questions after import (e.g. empty default initial section)
+    const sectionCounts = new Map<string, number>();
+    finalItemsList.forEach((it) => {
+      if (it.sectionId) {
+        sectionCounts.set(it.sectionId, (sectionCounts.get(it.sectionId) || 0) + 1);
+      }
+    });
+
+    const activeSections = updatedSectionsList.filter(
+      (s) => (sectionCounts.get(s.id) || 0) > 0
+    );
+
+    const finalSectionsList = activeSections.length > 0 ? activeSections : updatedSectionsList;
+
+    setSections(finalSectionsList.map((s, idx) => ({ ...s, displayOrder: idx + 1 })));
+    setItems(finalItemsList);
 
     toast({
       title: "Questions Imported",
-      description: `Successfully loaded ${newItems.length} questions into ${updatedSectionsList.length} sections.`,
+      description: `Successfully loaded ${newItems.length} questions into ${finalSectionsList.length} sections.`,
     });
     setImportOpen(false);
   };
