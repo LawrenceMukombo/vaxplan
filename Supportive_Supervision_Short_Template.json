@@ -1,0 +1,330 @@
+{
+  "name": "Short Supportive Supervision Checklist Template",
+  "category": "supervision",
+  "description": "Streamlined 35-question Supportive Supervision Checklist across 7 core EPI sections (5 questions per section) for rapid facility visits.",
+  "version": 1,
+  "isActive": true,
+  "questions": [
+    {
+      "sectionTitle": "Availability of RI Services",
+      "questionText": "[1] Are routine EPI/immunization services being provided at this site?",
+      "answerType": "yes_no",
+      "options": ["Yes", "No"],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Availability of RI Services",
+      "questionText": "[2] Is there trained health facility staff conducting routine immunization?",
+      "answerType": "yes_no",
+      "options": ["Yes", "No"],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Availability of RI Services",
+      "questionText": "[3] Has HF staff received EPI training within the last 2 years?",
+      "answerType": "yes_no",
+      "options": ["Yes", "No"],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Availability of RI Services",
+      "questionText": "[4] Is there an updated Health Facility RI micro-plan on site?",
+      "answerType": "yes_no",
+      "options": ["Yes", "No"],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Availability of RI Services",
+      "questionText": "[5] Is a copy of the National EPI Field Manual available at the facility?",
+      "answerType": "yes_no",
+      "options": ["Yes", "No"],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+
+    {
+      "sectionTitle": "RI Session Monitoring",
+      "questionText": "[6] How many Fixed Site sessions were planned vs conducted last month?",
+      "answerType": "text",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "RI Session Monitoring",
+      "questionText": "[7] How many Outreach/Mobile visits were conducted during the last month?",
+      "answerType": "number",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "RI Session Monitoring",
+      "questionText": "[8] Were any immunization sessions cancelled during the previous month?",
+      "answerType": "yes_no",
+      "options": ["Yes", "No"],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "RI Session Monitoring",
+      "questionText": "[9] Are session tally sheets filled correctly and available for review?",
+      "answerType": "yes_no",
+      "options": ["Yes", "No"],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "RI Session Monitoring",
+      "questionText": "[10] Are defaulter tracking lists updated and used for follow-up?",
+      "answerType": "yes_no",
+      "options": ["Yes", "No"],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+
+    {
+      "sectionTitle": "Advocacy & Social Mobilization",
+      "questionText": "[11] Does the facility have an active Advocacy & Social Mobilization (ACS) plan?",
+      "answerType": "yes_no",
+      "options": ["Yes", "No"],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Advocacy & Social Mobilization",
+      "questionText": "[12] Are there active community health committees (VHCC/HC) supporting immunization?",
+      "answerType": "yes_no",
+      "options": ["Yes", "No"],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Advocacy & Social Mobilization",
+      "questionText": "[13] Are active community mobilizers/volunteers engaged in social mobilization?",
+      "answerType": "yes_no",
+      "options": ["Yes", "No"],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Advocacy & Social Mobilization",
+      "questionText": "[14] Does the health facility have and display IEC materials for routine immunization?",
+      "answerType": "yes_no",
+      "options": ["Yes", "No"],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Advocacy & Social Mobilization",
+      "questionText": "[15] Is there a social mobilization strategy for Hard-To-Reach (HTR) populations?",
+      "answerType": "yes_no",
+      "options": ["Yes", "No"],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+
+    {
+      "sectionTitle": "Community Engagement & Caregiver Survey",
+      "questionText": "[16] Are caregivers satisfied with the immunization services provided at the facility?",
+      "answerType": "yes_no",
+      "options": ["Yes", "No"],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Community Engagement & Caregiver Survey",
+      "questionText": "[17] Do caregivers bring and present the Child Health Record Book (CHRB) at visits?",
+      "answerType": "yes_no",
+      "options": ["Yes", "No"],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Community Engagement & Caregiver Survey",
+      "questionText": "[18] Are key immunization messages (return date, side effects, benefits) communicated to caregivers?",
+      "answerType": "yes_no",
+      "options": ["Yes", "No"],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Community Engagement & Caregiver Survey",
+      "questionText": "[19] Are zero-dose or default children actively traced in the community?",
+      "answerType": "yes_no",
+      "options": ["Yes", "No"],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Community Engagement & Caregiver Survey",
+      "questionText": "[20] Are caregivers informed of the next scheduled immunization session date?",
+      "answerType": "yes_no",
+      "options": ["Yes", "No"],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+
+    {
+      "sectionTitle": "AEFI Management",
+      "questionText": "[21] Does the health facility have staff trained in AEFI identification and management?",
+      "answerType": "yes_no",
+      "options": ["Yes", "No"],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "AEFI Management",
+      "questionText": "[22] Were any AEFI cases (minor or major) reported in the last 3 months?",
+      "answerType": "yes_no",
+      "options": ["Yes", "No"],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "AEFI Management",
+      "questionText": "[23] Is a fully stocked AEFI Management Kit available with unexpired supplies?",
+      "answerType": "yes_no",
+      "options": ["Yes", "No"],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "AEFI Management",
+      "questionText": "[24] Are standard AEFI reporting forms and investigation protocols available?",
+      "answerType": "yes_no",
+      "options": ["Yes", "No"],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "AEFI Management",
+      "questionText": "[25] Is the EPI immunisation register updated and available on site?",
+      "answerType": "yes_no",
+      "options": ["Yes", "No"],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+
+    {
+      "sectionTitle": "Cold Chain & Equipment",
+      "questionText": "[26] Is there functioning cold chain equipment (refrigerator/freezer) on site?",
+      "answerType": "yes_no",
+      "options": ["Yes", "No"],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Cold Chain & Equipment",
+      "questionText": "[27] Is cold chain equipment placed in a well-ventilated location with easy access?",
+      "answerType": "yes_no",
+      "options": ["Yes", "No"],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Cold Chain & Equipment",
+      "questionText": "[28] Is a 30-day electronic temperature logger (Fridge-Tag) present and active?",
+      "answerType": "yes_no",
+      "options": ["Yes", "No"],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Cold Chain & Equipment",
+      "questionText": "[29] Is the temperature log chart recorded twice daily and displayed on the equipment?",
+      "answerType": "yes_no",
+      "options": ["Yes", "No"],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Cold Chain & Equipment",
+      "questionText": "[30] Does the facility have written SOPs for cold chain maintenance and emergency plans?",
+      "answerType": "yes_no",
+      "options": ["Yes", "No"],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+
+    {
+      "sectionTitle": "Vaccine & Supply Logistics",
+      "questionText": "[31] Does the facility use standard stock ledgers or electronic tools for inventory tracking?",
+      "answerType": "yes_no",
+      "options": ["Yes", "No"],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Vaccine & Supply Logistics",
+      "questionText": "[32] Were there any vaccine or diluent stock-outs during the previous month?",
+      "answerType": "yes_no",
+      "options": ["Yes", "No"],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Vaccine & Supply Logistics",
+      "questionText": "[33] Are multi-dose vial policy (MDVP) and open-vial rules strictly observed?",
+      "answerType": "yes_no",
+      "options": ["Yes", "No"],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Vaccine & Supply Logistics",
+      "questionText": "[34] Are safety boxes used for immediate puncture-proof disposal of syringes and needles?",
+      "answerType": "yes_no",
+      "options": ["Yes", "No"],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "Vaccine & Supply Logistics",
+      "questionText": "[35] Is medical waste disposed of safely using an incinerator, protected pit, or designated site?",
+      "answerType": "yes_no",
+      "options": ["Yes", "No"],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    }
+  ]
+}
