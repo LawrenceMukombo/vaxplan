@@ -39,6 +39,8 @@ import {
   type ChecklistAnswer,
 } from "@shared/supervisionChecklist";
 
+import { useQuery } from "@tanstack/react-query";
+
 export interface ComparativeScorecardRow {
   id: string | number;
   name: string;
@@ -78,17 +80,35 @@ export function ComparativeScorecardTable({
   // Column visibility state
   const [visibleSections, setVisibleSections] = useState<Record<string, boolean>>({});
 
-  const facById = useMemo(() => {
+  const { data: provinces = [] } = useQuery<any[]>({ queryKey: ["/api/provinces"] });
+
+  const provById = useMemo(() => {
     const m = new Map<number, any>();
-    facilities.forEach((f) => m.set(f.id, f));
+    provinces.forEach((p) => m.set(p.id, p));
     return m;
-  }, [facilities]);
+  }, [provinces]);
 
   const distById = useMemo(() => {
     const m = new Map<number, any>();
     districts.forEach((d) => m.set(d.id, d));
     return m;
   }, [districts]);
+
+  // Helper to get clean province name for a facility
+  const getFacilityProvinceName = (f: any): string => {
+    if (f.province && f.province.trim() && f.province !== "Unassigned Province") {
+      return f.province;
+    }
+    if (f.districtId && distById.has(f.districtId)) {
+      const d = distById.get(f.districtId);
+      if (d?.provinceId && provById.has(d.provinceId)) {
+        return provById.get(d.provinceId).name;
+      }
+      if (d?.provinceName) return d.provinceName;
+      if (d?.name) return `${d.name} Region`;
+    }
+    return "National Scope";
+  };
 
   // Extract all unique section titles across visits
   const allSectionTitles = useMemo(() => {
@@ -133,7 +153,7 @@ export function ComparativeScorecardTable({
           });
         }
 
-        const distName = f.districtId ? distById.get(f.districtId)?.name || f.province || "—" : f.province || "—";
+        const distName = f.districtId ? distById.get(f.districtId)?.name || getFacilityProvinceName(f) : getFacilityProvinceName(f);
 
         return {
           id: f.id,
@@ -159,8 +179,9 @@ export function ComparativeScorecardTable({
       facilities.forEach((f) => {
         const did = f.districtId || 0;
         const dName = distById.get(did)?.name || `District #${did}`;
+        const pName = getFacilityProvinceName(f);
         if (!distGroups.has(did)) {
-          distGroups.set(did, { districtName: dName, provinceName: f.province, facs: [] });
+          distGroups.set(did, { districtName: dName, provinceName: pName, facs: [] });
         }
         distGroups.get(did)!.facs.push(f);
       });
@@ -215,7 +236,7 @@ export function ComparativeScorecardTable({
     // Province Scope
     const provGroups = new Map<string, any[]>();
     facilities.forEach((f) => {
-      const pname = f.province || "Unassigned Province";
+      const pname = getFacilityProvinceName(f);
       if (!provGroups.has(pname)) provGroups.set(pname, []);
       provGroups.get(pname)!.push(f);
     });
@@ -265,7 +286,7 @@ export function ComparativeScorecardTable({
       };
     });
     return rows;
-  }, [scope, visits, facilities, distById]);
+  }, [scope, visits, facilities, distById, provById]);
 
   // Filtering
   const filteredRows = useMemo(() => {
@@ -494,12 +515,12 @@ export function ComparativeScorecardTable({
                   return (
                     <TableHead
                       key={secTitle}
-                      className="cursor-pointer font-semibold text-xs text-center min-w-[130px]"
+                      className="cursor-pointer font-semibold text-xs text-center min-w-[140px] max-w-[180px] py-2.5 align-bottom"
                       onClick={() => toggleSort(`sec_${secTitle}`)}
                     >
-                      <div className="flex items-center justify-center gap-1 truncate max-w-[140px]">
-                        {secTitle}
-                        <ArrowUpDown className="h-3 w-3" />
+                      <div className="flex items-center justify-center gap-1 leading-snug whitespace-normal break-words text-center">
+                        <span>{secTitle}</span>
+                        <ArrowUpDown className="h-3 w-3 shrink-0" />
                       </div>
                     </TableHead>
                   );
