@@ -568,7 +568,20 @@ export default function SupervisionTemplates() {
       }
     },
     onError: (err: Error) => {
-      toast({ title: "Save Failed", description: err.message, variant: "destructive" });
+      let desc = err?.message || "An error occurred while saving the checklist template.";
+      if (desc.trim().startsWith("[") || desc.trim().startsWith("{")) {
+        try {
+          const parsed = JSON.parse(desc);
+          if (Array.isArray(parsed)) {
+            desc = parsed.map((e: any) => typeof e === "string" ? e : `${e.path && Array.isArray(e.path) ? e.path.join(".") + ": " : ""}${e.message || "Invalid value"}`).join("; ");
+          } else if (parsed && typeof parsed === "object") {
+            desc = parsed.message || parsed.error || desc;
+          }
+        } catch {
+          // ignore
+        }
+      }
+      toast({ title: "Save Failed", description: desc, variant: "destructive" });
     },
   });
 
@@ -585,7 +598,8 @@ export default function SupervisionTemplates() {
       setEditing(null);
     },
     onError: (err: Error) => {
-      toast({ title: "Delete Failed", description: err.message, variant: "destructive" });
+      let desc = err?.message || "Failed to delete checklist template.";
+      toast({ title: "Delete Failed", description: desc, variant: "destructive" });
     },
   });
 

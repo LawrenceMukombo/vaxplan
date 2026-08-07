@@ -11328,6 +11328,10 @@ export async function registerRoutes(
       res.status(201).json(t);
     } catch (error: any) {
       console.error("Error creating checklist template:", error);
+      if (error?.name === "ZodError") {
+        const issues = error.errors?.map((e: any) => `${e.path?.join(".") || "field"}: ${e.message}`).join("; ") || "Invalid format";
+        return res.status(400).json({ message: `Validation Error: ${issues}`, errors: error.errors });
+      }
       res.status(400).json({ message: error?.message || "Invalid checklist template data" });
     }
   });
@@ -11342,6 +11346,10 @@ export async function registerRoutes(
       res.json(t);
     } catch (error: any) {
       console.error("Error updating checklist template:", error);
+      if (error?.name === "ZodError") {
+        const issues = error.errors?.map((e: any) => `${e.path?.join(".") || "field"}: ${e.message}`).join("; ") || "Invalid format";
+        return res.status(400).json({ message: `Validation Error: ${issues}`, errors: error.errors });
+      }
       res.status(400).json({ message: error?.message || "Failed to update checklist template" });
     }
   });

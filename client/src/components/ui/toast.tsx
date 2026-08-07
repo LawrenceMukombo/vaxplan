@@ -48,7 +48,7 @@ const Toast = React.forwardRef<
   return (
     <ToastPrimitives.Root
       ref={ref}
-      className={cn(toastVariants({ variant }), className)}
+      className={cn(toastVariants({ variant }), "max-h-[85vh] overflow-hidden flex flex-col justify-start p-4 border shadow-xl rounded-xl", className)}
       {...props}
     />
   )
@@ -103,13 +103,38 @@ ToastTitle.displayName = ToastPrimitives.Title.displayName
 const ToastDescription = React.forwardRef<
   React.ElementRef<typeof ToastPrimitives.Description>,
   React.ComponentPropsWithoutRef<typeof ToastPrimitives.Description>
->(({ className, ...props }, ref) => (
-  <ToastPrimitives.Description
-    ref={ref}
-    className={cn("text-sm opacity-90", className)}
-    {...props}
-  />
-))
+>(({ className, children, ...props }, ref) => {
+  let content = children;
+  if (typeof children === "string" && (children.trim().startsWith("[") || children.trim().startsWith("{"))) {
+    try {
+      const parsed = JSON.parse(children);
+      if (Array.isArray(parsed)) {
+        content = parsed
+          .map((item: any) =>
+            typeof item === "string"
+              ? item
+              : item.message
+              ? `${item.path && Array.isArray(item.path) && item.path.length > 0 ? item.path.join(".") + ": " : ""}${item.message}`
+              : JSON.stringify(item)
+          )
+          .join("; ");
+      } else if (typeof parsed === "object" && parsed !== null) {
+        content = parsed.message || parsed.error || JSON.stringify(parsed);
+      }
+    } catch {
+      // keep original string
+    }
+  }
+  return (
+    <ToastPrimitives.Description
+      ref={ref}
+      className={cn("text-xs opacity-95 break-words whitespace-pre-wrap max-h-48 overflow-y-auto pr-1 font-sans leading-relaxed", className)}
+      {...props}
+    >
+      {content}
+    </ToastPrimitives.Description>
+  );
+})
 ToastDescription.displayName = ToastPrimitives.Description.displayName
 
 type ToastProps = React.ComponentPropsWithoutRef<typeof Toast>

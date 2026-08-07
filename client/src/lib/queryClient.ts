@@ -19,7 +19,14 @@ async function throwIfResNotOk(res: Response) {
       } else {
         try {
           const json = JSON.parse(text);
-          errorMsg = json.message || json.error || text;
+          if (json.errors && Array.isArray(json.errors) && json.errors.length > 0) {
+            const formatted = json.errors
+              .map((e: any) => typeof e === "string" ? e : (e.message ? `${e.path && Array.isArray(e.path) && e.path.length > 0 ? e.path.join(".") + ": " : ""}${e.message}` : JSON.stringify(e)))
+              .join("; ");
+            errorMsg = json.message ? `${json.message}: ${formatted}` : formatted;
+          } else {
+            errorMsg = json.message || json.error || text;
+          }
         } catch {
           errorMsg = text || errorMsg;
         }
@@ -27,6 +34,22 @@ async function throwIfResNotOk(res: Response) {
     } catch {
       // fallback to statusText
     }
+
+    if (typeof errorMsg === "string" && (errorMsg.trim().startsWith("[") || errorMsg.trim().startsWith("{"))) {
+      try {
+        const parsed = JSON.parse(errorMsg);
+        if (Array.isArray(parsed)) {
+          errorMsg = parsed
+            .map((e: any) => typeof e === "string" ? e : (e.message ? `${e.path && Array.isArray(e.path) && e.path.length > 0 ? e.path.join(".") + ": " : ""}${e.message}` : JSON.stringify(e)))
+            .join("; ");
+        } else if (typeof parsed === "object" && parsed !== null) {
+          errorMsg = parsed.message || parsed.error || errorMsg;
+        }
+      } catch {
+        // ignore
+      }
+    }
+
     throw new Error(errorMsg);
   }
 }
