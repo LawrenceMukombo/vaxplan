@@ -1,6 +1,5 @@
 import { db } from "../db";
-import { supervisionChecklistTemplates, tenants } from "../../shared/schema";
-import { eq, and, sql } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import { readFileSync, existsSync } from "fs";
 import { join } from "path";
 
@@ -9,7 +8,7 @@ import { join } from "path";
  *
  * Ensures `supervision_checklist_templates` table exists and upserts the
  * 3 standard national supervision checklist templates (Short, National, Full)
- * for all active tenants.
+ * for all active tenants using clean parameterized SQL execution.
  */
 
 function parseTemplateJson(jsonRaw: any) {
@@ -105,61 +104,62 @@ export async function applySupervisionTemplatesSeed(): Promise<void> {
     return;
   }
 
-  // 3. Fetch all active tenants
+  // 3. Fetch all active tenant IDs
   try {
-    const allTenants = await db.select({ id: tenants.id }).from(tenants);
+    const tenantsRes = await db.execute(sql`SELECT id FROM tenants`);
+    const tenantIds = tenantsRes.rows.map((r: any) => r.id as string);
 
-    if (allTenants.length === 0) {
+    if (tenantIds.length === 0) {
       console.warn("[migration:028] No tenants found to seed templates.");
       return;
     }
 
-    // 4. Upsert for each tenant
-    for (const tenant of allTenants) {
+    // 4. Upsert for each tenant using clean parameterized SQL
+    for (const tenantId of tenantIds) {
       for (const t of parsedTemplates) {
         try {
-          const existing = await db
-            .select({ id: supervisionChecklistTemplates.id })
-            .from(supervisionChecklistTemplates)
-            .where(
-              and(
-                eq(supervisionChecklistTemplates.tenantId, tenant.id),
-                eq(supervisionChecklistTemplates.name, t.name)
-              )
-            )
-            .limit(1);
+          const checkRes = await db.execute(sql`
+            SELECT id FROM supervision_checklist_templates
+            WHERE tenant_id = ${tenantId}
+              AND name = ${t.name}
+            LIMIT 1
+          `);
 
-          if (existing.length > 0) {
-            const existingId = existing[0].id;
-            await db
-              .update(supervisionChecklistTemplates)
-              .set({
-                category: t.category,
-                description: t.description,
-                sections: t.sections,
-                items: t.items,
-                isActive: t.isActive,
-                updatedAt: new Date(),
-              })
-              .where(eq(supervisionChecklistTemplates.id, existingId));
-            console.log(`[migration:028] Updated template "${t.name}" (ID ${existingId}) for tenant "${tenant.id}".`);
+          const sectionsJsonStr = JSON.stringify(t.sections);
+          const itemsJsonStr = JSON.stringify(t.items);
+
+          if (checkRes.rows.length > 0) {
+            const existingId = (checkRes.rows[0] as any).id;
+            await db.execute(sql`
+              UPDATE supervision_checklist_templates
+              SET category = ${t.category},
+                  description = ${t.description},
+                  sections = ${sectionsJsonStr}::jsonb,
+                  items = ${itemsJsonStr}::jsonb,
+                  is_active = ${t.isActive},
+                  updated_at = NOW()
+              WHERE id = ${existingId}
+            `);
+            console.log(`[migration:028] Updated template "${t.name}" (ID ${existingId}) for tenant "${tenantId}".`);
           } else {
-            await db
-              .insert(supervisionChecklistTemplates)
-              .values({
-                tenantId: tenant.id,
-                name: t.name,
-                category: t.category,
-                description: t.description,
-                sections: t.sections,
-                items: t.items,
-                isActive: t.isActive,
-              });
-            console.log(`[migration:028] Inserted template "${t.name}" for tenant "${tenant.id}".`);
+            await db.execute(sql`
+              INSERT INTO supervision_checklist_templates (
+                tenant_id, name, category, description, sections, items, is_active
+              ) VALUES (
+                ${tenantId},
+                ${t.name},
+                ${t.category},
+                ${t.description},
+                ${sectionsJsonStr}::jsonb,
+                ${itemsJsonStr}::jsonb,
+                ${t.isActive}
+              )
+            `);
+            console.log(`[migration:028] Inserted template "${t.name}" for tenant "${tenantId}".`);
           }
         } catch (itemErr: any) {
           console.error(
-            `[migration:028] Error seeding template "${t.name}" for tenant "${tenant.id}":`,
+            `[migration:028] Error seeding template "${t.name}" for tenant "${tenantId}":`,
             itemErr?.detail || itemErr?.message || itemErr
           );
         }
