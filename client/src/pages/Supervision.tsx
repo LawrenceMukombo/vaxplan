@@ -39,6 +39,7 @@ import {
 } from "@shared/supervisionChecklist";
 import { ChecklistQuestion } from "@/components/ChecklistQuestion";
 import { SupervisionScorecard } from "@/components/SupervisionScorecard";
+import { ComparativeScorecardTable } from "@/components/ComparativeScorecardTable";
 
 const PAGE_SIZE_OPTIONS = [10, 25, 50, 100, 250] as const;
 
@@ -485,6 +486,24 @@ export default function Supervision() {
 
       {/* Live supervisor activity — provincial_coordinator and national_admin only */}
       {canSeeLiveActivity && <LiveSupervisionActivity facilities={facilities} />}
+
+      {/* Comparative Scorecard Table across Provinces, Districts, and Facilities */}
+      <ComparativeScorecardTable
+        visits={allVisits}
+        facilities={facilities}
+        districts={districts}
+        onSelectFacility={(facility, visit) => {
+          if (visit) {
+            setScorecardVisit(visit);
+          } else {
+            const facVisits = allVisits.filter((v) => v.facilityId === facility.id && v.status === "conducted");
+            const lastVisit = facVisits.sort((a, b) => +new Date(b.conductedDate || b.scheduledDate) - +new Date(a.conductedDate || a.scheduledDate))[0];
+            if (lastVisit) {
+              setScorecardVisit(lastVisit);
+            }
+          }
+        }}
+      />
 
       <Card>
         <CardHeader className="pb-3">
