@@ -40,6 +40,7 @@ import {
 } from "@shared/supervisionChecklist";
 
 import { useQuery } from "@tanstack/react-query";
+import { GeoCascadeFilter } from "@/components/GeoCascadeFilter";
 
 export interface ComparativeScorecardRow {
   id: string | number;
@@ -76,6 +77,11 @@ export function ComparativeScorecardTable({
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<number>(10);
+
+  // Cascading Location Filters
+  const [selectedProvinceId, setSelectedProvinceId] = useState<number | null>(null);
+  const [selectedDistrictId, setSelectedDistrictId] = useState<number | null>(null);
+  const [selectedFacilityId, setSelectedFacilityId] = useState<number | null>(null);
 
   // Column visibility state
   const [visibleSections, setVisibleSections] = useState<Record<string, boolean>>({});
@@ -290,13 +296,45 @@ export function ComparativeScorecardTable({
 
   // Filtering
   const filteredRows = useMemo(() => {
+    const targetProvObj = selectedProvinceId ? provById.get(selectedProvinceId) : null;
+    const targetDistObj = selectedDistrictId ? distById.get(selectedDistrictId) : null;
+
     return aggregatedRows.filter((r) => {
       const q = searchQuery.toLowerCase().trim();
       const matchesSearch = !q || r.name.toLowerCase().includes(q) || (r.parentName && r.parentName.toLowerCase().includes(q));
       const matchesRisk = riskFilter === "all" || r.riskLevel === riskFilter;
-      return matchesSearch && matchesRisk;
+
+      // Location Filter Check
+      let matchesGeo = true;
+      if (selectedFacilityId) {
+        if (r.scopeType === "facility") {
+          matchesGeo = r.id === selectedFacilityId;
+        } else if (r.scopeType === "district") {
+          const fac = facilities.find((f) => f.id === selectedFacilityId);
+          matchesGeo = fac?.districtId === Number(String(r.id).replace("dist-", ""));
+        }
+      } else if (selectedDistrictId) {
+        if (r.scopeType === "district") {
+          matchesGeo = r.id === `dist-${selectedDistrictId}` || r.name === targetDistObj?.name;
+        } else if (r.scopeType === "facility") {
+          matchesGeo = r.rawFacility?.districtId === selectedDistrictId;
+        } else if (r.scopeType === "province") {
+          matchesGeo = targetDistObj?.provinceId ? provById.get(targetDistObj.provinceId)?.name === r.name : true;
+        }
+      } else if (selectedProvinceId && targetProvObj) {
+        if (r.scopeType === "province") {
+          matchesGeo = r.name.toLowerCase() === targetProvObj.name.toLowerCase();
+        } else if (r.scopeType === "district") {
+          matchesGeo = r.parentName?.toLowerCase() === targetProvObj.name.toLowerCase();
+        } else if (r.scopeType === "facility") {
+          const fProv = r.rawFacility ? getFacilityProvinceName(r.rawFacility) : "";
+          matchesGeo = fProv.toLowerCase() === targetProvObj.name.toLowerCase();
+        }
+      }
+
+      return matchesSearch && matchesRisk && matchesGeo;
     });
-  }, [aggregatedRows, searchQuery, riskFilter]);
+  }, [aggregatedRows, searchQuery, riskFilter, selectedProvinceId, selectedDistrictId, selectedFacilityId, provById, distById, facilities]);
 
   // Sorting
   const sortedRows = useMemo(() => {
@@ -409,10 +447,38 @@ export function ComparativeScorecardTable({
       </CardHeader>
 
       <CardContent className="space-y-4">
-        {/* Controls Bar: Search, Risk Filter, Column Picker, Export */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="flex items-center gap-2 flex-1 max-w-md">
-            <div className="relative flex-1">
+        {/* Controls Bar: Smart Location Cascade, Search, Risk Filter, Column Picker, Export */}
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-2 flex-1 flex-wrap">
+            {/* Smart Location Cascade Filter */}
+            <GeoCascadeFilter
+              provinceId={selectedProvinceId}
+              districtId={selectedDistrictId}
+              facilityId={selectedFacilityId}
+              onProvinceChange={(pid) => {
+                setSelectedProvinceId(pid);
+                setSelectedDistrictId(null);
+                setSelectedFacilityId(null);
+                setPage(1);
+              }}
+              onDistrictChange={(did) => {
+                setSelectedDistrictId(did);
+                setSelectedFacilityId(null);
+                setPage(1);
+              }}
+              onFacilityChange={(fid) => {
+                setSelectedFacilityId(fid);
+                setPage(1);
+              }}
+              showFacility={scope === "facility"}
+              provinces={provinces}
+              districts={districts}
+              facilities={facilities}
+              strictCascade={false}
+              testIdPrefix="scorecard-matrix-geo"
+            />
+
+            <div className="relative min-w-[180px] flex-1">
               <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
               <Input
                 placeholder={`Search ${scope}s...`}
