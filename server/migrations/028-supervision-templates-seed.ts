@@ -8,7 +8,7 @@ import { join } from "path";
  *
  * Ensures `supervision_checklist_templates` table exists and upserts the
  * 3 standard national supervision checklist templates (Short, National, Full)
- * for all active tenants using clean parameterized SQL execution.
+ * for all active tenants with granular error diagnostics.
  */
 
 function parseTemplateJson(jsonRaw: any) {
@@ -160,7 +160,9 @@ export async function applySupervisionTemplatesSeed(): Promise<void> {
         } catch (itemErr: any) {
           console.error(
             `[migration:028] Error seeding template "${t.name}" for tenant "${tenantId}":`,
-            itemErr?.detail || itemErr?.message || itemErr
+            itemErr?.message || itemErr,
+            itemErr?.detail ? `| Detail: ${itemErr.detail}` : "",
+            itemErr?.constraint ? `| Constraint: ${itemErr.constraint}` : ""
           );
         }
       }
@@ -168,6 +170,6 @@ export async function applySupervisionTemplatesSeed(): Promise<void> {
 
     console.log("[migration:028] Supportive Supervision Templates seed complete.");
   } catch (err: any) {
-    console.error(`[migration:028] Fatal error during seed: ${err?.detail || err?.message || err}`);
+    console.error(`[migration:028] Fatal error during seed: ${err?.message || err}`);
   }
 }
