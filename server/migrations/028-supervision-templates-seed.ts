@@ -9,7 +9,7 @@ import { join } from "path";
  *
  * Ensures `supervision_checklist_templates` table exists and upserts the
  * 3 standard national supervision checklist templates (Short, National, Full)
- * for all active tenants using Drizzle ORM parameterized queries.
+ * for all active tenants using explicit `::jsonb` casting.
  */
 
 function parseTemplateJson(jsonRaw: any) {
@@ -114,7 +114,7 @@ export async function applySupervisionTemplatesSeed(): Promise<void> {
       return;
     }
 
-    // 4. Upsert for each tenant using Drizzle ORM parameterized queries
+    // 4. Upsert for each tenant using explicit jsonb casting
     for (const tenant of allTenants) {
       for (const t of parsedTemplates) {
         const existing = await db
@@ -128,6 +128,9 @@ export async function applySupervisionTemplatesSeed(): Promise<void> {
           )
           .limit(1);
 
+        const sectionsSql = sql`${JSON.stringify(t.sections)}::jsonb`;
+        const itemsSql = sql`${JSON.stringify(t.items)}::jsonb`;
+
         if (existing.length > 0) {
           const existingId = existing[0].id;
           await db
@@ -135,8 +138,8 @@ export async function applySupervisionTemplatesSeed(): Promise<void> {
             .set({
               category: t.category,
               description: t.description,
-              sections: t.sections,
-              items: t.items,
+              sections: sectionsSql,
+              items: itemsSql,
               isActive: t.isActive,
               updatedAt: new Date(),
             })
@@ -150,8 +153,8 @@ export async function applySupervisionTemplatesSeed(): Promise<void> {
               name: t.name,
               category: t.category,
               description: t.description,
-              sections: t.sections,
-              items: t.items,
+              sections: sectionsSql,
+              items: itemsSql,
               isActive: t.isActive,
               createdAt: new Date(),
               updatedAt: new Date(),
@@ -163,6 +166,6 @@ export async function applySupervisionTemplatesSeed(): Promise<void> {
 
     console.log("[migration:028] Supportive Supervision Templates seed complete.");
   } catch (err: any) {
-    console.error(`[migration:028] Error during seed: ${err.message}`);
+    console.error(`[migration:028] Error during seed: ${err?.detail || err?.message || err}`);
   }
 }
