@@ -1,5 +1,5 @@
 
-import { useEffect, useRef, useState, useMemo, useCallback, Fragment } from "react";
+import React, { useEffect, useRef, useState, useMemo, useCallback, Fragment, memo } from "react";
 import { useLocation } from "wouter";
 import {
   MapContainer,
@@ -1743,6 +1743,395 @@ function CustomVectorLayer({ id, style }: { id: string; style: any }) {
     />
   );
 }
+
+const FacilityMarkerItem = memo(({
+  facility,
+  facilityIcon,
+  markerRefs,
+  facilityVillagesMap,
+  activeSessionPlans,
+  handleFocusFacility,
+  setSelectedFacilityId,
+  setPanelVis,
+  onSelectIntelligencePoint,
+}: {
+  facility: Facility;
+  facilityIcon: any;
+  markerRefs: React.MutableRefObject<Record<number, L.Marker | null>>;
+  facilityVillagesMap: Map<number, any[]>;
+  activeSessionPlans: any[];
+  handleFocusFacility: (facility: Facility) => void;
+  setSelectedFacilityId: (id: number) => void;
+  setPanelVis: React.Dispatch<React.SetStateAction<any>>;
+  onSelectIntelligencePoint?: (pt: { lat: number; lng: number }) => void;
+}) => {
+  const facilityVillages = facilityVillagesMap.get(Number(facility.id)) || [];
+  const catchmentPop = facilityVillages.reduce(
+    (sum: number, v: any) => sum + (Number(v.population) || 0),
+    0,
+  );
+  const activeSessions = activeSessionPlans.filter(
+    (p: any) => Number(p.facilityId) === Number(facility.id),
+  ).length;
+  const facilityLlg = (facility as any).llgId ? (facility as any).llgName || "" : "";
+
+  return (
+    <Marker
+      key={`facility-${facility.id}`}
+      position={[Number(facility.latitude), Number(facility.longitude)]}
+      icon={facilityIcon}
+      eventHandlers={{
+        click: () => {
+          handleFocusFacility(facility);
+        },
+      }}
+      ref={(el) => {
+        if (el) {
+          markerRefs.current[facility.id] = el;
+        } else {
+          delete markerRefs.current[facility.id];
+        }
+      }}
+    >
+      <Popup className="premium-map-popup">
+        <div className="w-72 overflow-hidden rounded-lg font-sans text-xs select-none">
+          {/* Header */}
+          <div className="bg-primary/5 p-3 pb-2.5 border-b border-border/60">
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-1.5 text-[10px] font-semibold text-primary uppercase tracking-wider mb-0.5">
+                  <Building2 className="h-3 w-3 shrink-0" />
+                  <span>{facility.facilityType || "Health Facility"}</span>
+                </div>
+                <h4 className="font-bold text-foreground text-sm leading-tight truncate">
+                  {facility.name}
+                </h4>
+                <Badge variant="outline" className="text-[9px] shrink-0 mt-1 uppercase tracking-wider font-semibold border-primary/30 text-primary">
+                  Code: {facility.hmisCode || (facility as any).code || `FAC-${facility.id}`}
+                </Badge>
+              </div>
+            </div>
+            {facilityLlg && (
+              <div className="text-[10px] text-muted-foreground mt-1.5 flex items-center gap-1">
+                <MapPin className="h-3 w-3 shrink-0" />
+                <span className="truncate">{facilityLlg}</span>
+              </div>
+            )}
+          </div>
+
+          {/* Operational Details */}
+          <div className="p-3 space-y-2.5 bg-background/95 backdrop-blur-sm">
+            <div className="grid grid-cols-2 gap-2 text-[11px]">
+              <div className="flex items-center gap-1.5 text-muted-foreground">
+                <Clock className="h-3.5 w-3.5 shrink-0 text-primary" />
+                <span className="truncate">{facility.operatingHours || "24/7 Service"}</span>
+              </div>
+              <div className="flex items-center gap-1.5 text-muted-foreground">
+                <Users className="h-3.5 w-3.5 shrink-0 text-primary" />
+                <span>{facility.staffCount || 0} HCW Staff</span>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 pt-1 border-t border-border/40 text-[10px]">
+              <div className={`flex items-center gap-1 px-2 py-0.5 rounded-full font-medium ${
+                facility.hasRefrigerator
+                  ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20"
+                  : "bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20"
+              }`}>
+                <Thermometer className="h-3.5 w-3.5 shrink-0" />
+                <span>{facility.hasRefrigerator ? "Cold Chain Ready" : "No Refrigerator"}</span>
+              </div>
+              <div className={`flex items-center gap-1 px-2 py-0.5 rounded-full font-medium ${
+                facility.hasPower
+                  ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20"
+                  : "bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20"
+              }`}>
+                <Zap className="h-3.5 w-3.5 shrink-0" />
+                <span>{facility.hasPower ? "Power Grid/Solar" : "No Power"}</span>
+              </div>
+            </div>
+
+            {/* Stats grid */}
+            <div className="grid grid-cols-2 gap-1.5 p-2 bg-muted/40 rounded-md border border-border/50 text-[10px] mt-2">
+              <div className="flex flex-col">
+                <span className="text-muted-foreground">Active Sessions</span>
+                <span className={`font-bold text-sm leading-none mt-0.5 ${
+                  activeSessions > 0 ? "text-primary" : "text-foreground"
+                }`}>{activeSessions}</span>
+              </div>
+              <div className="flex flex-col">
+                <span className="text-muted-foreground">Catchment Pop</span>
+                <span className="font-bold text-foreground text-sm leading-none mt-0.5">
+                  {catchmentPop > 0 ? catchmentPop.toLocaleString() : "N/A"}
+                </span>
+              </div>
+            </div>
+
+            {/* Quick Actions */}
+            <div className="pt-2 flex flex-col gap-1.5 border-t border-border/40">
+              <Button
+                size="sm"
+                variant="default"
+                className="w-full h-7 text-[11px] font-semibold bg-primary hover:bg-primary/90 text-primary-foreground"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setSelectedFacilityId(facility.id);
+                  setPanelVis((prev: any) => ({ ...prev, facilities: true }));
+                }}
+              >
+                View Facility Info & Catchments →
+              </Button>
+              {onSelectIntelligencePoint && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="w-full h-6 text-[10px] text-muted-foreground hover:text-foreground border border-border/40"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (facility.latitude && facility.longitude) {
+                      onSelectIntelligencePoint({ lat: Number(facility.latitude), lng: Number(facility.longitude) });
+                    }
+                  }}
+                >
+                  🌐 GIS Point Intelligence
+                </Button>
+              )}
+            </div>
+          </div>
+        </div>
+      </Popup>
+    </Marker>
+  );
+});
+
+const VillageMarkerItem = memo(({
+  village,
+  plannedIcon,
+  missingHtrIcon,
+  missingStandardIcon,
+  plannedVillageIds,
+  showLabels,
+  currentZoom,
+  activeMapVillagesCount,
+  resolveLabel,
+  setRenameTarget,
+  setOutreachDialogTarget,
+  handleClearOutreachPost,
+  setLocation,
+  toast,
+}: {
+  village: Village;
+  plannedIcon: any;
+  missingHtrIcon: any;
+  missingStandardIcon: any;
+  plannedVillageIds: Set<number>;
+  showLabels: boolean;
+  currentZoom: number;
+  activeMapVillagesCount: number;
+  resolveLabel: (name: string) => string;
+  setRenameTarget: (target: any) => void;
+  setOutreachDialogTarget: (village: Village) => void;
+  handleClearOutreachPost: (village: Village) => void;
+  setLocation: (path: string) => void;
+  toast: any;
+}) => {
+  const isPlanned = plannedVillageIds.has(village.id);
+  const icon = isPlanned ? plannedIcon : village.isHardToReach ? missingHtrIcon : missingStandardIcon;
+
+  return (
+    <Marker
+      key={`village-${village.id}`}
+      position={[Number(village.latitude), Number(village.longitude)]}
+      icon={icon}
+    >
+      {showLabels && (
+        <Tooltip
+          permanent={currentZoom >= 14 && activeMapVillagesCount < 300}
+          direction="bottom"
+          offset={[0, 8]}
+          className="map-village-label"
+        >
+          {resolveLabel(village.name)}
+        </Tooltip>
+      )}
+      <Popup className="premium-map-popup">
+        <div className="w-64 overflow-hidden rounded-lg font-sans text-xs select-none">
+          {/* Header */}
+          <div className="bg-primary/5 p-3 pb-2 border-b border-border/60">
+            <div className="flex items-start justify-between gap-1.5">
+              <div className="min-w-0 flex-1">
+                <h4 className="font-bold text-foreground text-sm leading-tight line-clamp-2">
+                  {resolveLabel(village.name)}
+                </h4>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setRenameTarget({
+                      type: "village",
+                      id: village.id,
+                      name: village.name,
+                    });
+                  }}
+                  className="text-[10px] text-primary hover:underline font-bold mt-1 inline-flex items-center gap-0.5"
+                >
+                  Rename
+                </button>
+              </div>
+              {isPlanned ? (
+                <Badge variant="outline" className="text-[9px] shrink-0 py-0 px-1 border-emerald-500/40 text-emerald-600 dark:text-emerald-400 font-semibold bg-emerald-500/5 uppercase tracking-wider">
+                  Planned
+                </Badge>
+              ) : (
+                <Badge variant="outline" className="text-[9px] shrink-0 py-0 px-1 border-amber-500/40 text-amber-600 dark:text-amber-400 font-semibold bg-amber-500/5 uppercase tracking-wider">
+                  Unplanned
+                </Badge>
+              )}
+            </div>
+            {village.settlementType && (
+              <span className="text-[10px] text-muted-foreground capitalize mt-0.5 block font-medium">
+                {village.settlementType}
+              </span>
+            )}
+          </div>
+
+          {/* Details */}
+          <div className="p-3 space-y-2.5 bg-background/95 backdrop-blur-sm">
+            <div className="grid grid-cols-2 gap-2 text-[11px]">
+              <div className="flex flex-col">
+                <span className="text-[10px] text-muted-foreground">Total Pop</span>
+                <span className="font-semibold text-foreground text-xs mt-0.5">
+                  {village.population ? village.population.toLocaleString() : "N/A"}
+                </span>
+              </div>
+              <div className="flex flex-col">
+                <span className="text-[10px] text-muted-foreground">Under-5 Pop</span>
+                <span className="font-semibold text-primary text-xs mt-0.5">
+                  {village.under5Population ? village.under5Population.toLocaleString() : "N/A"}
+                </span>
+              </div>
+            </div>
+
+            {village.assignedFacilityId && (
+              <div className="text-[10px] text-muted-foreground border-t border-border/40 pt-1.5">
+                <span className="font-medium text-foreground">Assigned Facility:</span> #{village.assignedFacilityId}
+              </div>
+            )}
+
+            {/* Travel / Accessibility Badges */}
+            <div className="space-y-1 pt-1.5 border-t border-border/40 text-[10px]">
+              <div className="flex items-center justify-between text-muted-foreground">
+                <span>Access Profile:</span>
+                <span className="font-semibold text-foreground capitalize">
+                  {village.transportMode || "Walking"}
+                  {village.travelTimeMinutes ? ` (~${village.travelTimeMinutes} min)` : ""}
+                </span>
+              </div>
+
+              {village.isHardToReach ? (
+                <div className="flex items-center gap-1 text-amber-600 dark:text-amber-400 font-medium bg-amber-500/10 px-2 py-0.5 rounded text-[10px]">
+                  <AlertTriangle className="h-3 w-3 shrink-0" />
+                  <span>Hard-to-Reach / Remote Area</span>
+                </div>
+              ) : (
+                <div className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-medium bg-emerald-500/10 px-2 py-0.5 rounded text-[10px]">
+                  <CheckCircle className="h-3 w-3 shrink-0" />
+                  <span>Standard Access Zone</span>
+                </div>
+              )}
+            </div>
+
+            {/* Outreach Post Configuration Section */}
+            <div className="pt-2 border-t border-border/40 space-y-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-semibold text-foreground">Outreach Location</span>
+                {village.outreachLatitude && village.outreachLongitude ? (
+                  <Badge variant="outline" className="text-[8px] py-0 px-1 border-emerald-500/40 text-emerald-600 dark:text-emerald-400">
+                    Configured
+                  </Badge>
+                ) : (
+                  <Badge variant="outline" className="text-[8px] py-0 px-1 border-muted-foreground/30 text-muted-foreground">
+                    Not Set
+                  </Badge>
+                )}
+              </div>
+
+              {village.outreachLatitude && village.outreachLongitude ? (
+                <div className="p-1.5 bg-muted/40 rounded border border-border/50 space-y-1 text-[10px]">
+                  <div className="font-medium text-foreground truncate">
+                    {village.outreachPostName || `${village.name} Outreach`}
+                  </div>
+                  <div className="text-[9px] text-muted-foreground">
+                    {Number(village.outreachLatitude).toFixed(4)}, {Number(village.outreachLongitude).toFixed(4)}
+                  </div>
+                  <div className="flex items-center gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setOutreachDialogTarget(village);
+                      }}
+                      className="text-primary hover:underline font-semibold"
+                    >
+                      Edit
+                    </button>
+                    <span className="text-muted-foreground">|</span>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleClearOutreachPost(village);
+                      }}
+                      className="text-destructive hover:underline font-semibold"
+                    >
+                      Clear
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setOutreachDialogTarget(village);
+                  }}
+                  className="w-full py-1 px-2 text-[10px] font-medium text-primary bg-primary/10 hover:bg-primary/20 rounded border border-primary/20 transition-colors flex items-center justify-center gap-1"
+                >
+                  <MapPin className="h-3 w-3" />
+                  Set Outreach Coordinates
+                </button>
+              )}
+            </div>
+
+            {/* Session Plan Action */}
+            <div className="pt-2 border-t border-border/40">
+              <Button
+                size="sm"
+                variant="default"
+                className="w-full h-7 text-[11px] font-semibold bg-primary hover:bg-primary/90 text-primary-foreground"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (village.assignedFacilityId) {
+                    setLocation(`/session-plans/new?facilityId=${village.assignedFacilityId}&villageId=${village.id}`);
+                  } else {
+                    toast({
+                      title: "Facility Assignment Required",
+                      description: `Please assign ${village.name} to a health facility before planning sessions.`,
+                      variant: "destructive",
+                    });
+                  }
+                }}
+                data-testid={`button-plan-session-village-${village.id}`}
+              >
+                <Plus className="h-3 w-3 mr-1" />
+                Plan a session here
+              </Button>
+            </div>
+          </div>
+        </div>
+      </Popup>
+    </Marker>
+  );
+});
 
 const DEFAULT_MAP_CENTER: [number, number] = [-6.0, 147.0];
 
@@ -3789,10 +4178,6 @@ export function MapView({
     if (!facility.latitude || !facility.longitude) return;
     const lat = Number(facility.latitude);
     const lng = Number(facility.longitude);
-
-    setSelectedFacilityId(facility.id);
-    setPanelVis((prev) => ({ ...prev, facilities: true }));
-    setIntelligencePoint({ lat, lng });
 
     mapRef.current?.flyTo([lat, lng], 14, {
       animate: true,
@@ -6688,238 +7073,22 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
 
         {layers.facilities && (
           <MarkerClusterGroup chunkedLoading maxClusterRadius={50} iconCreateFunction={createFacilityClusterIcon}>
-            {/* Original Code commented out for backward-compatibility:
-            visibleFacilities
-            */}
             {visibleFacilitiesFiltered
               .filter((f) => f.latitude && f.longitude)
               .map((facility) => (
-              /* Original Code commented out for backward-compatibility:
-              <Marker
-                key={`facility-${facility.id}`}
-                position={[Number(facility.latitude), Number(facility.longitude)]}
-                icon={facilityIcon}
-                ref={(el) => {
-                  if (el) {
-                    markerRefs.current[facility.id] = el;
-                  } else {
-                    delete markerRefs.current[facility.id];
-                  }
-                }}
-              >
-              */
-              <Marker
-                key={`facility-${facility.id}`}
-                position={[Number(facility.latitude), Number(facility.longitude)]}
-                icon={facilityIcon}
-                eventHandlers={{
-                  click: () => {
-                    handleFocusFacility(facility);
-                  }
-                }}
-                ref={(el) => {
-                  if (el) {
-                    markerRefs.current[facility.id] = el;
-                  } else {
-                    delete markerRefs.current[facility.id];
-                  }
-                }}
-              >
-                <Popup className="premium-map-popup">
-                  {(() => {
-                    // Pre-compute enriched popup values — scoped per-facility so no
-                    // re-renders bleed across markers.
-                    const facilityVillages = facilityVillagesMap.get(Number(facility.id)) || [];
-                    const catchmentPop = facilityVillages.reduce(
-                      (sum: number, v: any) => sum + (Number(v.population) || 0),
-                      0,
-                    );
-                    const activeSessions = activeSessionPlans.filter(
-                      (p: any) => Number(p.facilityId) === Number(facility.id),
-                    ).length;
-                    const facilityLlg = (facility as any).llgId
-                      ? llgLookup.get(Number((facility as any).llgId))
-                      : null;
-                    const lat = facility.latitude ? Number(facility.latitude) : null;
-                    const lng = facility.longitude ? Number(facility.longitude) : null;
-                    return (
-                      <div className="w-72 overflow-hidden rounded-lg font-sans text-xs select-none">
-                        {/* Header */}
-                        <div className="bg-primary/5 p-3 pb-2 border-b border-border/60">
-                          <div className="flex items-start justify-between gap-1.5">
-                            <h4 className="font-bold text-foreground text-sm leading-tight line-clamp-2">
-                              {facility.name}
-                            </h4>
-                            <Badge variant="outline" className="text-[10px] shrink-0 font-mono py-0 px-1 bg-background/50">
-                              {facility.hmisCode}
-                            </Badge>
-                          </div>
-                          <div className="flex gap-1.5 mt-1.5 flex-wrap">
-                            <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded capitalize">
-                              {facility.facilityType?.toLowerCase().replace(/_/g, " ") || "Facility"}
-                            </span>
-                            {(facility as any).operationalStatus && (
-                              <span className={`text-[10px] px-1.5 py-0.5 rounded font-semibold ${
-                                (facility as any).operationalStatus === "active"
-                                  ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
-                                  : "bg-amber-500/10 text-amber-700 dark:text-amber-400"
-                              }`}>
-                                {(facility as any).operationalStatus}
-                              </span>
-                            )}
-                            {facility.agencyName && (
-                              <span className="text-[10px] text-muted-foreground/80 bg-muted/65 px-1.5 py-0.5 rounded">
-                                {facility.agencyName}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-
-                        <div className="p-3 space-y-2 bg-background/95 backdrop-blur-sm">
-                          {/* Administrative Trail */}
-                          <div className="space-y-0.5 text-[10px] text-muted-foreground">
-                            <div className="flex items-center gap-1.5">
-                              <MapPin className="h-3.5 w-3.5 text-primary shrink-0" />
-                              <div className="truncate">
-                                <span className="font-semibold text-foreground/80">{adminLabels.level1}:</span>{" "}
-                                {provinceLookup.get(Number(districtLookup.get(Number(facility.districtId))?.provinceId))?.name || "N/A"}
-                              </div>
-                            </div>
-                            <div className="pl-5 truncate">
-                              <span className="font-semibold text-foreground/80">{adminLabels.level2}:</span>{" "}
-                              {districtLookup.get(Number(facility.districtId))?.name || "N/A"}
-                            </div>
-                            {facilityLlg && (
-                              <div className="pl-5 truncate">
-                                <span className="font-semibold text-foreground/80">{adminLabels.level3 || "LLG"}:</span>{" "}
-                                {facilityLlg.name}
-                              </div>
-                            )}
-                            {lat !== null && lng !== null && (
-                              <div className="pl-5 font-mono text-[9px] text-muted-foreground/70">
-                                {lat.toFixed(5)}, {lng.toFixed(5)}
-                              </div>
-                            )}
-                          </div>
-
-                          <hr className="border-border/40" />
-
-                          {/* Contact & Hours */}
-                          {((facility as any).contactPhone || (facility as any).operatingHours) && (
-                            <div className="space-y-1 text-[10px]">
-                              {(facility as any).contactPhone && (
-                                <div className="flex items-center gap-1.5 text-muted-foreground">
-                                  <span className="text-primary">📞</span>
-                                  <span className="font-medium text-foreground truncate">{(facility as any).contactPhone}</span>
-                                </div>
-                              )}
-                              {(facility as any).operatingHours && (
-                                <div className="flex items-center gap-1.5 text-muted-foreground">
-                                  <Clock className="h-3 w-3 shrink-0" />
-                                  <span className="truncate">{(facility as any).operatingHours}</span>
-                                </div>
-                              )}
-                            </div>
-                          )}
-
-                          {/* Resource Metrics */}
-                          <div className="grid grid-cols-2 gap-1.5">
-                            <div className={`flex items-center gap-1.5 p-1.5 rounded border ${
-                              facility.hasRefrigerator
-                                ? "bg-emerald-500/5 border-emerald-500/20 text-emerald-700 dark:text-emerald-400"
-                                : "bg-destructive/5 border-destructive/20 text-destructive"
-                            }`}>
-                              <Thermometer className="h-3.5 w-3.5 shrink-0" />
-                              <div className="min-w-0">
-                                <p className="text-[9px] font-medium leading-none text-muted-foreground">Cold Chain</p>
-                                <p className="font-bold text-[10px] mt-0.5 truncate">{facility.hasRefrigerator ? "Functional" : "None"}</p>
-                              </div>
-                            </div>
-                            <div className={`flex items-center gap-1.5 p-1.5 rounded border ${
-                              facility.hasPower
-                                ? "bg-amber-500/5 border-amber-500/20 text-amber-700 dark:text-amber-400"
-                                : "bg-muted border border-border text-muted-foreground"
-                            }`}>
-                              <Zap className="h-3.5 w-3.5 shrink-0" />
-                              <div className="min-w-0">
-                                <p className="text-[9px] font-medium leading-none text-muted-foreground">Power</p>
-                                <p className="font-bold text-[10px] mt-0.5 truncate">{facility.hasPower ? "Active" : "None"}</p>
-                              </div>
-                            </div>
-                          </div>
-
-                          {/* Stats grid */}
-                          {/* Original non-clickable Stats Grid commented out to satisfy Rule 2:
-                          <div className="grid grid-cols-2 gap-1 border-t border-border/40 pt-2 text-[10px]">
-                            <div className="flex flex-col items-center justify-center bg-muted/60 rounded p-1.5">
-                              <span className="text-muted-foreground">Staff</span>
-                              <span className="font-bold text-foreground text-sm leading-none mt-0.5">{facility.staffCount ?? "—"}</span>
-                            </div>
-                            <div className="flex flex-col items-center justify-center bg-muted/60 rounded p-1.5">
-                              <span className="text-muted-foreground">Villages</span>
-                              <span className="font-bold text-foreground text-sm leading-none mt-0.5">{facilityVillages.length}</span>
-                            </div>
-                            <div className="flex flex-col items-center justify-center bg-muted/60 rounded p-1.5">
-                              <span className="text-muted-foreground">Pop. Coverage</span>
-                              <span className="font-bold text-foreground text-sm leading-none mt-0.5">
-                                {catchmentPop > 0 ? catchmentPop.toLocaleString() : "—"}
-                              </span>
-                            </div>
-                            <div className="flex flex-col items-center justify-center rounded p-1.5 border border-dashed border-primary/30 bg-primary/5">
-                              <span className="text-muted-foreground">Active Sessions</span>
-                              <span className={`font-bold text-sm leading-none mt-0.5 ${
-                                activeSessions > 0 ? "text-primary" : "text-foreground"
-                              }`}>{activeSessions}</span>
-                            </div>
-                          </div>
-                          */}
-                          {/* Updated Interactive Stats Grid: clickable Villages and Active Sessions redirecting to their respective lists */}
-                          <div className="grid grid-cols-2 gap-1 border-t border-border/40 pt-2 text-[10px]">
-                            <div className="flex flex-col items-center justify-center bg-muted/60 rounded p-1.5">
-                              <span className="text-muted-foreground">Staff</span>
-                              <span className="font-bold text-foreground text-sm leading-none mt-0.5">{facility.staffCount ?? "—"}</span>
-                            </div>
-                            <div
-                              className="flex flex-col items-center justify-center bg-muted/60 rounded p-1.5 cursor-pointer hover:bg-muted/80 hover:text-primary transition-all duration-200"
-                              onClick={() => setLocation("/population")}
-                            >
-                              <span className="text-muted-foreground">Villages</span>
-                              <span className="font-bold text-foreground text-sm leading-none mt-0.5">{facilityVillages.length}</span>
-                            </div>
-                            <div className="flex flex-col items-center justify-center bg-muted/60 rounded p-1.5">
-                              <span className="text-muted-foreground">Pop. Coverage</span>
-                              <span className="font-bold text-foreground text-sm leading-none mt-0.5">
-                                {catchmentPop > 0 ? catchmentPop.toLocaleString() : "—"}
-                              </span>
-                            </div>
-                            <div
-                              className="flex flex-col items-center justify-center rounded p-1.5 border border-dashed border-primary/30 bg-primary/5 cursor-pointer hover:bg-primary/10 transition-all duration-200"
-                              onClick={() => setLocation("/all-sessions")}
-                            >
-                              <span className="text-muted-foreground">Active Sessions</span>
-                              <span className={`font-bold text-sm leading-none mt-0.5 ${
-                                activeSessions > 0 ? "text-primary" : "text-foreground"
-                              }`}>{activeSessions}</span>
-                            </div>
-                          </div>
-                          <Button
-                            size="sm"
-                            className="w-full mt-2.5 h-7 text-xs font-semibold gap-1 bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setSelectedFacilityId(facility.id);
-                              setPanelVis((prev) => ({ ...prev, facilities: true }));
-                            }}
-                          >
-                            View Facility Info & Catchments →
-                          </Button>
-                        </div>
-                      </div>
-                    );
-                  })()}
-                </Popup>
-              </Marker>
-            ))}
+                <FacilityMarkerItem
+                  key={`facility-${facility.id}`}
+                  facility={facility}
+                  facilityIcon={facilityIcon}
+                  markerRefs={markerRefs}
+                  facilityVillagesMap={facilityVillagesMap}
+                  activeSessionPlans={activeSessionPlans}
+                  handleFocusFacility={handleFocusFacility}
+                  setSelectedFacilityId={setSelectedFacilityId}
+                  setPanelVis={setPanelVis}
+                  onSelectIntelligencePoint={setIntelligencePoint}
+                />
+              ))}
           </MarkerClusterGroup>
         )}
 
