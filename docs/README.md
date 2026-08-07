@@ -1,44 +1,21 @@
-# VaxPlan Complete Documentation Index
+# VaxPlan Technical Documentation Index
 
-Welcome to the VaxPlan Documentation Hub. Use this index to navigate the complete set of walkthroughs, user guides, and technical references.
+Welcome to the official technical documentation directory for **VaxPlan**.
 
-## 1. Master Walkthrough
-The primary, comprehensive guide covering all 29 core modules and features of the VaxPlan platform.
-- [VaxPlan Complete Walkthrough and User Guide](./walkthroughs/vaxplan-complete-walkthrough.md)
+## Documentation Guides & Manuals
 
-## 2. Role-Based Quick Guides
-Actionable, step-by-step instructions tailored to specific operational roles.
-- [Facility User Quick Guide](./user-guides/facility-user-quick-guide.md)
-- [District Manager Quick Guide](./user-guides/district-user-quick-guide.md)
-- [National Admin Quick Guide](./user-guides/national-admin-quick-guide.md)
-- [GIS Specialist Quick Guide](./user-guides/gis-specialist-quick-guide.md)
-- [System Admin Quick Guide](./user-guides/system-admin-quick-guide.md)
+- [**System User Guide (`USER_GUIDE.md`)**](./USER_GUIDE.md): Comprehensive user manual for microplanning, supportive supervision, scorecards, GIS maps, and data entry workflows.
+- [**Indicator Manual (`INDICATOR_MANUAL.md`)**](./INDICATOR_MANUAL.md): Standardized definitions, formulas, and threshold classifications for vaccination coverage and supervision indicators.
+- [**Release Notes (`releases.md`)**](./releases.md): Detailed release history detailing major platform updates, bug fixes, and schema migrations.
+- [**Country Onboarding Guide (`COUNTRY_ONBOARDING.md`)**](./COUNTRY_ONBOARDING.md): Step-by-step guide for initializing new country tenants, boundary shapefiles, and national facility databases.
+- [**Stakeholder Brief (`VAXPLAN_STAKEHOLDER_BRIEF.md`)**](./VAXPLAN_STAKEHOLDER_BRIEF.md): Executive summary for health ministry leadership, WHO/UNICEF partners, and program directors.
 
-## 3. Module Walkthroughs
-Deep-dives into the functionality of specific system modules.
-- [Facilities Module Walkthrough](./modules/facilities-module-walkthrough.md)
-- [GIS Microplanning Walkthrough](./modules/gis-microplanning-walkthrough.md)
-- [Microplan Wizard Walkthrough](./modules/microplan-wizard-walkthrough.md)
-- [Population Intelligence Walkthrough](./modules/population-intelligence-walkthrough.md)
-- [Polygon Drawing Walkthrough](./modules/polygon-drawing-walkthrough.md)
-- [Recommendations Walkthrough](./modules/recommendations-walkthrough.md)
-- [Research Module Walkthrough](./modules/research-module-walkthrough.md)
-- [Sessions Walkthrough](./modules/sessions-walkthrough.md)
-- [Supervision Tools Walkthrough](./modules/supervision-tools-walkthrough.md)
-- [Admin Management Walkthrough](./modules/admin-management-walkthrough.md)
+## Recent Platform Highlights (v1.9.0 – v1.9.2)
 
-## 4. Deployment and Administration
-Technical documentation for hosting, updates, and maintenance.
-- [Safe Deployment Guide](./deployment/vaxplan-safe-deployment-guide.md)
-- [Release History and Walkthroughs](./releases/vaxplan-release-walkthrough.md)
-
-## 5. Templates
-Standardized Markdown formats for creating new documentation.
-- [Module Walkthrough Template](./templates/module-walkthrough-template.md)
-- [Role Quick Guide Template](./templates/role-quick-guide-template.md)
-- [Release Walkthrough Template](./templates/release-walkthrough-template.md)
-- [Troubleshooting Template](./templates/troubleshooting-template.md)
-- [Deployment SOP Template](./templates/deployment-sop-template.md)
-
----
-*VaxPlan: Reach Every Child. Plan Every Session.*
+1. **Supportive Supervision Module**:
+   - Short 35-question & National 70-question supervision checklists.
+   - Traffic Light color coding standard (🔴 0-49.9% Red, 🟠 50-79.9% Amber, 🟢 80-100% Green).
+   - Executive Facility Scorecard with Action Plan table (`SupervisionScorecard.tsx`).
+   - Comparative Supervision Scorecard Matrix (`ComparativeScorecardTable.tsx`).
+2. **Strict Smart Location Cascade Filter**:
+   - Province → District → Health Facility strict parent-child locking and options filtering (`GeoCascadeFilter.tsx`).

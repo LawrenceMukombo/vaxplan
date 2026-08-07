@@ -474,7 +474,7 @@ export function ComparativeScorecardTable({
               provinces={provinces}
               districts={districts}
               facilities={facilities}
-              strictCascade={false}
+              strictCascade={true}
               testIdPrefix="scorecard-matrix-geo"
             />
 

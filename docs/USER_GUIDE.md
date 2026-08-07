@@ -1040,6 +1040,41 @@ on.
 
 ---
 
-*If you spot an error in this guide or want a topic added, ask your
-national admin to file an issue with the VaxPlan team. The guide is
-versioned alongside the application code.*
+## 14. Supportive Supervision, Executive Scorecards & Smart Cascading Filters
+
+### 14.1 Overview
+The Supportive Supervision module enables supervisors, district managers, and national teams to conduct facility visits, evaluate operational readiness across 7 core domain sections, generate executive facility scorecards, and compare performance quality across geographic boundaries.
+
+### 14.2 Standardized Checklists
+- **Short Supervision Template**: 35 core questions (5 questions across 7 sections) optimized for rapid field assessments.
+- **National Supervision Template**: Comprehensive 70-question full assessment checklist.
+
+### 14.3 Traffic Light Scoring System
+Supportive supervision scores follow global health program standards:
+- 🔴 **High Risk (0% – 49.9%)**: High operational risk; requires immediate supervisor intervention and corrective action plan.
+- 🟠 **Medium Risk (50.0% – 79.9%)**: Moderate performance; targeted coaching recommended.
+- 🟢 **Low Risk (80.0% – 100.0%)**: High operational quality and compliance.
+
+### 14.4 Executive Facility Scorecards
+Clicking **Scorecard** on any completed visit opens an executive printable report featuring:
+1. **Facility Metadata Tile**: Name, code, district, province, supervisor name, and visit date.
+2. **Overall Risk Score Badge**: Color-coded percentage and classification.
+3. **KPI Summary Tiles**: Questions Scored, Compliant, Non-compliant, and Action Items.
+4. **Domain Breakdown**: Section-by-section percentage bar charts.
+5. **Supervisor Findings**: Qualitative observations and key recommendations.
+6. **Corrective Action Plan Table**: Specific action items, responsible person, and target completion dates.
+7. **Print / Export PDF**: Built-in print button (`window.print()`) formatted for clean PDF downloads.
+
+### 14.5 Comparative Scorecard Matrix & Smart Location Cascade Filter
+The Comparative Scorecard Matrix allows multi-level comparison across Provinces, Districts, and Facilities:
+- **Strict Smart Location Cascade (`GeoCascadeFilter`)**:
+  - Selecting a **Province** filters down the available Districts and Health Facilities.
+  - **District** selector is locked until a Province is selected.
+  - **Health Facility** selector is locked until a District is selected.
+  - Downstream dropdown options strictly show **only** the direct children belonging to the active parent selection.
+  - One-click clear (`X`) resets location filters back to full national scope.
+- **Enterprise Features**: Pagination (10, 25, 50, 100 per page), sortable wrapped header columns, column visibility picker popover, risk level dropdown filter, search, and CSV export.
+
+---
+
+*If you spot an error in this guide or want a topic added, ask your national admin to file an issue with the VaxPlan team. The guide is versioned alongside the application code.*

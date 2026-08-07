@@ -199,10 +199,22 @@ export function GeoCascadeFilter({
         list = list.filter((d) => Number(d.id) === Number(user.districtId));
       }
     } else if (provinceId) {
-      list = list.filter((d) => Number((d as any).provinceId) === Number(provinceId));
+      const targetProv = provinces.find((p) => Number(p.id) === Number(provinceId));
+      list = list.filter((d) => {
+        const dProvId = Number((d as any).provinceId);
+        if (Number.isFinite(dProvId) && dProvId > 0) {
+          return dProvId === Number(provinceId);
+        }
+        if (targetProv && (d as any).provinceName) {
+          return (d as any).provinceName.toLowerCase() === targetProv.name.toLowerCase();
+        }
+        return false;
+      });
+    } else if (strictCascade) {
+      return [];
     }
     return [...list].sort((a, b) => a.name.localeCompare(b.name));
-  }, [districts, provinceId, isDistrictUser, isFacilityUser, user?.districtId]);
+  }, [districts, provinces, provinceId, isDistrictUser, isFacilityUser, user?.districtId, strictCascade]);
 
   const filteredFacilities = useMemo(() => {
     if (!showFacility) return [];
@@ -213,24 +225,41 @@ export function GeoCascadeFilter({
         list = list.filter((f) => Number(f.id) === Number(user.facilityId));
       }
     } else if (usesDistrictLevel && districtId) {
-      list = list.filter(
-        (f) => Number((f as any).districtId) === Number(districtId),
-      );
+      const targetDist = districts.find((d) => Number(d.id) === Number(districtId));
+      list = list.filter((f) => {
+        const fDistId = Number((f as any).districtId);
+        if (Number.isFinite(fDistId) && fDistId > 0) {
+          return fDistId === Number(districtId);
+        }
+        if (targetDist && (f as any).districtName) {
+          return (f as any).districtName.toLowerCase() === targetDist.name.toLowerCase();
+        }
+        return false;
+      });
     } else if (provinceId) {
+      const targetProv = provinces.find((p) => Number(p.id) === Number(provinceId));
       list = list.filter((f) => {
         const directProvinceId = Number((f as any).provinceId);
         if (Number.isFinite(directProvinceId) && directProvinceId === Number(provinceId)) {
           return true;
         }
-
+        if (targetProv && (f as any).province) {
+          return (f as any).province.toLowerCase() === targetProv.name.toLowerCase();
+        }
         const d = districts.find(
           (dd) => Number(dd.id) === Number((f as any).districtId),
         );
-        return d && Number((d as any).provinceId) === Number(provinceId);
+        if (d && Number((d as any).provinceId) === Number(provinceId)) return true;
+        if (d && targetProv && (d as any).provinceName) {
+          return (d as any).provinceName.toLowerCase() === targetProv.name.toLowerCase();
+        }
+        return false;
       });
+    } else if (strictCascade) {
+      return [];
     }
     return [...list].sort((a, b) => a.name.localeCompare(b.name));
-  }, [facilities, districts, provinceId, districtId, showFacility, usesDistrictLevel, isFacilityUser, user?.facilityId]);
+  }, [facilities, districts, provinces, provinceId, districtId, showFacility, usesDistrictLevel, isFacilityUser, user?.facilityId, strictCascade]);
 
   // Lock status considering user-role scopes
   const provinceLocked = isProvinceUser || isDistrictUser || isFacilityUser;
