@@ -8,7 +8,7 @@ import { join } from "path";
  *
  * Ensures `supervision_checklist_templates` table exists and upserts the
  * 3 standard national supervision checklist templates (Short, National, Full)
- * for all active tenants with granular error diagnostics.
+ * for all active tenants with underlying error cause extraction.
  */
 
 function parseTemplateJson(jsonRaw: any) {
@@ -158,11 +158,11 @@ export async function applySupervisionTemplatesSeed(): Promise<void> {
             console.log(`[migration:028] Inserted template "${t.name}" for tenant "${tenantId}".`);
           }
         } catch (itemErr: any) {
+          const causeMsg = itemErr?.cause?.message || itemErr?.message || String(itemErr);
+          const causeDetail = itemErr?.cause?.detail || itemErr?.detail || "";
+          const causeConstraint = itemErr?.cause?.constraint || itemErr?.constraint || "";
           console.error(
-            `[migration:028] Error seeding template "${t.name}" for tenant "${tenantId}":`,
-            itemErr?.message || itemErr,
-            itemErr?.detail ? `| Detail: ${itemErr.detail}` : "",
-            itemErr?.constraint ? `| Constraint: ${itemErr.constraint}` : ""
+            `[migration:028] Error seeding template "${t.name}" for tenant "${tenantId}": REASON -> ${causeMsg} ${causeDetail ? `| DETAIL -> ${causeDetail}` : ""} ${causeConstraint ? `| CONSTRAINT -> ${causeConstraint}` : ""}`
           );
         }
       }
