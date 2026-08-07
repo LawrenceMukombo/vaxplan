@@ -563,3 +563,67 @@ export function computeChecklistScore(answers: ChecklistAnswer[]): number {
   if (!count) return 0;
   return Math.round((total / count) * 100);
 }
+
+export interface SectionScoreSummary {
+  sectionId: string;
+  sectionTitle: string;
+  score: number;
+  totalQuestions: number;
+  scoredQuestions: number;
+  yesCount: number;
+  noCount: number;
+  naCount: number;
+  trafficLight: ScoreTrafficLight;
+}
+
+export function computeSectionScores(answers: ChecklistAnswer[]): SectionScoreSummary[] {
+  const all = answers || [];
+  const map = new Map<string, {
+    sectionTitle: string;
+    total: number;
+    scoredCount: number;
+    sum: number;
+    yes: number;
+    no: number;
+    na: number;
+  }>();
+
+  for (const a of all) {
+    if (!isAnswerVisible(a, all)) continue;
+    const secId = a.sectionId || "sec-default";
+    const secTitle = a.sectionTitle || "General Supervision Findings";
+    let entry = map.get(secId);
+    if (!entry) {
+      entry = { sectionTitle: secTitle, total: 0, scoredCount: 0, sum: 0, yes: 0, no: 0, na: 0 };
+      map.set(secId, entry);
+    }
+    entry.total += 1;
+
+    if (a.response === "yes") entry.yes += 1;
+    else if (a.response === "no") entry.no += 1;
+    else if (a.response === "na") entry.na += 1;
+
+    const c = scoreContribution(a);
+    if (c !== null) {
+      entry.sum += c;
+      entry.scoredCount += 1;
+    }
+  }
+
+  const results: SectionScoreSummary[] = [];
+  for (const [secId, entry] of Array.from(map.entries())) {
+    const score = entry.scoredCount > 0 ? Math.round((entry.sum / entry.scoredCount) * 100) : 0;
+    results.push({
+      sectionId: secId,
+      sectionTitle: entry.sectionTitle,
+      score,
+      totalQuestions: entry.total,
+      scoredQuestions: entry.scoredCount,
+      yesCount: entry.yes,
+      noCount: entry.no,
+      naCount: entry.na,
+      trafficLight: getScoreTrafficLight(score),
+    });
+  }
+  return results;
+}

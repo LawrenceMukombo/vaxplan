@@ -22,7 +22,7 @@ import {
   ClipboardCheck, Calendar, Plus, CheckCircle2, AlertCircle, XCircle, MinusCircle,
   Building2, User, FileText, ListChecks, Trash2, Pencil, Activity, Mail, NotebookPen,
   Settings2, MapPin, Camera, Star, Loader2, Crosshair, MapPinned, Radio, Clock, Wifi,
-  ChevronDown, ChevronRight, AlertTriangle,
+  ChevronDown, ChevronRight, AlertTriangle, Award,
 } from "lucide-react";
 import { GeoCascadeFilter } from "@/components/GeoCascadeFilter";
 import { useAuth } from "@/hooks/useAuth";
@@ -38,6 +38,7 @@ import {
   type ChecklistQuestionType,
 } from "@shared/supervisionChecklist";
 import { ChecklistQuestion } from "@/components/ChecklistQuestion";
+import { SupervisionScorecard } from "@/components/SupervisionScorecard";
 
 const PAGE_SIZE_OPTIONS = [10, 25, 50, 100, 250] as const;
 
@@ -256,6 +257,7 @@ export default function Supervision() {
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [presetFacilityId, setPresetFacilityId] = useState<number | null>(null);
   const [conductingVisit, setConductingVisit] = useState<SupervisionVisit | null>(null);
+  const [scorecardVisit, setScorecardVisit] = useState<SupervisionVisit | null>(null);
   const [statusSort, setStatusSort] = useState<"status" | "lastVisit" | "name">("status");
   const [statusBadgeFilter, setStatusBadgeFilter] = useState<"all" | "overdue" | "due_soon" | "current">("all");
   const [fsPage, setFsPage] = useState(1);
@@ -778,7 +780,11 @@ export default function Supervision() {
                               </div>
                             )}
                           </div>
-                          <div className="flex gap-2 self-start md:self-center">
+                          <div className="flex gap-2 self-start md:self-center flex-wrap">
+                            <Button size="sm" variant="outline" onClick={() => setScorecardVisit(v)} data-testid={`btn-scorecard-${v.id}`}>
+                              <Award className="h-3.5 w-3.5 mr-1 text-primary" />
+                              Scorecard
+                            </Button>
                             <Button size="sm" variant="outline" onClick={() => setConductingVisit(v)} data-testid={`btn-conduct-${v.id}`}>
                               <Pencil className="h-3.5 w-3.5 mr-1" />
                               {v.status === "conducted" ? "View / edit" : "Conduct"}
@@ -806,6 +812,25 @@ export default function Supervision() {
           onSave={(data) => updateMutation.mutate({ id: conductingVisit.id, data })}
           isSaving={updateMutation.isPending}
         />
+      )}
+
+      {scorecardVisit && (
+        <Dialog open={!!scorecardVisit} onOpenChange={(open) => !open && setScorecardVisit(null)}>
+          <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Supervision Visit Scorecard</DialogTitle>
+              <DialogDescription>
+                Detailed scorecard breakdown, category performance metrics, and corrective actions.
+              </DialogDescription>
+            </DialogHeader>
+            <SupervisionScorecard
+              visit={scorecardVisit}
+              facility={facById.get(scorecardVisit.facilityId)}
+              locationName={facById.get(scorecardVisit.facilityId)?.province || facById.get(scorecardVisit.facilityId)?.district}
+              onClose={() => setScorecardVisit(null)}
+            />
+          </DialogContent>
+        </Dialog>
       )}
     </div>
   );
@@ -1446,6 +1471,7 @@ function ConductDialog({ visit, facility, onClose, onSave, isSaving }: { visit: 
           <TabsList>
             <TabsTrigger value="checklist">Checklist</TabsTrigger>
             <TabsTrigger value="findings">Findings & follow-up</TabsTrigger>
+            <TabsTrigger value="scorecard">Scorecard Summary</TabsTrigger>
           </TabsList>
 
           <TabsContent value="checklist" className="space-y-3 mt-3">
@@ -1662,6 +1688,31 @@ function ConductDialog({ visit, facility, onClose, onSave, isSaving }: { visit: 
               <Label>Next visit date (optional)</Label>
               <Input type="date" value={nextVisitDate} onChange={(e) => setNextVisitDate(e.target.value)} data-testid="input-next-visit" />
             </div>
+          </TabsContent>
+
+          <TabsContent value="scorecard" className="mt-3">
+            <SupervisionScorecard
+              visit={{
+                ...visit,
+                checklist,
+                score,
+                findings,
+                followUpActions: followUp.trim()
+                  ? serializeCorrectiveAction({
+                      owner: actionOwner.trim() || "Unassigned",
+                      dueDate: actionDueDate || "",
+                      severity: actionSeverity,
+                      category: actionCategory,
+                      repeatFinding,
+                      evidencePhoto,
+                      escalated,
+                      escalationReason,
+                      actionText: followUp.trim(),
+                    })
+                  : null,
+              }}
+              facility={facility}
+            />
           </TabsContent>
         </Tabs>
 
