@@ -934,6 +934,14 @@ export class DatabaseStorage implements IStorage {
       .returning({ id: facilities.id });
     return rows.length > 0;
   }
+  async softDeleteFacility(tenantId: string, id: number): Promise<boolean> {
+    const [f] = await db
+      .update(facilities)
+      .set({ isActive: false, updatedAt: new Date() })
+      .where(and(eq(facilities.id, id), eq(facilities.tenantId, tenantId)))
+      .returning({ id: facilities.id });
+    return !!f;
+  }
 
   // --- Villages ---
   async getVillages(tenantId: string, districtId?: number, facilityId?: number): Promise<Village[]> {
