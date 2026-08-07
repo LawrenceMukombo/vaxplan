@@ -9,7 +9,7 @@ import { join } from "path";
  *
  * Ensures `supervision_checklist_templates` table exists and upserts the
  * 3 standard national supervision checklist templates (Short, National, Full)
- * for all active tenants using explicit `::jsonb` casting.
+ * for all active tenants.
  */
 
 function parseTemplateJson(jsonRaw: any) {
@@ -114,58 +114,60 @@ export async function applySupervisionTemplatesSeed(): Promise<void> {
       return;
     }
 
-    // 4. Upsert for each tenant using explicit jsonb casting
+    // 4. Upsert for each tenant
     for (const tenant of allTenants) {
       for (const t of parsedTemplates) {
-        const existing = await db
-          .select({ id: supervisionChecklistTemplates.id })
-          .from(supervisionChecklistTemplates)
-          .where(
-            and(
-              eq(supervisionChecklistTemplates.tenantId, tenant.id),
-              eq(supervisionChecklistTemplates.name, t.name)
+        try {
+          const existing = await db
+            .select({ id: supervisionChecklistTemplates.id })
+            .from(supervisionChecklistTemplates)
+            .where(
+              and(
+                eq(supervisionChecklistTemplates.tenantId, tenant.id),
+                eq(supervisionChecklistTemplates.name, t.name)
+              )
             )
-          )
-          .limit(1);
+            .limit(1);
 
-        const sectionsSql = sql`${JSON.stringify(t.sections)}::jsonb`;
-        const itemsSql = sql`${JSON.stringify(t.items)}::jsonb`;
-
-        if (existing.length > 0) {
-          const existingId = existing[0].id;
-          await db
-            .update(supervisionChecklistTemplates)
-            .set({
-              category: t.category,
-              description: t.description,
-              sections: sectionsSql,
-              items: itemsSql,
-              isActive: t.isActive,
-              updatedAt: new Date(),
-            })
-            .where(eq(supervisionChecklistTemplates.id, existingId));
-          console.log(`[migration:028] Updated template "${t.name}" (ID ${existingId}) for tenant "${tenant.id}".`);
-        } else {
-          await db
-            .insert(supervisionChecklistTemplates)
-            .values({
-              tenantId: tenant.id,
-              name: t.name,
-              category: t.category,
-              description: t.description,
-              sections: sectionsSql,
-              items: itemsSql,
-              isActive: t.isActive,
-              createdAt: new Date(),
-              updatedAt: new Date(),
-            });
-          console.log(`[migration:028] Inserted template "${t.name}" for tenant "${tenant.id}".`);
+          if (existing.length > 0) {
+            const existingId = existing[0].id;
+            await db
+              .update(supervisionChecklistTemplates)
+              .set({
+                category: t.category,
+                description: t.description,
+                sections: t.sections,
+                items: t.items,
+                isActive: t.isActive,
+                updatedAt: new Date(),
+              })
+              .where(eq(supervisionChecklistTemplates.id, existingId));
+            console.log(`[migration:028] Updated template "${t.name}" (ID ${existingId}) for tenant "${tenant.id}".`);
+          } else {
+            await db
+              .insert(supervisionChecklistTemplates)
+              .values({
+                tenantId: tenant.id,
+                name: t.name,
+                category: t.category,
+                description: t.description,
+                sections: t.sections,
+                items: t.items,
+                isActive: t.isActive,
+              });
+            console.log(`[migration:028] Inserted template "${t.name}" for tenant "${tenant.id}".`);
+          }
+        } catch (itemErr: any) {
+          console.error(
+            `[migration:028] Error seeding template "${t.name}" for tenant "${tenant.id}":`,
+            itemErr?.detail || itemErr?.message || itemErr
+          );
         }
       }
     }
 
     console.log("[migration:028] Supportive Supervision Templates seed complete.");
   } catch (err: any) {
-    console.error(`[migration:028] Error during seed: ${err?.detail || err?.message || err}`);
+    console.error(`[migration:028] Fatal error during seed: ${err?.detail || err?.message || err}`);
   }
 }
