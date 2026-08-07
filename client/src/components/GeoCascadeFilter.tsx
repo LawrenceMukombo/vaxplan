@@ -107,38 +107,37 @@ export function GeoCascadeFilter({
     queryKey: ["/api/me/tenant"],
   });
 
+  const activeTenantId = tenantInfo?.activeTenant?.id || tenantInfo?.id;
+
   const { data: fetchedRegions } = useQuery<Region[]>({
-    queryKey: ["/api/regions", tenantInfo?.id],
+    queryKey: ["/api/regions", activeTenantId],
     queryFn: () => fetchJson<Region[]>("/api/regions"),
-    enabled: showRegion && providedRegions === undefined && !!tenantInfo?.id,
+    enabled: showRegion && providedRegions === undefined,
   });
 
   const { data: fetchedProvinces } = useQuery<Province[]>({
-    queryKey: ["/api/provinces", tenantInfo?.id],
+    queryKey: ["/api/provinces", activeTenantId],
     queryFn: () => fetchJson<Province[]>("/api/provinces"),
-    enabled: providedProvinces === undefined && !!tenantInfo?.id,
+    enabled: providedProvinces === undefined,
   });
 
   const { data: fetchedDistricts } = useQuery<District[]>({
-    queryKey: ["/api/districts", tenantInfo?.id],
+    queryKey: ["/api/districts", activeTenantId],
     queryFn: () => fetchJson<District[]>("/api/districts"),
-    enabled: providedDistricts === undefined && !!tenantInfo?.id,
+    enabled: providedDistricts === undefined,
   });
 
   const { data: fetchedFacilities } = useQuery<Facility[]>({
-    queryKey: ["/api/facilities", tenantInfo?.id],
+    queryKey: ["/api/facilities", activeTenantId],
     queryFn: () => fetchJson<Facility[]>("/api/facilities"),
-    enabled:
-      showFacility &&
-      providedFacilities === undefined &&
-      !!tenantInfo?.id,
+    enabled: showFacility && providedFacilities === undefined,
   });
 
   const provinces = providedProvinces ?? fetchedProvinces ?? [];
   const districts = providedDistricts ?? fetchedDistricts ?? [];
   const facilities = providedFacilities ?? fetchedFacilities ?? [];
   const regions = providedRegions ?? fetchedRegions ?? [];
-  const usesDistrictLevel = tenantInfo?.settings?.hasDistricts !== false;
+  const usesDistrictLevel = (tenantInfo?.activeTenant?.settings ?? tenantInfo?.settings)?.hasDistricts !== false;
 
   useEffect(() => {
     if (!usesDistrictLevel && districtId !== null) {
