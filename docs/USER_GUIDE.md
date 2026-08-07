@@ -35,13 +35,13 @@ tenant administrator may have customised the labels (for example
 9. [Tenant onboarding (new Ministry of Health)](#9-tenant-onboarding-new-ministry-of-health)
 10. [Map and boundary management](#10-map-and-boundary-management)
 11. [Settlement intelligence and zero-dose targeting](#11-settlement-intelligence-and-zero-dose-targeting)
-12. [Settings, customisation, and labels](#12-settings-customisation-and-labels)
-13. [Supervision visits](#13-supervision-visits)
-14. [Reports and exports](#14-reports-and-exports)
-14b. [Indicator reference manual](#14b-indicator-reference-manual)
-15. [Troubleshooting](#15-troubleshooting)
-16. [Data sources and acknowledgements](#16-data-sources-and-acknowledgements)
-17. [Glossary](#17-glossary)
+13. [Supervision visits & scorecards](#13-supervision-visits)
+14. [Supportive Supervision, Executive Scorecards & Smart Cascading Filters](#14-supportive-supervision-executive-scorecards--smart-cascading-filters)
+15. [Reports and exports](#14-reports-and-exports)
+16. [Indicator reference manual](#14b-indicator-reference-manual)
+17. [Troubleshooting](#15-troubleshooting)
+18. [Data sources and acknowledgements](#16-data-sources-and-acknowledgements)
+19. [Glossary](#17-glossary)
 
 ---
 
