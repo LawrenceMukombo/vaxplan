@@ -42,6 +42,7 @@ import { upsertPolygonPermissionsForAllTenants } from "./migrations/029-polygon-
 import { applyMicroplanVersionControlMigration } from "./migrations/030-microplan-version-control";
 import { upsertMicroplanVersionPermissionsForAllTenants } from "./migrations/031-microplan-version-permissions";
 import { realignIdentitySequences } from "./services/identitySequences";
+import { applySupervisionTemplatesSeed } from "./migrations/028-supervision-templates-seed";
 const app = express();
 const httpServer = createServer(app);
 const skipDbBootstrap = process.env.SKIP_DB_BOOTSTRAP === '1';
@@ -246,6 +247,18 @@ async function backfillClientIds() {
   }
 }
 (async () => {
+  if (skipDbBootstrap) {
+    log("DB bootstrap disabled: skipping early identity sequence realignment", "db");
+  } else {
+    try {
+      const { db } = await import("./db");
+      await realignIdentitySequences(db as any);
+      log("identity sequences realigned before route startup", "db");
+    } catch (err: any) {
+      log(`early identity sequence realignment warning: ${err?.message ?? err}`, "db");
+    }
+  }
+
   await registerRoutes(httpServer, app);
   // Run backfill asynchronously in the background so as not to block startup
   if (skipDbBootstrap) {
@@ -352,7 +365,8 @@ async function backfillClientIds() {
     await realignIdentitySequences(db as any);
     await upsertPolygonPermissionsForAllTenants(db as any);
     await upsertMicroplanVersionPermissionsForAllTenants(db as any);
-    log("identity sequences and all-tenant lifecycle permissions ready", "db");
+    await applySupervisionTemplatesSeed();
+    log("identity sequences, templates, and all-tenant lifecycle permissions ready", "db");
   }).catch((err) => log("identity sequence and lifecycle permission warning: " + String(err?.message ?? err), "db"));
   // Stock ledger columns upgrade (migration 027)
   import("./db").then(({ db }) =>
@@ -363,20 +377,28 @@ async function backfillClientIds() {
     ).catch((err) => log(`stock ledger migration import failed: ${err?.message ?? err}`, "db"))
   ).catch((err) => log(`stock ledger db import failed: ${err?.message ?? err}`, "db"));
 
-  // Auto-upsert database snapshot from scratch/local_database_all.jsonl.gz if present.
-  // Refresh sequences and all-tenant permissions afterward so imported tenants
-  // and explicit snapshot IDs are immediately safe for normal app inserts.
-  import("../scripts/upsert-entire-database").then(({ upsertEntireDatabase }) => {
-    upsertEntireDatabase()
-      .then(async () => {
-        const { db } = await import("./db");
-        await realignIdentitySequences(db as any);
-        await upsertPolygonPermissionsForAllTenants(db as any);
-        await upsertMicroplanVersionPermissionsForAllTenants(db as any);
-        log("auto-upsert complete; sequences and all-tenant permissions refreshed", "db");
-      })
-      .catch((err) => log(`auto-upsert warning: ${err?.message ?? err}`, "db"));
-  }).catch((err) => log(`auto-upsert import failed: ${err?.message ?? err}`, "db"));
+  const autoUpsertEnabled =
+    process.env.ENABLE_AUTO_UPSERT === "1" ||
+    (process.env.NODE_ENV !== "production" && process.env.SKIP_AUTO_UPSERT !== "1");
+
+  if (autoUpsertEnabled) {
+    // Auto-upsert database snapshot from scratch/local_database_all.jsonl.gz when
+    // explicitly enabled. Production deploys should use npm run db:migrate plus
+    // the controlled upsert script so bulk imports do not slow live requests.
+    import("../scripts/upsert-entire-database").then(({ upsertEntireDatabase }) => {
+      upsertEntireDatabase()
+        .then(async () => {
+          const { db } = await import("./db");
+          await realignIdentitySequences(db as any);
+          await upsertPolygonPermissionsForAllTenants(db as any);
+          await upsertMicroplanVersionPermissionsForAllTenants(db as any);
+          log("auto-upsert complete; sequences and all-tenant permissions refreshed", "db");
+        })
+        .catch((err) => log(`auto-upsert warning: ${err?.message ?? err}`, "db"));
+    }).catch((err) => log(`auto-upsert import failed: ${err?.message ?? err}`, "db"));
+  } else {
+    log("auto-upsert skipped (set ENABLE_AUTO_UPSERT=1 for controlled data import)", "db");
+  }
   }
   setupRealtime(httpServer, sessionMiddleware);
   if (skipDbBootstrap) {
