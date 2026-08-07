@@ -1,7 +1,7 @@
 import { readFileSync, existsSync } from "fs";
 import { join } from "path";
 
-// Auto-load .env if process.env.DATABASE_URL is missing during CLI execution
+// Auto-load .env synchronously BEFORE importing db modules
 if (!process.env.DATABASE_URL) {
   const envPath = join(process.cwd(), ".env");
   if (existsSync(envPath)) {
@@ -10,16 +10,15 @@ if (!process.env.DATABASE_URL) {
       const trimmed = line.trim();
       if (trimmed && !trimmed.startsWith("#") && trimmed.includes("=")) {
         const [key, ...valParts] = trimmed.split("=");
-        const val = valParts.join("=").replace(/^["']|["']$/g, "");
-        if (key && !process.env[key.trim()]) {
-          process.env[key.trim()] = val.trim();
+        const val = valParts.join("=").trim().replace(/^["']|["']$/g, "");
+        const k = key.trim();
+        if (k && !process.env[k]) {
+          process.env[k] = val;
         }
       }
     }
   }
 }
-
-import { applySupervisionTemplatesSeed } from "../server/migrations/028-supervision-templates-seed";
 
 async function main() {
   console.log("=================================================");
@@ -27,6 +26,8 @@ async function main() {
   console.log("=================================================");
 
   try {
+    // Dynamic import to ensure process.env.DATABASE_URL is set BEFORE server/db.ts is evaluated
+    const { applySupervisionTemplatesSeed } = await import("../server/migrations/028-supervision-templates-seed");
     await applySupervisionTemplatesSeed();
     console.log("SUCCESS: Supportive Supervision Checklist Templates upserted successfully for all tenants.");
     process.exit(0);
