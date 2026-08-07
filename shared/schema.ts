@@ -2273,13 +2273,13 @@ export const supervisionChecklistTemplates = pgTable(
   }),
 );
 
-export const insertSupervisionChecklistTemplateSchema = createInsertSchema(supervisionChecklistTemplates).omit({
+export const insertSupervisionChecklistTemplateSchema = createInsertSchema(supervisionChecklistTemplates, {
+  isActive: z.boolean().optional(),
+}).omit({
   tenantId: true,
   createdByUserId: true,
   createdAt: true,
   updatedAt: true,
-} as any).extend({
-  isActive: z.boolean().optional(),
 });
 export type InsertSupervisionChecklistTemplate = z.infer<typeof insertSupervisionChecklistTemplateSchema>;
 export type SupervisionChecklistTemplate = typeof supervisionChecklistTemplates.$inferSelect;

@@ -1674,17 +1674,34 @@ export class DatabaseStorage implements IStorage {
     return t;
   }
   async createChecklistTemplate(tenantId: string, createdByUserId: string | null, data: InsertSupervisionChecklistTemplate): Promise<SupervisionChecklistTemplate> {
+    const cleanData = {
+      tenantId,
+      name: String(data.name || "Untitled Checklist"),
+      category: String(data.category || "supervision"),
+      description: data.description ? String(data.description) : "",
+      sections: Array.isArray(data.sections) ? data.sections : [],
+      items: Array.isArray(data.items) ? data.items : [],
+      isActive: data.isActive ?? true,
+      createdByUserId: createdByUserId ?? null,
+    };
     const [t] = await db
       .insert(supervisionChecklistTemplates)
-      .values({ ...data, tenantId, createdByUserId } as typeof supervisionChecklistTemplates.$inferInsert)
+      .values(cleanData)
       .returning();
     return t;
   }
   async updateChecklistTemplate(tenantId: string, id: number, data: Partial<InsertSupervisionChecklistTemplate>): Promise<SupervisionChecklistTemplate | undefined> {
-    const { tenantId: _i, ...safe } = data as any;
+    const safeData: Record<string, any> = { updatedAt: new Date() };
+    if (data.name !== undefined) safeData.name = String(data.name);
+    if (data.category !== undefined) safeData.category = String(data.category);
+    if (data.description !== undefined) safeData.description = data.description ? String(data.description) : "";
+    if (data.sections !== undefined) safeData.sections = Array.isArray(data.sections) ? data.sections : [];
+    if (data.items !== undefined) safeData.items = Array.isArray(data.items) ? data.items : [];
+    if (data.isActive !== undefined) safeData.isActive = data.isActive;
+
     const [t] = await db
       .update(supervisionChecklistTemplates)
-      .set({ ...safe, updatedAt: new Date() })
+      .set(safeData)
       .where(and(eq(supervisionChecklistTemplates.id, id), eq(supervisionChecklistTemplates.tenantId, tenantId)))
       .returning();
     return t;

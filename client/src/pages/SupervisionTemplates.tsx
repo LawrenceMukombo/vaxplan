@@ -540,10 +540,9 @@ export default function SupervisionTemplates() {
     mutationFn: async () => {
       const secTitleMap = new Map(sections.map((s) => [s.id, s.title]));
       const payload = {
-        name,
-        description,
-        category,
-        applicableLevel,
+        name: name || "Untitled Checklist",
+        description: description || "",
+        category: category || "supervision",
         isActive: active,
         sections,
         items: orderedItems.map((i, idx) => ({
