@@ -3,7 +3,7 @@ import { useLocation, useSearch } from "wouter";
 import { loadActiveTenant } from "@/lib/tenantCache";
 import type { Province, District, Village } from "@shared/schema";
 import { GeoCascadeFilter } from "@/components/GeoCascadeFilter";
-import { buildGeoMaps } from "@/lib/geoHierarchy";
+import { buildGeoMaps, getRecordHierarchy } from "@/lib/geoHierarchy";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -553,18 +553,43 @@ export default function StockLedger() {
     },
   });
 
-  const resolveRowGeo = (facilityId: number | null | undefined) => {
-    if (!facilityId) return { provinceName: null as string | null, districtName: null as string | null, provinceId: null as number | null, districtId: null as number | null };
-    const fac = geoMaps.facilityMap.get(Number(facilityId));
-    if (!fac) return { provinceName: null, districtName: null, provinceId: null, districtId: null };
-    const dist = fac.districtId ? geoMaps.districtMap.get(fac.districtId) : null;
-    const prov = dist?.provinceId ? geoMaps.provinceMap.get(dist.provinceId) : null;
+  const resolveRowGeo = (facilityId: number | null | undefined, record?: any) => {
+    const targetFacId = facilityId || selectedFacilityId;
+    const hierarchy = getRecordHierarchy({ ...(record || {}), facilityId: targetFacId }, geoMaps);
     return {
-      provinceName: prov?.name ?? null,
-      districtName: dist?.name ?? null,
-      provinceId: prov?.id ?? null,
-      districtId: dist?.id ?? null,
+      provinceName: hierarchy.provinceName !== "—" ? hierarchy.provinceName : null,
+      districtName: hierarchy.districtName !== "—" ? hierarchy.districtName : null,
+      provinceId: hierarchy.provinceId,
+      districtId: hierarchy.districtId,
     };
+  };
+
+  const getTxProductCategory = (tx: any) => {
+    const p = allCatalogueProducts.find((c) => c.id === tx.productId || c.name === tx.vaccineName);
+    if (p) {
+      return getProductCategoryGroup(p).groupId;
+    }
+    const name = (tx.vaccineName || "").toLowerCase();
+    if (
+      name.includes("tally") ||
+      name.includes("card") ||
+      name.includes("register") ||
+      name.includes("aefi form")
+    ) return "tally_sheet";
+
+    if (
+      name.includes("carrier") ||
+      name.includes("ice pack") ||
+      name.includes("cold box") ||
+      name.includes("refrigerator") ||
+      name.includes("freezer")
+    ) return "cold_chain";
+
+    if (name.includes("diluent")) return "diluent";
+    if (name.includes("syringe") || name.includes("safety box")) return "syringe";
+    if (name.includes("gloves") || name.includes("mask") || name.includes("cotton")) return "ppe";
+
+    return "vaccine";
   };
 
   const baseFilteredTransactions = useMemo(() => {
@@ -2097,7 +2122,7 @@ export default function StockLedger() {
                             className="px-4 py-3 cursor-pointer hover:bg-muted/40 transition-colors select-none"
                           >
                             <div className="flex items-center gap-1">
-                              <span>Antigen / Vaccine</span>
+                              <span>Item / Vaccine</span>
                               {sortField === "vaccineName" && (sortDirection === "asc" ? "▲" : "▼")}
                             </div>
                           </th>
@@ -2170,7 +2195,11 @@ export default function StockLedger() {
                           4: "4-Discarded",
                         };
 
-                        const rowGeo = resolveRowGeo(tx.facilityId);
+                        const rowGeo = resolveRowGeo(tx.facilityId, tx);
+                        const category = getTxProductCategory(tx);
+                        const isVaccine = category === "vaccine";
+                        const isNonExpiring = category === "tally_sheet" || category === "cold_chain" || (tx.expiryDate && tx.expiryDate.startsWith("2099"));
+
                         return (
                           <tr 
                             key={tx.id} 
@@ -2195,70 +2224,86 @@ export default function StockLedger() {
                             {visibleColumns.quantity && (
                               <td className="px-4 py-3 text-center font-bold">{tx.quantityDoses}</td>
                             )}
-                            {visibleColumns.batch && <td className="px-4 py-3 font-mono text-xs">{tx.batchNumber}</td>}
+                            {visibleColumns.batch && (
+                              <td className="px-4 py-3 font-mono text-xs">
+                                {category === "tally_sheet" || category === "cold_chain" || tx.batchNumber === "N/A" ? (
+                                  <span className="text-muted-foreground/50">N/A</span>
+                                ) : (
+                                  tx.batchNumber
+                                )}
+                              </td>
+                            )}
                             {visibleColumns.expiry && (
                               <td className="px-4 py-3">
-                                <div className="flex items-center gap-1.5">
-                                  <span>{format(new Date(tx.expiryDate), "yyyy-MM-dd")}</span>
-                                  {(() => {
-                                    const flagged = nearExpiryByTxId.get(tx.id);
-                                    if (flagged) {
-                                      if (flagged.status === "expired") {
+                                {isNonExpiring ? (
+                                  <span className="text-muted-foreground/50 text-xs font-mono">N/A</span>
+                                ) : (
+                                  <div className="flex items-center gap-1.5">
+                                    <span>{format(new Date(tx.expiryDate), "yyyy-MM-dd")}</span>
+                                    {(() => {
+                                      const flagged = nearExpiryByTxId.get(tx.id);
+                                      if (flagged) {
+                                        if (flagged.status === "expired") {
+                                          return (
+                                            <Badge
+                                              variant="outline"
+                                              className="border-rose-500 text-rose-600 bg-rose-500/10 text-[10px] px-1.5 py-0 h-5"
+                                              data-testid={`badge-expiry-${tx.id}`}
+                                            >
+                                              Expired {Math.abs(flagged.daysUntil)}d ago
+                                            </Badge>
+                                          );
+                                        }
+                                        if (flagged.status === "expiring-30") {
+                                          return (
+                                            <Badge
+                                              variant="outline"
+                                              className="border-rose-500 text-rose-600 bg-rose-500/10 text-[10px] px-1.5 py-0 h-5"
+                                              data-testid={`badge-expiry-${tx.id}`}
+                                            >
+                                              ≤30d
+                                            </Badge>
+                                          );
+                                        }
                                         return (
                                           <Badge
                                             variant="outline"
-                                            className="border-rose-500 text-rose-600 bg-rose-500/10 text-[10px] px-1.5 py-0 h-5"
+                                            className="border-amber-500 text-amber-600 bg-amber-500/10 text-[10px] px-1.5 py-0 h-5"
                                             data-testid={`badge-expiry-${tx.id}`}
                                           >
-                                            Expired {Math.abs(flagged.daysUntil)}d ago
+                                            ≤60d
                                           </Badge>
                                         );
                                       }
-                                      if (flagged.status === "expiring-30") {
-                                        return (
-                                          <Badge
-                                            variant="outline"
-                                            className="border-rose-500 text-rose-600 bg-rose-500/10 text-[10px] px-1.5 py-0 h-5"
-                                            data-testid={`badge-expiry-${tx.id}`}
-                                          >
-                                            ≤30d
-                                          </Badge>
-                                        );
+                                      if (tx.transactionType === "receipt") {
+                                        const { status, daysUntil } = getExpiryStatus(tx.expiryDate);
+                                        if (status === "expired") {
+                                          return (
+                                            <Badge
+                                              variant="outline"
+                                              className="border-muted-foreground/30 text-muted-foreground text-[10px] px-1.5 py-0 h-5"
+                                              title="Batch already exhausted"
+                                            >
+                                              Expired {Math.abs(daysUntil)}d ago
+                                            </Badge>
+                                          );
+                                        }
                                       }
-                                      return (
-                                        <Badge
-                                          variant="outline"
-                                          className="border-amber-500 text-amber-600 bg-amber-500/10 text-[10px] px-1.5 py-0 h-5"
-                                          data-testid={`badge-expiry-${tx.id}`}
-                                        >
-                                          ≤60d
-                                        </Badge>
-                                      );
-                                    }
-                                    if (tx.transactionType === "receipt") {
-                                      const { status, daysUntil } = getExpiryStatus(tx.expiryDate);
-                                      if (status === "expired") {
-                                        return (
-                                          <Badge
-                                            variant="outline"
-                                            className="border-muted-foreground/30 text-muted-foreground text-[10px] px-1.5 py-0 h-5"
-                                            title="Batch already exhausted"
-                                          >
-                                            Expired {Math.abs(daysUntil)}d ago
-                                          </Badge>
-                                        );
-                                      }
-                                    }
-                                    return null;
-                                  })()}
-                                </div>
+                                      return null;
+                                    })()}
+                                  </div>
+                                )}
                               </td>
                             )}
                             {visibleColumns.vvm && (
                               <td className="px-4 py-3 text-center">
-                                <Badge variant="outline" className={tx.vvmStatus > 2 ? "border-destructive text-destructive" : ""}>
-                                  {vvmStatuses[tx.vvmStatus] ?? tx.vvmStatus}
-                                </Badge>
+                                {isVaccine ? (
+                                  <Badge variant="outline" className={tx.vvmStatus > 2 ? "border-destructive text-destructive" : ""}>
+                                    {vvmStatuses[tx.vvmStatus] ?? tx.vvmStatus}
+                                  </Badge>
+                                ) : (
+                                  <span className="text-muted-foreground/50 text-xs font-mono">N/A</span>
+                                )}
                               </td>
                             )}
                             {visibleColumns.recipient && (
