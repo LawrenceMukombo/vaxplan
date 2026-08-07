@@ -183,12 +183,53 @@ export function getRiskClassification(score: number): {
   color: string;
 } {
   if (score >= 80) {
-    return { level: "low", label: "Low Risk (>= 80%)", color: "emerald" };
+    return { level: "low", label: "Low Risk (80-100%)", color: "emerald" };
   }
-  if (score >= 60) {
-    return { level: "medium", label: "Medium Risk (60–79%)", color: "amber" };
+  if (score >= 50) {
+    return { level: "medium", label: "Medium Risk (50-79.9%)", color: "amber" };
   }
-  return { level: "high", label: "High Risk (< 60%)", color: "red" };
+  return { level: "high", label: "High Risk (< 50%)", color: "red" };
+}
+
+export interface ScoreTrafficLight {
+  status: "red" | "amber" | "green";
+  label: string;
+  badgeClass: string;
+  textClass: string;
+  bgClass: string;
+  borderClass: string;
+}
+
+export function getScoreTrafficLight(score: number | null | undefined): ScoreTrafficLight {
+  const s = typeof score === "number" ? score : 0;
+  if (s >= 80) {
+    return {
+      status: "green",
+      label: "Good (80-100%)",
+      badgeClass: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30",
+      textClass: "text-emerald-600 dark:text-emerald-400 font-bold",
+      bgClass: "bg-emerald-500",
+      borderClass: "border-emerald-500",
+    };
+  }
+  if (s >= 50) {
+    return {
+      status: "amber",
+      label: "Needs Attention (50-79.9%)",
+      badgeClass: "bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30",
+      textClass: "text-amber-600 dark:text-amber-400 font-bold",
+      bgClass: "bg-amber-500",
+      borderClass: "border-amber-500",
+    };
+  }
+  return {
+    status: "red",
+    label: "Critical (0-49.9%)",
+    badgeClass: "bg-rose-500/15 text-rose-700 dark:text-rose-300 border border-rose-500/30",
+    textClass: "text-rose-600 dark:text-rose-400 font-bold",
+    bgClass: "bg-rose-500",
+    borderClass: "border-rose-500",
+  };
 }
 
 // A single captured answer stored on a supervision visit's `checklist` array.

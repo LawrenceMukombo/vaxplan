@@ -63,7 +63,7 @@ type SupervisionVisit = {
 
 function scoreColor(score: number) {
   if (score >= 80) return "text-emerald-600 dark:text-emerald-400";
-  if (score >= 60) return "text-amber-600 dark:text-amber-400";
+  if (score >= 50) return "text-amber-600 dark:text-amber-400";
   return "text-rose-600 dark:text-rose-400";
 }
 

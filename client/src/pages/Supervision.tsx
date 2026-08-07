@@ -30,6 +30,7 @@ import {
   templateToAnswers,
   autoPrefillChecklist,
   computeChecklistScore,
+  getScoreTrafficLight,
   isAnswerVisible,
   makeRepeatAnswer,
   type ChecklistAnswer,
@@ -334,7 +335,7 @@ export default function Supervision() {
       const lastScore = lastConducted && typeof lastConducted.score === "number" ? lastConducted.score : null;
       let status: Row["status"];
       if (!lastConducted) status = "overdue";
-      else if ((daysSinceLast ?? 0) > 90 || (lastScore !== null && lastScore < 60)) status = "overdue";
+      else if ((daysSinceLast ?? 0) > 90 || (lastScore !== null && lastScore < 50)) status = "overdue";
       else if ((daysSinceLast ?? 0) > 60) status = "due_soon";
       else status = "current";
       return { facility: f, lastConducted, lastScheduled, daysSinceLast, lastScore, status };
@@ -588,7 +589,11 @@ export default function Supervision() {
                               <>
                                 <span>Last visit: {new Date(row.lastConducted.conductedDate || row.lastConducted.scheduledDate).toLocaleDateString()}</span>
                                 <span>{row.daysSinceLast} days ago</span>
-                                {row.lastScore !== null && <span>Score {row.lastScore}%</span>}
+                                {row.lastScore !== null && (
+                                  <Badge variant="outline" className={`text-[10px] font-mono ${getScoreTrafficLight(row.lastScore).badgeClass}`}>
+                                    Score {row.lastScore}%
+                                  </Badge>
+                                )}
                               </>
                             ) : (
                               <span>No visit recorded yet</span>
@@ -735,7 +740,7 @@ export default function Supervision() {
                                 </Badge>
                               )}
                               {typeof v.score === "number" && (
-                                <Badge variant="outline" className={v.score >= 80 ? STATUS_STYLES.conducted : v.score >= 60 ? "bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/30" : STATUS_STYLES.missed}>
+                                <Badge variant="outline" className={`font-mono text-[11px] ${getScoreTrafficLight(v.score).badgeClass}`}>
                                   Score {v.score}%
                                 </Badge>
                               )}
@@ -1451,7 +1456,7 @@ function ConductDialog({ visit, facility, onClose, onSave, isSaving }: { visit: 
                 <CheckCircle2 className="h-4 w-4 text-emerald-500" />
                 <span>{answeredCount} of {totalCount} answered</span>
               </span>
-              <Badge variant={pct === 100 ? "default" : "secondary"} className="font-mono text-xs">
+              <Badge variant="outline" className={`font-mono text-xs ${getScoreTrafficLight(score).badgeClass}`}>
                 Current score: {score}%
               </Badge>
             </div>
