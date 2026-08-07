@@ -1,5 +1,6 @@
 import { db } from "../db";
-import { sql } from "drizzle-orm";
+import { supervisionChecklistTemplates, tenants } from "../../shared/schema";
+import { eq, and, sql } from "drizzle-orm";
 import { readFileSync, existsSync } from "fs";
 import { join } from "path";
 
@@ -8,7 +9,7 @@ import { join } from "path";
  *
  * Ensures `supervision_checklist_templates` table exists and upserts the
  * 3 standard national supervision checklist templates (Short, National, Full)
- * for all active tenants.
+ * for all active tenants using Drizzle ORM parameterized queries.
  */
 
 function parseTemplateJson(jsonRaw: any) {
@@ -104,68 +105,58 @@ export async function applySupervisionTemplatesSeed(): Promise<void> {
     return;
   }
 
-  // 3. Fetch all tenant IDs
+  // 3. Fetch all active tenants
   try {
-    const tenantsRes = await db.execute(sql.raw("SELECT id FROM tenants"));
-    const tenantIds = tenantsRes.rows.map((r: any) => r.id as string);
+    const allTenants = await db.select({ id: tenants.id }).from(tenants);
 
-    if (tenantIds.length === 0) {
+    if (allTenants.length === 0) {
       console.warn("[migration:028] No tenants found to seed templates.");
       return;
     }
 
-    // 4. Upsert for each tenant
-    for (const tenantId of tenantIds) {
+    // 4. Upsert for each tenant using Drizzle ORM parameterized queries
+    for (const tenant of allTenants) {
       for (const t of parsedTemplates) {
-        const checkRes = await db.execute(
-          sql.raw(`
-            SELECT id FROM supervision_checklist_templates
-            WHERE tenant_id = '${tenantId.replace(/'/g, "''")}'
-              AND name = '${t.name.replace(/'/g, "''")}'
-            LIMIT 1
-          `)
-        );
+        const existing = await db
+          .select({ id: supervisionChecklistTemplates.id })
+          .from(supervisionChecklistTemplates)
+          .where(
+            and(
+              eq(supervisionChecklistTemplates.tenantId, tenant.id),
+              eq(supervisionChecklistTemplates.name, t.name)
+            )
+          )
+          .limit(1);
 
-        const sectionsJson = JSON.stringify(t.sections).replace(/'/g, "''");
-        const itemsJson = JSON.stringify(t.items).replace(/'/g, "''");
-        const descEsc = t.description ? t.description.replace(/'/g, "''") : "";
-
-        if (checkRes.rows.length > 0) {
-          // Update
-          const existingId = (checkRes.rows[0] as any).id;
-          await db.execute(
-            sql.raw(`
-              UPDATE supervision_checklist_templates
-              SET category = '${t.category}',
-                  description = '${descEsc}',
-                  sections = '${sectionsJson}'::jsonb,
-                  items = '${itemsJson}'::jsonb,
-                  is_active = ${t.isActive},
-                  updated_at = NOW()
-              WHERE id = ${existingId}
-            `)
-          );
-          console.log(`[migration:028] Updated template "${t.name}" (ID ${existingId}) for tenant "${tenantId}".`);
+        if (existing.length > 0) {
+          const existingId = existing[0].id;
+          await db
+            .update(supervisionChecklistTemplates)
+            .set({
+              category: t.category,
+              description: t.description,
+              sections: t.sections,
+              items: t.items,
+              isActive: t.isActive,
+              updatedAt: new Date(),
+            })
+            .where(eq(supervisionChecklistTemplates.id, existingId));
+          console.log(`[migration:028] Updated template "${t.name}" (ID ${existingId}) for tenant "${tenant.id}".`);
         } else {
-          // Insert
-          await db.execute(
-            sql.raw(`
-              INSERT INTO supervision_checklist_templates (
-                tenant_id, name, category, description, sections, items, is_active, created_at, updated_at
-              ) VALUES (
-                '${tenantId.replace(/'/g, "''")}',
-                '${t.name.replace(/'/g, "''")}',
-                '${t.category}',
-                '${descEsc}',
-                '${sectionsJson}'::jsonb,
-                '${itemsJson}'::jsonb,
-                ${t.isActive},
-                NOW(),
-                NOW()
-              )
-            `)
-          );
-          console.log(`[migration:028] Inserted template "${t.name}" for tenant "${tenantId}".`);
+          await db
+            .insert(supervisionChecklistTemplates)
+            .values({
+              tenantId: tenant.id,
+              name: t.name,
+              category: t.category,
+              description: t.description,
+              sections: t.sections,
+              items: t.items,
+              isActive: t.isActive,
+              createdAt: new Date(),
+              updatedAt: new Date(),
+            });
+          console.log(`[migration:028] Inserted template "${t.name}" for tenant "${tenant.id}".`);
         }
       }
     }
