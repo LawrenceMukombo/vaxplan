@@ -1318,10 +1318,10 @@ export default function StaffManagement() {
                 <Select
                   value={selectedDistrictId || "all"}
                   onValueChange={handleDistrictChange}
-                  disabled={loadingDistricts}
+                  disabled={loadingDistricts || !selectedProvinceId}
                 >
-                  <SelectTrigger className="bg-background border-border h-9">
-                    <SelectValue placeholder="All Districts" />
+                  <SelectTrigger className="bg-background border-border h-9" disabled={loadingDistricts || !selectedProvinceId}>
+                    <SelectValue placeholder={!selectedProvinceId ? "Select Province first" : "All Districts"} />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All Districts</SelectItem>
@@ -1346,10 +1346,10 @@ export default function StaffManagement() {
                 <Select
                   value={selectedFacilityId || "all"}
                   onValueChange={handleFacilityChange}
-                  disabled={loadingFacilities}
+                  disabled={loadingFacilities || !selectedDistrictId}
                 >
-                  <SelectTrigger className="bg-background border-border h-9">
-                    <SelectValue placeholder={loadingFacilities ? "Loading..." : "Select Facility"} />
+                  <SelectTrigger className="bg-background border-border h-9" disabled={loadingFacilities || !selectedDistrictId}>
+                    <SelectValue placeholder={loadingFacilities ? "Loading..." : !selectedDistrictId ? "Select District first" : "Select Facility"} />
                   </SelectTrigger>
                   <SelectContent className="max-h-[300px]">
                     <SelectItem value="all">— Select a Facility —</SelectItem>

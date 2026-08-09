@@ -1220,7 +1220,7 @@ export default function Dashboard() {
         month: "long",
         day: "numeric",
       }) +
-      " · " +
+      " Â· " +
       liveTime.toLocaleTimeString("en-US", {
         hour: "numeric",
         minute: "2-digit",

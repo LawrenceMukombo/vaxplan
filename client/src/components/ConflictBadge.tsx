@@ -29,7 +29,6 @@ export function ConflictBadge() {
       }
     };
     recount();
-    const t = setInterval(recount, 15_000);
 
     const onSwMessage = (e: MessageEvent) => {
       if (e.data?.type === "OUTBOX_SYNC_FINISHED") recount();
@@ -45,7 +44,6 @@ export function ConflictBadge() {
 
     return () => {
       alive = false;
-      clearInterval(t);
       navigator.serviceWorker?.removeEventListener("message", onSwMessage);
       window.removeEventListener("vaxplan:conflict-count", onCustom);
     };

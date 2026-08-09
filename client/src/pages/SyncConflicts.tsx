@@ -92,10 +92,8 @@ export default function SyncConflicts() {
       if (e.data?.type === "OUTBOX_SYNC_FINISHED") reload();
     };
     navigator.serviceWorker?.addEventListener("message", handler);
-    const t = setInterval(reload, 5000);
     return () => {
       navigator.serviceWorker?.removeEventListener("message", handler);
-      clearInterval(t);
     };
   }, [reload]);
 

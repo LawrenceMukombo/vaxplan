@@ -292,11 +292,13 @@ export default function SupervisionTemplates() {
     const newSectionsMap: Record<string, ChecklistSection> = {};
     const newItems: ChecklistTemplateItem[] = [];
 
-    const baseSecId = sections[0]?.id || `sec-${Date.now()}`;
-    if (sections.length === 0) {
-      newSectionsMap[baseSecId] = { id: baseSecId, title: "General Findings", displayOrder: 1 };
-    } else {
-      sections.forEach((s) => { newSectionsMap[s.id] = s; });
+    if (mode !== "replace") {
+      const baseSecId = sections[0]?.id || `sec-${Date.now()}`;
+      if (sections.length === 0) {
+        newSectionsMap[baseSecId] = { id: baseSecId, title: "General Findings", displayOrder: 1 };
+      } else {
+        sections.forEach((s) => { newSectionsMap[s.id] = s; });
+      }
     }
 
     rawRows.forEach((r: any, idx: number) => {
@@ -347,7 +349,7 @@ export default function SupervisionTemplates() {
     const updatedSectionsList = Object.values(newSectionsMap);
     const finalItemsList = mode === "replace" ? newItems : [...items, ...newItems];
 
-    // Auto-prune any section that has 0 questions after import (e.g. empty default initial section)
+    // Auto-prune any section that has 0 questions after import
     const sectionCounts = new Map<string, number>();
     finalItemsList.forEach((it) => {
       if (it.sectionId) {
@@ -363,6 +365,9 @@ export default function SupervisionTemplates() {
 
     setSections(finalSectionsList.map((s, idx) => ({ ...s, displayOrder: idx + 1 })));
     setItems(finalItemsList);
+    if (finalItemsList.length > 0) {
+      setSelectedItemId(finalItemsList[0].id);
+    }
 
     toast({
       title: "Questions Imported",
@@ -382,8 +387,15 @@ export default function SupervisionTemplates() {
       reader.onload = (event) => {
         try {
           const json = JSON.parse(event.target?.result as string);
+          if (json && typeof json === "object" && !Array.isArray(json)) {
+            if (json.name) setName(json.name);
+            if (json.category) setCategory(json.category);
+            if (json.description) setDescription(json.description);
+            if (json.isActive !== undefined) setActive(Boolean(json.isActive));
+            if (json.applicableLevel) setApplicableLevel(json.applicableLevel);
+          }
           const rows = Array.isArray(json) ? json : (json.items || json.questions || [json]);
-          parseAndAppendQuestions(rows, "append");
+          parseAndAppendQuestions(rows, "replace");
         } catch (err: any) {
           toast({ title: "Invalid JSON", description: err?.message, variant: "destructive" });
         }
@@ -397,7 +409,7 @@ export default function SupervisionTemplates() {
           const firstSheet = workbook.SheetNames[0];
           const worksheet = workbook.Sheets[firstSheet];
           const rawRows = XLSX.utils.sheet_to_json(worksheet);
-          parseAndAppendQuestions(rawRows, "append");
+          parseAndAppendQuestions(rawRows, isNew ? "replace" : "append");
         } catch (err: any) {
           toast({ title: "File Error", description: "Failed to parse CSV/Excel file.", variant: "destructive" });
         }
@@ -729,10 +741,25 @@ export default function SupervisionTemplates() {
             </p>
           </div>
 
-          <Button onClick={() => openEditor()} className="gap-2 bg-primary text-primary-foreground">
-            <Plus className="h-4 w-4" />
-            Create Template
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                openEditor();
+                setTimeout(() => setImportOpen(true), 50);
+              }}
+              className="gap-1.5 border-indigo-500/30 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/30 font-semibold"
+              data-testid="button-import-template-top"
+            >
+              <FileUp className="h-4 w-4" />
+              Import Template
+            </Button>
+            <Button onClick={() => openEditor()} className="gap-2 bg-primary text-primary-foreground font-semibold">
+              <Plus className="h-4 w-4" />
+              Create Template
+            </Button>
+          </div>
         </div>
       )}
 
@@ -740,7 +767,7 @@ export default function SupervisionTemplates() {
       {!editing ? (
         <div className="space-y-4">
           {/* Category Filter Pills */}
-          <div className="flex flex-wrap items-center gap-2 border-b border-border/40 pb-3">
+          <div className="flex flex-wrap items-center gap-2 border-border/40 pb-3">
             <span className="text-xs font-semibold text-muted-foreground mr-1">Filter Type:</span>
             {[
               { id: "all", label: "All Checklists", count: templates.length },
@@ -778,10 +805,23 @@ export default function SupervisionTemplates() {
             <div className="text-center py-12 border border-dashed border-border/80 rounded-xl space-y-3 bg-muted/20">
               <ClipboardList className="h-10 w-10 mx-auto text-muted-foreground" />
               <div className="font-semibold text-sm">No {getCategoryLabel(activeCategoryFilter)} Checklists Found</div>
-              <p className="text-xs text-muted-foreground">Create a new {getCategoryLabel(activeCategoryFilter)} checklist template or select another filter.</p>
-              <Button size="sm" onClick={() => openEditor()} className="gap-1.5 mt-2">
-                <Plus className="h-4 w-4" /> Create {getCategoryLabel(activeCategoryFilter)} Template
-              </Button>
+              <p className="text-xs text-muted-foreground">Create a new {getCategoryLabel(activeCategoryFilter)} checklist template, import from JSON/CSV, or select another filter.</p>
+              <div className="flex items-center justify-center gap-2 mt-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    openEditor();
+                    setTimeout(() => setImportOpen(true), 50);
+                  }}
+                  className="gap-1.5 border-indigo-500/30 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/30 font-semibold"
+                >
+                  <FileUp className="h-4 w-4" /> Import Template
+                </Button>
+                <Button size="sm" onClick={() => openEditor()} className="gap-1.5 font-semibold">
+                  <Plus className="h-4 w-4" /> Create {getCategoryLabel(activeCategoryFilter)} Template
+                </Button>
+              </div>
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">

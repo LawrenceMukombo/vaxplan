@@ -4,7 +4,7 @@ import { Link } from "wouter";
 import {
   Snowflake, Thermometer, Wrench, AlertTriangle, CheckCircle2,
   Plus, Download, Upload, Search, Filter, RefreshCw, Building2,
-  SlidersHorizontal, Eye, FileSpreadsheet
+  SlidersHorizontal, Eye, FileSpreadsheet, Lock
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -582,9 +582,20 @@ export default function ColdChainInventory() {
 
           {/* DISTRICT */}
           <div className="space-y-1">
-            <label className="text-[11px] font-semibold text-muted-foreground uppercase">District</label>
-            <Select value={selectedDistrictId} onValueChange={setSelectedDistrictId}>
-              <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="All Districts" /></SelectTrigger>
+            <label className="text-[11px] font-semibold text-muted-foreground uppercase flex items-center gap-1">
+              District
+              {(!selectedProvinceId || selectedProvinceId === "all") && (
+                <Lock className="h-2.5 w-2.5 opacity-60 text-muted-foreground" />
+              )}
+            </label>
+            <Select
+              value={selectedDistrictId}
+              onValueChange={setSelectedDistrictId}
+              disabled={!selectedProvinceId || selectedProvinceId === "all"}
+            >
+              <SelectTrigger className="h-8 text-xs" disabled={!selectedProvinceId || selectedProvinceId === "all"}>
+                <SelectValue placeholder={!selectedProvinceId || selectedProvinceId === "all" ? "Select Province first" : "All Districts"} />
+              </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Districts</SelectItem>
                 {filteredDistricts.map((d: any) => (

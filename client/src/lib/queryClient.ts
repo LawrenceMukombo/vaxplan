@@ -99,7 +99,73 @@ async function getOfflineData(url: string): Promise<any> {
     return await _byTenant(offlineDb.vaccineConfigs);
   }
   if (pathname === "/api/population") {
-    return await _byTenant(offlineDb.populationData);
+    const records = await _byTenant<any>(offlineDb.populationData);
+    const [offlineVillages, offlineFacilities] = await Promise.all([
+      _byTenant<any>(offlineDb.villages),
+      _byTenant<any>(offlineDb.facilities),
+    ]);
+    const villageById = new Map(offlineVillages.map((v: any) => [Number(v.id), v]));
+    const facilityById = new Map(offlineFacilities.map((f: any) => [Number(f.id), f]));
+    const source = searchParams.get("source");
+    const year = searchParams.get("year");
+    const provinceId = searchParams.get("provinceId");
+    const districtId = searchParams.get("districtId");
+    const villageId = searchParams.get("villageId");
+    const facilityId = searchParams.get("facilityId");
+    const excludeVillages = searchParams.get("excludeVillages") === "true" && source !== "worldpop";
+
+    return records.filter((record: any) => {
+      if (source && String(record.source ?? "").toLowerCase() !== source.toLowerCase()) return false;
+      if (year && Number(record.year) !== Number(year)) return false;
+      if (provinceId && Number(record.provinceId) !== Number(provinceId)) return false;
+      if (districtId && Number(record.districtId) !== Number(districtId)) return false;
+      if (villageId && Number(record.villageId) !== Number(villageId)) return false;
+      if (facilityId && Number(record.facilityId) !== Number(facilityId)) return false;
+      if (excludeVillages && record.villageId != null) return false;
+      return true;
+    }).map((record: any) => {
+      const metadata =
+        record.metadata && typeof record.metadata === "object" && !Array.isArray(record.metadata)
+          ? record.metadata
+          : {};
+      const village = record.villageId ? villageById.get(Number(record.villageId)) : null;
+      const facility =
+        record.facilityId
+          ? facilityById.get(Number(record.facilityId))
+          : village?.assignedFacilityId
+            ? facilityById.get(Number(village.assignedFacilityId))
+            : null;
+      const communityName =
+        village?.name ??
+        record._geoCommunityName ??
+        record._geoVillageName ??
+        record.villageName ??
+        metadata.communityName ??
+        metadata.villageName ??
+        metadata.catchmentName ??
+        null;
+      const facilityName =
+        facility?.name ??
+        record._geoFacilityName ??
+        record.facilityName ??
+        metadata.facilityName ??
+        metadata.healthFacilityName ??
+        metadata.hfName ??
+        null;
+
+      return {
+        ...record,
+        _geoCommunityName: communityName,
+        _geoVillageName: communityName,
+        _geoFacilityName: facilityName,
+        metadata: {
+          ...metadata,
+          ...(communityName ? { communityName, villageName: communityName } : {}),
+          ...(facilityName ? { facilityName } : {}),
+          ...(facility?.hmisCode ? { facilityHmisCode: facility.hmisCode } : {}),
+        },
+      };
+    });
   }
   if (pathname === "/api/stock/ledger") {
     const facilityId = searchParams.get("facilityId");
@@ -413,6 +479,14 @@ async function writeToIndexedDB(method: string, url: string, data: any): Promise
     if (segments[2] === "estimate-polygon" || segments[2] === "worldpop-point") {
       return;
     }
+    if (segments[2] === "import") {
+      if (data && Array.isArray(data.records)) {
+        for (const record of data.records) {
+          await offlineDb.populationData.put({ ...record, _syncedAt: Date.now() });
+        }
+      }
+      return;
+    }
     table = offlineDb.populationData;
   } else if (resource === "vaccines") {
     if (segments[2] === "config") {
@@ -464,6 +538,61 @@ async function handleOfflineMutation(method: string, url: string, data: any): Pr
   const segments = pathname.split("/").filter(Boolean);
   const resource = segments[1];
   const isBulk = segments[segments.length - 1] === "bulk";
+
+  if (method === "POST" && pathname === "/api/population/import") {
+    const items = Array.isArray((data as any)?.population) ? (data as any).population : [];
+    const records = [];
+
+    for (const item of items) {
+      const itemData = { ...item };
+      const metadata =
+        itemData.metadata && typeof itemData.metadata === "object" && !Array.isArray(itemData.metadata)
+          ? itemData.metadata
+          : {};
+      const communityName = itemData.villageName ?? itemData.communityName ?? metadata.communityName ?? metadata.villageName;
+      const facilityName = itemData.facilityName ?? metadata.facilityName ?? metadata.healthFacilityName ?? metadata.hfName;
+      itemData._geoCommunityName = itemData._geoCommunityName ?? communityName ?? null;
+      itemData._geoVillageName = itemData._geoVillageName ?? communityName ?? null;
+      itemData._geoFacilityName = itemData._geoFacilityName ?? facilityName ?? null;
+      itemData.metadata = {
+        ...metadata,
+        ...(communityName ? { communityName, villageName: communityName } : {}),
+        ...(facilityName ? { facilityName } : {}),
+        ...(itemData.villageCode ? { villageCode: itemData.villageCode } : {}),
+        ...(itemData.facilityHmisCode ? { facilityHmisCode: itemData.facilityHmisCode } : {}),
+      };
+      if (!itemData.id) {
+        itemData.id = Math.floor(Date.now() + Math.random() * 1000);
+      }
+      itemData.tenantId = tenantId;
+      itemData._localOnly = true;
+      await offlineDb.populationData.put({ ...itemData, _syncedAt: Date.now() });
+      records.push(itemData);
+    }
+
+    await enqueueOutbox({
+      tenantId,
+      entityType: "population",
+      method: method as any,
+      url: cleanUrl,
+      body: JSON.stringify({ population: items }),
+      localId: "population-import",
+    });
+
+    setTimeout(() => {
+      import("./syncEngine").then(({ syncEngine }) => {
+        syncEngine.refreshPendingCount(tenantId);
+      });
+    }, 100);
+
+    return {
+      success: true,
+      createdCount: records.length,
+      updatedCount: 0,
+      skippedCount: 0,
+      records,
+    };
+  }
 
   if (method === "POST" && isBulk) {
     const items = Array.isArray(data?.items) ? data.items : [];

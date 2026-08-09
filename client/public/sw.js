@@ -1,4 +1,4 @@
-﻿const IS_LOCAL_PREVIEW_SW = self.location.hostname === "localhost" || self.location.hostname === "127.0.0.1";
+const IS_LOCAL_PREVIEW_SW = self.location.hostname === "localhost" || self.location.hostname === "127.0.0.1";
 
 if (IS_LOCAL_PREVIEW_SW) {
   self.addEventListener("install", (event) => {
@@ -11,10 +11,6 @@ if (IS_LOCAL_PREVIEW_SW) {
         const keys = await caches.keys();
         await Promise.all(keys.map((key) => caches.delete(key)));
         await self.registration.unregister();
-        const clients = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
-        for (const client of clients) {
-          client.navigate(client.url);
-        }
       })(),
     );
   });

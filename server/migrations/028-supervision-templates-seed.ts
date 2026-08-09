@@ -70,7 +70,15 @@ export async function applySupervisionTemplatesSeed(): Promise<void> {
 
   try {
     await db.execute(sql.raw(createTableStmt));
-    console.log("[migration:028] Table supervision_checklist_templates ensured.");
+    await db.execute(sql`
+      ALTER TABLE supervision_checklist_templates ADD COLUMN IF NOT EXISTS sections JSONB NOT NULL DEFAULT '[]'::jsonb;
+      ALTER TABLE supervision_checklist_templates ADD COLUMN IF NOT EXISTS category VARCHAR(50) NOT NULL DEFAULT 'supervision';
+      ALTER TABLE supervision_checklist_templates ADD COLUMN IF NOT EXISTS items JSONB NOT NULL DEFAULT '[]'::jsonb;
+      ALTER TABLE supervision_checklist_templates ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE;
+      ALTER TABLE supervision_checklist_templates ADD COLUMN IF NOT EXISTS description TEXT;
+      ALTER TABLE supervision_checklist_templates ADD COLUMN IF NOT EXISTS created_by_user_id VARCHAR(255);
+    `);
+    console.log("[migration:028] Table supervision_checklist_templates and columns ensured.");
   } catch (err: any) {
     console.error(`[migration:028] Error ensuring table: ${err.message}`);
   }

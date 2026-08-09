@@ -42,11 +42,13 @@ import {
   CornerUpLeft,
   Archive,
   X,
+  Sparkles,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import { canCreateData, canDeleteData } from "@/lib/permissions";
 import { PopulationDialog } from "@/components/PopulationDialog";
+import { WorldPopExtractionDialog } from "@/components/WorldPopExtractionDialog";
 import { DeleteConfirmDialog } from "@/components/DeleteConfirmDialog";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import {
@@ -59,7 +61,6 @@ import {
 } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-// XLSX is loaded lazily on-demand only when the user clicks Export.
 import type { 
   PopulationData, 
   Region, 
@@ -114,41 +115,111 @@ const TAB_CONFIG: TabConfig[] = [
 const CURRENT_YEAR = new Date().getFullYear();
 const YEARS = Array.from({ length: 10 }, (_, i) => CURRENT_YEAR - i);
 
-/* Original Code commented out to adhere to global rules and prevent leaflet tile crash:
-// Helper component to update map viewport dynamically on filter updates
-function MapUpdater({ center, zoom }: { center: [number, number]; zoom: number }) {
-  const map = useMap();
-  useEffect(() => {
-    map.setView(center, zoom);
-  }, [center, zoom, map]);
-  return null;
-}
-*/
+type HeatmapPoint = {
+  name: string;
+  lat: number;
+  lng: number;
+  population: number;
+  under1: number;
+  under5: number;
+  pregnant: number;
+  records: number;
+  villageId?: number;
+  facilityId?: number;
+  districtId?: number | null;
+  provinceId?: number | null;
+  sourceLabel?: string;
+};
 
-/* Previous attempt commented out to add value-based ref comparison to prevent infinite loop:
-// Helper component to update map viewport dynamically on filter updates
-// Updated to prevent Leaflet from failing with "Attempted to load an infinite number of tiles" by validating coordinates and zoom.
-function MapUpdater({ center, zoom }: { center: [number, number]; zoom: number }) {
-  const map = useMap();
-  useEffect(() => {
-    if (
-      center &&
-      Array.isArray(center) &&
-      center.length === 2 &&
-      typeof center[0] === "number" &&
-      typeof center[1] === "number" &&
-      !isNaN(center[0]) &&
-      !isNaN(center[1]) &&
-      typeof zoom === "number" &&
-      !isNaN(zoom) &&
-      isFinite(zoom)
-    ) {
-      map.setView(center, zoom);
-    }
-  }, [center, zoom, map]);
-  return null;
-}
-*/
+type ChoroplethBin = {
+  label: string;
+  min: number;
+  max: number;
+  color: string;
+};
+
+const CHOROPLETH_COLORS = ["#d1fae5", "#86efac", "#fde047", "#fb923c", "#ef4444", "#991b1b"];
+
+const asNumberOrNull = (value: unknown): number | null => {
+  if (value === null || value === undefined || value === "") return null;
+  const next = Number(value);
+  return Number.isFinite(next) ? next : null;
+};
+
+const formatChoroplethNumber = (value: number): string => {
+  if (!Number.isFinite(value)) return "0";
+  if (Math.abs(value) >= 1_000_000) return `${(value / 1_000_000).toFixed(value >= 10_000_000 ? 0 : 1)}m`;
+  if (Math.abs(value) >= 1_000) return `${(value / 1_000).toFixed(value >= 10_000 ? 0 : 1)}k`;
+  return Math.round(value).toLocaleString();
+};
+
+const quantileValue = (sortedValues: number[], q: number): number => {
+  if (sortedValues.length === 0) return 0;
+  if (sortedValues.length === 1) return sortedValues[0];
+  const pos = (sortedValues.length - 1) * q;
+  const base = Math.floor(pos);
+  const rest = pos - base;
+  const next = sortedValues[base + 1];
+  return next === undefined ? sortedValues[base] : sortedValues[base] + rest * (next - sortedValues[base]);
+};
+
+const makeChoroplethLabel = (min: number, max: number, index: number, total: number): string => {
+  if (total === 1) return `${formatChoroplethNumber(min)} people`;
+  if (index === 0) return `<= ${formatChoroplethNumber(max)}`;
+  if (index === total - 1) return `> ${formatChoroplethNumber(min)}`;
+  return `${formatChoroplethNumber(min)} - ${formatChoroplethNumber(max)}`;
+};
+
+const buildPopulationBins = (points: HeatmapPoint[]): ChoroplethBin[] => {
+  const values = points
+    .map((point) => point.population)
+    .filter((value) => Number.isFinite(value) && value > 0)
+    .sort((a, b) => a - b);
+
+  if (values.length === 0) {
+    return [{ label: "No population", min: 0, max: 0, color: CHOROPLETH_COLORS[0] }];
+  }
+
+  const min = values[0];
+  const max = values[values.length - 1];
+
+  if (min === max) {
+    return [{ label: `${formatChoroplethNumber(max)} people`, min, max, color: CHOROPLETH_COLORS[2] }];
+  }
+
+  let bounds = [0, 0.2, 0.4, 0.6, 0.8, 1]
+    .map((q) => Math.round(quantileValue(values, q)))
+    .filter((value, index, list) => index === 0 || value > list[index - 1]);
+
+  if (bounds.length < 4) {
+    const step = (max - min) / (CHOROPLETH_COLORS.length - 1);
+    bounds = Array.from({ length: CHOROPLETH_COLORS.length }, (_, index) => Math.round(min + step * index));
+  }
+
+  const binCount = Math.max(1, bounds.length - 1);
+  return Array.from({ length: binCount }, (_, index) => {
+    const minValue = index === 0 ? 0 : bounds[index];
+    const maxValue = bounds[index + 1] ?? max;
+    const colorIndex = Math.min(index, CHOROPLETH_COLORS.length - 1);
+    return {
+      label: makeChoroplethLabel(minValue, maxValue, index, binCount),
+      min: minValue,
+      max: maxValue,
+      color: CHOROPLETH_COLORS[colorIndex],
+    };
+  });
+};
+
+const getPopulationBin = (value: number, bins: ChoroplethBin[]): ChoroplethBin => {
+  if (bins.length === 0) {
+    return { label: "No population", min: 0, max: 0, color: CHOROPLETH_COLORS[0] };
+  }
+  if (!Number.isFinite(value) || value <= 0) return bins[0];
+  return bins.find((bin, index) => {
+    const isLast = index === bins.length - 1;
+    return value >= bin.min && (value <= bin.max || isLast);
+  }) ?? bins[bins.length - 1];
+};
 
 // Helper component to update map viewport dynamically on filter updates
 // Uses refs to track value-based changes of coordinates and zoom. This prevents infinite render loop cascades
@@ -263,36 +334,6 @@ function WorkflowStepper({ status }: WorkflowStepperProps) {
   );
 }
 
-/* Original Code commented out to adhere to global rules:
-// Helper to extract coordinates safely from jsonb coordinates
-const getAdminCoordinates = (adminRecord: any): [number, number] | null => {
-  if (!adminRecord || !adminRecord.coordinates) return null;
-  try {
-    const coords = typeof adminRecord.coordinates === "string" 
-      ? JSON.parse(adminRecord.coordinates) 
-      : adminRecord.coordinates;
-    
-    if (Array.isArray(coords) && coords.length === 2) {
-      const [c1, c2] = coords;
-      if (typeof c1 === "number" && typeof c2 === "number") {
-        if (Math.abs(c1) < Math.abs(c2)) {
-          return [c1, c2];
-        } else {
-          return [c2, c1];
-        }
-      }
-    }
-    if (coords.type === "Point" && Array.isArray(coords.coordinates)) {
-      const [lng, lat] = coords.coordinates;
-      return [Number(lat), Number(lng)];
-    }
-  } catch (e) {
-    // Ignore parse errors
-  }
-  return null;
-};
-*/
-
 // Helper to extract coordinates safely from jsonb coordinates.
 // Refactored to explicitly validate against NaN to prevent Leaflet infinite tile crashes.
 const getAdminCoordinates = (adminRecord: any): [number, number] | null => {
@@ -332,7 +373,6 @@ export default function Population() {
   const [basemap] = usePersistedBasemap("positron");
   
   const [activeTab, setActiveTab] = useState<PopulationSource | "comparison">("nso");
-  // Note: existing selectedProvince/selectedDistrict filters above are unified with the shared GeoCascadeFilter contract (Province → District) plus a Year filter unique to Population.
   const [selectedRegion, setSelectedRegion] = useState<string>("all");
   const [selectedProvince, setSelectedProvince] = useState<string>("all");
   const [selectedDistrict, setSelectedDistrict] = useState<string>("all");
@@ -345,15 +385,13 @@ export default function Population() {
   const [commentAction, setCommentAction] = useState<"return" | "reject" | "reopen" | null>(null);
   const [reviewerComment, setReviewerComment] = useState("");
 
-  /* Original Code commented out for backward-compatibility:
   const [selectedYear, setSelectedYear] = useState<string>("all");
-  */
-  const [selectedYear, setSelectedYear] = useState<string>(CURRENT_YEAR.toString());
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingRecord, setEditingRecord] = useState<PopulationData | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deletingRecord, setDeletingRecord] = useState<PopulationData | null>(null);
+  const [worldPopDialogOpen, setWorldPopDialogOpen] = useState(false);
 
   // Retrieve Tenant Context for multitenant support and premium dynamic terminology translation
   const { data: tenantInfo } = useQuery<any>({
@@ -377,7 +415,6 @@ export default function Population() {
     setSelectedRecord(null);
   }, [activeTab]);
 
-
   const skipRegionLevel = tenantInfo?.settings?.skipRegionLevel ?? (tenantInfo?.countryCode === "ZMB" || false);
   const rawAdminLabels = tenantInfo?.settings?.adminLevelLabels ?? {
     level1: "Region",
@@ -398,32 +435,6 @@ export default function Population() {
     queryKey: ["/api/regions"],
   });
 
-  /*
-  // Original Code: Standard static query which does not support tenant cache scopes
-  const { data: provinces, isLoading: loadingProvinces } = useQuery<Province[]>({
-    queryKey: ["/api/provinces"],
-  });
-
-  const { data: districts, isLoading: loadingDistricts } = useQuery<District[]>({
-    queryKey: ["/api/districts"],
-  });
-  */
-
-  /*
-  // Pre-Refactored Code: Scoped to tenant ID but lacked custom queryFn.
-  // This caused the default getQueryFn to fetch "/api/provinces/:tenantId", which resolved to a single province in routes.ts rather than an array.
-  const { data: provinces, isLoading: loadingProvinces } = useQuery<Province[]>({
-    queryKey: ["/api/provinces", tenantInfo?.id],
-    enabled: !!tenantInfo?.id,
-  });
-
-  const { data: districts, isLoading: loadingDistricts } = useQuery<District[]>({
-    queryKey: ["/api/districts", tenantInfo?.id],
-    enabled: !!tenantInfo?.id,
-  });
-  */
-
-  // Updated Code: Scope queries to tenant ID and use custom queryFn to fetch the array of all provinces/districts for the tenant.
   const { data: provinces, isLoading: loadingProvinces } = useQuery<Province[]>({
     queryKey: ["/api/provinces", tenantInfo?.id],
     queryFn: async () => {
@@ -445,23 +456,31 @@ export default function Population() {
   });
 
   const { data: villages, isLoading: loadingVillages } = useQuery<Village[]>({
-    queryKey: ["/api/villages"],
+    queryKey: ["/api/villages", tenantInfo?.id],
+    queryFn: async () => {
+      const res = await fetch("/api/villages", {
+        credentials: "include",
+        cache: "no-store",
+      });
+      if (!res.ok) throw new Error("Failed to fetch communities");
+      return res.json();
+    },
+    enabled: !!tenantInfo?.id,
   });
 
   const { data: facilities, isLoading: loadingFacilities } = useQuery<Facility[]>({
-    queryKey: ["/api/facilities"],
+    queryKey: ["/api/facilities", tenantInfo?.id],
+    queryFn: async () => {
+      const res = await fetch("/api/facilities", {
+        credentials: "include",
+        cache: "no-store",
+      });
+      if (!res.ok) throw new Error("Failed to fetch facilities");
+      return res.json();
+    },
+    enabled: !!tenantInfo?.id,
   });
 
-  /* Original Code:
-  const queryParams = useMemo(() => {
-    const params = new URLSearchParams();
-    if (activeTab !== "comparison") {
-      params.set("source", activeTab);
-    }
-    if (selectedYear !== "all") params.set("year", selectedYear);
-    return params.toString();
-  }, [activeTab, selectedYear]);
-  */
   const queryParams = useMemo(() => {
     const params = new URLSearchParams();
     if (activeTab !== "comparison") {
@@ -472,17 +491,14 @@ export default function Population() {
     if (selectedDistrict !== "all") params.set("districtId", selectedDistrict);
     if (selectedFacility !== "all") params.set("facilityId", selectedFacility);
     
-    // When no geographical scope filters are selected, exclude village-level records 
-    // to avoid downloading a 17MB nationwide dataset for the data grid.
-    if (selectedProvince === "all" && selectedDistrict === "all" && selectedFacility === "all") {
+    // When on non-worldpop tabs and no geographical scope filters are selected,
+    // exclude village-level records for huge NSO/HMIS nationwide datasets.
+    if (activeTab !== "worldpop" && selectedProvince === "all" && selectedDistrict === "all" && selectedFacility === "all") {
       params.set("excludeVillages", "true");
     }
     return params.toString();
   }, [activeTab, selectedYear, selectedProvince, selectedDistrict, selectedFacility]);
 
-  // Separate lightweight query for the heatmap — always includes village-level
-  // records (with coordinates) so the density map shows even when the data grid
-  // omits them for performance. Only fetches the fields needed for the map.
   const heatmapQueryParams = useMemo(() => {
     const params = new URLSearchParams();
     if (selectedYear !== "all") params.set("year", selectedYear);
@@ -494,23 +510,31 @@ export default function Population() {
   }, [selectedYear, selectedProvince, selectedDistrict, selectedFacility]);
 
   const { data: heatmapPopData = [] } = useQuery<PopulationData[]>({
-    queryKey: ["/api/population/heatmap", heatmapQueryParams],
+    queryKey: ["/api/population/heatmap", tenantInfo?.id, heatmapQueryParams],
     queryFn: async () => {
-      const res = await fetch(`/api/population?${heatmapQueryParams}`);
+      const res = await fetch(`/api/population?${heatmapQueryParams}`, {
+        credentials: "include",
+        cache: "no-store",
+      });
       if (!res.ok) throw new Error("Failed to fetch heatmap population data");
       return res.json();
     },
     // Stale time 5 min — heatmap doesn't need to update as frequently as the table
     staleTime: 5 * 60 * 1000,
+    enabled: !!tenantInfo?.id,
   });
 
   const { data: populationData, isLoading: loadingPopulation } = useQuery<PopulationData[]>({
-    queryKey: ["/api/population", queryParams],
+    queryKey: ["/api/population", tenantInfo?.id, queryParams],
     queryFn: async () => {
-      const res = await fetch(`/api/population?${queryParams}`);
+      const res = await fetch(`/api/population?${queryParams}`, {
+        credentials: "include",
+        cache: "no-store",
+      });
       if (!res.ok) throw new Error("Failed to fetch population data");
       return res.json();
     },
+    enabled: !!tenantInfo?.id,
   });
 
   const deleteMutation = useMutation({
@@ -722,325 +746,8 @@ export default function Population() {
         setSelectedProvince(provinceParam);
       }
     }
-
     appliedInitialPopulationParamsRef.current = true;
   }, [districtMap, facilityMap, initialPopulationParams, loadingDistricts, loadingFacilities, loadingProvinces, provinceMap]);
-  /* ORIGINAL CODE (Commented out to adhere to global rules):
-  // Helper to trace geographic hierarchy for any population record.
-  const getRecordHierarchy = useCallback((record: PopulationData) => {
-    let districtId: number | null = null;
-    let provinceId: number | null = null;
-
-    if (record.villageId) {
-      const v = villageMap.get(Number(record.villageId));
-      if (v) districtId = Number(v.districtId);
-    } else if (record.facilityId) {
-      const f = facilityMap.get(Number(record.facilityId));
-      if (f) districtId = Number(f.districtId);
-    }
-
-    if (!districtId && record.districtId) {
-      districtId = Number(record.districtId);
-    }
-
-    if (districtId) {
-      const d = districtMap.get(districtId);
-      if (d) provinceId = Number(d.provinceId);
-    }
-
-    if (!provinceId && record.provinceId) {
-      provinceId = Number(record.provinceId);
-    }
-
-    let regionId: number | null = null;
-    if (provinceId) {
-      const p = provinceMap.get(provinceId);
-      if (p) regionId = Number(p.regionId);
-    }
-
-    return { regionId, provinceId, districtId };
-  }, [provinceMap, districtMap, villageMap, facilityMap]);
-  */
-
-  // REFACTORED CODE:
-  // Helper to trace geographic hierarchy for any population record.
-  // Delegates Province/District resolution to the shared `getRecordHierarchySh` helper
-  // (consistent rules across every page) and only layers on the Region lookup that is
-  // specific to this page.
-  const getRecordHierarchy = useCallback((record: PopulationData) => {
-    const base = getRecordHierarchySh(record as unknown as Record<string, unknown>, {
-      provinceMap,
-      districtMap,
-      villageMap,
-      facilityMap,
-    });
-
-    let regionId: number | null = null;
-    if (base.provinceId) {
-      const p = provinceMap.get(Number(base.provinceId));
-      if (p) regionId = Number((p as any).regionId);
-    }
-
-    return { regionId, provinceId: base.provinceId, districtId: base.districtId };
-  }, [provinceMap, districtMap, villageMap, facilityMap]);
-
-  const userCanApproveRecord = useCallback((currentUser: any, record: PopulationData | null): boolean => {
-    if (!currentUser || !record) return false;
-    
-    // Check roles
-    const roles = Array.isArray(currentUser.roles) ? currentUser.roles : [currentUser.role];
-    const isApproverRole = roles.some((r: string) => 
-      ["national_admin", "gis_specialist", "provincial_coordinator", "district_manager"].includes(r)
-    );
-    
-    if (!isApproverRole) return false;
-    if (currentUser.isPlatformAdmin || roles.includes("national_admin") || roles.includes("gis_specialist")) {
-      return true;
-    }
-    
-    const hierarchy = getRecordHierarchy(record);
-    
-    // Check provincial coordinator access
-    if (roles.includes("provincial_coordinator")) {
-      if (!currentUser.provinceId || !hierarchy.provinceId) return false;
-      return Number(currentUser.provinceId) === Number(hierarchy.provinceId);
-    }
-    
-    // Check district manager access
-    if (roles.includes("district_manager")) {
-      if (!currentUser.districtId || !hierarchy.districtId) return false;
-      return Number(currentUser.districtId) === Number(hierarchy.districtId);
-    }
-    
-    return false;
-  }, [getRecordHierarchy]);
-
-  const filteredPopulationData = useMemo(() => {
-    if (!populationData) return [];
-    return populationData.filter((item) => {
-      if (activeTab !== "comparison" && item.source !== activeTab) {
-        return false;
-      }
-      
-      const hierarchy = getRecordHierarchy(item);
-      
-      if (selectedRegion !== "all" && Number(hierarchy.regionId) !== Number(selectedRegion)) {
-        return false;
-      }
-      if (selectedProvince !== "all" && Number(hierarchy.provinceId) !== Number(selectedProvince)) {
-        return false;
-      }
-      if (selectedDistrict !== "all" && Number(hierarchy.districtId) !== Number(selectedDistrict)) {
-        return false;
-      }
-      if (selectedFacility !== "all") {
-        if (item.facilityId) {
-          if (Number(item.facilityId) !== Number(selectedFacility)) return false;
-        } else if (item.villageId) {
-          const v = villageMap.get(Number(item.villageId));
-          if (!v || Number(v.assignedFacilityId) !== Number(selectedFacility)) return false;
-        } else {
-          return false; // exclude high-level records when facility filter is set
-        }
-      }
-      return true;
-    });
-  }, [populationData, activeTab, selectedRegion, selectedProvince, selectedDistrict, selectedFacility, getRecordHierarchy, villageMap]);
-
-  // Compute exact coordinates and populations for the density heatmap.
-  // Uses heatmapPopData (which always includes village-level records) rather than
-  // filteredPopulationData (which excludes villages for performance on the grid).
-  const heatmapPoints = useMemo(() => {
-    const points: { name: string; lat: number; lng: number; population: number }[] = [];
-    const seen = new Set<string>();
-    heatmapPopData.forEach(item => {
-      let lat: number | null = null;
-      let lng: number | null = null;
-      let name = "";
-      if (item.villageId) {
-        const v = villageMap.get(item.villageId);
-        if (v && v.latitude && v.longitude) {
-          lat = Number(v.latitude);
-          lng = Number(v.longitude);
-          name = v.name;
-        }
-      } else if (item.facilityId) {
-        const f = facilityMap.get(item.facilityId);
-        if (f && f.latitude && f.longitude) {
-          lat = Number(f.latitude);
-          lng = Number(f.longitude);
-          name = f.name;
-        }
-      }
-      
-      if (lat !== null && lng !== null && !isNaN(lat) && !isNaN(lng)) {
-        // Deduplicate by rounding coords to avoid stacking overlapping dots
-        const key = `${lat.toFixed(4)},${lng.toFixed(4)}`;
-        if (!seen.has(key)) {
-          seen.add(key);
-          points.push({
-            name,
-            lat,
-            lng,
-            population: item.totalPopulation
-          });
-        }
-      }
-    });
-    return points;
-  }, [heatmapPopData, villageMap, facilityMap]);
-
-  const defaultCenterAndZoom = useMemo(() => {
-    const code = tenantInfo?.countryCode;
-    if (code === "ZMB") {
-      return { center: [-13.13, 27.85] as [number, number], zoom: 6 };
-    }
-    if (code === "PNG") {
-      return { center: [-6.31, 143.95] as [number, number], zoom: 6 };
-    }
-    return { center: [-6.31, 143.95] as [number, number], zoom: 6 };
-  }, [tenantInfo?.countryCode]);
-
-  const { mapCenter, mapZoom } = useMemo(() => {
-    if (selectedFacility !== "all") {
-      const f = facilityMap.get(Number(selectedFacility));
-      const coords = getAdminCoordinates(f);
-      if (coords) return { mapCenter: coords, mapZoom: 12 };
-    }
-
-    if (selectedDistrict !== "all") {
-      const d = districtMap.get(Number(selectedDistrict));
-      const coords = getAdminCoordinates(d);
-      if (coords) return { mapCenter: coords, mapZoom: 10 };
-      
-      const dPoints = heatmapPoints.filter(p => {
-        const item = filteredPopulationData.find(x => x.villageId ? villageMap.get(x.villageId)?.name === p.name : false);
-        return item ? Number(item.districtId) === Number(selectedDistrict) : false;
-      });
-      if (dPoints.length > 0) {
-        let sumLat = 0, sumLng = 0;
-        dPoints.forEach(p => { sumLat += p.lat; sumLng += p.lng; });
-        return { mapCenter: [sumLat / dPoints.length, sumLng / dPoints.length] as [number, number], mapZoom: 10 };
-      }
-    }
-    
-    if (selectedProvince !== "all") {
-      const p = provinceMap.get(Number(selectedProvince));
-      const coords = getAdminCoordinates(p);
-      if (coords) return { mapCenter: coords, mapZoom: 8 };
-    }
-
-    if (heatmapPoints.length > 0) {
-      let sumLat = 0;
-      let sumLng = 0;
-      heatmapPoints.forEach(p => {
-        sumLat += p.lat;
-        sumLng += p.lng;
-      });
-      return { mapCenter: [sumLat / heatmapPoints.length, sumLng / heatmapPoints.length] as [number, number], mapZoom: 7 };
-    }
-
-    return { mapCenter: defaultCenterAndZoom.center, mapZoom: defaultCenterAndZoom.zoom };
-  }, [selectedFacility, selectedDistrict, selectedProvince, heatmapPoints, districtMap, provinceMap, facilityMap, defaultCenterAndZoom, filteredPopulationData, villageMap]);
-
-  // Memoized multi-source comparison summaries
-  const comparisonSummary = useMemo(() => {
-    if (activeTab !== "comparison" || !populationData) return null;
-
-    const geoFiltered = populationData.filter((item) => {
-      const hierarchy = getRecordHierarchy(item);
-      
-      if (selectedRegion !== "all" && Number(hierarchy.regionId) !== Number(selectedRegion)) {
-        return false;
-      }
-      if (selectedProvince !== "all" && Number(hierarchy.provinceId) !== Number(selectedProvince)) {
-        return false;
-      }
-      if (selectedDistrict !== "all" && Number(hierarchy.districtId) !== Number(selectedDistrict)) {
-        return false;
-      }
-      if (selectedFacility !== "all") {
-        if (item.facilityId) {
-          if (Number(item.facilityId) !== Number(selectedFacility)) return false;
-        } else if (item.villageId) {
-          const v = villageMap.get(Number(item.villageId));
-          if (!v || Number(v.assignedFacilityId) !== Number(selectedFacility)) return false;
-        } else {
-          return false;
-        }
-      }
-      return true;
-    });
-
-    const sums: Record<string, { total: number; under1: number; under5: number; pregnant: number; count: number }> = {
-      nso: { total: 0, under1: 0, under5: 0, pregnant: 0, count: 0 },
-      hmis: { total: 0, under1: 0, under5: 0, pregnant: 0, count: 0 },
-      worldpop: { total: 0, under1: 0, under5: 0, pregnant: 0, count: 0 },
-      survey: { total: 0, under1: 0, under5: 0, pregnant: 0, count: 0 },
-      community_census: { total: 0, under1: 0, under5: 0, pregnant: 0, count: 0 },
-    };
-
-    geoFiltered.forEach((record) => {
-      const s = record.source;
-      if (sums[s]) {
-        sums[s].total += record.totalPopulation || 0;
-        sums[s].under1 += record.under1Population || 0;
-        sums[s].under5 += record.under5Population || 0;
-        sums[s].pregnant += record.pregnantWomen || 0;
-        sums[s].count += 1;
-      }
-    });
-
-    return sums;
-  }, [activeTab, populationData, selectedRegion, selectedProvince, selectedDistrict, getRecordHierarchy]);
-
-  const activeSourcesStats = useMemo(() => {
-    if (!comparisonSummary) return null;
-
-    const sources = Object.entries(comparisonSummary)
-      .filter(([_, stats]) => stats.count > 0)
-      .map(([source, stats]) => ({
-        source,
-        label: TAB_CONFIG.find(t => t.value === source)?.label || source,
-        ...stats
-      }));
-
-    if (sources.length === 0) return null;
-
-    const nsoBaseline = comparisonSummary.nso;
-
-    const list = sources.map((s) => {
-      let devPercent = 0;
-      if (s.source !== "nso" && nsoBaseline.total > 0) {
-        devPercent = ((s.total - nsoBaseline.total) / nsoBaseline.total) * 100;
-      }
-      return {
-        ...s,
-        devPercent,
-      };
-    });
-
-    const totalSum = sources.reduce((sum, s) => sum + s.total, 0);
-    const meanEstimate = totalSum / sources.length;
-
-    const variance = sources.reduce((sum, s) => sum + Math.pow(s.total - meanEstimate, 2), 0) / sources.length;
-    const stdDeviation = Math.sqrt(variance);
-
-    const totals = sources.map((s) => s.total);
-    const maxTotal = Math.max(...totals);
-    const minTotal = Math.min(...totals);
-    const gap = maxTotal - minTotal;
-    const gapPercent = meanEstimate > 0 ? (gap / meanEstimate) * 100 : 0;
-
-    return {
-      sourcesList: list,
-      meanEstimate,
-      stdDeviation,
-      gap,
-      gapPercent,
-      nsoBaseline,
-    };
-  }, [comparisonSummary]);
 
   const isNational = useMemo(() => {
     return user?.role === "national_admin" || user?.role === "gis_specialist" || user?.isPlatformAdmin ||
@@ -1096,7 +803,7 @@ export default function Population() {
       );
       return districts.filter(d => allowedProvinceIds.has(Number(d.provinceId)));
     }
-    return districts;
+    return []; // Smart cascade: District is locked until a Province is selected!
   }, [districts, provinces, selectedRegion, selectedProvince, isDistrictLocked, user, facilityMap, isNational]);
 
   const filteredFacilities = useMemo(() => {
@@ -1107,54 +814,369 @@ export default function Population() {
     if (selectedDistrict !== "all") {
       return facilities.filter(f => Number(f.districtId) === Number(selectedDistrict));
     }
-    if (selectedProvince !== "all") {
-      const allowedDistrictIds = new Set(filteredDistricts.map(d => Number(d.id)));
-      return facilities.filter(f => allowedDistrictIds.has(Number(f.districtId)));
-    }
-    if (!isNational && user?.districtId) {
-      return facilities.filter(f => Number(f.districtId) === Number(user.districtId));
-    }
-    if (!isNational && user?.provinceId) {
-      const allowedDistrictIds = new Set(
-        districts?.filter(d => Number(d.provinceId) === Number(user.provinceId)).map(d => Number(d.id)) || []
-      );
-      return facilities.filter(f => allowedDistrictIds.has(Number(f.districtId)));
-    }
-    return facilities;
-  }, [facilities, selectedDistrict, selectedProvince, filteredDistricts, isFacilityLocked, user, isNational, districts]);
+    return []; // Smart cascade: Facility is locked until a District is selected!
+  }, [facilities, selectedDistrict, isFacilityLocked, user]);
 
-  // Pre-populate and lock filters on load based on user role
-  useEffect(() => {
-    if (!user || loadingProvinces || loadingDistricts || loadingFacilities) return;
+  const getRecordHierarchy = useCallback((record: PopulationData) => {
+    const base = getRecordHierarchySh(record as unknown as Record<string, unknown>, {
+      provinceMap,
+      districtMap,
+      villageMap,
+      facilityMap,
+    });
 
-    if (user.facilityId) {
-      const fId = Number(user.facilityId);
-      const fac = facilityMap.get(fId);
-      if (fac) {
-        setSelectedFacility(fId.toString());
-        const dId = fac.districtId;
-        if (dId) {
-          setSelectedDistrict(dId.toString());
-          const dist = districtMap.get(Number(dId));
-          if (dist && dist.provinceId) {
-            setSelectedProvince(dist.provinceId.toString());
-          }
+    let regionId: number | null = null;
+    if (base.provinceId) {
+      const p = provinceMap.get(Number(base.provinceId));
+      if (p) regionId = Number((p as any).regionId);
+    }
+
+    return { regionId, provinceId: base.provinceId, districtId: base.districtId };
+  }, [provinceMap, districtMap, villageMap, facilityMap]);
+
+  const userCanApproveRecord = useCallback((currentUser: any, record: PopulationData | null): boolean => {
+    if (!currentUser || !record) return false;
+    
+    const roles = Array.isArray(currentUser.roles) ? currentUser.roles : [currentUser.role];
+    const isApproverRole = roles.some((r: string) => 
+      ["national_admin", "gis_specialist", "provincial_coordinator", "district_manager"].includes(r)
+    );
+    
+    if (!isApproverRole) return false;
+    if (currentUser.isPlatformAdmin || roles.includes("national_admin") || roles.includes("gis_specialist")) {
+      return true;
+    }
+    
+    const hierarchy = getRecordHierarchy(record);
+    
+    if (roles.includes("provincial_coordinator")) {
+      if (!currentUser.provinceId || !hierarchy.provinceId) return false;
+      return Number(currentUser.provinceId) === Number(hierarchy.provinceId);
+    }
+    
+    if (roles.includes("district_manager")) {
+      if (!currentUser.districtId || !hierarchy.districtId) return false;
+      return Number(currentUser.districtId) === Number(hierarchy.districtId);
+    }
+    
+    return false;
+  }, [getRecordHierarchy]);
+
+  const filteredPopulationData = useMemo(() => {
+    if (!populationData) return [];
+    return populationData.filter((item) => {
+      if (activeTab !== "comparison" && item.source?.toLowerCase() !== activeTab.toLowerCase()) {
+        return false;
+      }
+      if (selectedYear !== "all" && item.year && Number(item.year) !== Number(selectedYear)) {
+        return false;
+      }
+      
+      const hierarchy = getRecordHierarchy(item);
+      
+      if (selectedRegion !== "all" && Number(hierarchy.regionId) !== Number(selectedRegion)) {
+        return false;
+      }
+      if (selectedProvince !== "all" && Number(hierarchy.provinceId) !== Number(selectedProvince)) {
+        return false;
+      }
+      if (selectedDistrict !== "all" && Number(hierarchy.districtId) !== Number(selectedDistrict)) {
+        return false;
+      }
+      if (selectedFacility !== "all") {
+        if (item.facilityId) {
+          if (Number(item.facilityId) !== Number(selectedFacility)) return false;
+        } else if (item.villageId) {
+          const v = villageMap.get(Number(item.villageId));
+          if (!v || Number(v.assignedFacilityId) !== Number(selectedFacility)) return false;
+        } else {
+          return false;
         }
       }
-    } else if (user.districtId) {
-      const dId = Number(user.districtId);
-      setSelectedDistrict(dId.toString());
-      const dist = districtMap.get(dId);
-      if (dist && dist.provinceId) {
-        setSelectedProvince(dist.provinceId.toString());
+      return true;
+    });
+  }, [populationData, activeTab, selectedYear, selectedRegion, selectedProvince, selectedDistrict, selectedFacility, getRecordHierarchy, villageMap]);
+
+  const heatmapPoints = useMemo<HeatmapPoint[]>(() => {
+    const aggregated = new Map<string, HeatmapPoint>();
+
+    heatmapPopData.forEach((item) => {
+      const metadata =
+        item.metadata && typeof item.metadata === "object" && !Array.isArray(item.metadata)
+          ? (item.metadata as Record<string, unknown>)
+          : {};
+
+      let lat: number | null = null;
+      let lng: number | null = null;
+      let name =
+        String((item as any)._geoCommunityName ?? (item as any)._geoVillageName ?? (item as any)._geoFacilityName ?? "")
+          .trim();
+      let districtId: number | null = item.districtId ? Number(item.districtId) : null;
+      let provinceId: number | null = item.provinceId ? Number(item.provinceId) : null;
+      const villageId = item.villageId ? Number(item.villageId) : undefined;
+      const facilityId = item.facilityId ? Number(item.facilityId) : undefined;
+
+      if (villageId) {
+        const village = villageMap.get(villageId);
+        if (village) {
+          lat = asNumberOrNull(village.latitude);
+          lng = asNumberOrNull(village.longitude);
+          name = name || village.name;
+          districtId = asNumberOrNull(village.districtId) ?? districtId;
+          const district = districtId ? districtMap.get(Number(districtId)) : null;
+          provinceId = asNumberOrNull(district?.provinceId) ?? provinceId;
+        }
+      } else if (facilityId) {
+        const facility = facilityMap.get(facilityId);
+        if (facility) {
+          lat = asNumberOrNull(facility.latitude);
+          lng = asNumberOrNull(facility.longitude);
+          name = name || facility.name;
+          districtId = asNumberOrNull(facility.districtId) ?? districtId;
+          const district = districtId ? districtMap.get(Number(districtId)) : null;
+          provinceId = asNumberOrNull(district?.provinceId) ?? provinceId;
+        }
       }
-    } else if (user.provinceId) {
-      const pId = Number(user.provinceId);
-      setSelectedProvince(pId.toString());
+
+      lat = lat ?? asNumberOrNull((item as any).latitude) ?? asNumberOrNull(metadata.latitude);
+      lng = lng ?? asNumberOrNull((item as any).longitude) ?? asNumberOrNull(metadata.longitude);
+      if (lat === null || lng === null) return;
+
+      const population = Number(item.totalPopulation ?? 0);
+      if (!Number.isFinite(population) || population <= 0) return;
+
+      const key = villageId
+        ? `village-${villageId}`
+        : facilityId
+        ? `facility-${facilityId}`
+        : `point-${lat.toFixed(5)}-${lng.toFixed(5)}-${name || "unnamed"}`;
+      const existing = aggregated.get(key);
+
+      if (existing) {
+        existing.population += population;
+        existing.under1 += Number(item.under1Population ?? 0) || 0;
+        existing.under5 += Number(item.under5Population ?? 0) || 0;
+        existing.pregnant += Number(item.pregnantWomen ?? 0) || 0;
+        existing.records += 1;
+        if (!existing.sourceLabel && item.source) existing.sourceLabel = String(item.source).toUpperCase();
+        return;
+      }
+
+      aggregated.set(key, {
+        name: name || "Mapped population point",
+        lat,
+        lng,
+        population,
+        under1: Number(item.under1Population ?? 0) || 0,
+        under5: Number(item.under5Population ?? 0) || 0,
+        pregnant: Number(item.pregnantWomen ?? 0) || 0,
+        records: 1,
+        villageId,
+        facilityId,
+        districtId,
+        provinceId,
+        sourceLabel: item.source ? String(item.source).toUpperCase() : undefined,
+      });
+    });
+
+    return Array.from(aggregated.values()).sort((a, b) => b.population - a.population);
+  }, [heatmapPopData, villageMap, facilityMap, districtMap]);
+
+  const populationChoropleth = useMemo(() => {
+    const totalPopulation = heatmapPoints.reduce((sum, point) => sum + point.population, 0);
+    const totalRecords = heatmapPoints.reduce((sum, point) => sum + point.records, 0);
+    const maxPopulation = Math.max(...heatmapPoints.map((point) => point.population), 1);
+
+    return {
+      bins: buildPopulationBins(heatmapPoints),
+      maxPopulation,
+      totalPopulation,
+      totalRecords,
+    };
+  }, [heatmapPoints]);
+
+  const defaultCenterAndZoom = useMemo(() => {
+    const code = tenantInfo?.countryCode;
+    if (code === "ZMB") {
+      return { center: [-13.13, 27.85] as [number, number], zoom: 6 };
     }
-  }, [user, loadingProvinces, loadingDistricts, loadingFacilities, facilityMap, districtMap, provinceMap]);
+    if (code === "SSD") {
+      return { center: [7.87, 30.22] as [number, number], zoom: 6 };
+    }
+    if (code === "VNM") {
+      return { center: [16.05, 108.23] as [number, number], zoom: 6 };
+    }
+    if (code === "KEN") {
+      return { center: [0.02, 37.91] as [number, number], zoom: 6 };
+    }
+    if (code === "UGA") {
+      return { center: [1.37, 32.29] as [number, number], zoom: 7 };
+    }
+    if (code === "PNG") {
+      return { center: [-6.31, 143.95] as [number, number], zoom: 6 };
+    }
+    return { center: [0, 20] as [number, number], zoom: 3 };
+  }, [tenantInfo?.countryCode]);
+
+  const { mapCenter, mapZoom } = useMemo(() => {
+    if (selectedFacility !== "all") {
+      const f = facilityMap.get(Number(selectedFacility));
+      const coords = getAdminCoordinates(f);
+      if (coords) return { mapCenter: coords, mapZoom: 12 };
+    }
+
+    if (selectedDistrict !== "all") {
+      const d = districtMap.get(Number(selectedDistrict));
+      const coords = getAdminCoordinates(d);
+      if (coords) return { mapCenter: coords, mapZoom: 10 };
+      
+      const dPoints = heatmapPoints.filter(p => Number(p.districtId) === Number(selectedDistrict));
+      if (dPoints.length > 0) {
+        let sumLat = 0, sumLng = 0;
+        dPoints.forEach(p => { sumLat += p.lat; sumLng += p.lng; });
+        return { mapCenter: [sumLat / dPoints.length, sumLng / dPoints.length] as [number, number], mapZoom: 10 };
+      }
+    }
+    
+    if (selectedProvince !== "all") {
+      const p = provinceMap.get(Number(selectedProvince));
+      const coords = getAdminCoordinates(p);
+      if (coords) return { mapCenter: coords, mapZoom: 8 };
+    }
+
+    if (heatmapPoints.length > 0) {
+      let sumLat = 0;
+      let sumLng = 0;
+      heatmapPoints.forEach(p => {
+        sumLat += p.lat;
+        sumLng += p.lng;
+      });
+      return { mapCenter: [sumLat / heatmapPoints.length, sumLng / heatmapPoints.length] as [number, number], mapZoom: 7 };
+    }
+
+    return { mapCenter: defaultCenterAndZoom.center, mapZoom: defaultCenterAndZoom.zoom };
+  }, [selectedFacility, selectedDistrict, selectedProvince, heatmapPoints, districtMap, provinceMap, facilityMap, defaultCenterAndZoom]);
+
+  const comparisonSummary = useMemo(() => {
+    if (activeTab !== "comparison" || !populationData) return null;
+
+    const geoFiltered = populationData.filter((item) => {
+      const hierarchy = getRecordHierarchy(item);
+      
+      if (selectedRegion !== "all" && Number(hierarchy.regionId) !== Number(selectedRegion)) {
+        return false;
+      }
+      if (selectedProvince !== "all" && Number(hierarchy.provinceId) !== Number(selectedProvince)) {
+        return false;
+      }
+      if (selectedDistrict !== "all" && Number(hierarchy.districtId) !== Number(selectedDistrict)) {
+        return false;
+      }
+      if (selectedFacility !== "all") {
+        if (item.facilityId) {
+          if (Number(item.facilityId) !== Number(selectedFacility)) return false;
+        } else if (item.villageId) {
+          const v = villageMap.get(Number(item.villageId));
+          if (!v || Number(v.assignedFacilityId) !== Number(selectedFacility)) return false;
+        } else {
+          return false;
+        }
+      }
+      return true;
+    });
+
+    const sums: Record<string, { total: number; under1: number; under5: number; pregnant: number; count: number }> = {
+      nso: { total: 0, under1: 0, under5: 0, pregnant: 0, count: 0 },
+      hmis: { total: 0, under1: 0, under5: 0, pregnant: 0, count: 0 },
+      worldpop: { total: 0, under1: 0, under5: 0, pregnant: 0, count: 0 },
+      survey: { total: 0, under1: 0, under5: 0, pregnant: 0, count: 0 },
+      community_census: { total: 0, under1: 0, under5: 0, pregnant: 0, count: 0 },
+    };
+
+    geoFiltered.forEach((record) => {
+      const s = record.source;
+      if (sums[s]) {
+        sums[s].total += record.totalPopulation || 0;
+        sums[s].under1 += record.under1Population || 0;
+        sums[s].under5 += record.under5Population || 0;
+        sums[s].pregnant += record.pregnantWomen || 0;
+        sums[s].count += 1;
+      }
+    });
+
+    return sums;
+  }, [activeTab, populationData, selectedRegion, selectedProvince, selectedDistrict, selectedFacility, getRecordHierarchy, villageMap]);
+
+  const activeSourcesStats = useMemo(() => {
+    if (!comparisonSummary) return null;
+
+    const sources = Object.entries(comparisonSummary)
+      .filter(([_, stats]) => stats.count > 0)
+      .map(([source, stats]) => ({
+        source,
+        label: TAB_CONFIG.find(t => t.value === source)?.label || source,
+        ...stats
+      }));
+
+    if (sources.length === 0) return null;
+
+    const nsoBaseline = comparisonSummary.nso;
+
+    const list = sources.map((s) => {
+      let devPercent = 0;
+      if (s.source !== "nso" && nsoBaseline.total > 0) {
+        devPercent = ((s.total - nsoBaseline.total) / nsoBaseline.total) * 100;
+      }
+      return {
+        ...s,
+        devPercent,
+      };
+    });
+
+    const totalSum = sources.reduce((sum, s) => sum + s.total, 0);
+    const meanEstimate = totalSum / sources.length;
+
+    const variance = sources.reduce((sum, s) => sum + Math.pow(s.total - meanEstimate, 2), 0) / sources.length;
+    const stdDeviation = Math.sqrt(variance);
+
+    const totals = sources.map((s) => s.total);
+    const maxTotal = Math.max(...totals);
+    const minTotal = Math.min(...totals);
+    const gap = maxTotal - minTotal;
+    const gapPercent = meanEstimate > 0 ? (gap / meanEstimate) * 100 : 0;
+
+    return {
+      sourcesList: list,
+      meanEstimate,
+      stdDeviation,
+      gap,
+      gapPercent,
+      nsoBaseline,
+    };
+  }, [comparisonSummary]);
 
   const isLoading = loadingRegions || loadingProvinces || loadingDistricts || loadingVillages || loadingPopulation || loadingFacilities;
+
+  const handleAddRecord = () => {
+    setEditingRecord(null);
+    setDialogOpen(true);
+  };
+
+  const handleEditRecord = (record: PopulationData) => {
+    setEditingRecord(record);
+    setDialogOpen(true);
+  };
+
+  const handleDeleteClick = (record: PopulationData) => {
+    setDeletingRecord(record);
+    setDeleteDialogOpen(true);
+  };
+
+  const handleDeleteConfirm = () => {
+    if (deletingRecord) {
+      deleteMutation.mutate(deletingRecord.id);
+    }
+  };
 
   const getLocationName = (data: PopulationData): string => {
     if (data.villageId) {
@@ -1179,27 +1201,6 @@ export default function Population() {
     return "National";
   };
 
-  const handleAddRecord = () => {
-    setEditingRecord(null);
-    setDialogOpen(true);
-  };
-
-  const handleEditRecord = (record: PopulationData) => {
-    setEditingRecord(record);
-    setDialogOpen(true);
-  };
-
-  const handleDeleteClick = (record: PopulationData) => {
-    setDeletingRecord(record);
-    setDeleteDialogOpen(true);
-  };
-
-  const handleDeleteConfirm = () => {
-    if (deletingRecord) {
-      deleteMutation.mutate(deletingRecord.id);
-    }
-  };
-
   const getProvinceNameForRecord = (item: PopulationData) => {
     const h = getRecordHierarchy(item);
     if (!h.provinceId) return "—";
@@ -1212,24 +1213,54 @@ export default function Population() {
     return districtMap.get(Number(h.districtId))?.name ?? "—";
   };
 
+  const getPopulationDisplayName = (item: PopulationData, keys: string[]) => {
+    const row = item as any;
+    const metadata = row.metadata && typeof row.metadata === "object" && !Array.isArray(row.metadata)
+      ? row.metadata
+      : {};
+
+    for (const key of keys) {
+      const value = row[key] ?? metadata[key];
+      if (typeof value === "string" && value.trim()) return value.trim();
+    }
+
+    return null;
+  };
+
   const getFacilityNameForRecord = (item: PopulationData) => {
+    const fallbackName = getPopulationDisplayName(item, [
+      "_geoFacilityName",
+      "facilityName",
+      "healthFacilityName",
+      "hfName",
+    ]);
+
     if (item.facilityId) {
-      return facilityMap.get(Number(item.facilityId))?.name ?? "—";
+      return facilityMap.get(Number(item.facilityId))?.name ?? fallbackName ?? "—";
     }
     if (item.villageId) {
       const v = villageMap.get(Number(item.villageId));
       if (v && v.assignedFacilityId) {
-        return facilityMap.get(Number(v.assignedFacilityId))?.name ?? "—";
+        return facilityMap.get(Number(v.assignedFacilityId))?.name ?? fallbackName ?? "—";
       }
     }
-    return "—";
+    return fallbackName ?? "—";
   };
 
   const getCommunityNameForRecord = (item: PopulationData) => {
+    const fallbackName = getPopulationDisplayName(item, [
+      "_geoCommunityName",
+      "_geoVillageName",
+      "communityName",
+      "villageName",
+      "catchmentName",
+      "settlementName",
+    ]);
+
     if (item.villageId) {
-      return villageMap.get(Number(item.villageId))?.name ?? "—";
+      return villageMap.get(Number(item.villageId))?.name ?? fallbackName ?? "—";
     }
-    return "—";
+    return fallbackName ?? "—";
   };
 
   const columns = [
@@ -1505,14 +1536,23 @@ export default function Population() {
             Multi-source population data with location filtering
           </p>
         </div>
-        <div className="flex gap-2 flex-wrap">
+        <div className="flex gap-2 flex-wrap items-center">
+          <Button 
+            variant="outline" 
+            className="border-emerald-600/30 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 rounded-xl"
+            onClick={() => setWorldPopDialogOpen(true)}
+            data-testid="button-worldpop-extract"
+          >
+            <Sparkles className="h-4 w-4 mr-1.5 text-emerald-600 dark:text-emerald-400" />
+            Extract WorldPop Data
+          </Button>
           {canCreateData(user) && (
-            <Button onClick={handleAddRecord} data-testid="button-add-population">
+            <Button onClick={handleAddRecord} data-testid="button-add-population" className="rounded-xl">
               <Plus className="h-4 w-4 mr-1" />
               Add Record
             </Button>
           )}
-          <Button variant="outline" onClick={handleExport} data-testid="button-export-population">
+          <Button variant="outline" onClick={handleExport} data-testid="button-export-population" className="rounded-xl">
             <Download className="h-4 w-4 mr-1" />
             Export
           </Button>
@@ -1580,17 +1620,31 @@ export default function Population() {
             </div>
 
             <div>
-              <label className="text-sm text-muted-foreground mb-1.5 block">{adminLabels.level2}</label>
+              <label className="text-sm text-muted-foreground mb-1.5 flex items-center gap-1">
+                {adminLabels.level2}
+                {selectedProvince === "all" && !isDistrictLocked && (
+                  <Lock className="h-3 w-3 opacity-60 text-muted-foreground" />
+                )}
+              </label>
               <Select
                 value={selectedDistrict}
                 onValueChange={(val) => {
                   setSelectedDistrict(val);
                   setSelectedFacility("all");
                 }}
-                disabled={isDistrictLocked}
+                disabled={isDistrictLocked || selectedProvince === "all"}
               >
-                <SelectTrigger data-testid="select-district">
-                  <SelectValue placeholder={`All ${adminLabels.level2}s`} />
+                <SelectTrigger
+                  data-testid="select-district"
+                  disabled={isDistrictLocked || selectedProvince === "all"}
+                >
+                  <SelectValue
+                    placeholder={
+                      selectedProvince === "all"
+                        ? `Select ${adminLabels.level1} first`
+                        : `All ${adminLabels.level2}s`
+                    }
+                  />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All {adminLabels.level2}s</SelectItem>
@@ -1604,14 +1658,28 @@ export default function Population() {
             </div>
 
             <div>
-              <label className="text-sm text-muted-foreground mb-1.5 block">Health Facility</label>
+              <label className="text-sm text-muted-foreground mb-1.5 flex items-center gap-1">
+                Health Facility
+                {(selectedDistrict === "all" || selectedProvince === "all") && !isFacilityLocked && (
+                  <Lock className="h-3 w-3 opacity-60 text-muted-foreground" />
+                )}
+              </label>
               <Select
                 value={selectedFacility}
                 onValueChange={setSelectedFacility}
-                disabled={isFacilityLocked}
+                disabled={isFacilityLocked || selectedDistrict === "all" || selectedProvince === "all"}
               >
-                <SelectTrigger data-testid="select-facility">
-                  <SelectValue placeholder="All Facilities" />
+                <SelectTrigger
+                  data-testid="select-facility"
+                  disabled={isFacilityLocked || selectedDistrict === "all" || selectedProvince === "all"}
+                >
+                  <SelectValue
+                    placeholder={
+                      selectedDistrict === "all" || selectedProvince === "all"
+                        ? `Select ${adminLabels.level2} first`
+                        : "All Facilities"
+                    }
+                  />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All Facilities</SelectItem>
@@ -1655,12 +1723,12 @@ export default function Population() {
         </CardContent>
       </Card>
 
-      {/* Population Density Heatmap Card */}
+      {/* Population Choropleth Map Card */}
       <Card className="border border-border/80 overflow-hidden shadow-lg bg-card/50 backdrop-blur-sm">
         <CardHeader className="pb-3 border-b border-border/50">
           <CardTitle className="text-base flex items-center gap-2">
             <Globe className="h-5 w-5 text-indigo-500" />
-            Population Density Heatmap ({selectedYear === "all" ? "All Years" : selectedYear})
+            Population Choropleth Map ({selectedYear === "all" ? "All Years" : selectedYear})
           </CardTitle>
         </CardHeader>
         <CardContent className="p-0 relative">
@@ -1693,27 +1761,26 @@ export default function Population() {
                 <MapUpdater center={mapCenter} zoom={mapZoom} />
                 <MapEventsHandler onMapClick={handleResetFilters} />
                 {heatmapPoints.map((point, index) => {
-                  const maxPop = Math.max(...heatmapPoints.map(p => p.population), 1);
-                  const ratio = point.population / maxPop;
-                  const hue = 100 - 100 * ratio; // 100 is green-yellow, 0 is red
-                  const color = `hsl(${hue}, 100%, 45%)`;
-                  const radius = 6 + 18 * Math.sqrt(ratio);
+                  const ratio = point.population / populationChoropleth.maxPopulation;
+                  const bin = getPopulationBin(point.population, populationChoropleth.bins);
+                  const radius = Math.max(6, Math.min(26, 6 + 20 * Math.sqrt(ratio)));
                   return (
                     <CircleMarker
                       key={`${point.name}-${index}-${point.population}`}
                       center={[point.lat, point.lng]}
                       radius={radius}
-                      fillColor={color}
-                      color={color}
-                      weight={1.5}
-                      fillOpacity={0.65}
+                      fillColor={bin.color}
+                      color="#0f172a"
+                      weight={1.1}
+                      opacity={0.8}
+                      fillOpacity={0.72}
                       eventHandlers={{
                         click: (e) => {
                           if (e.originalEvent) {
                             e.originalEvent.stopPropagation();
                           }
                           // Filter grid to match the clicked marker's province and district
-                          const v = villages?.find(
+                          const v = point.villageId ? villageMap.get(Number(point.villageId)) : villages?.find(
                             (vl) =>
                               vl.name === point.name &&
                               vl.latitude &&
@@ -1726,7 +1793,7 @@ export default function Population() {
                             if (d && d.provinceId) setSelectedProvince(d.provinceId.toString());
                             if (v.districtId) setSelectedDistrict(v.districtId.toString());
                           } else {
-                            const f = facilities?.find(
+                            const f = point.facilityId ? facilityMap.get(Number(point.facilityId)) : facilities?.find(
                               (fl) =>
                                 fl.name === point.name &&
                                 fl.latitude &&
@@ -1744,11 +1811,27 @@ export default function Population() {
                       }}
                     >
                       <Tooltip sticky>
-                        <div className="p-1 space-y-0.5">
-                          <p className="font-bold text-sm">{point.name}</p>
-                          <p className="text-xs text-muted-foreground">
-                            Population: <span className="font-mono font-semibold text-foreground">{point.population.toLocaleString()}</span>
-                          </p>
+                        <div className="min-w-[190px] p-1 space-y-1">
+                          <div>
+                            <p className="font-bold text-sm leading-tight">{point.name}</p>
+                            <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                              {point.sourceLabel ?? "Population"} evidence - {point.records} record{point.records === 1 ? "" : "s"}
+                            </p>
+                          </div>
+                          <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
+                            <span className="text-muted-foreground">Total</span>
+                            <span className="font-mono font-semibold text-right">{point.population.toLocaleString()}</span>
+                            <span className="text-muted-foreground">Under 1</span>
+                            <span className="font-mono text-right">{point.under1.toLocaleString()}</span>
+                            <span className="text-muted-foreground">Under 5</span>
+                            <span className="font-mono text-right">{point.under5.toLocaleString()}</span>
+                            <span className="text-muted-foreground">Pregnant</span>
+                            <span className="font-mono text-right">{point.pregnant.toLocaleString()}</span>
+                          </div>
+                          <div className="mt-1 flex items-center gap-2 border-t border-border/60 pt-1 text-[10px] text-muted-foreground">
+                            <span className="h-2.5 w-2.5 rounded-full border border-slate-800/50" style={{ backgroundColor: bin.color }} />
+                            <span>{bin.label}</span>
+                          </div>
                         </div>
                       </Tooltip>
                     </CircleMarker>
@@ -1758,20 +1841,31 @@ export default function Population() {
             )}
             
             {heatmapPoints.length > 0 && (
-              <div className="absolute bottom-4 right-4 z-[1000] bg-background/95 backdrop-blur-md border border-border p-3 rounded-xl shadow-lg space-y-2 text-xs">
-                <p className="font-semibold text-foreground">Population Scale</p>
-                <div className="flex items-center gap-2">
-                  <span className="w-3 h-3 rounded-full bg-[hsl(100,100%,45%)]" />
-                  <span className="text-muted-foreground">Lowest Density</span>
+              <div className="absolute bottom-4 right-4 z-[1000] w-[230px] bg-background/95 backdrop-blur-md border border-border p-3 rounded-xl shadow-lg space-y-2 text-xs">
+                <div>
+                  <p className="font-semibold text-foreground">Population Choropleth</p>
+                  <p className="text-[10px] text-muted-foreground">
+                    {heatmapPoints.length.toLocaleString()} mapped areas - {formatChoroplethNumber(populationChoropleth.totalPopulation)} people
+                  </p>
                 </div>
-                <div className="flex items-center gap-2">
-                  <span className="w-3 h-3 rounded-full bg-[hsl(50,100%,45%)]" />
-                  <span className="text-muted-foreground">Moderate Density</span>
+                <div className="flex h-2.5 overflow-hidden rounded-full border border-border/70">
+                  {populationChoropleth.bins.map((bin) => (
+                    <span key={`${bin.label}-${bin.color}`} className="flex-1" style={{ backgroundColor: bin.color }} />
+                  ))}
                 </div>
-                <div className="flex items-center gap-2">
-                  <span className="w-3 h-3 rounded-full bg-[hsl(0,100%,45%)]" />
-                  <span className="text-muted-foreground">Highest Density</span>
+                <div className="space-y-1">
+                  {populationChoropleth.bins.map((bin) => (
+                    <div key={bin.label} className="flex items-center justify-between gap-2">
+                      <span className="flex items-center gap-2 text-muted-foreground">
+                        <span className="h-2.5 w-2.5 rounded-sm border border-slate-800/30" style={{ backgroundColor: bin.color }} />
+                        <span>{bin.label}</span>
+                      </span>
+                    </div>
+                  ))}
                 </div>
+                <p className="border-t border-border/60 pt-1 text-[10px] text-muted-foreground">
+                  Circle size shows relative population; color shows quantile class.
+                </p>
               </div>
             )}
           </div>
@@ -1805,6 +1899,27 @@ export default function Population() {
           const isCurrentTabSelected = selectedRecord && selectedRecord.source === tab.value;
           return (
             <TabsContent key={tab.value} value={tab.value} className="space-y-4">
+              {tab.value === "worldpop" && (
+                <div className="bg-gradient-to-r from-emerald-500/10 via-teal-500/10 to-indigo-500/10 border border-emerald-500/30 rounded-2xl p-4 flex items-center justify-between gap-4 flex-wrap">
+                  <div className="flex items-center gap-3">
+                    <div className="h-10 w-10 rounded-xl bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
+                      <Sparkles className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <h4 className="font-semibold text-sm text-foreground">WorldPop High-Resolution Extraction Engine</h4>
+                      <p className="text-xs text-muted-foreground">Extract raster & point estimates for settlement coordinates, compute under-1/under-5/pregnant cohorts, and bulk-assign to communities.</p>
+                    </div>
+                  </div>
+                  <Button 
+                    onClick={() => setWorldPopDialogOpen(true)}
+                    className="bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl shadow-sm text-xs font-semibold"
+                    data-testid="button-tab-extract-worldpop"
+                  >
+                    <Sparkles className="h-3.5 w-3.5 mr-1.5" />
+                    Extract & Populate Communities
+                  </Button>
+                </div>
+              )}
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
                 <div className={isCurrentTabSelected ? "lg:col-span-8 space-y-4" : "lg:col-span-12 space-y-4"}>
                   <Card>
@@ -2329,6 +2444,60 @@ export default function Population() {
         onOpenChange={setDialogOpen}
         editData={editingRecord}
         defaultSource={activeTab === "comparison" ? undefined : activeTab}
+      />
+
+      <WorldPopExtractionDialog
+        open={worldPopDialogOpen}
+        onOpenChange={setWorldPopDialogOpen}
+        defaultProvinceId={selectedProvince}
+        defaultDistrictId={selectedDistrict}
+        defaultFacilityId={selectedFacility}
+        onSuccess={async (result) => {
+          setActiveTab("worldpop");
+          if (result?.year) {
+            setSelectedYear(String(result.year));
+          }
+          await queryClient.cancelQueries({
+            predicate: (query) => {
+              const key = query.queryKey[0];
+              return typeof key === "string" && key.startsWith("/api/population");
+            },
+          });
+          if (Array.isArray(result?.records) && result.records.length > 0) {
+            queryClient.setQueriesData(
+              {
+                predicate: (query) => {
+                  const key = query.queryKey[0];
+                  return typeof key === "string" && key.startsWith("/api/population");
+                },
+              },
+              (old: PopulationData[] | undefined) => {
+                const byId = new Map<number, PopulationData>();
+                for (const row of old ?? []) {
+                  if (row?.id != null) byId.set(Number(row.id), row);
+                }
+                for (const row of result.records as PopulationData[]) {
+                  if (row?.id != null) byId.set(Number(row.id), row);
+                }
+                return Array.from(byId.values());
+              },
+            );
+          }
+          await queryClient.invalidateQueries({
+            predicate: (query) => {
+              const key = query.queryKey[0];
+              return typeof key === "string" && key.startsWith("/api/population");
+            },
+            refetchType: "all",
+          });
+          await queryClient.refetchQueries({
+            predicate: (query) => {
+              const key = query.queryKey[0];
+              return typeof key === "string" && key.startsWith("/api/population");
+            },
+            type: "active",
+          });
+        }}
       />
 
       <DeleteConfirmDialog

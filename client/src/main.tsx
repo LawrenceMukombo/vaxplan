@@ -136,12 +136,9 @@ if ("serviceWorker" in navigator && import.meta.env.PROD && !isLocalhost) {
       })
       .catch((err) => console.warn("[VaxPlan SW] Registration failed:", err));
 
-    // Reload once the new SW takes control after a SKIP_WAITING message.
-    let reloading = false;
+    // Dispatch event on SW controller change so UI can notify user without forcing a page reload
     navigator.serviceWorker.addEventListener("controllerchange", () => {
-      if (reloading) return;
-      reloading = true;
-      window.location.reload();
+      window.dispatchEvent(new CustomEvent("vaxplan:sw-controller-changed"));
     });
   });
 }

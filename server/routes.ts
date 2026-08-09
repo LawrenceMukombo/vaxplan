@@ -7933,10 +7933,14 @@ export async function registerRoutes(
   });
 
   // Bulk JSON import of population data (non-destructive upserts)
-  app.post("/api/population/import", isAuthenticated, requireTenant, loadRole, requireAdmin, async (req: any, res) => {
+  app.post("/api/population/import", ...auth, async (req: any, res) => {
     try {
       const schema = z.object({
         population: z.array(z.object({
+          villageId: z.number().int().optional().nullable(),
+          facilityId: z.number().int().optional().nullable(),
+          districtId: z.number().int().optional().nullable(),
+          provinceId: z.number().int().optional().nullable(),
           villageName: z.string().optional().nullable(),
           villageCode: z.string().optional().nullable(),
           facilityHmisCode: z.string().optional().nullable(),
@@ -7953,6 +7957,7 @@ export async function registerRoutes(
           schoolExit: z.number().int().optional().nullable(),
           growthRate: z.union([z.number(), z.string()]).optional().nullable(),
           confidenceScore: z.union([z.number(), z.string()]).optional().nullable(),
+          metadata: z.record(z.any()).optional().nullable(),
         }))
       });
 
@@ -7963,13 +7968,22 @@ export async function registerRoutes(
 
       let createdCount = 0;
       let updatedCount = 0;
+      const savedRecords: any[] = [];
+      const skippedRecords: Array<{ item: any; reason: string }> = [];
 
       for (const item of importedPop) {
-        let villageId: number | null = null;
-        let districtId: number | null = null;
-        let provinceId: number | null = null;
+        let villageId: number | null = item.villageId || null;
+        let districtId: number | null = item.districtId || null;
+        let provinceId: number | null = item.provinceId || null;
 
-        if (item.villageCode) {
+        if (villageId) {
+          const matched = allVillages.find(v => Number(v.id) === Number(villageId));
+          if (matched) {
+            districtId = matched.districtId;
+          }
+        }
+
+        if (!villageId && item.villageCode) {
           const matched = allVillages.find(v => v.code?.toLowerCase() === item.villageCode!.trim().toLowerCase());
           if (matched) {
             villageId = matched.id;
@@ -7984,9 +7998,16 @@ export async function registerRoutes(
           }
         }
 
-        let facilityId: number | null = null;
-        if (item.facilityHmisCode) {
-          const matched = allFacilities.find(f => f.hmisCode.toLowerCase() === item.facilityHmisCode!.trim().toLowerCase());
+        let facilityId: number | null = item.facilityId || null;
+        if (facilityId) {
+          const matched = allFacilities.find(f => Number(f.id) === Number(facilityId));
+          if (matched && !districtId) {
+            districtId = matched.districtId;
+          }
+        }
+
+        if (!facilityId && item.facilityHmisCode) {
+          const matched = allFacilities.find(f => f.hmisCode?.toLowerCase() === item.facilityHmisCode!.trim().toLowerCase());
           if (matched) {
             facilityId = matched.id;
             if (!districtId) {
@@ -7994,6 +8015,7 @@ export async function registerRoutes(
             }
           }
         }
+
         if (!facilityId && item.facilityName) {
           const matched = allFacilities.find(f => f.name.toLowerCase() === item.facilityName!.trim().toLowerCase());
           if (matched) {
@@ -8005,20 +8027,49 @@ export async function registerRoutes(
         }
 
         if (!villageId && !facilityId) {
+          skippedRecords.push({
+            item,
+            reason: "No matching community or facility was found for this population record.",
+          });
           continue;
         }
 
-        if (districtId) {
+        // Resolve provinceId from districtId if not already set
+        if (districtId && !provinceId) {
           const dist = await storage.getDistrict(req.tenantId, districtId);
-          if (dist) {
+          if (dist && dist.provinceId) {
             provinceId = dist.provinceId;
           }
         }
+        provinceId = provinceId || item.provinceId || null;
+        districtId = districtId || item.districtId || null;
+        facilityId = facilityId || item.facilityId || null;
 
         const growthVal = item.growthRate !== null && item.growthRate !== undefined ? parseFloat(item.growthRate.toString()) : null;
         const confidenceVal = item.confidenceScore !== null && item.confidenceScore !== undefined ? parseFloat(item.confidenceScore.toString()) : null;
+        const matchedVillage = villageId ? allVillages.find(v => Number(v.id) === Number(villageId)) : null;
+        const matchedFacility = facilityId
+          ? allFacilities.find(f => Number(f.id) === Number(facilityId))
+          : (matchedVillage?.assignedFacilityId
+            ? allFacilities.find(f => Number(f.id) === Number(matchedVillage.assignedFacilityId))
+            : null);
+        const incomingMetadata = (item as any).metadata && typeof (item as any).metadata === "object" && !Array.isArray((item as any).metadata)
+          ? (item as any).metadata
+          : {};
+        const resolvedMetadata = {
+          ...incomingMetadata,
+          ...(matchedVillage?.name || item.villageName
+            ? {
+              villageName: matchedVillage?.name ?? item.villageName,
+              communityName: matchedVillage?.name ?? item.villageName,
+            }
+            : {}),
+          ...(matchedVillage?.code || item.villageCode ? { villageCode: matchedVillage?.code ?? item.villageCode } : {}),
+          ...(matchedFacility?.name || item.facilityName ? { facilityName: matchedFacility?.name ?? item.facilityName } : {}),
+          ...(matchedFacility?.hmisCode || item.facilityHmisCode ? { facilityHmisCode: matchedFacility?.hmisCode ?? item.facilityHmisCode } : {}),
+        };
 
-        let existing = null;
+        let existing: any = null;
         if (villageId) {
           [existing] = await db
             .select()
@@ -8048,9 +8099,14 @@ export async function registerRoutes(
         }
 
         if (existing) {
-          await db
+          const [updated] = await db
             .update(populationData)
             .set({
+              // Always refresh resolved geo IDs so null values get filled in on re-extraction
+              provinceId: provinceId ?? existing.provinceId,
+              districtId: districtId ?? existing.districtId,
+              villageId: villageId ?? existing.villageId,
+              facilityId: facilityId ?? existing.facilityId,
               totalPopulation: item.totalPopulation,
               malePopulation: item.malePopulation ?? existing.malePopulation,
               femalePopulation: item.femalePopulation ?? existing.femalePopulation,
@@ -8061,12 +8117,18 @@ export async function registerRoutes(
               schoolExit: item.schoolExit ?? existing.schoolExit,
               growthRate: growthVal !== null && !isNaN(growthVal) ? growthVal.toFixed(2) : existing.growthRate,
               confidenceScore: confidenceVal !== null && !isNaN(confidenceVal) ? confidenceVal.toFixed(2) : existing.confidenceScore,
+              metadata: {
+                ...(existing.metadata && typeof existing.metadata === "object" && !Array.isArray(existing.metadata) ? existing.metadata : {}),
+                ...resolvedMetadata,
+              },
               updatedAt: new Date(),
             })
-            .where(eq(populationData.id, existing.id));
+            .where(eq(populationData.id, existing.id))
+            .returning();
           updatedCount++;
+          if (updated) savedRecords.push(updated);
         } else {
-          await db
+          const [created] = await db
             .insert(populationData)
             .values({
               tenantId: req.tenantId,
@@ -8086,14 +8148,29 @@ export async function registerRoutes(
               schoolExit: item.schoolExit ?? null,
               growthRate: growthVal !== null && !isNaN(growthVal) ? growthVal.toFixed(2) : null,
               confidenceScore: confidenceVal !== null && !isNaN(confidenceVal) ? confidenceVal.toFixed(2) : null,
+              metadata: resolvedMetadata,
               approvalStatus: "approved",
-            });
+            })
+            .returning();
           createdCount++;
+          if (created) savedRecords.push(created);
         }
       }
 
-      await logAudit(req, "import_population", "population_data", null, null, { createdCount, updatedCount });
-      res.json({ success: true, message: `Successfully imported ${importedPop.length} population records.`, createdCount, updatedCount });
+      await logAudit(req, "import_population", "population_data", null, null, {
+        createdCount,
+        updatedCount,
+        skippedCount: skippedRecords.length,
+      });
+      res.json({
+        success: true,
+        message: `Successfully imported ${savedRecords.length} population records.`,
+        createdCount,
+        updatedCount,
+        skippedCount: skippedRecords.length,
+        records: savedRecords,
+        skipped: skippedRecords,
+      });
     } catch (error: any) {
       if (error?.name === "ZodError") {
         return res.status(400).json({ success: false, message: "Invalid population payload.", errors: error.errors });
@@ -8118,7 +8195,7 @@ export async function registerRoutes(
 
       const isNationalAdmin = dbUser.role === "national_admin" || (Array.isArray(dbUser.roles) && (dbUser.roles as string[]).includes("national_admin"));
 
-      const excludeVillages = req.query.excludeVillages === "true" || (isNationalAdmin && !filters.provinceId && !filters.districtId && !filters.villageId && !filters.facilityId);
+      const excludeVillages = req.query.excludeVillages === "true" && filters.source !== "worldpop";
       filters.excludeVillages = excludeVillages;
 
       const scope = await getGeoScope(dbUser, req.tenantId);
@@ -8160,7 +8237,55 @@ export async function registerRoutes(
         });
       }
 
-      res.json(allPop);
+      const villageIds = Array.from(new Set(
+        allPop
+          .map((p: any) => Number(p.villageId))
+          .filter((id: number) => Number.isFinite(id) && id > 0)
+      ));
+      const explicitFacilityIds = Array.from(new Set(
+        allPop
+          .map((p: any) => Number(p.facilityId))
+          .filter((id: number) => Number.isFinite(id) && id > 0)
+      ));
+
+      const labelVillages = villageIds.length
+        ? await db.select().from(villages).where(and(eq(villages.tenantId, req.tenantId), inArray(villages.id, villageIds)))
+        : [];
+      const villageById = new Map(labelVillages.map((v: any) => [Number(v.id), v]));
+      const facilityIds = new Set<number>(explicitFacilityIds);
+      labelVillages.forEach((v: any) => {
+        const assignedFacilityId = Number(v.assignedFacilityId);
+        if (Number.isFinite(assignedFacilityId) && assignedFacilityId > 0) {
+          facilityIds.add(assignedFacilityId);
+        }
+      });
+      const labelFacilities = facilityIds.size
+        ? await db.select().from(facilities).where(and(eq(facilities.tenantId, req.tenantId), inArray(facilities.id, Array.from(facilityIds))))
+        : [];
+      const facilityById = new Map(labelFacilities.map((f: any) => [Number(f.id), f]));
+
+      const enrichedPop = allPop.map((p: any) => {
+        const meta = p.metadata && typeof p.metadata === "object" && !Array.isArray(p.metadata) ? p.metadata : {};
+        const village = p.villageId ? villageById.get(Number(p.villageId)) : null;
+        const facility = p.facilityId
+          ? facilityById.get(Number(p.facilityId))
+          : (village?.assignedFacilityId ? facilityById.get(Number(village.assignedFacilityId)) : null);
+        const communityName = village?.name ?? meta.communityName ?? meta.villageName ?? meta.catchmentName ?? null;
+        const facilityName = facility?.name ?? meta.facilityName ?? meta.healthFacilityName ?? meta.hfName ?? null;
+        return {
+          ...p,
+          _geoFacilityName: facilityName,
+          _geoCommunityName: communityName,
+          metadata: {
+            ...meta,
+            ...(communityName ? { communityName, villageName: communityName } : {}),
+            ...(facilityName ? { facilityName } : {}),
+            ...(facility?.hmisCode ? { facilityHmisCode: facility.hmisCode } : {}),
+          },
+        };
+      });
+
+      res.json(enrichedPop);
     } catch (error) {
       console.error("Error fetching population data:", error);
       res.status(500).json({ message: "Failed to fetch population data" });
@@ -8186,6 +8311,7 @@ export async function registerRoutes(
 
     // 1️⃣ Check local DB first (fast path)
     try {
+      const radiusMeters = Math.round(radiusKm * 1000);
       const localResult = await pool.query(
         `SELECT COALESCE(SUM(population_total),0)::int AS total,
                 COALESCE(SUM(under5_population),0)::int AS under5
@@ -8195,9 +8321,9 @@ export async function registerRoutes(
            AND ST_DWithin(
              geometry::geography,
              ST_SetSRID(ST_MakePoint($2,$3),4326)::geography,
-             $4 * 1000
+             $4
            )`,
-        [req.tenantId, lng, lat, radiusKm]
+        [req.tenantId, lng, lat, radiusMeters]
       );
       const localTotal = localResult.rows[0]?.total ?? 0;
       if (localTotal > 0) {
@@ -8279,15 +8405,19 @@ export async function registerRoutes(
 
   // Helper: cache a WorldPop result into population_grids (fire-and-forget)
   async function _cacheWorldPopGrid(tenantId: string, lat: number, lng: number, radiusKm: number, pop: number, pool: any) {
-    const half = radiusKm / 111;
-    const bbox = `POLYGON((${lng - half} ${lat - half},${lng + half} ${lat - half},${lng + half} ${lat + half},${lng - half} ${lat + half},${lng - half} ${lat - half}))`;
-    await pool.query(
-      `INSERT INTO population_grids (tenant_id, population_total, under5_population, geometry, geojson, source_year)
-       VALUES ($1, $2, $3, ST_SetSRID(ST_GeomFromText($4), 4326),
-               ST_AsGeoJSON(ST_SetSRID(ST_GeomFromText($4), 4326))::jsonb, 2020)
-       ON CONFLICT DO NOTHING`,
-      [tenantId, pop, Math.round(pop * 0.17), bbox]
-    );
+    try {
+      const half = radiusKm / 111;
+      const bbox = `POLYGON((${lng - half} ${lat - half},${lng + half} ${lat - half},${lng + half} ${lat + half},${lng - half} ${lat + half},${lng - half} ${lat - half}))`;
+      await pool.query(
+        `INSERT INTO population_grids (tenant_id, population_total, under5_population, geometry, geojson)
+         VALUES ($1, $2, $3, ST_SetSRID(ST_GeomFromText($4), 4326),
+                 ST_AsGeoJSON(ST_SetSRID(ST_GeomFromText($4), 4326))::jsonb)
+         ON CONFLICT DO NOTHING`,
+        [tenantId, pop, Math.round(pop * 0.17), bbox]
+      );
+    } catch (e) {
+      // Non-critical caching fallback
+    }
   }
 
   // [Cleaned up legacy commented-out code block, lines 7553-7625]

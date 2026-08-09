@@ -1652,8 +1652,8 @@ var stockTransactions = (0, import_pg_core.pgTable)("stock_transactions", {
   id: (0, import_pg_core.integer)("id").primaryKey().generatedAlwaysAsIdentity(),
   tenantId: (0, import_pg_core.varchar)("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
   facilityId: (0, import_pg_core.integer)("facility_id").notNull().references(() => facilities.id, { onDelete: "cascade" }),
-  productId: (0, import_pg_core.integer)("product_id").notNull().references(() => catalogueVaccines.id, { onDelete: "restrict" }),
-  // Must link to catalogue physical product
+  productId: (0, import_pg_core.integer)("product_id").notNull(),
+  // Links to catalogue vaccine ID or commodity ID (10000 + id)
   productCode: (0, import_pg_core.varchar)("product_code", { length: 100 }),
   // snapshot of product code
   vaccineName: (0, import_pg_core.varchar)("vaccine_name", { length: 100 }),
@@ -2014,6 +2014,8 @@ var supervisionChecklistTemplates = (0, import_pg_core.pgTable)(
     name: (0, import_pg_core.varchar)("name", { length: 200 }).notNull(),
     category: (0, import_pg_core.varchar)("category", { length: 50 }).notNull().default("supervision"),
     description: (0, import_pg_core.text)("description"),
+    sections: (0, import_pg_core.jsonb)("sections").default([]).notNull(),
+    // ChecklistSection[]
     items: (0, import_pg_core.jsonb)("items").default([]).notNull(),
     // ChecklistTemplateItem[]
     isActive: (0, import_pg_core.boolean)("is_active").notNull().default(true),
@@ -2026,13 +2028,13 @@ var supervisionChecklistTemplates = (0, import_pg_core.pgTable)(
     tenantIdx: (0, import_pg_core.index)("idx_supervision_template_tenant").on(table.tenantId)
   })
 );
-var insertSupervisionChecklistTemplateSchema = (0, import_drizzle_zod.createInsertSchema)(supervisionChecklistTemplates).omit({
+var insertSupervisionChecklistTemplateSchema = (0, import_drizzle_zod.createInsertSchema)(supervisionChecklistTemplates, {
+  isActive: import_zod.z.boolean().optional()
+}).omit({
   tenantId: true,
   createdByUserId: true,
   createdAt: true,
   updatedAt: true
-}).extend({
-  isActive: import_zod.z.boolean().optional()
 });
 var annualImmunizationPlans = (0, import_pg_core.pgTable)(
   "annual_immunization_plans",

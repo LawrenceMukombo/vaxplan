@@ -172,6 +172,84 @@ const getBoundaryFeatureName = (feature: any, adminLevel: number): string => {
 
   return "";
 };
+
+type PopulationChoroplethBin = {
+  label: string;
+  min: number;
+  max: number;
+  color: string;
+};
+
+const POPULATION_CHOROPLETH_COLORS = ["#d1fae5", "#86efac", "#fde047", "#fb923c", "#ef4444", "#991b1b"];
+
+const formatChoroplethNumber = (value: number): string => {
+  if (!Number.isFinite(value)) return "0";
+  if (Math.abs(value) >= 1_000_000) return `${(value / 1_000_000).toFixed(value >= 10_000_000 ? 0 : 1)}m`;
+  if (Math.abs(value) >= 1_000) return `${(value / 1_000).toFixed(value >= 10_000 ? 0 : 1)}k`;
+  return Math.round(value).toLocaleString();
+};
+
+const getQuantile = (sortedValues: number[], q: number): number => {
+  if (sortedValues.length === 0) return 0;
+  if (sortedValues.length === 1) return sortedValues[0];
+  const pos = (sortedValues.length - 1) * q;
+  const base = Math.floor(pos);
+  const rest = pos - base;
+  const next = sortedValues[base + 1];
+  return next === undefined ? sortedValues[base] : sortedValues[base] + rest * (next - sortedValues[base]);
+};
+
+const createPopulationChoroplethBins = (values: number[]): PopulationChoroplethBin[] => {
+  const positiveValues = values
+    .filter((value) => Number.isFinite(value) && value > 0)
+    .sort((a, b) => a - b);
+
+  if (positiveValues.length === 0) {
+    return [{ label: "No population", min: 0, max: 0, color: "#f1f5f9" }];
+  }
+
+  const min = positiveValues[0];
+  const max = positiveValues[positiveValues.length - 1];
+
+  if (min === max) {
+    return [{ label: `${formatChoroplethNumber(max)} people`, min, max, color: POPULATION_CHOROPLETH_COLORS[2] }];
+  }
+
+  let bounds = [0, 0.2, 0.4, 0.6, 0.8, 1]
+    .map((q) => Math.round(getQuantile(positiveValues, q)))
+    .filter((value, index, list) => index === 0 || value > list[index - 1]);
+
+  if (bounds.length < 4) {
+    const step = (max - min) / (POPULATION_CHOROPLETH_COLORS.length - 1);
+    bounds = Array.from({ length: POPULATION_CHOROPLETH_COLORS.length }, (_, index) => Math.round(min + step * index));
+  }
+
+  const binCount = Math.max(1, bounds.length - 1);
+  return Array.from({ length: binCount }, (_, index) => {
+    const minValue = index === 0 ? 0 : bounds[index];
+    const maxValue = bounds[index + 1] ?? max;
+    const label =
+      index === 0
+        ? `<= ${formatChoroplethNumber(maxValue)}`
+        : index === binCount - 1
+        ? `> ${formatChoroplethNumber(minValue)}`
+        : `${formatChoroplethNumber(minValue)} - ${formatChoroplethNumber(maxValue)}`;
+    return {
+      label,
+      min: minValue,
+      max: maxValue,
+      color: POPULATION_CHOROPLETH_COLORS[Math.min(index, POPULATION_CHOROPLETH_COLORS.length - 1)],
+    };
+  });
+};
+
+const getPopulationChoroplethBin = (value: number, bins: PopulationChoroplethBin[]): PopulationChoroplethBin => {
+  if (!Number.isFinite(value) || value <= 0) return bins[0] ?? { label: "No population", min: 0, max: 0, color: "#f1f5f9" };
+  return bins.find((bin, index) => {
+    const isLast = index === bins.length - 1;
+    return value >= bin.min && (value <= bin.max || isLast);
+  }) ?? bins[bins.length - 1];
+};
 const getGeoJSONBBox = (geojson: any) => {
   let minLat = Infinity, maxLat = -Infinity;
   let minLng = Infinity, maxLng = -Infinity;
@@ -4315,9 +4393,16 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
   const [popChoroplethSource, setPopChoroplethSource] = useState<"nso" | "hmis">("nso");
   const { data: choroplethData = [] } = useQuery<Array<{ districtId: number; population: number }>>(
     {
-      queryKey: ["/api/surveillance/population/choropleth", popChoroplethSource],
-      queryFn: () => fetch(`/api/surveillance/population/choropleth?source=${popChoroplethSource}`, { credentials: "include" }).then((r) => r.json()),
-      enabled: layers.populationChoropleth,
+      queryKey: ["/api/surveillance/population/choropleth", tenantInfo?.id, popChoroplethSource],
+      queryFn: async () => {
+        const res = await fetch(`/api/surveillance/population/choropleth?source=${popChoroplethSource}`, {
+          credentials: "include",
+          cache: "no-store",
+        });
+        if (!res.ok) throw new Error("Failed to fetch population choropleth data");
+        return res.json();
+      },
+      enabled: layers.populationChoropleth && !!tenantInfo?.id,
       staleTime: 5 * 60 * 1000,
       gcTime: 30 * 60 * 1000,
     }
@@ -4366,17 +4451,17 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
     if (choroplethData) choroplethData.forEach((r) => r.districtId && m.set(Number(r.districtId), Number(r.population)));
     return m;
   }, [choroplethData]);
-  const choroplethMax = useMemo(() => Math.max(1, ...Array.from(districtPopMap.values())), [districtPopMap]);
-  function getChoroplethColor(pop: number): string {
-    const t = Math.min(1, pop / choroplethMax);
-    if (t > 0.9) return "#083e7d";
-    if (t > 0.7) return "#1a5eb8";
-    if (t > 0.5) return "#3182bd";
-    if (t > 0.3) return "#6baed6";
-    if (t > 0.15) return "#9ecae1";
-    if (t > 0.05) return "#c6dbef";
-    return "#eff3ff";
-  }
+  const populationChoroplethStats = useMemo(() => {
+    const values = Array.from(districtPopMap.values()).filter((value) => Number.isFinite(value) && value > 0);
+    return {
+      bins: createPopulationChoroplethBins(values),
+      totalPopulation: values.reduce((sum, value) => sum + value, 0),
+      districtCount: values.length,
+    };
+  }, [districtPopMap]);
+  const getChoroplethColor = useCallback((pop: number): string => {
+    return getPopulationChoroplethBin(pop, populationChoroplethStats.bins).color;
+  }, [populationChoroplethStats.bins]);
   useEffect(() => {
     if (!boundaryList) return;
     boundaryList.forEach((b) => {
@@ -6414,12 +6499,18 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
 
               const choroplethStyleFn = layers.populationChoropleth && b.adminLevel === 2
                 ? (feature: any) => {
-                    const fName = feature?.properties?.name || feature?.properties?.NAME || feature?.properties?.shapeName || feature?.properties?.NAME_2 || "";
-                    const normN = fName.toLowerCase().replace(/[^a-z0-9]/g, "");
-                    const matchedDist = districts.find((d) => d.name.toLowerCase().replace(/[^a-z0-9]/g, "") === normN);
+                    const fName = getBoundaryFeatureName(feature, b.adminLevel);
+                    const matchedDist = districtNameLookup.get(normalizeName(fName));
                     const pop = matchedDist ? (districtPopMap.get(matchedDist.id) ?? 0) : 0;
                     const col = pop > 0 ? getChoroplethColor(pop) : "#f1f5f9";
-                    return { color: "#334155", weight: 1.5, fillOpacity: 0.72, fillColor: col };
+                    return {
+                      color: pop > 0 ? "#1e293b" : "#94a3b8",
+                      weight: pop > 0 ? 1.2 : 0.9,
+                      opacity: pop > 0 ? 0.9 : 0.65,
+                      fillOpacity: pop > 0 ? 0.68 : 0.18,
+                      fillColor: col,
+                      dashArray: pop > 0 ? undefined : "4, 4",
+                    };
                   }
                 : undefined;
               const style = choroplethStyleFn ?? getBoundaryStyle(b.adminLevel, mode);
@@ -6439,7 +6530,19 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
                         className: "map-boundary-label",
                       });
                     } else if (name) {
-                      layer.bindTooltip(resolveLabel(name), {
+                      const matchedDist =
+                        layers.populationChoropleth && b.adminLevel === 2
+                          ? districtNameLookup.get(normalizeName(name))
+                          : null;
+                      const population =
+                        matchedDist && districtPopMap.has(matchedDist.id)
+                          ? districtPopMap.get(matchedDist.id)
+                          : null;
+                      const tooltipText =
+                        layers.populationChoropleth && b.adminLevel === 2
+                          ? `${resolveLabel(name)} - ${population ? population.toLocaleString() + " people" : "No population data"}`
+                          : resolveLabel(name);
+                      layer.bindTooltip(tooltipText, {
                         sticky: true,
                         className: "text-xs font-semibold px-2 py-1 rounded bg-background border shadow",
                       });
@@ -8614,8 +8717,13 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
       {/* Population choropleth source toggle (only when choropleth layer active) */}
       {!isPrinting && layers.populationChoropleth && (
         <div className="absolute left-4 top-16 z-[1000]" ref={disableLeafletPropagation}>
-          <div className="bg-background/90 backdrop-blur-sm border border-border/50 rounded-lg shadow-lg p-2.5 flex flex-col gap-1.5">
-            <p className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground">Population Source</p>
+          <div className="w-64 bg-background/95 backdrop-blur-sm border border-border/50 rounded-xl shadow-lg p-3 flex flex-col gap-2">
+            <div>
+              <p className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground">Population Choropleth</p>
+              <p className="text-[10px] text-muted-foreground">
+                {populationChoroplethStats.districtCount.toLocaleString()} districts - {formatChoroplethNumber(populationChoroplethStats.totalPopulation)} people
+              </p>
+            </div>
             <div className="flex gap-1">
               {(["nso", "hmis"] as const).map((s) => (
                 <button key={s} onClick={() => setPopChoroplethSource(s)}
@@ -8626,13 +8734,22 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
                   }`}>{s.toUpperCase()}</button>
               ))}
             </div>
-            <div className="flex items-center gap-1 mt-0.5">
-              {["#eff3ff","#9ecae1","#3182bd","#083e7d"].map((col, i) => (
-                <div key={col} className="h-2.5 flex-1 rounded-sm" style={{ background: col }}></div>
+            <div className="flex h-2.5 overflow-hidden rounded-full border border-border/70">
+              {populationChoroplethStats.bins.map((bin) => (
+                <div key={`${bin.label}-${bin.color}`} className="flex-1" style={{ background: bin.color }} />
               ))}
             </div>
-            <div className="flex justify-between text-[8px] text-muted-foreground">
-              <span>Low</span><span>High</span>
+            <div className="space-y-1">
+              {populationChoroplethStats.bins.map((bin) => (
+                <div key={bin.label} className="flex items-center gap-2 text-[10px] text-muted-foreground">
+                  <span className="h-2.5 w-2.5 rounded-sm border border-slate-800/30" style={{ backgroundColor: bin.color }} />
+                  <span>{bin.label}</span>
+                </div>
+              ))}
+              <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+                <span className="h-2.5 w-2.5 rounded-sm border border-dashed border-slate-500 bg-slate-100" />
+                <span>No population data</span>
+              </div>
             </div>
           </div>
         </div>

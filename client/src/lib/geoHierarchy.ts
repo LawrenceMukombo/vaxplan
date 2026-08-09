@@ -119,9 +119,22 @@ export function withGeoColumns<T extends Record<string, unknown>>(
 }
 */
 
+function pickDisplayName(item: Record<string, unknown>, keys: string[]): string | null {
+  const metadata = item.metadata && typeof item.metadata === "object" && !Array.isArray(item.metadata)
+    ? item.metadata as Record<string, unknown>
+    : {};
+
+  for (const key of keys) {
+    const value = item[key] ?? metadata[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+
+  return null;
+}
+
 // Updated withGeoColumns:
-// Checks if client-side map lookups fail to resolve the province/district/village names,
-// and falls back to pre-resolved _geo fields returned from the backend (or sync engine) if present.
+// Checks if client-side map lookups fail and falls back to pre-resolved labels
+// returned from the backend or sync engine.
 export function withGeoColumns<T extends Record<string, unknown>>(
   items: T[],
   maps: GeoMaps,
@@ -131,19 +144,48 @@ export function withGeoColumns<T extends Record<string, unknown>>(
   _geoDistrictId: number | null;
   _geoDistrictName: string;
   _geoVillageName?: string | null;
+  _geoCommunityName?: string | null;
+  _geoFacilityName?: string | null;
 }> {
-  const { villageMap } = maps;
+  const { villageMap, facilityMap } = maps;
   return items.map((item) => {
     const h = getRecordHierarchy(item, maps);
     const villageId = Number(item.villageId);
-    const vName = villageId && villageMap ? villageMap.get(villageId)?.name : undefined;
+    const village = villageId && villageMap ? villageMap.get(villageId) : undefined;
+    const explicitFacilityId = Number(item.facilityId);
+    const assignedFacilityId = Number((village as any)?.assignedFacilityId);
+    const facilityId = Number.isFinite(explicitFacilityId) && explicitFacilityId > 0
+      ? explicitFacilityId
+      : assignedFacilityId;
+    const facility = Number.isFinite(facilityId) && facilityId > 0 && facilityMap
+      ? facilityMap.get(facilityId)
+      : undefined;
+    const communityName = village?.name || pickDisplayName(item, [
+      "_geoCommunityName",
+      "_geoVillageName",
+      "communityName",
+      "villageName",
+      "catchmentName",
+      "settlementName",
+    ]);
+    const facilityName = facility?.name || pickDisplayName(item, [
+      "_geoFacilityName",
+      "facilityName",
+      "healthFacilityName",
+      "hfName",
+    ]);
+    const existingProvinceName = item._geoProvinceName as string | undefined;
+    const existingDistrictName = item._geoDistrictName as string | undefined;
+
     return {
       ...item,
       _geoProvinceId: h.provinceId || (item._geoProvinceId as number | null),
-      _geoProvinceName: h.provinceName !== "—" ? h.provinceName : (item._geoProvinceName as string || "—"),
+      _geoProvinceName: h.provinceName !== "—" ? h.provinceName : (existingProvinceName || "—"),
       _geoDistrictId: h.districtId || (item._geoDistrictId as number | null),
-      _geoDistrictName: h.districtName !== "—" ? h.districtName : (item._geoDistrictName as string || "—"),
-      _geoVillageName: vName || (item._geoVillageName as string | null | undefined),
+      _geoDistrictName: h.districtName !== "—" ? h.districtName : (existingDistrictName || "—"),
+      _geoVillageName: communityName || (item._geoVillageName as string | null | undefined),
+      _geoCommunityName: communityName || (item._geoCommunityName as string | null | undefined),
+      _geoFacilityName: facilityName || (item._geoFacilityName as string | null | undefined),
     };
   });
 }

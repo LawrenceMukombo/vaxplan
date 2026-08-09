@@ -377,6 +377,39 @@ async function backfillClientIds() {
     ).catch((err) => log(`stock ledger migration import failed: ${err?.message ?? err}`, "db"))
   ).catch((err) => log(`stock ledger db import failed: ${err?.message ?? err}`, "db"));
 
+  // Population geo-ID backfill (one-time, idempotent): fills in null districtId/provinceId
+  // on population_data records that have a villageId or facilityId but are missing geo scope.
+  import("./db").then(async ({ pool }) => {
+    try {
+      // Backfill from villages
+      await (pool as any).query(`
+        UPDATE population_data pd
+        SET
+          district_id = v.district_id,
+          province_id = d.province_id
+        FROM villages v
+        JOIN districts d ON d.id = v.district_id
+        WHERE pd.village_id = v.id
+          AND pd.tenant_id = v.tenant_id
+          AND (pd.district_id IS NULL OR pd.province_id IS NULL)
+      `);
+      // Backfill from facilities
+      await (pool as any).query(`
+        UPDATE population_data pd
+        SET
+          district_id = COALESCE(pd.district_id, f.district_id),
+          province_id = COALESCE(pd.province_id, d.province_id)
+        FROM facilities f
+        JOIN districts d ON d.id = f.district_id
+        WHERE pd.facility_id = f.id
+          AND pd.tenant_id = f.tenant_id
+          AND (pd.district_id IS NULL OR pd.province_id IS NULL)
+      `);
+      log("population geo-ID backfill complete", "db");
+    } catch (err: any) {
+      log(`population geo-ID backfill warning: ${err?.message ?? err}`, "db");
+    }
+  }).catch((err) => log(`population geo-ID backfill db import failed: ${err?.message ?? err}`, "db"));
   const autoUpsertEnabled =
     process.env.ENABLE_AUTO_UPSERT === "1" ||
     (process.env.NODE_ENV !== "production" && process.env.SKIP_AUTO_UPSERT !== "1");

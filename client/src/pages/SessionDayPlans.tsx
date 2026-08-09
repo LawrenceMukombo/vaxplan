@@ -248,9 +248,7 @@ export default function SessionDayPlans() {
       );
       return { pending };
     },
-    refetchInterval: 3000,
-    refetchIntervalInBackground: false,
-    staleTime: 1000,
+    staleTime: 30_000,
   });
   const isSessionPendingSync = !!pendingSessionSync?.pending;
 

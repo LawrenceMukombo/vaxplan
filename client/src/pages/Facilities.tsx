@@ -1529,6 +1529,117 @@ export default function Facilities() {
     queryKey: ["/api/population"],
   });
 
+  const toPositiveNumber = (value: unknown): number => {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) && numeric > 0 ? numeric : 0;
+  };
+
+  const populationRecordRank = (record: any): number => {
+    const source = String(record?.source || "").toLowerCase();
+    const status = String(record?.status || record?.approvalStatus || "").toLowerCase();
+    const sourceRank = source.includes("worldpop") ? 3 : source.includes("census") ? 2 : 1;
+    const statusRank = ["approved", "verified", "confirmed", "baseline"].includes(status) ? 1 : 0;
+    const yearRank = Number(record?.year || 0);
+    const updatedRank = record?.updatedAt ? Date.parse(record.updatedAt) : 0;
+    const idRank = Number(record?.id || 0);
+
+    return (
+      sourceRank * 1_000_000_000_000_000 +
+      statusRank * 100_000_000_000_000 +
+      yearRank * 10_000_000_000 +
+      (Number.isFinite(updatedRank) ? updatedRank : 0) +
+      idRank
+    );
+  };
+
+  const populationByVillageId = useMemo(() => {
+    const latest = new Map<number, any>();
+    (populationList || []).forEach((record: any) => {
+      const villageId = Number(record?.villageId || record?.communityId || 0);
+      if (!villageId) return;
+
+      const current = latest.get(villageId);
+      if (!current || populationRecordRank(record) > populationRecordRank(current)) {
+        latest.set(villageId, record);
+      }
+    });
+    return latest;
+  }, [populationList]);
+
+  const directPopulationByFacilityId = useMemo(() => {
+    const latest = new Map<number, any>();
+    (populationList || []).forEach((record: any) => {
+      const facilityId = Number(record?.facilityId || 0);
+      if (!facilityId || Number(record?.villageId || record?.communityId || 0)) return;
+
+      const current = latest.get(facilityId);
+      if (!current || populationRecordRank(record) > populationRecordRank(current)) {
+        latest.set(facilityId, record);
+      }
+    });
+    return latest;
+  }, [populationList]);
+
+  const facilityPopulationRollup = useMemo(() => {
+    const rollup = new Map<number, { total: number; communities: number; worldPopCommunities: number; fallbackCommunities: number }>();
+
+    const addToFacility = (
+      facilityId: number,
+      population: number,
+      source: "worldpop" | "record" | "fallback",
+    ) => {
+      if (!facilityId || population <= 0) return;
+      const current = rollup.get(facilityId) || {
+        total: 0,
+        communities: 0,
+        worldPopCommunities: 0,
+        fallbackCommunities: 0,
+      };
+      current.total += population;
+      current.communities += 1;
+      if (source === "worldpop") current.worldPopCommunities += 1;
+      if (source === "fallback") current.fallbackCommunities += 1;
+      rollup.set(facilityId, current);
+    };
+
+    (villages || []).forEach((village: any) => {
+      const facilityId = Number(village?.assignedFacilityId || village?.facilityId || 0);
+      if (!facilityId) return;
+
+      const populationRecord = populationByVillageId.get(Number(village.id));
+      const recordPopulation = toPositiveNumber(populationRecord?.totalPopulation);
+      const fallbackPopulation =
+        toPositiveNumber(village?.worldpopPopulation) ||
+        toPositiveNumber(village?.totalCatchmentPopulation) ||
+        toPositiveNumber(village?.griddedPopulation) ||
+        toPositiveNumber(village?.estimatedPopulation) ||
+        toPositiveNumber(village?.population) ||
+        toPositiveNumber(village?.targetPopulation);
+
+      const source = populationRecord
+        ? String(populationRecord.source || "").toLowerCase().includes("worldpop")
+          ? "worldpop"
+          : "record"
+        : "fallback";
+      addToFacility(facilityId, recordPopulation || fallbackPopulation, source);
+    });
+
+    directPopulationByFacilityId.forEach((record, facilityId) => {
+      if (rollup.has(facilityId)) return;
+      const total = toPositiveNumber(record?.totalPopulation);
+      if (total > 0) {
+        rollup.set(facilityId, {
+          total,
+          communities: 0,
+          worldPopCommunities: String(record?.source || "").toLowerCase().includes("worldpop") ? 1 : 0,
+          fallbackCommunities: 0,
+        });
+      }
+    });
+
+    return rollup;
+  }, [villages, populationByVillageId, directPopulationByFacilityId]);
+
   // Resolve admin labels from the row first, then fall back to tenant-scoped lookup lists.
   const getDistrictName = (source: number | { districtId?: number | string | null; districtName?: string | null }) => {
     if (typeof source === "object" && source?.districtName) return source.districtName;
@@ -1551,21 +1662,13 @@ export default function Facilities() {
     return province?.name || "Unknown";
   };
 
+  const getFacilityPopulationRollup = (facilityId: number) => {
+    return facilityPopulationRollup.get(Number(facilityId));
+  };
+
   const getFacilityPopulation = (facilityId: number) => {
-    if (!populationList) return "-";
-    
-    // Find population entry for this facility
-    const entry = populationList.find(p => p.facilityId === facilityId);
-    if (entry) return entry.totalPopulation.toLocaleString();
-    
-    // Fallback: Sum of assigned communities population
-    const villageEntries = populationList.filter(p => p.villageId !== null);
-    const assignedVillages = villages?.filter(v => v.assignedFacilityId === facilityId) || [];
-    const villageIds = assignedVillages.map(v => v.id);
-    const sum = villageEntries
-      .filter(p => villageIds.includes(p.villageId))
-      .reduce((acc, curr) => acc + curr.totalPopulation, 0);
-    return sum > 0 ? `${sum.toLocaleString()} (Est.)` : "-";
+    const rollup = getFacilityPopulationRollup(facilityId);
+    return rollup && rollup.total > 0 ? rollup.total.toLocaleString() : "-";
   };
 
   const getAssignedVillageCount = (facilityId: number) => {
@@ -1644,7 +1747,26 @@ export default function Facilities() {
       key: "population",
       header: "Estimated / Confirmed Pop",
       sortable: true,
-      render: (item: Facility) => getFacilityPopulation(item.id),
+      render: (item: Facility) => {
+        const rollup = getFacilityPopulationRollup(item.id);
+        if (!rollup || rollup.total <= 0) {
+          return <span className="text-muted-foreground">-</span>;
+        }
+
+        const label = rollup.communities > 0
+          ? `${rollup.communities} ${rollup.communities === 1 ? "community" : "communities"}`
+          : "facility record";
+
+        return (
+          <div className="flex flex-col">
+            <span className="font-semibold">{getFacilityPopulation(item.id)}</span>
+            <span className="text-xs text-muted-foreground">
+              {label}
+              {rollup.worldPopCommunities > 0 ? " · WorldPop" : ""}
+            </span>
+          </div>
+        );
+      },
     },
     {
       key: "facilityType",
@@ -6662,4 +6784,3 @@ function ChwDirectoryDialog({ chvId, initialData, mode, provinces, allDistricts,
 function setPagePageSize(size: number) {
   // Utility helper if page limits are synchronized
 }
-

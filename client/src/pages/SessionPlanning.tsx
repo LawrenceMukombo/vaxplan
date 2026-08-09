@@ -318,9 +318,7 @@ export default function SessionPlanning({
       }
       return { serverIds, markDoneServerIds, hasLocalCreate };
     },
-    refetchInterval: 3000,
-    refetchIntervalInBackground: false,
-    staleTime: 1000,
+    staleTime: 30_000,
   });
 
   const isSessionPendingSync = (item: SessionPlan): boolean => {
