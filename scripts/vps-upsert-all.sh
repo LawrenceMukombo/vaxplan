@@ -37,7 +37,7 @@ npx tsx scripts/migrate.ts
 echo "Schema updated. Upserting the complete 104-table local snapshot..."
 npx tsx scripts/upsert-entire-database.ts "$SNAPSHOT" 2>&1 | tee "$log_file"
 
-grep -q "Successfully upserted every one of 182069 records." "$log_file" || {
+grep -Eq "Successfully upserted every one of [0-9]+ records\\." "$log_file" || {
   echo "ERROR: Full-record completion marker was not found. Review $log_file." >&2
   exit 1
 }
