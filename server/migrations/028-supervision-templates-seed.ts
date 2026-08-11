@@ -41,10 +41,32 @@ function parseTemplateJson(jsonRaw: any) {
     name: jsonRaw.name,
     category: jsonRaw.category || "supervision",
     description: jsonRaw.description || "",
+    countryCodes: Array.isArray(jsonRaw.countryCodes)
+      ? jsonRaw.countryCodes.map((code: any) => String(code).toUpperCase())
+      : [],
     sections,
     items,
     isActive: jsonRaw.isActive ?? true,
   };
+}
+
+function inferTemplateCountryCodes(filename: string, parsedTemplate: any): string[] {
+  if (Array.isArray(parsedTemplate.countryCodes) && parsedTemplate.countryCodes.length > 0) {
+    return parsedTemplate.countryCodes;
+  }
+
+  const normalized = `${filename} ${parsedTemplate.name || ""} ${parsedTemplate.description || ""}`.toLowerCase();
+  if (normalized.includes("southsudan") || normalized.includes("south sudan")) return ["SSD"];
+
+  return [];
+}
+
+function isTemplateInScopeForTenant(templateCountryCodes: string[], tenant: any): boolean {
+  if (templateCountryCodes.length === 0) return true;
+  const tenantCodes = [tenant.code, tenant.country_code, tenant.countryCode]
+    .filter(Boolean)
+    .map((code: any) => String(code).toUpperCase());
+  return templateCountryCodes.some((code) => tenantCodes.includes(code));
 }
 
 export async function applySupervisionTemplatesSeed(): Promise<void> {
@@ -88,6 +110,7 @@ export async function applySupervisionTemplatesSeed(): Promise<void> {
     "Supportive_Supervision_Short_Template.json",
     "Supportive_Supervision_National_Template.json",
     "Supportive_Supervision_National_Full_Template.json",
+    "EPI_Support_Supervision_SouthSudan_Template.json",
   ];
 
   const parsedTemplates: any[] = [];
@@ -98,7 +121,12 @@ export async function applySupervisionTemplatesSeed(): Promise<void> {
     if (existsSync(fullPath)) {
       try {
         const raw = JSON.parse(readFileSync(fullPath, "utf-8"));
-        parsedTemplates.push(parseTemplateJson(raw));
+        const parsed = parseTemplateJson(raw);
+        parsedTemplates.push({
+          ...parsed,
+          sourceFilename: fname,
+          countryCodes: inferTemplateCountryCodes(fname, parsed),
+        });
       } catch (err: any) {
         console.error(`[migration:028] Failed to parse ${fname}: ${err.message}`);
       }
@@ -114,17 +142,40 @@ export async function applySupervisionTemplatesSeed(): Promise<void> {
 
   // 3. Fetch all active tenant IDs
   try {
-    const tenantsRes = await db.execute(sql`SELECT id FROM tenants`);
-    const tenantIds = tenantsRes.rows.map((r: any) => r.id as string);
+    const tenantsRes = await db.execute(sql`SELECT id, code, country_code FROM tenants`);
+    const tenantRows = tenantsRes.rows;
+    const countryScopedTemplates = parsedTemplates.filter((t) => t.countryCodes.length > 0);
 
-    if (tenantIds.length === 0) {
+    if (tenantRows.length === 0) {
       console.warn("[migration:028] No tenants found to seed templates.");
       return;
     }
 
+    // Remove exact seed pollution from tenants outside the template's country.
+    // User-created templates remain untouched; this only targets known seeded names.
+    for (const t of countryScopedTemplates) {
+      for (const tenant of tenantRows) {
+        if (isTemplateInScopeForTenant(t.countryCodes, tenant)) continue;
+        await db.execute(sql`
+          DELETE FROM supervision_checklist_templates
+          WHERE tenant_id = ${tenant.id}
+            AND name = ${t.name}
+            AND description = ${t.description}
+        `);
+      }
+    }
+
     // 4. Upsert for each tenant using clean parameterized SQL
-    for (const tenantId of tenantIds) {
+    for (const tenant of tenantRows) {
+      const tenantId = tenant.id as string;
       for (const t of parsedTemplates) {
+        if (!isTemplateInScopeForTenant(t.countryCodes, tenant)) {
+          console.log(
+            `[migration:028] Skipped country-scoped template "${t.name}" for tenant "${tenantId}" (${tenant.country_code || tenant.code}).`
+          );
+          continue;
+        }
+
         try {
           const checkRes = await db.execute(sql`
             SELECT id FROM supervision_checklist_templates
