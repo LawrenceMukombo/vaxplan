@@ -90,7 +90,7 @@ CREATE TABLE "vgie_settlement_facility_links" (
 	"created_at" timestamp DEFAULT now()
 );
 --> statement-breakpoint
-ALTER TABLE "users" DROP CONSTRAINT "users_email_unique";--> statement-breakpoint
+ALTER TABLE "users" DROP CONSTRAINT IF EXISTS "users_email_unique";--> statement-breakpoint
 ALTER TABLE "facility_staff" ADD COLUMN "employee_id" varchar(100);--> statement-breakpoint
 ALTER TABLE "facility_staff" ADD COLUMN "nrc" varchar(100);--> statement-breakpoint
 ALTER TABLE "facility_staff" ADD COLUMN "history" jsonb DEFAULT '[]'::jsonb;--> statement-breakpoint
