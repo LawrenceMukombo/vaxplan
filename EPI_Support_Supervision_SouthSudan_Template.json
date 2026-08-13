@@ -1,0 +1,1440 @@
+{
+  "name": "Checklist for EPI Support Supervision at Health Facilities - MOH/RSS South Sudan",
+  "category": "supervision",
+  "description": "Full EPI Support Supervision Checklist for Health Facilities, Ministry of Health / Republic of South Sudan. Covers General Information, EPI Plan, Session Observations, Monitoring and Supervision, Waste Management and Injection Safety, VPD Surveillance, Community Mobilization, Support from Higher Level, Observations by Supervisor, Client Exit Interview, and Supervision Summary.",
+  "version": 1,
+  "isActive": true,
+  "questions": [
+    {
+      "sectionTitle": "General Information",
+      "questionText": "Name of the health facility:",
+      "answerType": "text",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": "facilityName"
+    },
+    {
+      "sectionTitle": "General Information",
+      "questionText": "State:",
+      "answerType": "text",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": "provinceName"
+    },
+    {
+      "sectionTitle": "General Information",
+      "questionText": "County:",
+      "answerType": "text",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": "districtName"
+    },
+    {
+      "sectionTitle": "General Information",
+      "questionText": "Payam:",
+      "answerType": "text",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "General Information",
+      "questionText": "Boma:",
+      "answerType": "text",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "General Information",
+      "questionText": "Health Facility Ownership:",
+      "answerType": "select",
+      "options": [
+        "Government",
+        "INGO",
+        "FBO",
+        "CBO/NNGO",
+        "Others (Specify)"
+      ],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "General Information",
+      "questionText": "[1.4.(a)] Is the health facility supported by NGO?",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "General Information",
+      "questionText": "[1.4.(b)] If Yes, which NGO/s supports the health facility? (Give all supporting NGO/s)",
+      "answerType": "text",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "General Information",
+      "questionText": "Date of Visit:",
+      "answerType": "date",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "General Information",
+      "questionText": "Date of previous supervision:",
+      "answerType": "date",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "General Information",
+      "questionText": "Name and title of the contacted person or supervisee (Supervisee 1 - Name / Title):",
+      "answerType": "text",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "General Information",
+      "questionText": "Name and title of the contacted person or supervisee (Supervisee 2 - Name / Title):",
+      "answerType": "text",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "General Information",
+      "questionText": "Name and title of the contacted person or supervisee (Supervisee 3 - Name / Title):",
+      "answerType": "text",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "General Information",
+      "questionText": "[1.7.(a)] Total catchment area population:",
+      "answerType": "number",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "General Information",
+      "questionText": "[1.7.(b)] Estimated target population for the year - Estimated births:",
+      "answerType": "number",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "General Information",
+      "questionText": "[1.7.(b)] Estimated target population for the year - Estimated pregnant women (PW):",
+      "answerType": "number",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "General Information",
+      "questionText": "Are there unreached populations?",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "General Information",
+      "questionText": "[1.9.(a)] How many villages are there in the health facility catchment area?",
+      "answerType": "number",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "General Information",
+      "questionText": "[1.9.(b)] How many villages are unreached?",
+      "answerType": "number",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "General Information",
+      "questionText": "[10.] When was the last time staff in this health facility attended EPI training?",
+      "answerType": "date",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "General Information",
+      "questionText": "[11.] Are there any RSS/MOH EPI reference materials in the facility? If yes, specify:",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "General Information",
+      "questionText": "[11.] If Yes, specify which RSS/MOH EPI reference materials are in the facility:",
+      "answerType": "text",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "II. EPI Plan",
+      "questionText": "[2.1.] Is there an existing EPI micro plan?",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "II. EPI Plan",
+      "questionText": "[2.2.] Is the microplan updated quarterly?",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "II. EPI Plan",
+      "questionText": "[2.3.] Is social mobilization and communication included in the EPI microplan?",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "II. EPI Plan",
+      "questionText": "[2.4.] Is there annual and quarterly vaccine, AD syringe, mixing syringe and safety box forecast for the health facility?",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "II. EPI Plan",
+      "questionText": "[2.5.] Number of monthly EPI sessions planned - Static:",
+      "answerType": "number",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "II. EPI Plan",
+      "questionText": "[2.5.] Number of monthly EPI sessions planned - Outreach:",
+      "answerType": "number",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "II. EPI Plan",
+      "questionText": "[2.5.] Number of monthly EPI sessions planned - Mobile:",
+      "answerType": "number",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "II. EPI Plan",
+      "questionText": "[2.6.] Number of monthly EPI sessions implemented - Static:",
+      "answerType": "number",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "II. EPI Plan",
+      "questionText": "[2.6.] Number of monthly EPI sessions implemented - Outreach:",
+      "answerType": "number",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "II. EPI Plan",
+      "questionText": "[2.6.] Number of monthly EPI sessions implemented - Mobile:",
+      "answerType": "number",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "III. EPI Routine Immunization Session Observations",
+      "questionText": "[3.1.] Are the vaccine and diluents brought to the session in a small plastic bag, under a foam pad, in a vaccine carrier with four conditioned ice packs?",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "III. EPI Routine Immunization Session Observations",
+      "questionText": "[3.2.] Are all vaccines and diluents available during the session?",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "III. EPI Routine Immunization Session Observations",
+      "questionText": "[3.3.] Are the diluents of BCG and Measles the ones provided by the manufacturer for that same vaccine?",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "III. EPI Routine Immunization Session Observations",
+      "questionText": "[3.4.] Are there sufficient syringes/needles for reconstituting and administering the vaccines?",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "III. EPI Routine Immunization Session Observations",
+      "questionText": "[3.5.] Does the vaccinator verify the infant's age and review records for vaccination?",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "III. EPI Routine Immunization Session Observations",
+      "questionText": "[3.6.] Are all the vaccines given in the correct sites, using the correct doses, and the correct route of administration?",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "III. EPI Routine Immunization Session Observations",
+      "questionText": "[3.7.] Are used needles and syringes immediately placed in a safety box following administration of the vaccine?",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "III. EPI Routine Immunization Session Observations",
+      "questionText": "[3.8.] Does the vaccinator deliver all the five (5) key messages of immunization to parents/care-givers?",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "III. EPI Routine Immunization Session Observations",
+      "questionText": "[3.9.] Is the vaccinator asking care-givers to wait for 30 minutes after vaccination?",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "III. EPI Routine Immunization Session Observations",
+      "questionText": "[3.10.] Comments / Observations on EPI Routine Immunization Session:",
+      "answerType": "text",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "IV. EPI Monitoring and Supervision",
+      "questionText": "[4.1.] What is the percentage of infants immunized against the total catchment area (% coverage) last month? - Penta 1 coverage (%):",
+      "answerType": "number",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "IV. EPI Monitoring and Supervision",
+      "questionText": "[4.1.] What is the percentage of infants immunized against the total catchment area (% coverage) last month? - Penta 3 coverage (%):",
+      "answerType": "number",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "IV. EPI Monitoring and Supervision",
+      "questionText": "[4.1.] What is the percentage of infants immunized against the total catchment area (% coverage) last month? - MCV coverage (%):",
+      "answerType": "number",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "IV. EPI Monitoring and Supervision",
+      "questionText": "[4.1.] What is the percentage of pregnant women immunized against the total catchment area (% coverage) last month? - Td2+ coverage (%):",
+      "answerType": "number",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "IV. EPI Monitoring and Supervision",
+      "questionText": "[4.2.] What is the current dropout rate for Penta 1 to Penta 3 (%)?",
+      "answerType": "number",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "IV. EPI Monitoring and Supervision",
+      "questionText": "[4.2.] What is the current dropout rate for Penta 1 to MCV (%)?",
+      "answerType": "number",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "IV. EPI Monitoring and Supervision",
+      "questionText": "Did any county EPI staff visit this health facility in the last quarter?",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "IV. EPI Monitoring and Supervision",
+      "questionText": "[4.] Was there any support supervision feedback after the visit? (Observe for record of feedback)",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "V. Waste Management and Injection Safety",
+      "questionText": "[5.1.] Are there sufficient amounts of AD syringes, reconstitution syringes, and safety boxes to use for the vaccine quantities in stock?",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "V. Waste Management and Injection Safety",
+      "questionText": "[5.2.] Are safety boxes used for disposal of used needles and syringes?",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "V. Waste Management and Injection Safety",
+      "questionText": "[5.3.] Do you use one mixing syringe for reconstituting one vial of vaccine?",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "V. Waste Management and Injection Safety",
+      "questionText": "[5.4.] Are needles separated from the syringe after use?",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "V. Waste Management and Injection Safety",
+      "questionText": "[5.5.] Is there a hand washing facility in the vaccination site?",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "V. Waste Management and Injection Safety",
+      "questionText": "[5.6.] At the end of the EPI sessions does the vaccinator take care to leave the immunization site safe and clean?",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "V. Waste Management and Injection Safety",
+      "questionText": "[5.7.] Has the facility reported/recorded any AEFI case in the last 3 months?",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "V. Waste Management and Injection Safety",
+      "questionText": "[5.8.] Does the vaccinator know what can be done when there is an AEFI case?",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "VI. VPD Surveillance",
+      "questionText": "[6.1.] Are there surveillance case definition charts/posters for priority diseases posted on the wall?",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "VI. VPD Surveillance",
+      "questionText": "[6.2.] Does the vaccinator/surveillance focal point/clinician know the case definitions for AFP, Measles and NNT?",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "VI. VPD Surveillance",
+      "questionText": "[6.3.] Does the vaccinator/surveillance focal point/clinician update VPD cases in the EPI monitoring chart?",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "VI. VPD Surveillance",
+      "questionText": "[7.4.] Are there VPD case-based investigation forms and surveillance guidelines at the health facility?",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "VI. VPD Surveillance",
+      "questionText": "[7.5.] If yes, specify the VPD case-based investigation forms and surveillance guidelines available:",
+      "answerType": "text",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "VII. Community Mobilization / Community Involvement",
+      "questionText": "[7.1.] Are there social mobilization activities being carried out for immunization in the catchment areas?",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "VII. Community Mobilization / Community Involvement",
+      "questionText": "[7.2.] Is any mobilizer assigned to the facility?",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "VII. Community Mobilization / Community Involvement",
+      "questionText": "[7.3.] Is there community involvement in outreach site selection?",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "VII. Community Mobilization / Community Involvement",
+      "questionText": "[7.4.] Is there community involvement in scheduling outreach sessions?",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "VII. Community Mobilization / Community Involvement",
+      "questionText": "[7.5.] Is there community involvement in mobilizing mothers?",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "VII. Community Mobilization / Community Involvement",
+      "questionText": "[7.6.] Does the Boma Health committee meet monthly? If yes, is EPI part of the agenda?",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "VII. Community Mobilization / Community Involvement",
+      "questionText": "[7.7.] Do vaccinators conduct health education sessions before vaccination regularly? (Observe)",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "VII. Community Mobilization / Community Involvement",
+      "questionText": "[7.8.] Is there a defaulter tracing mechanism?",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "VII. Community Mobilization / Community Involvement",
+      "questionText": "[7.8.] If yes, specify the defaulter tracing mechanism:",
+      "answerType": "text",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "VII. Community Mobilization / Community Involvement",
+      "questionText": "[7.9.] Is the integration of EPI services into other health services conducted in this health facility?",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "VII. Community Mobilization / Community Involvement",
+      "questionText": "[7.9.] If yes, specify which other health services EPI is integrated with:",
+      "answerType": "text",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "VIII. Support from Higher Level",
+      "questionText": "[8.1.] Is there feedback from the county or state levels on the health facility monthly EPI performance?",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "VIII. Support from Higher Level",
+      "questionText": "[8.2.] Did you receive support for immunization activities implemented last month such as for outreach directly or indirectly?",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "IX. Observations by Supervisor",
+      "questionText": "[9.1.] Are all vaccines available at the time of visit? (Check BCG and diluent, OPV and Droppers, Measles and Diluent, Td, Penta and IPV)",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "IX. Observations by Supervisor",
+      "questionText": "[9.2.] If any vaccine or diluent is out of stock, indicate the duration of stockout (in days):",
+      "answerType": "number",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "IX. Observations by Supervisor",
+      "questionText": "[9.3.] Are all vaccines in a usable condition? (Review against below checklists)",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "IX. Observations by Supervisor",
+      "questionText": "[9.4.] Are all injection supplies available at the time of visit? (Check 5ml, 2ml, AD 0.5ml, AD 0.05ml, Safety Boxes)",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "IX. Observations by Supervisor",
+      "questionText": "[9.5.] If any of the injection supplies is out of stock, indicate the duration of stockout (in days):",
+      "answerType": "number",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "IX. Observations by Supervisor",
+      "questionText": "[9.6.] Do you know when to place an order for vaccines and supplies refill?",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "IX. Observations by Supervisor",
+      "questionText": "[9.7.] Note: Orders should be placed before stockout occurs (at least 2 weeks). Does the health worker order vaccines at least 2 weeks before stockout?",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "IX. Observations by Supervisor",
+      "questionText": "[9.8.] What is the correct storage temperature for vaccines when they are at the facility? (Enter observed/stated temperature range)",
+      "answerType": "text",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "IX. Observations by Supervisor",
+      "questionText": "[9.9.] Is there a temperature monitoring device in use for monitoring cold chain temperature? (Thermometer, fridge-tags, others)",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "IX. Observations by Supervisor",
+      "questionText": "[9.10.] Does the health worker know how to read and interpret temperature monitoring devices?",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "IX. Observations by Supervisor",
+      "questionText": "[9.11.] Is there a temperature monitoring chart at the facility? Is the temperature monitoring chart updated twice per day, every day?",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "IX. Observations by Supervisor",
+      "questionText": "[9.12.] Is there evidence that vaccines have been exposed to temperature greater than 8 degrees C or less than 2 degrees C?",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "IX. Observations by Supervisor",
+      "questionText": "[9.13.] Can you tell me some of the vaccines that are sensitive to high temperature exposure?",
+      "answerType": "text",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "IX. Observations by Supervisor",
+      "questionText": "[9.14.] Can you tell me what VVM is and which VVM stages are usable?",
+      "answerType": "text",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "IX. Observations by Supervisor",
+      "questionText": "[9.15.] Can you tell me some of the vaccines that are sensitive to freezing temperature?",
+      "answerType": "text",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "IX. Observations by Supervisor",
+      "questionText": "[9.16.] Is this health facility using appropriate tally sheets and reporting formats?",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "IX. Observations by Supervisor",
+      "questionText": "[9.17.] Are the used tally sheets and reporting formats appropriately filed?",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "IX. Observations by Supervisor",
+      "questionText": "[9.18.] Are the reports completed for all three previous months?",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "IX. Observations by Supervisor",
+      "questionText": "[9.19.] Verify the validity of doses by checking the age of the child when he/she received the vaccine. Are doses verified as valid?",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "IX. Observations by Supervisor",
+      "questionText": "[9.20.] Number of Penta 1 doses received before the age of 6 weeks in the previous one month:",
+      "answerType": "number",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "IX. Observations by Supervisor",
+      "questionText": "[9.21.] Number of measles doses received before the age of 9 months in the previous one month:",
+      "answerType": "number",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "IX. Observations by Supervisor",
+      "questionText": "[9.22.] Number of children vaccinated after age one year and misclassified and reported as under one in the previous one month:",
+      "answerType": "number",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "IX. Observations by Supervisor",
+      "questionText": "[9.23.] Are birth dates for all children documented in the child register for immunization?",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "IX. Observations by Supervisor",
+      "questionText": "[9.24.] Are all dates for vaccine receipt documented?",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "IX. Observations by Supervisor",
+      "questionText": "[9.25.] Is vaccine wastage monitored?",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "IX. Observations by Supervisor",
+      "questionText": "[9.26.] If yes, indicate the wastage rate of BCG (%):",
+      "answerType": "number",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "IX. Observations by Supervisor",
+      "questionText": "[9.26.] If yes, indicate the wastage rate of Measles (%):",
+      "answerType": "number",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "IX. Observations by Supervisor",
+      "questionText": "[9.26.] If yes, indicate the wastage rate of Penta (%):",
+      "answerType": "number",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "IX. Observations by Supervisor",
+      "questionText": "[9.26.] If yes, indicate the wastage rate of OPV (%):",
+      "answerType": "number",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "IX. Observations by Supervisor",
+      "questionText": "[9.26.] If yes, indicate the wastage rate of Td (%):",
+      "answerType": "number",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "X. Client Exit Interview",
+      "questionText": "Exit interview instructions: Interview at least 5 clients for the facility visited. Were parents/caregivers told about the vaccine and side effects? (Number of 'Yes' responses out of 5 clients)",
+      "answerType": "number",
+      "options": [],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "X. Client Exit Interview",
+      "questionText": "Were the clients told about the disease the vaccine will protect the child against? (Number of 'Yes' responses out of 5 clients)",
+      "answerType": "number",
+      "options": [],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "X. Client Exit Interview",
+      "questionText": "Do the clients know when to come back for the next vaccination? (Number of 'Yes' responses out of 5 clients)",
+      "answerType": "number",
+      "options": [],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "X. Client Exit Interview",
+      "questionText": "Were the clients told to keep the card safe and bring it for vaccination? (Number of 'Yes' responses out of 5 clients)",
+      "answerType": "number",
+      "options": [],
+      "isScored": true,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "XI. Summary of the Supervision Activity",
+      "questionText": "[11.0.] Status of implementation of recommendations from the most recent supportive supervision visit:",
+      "answerType": "text",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "XI. Summary of the Supervision Activity",
+      "questionText": "[11.1.] Strengths of the health facility (Strength 1):",
+      "answerType": "text",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "XI. Summary of the Supervision Activity",
+      "questionText": "[11.1.] Strengths of the health facility (Strength 2):",
+      "answerType": "text",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "XI. Summary of the Supervision Activity",
+      "questionText": "[11.1.] Strengths of the health facility (Strength 3):",
+      "answerType": "text",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "XI. Summary of the Supervision Activity",
+      "questionText": "[11.1.] Strengths of the health facility (Strength 4):",
+      "answerType": "text",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "XI. Summary of the Supervision Activity",
+      "questionText": "[11.1.] Strengths of the health facility (Strength 5):",
+      "answerType": "text",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "XI. Summary of the Supervision Activity",
+      "questionText": "[11.2.] Five major areas for improvement (Area 1):",
+      "answerType": "text",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "XI. Summary of the Supervision Activity",
+      "questionText": "[11.2.] Five major areas for improvement (Area 2):",
+      "answerType": "text",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "XI. Summary of the Supervision Activity",
+      "questionText": "[11.2.] Five major areas for improvement (Area 3):",
+      "answerType": "text",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "XI. Summary of the Supervision Activity",
+      "questionText": "[11.2.] Five major areas for improvement (Area 4):",
+      "answerType": "text",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "XI. Summary of the Supervision Activity",
+      "questionText": "[11.2.] Five major areas for improvement (Area 5):",
+      "answerType": "text",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "XI. Summary of the Supervision Activity",
+      "questionText": "[11.3.] Recommendation 1 - Description:",
+      "answerType": "text",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "XI. Summary of the Supervision Activity",
+      "questionText": "[11.3.] Recommendation 1 - Responsible person/agency:",
+      "answerType": "text",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "XI. Summary of the Supervision Activity",
+      "questionText": "[11.3.] Recommendation 1 - Target date:",
+      "answerType": "date",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "XI. Summary of the Supervision Activity",
+      "questionText": "[11.3.] Recommendation 2 - Description:",
+      "answerType": "text",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "XI. Summary of the Supervision Activity",
+      "questionText": "[11.3.] Recommendation 2 - Responsible person/agency:",
+      "answerType": "text",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "XI. Summary of the Supervision Activity",
+      "questionText": "[11.3.] Recommendation 2 - Target date:",
+      "answerType": "date",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "XI. Summary of the Supervision Activity",
+      "questionText": "[11.3.] Recommendation 3 - Description:",
+      "answerType": "text",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "XI. Summary of the Supervision Activity",
+      "questionText": "[11.3.] Recommendation 3 - Responsible person/agency:",
+      "answerType": "text",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "XI. Summary of the Supervision Activity",
+      "questionText": "[11.3.] Recommendation 3 - Target date:",
+      "answerType": "date",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "XI. Summary of the Supervision Activity",
+      "questionText": "[11.3.] Recommendation 4 - Description:",
+      "answerType": "text",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "XI. Summary of the Supervision Activity",
+      "questionText": "[11.3.] Recommendation 4 - Responsible person/agency:",
+      "answerType": "text",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "XI. Summary of the Supervision Activity",
+      "questionText": "[11.3.] Recommendation 4 - Target date:",
+      "answerType": "date",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "XI. Summary of the Supervision Activity",
+      "questionText": "[11.3.] Recommendation 5 - Description:",
+      "answerType": "text",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "XI. Summary of the Supervision Activity",
+      "questionText": "[11.3.] Recommendation 5 - Responsible person/agency:",
+      "answerType": "text",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "XI. Summary of the Supervision Activity",
+      "questionText": "[11.3.] Recommendation 5 - Target date:",
+      "answerType": "date",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "XI. Summary of the Supervision Activity",
+      "questionText": "NB: All challenges and recommendations have to be put in the supervision book or prepare two copies and give one to supervisee. Was this done?",
+      "answerType": "yes_no",
+      "options": [
+        "Yes",
+        "No"
+      ],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "XI. Summary of the Supervision Activity",
+      "questionText": "Name and title of supervisor:",
+      "answerType": "text",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    },
+    {
+      "sectionTitle": "XI. Summary of the Supervision Activity",
+      "questionText": "Date of supervisor's signature:",
+      "answerType": "date",
+      "options": [],
+      "isScored": false,
+      "weight": 1.0,
+      "prefillSourceKey": ""
+    }
+  ]
+}
