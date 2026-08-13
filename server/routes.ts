@@ -585,6 +585,47 @@ function recordInGeoScope(
   return false;
 }
 
+type MapBbox = {
+  west: number;
+  south: number;
+  east: number;
+  north: number;
+};
+
+function parseMapNumber(value: unknown): number | null {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function parseMapInt(value: unknown): number | null {
+  const n = parseInt(String(value ?? ""), 10);
+  return Number.isFinite(n) ? n : null;
+}
+
+function parseMapLimit(value: unknown, fallback: number, max: number): number {
+  const n = parseMapInt(value);
+  if (!n || n <= 0) return fallback;
+  return Math.min(n, max);
+}
+
+function parseMapBbox(value: unknown): MapBbox | null {
+  if (!value) return null;
+  const parts = String(value).split(",").map((part) => Number(part.trim()));
+  if (parts.length !== 4 || parts.some((part) => !Number.isFinite(part))) return null;
+  const [west, south, east, north] = parts;
+  if (south < -90 || north > 90 || west < -180 || east > 180) return null;
+  if (south >= north || west >= east) return null;
+  return { west, south, east, north };
+}
+
+function pointInsideBbox(lat: unknown, lng: unknown, bbox: MapBbox | null): boolean {
+  if (!bbox) return true;
+  const pointLat = parseMapNumber(lat);
+  const pointLng = parseMapNumber(lng);
+  if (pointLat == null || pointLng == null) return false;
+  return pointLat >= bbox.south && pointLat <= bbox.north && pointLng >= bbox.west && pointLng <= bbox.east;
+}
+
 async function userHasAccessToUser(viewer: any, target: any, tenantId: string): Promise<boolean> {
   if (viewer.isPlatformAdmin === true) return true;
   const seesWholeTenant =
@@ -6420,6 +6461,191 @@ export async function registerRoutes(
   });
 
   // ─── Villages ─────────────────────────────────────────
+  // Viewport-scoped map feature payload. This is intentionally lean and bounded:
+  // the full national facility/community registries are too large for initial map
+  // loads in country-scale tenants, so the map asks only for the current bounds.
+  app.get("/api/map/features", ...auth, async (req: any, res) => {
+    try {
+      const dbUser = req.dbUser!;
+      const tenantId = String(req.tenantId);
+      const scope = await getGeoScope(dbUser, tenantId);
+      const bbox = parseMapBbox(req.query.bbox);
+      const zoom = parseMapNumber(req.query.zoom) ?? 0;
+      const selectedProvinceId = parseMapInt(req.query.provinceId);
+      const selectedDistrictId = parseMapInt(req.query.districtId);
+      const selectedFacilityId = parseMapInt(req.query.facilityId);
+      const selectedLlgId = parseMapInt(req.query.llgId);
+      const search = String(req.query.q ?? "").trim().toLowerCase();
+      const layers = new Set(
+        String(req.query.layers ?? "facilities,communities")
+          .split(",")
+          .map((layer) => layer.trim().toLowerCase())
+          .filter(Boolean),
+      );
+
+      const [districtRows, provinceRows] = await Promise.all([
+        db
+          .select({ id: districts.id, name: districts.name, provinceId: districts.provinceId })
+          .from(districts)
+          .where(eq(districts.tenantId, tenantId)),
+        db
+          .select({ id: provinces.id, name: provinces.name })
+          .from(provinces)
+          .where(eq(provinces.tenantId, tenantId)),
+      ]);
+      const districtMap = new Map(districtRows.map((d) => [Number(d.id), d]));
+      const provinceMap = new Map(provinceRows.map((p) => [Number(p.id), p]));
+
+      const facilityLimit = parseMapLimit(req.query.limitFacilities, zoom < 7 ? 600 : 2500, 5000);
+      const communityLimit = parseMapLimit(req.query.limitCommunities, 1200, 5000);
+
+      const facilityConditions: any[] = [eq(facilities.tenantId, tenantId)];
+      if (selectedDistrictId) facilityConditions.push(eq(facilities.districtId, selectedDistrictId));
+      if (selectedFacilityId) facilityConditions.push(eq(facilities.id, selectedFacilityId));
+      if (bbox && !selectedFacilityId) {
+        facilityConditions.push(dsql`${facilities.latitude}::double precision BETWEEN ${bbox.south} AND ${bbox.north}`);
+        facilityConditions.push(dsql`${facilities.longitude}::double precision BETWEEN ${bbox.west} AND ${bbox.east}`);
+      }
+
+      const facilityRows = layers.has("facilities")
+        ? await db
+            .select({
+              id: facilities.id,
+              tenantId: facilities.tenantId,
+              name: facilities.name,
+              hmisCode: facilities.hmisCode,
+              facilityType: facilities.facilityType,
+              districtId: facilities.districtId,
+              latitude: facilities.latitude,
+              longitude: facilities.longitude,
+              hasRefrigerator: facilities.hasRefrigerator,
+              hasPower: facilities.hasPower,
+              staffCount: facilities.staffCount,
+              catchmentRadius: facilities.catchmentRadius,
+              catchmentGridPopulation: facilities.catchmentGridPopulation,
+              operationalStatus: facilities.operationalStatus,
+              isActive: facilities.isActive,
+              externalIds: facilities.externalIds,
+            })
+            .from(facilities)
+            .where(and(...facilityConditions))
+            .limit(facilityLimit * 2)
+        : [];
+
+      const facilitiesResult = facilityRows
+        .filter((facility: any) => {
+          const district = districtMap.get(Number(facility.districtId));
+          if (!recordInGeoScope(scope, { facilityId: facility.id, districtId: facility.districtId, provinceId: district?.provinceId })) return false;
+          if (selectedProvinceId && Number(district?.provinceId) !== selectedProvinceId) return false;
+          if (search) {
+            const haystack = `${facility.name ?? ""} ${facility.hmisCode ?? ""}`.toLowerCase();
+            if (!haystack.includes(search)) return false;
+          }
+          return true;
+        })
+        .slice(0, facilityLimit)
+        .map((facility: any) => {
+          const district = districtMap.get(Number(facility.districtId));
+          const province = district ? provinceMap.get(Number(district.provinceId)) : undefined;
+          return {
+            ...facility,
+            districtName: district?.name ?? null,
+            provinceId: district?.provinceId ?? null,
+            provinceName: province?.name ?? null,
+          };
+        });
+
+      const hasCommunityFocus =
+        !!selectedFacilityId ||
+        !!selectedDistrictId ||
+        !!selectedLlgId ||
+        !!search ||
+        zoom >= 10;
+      const communityConditions: any[] = [eq(villages.tenantId, tenantId)];
+      if (selectedFacilityId) {
+        communityConditions.push(eq(villages.assignedFacilityId, selectedFacilityId));
+      } else if (selectedDistrictId) {
+        communityConditions.push(eq(villages.districtId, selectedDistrictId));
+      } else if (bbox) {
+        communityConditions.push(dsql`${villages.latitude}::double precision BETWEEN ${bbox.south} AND ${bbox.north}`);
+        communityConditions.push(dsql`${villages.longitude}::double precision BETWEEN ${bbox.west} AND ${bbox.east}`);
+      }
+      if (selectedLlgId) communityConditions.push(eq(villages.llgId, selectedLlgId));
+
+      const communityRows = layers.has("communities") && hasCommunityFocus
+        ? await db
+            .select({
+              id: villages.id,
+              tenantId: villages.tenantId,
+              name: villages.name,
+              code: villages.code,
+              districtId: villages.districtId,
+              llgId: villages.llgId,
+              assignedFacilityId: villages.assignedFacilityId,
+              latitude: villages.latitude,
+              longitude: villages.longitude,
+              distanceToFacility: villages.distanceToFacility,
+              travelTimeMinutes: villages.travelTimeMinutes,
+              terrainDifficulty: villages.terrainDifficulty,
+              isHardToReach: villages.isHardToReach,
+              seasonalAccessibility: villages.seasonalAccessibility,
+              transportMode: villages.transportMode,
+              insecurityLevel: villages.insecurityLevel,
+              comments: villages.comments,
+              accessibilityScore: villages.accessibilityScore,
+              referralRoute: villages.referralRoute,
+              outreachLatitude: villages.outreachLatitude,
+              outreachLongitude: villages.outreachLongitude,
+              outreachPostName: villages.outreachPostName,
+              focalPersonName: villages.focalPersonName,
+              focalPersonPhone: villages.focalPersonPhone,
+              settlementType: villages.settlementType,
+              highRisk: villages.highRisk,
+              totalCatchmentPopulation: villages.totalCatchmentPopulation,
+              under5Population: villages.under5Population,
+              griddedPopulation: villages.griddedPopulation,
+              population: dsql<number>`COALESCE(${villages.griddedPopulation}, ${villages.totalCatchmentPopulation}, 0)`.mapWith(Number),
+            })
+            .from(villages)
+            .where(and(...communityConditions))
+            .limit(communityLimit * 2)
+        : [];
+
+      const communitiesResult = communityRows
+        .filter((village: any) => {
+          if (outsideVillageIds.has(Number(village.id))) return false;
+          const district = districtMap.get(Number(village.districtId));
+          if (!recordInGeoScope(scope, { facilityId: village.assignedFacilityId, districtId: village.districtId, provinceId: district?.provinceId })) return false;
+          if (selectedProvinceId && Number(district?.provinceId) !== selectedProvinceId) return false;
+          if (search) {
+            const haystack = `${village.name ?? ""} ${village.code ?? ""}`.toLowerCase();
+            if (!haystack.includes(search)) return false;
+          }
+          if (!selectedFacilityId && !pointInsideBbox(village.latitude, village.longitude, bbox)) return false;
+          return true;
+        })
+        .slice(0, communityLimit);
+
+      setCacheHeaders(res, 60);
+      res.json({
+        facilities: facilitiesResult,
+        villages: communitiesResult,
+        meta: {
+          bbox,
+          zoom,
+          facilityLimit,
+          communityLimit,
+          communitiesSuppressed: layers.has("communities") && !hasCommunityFocus,
+          returnedFacilities: facilitiesResult.length,
+          returnedCommunities: communitiesResult.length,
+        },
+      });
+    } catch (error) {
+      console.error("GET /api/map/features failed:", error);
+      res.status(500).json({ message: "Failed to fetch map features" });
+    }
+  });
+
   app.get("/api/villages", ...auth, async (req: any, res) => {
     try {
       const dbUser = req.dbUser!;

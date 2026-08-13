@@ -16529,6 +16529,35 @@ function recordInGeoScope(scope, geo) {
   if (provinceId != null && scope.provinceIds.has(Number(provinceId))) return true;
   return false;
 }
+function parseMapNumber(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+function parseMapInt(value) {
+  const n = parseInt(String(value ?? ""), 10);
+  return Number.isFinite(n) ? n : null;
+}
+function parseMapLimit(value, fallback, max) {
+  const n = parseMapInt(value);
+  if (!n || n <= 0) return fallback;
+  return Math.min(n, max);
+}
+function parseMapBbox(value) {
+  if (!value) return null;
+  const parts = String(value).split(",").map((part) => Number(part.trim()));
+  if (parts.length !== 4 || parts.some((part) => !Number.isFinite(part))) return null;
+  const [west, south, east, north] = parts;
+  if (south < -90 || north > 90 || west < -180 || east > 180) return null;
+  if (south >= north || west >= east) return null;
+  return { west, south, east, north };
+}
+function pointInsideBbox(lat, lng, bbox) {
+  if (!bbox) return true;
+  const pointLat = parseMapNumber(lat);
+  const pointLng = parseMapNumber(lng);
+  if (pointLat == null || pointLng == null) return false;
+  return pointLat >= bbox.south && pointLat <= bbox.north && pointLng >= bbox.west && pointLng <= bbox.east;
+}
 async function userHasAccessToUser(viewer, target, tenantId) {
   if (viewer.isPlatformAdmin === true) return true;
   const seesWholeTenant = viewer.role === "national_admin" || viewer.role === "gis_specialist" || Array.isArray(viewer.roles) && viewer.roles.some(
@@ -21043,6 +21072,147 @@ async function registerRoutes(httpServer2, app2) {
     } catch (error) {
       console.error("Error fetching village summary:", error);
       res.status(500).json({ message: "Failed to fetch village summary" });
+    }
+  });
+  app2.get("/api/map/features", ...auth, async (req, res) => {
+    try {
+      const dbUser = req.dbUser;
+      const tenantId = String(req.tenantId);
+      const scope = await getGeoScope(dbUser, tenantId);
+      const bbox = parseMapBbox(req.query.bbox);
+      const zoom = parseMapNumber(req.query.zoom) ?? 0;
+      const selectedProvinceId = parseMapInt(req.query.provinceId);
+      const selectedDistrictId = parseMapInt(req.query.districtId);
+      const selectedFacilityId = parseMapInt(req.query.facilityId);
+      const selectedLlgId = parseMapInt(req.query.llgId);
+      const search = String(req.query.q ?? "").trim().toLowerCase();
+      const layers = new Set(
+        String(req.query.layers ?? "facilities,communities").split(",").map((layer) => layer.trim().toLowerCase()).filter(Boolean)
+      );
+      const [districtRows, provinceRows] = await Promise.all([
+        db.select({ id: districts.id, name: districts.name, provinceId: districts.provinceId }).from(districts).where((0, import_drizzle_orm26.eq)(districts.tenantId, tenantId)),
+        db.select({ id: provinces.id, name: provinces.name }).from(provinces).where((0, import_drizzle_orm26.eq)(provinces.tenantId, tenantId))
+      ]);
+      const districtMap = new Map(districtRows.map((d) => [Number(d.id), d]));
+      const provinceMap = new Map(provinceRows.map((p) => [Number(p.id), p]));
+      const facilityLimit = parseMapLimit(req.query.limitFacilities, zoom < 7 ? 600 : 2500, 5e3);
+      const communityLimit = parseMapLimit(req.query.limitCommunities, 1200, 5e3);
+      const facilityConditions = [(0, import_drizzle_orm26.eq)(facilities.tenantId, tenantId)];
+      if (selectedDistrictId) facilityConditions.push((0, import_drizzle_orm26.eq)(facilities.districtId, selectedDistrictId));
+      if (selectedFacilityId) facilityConditions.push((0, import_drizzle_orm26.eq)(facilities.id, selectedFacilityId));
+      if (bbox && !selectedFacilityId) {
+        facilityConditions.push(import_drizzle_orm26.sql`${facilities.latitude}::double precision BETWEEN ${bbox.south} AND ${bbox.north}`);
+        facilityConditions.push(import_drizzle_orm26.sql`${facilities.longitude}::double precision BETWEEN ${bbox.west} AND ${bbox.east}`);
+      }
+      const facilityRows = layers.has("facilities") ? await db.select({
+        id: facilities.id,
+        tenantId: facilities.tenantId,
+        name: facilities.name,
+        hmisCode: facilities.hmisCode,
+        facilityType: facilities.facilityType,
+        districtId: facilities.districtId,
+        latitude: facilities.latitude,
+        longitude: facilities.longitude,
+        hasRefrigerator: facilities.hasRefrigerator,
+        hasPower: facilities.hasPower,
+        staffCount: facilities.staffCount,
+        catchmentRadius: facilities.catchmentRadius,
+        catchmentGridPopulation: facilities.catchmentGridPopulation,
+        operationalStatus: facilities.operationalStatus,
+        isActive: facilities.isActive,
+        externalIds: facilities.externalIds
+      }).from(facilities).where((0, import_drizzle_orm26.and)(...facilityConditions)).limit(facilityLimit * 2) : [];
+      const facilitiesResult = facilityRows.filter((facility) => {
+        const district = districtMap.get(Number(facility.districtId));
+        if (!recordInGeoScope(scope, { facilityId: facility.id, districtId: facility.districtId, provinceId: district?.provinceId })) return false;
+        if (selectedProvinceId && Number(district?.provinceId) !== selectedProvinceId) return false;
+        if (search) {
+          const haystack = `${facility.name ?? ""} ${facility.hmisCode ?? ""}`.toLowerCase();
+          if (!haystack.includes(search)) return false;
+        }
+        return true;
+      }).slice(0, facilityLimit).map((facility) => {
+        const district = districtMap.get(Number(facility.districtId));
+        const province = district ? provinceMap.get(Number(district.provinceId)) : void 0;
+        return {
+          ...facility,
+          districtName: district?.name ?? null,
+          provinceId: district?.provinceId ?? null,
+          provinceName: province?.name ?? null
+        };
+      });
+      const hasCommunityFocus = !!selectedFacilityId || !!selectedDistrictId || !!selectedLlgId || !!search || zoom >= 10;
+      const communityConditions = [(0, import_drizzle_orm26.eq)(villages.tenantId, tenantId)];
+      if (selectedFacilityId) {
+        communityConditions.push((0, import_drizzle_orm26.eq)(villages.assignedFacilityId, selectedFacilityId));
+      } else if (selectedDistrictId) {
+        communityConditions.push((0, import_drizzle_orm26.eq)(villages.districtId, selectedDistrictId));
+      } else if (bbox) {
+        communityConditions.push(import_drizzle_orm26.sql`${villages.latitude}::double precision BETWEEN ${bbox.south} AND ${bbox.north}`);
+        communityConditions.push(import_drizzle_orm26.sql`${villages.longitude}::double precision BETWEEN ${bbox.west} AND ${bbox.east}`);
+      }
+      if (selectedLlgId) communityConditions.push((0, import_drizzle_orm26.eq)(villages.llgId, selectedLlgId));
+      const communityRows = layers.has("communities") && hasCommunityFocus ? await db.select({
+        id: villages.id,
+        tenantId: villages.tenantId,
+        name: villages.name,
+        code: villages.code,
+        districtId: villages.districtId,
+        llgId: villages.llgId,
+        assignedFacilityId: villages.assignedFacilityId,
+        latitude: villages.latitude,
+        longitude: villages.longitude,
+        distanceToFacility: villages.distanceToFacility,
+        travelTimeMinutes: villages.travelTimeMinutes,
+        terrainDifficulty: villages.terrainDifficulty,
+        isHardToReach: villages.isHardToReach,
+        seasonalAccessibility: villages.seasonalAccessibility,
+        transportMode: villages.transportMode,
+        insecurityLevel: villages.insecurityLevel,
+        comments: villages.comments,
+        accessibilityScore: villages.accessibilityScore,
+        referralRoute: villages.referralRoute,
+        outreachLatitude: villages.outreachLatitude,
+        outreachLongitude: villages.outreachLongitude,
+        outreachPostName: villages.outreachPostName,
+        focalPersonName: villages.focalPersonName,
+        focalPersonPhone: villages.focalPersonPhone,
+        settlementType: villages.settlementType,
+        highRisk: villages.highRisk,
+        totalCatchmentPopulation: villages.totalCatchmentPopulation,
+        under5Population: villages.under5Population,
+        griddedPopulation: villages.griddedPopulation,
+        population: import_drizzle_orm26.sql`COALESCE(${villages.griddedPopulation}, ${villages.totalCatchmentPopulation}, 0)`.mapWith(Number)
+      }).from(villages).where((0, import_drizzle_orm26.and)(...communityConditions)).limit(communityLimit * 2) : [];
+      const communitiesResult = communityRows.filter((village) => {
+        if (outsideVillageIds.has(Number(village.id))) return false;
+        const district = districtMap.get(Number(village.districtId));
+        if (!recordInGeoScope(scope, { facilityId: village.assignedFacilityId, districtId: village.districtId, provinceId: district?.provinceId })) return false;
+        if (selectedProvinceId && Number(district?.provinceId) !== selectedProvinceId) return false;
+        if (search) {
+          const haystack = `${village.name ?? ""} ${village.code ?? ""}`.toLowerCase();
+          if (!haystack.includes(search)) return false;
+        }
+        if (!selectedFacilityId && !pointInsideBbox(village.latitude, village.longitude, bbox)) return false;
+        return true;
+      }).slice(0, communityLimit);
+      setCacheHeaders(res, 60);
+      res.json({
+        facilities: facilitiesResult,
+        villages: communitiesResult,
+        meta: {
+          bbox,
+          zoom,
+          facilityLimit,
+          communityLimit,
+          communitiesSuppressed: layers.has("communities") && !hasCommunityFocus,
+          returnedFacilities: facilitiesResult.length,
+          returnedCommunities: communitiesResult.length
+        }
+      });
+    } catch (error) {
+      console.error("GET /api/map/features failed:", error);
+      res.status(500).json({ message: "Failed to fetch map features" });
     }
   });
   app2.get("/api/villages", ...auth, async (req, res) => {

@@ -23,6 +23,8 @@ const FALLBACK_CENTER: [number, number] = [-6.0, 147.0];
 const FALLBACK_ZOOM = 6;
 
 export default function MapPage() {
+  const isOnline = typeof navigator === "undefined" ? true : navigator.onLine;
+
   // Updated queries with offline fallbacks to Dexie local DB & optimal caching:
   const { data: activeTenantInfo } = useQuery<MyTenant>({
     queryKey: ["/api/me/tenant"],
@@ -67,9 +69,7 @@ export default function MapPage() {
           ? offlineDb.facilities.where("tenantId").equals(_tid).toArray()
           : offlineDb.facilities.toArray()) as any;
       }
-      const res = await fetch("/api/facilities", { credentials: "include" });
-      if (!res.ok) throw new Error("Failed to fetch facilities");
-      return res.json();
+      return [];
     },
     enabled: !!activeTenantInfo?.id,
     staleTime: 5 * 60 * 1000,
@@ -85,9 +85,7 @@ export default function MapPage() {
           ? offlineDb.villages.where("tenantId").equals(_tid).toArray()
           : offlineDb.villages.toArray()) as any;
       }
-      const res = await fetch("/api/villages/summary", { credentials: "include" });
-      if (!res.ok) throw new Error("Failed to fetch villages");
-      return res.json();
+      return [];
     },
     enabled: !!activeTenantInfo?.id,
     staleTime: 5 * 60 * 1000,
@@ -123,7 +121,7 @@ export default function MapPage() {
     let calculatedCenter: [number, number] = tenantCenter ?? FALLBACK_CENTER;
     let calculatedZoom: number = tenantZoom ?? FALLBACK_ZOOM;
 
-    if (!tenantCenter && facilityCoords.length > 0) {
+    if (!isOnline && !tenantCenter && facilityCoords.length > 0) {
       const avgLat =
         facilityCoords.reduce((s, f) => s + Number(f.latitude), 0) /
         facilityCoords.length;
@@ -134,7 +132,7 @@ export default function MapPage() {
     }
 
     return { center: calculatedCenter, zoom: calculatedZoom };
-  }, [scopedFacilities, tenantCenter, tenantZoom]);
+  }, [isOnline, scopedFacilities, tenantCenter, tenantZoom]);
 
   return (
     <div className="h-full">

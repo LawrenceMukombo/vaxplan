@@ -2215,8 +2215,8 @@ const DEFAULT_MAP_CENTER: [number, number] = [-6.0, 147.0];
 
 // Updated Code: Fully functional MapView supporting interactive geodesic Turf measurements, high-res PDF layout, and premium Radix UI data exports
 export function MapView({
-  facilities = [],
-  villages = [],
+  facilities: inputFacilities = [],
+  villages: inputVillages = [],
   cases = [],
   center = DEFAULT_MAP_CENTER,
   zoom = 6,
@@ -2224,6 +2224,8 @@ export function MapView({
   showFacilityList = false,
   mode = "planning",
 }: MapViewProps) {
+  let facilities = inputFacilities;
+  let villages = inputVillages;
   const { user } = useAuth();
   const isNationalAdminOrManager = useMemo(() => {
     if (!user) return false;
@@ -2239,7 +2241,25 @@ export function MapView({
   const geoJsonRefs = useRef<Record<string, any>>({});
   const fetchingRef = useRef<Record<string, boolean>>({});
   const [mapBounds, setMapBounds] = useState<L.LatLngBounds | null>(null);
+  const [currentZoom, setCurrentZoom] = useState(zoom);
   const [intelligencePoint, setIntelligencePoint] = useState<{lat: number, lng: number} | null>(null);
+
+  useEffect(() => {
+    setCurrentZoom(zoom);
+  }, [zoom]);
+
+  const viewportBbox = useMemo(() => {
+    if (!mapBounds) return null;
+    const padded = mapBounds.pad(0.25);
+    const west = Number(padded.getWest().toFixed(5));
+    const south = Number(padded.getSouth().toFixed(5));
+    const east = Number(padded.getEast().toFixed(5));
+    const north = Number(padded.getNorth().toFixed(5));
+    return {
+      bbox: `${west},${south},${east},${north}`,
+      key: `${west.toFixed(3)},${south.toFixed(3)},${east.toFixed(3)},${north.toFixed(3)}`,
+    };
+  }, [mapBounds]);
 
   // WorldPop population-density overlay (off by default, session-scoped).
   const populationOverlay = usePopulationOverlay();
@@ -2768,6 +2788,57 @@ export function MapView({
     });
   };
 
+  const mapFeatureLayers = useMemo(() => {
+    const activeLayers = ["facilities"];
+    if (layers.villages && !hiddenCategories.has("villages")) activeLayers.push("communities");
+    return activeLayers.join(",");
+  }, [hiddenCategories, layers.villages]);
+
+  const mapFeatureQueryEnabled =
+    mode === "planning" &&
+    typeof navigator !== "undefined" &&
+    navigator.onLine &&
+    !!tenantInfo?.id &&
+    !!viewportBbox;
+
+  const { data: mapFeaturePayload } = useQuery<{ facilities?: Facility[]; villages?: Village[]; meta?: any }>({
+    queryKey: [
+      "/api/map/features",
+      tenantInfo?.id,
+      viewportBbox?.key,
+      currentZoom,
+      selectedProvinceId,
+      selectedDistrictId,
+      selectedLlgId,
+      selectedFacilityId,
+      villageCategory,
+      searchQuery,
+      mapFeatureLayers,
+    ],
+    enabled: mapFeatureQueryEnabled,
+    staleTime: 60 * 1000,
+    gcTime: 10 * 60 * 1000,
+    queryFn: async () => {
+      const params = new URLSearchParams();
+      if (viewportBbox) params.set("bbox", viewportBbox.bbox);
+      params.set("zoom", String(currentZoom));
+      params.set("layers", mapFeatureLayers);
+      params.set("limitFacilities", "2500");
+      params.set("limitCommunities", selectedFacilityId ? "5000" : "1200");
+      if (selectedProvinceId !== "all") params.set("provinceId", String(selectedProvinceId));
+      if (selectedDistrictId !== "all") params.set("districtId", String(selectedDistrictId));
+      if (selectedLlgId !== "all") params.set("llgId", String(selectedLlgId));
+      if (selectedFacilityId) params.set("facilityId", String(selectedFacilityId));
+      if (searchQuery.trim()) params.set("q", searchQuery.trim());
+      const res = await fetch(`/api/map/features?${params.toString()}`, { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to load map features");
+      return res.json();
+    },
+  });
+
+  facilities = mapFeaturePayload?.facilities ?? inputFacilities;
+  villages = mapFeaturePayload?.villages ?? inputVillages;
+
   // Unified panel visibility for the floating map "dock". On phones every panel
   // starts hidden so the map fills the screen; users reveal a panel by tapping
   // its dock button. On larger screens the panels keep their previous defaults.
@@ -2809,12 +2880,6 @@ export function MapView({
 
   const [alertsExpanded, setAlertsExpanded] = useState(true);
   const [recommendationsExpanded, setRecommendationsExpanded] = useState(true);
-
-  // States to keep track of active zoom level and conditionally hide village markers
-  const [currentZoom, setCurrentZoom] = useState(zoom);
-  useEffect(() => {
-    setCurrentZoom(zoom);
-  }, [zoom]);
 
   // Original Code: Low zoom threshold (9) that rendered thousands of village markers simultaneously, throttling performance
   /*
@@ -6049,6 +6114,7 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
         zoom={effectiveZoom}
         style={{ height: "100%", width: "100%" }}
         ref={mapRef}
+        preferCanvas={true}
         zoomControl={false}
         maxZoom={22}
         maxBounds={getTenantMaxBounds(tenantInfo)}
