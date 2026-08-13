@@ -4390,7 +4390,7 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
 
   // Fetch full GeoJSON for each active boundary
 // Population choropleth source toggle
-  const [popChoroplethSource, setPopChoroplethSource] = useState<"nso" | "hmis">("nso");
+  const [popChoroplethSource, setPopChoroplethSource] = useState<"nso" | "hmis" | "worldpop">("worldpop");
   const { data: choroplethData = [] } = useQuery<Array<{ districtId: number; population: number }>>(
     {
       queryKey: ["/api/surveillance/population/choropleth", tenantInfo?.id, popChoroplethSource],
@@ -7107,49 +7107,15 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
             })}
         */}
 
-        {/* Updated Code: Utilize pre-computed village.distanceToFacility to avoid expensive geodesic calculations in render loop, falling back to Turf distance only when pre-computed value is missing. */}
-        {layers.catchments &&
-          showVillageMarkers &&
-          visibleVillagesFiltered
-            .filter((v) => v.latitude && v.longitude && v.assignedFacilityId)
-            .map((village) => {
-              const facility = filteredFacilitiesMap.get(Number(village.assignedFacilityId));
-              if (!facility || !facility.latitude || !facility.longitude) return null;
-
-              const vLat = Number(village.latitude);
-              const vLng = Number(village.longitude);
-              const fLat = Number(facility.latitude);
-              const fLng = Number(facility.longitude);
-
-              // Use pre-computed distance if available, otherwise fall back to Turf distance
-              const dist = village.distanceToFacility != null
-                ? Number(village.distanceToFacility)
-                : distance([vLng, vLat], [fLng, fLat], { units: "kilometers" });
-
-              // Color code based on walkability distance
-              let color = "#22c55e"; // Walkable (<5km)
-              if (dist > 10) {
-                color = "#ef4444"; // HTR (>10km)
-              } else if (dist > 5) {
-                color = "#ea580c"; // Outreach (5-10km)
-              }
-
-              return (
-                <Polyline
-                  key={`link-${village.id}-${facility.id}`}
-                  positions={[[vLat, vLng], [fLat, fLng]]}
-                  color={color}
-                  weight={1.5}
-                  opacity={0.7}
-                  dashArray="2, 4"
-                />
-              );
-            })}
+        {/* Facility-community links must be routed roads, not straight-line hints.
+            Straight geometry is intentionally hidden; selecting a facility below
+            draws only OSRM road route geometry returned by the API. */}
 
         {/* Network routes rendering when a facility is selected */}
         {selectedFacilityId && communityRoutes && communityRoutes.length > 0 &&
           communityRoutes.map((route: any) => {
-            if (!route.routeGeometry || route.routeGeometry.length === 0) return null;
+            if (route.hasRoadGeometry === false || route.routeSource === "estimate") return null;
+            if (!route.routeGeometry || route.routeGeometry.length < 2) return null;
             const positions = route.routeGeometry.map(([lng, lat]: [number, number]) => [lat, lng]);
 
             // Color code based on walkability distance
@@ -8725,7 +8691,7 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
               </p>
             </div>
             <div className="flex gap-1">
-              {(["nso", "hmis"] as const).map((s) => (
+              {(["worldpop", "nso", "hmis"] as const).map((s) => (
                 <button key={s} onClick={() => setPopChoroplethSource(s)}
                   className={`px-2 py-0.5 rounded text-[10px] font-semibold border transition-all ${
                     popChoroplethSource === s

@@ -118,6 +118,7 @@ export default function SupervisionTools() {
       return res.json();
     },
   });
+  const activeTemplates = templates.filter((t) => t.isActive);
 
   const { data: facilities = [] } = useQuery<any[]>({ queryKey: ["/api/facilities"] });
 
@@ -339,7 +340,7 @@ export default function SupervisionTools() {
                     if (v === "__default__") {
                       setChecklistItems(CAMPAIGN_SUPERVISION_CHECKLIST.map((c) => ({ ...c, response: "" })));
                     } else {
-                      const chosen = templates.find((t) => String(t.id) === v);
+                      const chosen = activeTemplates.find((t) => String(t.id) === v);
                       if (chosen) {
                         setChecklistItems(templateToAnswers(chosen.items));
                       }
@@ -350,7 +351,7 @@ export default function SupervisionTools() {
                   <SelectTrigger data-testid="select-campaign-template"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="__default__">Default Campaign Checklist</SelectItem>
-                    {templates.map((t) => (
+                    {activeTemplates.map((t) => (
                       <SelectItem key={t.id} value={String(t.id)}>{t.name}</SelectItem>
                     ))}
                   </SelectContent>

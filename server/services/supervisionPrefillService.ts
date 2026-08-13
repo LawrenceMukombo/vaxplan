@@ -34,9 +34,9 @@ export interface SupervisionPrefillBundle {
     previousVisitId: number | null;
   };
   contacts: {
-    person1?: { name: string; responsibility: string; source: string };
-    person2?: { name: string; responsibility: string; source: string };
-    person3?: { name: string; responsibility: string; source: string };
+    person1?: { name: string; responsibility: string; source: string; phone?: string };
+    person2?: { name: string; responsibility: string; source: string; phone?: string };
+    person3?: { name: string; responsibility: string; source: string; phone?: string };
   };
   population: {
     totalCatchmentPopulation: number;
@@ -103,7 +103,7 @@ export async function getSupervisionPrefillBundle(
       FROM supervision_visits
       WHERE tenant_id = ${tenantId}
         AND facility_id = ${facilityId}
-        AND status = 'completed'
+        AND status = 'conducted'
       ORDER BY visit_date DESC
       LIMIT 1
     `);
@@ -118,9 +118,9 @@ export async function getSupervisionPrefillBundle(
   }
 
   // 3. Fetch Staff Contacts (Check facilityStaff first, then users, then facility master)
-  let person1: { name: string; responsibility: string; source: string } | undefined;
-  let person2: { name: string; responsibility: string; source: string } | undefined;
-  let person3: { name: string; responsibility: string; source: string } | undefined;
+  let person1: { name: string; responsibility: string; source: string; phone?: string } | undefined;
+  let person2: { name: string; responsibility: string; source: string; phone?: string } | undefined;
+  let person3: { name: string; responsibility: string; source: string; phone?: string } | undefined;
 
   let staffList: any[] = [];
   try {
@@ -138,12 +138,14 @@ export async function getSupervisionPrefillBundle(
       name: staffList[0].fullName || staffList[0].name || "Facility Staff",
       responsibility: staffList[0].position || staffList[0].role || "Facility In-Charge",
       source: "staff_roster",
+      phone: staffList[0].contactPhone || undefined,
     };
     if (staffList.length > 1) {
       person2 = {
         name: staffList[1].fullName || staffList[1].name || "EPI Officer",
         responsibility: staffList[1].position || staffList[1].role || "EPI Focal Person",
         source: "staff_roster",
+        phone: staffList[1].contactPhone || undefined,
       };
     }
     if (staffList.length > 2) {
@@ -151,6 +153,7 @@ export async function getSupervisionPrefillBundle(
         name: staffList[2].fullName || staffList[2].name || "Cold Chain Staff",
         responsibility: staffList[2].position || staffList[2].role || "Cold Chain Nurse",
         source: "staff_roster",
+        phone: staffList[2].contactPhone || undefined,
       };
     }
   } else {
@@ -165,21 +168,24 @@ export async function getSupervisionPrefillBundle(
         name: `${userList[0].firstName || ''} ${userList[0].lastName || ''}`.trim() || userList[0].email || "Facility Staff",
         responsibility: userList[0].role || "Facility In-Charge",
         source: "user_roster",
+        phone: (userList[0] as any).phone || undefined,
       };
       if (userList.length > 1) {
         person2 = {
           name: `${userList[1].firstName || ''} ${userList[1].lastName || ''}`.trim() || userList[1].email || "EPI Officer",
           responsibility: userList[1].role || "EPI Focal Person",
           source: "user_roster",
+          phone: (userList[1] as any).phone || undefined,
         };
       }
     } else if ((facility as any).contactPerson || (facility as any).inCharge) {
       const cName = ((facility as any).contactPerson || (facility as any).inCharge || "").trim();
       const cPhone = (facility.contactPhone || (facility as any).phone || "").trim();
       person1 = {
-        name: cName + (cPhone ? ` (${cPhone})` : ""),
+        name: cName,
         responsibility: "Facility In-Charge",
         source: "facility_master",
+        phone: cPhone || undefined,
       };
     } else {
       warnings.push("No facility in-charge or staff roster entries found for this facility.");

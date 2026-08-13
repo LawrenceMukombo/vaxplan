@@ -1,4 +1,4 @@
-import { CheckCircle2, XCircle, MinusCircle, Trash2, Star, Camera } from "lucide-react";
+import { CheckCircle2, XCircle, MinusCircle, Trash2, Star, Camera, Info, QrCode, PenLine } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -89,6 +89,7 @@ export function ChecklistQuestion({
   const gps = (item.value as any) || null;
   const img = (item.value as any) || null;
   const multi: string[] = Array.isArray(item.value) ? (item.value as string[]) : [];
+  const readOnly = item.type === "auto_prefill" || (item as any).readOnly;
 
   return (
     <div
@@ -114,7 +115,7 @@ export function ChecklistQuestion({
         </div>
 
         <div className="flex items-center gap-1">
-          {(type === "yes_no" || type === "true_false") && (
+          {(type === "yes_no" || type === "yes_no_na" || type === "true_false") && (
             <div className="flex gap-1">
               <RespBtn
                 active={item.response === "yes"}
@@ -158,22 +159,45 @@ export function ChecklistQuestion({
         </div>
       </div>
 
-      {type === "text" && (
+      {(type === "instruction" || type === "section_heading") && (
+        <div className="rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-900 dark:border-sky-900/50 dark:bg-sky-950/30 dark:text-sky-100">
+          <div className="flex items-start gap-2">
+            <Info className="h-4 w-4 mt-0.5 shrink-0" />
+            <span>{item.helpText || item.label}</span>
+          </div>
+        </div>
+      )}
+
+      {(type === "text" || type === "auto_prefill") && (
         <Textarea
           rows={2}
-          placeholder="Type the answer"
+          placeholder={readOnly ? "Auto-prefilled from VaxPlan" : "Type the answer"}
           value={(item.value as string) || ""}
           onChange={(e) => setValue(key, e.target.value)}
+          readOnly={readOnly}
+          className={readOnly ? "bg-muted/50" : undefined}
           data-testid={`${item.key}-text`}
         />
       )}
 
-      {type === "number" && (
+      {type === "long_text" && (
+        <Textarea
+          rows={4}
+          placeholder="Type detailed notes"
+          value={(item.value as string) || ""}
+          onChange={(e) => setValue(key, e.target.value)}
+          data-testid={`${item.key}-long-text`}
+        />
+      )}
+
+      {(type === "number" || type === "decimal" || type === "score_only" || type === "calculated" || type === "temperature" || type === "stock_quantity") && (
         <Input
           type="number"
-          placeholder="Enter a number"
+          step={type === "decimal" || type === "temperature" ? "0.01" : "1"}
+          placeholder={type === "temperature" ? "Enter temperature" : type === "stock_quantity" ? "Enter quantity" : "Enter a number"}
           value={item.value === undefined || item.value === null ? "" : String(item.value)}
           onChange={(e) => setValue(key, e.target.value === "" ? null : Number(e.target.value))}
+          readOnly={type === "calculated" && readOnly}
           data-testid={`${item.key}-number`}
         />
       )}
@@ -184,6 +208,24 @@ export function ChecklistQuestion({
           value={(item.value as string) || ""}
           onChange={(e) => setValue(key, e.target.value)}
           data-testid={`${item.key}-date`}
+        />
+      )}
+
+      {type === "time" && (
+        <Input
+          type="time"
+          value={(item.value as string) || ""}
+          onChange={(e) => setValue(key, e.target.value)}
+          data-testid={`${item.key}-time`}
+        />
+      )}
+
+      {type === "datetime" && (
+        <Input
+          type="datetime-local"
+          value={(item.value as string) || ""}
+          onChange={(e) => setValue(key, e.target.value)}
+          data-testid={`${item.key}-datetime`}
         />
       )}
 
@@ -218,6 +260,61 @@ export function ChecklistQuestion({
             ))}
           </SelectContent>
         </Select>
+      )}
+
+      {type === "likert" && (
+        <Select value={(item.value as string) || ""} onValueChange={(v) => setValue(key, v)}>
+          <SelectTrigger data-testid={`${item.key}-likert`}>
+            <SelectValue placeholder="Pick one" />
+          </SelectTrigger>
+          <SelectContent>
+            {["Strongly disagree", "Disagree", "Neutral", "Agree", "Strongly agree"].map((o) => (
+              <SelectItem key={o} value={o}>{o}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      )}
+
+      {type === "equipment_status" && (
+        <Select value={(item.value as string) || ""} onValueChange={(v) => setValue(key, v)}>
+          <SelectTrigger data-testid={`${item.key}-equipment-status`}>
+            <SelectValue placeholder="Select status" />
+          </SelectTrigger>
+          <SelectContent>
+            {["Functional", "Needs repair", "Non-functional", "Not available"].map((o) => (
+              <SelectItem key={o} value={o}>{o}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      )}
+
+      {(type === "person_selector" || type === "facility_selector" || type === "community_selector") && (
+        <Input
+          placeholder={
+            type === "person_selector"
+              ? "Enter or select staff/person"
+              : type === "facility_selector"
+                ? "Enter or select facility"
+                : "Enter or select community"
+          }
+          value={(item.value as string) || ""}
+          onChange={(e) => setValue(key, e.target.value)}
+          data-testid={`${item.key}-selector-fallback`}
+        />
+      )}
+
+      {type === "barcode" && (
+        <div className="flex gap-2">
+          <Input
+            placeholder="Scan or type barcode / QR value"
+            value={(item.value as string) || ""}
+            onChange={(e) => setValue(key, e.target.value)}
+            data-testid={`${item.key}-barcode`}
+          />
+          <Button type="button" variant="outline" size="icon" title="Barcode capture placeholder">
+            <QrCode className="h-4 w-4" />
+          </Button>
+        </div>
       )}
 
       {type === "multi_select" && (
@@ -287,7 +384,47 @@ export function ChecklistQuestion({
         </div>
       )}
 
-      {(type === "yes_no" || type === "true_false") && item.response === "no" && (
+      {type === "file" && (
+        <div className="space-y-2">
+          <label
+            className="inline-flex items-center gap-1 text-sm border rounded-md px-3 py-1.5 cursor-pointer hover:bg-muted"
+            data-testid={`${item.key}-file-label`}
+          >
+            <Camera className="h-4 w-4" />
+            {(item.value as any)?.name ? "Replace file" : "Attach file"}
+            <input
+              type="file"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+                setValue(key, { name: file.name, size: file.size, type: file.type });
+              }}
+              data-testid={`${item.key}-file`}
+            />
+          </label>
+          {(item.value as any)?.name && (
+            <div className="text-xs text-muted-foreground">{(item.value as any).name}</div>
+          )}
+        </div>
+      )}
+
+      {type === "signature" && (
+        <Input
+          placeholder="Type signer name"
+          value={(item.value as string) || ""}
+          onChange={(e) => setValue(key, e.target.value)}
+          data-testid={`${item.key}-signature`}
+        />
+      )}
+
+      {type === "signature" && (
+        <div className="text-xs text-muted-foreground inline-flex items-center gap-1">
+          <PenLine className="h-3.5 w-3.5" /> Signature pad can be connected here; typed signer name is saved.
+        </div>
+      )}
+
+      {(type === "yes_no" || type === "yes_no_na" || type === "true_false") && item.response === "no" && (
         <Input
           placeholder="Note the gap (optional)"
           value={item.note || ""}

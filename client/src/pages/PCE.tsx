@@ -111,6 +111,7 @@ export default function PCE() {
       return res.json();
     },
   });
+  const activeTemplates = templates.filter((t) => t.isActive);
 
   const { data: facilities = [] } = useQuery<any[]>({ queryKey: ["/api/facilities"] });
 
@@ -279,7 +280,7 @@ export default function PCE() {
                     if (v === "__default__") {
                       setChecklistItems(PCE_CHECKLIST.map((c) => ({ ...c, response: "" })));
                     } else {
-                      const chosen = templates.find((t) => String(t.id) === v);
+                      const chosen = activeTemplates.find((t) => String(t.id) === v);
                       if (chosen) {
                         setChecklistItems(templateToAnswers(chosen.items));
                       }
@@ -290,7 +291,7 @@ export default function PCE() {
                   <SelectTrigger data-testid="select-pce-template"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="__default__">Default PCE Checklist</SelectItem>
-                    {templates.map((t) => (
+                    {activeTemplates.map((t) => (
                       <SelectItem key={t.id} value={String(t.id)}>{t.name}</SelectItem>
                     ))}
                   </SelectContent>

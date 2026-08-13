@@ -405,6 +405,94 @@ async function backfillClientIds() {
           AND pd.tenant_id = f.tenant_id
           AND (pd.district_id IS NULL OR pd.province_id IS NULL)
       `);
+      // Backfill older WorldPop/import rows that carried names/codes in metadata
+      // but missed the durable village_id/facility_id links needed by tables/maps.
+      await (pool as any).query(`
+        UPDATE population_data pd
+        SET
+          village_id = v.id,
+          facility_id = COALESCE(pd.facility_id, v.assigned_facility_id),
+          district_id = COALESCE(pd.district_id, v.district_id),
+          province_id = COALESCE(pd.province_id, d.province_id)
+        FROM villages v
+        JOIN districts d ON d.id = v.district_id AND d.tenant_id = v.tenant_id
+        WHERE pd.tenant_id = v.tenant_id
+          AND pd.village_id IS NULL
+          AND pd.metadata IS NOT NULL
+          AND (
+            (
+              COALESCE(BTRIM(pd.metadata->>'villageCode'), '') <> ''
+              AND LOWER(v.code) = LOWER(BTRIM(pd.metadata->>'villageCode'))
+            )
+            OR (
+              COALESCE(BTRIM(COALESCE(pd.metadata->>'communityName', pd.metadata->>'villageName', pd.metadata->>'catchmentName')), '') <> ''
+              AND LOWER(v.name) = LOWER(BTRIM(COALESCE(pd.metadata->>'communityName', pd.metadata->>'villageName', pd.metadata->>'catchmentName')))
+            )
+          )
+      `);
+      await (pool as any).query(`
+        UPDATE population_data pd
+        SET
+          facility_id = f.id,
+          district_id = COALESCE(pd.district_id, f.district_id),
+          province_id = COALESCE(pd.province_id, d.province_id)
+        FROM facilities f
+        JOIN districts d ON d.id = f.district_id AND d.tenant_id = f.tenant_id
+        WHERE pd.tenant_id = f.tenant_id
+          AND pd.facility_id IS NULL
+          AND pd.metadata IS NOT NULL
+          AND (
+            (
+              COALESCE(BTRIM(pd.metadata->>'facilityHmisCode'), '') <> ''
+              AND LOWER(f.hmis_code) = LOWER(BTRIM(pd.metadata->>'facilityHmisCode'))
+            )
+            OR (
+              COALESCE(BTRIM(COALESCE(pd.metadata->>'facilityName', pd.metadata->>'healthFacilityName', pd.metadata->>'hfName')), '') <> ''
+              AND LOWER(f.name) = LOWER(BTRIM(COALESCE(pd.metadata->>'facilityName', pd.metadata->>'healthFacilityName', pd.metadata->>'hfName')))
+            )
+          )
+      `);
+      await (pool as any).query(`
+        WITH latest AS (
+          SELECT DISTINCT ON (tenant_id, village_id)
+            tenant_id,
+            village_id,
+            total_population,
+            under_5_population,
+            source
+          FROM population_data
+          WHERE village_id IS NOT NULL
+          ORDER BY tenant_id, village_id, year DESC, updated_at DESC NULLS LAST, id DESC
+        )
+        UPDATE villages v
+        SET
+          total_catchment_population = latest.total_population,
+          under5_population = COALESCE(latest.under_5_population, v.under5_population),
+          gridded_population = CASE WHEN latest.source = 'worldpop' THEN latest.total_population ELSE v.gridded_population END,
+          population_source_label = CASE WHEN latest.source = 'worldpop' THEN 'WorldPop' ELSE v.population_source_label END,
+          updated_at = NOW()
+        FROM latest
+        WHERE v.tenant_id = latest.tenant_id
+          AND v.id = latest.village_id
+      `);
+      await (pool as any).query(`
+        WITH agg AS (
+          SELECT
+            tenant_id,
+            assigned_facility_id AS facility_id,
+            COALESCE(SUM(COALESCE(gridded_population, total_catchment_population, 0)), 0)::int AS total
+          FROM villages
+          WHERE assigned_facility_id IS NOT NULL
+          GROUP BY tenant_id, assigned_facility_id
+        )
+        UPDATE facilities f
+        SET
+          catchment_grid_population = agg.total,
+          updated_at = NOW()
+        FROM agg
+        WHERE f.tenant_id = agg.tenant_id
+          AND f.id = agg.facility_id
+      `);
       log("population geo-ID backfill complete", "db");
     } catch (err: any) {
       log(`population geo-ID backfill warning: ${err?.message ?? err}`, "db");

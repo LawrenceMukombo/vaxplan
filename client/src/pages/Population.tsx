@@ -2497,6 +2497,11 @@ export default function Population() {
             },
             type: "active",
           });
+          await Promise.all([
+            queryClient.invalidateQueries({ queryKey: ["/api/facilities"] }),
+            queryClient.invalidateQueries({ queryKey: ["/api/villages"] }),
+            queryClient.invalidateQueries({ queryKey: ["/api/villages/summary"] }),
+          ]);
         }}
       />
 

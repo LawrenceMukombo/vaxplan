@@ -405,7 +405,7 @@ export interface IStorage {
   getMonthlyReport(tenantId: string, id: number): Promise<MonthlyReport | undefined>;
   createMonthlyReport(tenantId: string, data: InsertMonthlyReport): Promise<MonthlyReport>;
   updateMonthlyReport(tenantId: string, id: number, data: Partial<InsertMonthlyReport>): Promise<MonthlyReport | undefined>;
-  
+
   // --- 7. Custom User Roles ---
   getUserRoles(tenantId: string): Promise<CustomUserRole[]>;
   getUserRole(tenantId: string, id: number): Promise<CustomUserRole | undefined>;
@@ -438,6 +438,65 @@ function withTenant<T extends { tenantId: any }>(
 }
 
 export class DatabaseStorage implements IStorage {
+  async refreshFacilityPopulationAggregate(tenantId: string, facilityId: number | null | undefined): Promise<void> {
+    const id = Number(facilityId);
+    if (!Number.isFinite(id)) return;
+
+    const [aggregate] = await db
+      .select({
+        total: sql<number>`COALESCE(SUM(COALESCE(${villages.griddedPopulation}, ${villages.totalCatchmentPopulation}, 0)), 0)`.mapWith(Number),
+      })
+      .from(villages)
+      .where(and(eq(villages.tenantId, tenantId), eq(villages.assignedFacilityId, id)));
+
+    await db
+      .update(facilities)
+      .set({
+        catchmentGridPopulation: Number(aggregate?.total ?? 0),
+        updatedAt: new Date(),
+      })
+      .where(and(eq(facilities.tenantId, tenantId), eq(facilities.id, id)));
+  }
+
+  async refreshPopulationOwnerAggregates(
+    tenantId: string,
+    row: Pick<PopulationData, "villageId" | "facilityId" | "source" | "totalPopulation" | "under5Population"> | undefined | null,
+  ): Promise<void> {
+    if (!row) return;
+
+    const villageId = row.villageId ? Number(row.villageId) : null;
+    const facilityId = row.facilityId ? Number(row.facilityId) : null;
+    let resolvedFacilityId = facilityId;
+
+    if (villageId) {
+      const [village] = await db
+        .select({ assignedFacilityId: villages.assignedFacilityId })
+        .from(villages)
+        .where(and(eq(villages.tenantId, tenantId), eq(villages.id, villageId)))
+        .limit(1);
+      resolvedFacilityId = facilityId ?? (village?.assignedFacilityId ? Number(village.assignedFacilityId) : null);
+
+      const populationPatch: Partial<typeof villages.$inferInsert> = {
+        totalCatchmentPopulation: Number(row.totalPopulation ?? 0),
+        updatedAt: new Date(),
+      };
+      if (row.source === "worldpop") {
+        populationPatch.griddedPopulation = Number(row.totalPopulation ?? 0);
+        populationPatch.populationSourceLabel = "WorldPop";
+      }
+      if (row.under5Population != null) {
+        populationPatch.under5Population = Number(row.under5Population);
+      }
+
+      await db
+        .update(villages)
+        .set(populationPatch)
+        .where(and(eq(villages.tenantId, tenantId), eq(villages.id, villageId)));
+    }
+
+    await this.refreshFacilityPopulationAggregate(tenantId, resolvedFacilityId);
+  }
+
   // --- Users ---
   async getUser(id: string): Promise<User | undefined> {
     const [user] = await db.select().from(users).where(eq(users.id, id));
@@ -490,12 +549,12 @@ export class DatabaseStorage implements IStorage {
   async updateUserRolesAndPermissions(tenantId: string, id: string, roles: string[], permissions: string[], scope: any): Promise<User | undefined> {
     const [u] = await db
       .update(users)
-      .set({ 
-        roles, 
-        permissions, 
+      .set({
+        roles,
+        permissions,
         dataAccessScope: scope,
         role: roles.length > 0 ? roles[0] as any : "facility_clerk",
-        updatedAt: new Date() 
+        updatedAt: new Date()
       })
       .where(and(eq(users.id, id), eq(users.tenantId, tenantId)))
       .returning();
@@ -948,7 +1007,7 @@ export class DatabaseStorage implements IStorage {
     // PERFORMANCE: exclude `boundary` (GeoJSON polygon, potentially 10s of KB per row)
     // from list queries. The full polygon is only needed on the single-village
     // detail/edit view, which calls getVillage() and still returns all columns.
-    
+
     /* Original Code:
     return await db
       .select({
@@ -1006,10 +1065,10 @@ export class DatabaseStorage implements IStorage {
         insecurityLevel: villages.insecurityLevel,
         comments: villages.comments,
         population: sql<number>`(
-          SELECT total_population 
-          FROM population_data p 
-          WHERE p.village_id = ${villages.id} 
-          ORDER BY p.year DESC, CASE WHEN p.source = 'nso' THEN 1 ELSE 2 END ASC 
+          SELECT total_population
+          FROM population_data p
+          WHERE p.village_id = ${villages.id}
+          ORDER BY p.year DESC, CASE WHEN p.source = 'nso' THEN 1 ELSE 2 END ASC
           LIMIT 1
         )`.mapWith(Number),
         createdAt: villages.createdAt,
@@ -1039,10 +1098,10 @@ export class DatabaseStorage implements IStorage {
       .select({
         ...getTableColumns(villages),
         population: sql<number>`(
-          SELECT total_population 
-          FROM population_data p 
-          WHERE p.village_id = ${villages.id} 
-          ORDER BY p.year DESC, CASE WHEN p.source = 'nso' THEN 1 ELSE 2 END ASC 
+          SELECT total_population
+          FROM population_data p
+          WHERE p.village_id = ${villages.id}
+          ORDER BY p.year DESC, CASE WHEN p.source = 'nso' THEN 1 ELSE 2 END ASC
           LIMIT 1
         )`.mapWith(Number),
       })
@@ -1067,10 +1126,10 @@ export class DatabaseStorage implements IStorage {
     return await db.transaction(async (tx) => {
       // 1. Delete associated htr_scores
       await tx.delete(htrScores).where(eq(htrScores.villageId, id));
-      
+
       // 2. Delete associated session_villages
       await tx.delete(sessionVillages).where(eq(sessionVillages.villageId, id));
-      
+
       // 3. Delete associated population_data
       await tx.delete(populationData).where(eq(populationData.villageId, id));
 
@@ -1187,23 +1246,25 @@ export class DatabaseStorage implements IStorage {
   async resolvePopulationGeographics(
     tenantId: string,
     data: { villageId?: number | null; facilityId?: number | null; districtId?: number | null; provinceId?: number | null }
-  ): Promise<{ provinceId: number | null; districtId: number | null }> {
+  ): Promise<{ provinceId: number | null; districtId: number | null; facilityId: number | null }> {
     let districtId: number | null = data.districtId ? Number(data.districtId) : null;
     let provinceId: number | null = data.provinceId ? Number(data.provinceId) : null;
+    let facilityId: number | null = data.facilityId ? Number(data.facilityId) : null;
 
     if (data.villageId) {
       const [v] = await db
-        .select({ districtId: villages.districtId })
+        .select({ districtId: villages.districtId, assignedFacilityId: villages.assignedFacilityId })
         .from(villages)
         .where(and(eq(villages.id, data.villageId), eq(villages.tenantId, tenantId)));
       if (v) {
         districtId = v.districtId;
+        facilityId = facilityId ?? (v.assignedFacilityId ? Number(v.assignedFacilityId) : null);
       }
-    } else if (data.facilityId) {
+    } else if (facilityId) {
       const [f] = await db
         .select({ districtId: facilities.districtId })
         .from(facilities)
-        .where(and(eq(facilities.id, data.facilityId), eq(facilities.tenantId, tenantId)));
+        .where(and(eq(facilities.id, facilityId), eq(facilities.tenantId, tenantId)));
       if (f) {
         districtId = f.districtId;
       }
@@ -1219,26 +1280,28 @@ export class DatabaseStorage implements IStorage {
       }
     }
 
-    return { provinceId, districtId };
+    return { provinceId, districtId, facilityId };
   }
 
   async createPopulationData(tenantId: string, data: InsertPopulationData): Promise<PopulationData> {
     const geographics = await this.resolvePopulationGeographics(tenantId, data);
     const [p] = await db
       .insert(populationData)
-      .values({ 
-        ...data, 
-        districtId: geographics.districtId, 
-        provinceId: geographics.provinceId, 
-        tenantId 
+      .values({
+        ...data,
+        districtId: geographics.districtId,
+        provinceId: geographics.provinceId,
+        facilityId: geographics.facilityId ?? data.facilityId ?? null,
+        tenantId,
       } as typeof populationData.$inferInsert)
       .returning();
+    await this.refreshPopulationOwnerAggregates(tenantId, p);
     return p;
   }
 
   async updatePopulationData(
-    tenantId: string, 
-    id: number, 
+    tenantId: string,
+    id: number,
     data: Partial<InsertPopulationData>
   ): Promise<PopulationData | undefined> {
     const existing = await this.getPopulationDataById(tenantId, id);
@@ -1251,22 +1314,59 @@ export class DatabaseStorage implements IStorage {
     const { tenantId: _i, ...safe } = data as any;
     const [p] = await db
       .update(populationData)
-      .set({ 
-        ...safe, 
-        districtId: geographics.districtId, 
-        provinceId: geographics.provinceId, 
-        updatedAt: new Date() 
+      .set({
+        ...safe,
+        districtId: geographics.districtId,
+        provinceId: geographics.provinceId,
+        facilityId: geographics.facilityId ?? safe.facilityId ?? existing.facilityId ?? null,
+        updatedAt: new Date(),
       })
       .where(and(eq(populationData.id, id), eq(populationData.tenantId, tenantId)))
       .returning();
+    await this.refreshPopulationOwnerAggregates(tenantId, p);
     return p;
   }
   async deletePopulationData(tenantId: string, id: number): Promise<boolean> {
+    const existing = await this.getPopulationDataById(tenantId, id);
     const rows = await db
       .delete(populationData)
       .where(and(eq(populationData.id, id), eq(populationData.tenantId, tenantId)))
       .returning({ id: populationData.id });
-    return rows.length > 0;
+    if (rows.length === 0) return false;
+
+    if (existing?.villageId) {
+      const [latest] = await db
+        .select()
+        .from(populationData)
+        .where(and(eq(populationData.tenantId, tenantId), eq(populationData.villageId, existing.villageId)))
+        .orderBy(desc(populationData.year), desc(populationData.updatedAt))
+        .limit(1);
+
+      if (latest) {
+        await this.refreshPopulationOwnerAggregates(tenantId, latest);
+      } else {
+        const [village] = await db
+          .select({ assignedFacilityId: villages.assignedFacilityId })
+          .from(villages)
+          .where(and(eq(villages.tenantId, tenantId), eq(villages.id, existing.villageId)))
+          .limit(1);
+        await db
+          .update(villages)
+          .set({
+            totalCatchmentPopulation: null,
+            under5Population: null,
+            griddedPopulation: null,
+            populationSourceLabel: null,
+            updatedAt: new Date(),
+          })
+          .where(and(eq(villages.tenantId, tenantId), eq(villages.id, existing.villageId)));
+        await this.refreshFacilityPopulationAggregate(tenantId, village?.assignedFacilityId);
+      }
+    } else if (existing?.facilityId) {
+      await this.refreshFacilityPopulationAggregate(tenantId, existing.facilityId);
+    }
+
+    return true;
   }
 
   // --- Facility excluded villages ---
@@ -2505,11 +2605,11 @@ export class DatabaseStorage implements IStorage {
     let conds = facilityId !== undefined
       ? and(eq(stockTransactions.tenantId, tenantId), eq(stockTransactions.facilityId, facilityId))
       : eq(stockTransactions.tenantId, tenantId);
-    
+
     if (productId !== undefined) {
       conds = and(conds, eq(stockTransactions.productId, productId));
     }
-    
+
     return await db
       .select()
       .from(stockTransactions)
@@ -2519,7 +2619,7 @@ export class DatabaseStorage implements IStorage {
 
   async createStockTransaction(tenantId: string, data: InsertStockTransaction): Promise<StockTransaction> {
     // Parse transactionDate string from offline JSON outbox payloads to native Date objects
-    const cleanData = { 
+    const cleanData = {
       ...data,
       vaccineName: data.vaccineName ? normalizeStockVaccineName(data.vaccineName) : null,
     };
@@ -2692,4 +2792,8 @@ export class DatabaseStorage implements IStorage {
 }
 
 export const storage = new DatabaseStorage();
+
+export async function refreshFacilityPopulationAggregate(tenantId: string, facilityId: number | null | undefined): Promise<void> {
+  await storage.refreshFacilityPopulationAggregate(tenantId, facilityId);
+}
 

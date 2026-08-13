@@ -412,6 +412,11 @@ export function WorldPopExtractionDialog({
         return typeof key === "string" && key.startsWith("/api/population");
       },
     });
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["/api/facilities"] }),
+      queryClient.invalidateQueries({ queryKey: ["/api/villages"] }),
+      queryClient.invalidateQueries({ queryKey: ["/api/villages/summary"] }),
+    ]);
     queryClient.invalidateQueries({ queryKey: ["/api/stats"] });
 
     if (confirmedSavedCount > 0) {

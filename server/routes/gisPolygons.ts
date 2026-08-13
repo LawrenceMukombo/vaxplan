@@ -4,6 +4,7 @@ import { db, pool } from "../db";
 import { gisPolygons } from "@shared/schema";
 import { PopulationIntelligenceService } from "../services/populationIntelligenceService";
 import { isAuthenticated } from "../auth";
+import { storage } from "../storage";
 
 export const gisPolygonsRouter = Router();
 gisPolygonsRouter.use(isAuthenticated);
@@ -38,6 +39,12 @@ gisPolygonsRouter.post("/", async (req, res) => {
   try {
     const tenantId = (req.user as any)?.tenantId;
     const data = req.body;
+    if (data?.status === "active" || data?.isActive === true || data?.approvalStatus === "approved") {
+      return res.status(409).json({
+        code: "POLYGON_LIFECYCLE_REQUIRED",
+        message: "Approved polygons must be created through the polygon lifecycle workflow.",
+      });
+    }
     
     const [inserted] = await db.insert(gisPolygons).values({
       ...data,
@@ -56,6 +63,17 @@ gisPolygonsRouter.put("/:id", async (req, res) => {
     const tenantId = (req.user as any)?.tenantId;
     const id = parseInt(req.params.id, 10);
     const data = req.body;
+    const [current] = await db
+      .select({ id: gisPolygons.id, status: gisPolygons.status, isActive: gisPolygons.isActive })
+      .from(gisPolygons)
+      .where(and(eq(gisPolygons.id, id), eq(gisPolygons.tenantId, tenantId)))
+      .limit(1);
+    if (current && (current.status === "active" || current.isActive || data?.status === "active" || data?.isActive === true)) {
+      return res.status(409).json({
+        code: "POLYGON_LIFECYCLE_REQUIRED",
+        message: "Approved polygons must be changed through the polygon lifecycle workflow.",
+      });
+    }
     
     const [updated] = await db.update(gisPolygons)
       .set({ ...data, updatedAt: new Date() })
@@ -75,6 +93,17 @@ gisPolygonsRouter.delete("/:id", async (req, res) => {
   try {
     const tenantId = (req.user as any)?.tenantId;
     const id = parseInt(req.params.id, 10);
+    const [current] = await db
+      .select({ id: gisPolygons.id, status: gisPolygons.status, isActive: gisPolygons.isActive })
+      .from(gisPolygons)
+      .where(and(eq(gisPolygons.id, id), eq(gisPolygons.tenantId, tenantId)))
+      .limit(1);
+    if (current && (current.status === "active" || current.isActive)) {
+      return res.status(409).json({
+        code: "POLYGON_LIFECYCLE_REQUIRED",
+        message: "Approved polygons must be archived or replaced through the polygon lifecycle workflow.",
+      });
+    }
     
     await db.delete(gisPolygons)
       .where(and(eq(gisPolygons.id, id), eq(gisPolygons.tenantId, tenantId)));
@@ -154,8 +183,10 @@ gisPolygonsRouter.post("/intelligence", async (req, res) => {
   try {
     const tenantId = (req.user as any)?.tenantId;
     const { geometry, ownerType, ownerId } = req.body;
-    
-    const intelligence = await PopulationIntelligenceService.fetchPolygonPopulation(tenantId, geometry, "ZMB", ownerType, ownerId);
+
+    const tenant = tenantId ? await storage.getTenant(tenantId) : undefined;
+    const countryCode = String(tenant?.countryCode || tenant?.code || "ZMB").toUpperCase();
+    const intelligence = await PopulationIntelligenceService.fetchPolygonPopulation(tenantId, geometry, countryCode, ownerType, ownerId);
     res.json(intelligence);
   } catch (err: any) {
     res.status(500).json({ message: "Failed to calculate intelligence", error: err.message });

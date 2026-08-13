@@ -151,6 +151,33 @@ function MapResizer() {
   return null;
 }
 
+function FlyToLocation({
+  latitude,
+  longitude,
+  zoom = 15,
+}: {
+  latitude?: string | number | null;
+  longitude?: string | number | null;
+  zoom?: number;
+}) {
+  const map = useMapEvents({});
+
+  useEffect(() => {
+    const lat = Number(latitude);
+    const lng = Number(longitude);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+
+    const timer = window.setTimeout(() => {
+      map.invalidateSize();
+      map.flyTo([lat, lng], zoom, { animate: true, duration: 0.9 });
+    }, 180);
+
+    return () => window.clearTimeout(timer);
+  }, [map, latitude, longitude, zoom]);
+
+  return null;
+}
+
 export default function Facilities() {
   const { toast } = useToast();
   const [location, setLocation] = useLocation();
@@ -199,6 +226,7 @@ export default function Facilities() {
   const [commDrawMode, setCommDrawMode] = useState<"pin" | "polygon">("pin");
   const [commPolygonPoints, setCommPolygonPoints] = useState<L.LatLng[]>([]);
   const [editingCommunity, setEditingCommunity] = useState<Village | null>(null);
+  const [selectedCommunityDetails, setSelectedCommunityDetails] = useState<Village | null>(null);
   const [deletingCommunity, setDeletingCommunity] = useState<Village | null>(null);
   const [newCommTransportMode, setNewCommTransportMode] = useState<string>("walking");
   const [overlapConflicts, setOverlapConflicts] = useState<any[]>([]);
@@ -307,9 +335,13 @@ export default function Facilities() {
     }
   });
   */
-  const activeChvFacilityId = editingFacility?.id 
-    ? Number(editingFacility.id) 
-    : (editingCommunity?.assignedFacilityId ? Number(editingCommunity.assignedFacilityId) : undefined);
+  const activeChvFacilityId = editingFacility?.id
+    ? Number(editingFacility.id)
+    : editingCommunity?.assignedFacilityId
+      ? Number(editingCommunity.assignedFacilityId)
+      : selectedFacilityId
+        ? Number(selectedFacilityId)
+        : undefined;
   const { data: facilityChvs, refetch: refetchFacilityChvs } = useQuery<any[]>({
     queryKey: ["/api/facilities", activeChvFacilityId, "chvs"],
     enabled: !!activeChvFacilityId,
@@ -522,6 +554,10 @@ export default function Facilities() {
   useEffect(() => {
     setSelectedCommIds([]);
   }, [selectedProvinceId, selectedDistrictId, selectedFacilityId]);
+
+  useEffect(() => {
+    setSelectedCommunityDetails(null);
+  }, [selectedFacilityId]);
 
   const tenantQueryKey = tenantInfo?.id ?? "pending";
 
@@ -1555,7 +1591,7 @@ export default function Facilities() {
   const populationByVillageId = useMemo(() => {
     const latest = new Map<number, any>();
     (populationList || []).forEach((record: any) => {
-      const villageId = Number(record?.villageId || record?.communityId || 0);
+      const villageId = Number(record?.villageId || record?.village_id || record?.communityId || record?.community_id || 0);
       if (!villageId) return;
 
       const current = latest.get(villageId);
@@ -1569,8 +1605,8 @@ export default function Facilities() {
   const directPopulationByFacilityId = useMemo(() => {
     const latest = new Map<number, any>();
     (populationList || []).forEach((record: any) => {
-      const facilityId = Number(record?.facilityId || 0);
-      if (!facilityId || Number(record?.villageId || record?.communityId || 0)) return;
+      const facilityId = Number(record?.facilityId || record?.facility_id || 0);
+      if (!facilityId || Number(record?.villageId || record?.village_id || record?.communityId || record?.community_id || 0)) return;
 
       const current = latest.get(facilityId);
       if (!current || populationRecordRank(record) > populationRecordRank(current)) {
@@ -1607,14 +1643,21 @@ export default function Facilities() {
       if (!facilityId) return;
 
       const populationRecord = populationByVillageId.get(Number(village.id));
-      const recordPopulation = toPositiveNumber(populationRecord?.totalPopulation);
+      const recordPopulation =
+        toPositiveNumber(populationRecord?.totalPopulation) ||
+        toPositiveNumber(populationRecord?.total_population);
       const fallbackPopulation =
         toPositiveNumber(village?.worldpopPopulation) ||
+        toPositiveNumber(village?.worldpop_population) ||
         toPositiveNumber(village?.totalCatchmentPopulation) ||
+        toPositiveNumber(village?.total_catchment_population) ||
         toPositiveNumber(village?.griddedPopulation) ||
+        toPositiveNumber(village?.gridded_population) ||
         toPositiveNumber(village?.estimatedPopulation) ||
+        toPositiveNumber(village?.estimated_population) ||
         toPositiveNumber(village?.population) ||
-        toPositiveNumber(village?.targetPopulation);
+        toPositiveNumber(village?.targetPopulation) ||
+        toPositiveNumber(village?.target_population);
 
       const source = populationRecord
         ? String(populationRecord.source || "").toLowerCase().includes("worldpop")
@@ -1626,7 +1669,7 @@ export default function Facilities() {
 
     directPopulationByFacilityId.forEach((record, facilityId) => {
       if (rollup.has(facilityId)) return;
-      const total = toPositiveNumber(record?.totalPopulation);
+      const total = toPositiveNumber(record?.totalPopulation) || toPositiveNumber(record?.total_population);
       if (total > 0) {
         rollup.set(facilityId, {
           total,
@@ -1671,6 +1714,89 @@ export default function Facilities() {
     return rollup && rollup.total > 0 ? rollup.total.toLocaleString() : "-";
   };
 
+  const getCommunityRoute = (communityId: number) => {
+    return (selectedFacilityRoutes || editingFacilityRoutes)?.find((r: any) => Number(r.villageId) === Number(communityId));
+  };
+
+  const getCommunityChvCount = (communityId: number) => {
+    return (facilityChvs || []).filter((chv: any) => Number(chv.villageId || chv.assignedVillageId) === Number(communityId)).length;
+  };
+
+  const getCommunityPopulation = (community: Village) => {
+    const popRecord = populationByVillageId.get(Number(community.id));
+    const total =
+      toPositiveNumber(popRecord?.totalPopulation) ||
+      toPositiveNumber((popRecord as any)?.total_population) ||
+      toPositiveNumber((community as any).worldpopPopulation) ||
+      toPositiveNumber((community as any).worldpop_population) ||
+      toPositiveNumber((community as any).totalCatchmentPopulation) ||
+      toPositiveNumber((community as any).total_catchment_population) ||
+      toPositiveNumber((community as any).griddedPopulation) ||
+      toPositiveNumber((community as any).gridded_population) ||
+      toPositiveNumber((community as any).estimatedPopulation) ||
+      toPositiveNumber((community as any).estimated_population) ||
+      toPositiveNumber((community as any).population) ||
+      toPositiveNumber((community as any).targetPopulation) ||
+      toPositiveNumber((community as any).target_population);
+    const under5 =
+      toPositiveNumber(popRecord?.under5Population) ||
+      toPositiveNumber((popRecord as any)?.under5_population) ||
+      toPositiveNumber((community as any).under5Population) ||
+      toPositiveNumber((community as any).under5_population);
+    return { total, under5 };
+  };
+
+  const renderCommunityDetails = (community: Village, compact = false) => {
+    const route = getCommunityRoute(community.id);
+    const population = getCommunityPopulation(community);
+    const chvCount = getCommunityChvCount(community.id);
+    const facility = facilities?.find(f => Number(f.id) === Number(community.assignedFacilityId));
+    const coordinates = community.latitude && community.longitude
+      ? `${Number(community.latitude).toFixed(5)}, ${Number(community.longitude).toFixed(5)}`
+      : "No coordinates";
+
+    return (
+      <div className={compact ? "space-y-2 text-xs w-[min(300px,calc(100vw-96px))] max-w-full" : "space-y-3 text-sm"}>
+        <div>
+          <p className="font-semibold text-foreground break-words">{community.name}</p>
+          <p className="text-xs text-muted-foreground break-words">
+            {community.code || "No community code"} • {getDistrictName(community.districtId)}, {getProvinceName(community.districtId)}
+          </p>
+        </div>
+        <div className={compact ? "grid grid-cols-2 gap-1.5" : "grid grid-cols-2 md:grid-cols-3 gap-2"}>
+          <div className="rounded-md bg-muted/40 p-2">
+            <p className="text-[10px] uppercase text-muted-foreground font-semibold">Population</p>
+            <p className="font-semibold">{population.total ? population.total.toLocaleString() : "-"}</p>
+          </div>
+          <div className="rounded-md bg-muted/40 p-2">
+            <p className="text-[10px] uppercase text-muted-foreground font-semibold">Under-5</p>
+            <p className="font-semibold">{population.under5 ? population.under5.toLocaleString() : "-"}</p>
+          </div>
+          <div className="rounded-md bg-muted/40 p-2">
+            <p className="text-[10px] uppercase text-muted-foreground font-semibold">Distance</p>
+            <p className="font-semibold">{route?.distanceToFacility ? `${route.distanceToFacility.toFixed(2)} km` : community.distanceToFacility ? `${Number(community.distanceToFacility).toFixed(2)} km` : "-"}</p>
+          </div>
+          <div className="rounded-md bg-muted/40 p-2">
+            <p className="text-[10px] uppercase text-muted-foreground font-semibold">Travel</p>
+            <p className="font-semibold">{route ? `${route.drivingTimeMinutes}m drive` : community.travelTimeMinutes ? `${community.travelTimeMinutes}m` : "-"}</p>
+          </div>
+          <div className="rounded-md bg-muted/40 p-2">
+            <p className="text-[10px] uppercase text-muted-foreground font-semibold">CHVs</p>
+            <p className="font-semibold">{chvCount.toLocaleString()}</p>
+          </div>
+        </div>
+        <div className="space-y-1 text-xs">
+          <p><span className="font-semibold">Facility:</span> {facility?.name || "Unassigned"}</p>
+          <p><span className="font-semibold">Coordinates:</span> <span className="font-mono">{coordinates}</span></p>
+          <p><span className="font-semibold">Access mode:</span> <span className="capitalize">{route?.transportMode || community.transportMode || "Unknown"}</span></p>
+          <p><span className="font-semibold">Access status:</span> {route?.accessibilityScore || (community.isHardToReach ? "Hard to Reach" : "Accessible")}</p>
+          {route?.seasonalAccessibility && <p><span className="font-semibold">Season:</span> {route.seasonalAccessibility}</p>}
+          {route?.referralRoute && <p className="italic text-muted-foreground break-words"><span className="font-semibold not-italic text-foreground">Referral:</span> {route.referralRoute}</p>}
+        </div>
+      </div>
+    );
+  };
+
   const getAssignedVillageCount = (facilityId: number) => {
     if (!villages) return 0;
     return villages.filter(v => v.assignedFacilityId === facilityId).length;
@@ -1691,8 +1817,17 @@ export default function Facilities() {
       return;
     }
 
+    setSelectedFacilityId(facility.id);
     setEditingFacility(facility);
     setDialogOpen(true);
+  };
+
+  const handleOpenFacility = (facility: Facility) => {
+    setSelectedFacilityId(facility.id);
+    setMainTab("facilities");
+    setTimeout(() => {
+      document.querySelector('[data-selected-facility-panel="true"]')?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 100);
   };
 
   const handleDelete = (facility: Facility) => {
@@ -1915,17 +2050,33 @@ export default function Facilities() {
       header: "Community Name",
       sortable: true,
       render: (item: Village) => {
-        const route = (selectedFacilityRoutes || editingFacilityRoutes)?.find((r: any) => r.villageId === item.id);
+        const route = getCommunityRoute(item.id);
         return (
-          <div className="space-y-1">
-            <p className="font-semibold text-sm text-foreground">{item.name}</p>
-            {item.code && <p className="text-[10px] text-muted-foreground font-mono">Code: {item.code}</p>}
-            {route?.referralRoute && (
-              <p className="text-[10px] text-muted-foreground/80 italic truncate max-w-[200px]" title={route.referralRoute}>
-                Referral: {route.referralRoute}
-              </p>
-            )}
-          </div>
+          <TooltipProvider>
+            <Tooltip delayDuration={150}>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  className="space-y-1 text-left rounded-md p-1 -m-1 hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setSelectedCommunityDetails(item);
+                  }}
+                >
+                  <p className="font-semibold text-sm text-foreground">{item.name}</p>
+                  {item.code && <p className="text-[10px] text-muted-foreground font-mono">Code: {item.code}</p>}
+                  {route?.referralRoute && (
+                    <p className="text-[10px] text-muted-foreground/80 italic truncate max-w-[200px]" title={route.referralRoute}>
+                      Referral: {route.referralRoute}
+                    </p>
+                  )}
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="right" align="start" className="max-w-sm p-3 bg-popover text-popover-foreground border shadow-xl">
+                {renderCommunityDetails(item, true)}
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
         );
       },
     },
@@ -1946,7 +2097,7 @@ export default function Facilities() {
       header: "Distance",
       sortable: true,
       render: (item: Village) => {
-        const route = (selectedFacilityRoutes || editingFacilityRoutes)?.find((r: any) => r.villageId === item.id);
+        const route = getCommunityRoute(item.id);
         if (route) {
           return (
             <Badge variant="outline" className="font-mono bg-background/50 border-primary/10">
@@ -1963,7 +2114,7 @@ export default function Facilities() {
       key: "travelTime",
       header: "Est. Travel Time",
       render: (item: Village) => {
-        const route = (selectedFacilityRoutes || editingFacilityRoutes)?.find((r: any) => r.villageId === item.id);
+        const route = getCommunityRoute(item.id);
         if (!route) return <span className="text-muted-foreground text-xs">-</span>;
         return (
           <div className="text-xs space-y-0.5">
@@ -1977,7 +2128,7 @@ export default function Facilities() {
       key: "transportMode",
       header: "Access Mode",
       render: (item: Village) => {
-        const route = (selectedFacilityRoutes || editingFacilityRoutes)?.find((r: any) => r.villageId === item.id);
+        const route = getCommunityRoute(item.id);
         const mode = route ? route.transportMode : item.transportMode;
         return (
           <Badge variant="outline" className="capitalize">
@@ -1990,7 +2141,7 @@ export default function Facilities() {
       key: "isHardToReach",
       header: "HTR Status / Access",
       render: (item: Village) => {
-        const route = (selectedFacilityRoutes || editingFacilityRoutes)?.find((r: any) => r.villageId === item.id);
+        const route = getCommunityRoute(item.id);
         const isHTR = route ? route.accessibilityScore === "Difficult" : item.isHardToReach;
         const score = route?.accessibilityScore;
         const seasonal = route?.seasonalAccessibility;
@@ -3072,6 +3223,11 @@ export default function Facilities() {
                               <BasemapTileLayer basemap={basemap} />
                               <PopulationWmsLayer overlay={populationOverlay} />
                               <MapResizer />
+                              <FlyToLocation
+                                latitude={form.watch("latitude")}
+                                longitude={form.watch("longitude")}
+                                zoom={15}
+                              />
                               <FacilityMapEvents />
                               
                               {/* Facility coordinate marker */}
@@ -3361,7 +3517,8 @@ export default function Facilities() {
 
                             {/* Network Routes from Facility to Communities */}
                             {editingFacilityRoutes && editingFacilityRoutes.map((route: any) => {
-                              if (!route.routeGeometry || route.routeGeometry.length === 0) return null;
+                              if (route.hasRoadGeometry === false || route.routeSource === "estimate") return null;
+                              if (!route.routeGeometry || route.routeGeometry.length < 2) return null;
                               const positions = route.routeGeometry.map((pt: number[]) => [pt[1], pt[0]]) as [number, number][];
                               
                               let color = "#10b981"; // Easy
@@ -3572,7 +3729,7 @@ export default function Facilities() {
                 searchable
                 searchPlaceholder="Search facilities..."
                 searchKeys={["name", "hmisCode", "facilityType"]}
-                onRowClick={(item) => handleEdit(item)}
+                onRowClick={(item) => handleOpenFacility(item)}
               />
             </CardContent>
           </Card>
@@ -3622,12 +3779,12 @@ export default function Facilities() {
                       View, extract, and drag community pins on the map to dynamically edit GIS coordinates.
                     </p>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center justify-end gap-2">
                     {canCreate && (
                       <Button
                         size="sm"
                         onClick={handleAddCommunity}
-                        className="gap-1"
+                        className="gap-1 whitespace-nowrap"
                         data-testid="button-add-community-for-selected-facility"
                       >
                         <Plus className="h-4 w-4" />
@@ -3638,7 +3795,7 @@ export default function Facilities() {
                       variant="outline"
                       disabled={aggressiveExtractMutation.isPending}
                       onClick={() => aggressiveExtractMutation.mutate(selectedFacilityId)}
-                      className="bg-emerald-600 hover:bg-emerald-700 text-white gap-1"
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white gap-1 whitespace-nowrap"
                       data-testid="button-extract-communities"
                     >
                       <Building2 className="h-4 w-4" />
@@ -3678,7 +3835,37 @@ export default function Facilities() {
                         searchable
                         searchPlaceholder="Search assigned communities..."
                         searchKeys={["name", "code"]}
+                        onRowClick={(community) => setSelectedCommunityDetails(community)}
                       />
+                      {selectedCommunityDetails && facilityCommunities.some((community) => Number(community.id) === Number(selectedCommunityDetails.id)) && (
+                        <div className="mt-4 rounded-lg border bg-muted/20 p-4 shadow-sm">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="flex-1">
+                              {renderCommunityDetails(selectedCommunityDetails)}
+                            </div>
+                            <div className="flex items-center gap-1">
+                              {canManageCommunity(selectedCommunityDetails) && (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => handleEditCommunity(selectedCommunityDetails)}
+                                >
+                                  <Pencil className="h-3.5 w-3.5 mr-1" />
+                                  Edit
+                                </Button>
+                              )}
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => setSelectedCommunityDetails(null)}
+                                aria-label="Close community details"
+                              >
+                                <X className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      )}
                     </div>
                     
                     {/* Right: Interactive Sub-Map */}
@@ -3709,6 +3896,16 @@ export default function Facilities() {
                         <BasemapTileLayer basemap={basemap} />
                         <PopulationWmsLayer overlay={populationOverlay} />
                         <MapResizer />
+                        {(() => {
+                          const fac = facilities?.find(f => f.id === selectedFacilityId);
+                          return (
+                            <FlyToLocation
+                              latitude={fac?.latitude}
+                              longitude={fac?.longitude}
+                              zoom={14}
+                            />
+                          );
+                        })()}
                         
                         {/* Facility Pin (Draggable) */}
                         {(() => {
@@ -3746,7 +3943,8 @@ export default function Facilities() {
 
                         {/* Network Routes from Facility to Communities */}
                         {selectedFacilityRoutes && selectedFacilityRoutes.map((route: any) => {
-                          if (!route.routeGeometry || route.routeGeometry.length === 0) return null;
+                          if (route.hasRoadGeometry === false || route.routeSource === "estimate") return null;
+                          if (!route.routeGeometry || route.routeGeometry.length < 2) return null;
                           const positions = route.routeGeometry.map((pt: number[]) => [pt[1], pt[0]]) as [number, number][];
                           
                           let color = "#10b981"; // Easy
@@ -3821,10 +4019,30 @@ export default function Facilities() {
                                 }
                               }}
                             >
-                              <Popup>
-                                <div className="p-1">
-                                  <p className="font-semibold text-sm">{village.name}</p>
-                                  <p className="text-xs text-muted-foreground">Catchment Community</p>
+                              <Popup maxWidth={320} minWidth={260} autoPan autoPanPadding={[32, 32]}>
+                                <div className="max-h-[420px] max-w-[300px] overflow-y-auto p-2">
+                                  {renderCommunityDetails(village, true)}
+                                  <div className="flex items-center justify-end gap-2 pt-2 mt-2 border-t">
+                                    <Button
+                                      type="button"
+                                      variant="outline"
+                                      size="sm"
+                                      className="h-7 text-xs"
+                                      onClick={() => setSelectedCommunityDetails(village)}
+                                    >
+                                      View
+                                    </Button>
+                                    {canManageCommunity(village) && (
+                                      <Button
+                                        type="button"
+                                        size="sm"
+                                        className="h-7 text-xs"
+                                        onClick={() => handleEditCommunity(village)}
+                                      >
+                                        Edit
+                                      </Button>
+                                    )}
+                                  </div>
                                 </div>
                               </Popup>
                             </Marker>
@@ -4316,6 +4534,11 @@ export default function Facilities() {
                       */}
                       <BasemapTileLayer basemap={basemap} />
                       <MapResizer />
+                      <FlyToLocation
+                        latitude={newCommLat || commMapCenter[0]}
+                        longitude={newCommLng || commMapCenter[1]}
+                        zoom={newCommLat && newCommLng ? 15 : 13}
+                      />
                       <CommMapEvents />
                       
                       {/* Facility Marker if selected */}

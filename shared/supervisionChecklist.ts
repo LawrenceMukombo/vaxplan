@@ -432,6 +432,8 @@ function blankAnswerFor(
   facilityContext?: FacilityPrefillContext
 ): ChecklistAnswer {
   const prefilled = resolvePrefillValue(it.label, it.prefillSourceKey || it.id, facilityContext);
+  const parentId = it.parentId ?? it.conditionalOnQuestionId ?? undefined;
+  const showWhen = it.showWhen ?? it.conditionalValue ?? undefined;
 
   return {
     key,
@@ -441,14 +443,14 @@ function blankAnswerFor(
     repeatIndex,
     label: it.label,
     type: it.type,
-    response: it.type === "yes_no" || it.type === "true_false" ? "" : undefined,
+    response: it.type === "yes_no" || it.type === "yes_no_na" || it.type === "true_false" ? "" : undefined,
     value: prefilled !== undefined ? prefilled : (it.type === "multi_select" ? [] : undefined),
     note: "",
     helpText: it.helpText,
     required: it.required,
     options: it.options,
-    parentId: it.parentId,
-    showWhen: it.showWhen,
+    parentId,
+    showWhen,
     repeatable: it.repeatable,
     repeatLabel: it.repeatLabel,
     maxRepeats: it.maxRepeats,
@@ -478,7 +480,7 @@ export function makeRepeatAnswer(base: ChecklistAnswer, repeatIndex: number): Ch
     key: `${baseKey}__r${repeatIndex}`,
     baseKey,
     repeatIndex,
-    response: base.type === "yes_no" || base.type === "true_false" ? "" : undefined,
+    response: base.type === "yes_no" || base.type === "yes_no_na" || base.type === "true_false" ? "" : undefined,
     value: base.type === "multi_select" ? [] : undefined,
     note: "",
   };
@@ -497,7 +499,8 @@ function answerHasValue(a: ChecklistAnswer): boolean {
 function parentMatches(parent: ChecklistAnswer, showWhen: string | undefined): boolean {
   if (!showWhen || showWhen === SHOW_WHEN_ANY) return answerHasValue(parent);
   const t = parent.type || "yes_no";
-  if (t === "yes_no" || t === "true_false") return parent.response === showWhen;
+  const normalized = showWhen.toLowerCase();
+  if (t === "yes_no" || t === "yes_no_na" || t === "true_false") return parent.response === normalized;
   if (t === "single_select") return parent.value === showWhen;
   if (t === "multi_select") return Array.isArray(parent.value) && (parent.value as string[]).includes(showWhen);
   return String(parent.value ?? "") === showWhen;
@@ -530,7 +533,7 @@ export function isAnswerVisible(
 // it is not a scorable/answered question.
 function scoreContribution(a: ChecklistAnswer): number | null {
   const t = a.type || "yes_no";
-  if (t === "yes_no" || t === "true_false") {
+  if (t === "yes_no" || t === "yes_no_na" || t === "true_false") {
     if (a.includeInScore === false) return null;
     if (a.response === "yes") return 1;
     if (a.response === "no") return 0;

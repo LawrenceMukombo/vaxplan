@@ -77,7 +77,7 @@ export default function MapPage() {
   });
 
   const { data: villages } = useQuery<Village[]>({
-    queryKey: ["/api/villages", "tenant", activeTenantInfo?.id],
+    queryKey: ["/api/villages/summary", "tenant", activeTenantInfo?.id],
     queryFn: async () => {
       if (!navigator.onLine) {
         const _tid = loadActiveTenant()?.id;
@@ -85,7 +85,7 @@ export default function MapPage() {
           ? offlineDb.villages.where("tenantId").equals(_tid).toArray()
           : offlineDb.villages.toArray()) as any;
       }
-      const res = await fetch("/api/villages", { credentials: "include" });
+      const res = await fetch("/api/villages/summary", { credentials: "include" });
       if (!res.ok) throw new Error("Failed to fetch villages");
       return res.json();
     },

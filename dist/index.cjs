@@ -3902,7 +3902,7 @@ async function getSupervisionPrefillBundle(tenantId, facilityId, checklistTempla
       FROM supervision_visits
       WHERE tenant_id = ${tenantId}
         AND facility_id = ${facilityId}
-        AND status = 'completed'
+        AND status = 'conducted'
       ORDER BY visit_date DESC
       LIMIT 1
     `);
@@ -3926,20 +3926,23 @@ async function getSupervisionPrefillBundle(tenantId, facilityId, checklistTempla
     person1 = {
       name: staffList[0].fullName || staffList[0].name || "Facility Staff",
       responsibility: staffList[0].position || staffList[0].role || "Facility In-Charge",
-      source: "staff_roster"
+      source: "staff_roster",
+      phone: staffList[0].contactPhone || void 0
     };
     if (staffList.length > 1) {
       person2 = {
         name: staffList[1].fullName || staffList[1].name || "EPI Officer",
         responsibility: staffList[1].position || staffList[1].role || "EPI Focal Person",
-        source: "staff_roster"
+        source: "staff_roster",
+        phone: staffList[1].contactPhone || void 0
       };
     }
     if (staffList.length > 2) {
       person3 = {
         name: staffList[2].fullName || staffList[2].name || "Cold Chain Staff",
         responsibility: staffList[2].position || staffList[2].role || "Cold Chain Nurse",
-        source: "staff_roster"
+        source: "staff_roster",
+        phone: staffList[2].contactPhone || void 0
       };
     }
   } else {
@@ -3948,22 +3951,25 @@ async function getSupervisionPrefillBundle(tenantId, facilityId, checklistTempla
       person1 = {
         name: `${userList[0].firstName || ""} ${userList[0].lastName || ""}`.trim() || userList[0].email || "Facility Staff",
         responsibility: userList[0].role || "Facility In-Charge",
-        source: "user_roster"
+        source: "user_roster",
+        phone: userList[0].phone || void 0
       };
       if (userList.length > 1) {
         person2 = {
           name: `${userList[1].firstName || ""} ${userList[1].lastName || ""}`.trim() || userList[1].email || "EPI Officer",
           responsibility: userList[1].role || "EPI Focal Person",
-          source: "user_roster"
+          source: "user_roster",
+          phone: userList[1].phone || void 0
         };
       }
     } else if (facility.contactPerson || facility.inCharge) {
       const cName = (facility.contactPerson || facility.inCharge || "").trim();
       const cPhone = (facility.contactPhone || facility.phone || "").trim();
       person1 = {
-        name: cName + (cPhone ? ` (${cPhone})` : ""),
+        name: cName,
         responsibility: "Facility In-Charge",
-        source: "facility_master"
+        source: "facility_master",
+        phone: cPhone || void 0
       };
     } else {
       warnings.push("No facility in-charge or staff roster entries found for this facility.");
@@ -4156,6 +4162,9 @@ function withTenant(table, tenantId, ...extra) {
   const conds = [(0, import_drizzle_orm5.eq)(table.tenantId, tenantId), ...extra.filter(Boolean)];
   return conds.length === 1 ? conds[0] : (0, import_drizzle_orm5.and)(...conds);
 }
+async function refreshFacilityPopulationAggregate(tenantId, facilityId) {
+  await storage.refreshFacilityPopulationAggregate(tenantId, facilityId);
+}
 var import_drizzle_orm5, DatabaseStorage, storage;
 var init_storage = __esm({
   "server/storage.ts"() {
@@ -4165,6 +4174,40 @@ var init_storage = __esm({
     init_db();
     import_drizzle_orm5 = require("drizzle-orm");
     DatabaseStorage = class {
+      async refreshFacilityPopulationAggregate(tenantId, facilityId) {
+        const id = Number(facilityId);
+        if (!Number.isFinite(id)) return;
+        const [aggregate] = await db.select({
+          total: import_drizzle_orm5.sql`COALESCE(SUM(COALESCE(${villages.griddedPopulation}, ${villages.totalCatchmentPopulation}, 0)), 0)`.mapWith(Number)
+        }).from(villages).where((0, import_drizzle_orm5.and)((0, import_drizzle_orm5.eq)(villages.tenantId, tenantId), (0, import_drizzle_orm5.eq)(villages.assignedFacilityId, id)));
+        await db.update(facilities).set({
+          catchmentGridPopulation: Number(aggregate?.total ?? 0),
+          updatedAt: /* @__PURE__ */ new Date()
+        }).where((0, import_drizzle_orm5.and)((0, import_drizzle_orm5.eq)(facilities.tenantId, tenantId), (0, import_drizzle_orm5.eq)(facilities.id, id)));
+      }
+      async refreshPopulationOwnerAggregates(tenantId, row) {
+        if (!row) return;
+        const villageId = row.villageId ? Number(row.villageId) : null;
+        const facilityId = row.facilityId ? Number(row.facilityId) : null;
+        let resolvedFacilityId = facilityId;
+        if (villageId) {
+          const [village] = await db.select({ assignedFacilityId: villages.assignedFacilityId }).from(villages).where((0, import_drizzle_orm5.and)((0, import_drizzle_orm5.eq)(villages.tenantId, tenantId), (0, import_drizzle_orm5.eq)(villages.id, villageId))).limit(1);
+          resolvedFacilityId = facilityId ?? (village?.assignedFacilityId ? Number(village.assignedFacilityId) : null);
+          const populationPatch = {
+            totalCatchmentPopulation: Number(row.totalPopulation ?? 0),
+            updatedAt: /* @__PURE__ */ new Date()
+          };
+          if (row.source === "worldpop") {
+            populationPatch.griddedPopulation = Number(row.totalPopulation ?? 0);
+            populationPatch.populationSourceLabel = "WorldPop";
+          }
+          if (row.under5Population != null) {
+            populationPatch.under5Population = Number(row.under5Population);
+          }
+          await db.update(villages).set(populationPatch).where((0, import_drizzle_orm5.and)((0, import_drizzle_orm5.eq)(villages.tenantId, tenantId), (0, import_drizzle_orm5.eq)(villages.id, villageId)));
+        }
+        await this.refreshFacilityPopulationAggregate(tenantId, resolvedFacilityId);
+      }
       // --- Users ---
       async getUser(id) {
         const [user] = await db.select().from(users).where((0, import_drizzle_orm5.eq)(users.id, id));
@@ -4495,10 +4538,10 @@ var init_storage = __esm({
           insecurityLevel: villages.insecurityLevel,
           comments: villages.comments,
           population: import_drizzle_orm5.sql`(
-          SELECT total_population 
-          FROM population_data p 
-          WHERE p.village_id = ${villages.id} 
-          ORDER BY p.year DESC, CASE WHEN p.source = 'nso' THEN 1 ELSE 2 END ASC 
+          SELECT total_population
+          FROM population_data p
+          WHERE p.village_id = ${villages.id}
+          ORDER BY p.year DESC, CASE WHEN p.source = 'nso' THEN 1 ELSE 2 END ASC
           LIMIT 1
         )`.mapWith(Number),
           createdAt: villages.createdAt,
@@ -4516,10 +4559,10 @@ var init_storage = __esm({
         const [v] = await db.select({
           ...(0, import_drizzle_orm5.getTableColumns)(villages),
           population: import_drizzle_orm5.sql`(
-          SELECT total_population 
-          FROM population_data p 
-          WHERE p.village_id = ${villages.id} 
-          ORDER BY p.year DESC, CASE WHEN p.source = 'nso' THEN 1 ELSE 2 END ASC 
+          SELECT total_population
+          FROM population_data p
+          WHERE p.village_id = ${villages.id}
+          ORDER BY p.year DESC, CASE WHEN p.source = 'nso' THEN 1 ELSE 2 END ASC
           LIMIT 1
         )`.mapWith(Number)
         }).from(villages).where((0, import_drizzle_orm5.and)((0, import_drizzle_orm5.eq)(villages.id, id), (0, import_drizzle_orm5.eq)(villages.tenantId, tenantId)));
@@ -4622,13 +4665,15 @@ var init_storage = __esm({
       async resolvePopulationGeographics(tenantId, data) {
         let districtId = data.districtId ? Number(data.districtId) : null;
         let provinceId = data.provinceId ? Number(data.provinceId) : null;
+        let facilityId = data.facilityId ? Number(data.facilityId) : null;
         if (data.villageId) {
-          const [v] = await db.select({ districtId: villages.districtId }).from(villages).where((0, import_drizzle_orm5.and)((0, import_drizzle_orm5.eq)(villages.id, data.villageId), (0, import_drizzle_orm5.eq)(villages.tenantId, tenantId)));
+          const [v] = await db.select({ districtId: villages.districtId, assignedFacilityId: villages.assignedFacilityId }).from(villages).where((0, import_drizzle_orm5.and)((0, import_drizzle_orm5.eq)(villages.id, data.villageId), (0, import_drizzle_orm5.eq)(villages.tenantId, tenantId)));
           if (v) {
             districtId = v.districtId;
+            facilityId = facilityId ?? (v.assignedFacilityId ? Number(v.assignedFacilityId) : null);
           }
-        } else if (data.facilityId) {
-          const [f] = await db.select({ districtId: facilities.districtId }).from(facilities).where((0, import_drizzle_orm5.and)((0, import_drizzle_orm5.eq)(facilities.id, data.facilityId), (0, import_drizzle_orm5.eq)(facilities.tenantId, tenantId)));
+        } else if (facilityId) {
+          const [f] = await db.select({ districtId: facilities.districtId }).from(facilities).where((0, import_drizzle_orm5.and)((0, import_drizzle_orm5.eq)(facilities.id, facilityId), (0, import_drizzle_orm5.eq)(facilities.tenantId, tenantId)));
           if (f) {
             districtId = f.districtId;
           }
@@ -4639,7 +4684,7 @@ var init_storage = __esm({
             provinceId = d.provinceId;
           }
         }
-        return { provinceId, districtId };
+        return { provinceId, districtId, facilityId };
       }
       async createPopulationData(tenantId, data) {
         const geographics = await this.resolvePopulationGeographics(tenantId, data);
@@ -4647,8 +4692,10 @@ var init_storage = __esm({
           ...data,
           districtId: geographics.districtId,
           provinceId: geographics.provinceId,
+          facilityId: geographics.facilityId ?? data.facilityId ?? null,
           tenantId
         }).returning();
+        await this.refreshPopulationOwnerAggregates(tenantId, p);
         return p;
       }
       async updatePopulationData(tenantId, id, data) {
@@ -4661,13 +4708,35 @@ var init_storage = __esm({
           ...safe,
           districtId: geographics.districtId,
           provinceId: geographics.provinceId,
+          facilityId: geographics.facilityId ?? safe.facilityId ?? existing.facilityId ?? null,
           updatedAt: /* @__PURE__ */ new Date()
         }).where((0, import_drizzle_orm5.and)((0, import_drizzle_orm5.eq)(populationData.id, id), (0, import_drizzle_orm5.eq)(populationData.tenantId, tenantId))).returning();
+        await this.refreshPopulationOwnerAggregates(tenantId, p);
         return p;
       }
       async deletePopulationData(tenantId, id) {
+        const existing = await this.getPopulationDataById(tenantId, id);
         const rows = await db.delete(populationData).where((0, import_drizzle_orm5.and)((0, import_drizzle_orm5.eq)(populationData.id, id), (0, import_drizzle_orm5.eq)(populationData.tenantId, tenantId))).returning({ id: populationData.id });
-        return rows.length > 0;
+        if (rows.length === 0) return false;
+        if (existing?.villageId) {
+          const [latest] = await db.select().from(populationData).where((0, import_drizzle_orm5.and)((0, import_drizzle_orm5.eq)(populationData.tenantId, tenantId), (0, import_drizzle_orm5.eq)(populationData.villageId, existing.villageId))).orderBy((0, import_drizzle_orm5.desc)(populationData.year), (0, import_drizzle_orm5.desc)(populationData.updatedAt)).limit(1);
+          if (latest) {
+            await this.refreshPopulationOwnerAggregates(tenantId, latest);
+          } else {
+            const [village] = await db.select({ assignedFacilityId: villages.assignedFacilityId }).from(villages).where((0, import_drizzle_orm5.and)((0, import_drizzle_orm5.eq)(villages.tenantId, tenantId), (0, import_drizzle_orm5.eq)(villages.id, existing.villageId))).limit(1);
+            await db.update(villages).set({
+              totalCatchmentPopulation: null,
+              under5Population: null,
+              griddedPopulation: null,
+              populationSourceLabel: null,
+              updatedAt: /* @__PURE__ */ new Date()
+            }).where((0, import_drizzle_orm5.and)((0, import_drizzle_orm5.eq)(villages.tenantId, tenantId), (0, import_drizzle_orm5.eq)(villages.id, existing.villageId)));
+            await this.refreshFacilityPopulationAggregate(tenantId, village?.assignedFacilityId);
+          }
+        } else if (existing?.facilityId) {
+          await this.refreshFacilityPopulationAggregate(tenantId, existing.facilityId);
+        }
+        return true;
       }
       // --- Facility excluded villages ---
       // Tracks villages staff explicitly removed from a facility's microplan
@@ -7569,11 +7638,12 @@ var init_surveillance = __esm({
     });
     surveillanceRouter.get("/population/choropleth", async (req, res) => {
       try {
-        const source = req.query.source || "nso";
+        const requestedSource = String(req.query.source || "worldpop").toLowerCase();
+        const source = ["nso", "hmis", "worldpop", "survey", "community_census"].includes(requestedSource) ? requestedSource : "worldpop";
         const tenantId = req.tenantId;
         const rows = await db.select({
           districtId: populationData.districtId,
-          population: import_drizzle_orm11.sql`SUM(${populationData.totalPopulation})`
+          population: import_drizzle_orm11.sql`COALESCE(SUM(${populationData.totalPopulation}), 0)`.mapWith(Number)
         }).from(populationData).where(
           (0, import_drizzle_orm11.and)(
             (0, import_drizzle_orm11.eq)(populationData.tenantId, tenantId),
@@ -19345,19 +19415,27 @@ async function registerRoutes(httpServer2, app2) {
         const vLat = village.latitude ? Number(village.latitude) : null;
         const vLng = village.longitude ? Number(village.longitude) : null;
         if (vLat === null || vLng === null) continue;
-        const routeData = await fetchOsrmRoute(fLng, fLat, vLng, vLat);
+        const savedDistance = village.distanceToFacility != null ? Number(village.distanceToFacility) : NaN;
+        const savedTravelMinutes = village.travelTimeMinutes != null ? Number(village.travelTimeMinutes) : NaN;
         let roadDistanceKm;
         let drivingMin;
-        let geometry;
-        if (routeData) {
+        let geometry = null;
+        let routeSource = "estimate";
+        const routeData = await fetchOsrmRoute(fLng, fLat, vLng, vLat);
+        if (routeData?.geometry && routeData.geometry.length >= 2) {
           roadDistanceKm = routeData.roadDistanceKm;
           drivingMin = routeData.drivingMin;
-          geometry = routeData.geometry ?? [[fLng, fLat], [vLng, vLat]];
+          geometry = routeData.geometry;
+          routeSource = "osrm";
         } else {
-          const straightLineKm = haversineKm3(fLat, fLng, vLat, vLng);
-          roadDistanceKm = parseFloat(straightLineKm.toFixed(2));
-          drivingMin = Math.round(straightLineKm / 40 * 60);
-          geometry = [[fLng, fLat], [vLng, vLat]];
+          if (Number.isFinite(savedDistance) && savedDistance > 0) {
+            roadDistanceKm = parseFloat(savedDistance.toFixed(2));
+            drivingMin = Number.isFinite(savedTravelMinutes) && savedTravelMinutes > 0 ? Math.round(savedTravelMinutes) : Math.round(savedDistance / 40 * 60);
+          } else {
+            const straightLineKm = haversineKm3(fLat, fLng, vLat, vLng);
+            roadDistanceKm = parseFloat(straightLineKm.toFixed(2));
+            drivingMin = Math.round(straightLineKm / 40 * 60);
+          }
         }
         const walkingMin = Math.round(roadDistanceKm / 5 * 60);
         let accessibilityScore = village.accessibilityScore;
@@ -19375,6 +19453,8 @@ async function registerRoutes(httpServer2, app2) {
           transportMode: village.transportMode || "walking",
           accessibilityScore,
           routeGeometry: geometry,
+          routeSource,
+          hasRoadGeometry: routeSource === "osrm" && Array.isArray(geometry) && geometry.length >= 2,
           seasonalAccessibility: village.seasonalAccessibility || "Dry / Rainy",
           referralRoute,
           isDirectlyAssigned: !!village.assignedFacilityId && Number(village.assignedFacilityId) === facilityId
@@ -20913,6 +20993,12 @@ async function registerRoutes(httpServer2, app2) {
           approvalStatus: "approved"
         });
       }
+      await dbInstance.update(villages).set({
+        totalCatchmentPopulation: Number(totalPop ?? 0),
+        under5Population: Number(under5Pop ?? 0),
+        updatedAt: /* @__PURE__ */ new Date()
+      }).where((0, import_drizzle_orm26.and)((0, import_drizzle_orm26.eq)(villages.tenantId, tenantId), (0, import_drizzle_orm26.eq)(villages.id, villageId)));
+      await refreshFacilityPopulationAggregate(tenantId, villageRow.assignedFacilityId ?? null);
       return totalPop;
     } catch (err) {
       console.error(`Error estimating/saving population for village ${villageId}:`, err);
@@ -20930,7 +21016,20 @@ async function registerRoutes(httpServer2, app2) {
         assignedFacilityId: villages.assignedFacilityId,
         isHardToReach: villages.isHardToReach,
         latitude: villages.latitude,
-        longitude: villages.longitude
+        longitude: villages.longitude,
+        code: villages.code,
+        distanceToFacility: villages.distanceToFacility,
+        travelTimeMinutes: villages.travelTimeMinutes,
+        transportMode: villages.transportMode,
+        seasonalAccessibility: villages.seasonalAccessibility,
+        settlementType: villages.settlementType,
+        totalCatchmentPopulation: villages.totalCatchmentPopulation,
+        griddedPopulation: villages.griddedPopulation,
+        under5Population: villages.under5Population,
+        outreachLatitude: villages.outreachLatitude,
+        outreachLongitude: villages.outreachLongitude,
+        outreachPostName: villages.outreachPostName,
+        population: import_drizzle_orm26.sql`COALESCE(${villages.griddedPopulation}, ${villages.totalCatchmentPopulation}, 0)`.mapWith(Number)
       }).from(villages).where((0, import_drizzle_orm26.eq)(villages.tenantId, req.tenantId));
       let result = scope.all ? rows : rows.filter(
         (v) => recordInGeoScope(scope, {
@@ -22140,7 +22239,10 @@ Note from the requester: ${conflict.note}` : ""}`,
             updatedAt: /* @__PURE__ */ new Date()
           }).where((0, import_drizzle_orm26.eq)(populationData.id, existing.id)).returning();
           updatedCount++;
-          if (updated) savedRecords.push(updated);
+          if (updated) {
+            savedRecords.push(updated);
+            await storage.refreshPopulationOwnerAggregates(req.tenantId, updated);
+          }
         } else {
           const [created] = await db.insert(populationData).values({
             tenantId: req.tenantId,
@@ -22164,7 +22266,10 @@ Note from the requester: ${conflict.note}` : ""}`,
             approvalStatus: "approved"
           }).returning();
           createdCount++;
-          if (created) savedRecords.push(created);
+          if (created) {
+            savedRecords.push(created);
+            await storage.refreshPopulationOwnerAggregates(req.tenantId, created);
+          }
         }
       }
       await logAudit(req, "import_population", "population_data", null, null, {
@@ -24674,7 +24779,7 @@ Note from the requester: ${conflict.note}` : ""}`,
       res.status(500).json({ message: "Failed to fetch checklist template" });
     }
   });
-  app2.post("/api/supervision-checklist-templates", ...auth, loadRole, async (req, res) => {
+  app2.post("/api/supervision-checklist-templates", ...auth, loadRole, requirePermission2("manage_users"), async (req, res) => {
     try {
       const data = insertSupervisionChecklistTemplateSchema.parse(req.body);
       const t = await storage.createChecklistTemplate(req.tenantId, req.user?.claims?.sub ?? null, data);
@@ -24689,7 +24794,7 @@ Note from the requester: ${conflict.note}` : ""}`,
       res.status(400).json({ message: error?.message || "Invalid checklist template data" });
     }
   });
-  app2.patch("/api/supervision-checklist-templates/:id", ...auth, loadRole, async (req, res) => {
+  app2.patch("/api/supervision-checklist-templates/:id", ...auth, loadRole, requirePermission2("manage_users"), async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const old = await storage.getChecklistTemplate(req.tenantId, id);
@@ -24706,7 +24811,7 @@ Note from the requester: ${conflict.note}` : ""}`,
       res.status(400).json({ message: error?.message || "Failed to update checklist template" });
     }
   });
-  app2.delete("/api/supervision-checklist-templates/:id", ...auth, loadRole, async (req, res) => {
+  app2.delete("/api/supervision-checklist-templates/:id", ...auth, loadRole, requirePermission2("manage_users"), async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const old = await storage.getChecklistTemplate(req.tenantId, id);
@@ -29940,6 +30045,8 @@ Note from the requester: ${conflict.note}` : ""}`,
       const results = [];
       const facilityCache = /* @__PURE__ */ new Map();
       const microplanCache = /* @__PURE__ */ new Map();
+      const sessionPlanCache = /* @__PURE__ */ new Map();
+      const templateCache = /* @__PURE__ */ new Map();
       for (const item of parsed.items) {
         const clientId = item.clientId;
         try {
@@ -29958,6 +30065,14 @@ Note from the requester: ${conflict.note}` : ""}`,
             if (!microplanCache.has(mid)) microplanCache.set(mid, await storage.getMicroplan(req.tenantId, mid));
             return microplanCache.get(mid);
           };
+          const checkSessionPlan = async (sid) => {
+            if (!sessionPlanCache.has(sid)) sessionPlanCache.set(sid, await storage.getSessionPlan(req.tenantId, sid));
+            return sessionPlanCache.get(sid);
+          };
+          const checkTemplate = async (tid) => {
+            if (!templateCache.has(tid)) templateCache.set(tid, await storage.getChecklistTemplate(req.tenantId, tid));
+            return templateCache.get(tid);
+          };
           if (id != null) {
             if (body.facilityId && !await checkFacility(body.facilityId)) {
               results.push({ clientId, ok: false, error: "Facility does not belong to this tenant" });
@@ -29965,6 +30080,14 @@ Note from the requester: ${conflict.note}` : ""}`,
             }
             if (body.microplanId && !await checkMicroplan(body.microplanId)) {
               results.push({ clientId, ok: false, error: "Microplan does not belong to this tenant" });
+              continue;
+            }
+            if (body.sessionPlanId && !await checkSessionPlan(body.sessionPlanId)) {
+              results.push({ clientId, ok: false, error: "Session plan does not belong to this tenant" });
+              continue;
+            }
+            if (body.templateId && !await checkTemplate(body.templateId)) {
+              results.push({ clientId, ok: false, error: "Checklist template does not belong to this tenant" });
               continue;
             }
             const old = await storage.getSupervisionVisit(req.tenantId, Number(id));
@@ -29995,6 +30118,14 @@ Note from the requester: ${conflict.note}` : ""}`,
             }
             if (data.microplanId && !await checkMicroplan(data.microplanId)) {
               results.push({ clientId, ok: false, error: "Microplan does not belong to this tenant" });
+              continue;
+            }
+            if (data.sessionPlanId && !await checkSessionPlan(data.sessionPlanId)) {
+              results.push({ clientId, ok: false, error: "Session plan does not belong to this tenant" });
+              continue;
+            }
+            if (data.templateId && !await checkTemplate(data.templateId)) {
+              results.push({ clientId, ok: false, error: "Checklist template does not belong to this tenant" });
               continue;
             }
             if (data.facilityId && !await userCanAccessGeo(req.dbUser, req.tenantId, { facilityId: Number(data.facilityId) })) {
@@ -30082,15 +30213,14 @@ Note from the requester: ${conflict.note}` : ""}`,
       }
     } else if (type === "villages") {
       const rows = await db.select().from(villages).where((0, import_drizzle_orm26.eq)(villages.tenantId, tenantId));
-      const popRows = await db.select().from(populationData).where(
-        (0, import_drizzle_orm26.and)(
-          (0, import_drizzle_orm26.eq)(populationData.tenantId, tenantId),
-          (0, import_drizzle_orm26.isNull)(populationData.provinceId),
-          (0, import_drizzle_orm26.isNull)(populationData.districtId),
-          (0, import_drizzle_orm26.isNull)(populationData.facilityId)
-        )
-      );
-      const popMap = new Map(popRows.map((p) => [p.villageId, p.totalPopulation]));
+      const popRows = await db.select().from(populationData).where((0, import_drizzle_orm26.and)((0, import_drizzle_orm26.eq)(populationData.tenantId, tenantId), (0, import_drizzle_orm26.isNotNull)(populationData.villageId)));
+      const popMap = /* @__PURE__ */ new Map();
+      for (const p of popRows) {
+        const id = Number(p.villageId);
+        if (!Number.isFinite(id)) continue;
+        const current = popMap.get(id) ?? 0;
+        popMap.set(id, Math.max(current, Number(p.totalPopulation ?? 0)));
+      }
       for (const v of rows) {
         const lat = v.latitude != null ? Number(v.latitude) : null;
         const lng = v.longitude != null ? Number(v.longitude) : null;
@@ -32956,7 +33086,7 @@ This response is powered by the local VaxPlan database query engine. You can que
       res.status(400).json({ message: err?.message || "Failed to generate supervision prefill bundle" });
     }
   });
-  app2.get("/api/supervision/templates/import-template", ...auth, requireTenant, async (req, res) => {
+  app2.get("/api/supervision/templates/import-template/schema", ...auth, requireTenant, async (req, res) => {
     res.json({
       format: "csv_or_xlsx",
       columns: [
@@ -37979,10 +38109,24 @@ function parseTemplateJson(jsonRaw) {
     name: jsonRaw.name,
     category: jsonRaw.category || "supervision",
     description: jsonRaw.description || "",
+    countryCodes: Array.isArray(jsonRaw.countryCodes) ? jsonRaw.countryCodes.map((code) => String(code).toUpperCase()) : [],
     sections,
     items,
     isActive: jsonRaw.isActive ?? true
   };
+}
+function inferTemplateCountryCodes(filename, parsedTemplate) {
+  if (Array.isArray(parsedTemplate.countryCodes) && parsedTemplate.countryCodes.length > 0) {
+    return parsedTemplate.countryCodes;
+  }
+  const normalized = `${filename} ${parsedTemplate.name || ""} ${parsedTemplate.description || ""}`.toLowerCase();
+  if (normalized.includes("southsudan") || normalized.includes("south sudan")) return ["SSD"];
+  return [];
+}
+function isTemplateInScopeForTenant(templateCountryCodes, tenant) {
+  if (templateCountryCodes.length === 0) return true;
+  const tenantCodes = [tenant.code, tenant.country_code, tenant.countryCode].filter(Boolean).map((code) => String(code).toUpperCase());
+  return templateCountryCodes.some((code) => tenantCodes.includes(code));
 }
 async function applySupervisionTemplatesSeed() {
   console.log("[migration:028] Starting Supportive Supervision Templates Seed & Upsert...");
@@ -38019,7 +38163,8 @@ async function applySupervisionTemplatesSeed() {
   const templateFilenames = [
     "Supportive_Supervision_Short_Template.json",
     "Supportive_Supervision_National_Template.json",
-    "Supportive_Supervision_National_Full_Template.json"
+    "Supportive_Supervision_National_Full_Template.json",
+    "EPI_Support_Supervision_SouthSudan_Template.json"
   ];
   const parsedTemplates = [];
   const rootDir = process.cwd();
@@ -38028,7 +38173,12 @@ async function applySupervisionTemplatesSeed() {
     if ((0, import_fs8.existsSync)(fullPath)) {
       try {
         const raw = JSON.parse((0, import_fs8.readFileSync)(fullPath, "utf-8"));
-        parsedTemplates.push(parseTemplateJson(raw));
+        const parsed = parseTemplateJson(raw);
+        parsedTemplates.push({
+          ...parsed,
+          sourceFilename: fname,
+          countryCodes: inferTemplateCountryCodes(fname, parsed)
+        });
       } catch (err) {
         console.error(`[migration:028] Failed to parse ${fname}: ${err.message}`);
       }
@@ -38041,14 +38191,33 @@ async function applySupervisionTemplatesSeed() {
     return;
   }
   try {
-    const tenantsRes = await db.execute(import_drizzle_orm50.sql`SELECT id FROM tenants`);
-    const tenantIds = tenantsRes.rows.map((r) => r.id);
-    if (tenantIds.length === 0) {
+    const tenantsRes = await db.execute(import_drizzle_orm50.sql`SELECT id, code, country_code FROM tenants`);
+    const tenantRows = tenantsRes.rows;
+    const countryScopedTemplates = parsedTemplates.filter((t) => t.countryCodes.length > 0);
+    if (tenantRows.length === 0) {
       console.warn("[migration:028] No tenants found to seed templates.");
       return;
     }
-    for (const tenantId of tenantIds) {
+    for (const t of countryScopedTemplates) {
+      for (const tenant of tenantRows) {
+        if (isTemplateInScopeForTenant(t.countryCodes, tenant)) continue;
+        await db.execute(import_drizzle_orm50.sql`
+          DELETE FROM supervision_checklist_templates
+          WHERE tenant_id = ${tenant.id}
+            AND name = ${t.name}
+            AND description = ${t.description}
+        `);
+      }
+    }
+    for (const tenant of tenantRows) {
+      const tenantId = tenant.id;
       for (const t of parsedTemplates) {
+        if (!isTemplateInScopeForTenant(t.countryCodes, tenant)) {
+          console.log(
+            `[migration:028] Skipped country-scoped template "${t.name}" for tenant "${tenantId}" (${tenant.country_code || tenant.code}).`
+          );
+          continue;
+        }
         try {
           const checkRes = await db.execute(import_drizzle_orm50.sql`
             SELECT id FROM supervision_checklist_templates
@@ -39284,6 +39453,7 @@ var init_gisPolygons = __esm({
     init_schema();
     init_populationIntelligenceService();
     init_auth();
+    init_storage();
     gisPolygonsRouter = (0, import_express8.Router)();
     gisPolygonsRouter.use(isAuthenticated);
     gisPolygonsRouter.get("/", async (req, res) => {
@@ -39310,6 +39480,12 @@ var init_gisPolygons = __esm({
       try {
         const tenantId = req.user?.tenantId;
         const data = req.body;
+        if (data?.status === "active" || data?.isActive === true || data?.approvalStatus === "approved") {
+          return res.status(409).json({
+            code: "POLYGON_LIFECYCLE_REQUIRED",
+            message: "Approved polygons must be created through the polygon lifecycle workflow."
+          });
+        }
         const [inserted] = await db.insert(gisPolygons).values({
           ...data,
           tenantId
@@ -39324,6 +39500,13 @@ var init_gisPolygons = __esm({
         const tenantId = req.user?.tenantId;
         const id = parseInt(req.params.id, 10);
         const data = req.body;
+        const [current] = await db.select({ id: gisPolygons.id, status: gisPolygons.status, isActive: gisPolygons.isActive }).from(gisPolygons).where((0, import_drizzle_orm53.and)((0, import_drizzle_orm53.eq)(gisPolygons.id, id), (0, import_drizzle_orm53.eq)(gisPolygons.tenantId, tenantId))).limit(1);
+        if (current && (current.status === "active" || current.isActive || data?.status === "active" || data?.isActive === true)) {
+          return res.status(409).json({
+            code: "POLYGON_LIFECYCLE_REQUIRED",
+            message: "Approved polygons must be changed through the polygon lifecycle workflow."
+          });
+        }
         const [updated] = await db.update(gisPolygons).set({ ...data, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm53.and)((0, import_drizzle_orm53.eq)(gisPolygons.id, id), (0, import_drizzle_orm53.eq)(gisPolygons.tenantId, tenantId))).returning();
         if (!updated) return res.status(404).json({ message: "Polygon not found" });
         res.json(updated);
@@ -39335,6 +39518,13 @@ var init_gisPolygons = __esm({
       try {
         const tenantId = req.user?.tenantId;
         const id = parseInt(req.params.id, 10);
+        const [current] = await db.select({ id: gisPolygons.id, status: gisPolygons.status, isActive: gisPolygons.isActive }).from(gisPolygons).where((0, import_drizzle_orm53.and)((0, import_drizzle_orm53.eq)(gisPolygons.id, id), (0, import_drizzle_orm53.eq)(gisPolygons.tenantId, tenantId))).limit(1);
+        if (current && (current.status === "active" || current.isActive)) {
+          return res.status(409).json({
+            code: "POLYGON_LIFECYCLE_REQUIRED",
+            message: "Approved polygons must be archived or replaced through the polygon lifecycle workflow."
+          });
+        }
         await db.delete(gisPolygons).where((0, import_drizzle_orm53.and)((0, import_drizzle_orm53.eq)(gisPolygons.id, id), (0, import_drizzle_orm53.eq)(gisPolygons.tenantId, tenantId)));
         res.json({ success: true });
       } catch (err) {
@@ -39390,7 +39580,9 @@ var init_gisPolygons = __esm({
       try {
         const tenantId = req.user?.tenantId;
         const { geometry, ownerType, ownerId } = req.body;
-        const intelligence = await PopulationIntelligenceService.fetchPolygonPopulation(tenantId, geometry, "ZMB", ownerType, ownerId);
+        const tenant = tenantId ? await storage.getTenant(tenantId) : void 0;
+        const countryCode = String(tenant?.countryCode || tenant?.code || "ZMB").toUpperCase();
+        const intelligence = await PopulationIntelligenceService.fetchPolygonPopulation(tenantId, geometry, countryCode, ownerType, ownerId);
         res.json(intelligence);
       } catch (err) {
         res.status(500).json({ message: "Failed to calculate intelligence", error: err.message });
@@ -40136,6 +40328,92 @@ var init_index = __esm({
         WHERE pd.facility_id = f.id
           AND pd.tenant_id = f.tenant_id
           AND (pd.district_id IS NULL OR pd.province_id IS NULL)
+      `);
+            await pool2.query(`
+        UPDATE population_data pd
+        SET
+          village_id = v.id,
+          facility_id = COALESCE(pd.facility_id, v.assigned_facility_id),
+          district_id = COALESCE(pd.district_id, v.district_id),
+          province_id = COALESCE(pd.province_id, d.province_id)
+        FROM villages v
+        JOIN districts d ON d.id = v.district_id AND d.tenant_id = v.tenant_id
+        WHERE pd.tenant_id = v.tenant_id
+          AND pd.village_id IS NULL
+          AND pd.metadata IS NOT NULL
+          AND (
+            (
+              COALESCE(BTRIM(pd.metadata->>'villageCode'), '') <> ''
+              AND LOWER(v.code) = LOWER(BTRIM(pd.metadata->>'villageCode'))
+            )
+            OR (
+              COALESCE(BTRIM(COALESCE(pd.metadata->>'communityName', pd.metadata->>'villageName', pd.metadata->>'catchmentName')), '') <> ''
+              AND LOWER(v.name) = LOWER(BTRIM(COALESCE(pd.metadata->>'communityName', pd.metadata->>'villageName', pd.metadata->>'catchmentName')))
+            )
+          )
+      `);
+            await pool2.query(`
+        UPDATE population_data pd
+        SET
+          facility_id = f.id,
+          district_id = COALESCE(pd.district_id, f.district_id),
+          province_id = COALESCE(pd.province_id, d.province_id)
+        FROM facilities f
+        JOIN districts d ON d.id = f.district_id AND d.tenant_id = f.tenant_id
+        WHERE pd.tenant_id = f.tenant_id
+          AND pd.facility_id IS NULL
+          AND pd.metadata IS NOT NULL
+          AND (
+            (
+              COALESCE(BTRIM(pd.metadata->>'facilityHmisCode'), '') <> ''
+              AND LOWER(f.hmis_code) = LOWER(BTRIM(pd.metadata->>'facilityHmisCode'))
+            )
+            OR (
+              COALESCE(BTRIM(COALESCE(pd.metadata->>'facilityName', pd.metadata->>'healthFacilityName', pd.metadata->>'hfName')), '') <> ''
+              AND LOWER(f.name) = LOWER(BTRIM(COALESCE(pd.metadata->>'facilityName', pd.metadata->>'healthFacilityName', pd.metadata->>'hfName')))
+            )
+          )
+      `);
+            await pool2.query(`
+        WITH latest AS (
+          SELECT DISTINCT ON (tenant_id, village_id)
+            tenant_id,
+            village_id,
+            total_population,
+            under_5_population,
+            source
+          FROM population_data
+          WHERE village_id IS NOT NULL
+          ORDER BY tenant_id, village_id, year DESC, updated_at DESC NULLS LAST, id DESC
+        )
+        UPDATE villages v
+        SET
+          total_catchment_population = latest.total_population,
+          under5_population = COALESCE(latest.under_5_population, v.under5_population),
+          gridded_population = CASE WHEN latest.source = 'worldpop' THEN latest.total_population ELSE v.gridded_population END,
+          population_source_label = CASE WHEN latest.source = 'worldpop' THEN 'WorldPop' ELSE v.population_source_label END,
+          updated_at = NOW()
+        FROM latest
+        WHERE v.tenant_id = latest.tenant_id
+          AND v.id = latest.village_id
+      `);
+            await pool2.query(`
+        WITH agg AS (
+          SELECT
+            tenant_id,
+            assigned_facility_id AS facility_id,
+            COALESCE(SUM(COALESCE(gridded_population, total_catchment_population, 0)), 0)::int AS total
+          FROM villages
+          WHERE assigned_facility_id IS NOT NULL
+          GROUP BY tenant_id, assigned_facility_id
+        )
+        UPDATE facilities f
+        SET
+          catchment_grid_population = agg.total,
+          updated_at = NOW()
+        FROM agg
+        WHERE f.tenant_id = agg.tenant_id
+          AND f.id = agg.facility_id
       `);
             log("population geo-ID backfill complete", "db");
           } catch (err) {

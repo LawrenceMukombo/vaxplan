@@ -870,8 +870,8 @@ export default function SupervisionTemplates() {
       ) : (
         /* Full Builder Canvas */
         <div className="space-y-4">
-          {/* Top Sticky Header & Action Bar Container */}
-          <div className="sticky top-0 z-30 bg-background/95 backdrop-blur-md border border-border/80 p-4 rounded-xl shadow-md space-y-3">
+          {/* Sticky Header & Action Bar Container */}
+          <div className="sticky top-20 z-40 bg-background/95 backdrop-blur-md border border-border/80 p-4 rounded-xl shadow-md space-y-3">
             {/* Header Title Row */}
             <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-2 border-b border-border/40 pb-2">
               <div>
@@ -892,9 +892,9 @@ export default function SupervisionTemplates() {
             </div>
 
             {/* Action Toolbar Row */}
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="flex flex-wrap items-center gap-2">
-                <div className="flex items-center gap-1.5 border-r border-border/50 pr-2">
+            <div className="grid gap-3">
+              <div className="grid gap-2 xl:grid-cols-[minmax(18rem,1fr)_minmax(16rem,1fr)_12rem] xl:items-end">
+                <div className="flex min-w-0 flex-col gap-1.5">
                   <span className="text-xs font-semibold text-muted-foreground shrink-0">Saved Checklists:</span>
                   <Select
                     value={editing?.id ? String(editing.id) : "new"}
@@ -907,7 +907,7 @@ export default function SupervisionTemplates() {
                       }
                     }}
                   >
-                    <SelectTrigger className="w-56 md:w-72 h-9 text-xs font-bold border-indigo-500/40 bg-background" data-testid="select-saved-checklist">
+                    <SelectTrigger className="h-9 w-full text-xs font-bold border-indigo-500/40 bg-background" data-testid="select-saved-checklist">
                       <SelectValue placeholder="Retrieve saved checklist..." />
                     </SelectTrigger>
                     <SelectContent>
@@ -944,10 +944,10 @@ export default function SupervisionTemplates() {
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   placeholder="Checklist Title (e.g. Routine Supportive Supervision)"
-                  className="w-56 md:w-72 h-9 font-semibold text-sm"
+                  className="h-9 w-full min-w-0 font-semibold text-sm"
                 />
                 <Select value={category} onValueChange={(v: any) => setCategory(v)}>
-                  <SelectTrigger className="w-36 h-9 text-xs font-bold border-primary/40 bg-background" data-testid="select-category-type">
+                  <SelectTrigger className="h-9 w-full text-xs font-bold border-primary/40 bg-background" data-testid="select-category-type">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -959,8 +959,8 @@ export default function SupervisionTemplates() {
                 </Select>
               </div>
 
-              {/* STICKY ACTION BUTTONS */}
-              <div className="flex items-center gap-2 flex-wrap">
+              {/* Action buttons */}
+              <div className="flex flex-wrap items-center gap-2 border-t border-border/40 pt-2">
                 {isValid ? (
                   <Badge variant="outline" className="text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border-emerald-500/30 text-[11px] gap-1 font-semibold" data-testid="badge-validation-valid">
                     <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" /> 100% Valid ({items.length} Qs)
@@ -1083,7 +1083,7 @@ export default function SupervisionTemplates() {
           {/* Builder Workspace: 3-Panel Layout */}
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
             {/* Left Panel: Sections & Outline */}
-            <Card className="lg:col-span-3 border-border/60 sticky top-36 max-h-[calc(100vh-10rem)] overflow-y-auto shadow-sm">
+            <Card className="lg:col-span-3 border-border/60 lg:sticky lg:top-72 lg:max-h-[calc(100vh-19rem)] overflow-y-auto shadow-sm">
               <CardHeader className="p-3 border-b border-border/40 flex flex-row items-center justify-between">
                 <CardTitle className="text-sm font-semibold flex items-center gap-1.5">
                   <Layers className="h-4 w-4 text-primary" />
@@ -1389,7 +1389,7 @@ export default function SupervisionTemplates() {
              </div>
 
             {/* Right Panel: Selected Question Settings & Logic Drawer */}
-            <Card className="lg:col-span-3 border-border/60 sticky top-36 max-h-[calc(100vh-10rem)] overflow-y-auto shadow-sm">
+            <Card className="lg:col-span-3 border-border/60 lg:sticky lg:top-72 lg:max-h-[calc(100vh-19rem)] overflow-y-auto shadow-sm">
               <CardHeader className="p-3 border-b border-border/40">
                 <CardTitle className="text-sm font-semibold flex items-center gap-1.5">
                   <Sliders className="h-4 w-4 text-primary" />
@@ -1536,12 +1536,12 @@ export default function SupervisionTemplates() {
                     </div>
 
                     {/* Follow-up / Conditional Display Logic */}
-                    <div className="space-y-2 pt-2 border-t border-border/40">
+                    <div className="space-y-2 pt-3 border-t border-border/40">
                       <Label className="text-xs font-semibold flex items-center gap-1.5 text-indigo-600 dark:text-indigo-400">
                         <GitBranch className="h-3.5 w-3.5" />
                         Follow-Up / Conditional Display
                       </Label>
-                      <div>
+                      <div className="rounded-lg border border-border/50 bg-background p-2">
                         <Label className="text-[10px] text-muted-foreground">Parent Question (Condition)</Label>
                         <Select
                           value={selectedItem.conditionalOnQuestionId || "none"}
@@ -1555,7 +1555,7 @@ export default function SupervisionTemplates() {
                           <SelectTrigger className="h-8 text-xs mt-1" data-testid="select-drawer-conditional-parent">
                             <SelectValue placeholder="No parent condition (Always show)" />
                           </SelectTrigger>
-                          <SelectContent>
+                          <SelectContent className="max-h-72">
                             <SelectItem value="none" className="text-xs text-muted-foreground">
                               None (Always Visible)
                             </SelectItem>

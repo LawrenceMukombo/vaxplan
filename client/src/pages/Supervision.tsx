@@ -338,7 +338,7 @@ export default function Supervision() {
       const lastScore = lastConducted && typeof lastConducted.score === "number" ? lastConducted.score : null;
       let status: Row["status"];
       if (!lastConducted) status = "overdue";
-      else if ((daysSinceLast ?? 0) > 90 || (lastScore !== null && lastScore < 50)) status = "overdue";
+      else if ((daysSinceLast ?? 0) > 90 || (lastScore !== null && lastScore < 60)) status = "overdue";
       else if ((daysSinceLast ?? 0) > 60) status = "due_soon";
       else status = "current";
       return { facility: f, lastConducted, lastScheduled, daysSinceLast, lastScore, status };

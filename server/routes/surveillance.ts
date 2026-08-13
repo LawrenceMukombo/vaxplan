@@ -214,12 +214,15 @@ surveillanceRouter.get("/cases/kpis", async (req: any, res) => {
 // Population choropleth data (district populations by source for heatmap)
 surveillanceRouter.get("/population/choropleth", async (req: any, res) => {
   try {
-    const source = (req.query.source as string) || "nso";
+    const requestedSource = String(req.query.source || "worldpop").toLowerCase();
+    const source = ["nso", "hmis", "worldpop", "survey", "community_census"].includes(requestedSource)
+      ? requestedSource
+      : "worldpop";
     const tenantId = req.tenantId;
     const rows = await db
       .select({
         districtId: populationData.districtId,
-        population: sql<number>`SUM(${populationData.totalPopulation})`,
+        population: sql<number>`COALESCE(SUM(${populationData.totalPopulation}), 0)`.mapWith(Number),
       })
       .from(populationData)
       .where(

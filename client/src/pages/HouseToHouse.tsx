@@ -104,6 +104,7 @@ export default function HouseToHouse() {
       return res.json();
     },
   });
+  const activeTemplates = templates.filter((t) => t.isActive);
 
   const { data: facilities = [] } = useQuery<any[]>({ queryKey: ["/api/facilities"] });
 
@@ -272,7 +273,7 @@ export default function HouseToHouse() {
                     if (v === "__default__") {
                       setChecklistItems(H2H_CHECKLIST.map((c) => ({ ...c, response: "" })));
                     } else {
-                      const chosen = templates.find((t) => String(t.id) === v);
+                      const chosen = activeTemplates.find((t) => String(t.id) === v);
                       if (chosen) {
                         setChecklistItems(templateToAnswers(chosen.items));
                       }
@@ -283,7 +284,7 @@ export default function HouseToHouse() {
                   <SelectTrigger data-testid="select-h2h-template"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="__default__">Default H2H Checklist</SelectItem>
-                    {templates.map((t) => (
+                    {activeTemplates.map((t) => (
                       <SelectItem key={t.id} value={String(t.id)}>{t.name}</SelectItem>
                     ))}
                   </SelectContent>

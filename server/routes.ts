@@ -6,7 +6,7 @@ import { validateClientImportBatch, checkClientHasLinkedRecords } from "./servic
 import express, { type Express, type Request } from "express";
 import { createServer, type Server } from "http";
 import PDFDocument from "pdfkit";
-import { storage } from "./storage";
+import { refreshFacilityPopulationAggregate, storage } from "./storage";
 import { setupAuth, isAuthenticated, getCurrentUserId, ensureDbUserFromSession } from "./auth";
 
 
@@ -128,7 +128,7 @@ import { z } from "zod";
 import { db, pool } from "./db";
 import { readFileSync, existsSync, readdirSync, createReadStream, createWriteStream, writeFileSync, mkdirSync, unlinkSync } from "fs";
 import { join, basename } from "path";
-import { eq, and, or, asc, desc, ne, inArray, gte, lte, like, ilike, isNull, gt, sql as dsql } from "drizzle-orm";
+import { eq, and, or, asc, desc, ne, inArray, gte, lte, like, ilike, isNull, isNotNull, gt, sql as dsql } from "drizzle-orm";
 import {
   fetchGeoBoundariesGeoJSON,
   calcBBox,
@@ -4470,21 +4470,33 @@ export async function registerRoutes(
 
         if (vLat === null || vLng === null) continue;
 
-        // Fetch OSRM route; fall back to straight-line estimate on failure
-        const routeData = await fetchOsrmRoute(fLng, fLat, vLng, vLat);
+        const savedDistance = village.distanceToFacility != null ? Number(village.distanceToFacility) : NaN;
+        const savedTravelMinutes = village.travelTimeMinutes != null ? Number(village.travelTimeMinutes) : NaN;
         let roadDistanceKm: number;
         let drivingMin: number;
-        let geometry: [number, number][];
+        let geometry: [number, number][] | null = null;
+        let routeSource: "osrm" | "estimate" = "estimate";
 
-        if (routeData) {
+        // Always try to recover a real road geometry for display. Saved legacy
+        // distances are useful for metrics, but turning them into two-point
+        // LineStrings draws misleading straight links on the map.
+        const routeData = await fetchOsrmRoute(fLng, fLat, vLng, vLat);
+        if (routeData?.geometry && routeData.geometry.length >= 2) {
           roadDistanceKm = routeData.roadDistanceKm;
           drivingMin = routeData.drivingMin;
-          geometry = routeData.geometry ?? [[fLng, fLat], [vLng, vLat]];
+          geometry = routeData.geometry;
+          routeSource = "osrm";
         } else {
-          const straightLineKm = haversineKm(fLat, fLng, vLat, vLng);
-          roadDistanceKm = parseFloat(straightLineKm.toFixed(2));
-          drivingMin = Math.round((straightLineKm / 40) * 60);
-          geometry = [[fLng, fLat], [vLng, vLat]];
+          if (Number.isFinite(savedDistance) && savedDistance > 0) {
+            roadDistanceKm = parseFloat(savedDistance.toFixed(2));
+            drivingMin = Number.isFinite(savedTravelMinutes) && savedTravelMinutes > 0
+              ? Math.round(savedTravelMinutes)
+              : Math.round((savedDistance / 40) * 60);
+          } else {
+            const straightLineKm = haversineKm(fLat, fLng, vLat, vLng);
+            roadDistanceKm = parseFloat(straightLineKm.toFixed(2));
+            drivingMin = Math.round((straightLineKm / 40) * 60);
+          }
         }
 
         const walkingMin = Math.round((roadDistanceKm / 5) * 60);
@@ -4508,6 +4520,8 @@ export async function registerRoutes(
           transportMode: (village as any).transportMode || "walking",
           accessibilityScore,
           routeGeometry: geometry,
+          routeSource,
+          hasRoadGeometry: routeSource === "osrm" && Array.isArray(geometry) && geometry.length >= 2,
           seasonalAccessibility: (village as any).seasonalAccessibility || "Dry / Rainy",
           referralRoute,
           isDirectlyAssigned: !!(village as any).assignedFacilityId &&
@@ -6337,6 +6351,15 @@ export async function registerRoutes(
             approvalStatus: "approved",
           });
       }
+      await dbInstance
+        .update(villages)
+        .set({
+          totalCatchmentPopulation: Number(totalPop ?? 0),
+          under5Population: Number(under5Pop ?? 0),
+          updatedAt: new Date(),
+        })
+        .where(and(eq(villages.tenantId, tenantId), eq(villages.id, villageId)));
+      await refreshFacilityPopulationAggregate(tenantId, villageRow.assignedFacilityId ?? null);
       return totalPop;
     } catch (err) {
       console.error(`Error estimating/saving population for village ${villageId}:`, err);
@@ -6362,6 +6385,19 @@ export async function registerRoutes(
           isHardToReach: villages.isHardToReach,
           latitude: villages.latitude,
           longitude: villages.longitude,
+          code: villages.code,
+          distanceToFacility: villages.distanceToFacility,
+          travelTimeMinutes: villages.travelTimeMinutes,
+          transportMode: villages.transportMode,
+          seasonalAccessibility: villages.seasonalAccessibility,
+          settlementType: villages.settlementType,
+          totalCatchmentPopulation: villages.totalCatchmentPopulation,
+          griddedPopulation: villages.griddedPopulation,
+          under5Population: villages.under5Population,
+          outreachLatitude: villages.outreachLatitude,
+          outreachLongitude: villages.outreachLongitude,
+          outreachPostName: villages.outreachPostName,
+          population: dsql<number>`COALESCE(${villages.griddedPopulation}, ${villages.totalCatchmentPopulation}, 0)`.mapWith(Number),
         })
         .from(villages)
         .where(eq(villages.tenantId, req.tenantId));
@@ -8126,7 +8162,10 @@ export async function registerRoutes(
             .where(eq(populationData.id, existing.id))
             .returning();
           updatedCount++;
-          if (updated) savedRecords.push(updated);
+          if (updated) {
+            savedRecords.push(updated);
+            await storage.refreshPopulationOwnerAggregates(req.tenantId, updated);
+          }
         } else {
           const [created] = await db
             .insert(populationData)
@@ -8153,7 +8192,10 @@ export async function registerRoutes(
             })
             .returning();
           createdCount++;
-          if (created) savedRecords.push(created);
+          if (created) {
+            savedRecords.push(created);
+            await storage.refreshPopulationOwnerAggregates(req.tenantId, created);
+          }
         }
       }
 
@@ -11450,7 +11492,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/supervision-checklist-templates", ...auth, loadRole, async (req: any, res) => {
+  app.post("/api/supervision-checklist-templates", ...auth, loadRole, requirePermission("manage_users"), async (req: any, res) => {
     try {
       const data = insertSupervisionChecklistTemplateSchema.parse(req.body);
       const t = await storage.createChecklistTemplate(req.tenantId, req.user?.claims?.sub ?? null, data);
@@ -11466,7 +11508,7 @@ export async function registerRoutes(
     }
   });
 
-  app.patch("/api/supervision-checklist-templates/:id", ...auth, loadRole, async (req: any, res) => {
+  app.patch("/api/supervision-checklist-templates/:id", ...auth, loadRole, requirePermission("manage_users"), async (req: any, res) => {
     try {
       const id = parseInt(req.params.id);
       const old = await storage.getChecklistTemplate(req.tenantId, id);
@@ -11484,7 +11526,7 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/supervision-checklist-templates/:id", ...auth, loadRole, async (req: any, res) => {
+  app.delete("/api/supervision-checklist-templates/:id", ...auth, loadRole, requirePermission("manage_users"), async (req: any, res) => {
     try {
       const id = parseInt(req.params.id);
       const old = await storage.getChecklistTemplate(req.tenantId, id);
@@ -18434,6 +18476,8 @@ export async function registerRoutes(
       const results: BulkResult[] = [];
       const facilityCache = new Map<number, any>();
       const microplanCache = new Map<number, any>();
+      const sessionPlanCache = new Map<number, any>();
+      const templateCache = new Map<number, any>();
       for (const item of parsed.items) {
         const clientId = item.clientId;
         try {
@@ -18454,6 +18498,14 @@ export async function registerRoutes(
             if (!microplanCache.has(mid)) microplanCache.set(mid, await storage.getMicroplan(req.tenantId, mid));
             return microplanCache.get(mid);
           };
+          const checkSessionPlan = async (sid: number) => {
+            if (!sessionPlanCache.has(sid)) sessionPlanCache.set(sid, await storage.getSessionPlan(req.tenantId, sid));
+            return sessionPlanCache.get(sid);
+          };
+          const checkTemplate = async (tid: number) => {
+            if (!templateCache.has(tid)) templateCache.set(tid, await storage.getChecklistTemplate(req.tenantId, tid));
+            return templateCache.get(tid);
+          };
 
           if (id != null) {
             if (body.facilityId && !(await checkFacility(body.facilityId))) {
@@ -18462,6 +18514,14 @@ export async function registerRoutes(
             }
             if (body.microplanId && !(await checkMicroplan(body.microplanId))) {
               results.push({ clientId, ok: false, error: "Microplan does not belong to this tenant" });
+              continue;
+            }
+            if (body.sessionPlanId && !(await checkSessionPlan(body.sessionPlanId))) {
+              results.push({ clientId, ok: false, error: "Session plan does not belong to this tenant" });
+              continue;
+            }
+            if (body.templateId && !(await checkTemplate(body.templateId))) {
+              results.push({ clientId, ok: false, error: "Checklist template does not belong to this tenant" });
               continue;
             }
             const old = await storage.getSupervisionVisit(req.tenantId, Number(id));
@@ -18493,6 +18553,14 @@ export async function registerRoutes(
             }
             if (data.microplanId && !(await checkMicroplan(data.microplanId))) {
               results.push({ clientId, ok: false, error: "Microplan does not belong to this tenant" });
+              continue;
+            }
+            if (data.sessionPlanId && !(await checkSessionPlan(data.sessionPlanId))) {
+              results.push({ clientId, ok: false, error: "Session plan does not belong to this tenant" });
+              continue;
+            }
+            if (data.templateId && !(await checkTemplate(data.templateId))) {
+              results.push({ clientId, ok: false, error: "Checklist template does not belong to this tenant" });
               continue;
             }
             if (data.facilityId && !(await userCanAccessGeo(req.dbUser, req.tenantId, { facilityId: Number(data.facilityId) }))) {
@@ -18610,15 +18678,14 @@ export async function registerRoutes(
       const popRows = await db
         .select()
         .from(populationData)
-        .where(
-          and(
-            eq(populationData.tenantId, tenantId),
-            isNull(populationData.provinceId),
-            isNull(populationData.districtId),
-            isNull(populationData.facilityId)
-          )
-        );
-      const popMap = new Map(popRows.map(p => [p.villageId, p.totalPopulation]));
+        .where(and(eq(populationData.tenantId, tenantId), isNotNull(populationData.villageId)));
+      const popMap = new Map<number, number>();
+      for (const p of popRows) {
+        const id = Number(p.villageId);
+        if (!Number.isFinite(id)) continue;
+        const current = popMap.get(id) ?? 0;
+        popMap.set(id, Math.max(current, Number(p.totalPopulation ?? 0)));
+      }
 
       for (const v of rows) {
         const lat = v.latitude != null ? Number(v.latitude) : null;
@@ -22347,8 +22414,8 @@ Instructions:
     }
   });
 
-  // GET /api/supervision/templates/import-template — Download question import template CSV/XLSX format description
-  app.get("/api/supervision/templates/import-template", ...auth, requireTenant, async (req: any, res) => {
+  // GET /api/supervision/templates/import-template/schema — Question import template CSV/XLSX format description
+  app.get("/api/supervision/templates/import-template/schema", ...auth, requireTenant, async (req: any, res) => {
     res.json({
       format: "csv_or_xlsx",
       columns: [
