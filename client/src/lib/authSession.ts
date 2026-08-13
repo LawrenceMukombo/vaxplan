@@ -57,6 +57,23 @@ export function clearLogoutState(): void {
   safeLocalStorage()?.removeItem(LOGOUT_STATE_KEY);
 }
 
+export function completePendingServerLogout(): void {
+  const storage = safeLocalStorage();
+  if (!storage) return;
+
+  const logout = getLogoutState();
+  if (!logout?.pendingServerLogout) return;
+
+  storage.setItem(
+    LOGOUT_STATE_KEY,
+    JSON.stringify({
+      ...logout,
+      pendingServerLogout: false,
+      message: logout.message ?? "You have been signed out.",
+    }),
+  );
+}
+
 export function recordOnlineAuthSession(user: User | null | undefined): void {
   const storage = safeLocalStorage();
   if (!storage || !user?.id) return;

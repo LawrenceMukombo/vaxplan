@@ -50,6 +50,7 @@ import {
 import type { User } from "@shared/schema";
 import { DEFAULT_MODULES } from "@/lib/modules";
 import { canAccessAdministration, canAccessClientLogbook, canAccessDefaulterList, canAccessDropoutRates, canAccessHisIntegrations, canAccessUserManagement, hasAnyPermission } from "@/lib/accessControl";
+import { performClientLogout } from "@/lib/logout";
 
 interface TenantSummary {
   id: string;
@@ -455,7 +456,7 @@ export function GlobalSearch({ user }: GlobalSearchProps) {
       title: "Log Out",
       description: "Safely end the current session and sign out",
       action: () => {
-        window.location.assign("/api/logout");
+        void performClientLogout({ reason: "global_search_logout" });
       },
       icon: LogOut,
       group: "Quick Actions",

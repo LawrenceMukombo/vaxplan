@@ -37,7 +37,7 @@ import {
   LOGOUT_BROADCAST_KEY,
   LOGOUT_CHANNEL,
 } from "./lib/authSession";
-import { performClientLogout } from "./lib/logout";
+import { flushPendingServerLogout, performClientLogout } from "./lib/logout";
 import { canAccessClientLogbook, canAccessDefaulterList, canAccessHisIntegrations, canAccessSessionPlanning, canAccessUserManagement, canPlanSessions } from "@/lib/accessControl";
 import type { User } from "@shared/schema";
 const Dashboard = lazy(() => import("@/pages/Dashboard"));
@@ -458,15 +458,6 @@ function AuthenticatedLayout() {
       window.removeEventListener("storage", handleStorage);
     };
   }, []);
-  useEffect(() => {
-    const logoutState = getLogoutState();
-    if (logoutState?.pendingServerLogout && typeof navigator !== "undefined" && navigator.onLine) {
-      fetch(`/api/logout?reason=${encodeURIComponent(logoutState.reason ?? "offline_logout")}&format=json`, {
-        credentials: "include",
-        headers: { Accept: "application/json" },
-      }).catch(() => {});
-    }
-  }, []);
   // Task #106 - surface a toast when the offline outbox replays a mark-done
   // and the server reports antigen codes outside the tenant's vaccine schedule.
   useUnmappedAntigenWarnings();
@@ -548,6 +539,24 @@ function App() {
   const host = typeof window !== "undefined" ? window.location.hostname : "";
   const isResearch = host.startsWith("research.") || host.startsWith("reasearch.");
   const isDocs = host.startsWith("doc.") || host.startsWith("docs.");
+
+  useEffect(() => {
+    const flushLogout = () => {
+      const logoutState = getLogoutState();
+      if (logoutState?.pendingServerLogout && typeof navigator !== "undefined" && navigator.onLine) {
+        flushPendingServerLogout(logoutState.reason ?? "offline_logout");
+      }
+    };
+
+    flushLogout();
+    window.addEventListener("online", flushLogout);
+    window.addEventListener("focus", flushLogout);
+    return () => {
+      window.removeEventListener("online", flushLogout);
+      window.removeEventListener("focus", flushLogout);
+    };
+  }, []);
+
   // Task #276 - the basemap attribution credit on every Leaflet map ends with a
   // "Data sources" link (see CARTO_POSITRON_ATTRIBUTION / CARTO_VOYAGER_ATTRIBUTION).
   // Leaflet renders attribution as raw HTML outside React, so a delegated click
