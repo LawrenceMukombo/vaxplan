@@ -7087,6 +7087,178 @@ var init_mailer = __esm({
   }
 });
 
+// server/services/notificationService.ts
+async function notifyAdminNewSignupRequest(request, tenant) {
+  const tenantName = tenant?.name || "VaxPlan Platform";
+  const countryCode = tenant?.countryCode || "";
+  const roleDisplay = request.requestedRole.replace(/_/g, " ").toUpperCase();
+  const reviewUrl = `${APP_BASE_URL}/admin/signups`;
+  const subject = `[VaxPlan Action Required] New Access Request: ${request.fullName} (${tenantName})`;
+  const text2 = `A new user has submitted a self-service access request for VaxPlan.
+
+Applicant Name: ${request.fullName}
+Email Address: ${request.email}
+Tenant / Country: ${tenantName} ${countryCode ? `(${countryCode})` : ""}
+Requested Role: ${roleDisplay}
+` + (request.justification ? `Justification: ${request.justification}
+
+` : `
+`) + `Review and decide this request in the Admin Portal:
+${reviewUrl}
+
+VaxPlan Immunization Intelligence Platform`;
+  const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; color: #1e293b; line-height: 1.6;">
+      <div style="background-color: #0284c7; padding: 20px; text-align: center; border-radius: 8px 8px 0 0;">
+        <h2 style="color: #ffffff; margin: 0; font-size: 20px;">VaxPlan Access Request</h2>
+      </div>
+      <div style="padding: 24px; border: 1px solid #e2e8f0; border-top: none; border-radius: 0 0 8px 8px; background: #ffffff;">
+        <p style="font-size: 15px;">A new user has submitted an access request for your platform.</p>
+        <table style="width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 14px;">
+          <tr>
+            <td style="padding: 8px 12px; background: #f8fafc; font-weight: bold; width: 35%;">Applicant:</td>
+            <td style="padding: 8px 12px; border-bottom: 1px solid #f1f5f9;">${request.fullName}</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px 12px; background: #f8fafc; font-weight: bold;">Work Email:</td>
+            <td style="padding: 8px 12px; border-bottom: 1px solid #f1f5f9;"><a href="mailto:${request.email}">${request.email}</a></td>
+          </tr>
+          <tr>
+            <td style="padding: 8px 12px; background: #f8fafc; font-weight: bold;">Tenant / Country:</td>
+            <td style="padding: 8px 12px; border-bottom: 1px solid #f1f5f9;">${tenantName}</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px 12px; background: #f8fafc; font-weight: bold;">Requested Role:</td>
+            <td style="padding: 8px 12px; border-bottom: 1px solid #f1f5f9; color: #0284c7; font-weight: bold;">${roleDisplay}</td>
+          </tr>
+          ${request.justification ? `<tr>
+            <td style="padding: 8px 12px; background: #f8fafc; font-weight: bold;">Justification:</td>
+            <td style="padding: 8px 12px;">${request.justification}</td>
+          </tr>` : ""}
+        </table>
+        <div style="text-align: center; margin: 28px 0 16px;">
+          <a href="${reviewUrl}" style="background-color: #0284c7; color: #ffffff; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;">
+            Review Access Request
+          </a>
+        </div>
+      </div>
+      <div style="text-align: center; padding: 16px; font-size: 12px; color: #64748b;">
+        VaxPlan Digital Immunization Platform \xB7 <a href="${APP_BASE_URL}" style="color: #0284c7;">vaxplan.org</a>
+      </div>
+    </div>
+  `;
+  await sendEmail({
+    to: PLATFORM_ADMIN_EMAIL,
+    subject,
+    text: text2,
+    html,
+    tenant
+  }).catch((err) => console.error("[NotificationService] Admin signup alert failed:", err));
+}
+async function notifyUserSignupDecision(request, tenant) {
+  const isApproved = request.status === "approved";
+  const tenantName = tenant?.name || "Republic of South Africa National Department of Health";
+  const roleDisplay = request.requestedRole.replace(/_/g, " ").toUpperCase();
+  const loginUrl = `${APP_BASE_URL}/`;
+  const subject = isApproved ? `Your VaxPlan Access Request Has Been Approved \u2013 ${roleDisplay}` : `Update on your VaxPlan Access Request`;
+  const text2 = isApproved ? `Dear ${request.fullName},
+
+We are pleased to inform you that your access request for the VaxPlan Digital Microplanning & Immunization Intelligence Platform has been approved.
+
+Account Details:
+- Portal URL: ${loginUrl}
+- Registered Email: ${request.email}
+- Assigned Role: ${roleDisplay}
+- Tenant: ${tenantName}
+
+You can now sign in at ${loginUrl} using your registered email and password.
+
+Warm regards,
+VaxPlan Platform Administration
+${APP_BASE_URL}` : `Dear ${request.fullName},
+
+Thank you for your interest in VaxPlan. Your access request for ${tenantName} was reviewed and could not be approved at this time.
+
+` + (request.decisionReason ? `Reason: ${request.decisionReason}
+
+` : "") + `If you believe this was in error, please contact your national or district administrator.
+
+Warm regards,
+VaxPlan Platform Administration`;
+  const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; color: #1e293b; line-height: 1.6;">
+      <div style="background-color: ${isApproved ? "#059669" : "#dc2626"}; padding: 20px; text-align: center; border-radius: 8px 8px 0 0;">
+        <h2 style="color: #ffffff; margin: 0; font-size: 20px;">
+          ${isApproved ? "Access Request Approved" : "Access Request Update"}
+        </h2>
+      </div>
+      <div style="padding: 24px; border: 1px solid #e2e8f0; border-top: none; border-radius: 0 0 8px 8px; background: #ffffff;">
+        <p style="font-size: 15px;">Dear <strong>${request.fullName}</strong>,</p>
+        ${isApproved ? `<p>We are pleased to inform you that your access request for the <strong>VaxPlan Platform</strong> has been approved.</p>
+               <div style="background: #f0fdf4; border: 1px solid #bbf7d0; padding: 16px; border-radius: 6px; margin: 16px 0;">
+                 <p style="margin: 4px 0;"><strong>Portal:</strong> <a href="${loginUrl}">${loginUrl}</a></p>
+                 <p style="margin: 4px 0;"><strong>Email:</strong> ${request.email}</p>
+                 <p style="margin: 4px 0;"><strong>Role:</strong> <span style="color: #059669; font-weight: bold;">${roleDisplay}</span></p>
+                 <p style="margin: 4px 0;"><strong>Tenant:</strong> ${tenantName}</p>
+               </div>
+               <p>You can now sign in using your registered credentials to access your microplanning, logbook, and supervisory tools.</p>
+               <div style="text-align: center; margin: 28px 0 16px;">
+                 <a href="${loginUrl}" style="background-color: #059669; color: #ffffff; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;">
+                   Sign In to VaxPlan
+                 </a>
+               </div>` : `<p>Thank you for your interest in VaxPlan. Your access request for <strong>${tenantName}</strong> was reviewed and could not be approved at this time.</p>
+               ${request.decisionReason ? `<p style="background: #fef2f2; border: 1px solid #fecaca; padding: 12px; border-radius: 6px;"><strong>Note:</strong> ${request.decisionReason}</p>` : ""}
+               <p>If you believe this was in error, please contact your district or national health supervisor.</p>`}
+      </div>
+      <div style="text-align: center; padding: 16px; font-size: 12px; color: #64748b;">
+        VaxPlan Digital Immunization Platform \xB7 <a href="${APP_BASE_URL}" style="color: #0284c7;">vaxplan.org</a>
+      </div>
+    </div>
+  `;
+  await sendEmail({
+    to: request.email,
+    subject,
+    text: text2,
+    html,
+    tenant
+  }).catch((err) => console.error("[NotificationService] User signup decision notice failed:", err));
+  await sendEmail({
+    to: PLATFORM_ADMIN_EMAIL,
+    subject: `[Audit Copy] Signup ${isApproved ? "Approved" : "Rejected"}: ${request.fullName} (${request.email})`,
+    text: text2,
+    html,
+    tenant
+  }).catch(() => {
+  });
+}
+async function notifyAdminNewCountryInterest(lead) {
+  const subject = `[VaxPlan Country Lead] New Onboarding Interest: ${lead.countryName} (${lead.countryCode})`;
+  const text2 = `New country onboarding inquiry received on VaxPlan:
+
+Country: ${lead.countryName} (${lead.countryCode})
+Organization: ${lead.organization || "Not provided"}
+Contact Name: ${lead.fullName}
+Email: ${lead.email}
+Role: ${lead.requestedRole}
+` + (lead.justification ? `Message: ${lead.justification}
+
+` : "\n\n") + `VaxPlan Platform Onboarding`;
+  await sendEmail({
+    to: PLATFORM_ADMIN_EMAIL,
+    subject,
+    text: text2
+  }).catch((err) => console.error("[NotificationService] Lead alert failed:", err));
+}
+var PLATFORM_ADMIN_EMAIL, APP_BASE_URL;
+var init_notificationService = __esm({
+  "server/services/notificationService.ts"() {
+    "use strict";
+    init_mailer();
+    PLATFORM_ADMIN_EMAIL = process.env.ADMIN_ALERT_EMAIL || "info@vaxplan.org";
+    APP_BASE_URL = process.env.APP_BASE_URL || "https://vaxplan.org";
+  }
+});
+
 // server/services/uce/queue.ts
 var import_bullmq, import_ioredis, isRedisConfigured, redisConnection, lastErrorTime, communicationQueue;
 var init_queue = __esm({
@@ -18086,24 +18258,35 @@ async function registerRoutes(httpServer2, app2) {
       res.status(500).json({ message: "Failed to fetch user" });
     }
   });
+  const FALLBACK_PUBLIC_TENANTS = [
+    { id: "8c2f81fb-06f3-4688-90ea-e9ae27d73191", code: "PNG", name: "Papua New Guinea National Department of Health", countryCode: "PNG", status: "active", settings: {} },
+    { id: "705728db-4892-49d7-9b67-35aa67c7574b", code: "SSD", name: "Republic of South Sudan Ministry of Health", countryCode: "SSD", status: "active", settings: {} },
+    { id: "4bb7abba-11cd-4c99-96c2-eedc8a4dfd06", code: "ZMB", name: "Republic of Zambia Ministry of Health", countryCode: "ZMB", status: "active", settings: {} },
+    { id: "22571429-f7dd-4f1d-9dea-abdfbf4dc115", code: "BW", name: "Republic of Botswana Ministry of Health", countryCode: "BWA", status: "active", settings: {} },
+    { id: "08083581-cf5e-47d7-b3ed-a97b10be01ba", code: "KEN", name: "Republic of Kenya Ministry of Health", countryCode: "KEN", status: "active", settings: {} },
+    { id: "1a39bf12-bf10-4415-b2dd-96f1ece09b75", code: "VNM", name: "Republic of Vietnam Ministry of Health", countryCode: "VNM", status: "active", settings: {} },
+    { id: "c43e2923-b2d9-4175-a1a8-ff6b0cd58810", code: "ZAF", name: "Republic of South Africa National Department of Health", countryCode: "ZAF", status: "active", settings: {} }
+  ];
   app2.get("/api/public/tenants", async (_req, res) => {
     try {
       const list = await storage.listActiveTenants();
-      res.json(list.map((t) => {
-        const s = t.settings ?? {};
-        return {
-          id: t.id,
-          code: t.code,
-          name: t.name,
-          countryCode: t.countryCode,
-          status: t.status,
-          settings: s
-        };
-      }));
+      if (Array.isArray(list) && list.length > 0) {
+        return res.json(list.map((t) => {
+          const s = t.settings ?? {};
+          return {
+            id: t.id,
+            code: t.code,
+            name: t.name,
+            countryCode: t.countryCode,
+            status: t.status,
+            settings: s
+          };
+        }));
+      }
     } catch (err) {
-      console.error("listActiveTenants failed:", err);
-      res.status(500).json({ message: "Failed to load tenants" });
+      console.error("listActiveTenants failed, serving canonical active tenants:", err);
     }
+    return res.json(FALLBACK_PUBLIC_TENANTS);
   });
   const checkSuperAdminAccess = (req, res) => {
     const isSuperAdmin = req.dbUser?.isPlatformAdmin === true || process.env.NODE_ENV !== "production";
@@ -18182,25 +18365,6 @@ async function registerRoutes(httpServer2, app2) {
       res.status(500).json({ message: err?.message || "Failed to delete tenant" });
     }
   });
-  app2.get("/api/public/tenants", async (_req, res) => {
-    try {
-      const list = await storage.listActiveTenants();
-      res.json(list.map((t) => {
-        const s = t.settings ?? {};
-        return {
-          id: t.id,
-          code: t.code,
-          name: t.name,
-          countryCode: t.countryCode,
-          status: t.status,
-          settings: s
-        };
-      }));
-    } catch (err) {
-      console.error("listActiveTenants failed:", err);
-      res.status(500).json({ message: "Failed to load tenants" });
-    }
-  });
   app2.post("/api/public/onboarding-interest", async (req, res) => {
     try {
       const data = insertTenantInterestRequestSchema.parse(req.body);
@@ -18211,6 +18375,15 @@ async function registerRoutes(httpServer2, app2) {
         });
       }
       const created = await storage.createTenantInterestRequest(data);
+      notifyAdminNewCountryInterest({
+        countryCode: data.countryCode,
+        countryName: data.countryName,
+        organization: data.organization,
+        fullName: data.fullName,
+        email: data.email,
+        requestedRole: data.requestedRole,
+        justification: data.justification
+      }).catch((e) => console.error("notifyAdminNewCountryInterest error:", e));
       res.status(201).json({ id: created.id, status: created.status });
     } catch (err) {
       if (err?.name === "ZodError") {
@@ -18265,6 +18438,15 @@ async function registerRoutes(httpServer2, app2) {
         return res.status(400).json({ message: "Invalid tenant" });
       }
       const created = await storage.createSignupRequest(data);
+      notifyAdminNewSignupRequest(
+        {
+          fullName: data.fullName,
+          email: data.email,
+          requestedRole: data.requestedRole,
+          justification: data.justification
+        },
+        tenant
+      ).catch((e) => console.error("notifyAdminNewSignupRequest error:", e));
       res.status(201).json({ id: created.id, status: created.status });
     } catch (err) {
       if (err?.name === "ZodError") {
@@ -18491,6 +18673,17 @@ async function registerRoutes(httpServer2, app2) {
         email: updated.email,
         role: updated.requestedRole
       });
+      const currentTenant = await storage.getTenant(req.tenantId);
+      notifyUserSignupDecision(
+        {
+          fullName: updated.fullName,
+          email: updated.email,
+          requestedRole: updated.requestedRole,
+          status: decision,
+          decisionReason: reason
+        },
+        currentTenant
+      ).catch((e) => console.error("notifyUserSignupDecision error:", e));
       res.json(updated);
     } catch (err) {
       if (err?.name === "ZodError") {
@@ -33354,6 +33547,7 @@ var init_routes = __esm({
     init_tenantResolver();
     init_loadDbUser();
     init_mailer();
+    init_notificationService();
     init_messaging();
     init_uce();
     init_surveillance();

@@ -102,6 +102,8 @@ import { canEditFacility, canDeleteData, canCreateFacility, canCreateCommunity }
 import { FacilityCascadePicker } from "@/components/FacilityCascadePicker";
 import { ColdChainTab } from "@/components/ColdChainTab";
 import { FacilityPopulationTab } from "@/components/ui/population/FacilityPopulationTab";
+import { OutreachPostsManager } from "@/components/OutreachPostsManager";
+import { Send } from "lucide-react";
 import { insertFacilitySchema, type Facility, type InsertFacility, type Region, type Province, type District, type Village, type FacilityCatchment } from "@shared/schema";
 import { z } from "zod";
 
@@ -436,6 +438,7 @@ export default function Facilities() {
     coordinates: true,
     distanceToFacility: true,
     closestFacilities: false,
+    outreachPost: true,
     isHardToReach: true,
     actions: true,
   });
@@ -449,6 +452,7 @@ export default function Facilities() {
     coordinates: "Coordinates",
     distanceToFacility: "Assigned Distance",
     closestFacilities: "Closest Facilities",
+    outreachPost: "Outreach Post",
     isHardToReach: "HTR Status",
     actions: "Actions",
   };
@@ -1319,10 +1323,12 @@ export default function Facilities() {
       settlementIds?: number[];
       unmappedOsm?: Array<{ name: string; latitude: number; longitude: number; placeType: string; osmId?: string }>;
     }) => {
+      const targetFacility = (facilities || []).find((f) => f.id === facilityId) || editingFacility;
+      const facName = targetFacility?.name || `HF ${facilityId}`;
       return apiRequest("POST", `/api/facilities/${facilityId}/catchments`, {
         geojson,
-        name: `Official Catchment for HF ${facilityId}`,
-        description: `Geofenced catchment area drawing`,
+        name: `Official Catchment for ${facName}`,
+        description: `Geofenced catchment area drawing for ${facName}`,
         villageIds,
         settlementIds,
         unmappedOsm,
@@ -2465,6 +2471,48 @@ export default function Facilities() {
       }
     },
     {
+      key: "outreachPost",
+      header: "Outreach Post",
+      sortable: true,
+      render: (item: Village) => {
+        const isConfigured = Boolean(item.outreachLatitude && item.outreachLongitude);
+        if (isConfigured) {
+          return (
+            <div className="flex items-center gap-1.5">
+              <Badge variant="outline" className="bg-purple-500/10 text-purple-700 dark:text-purple-300 border-purple-500/30 text-[11px] font-medium max-w-[150px] truncate">
+                📍 {item.outreachPostName || "Outreach Post"}
+              </Badge>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6 text-purple-600 hover:text-purple-700 hover:bg-purple-50 dark:hover:bg-purple-950/40"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setMainTab("outreach-posts");
+                }}
+                title="Manage in Outreach Posts tab"
+              >
+                <Pencil className="h-3 w-3" />
+              </Button>
+            </div>
+          );
+        }
+        return (
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-6 text-[10px] text-muted-foreground hover:text-purple-600 hover:border-purple-500/40 border-dashed"
+            onClick={(e) => {
+              e.stopPropagation();
+              setMainTab("outreach-posts");
+            }}
+          >
+            + Add Post
+          </Button>
+        );
+      }
+    },
+    {
       key: "isHardToReach",
       header: "HTR Status",
       sortable: true,
@@ -2568,6 +2616,18 @@ export default function Facilities() {
             <TabsTrigger value="communities" className="gap-2">
               <Users className="h-4 w-4" />
               Communities Registry
+            </TabsTrigger>
+            <TabsTrigger value="outreach-posts" className="gap-2" data-testid="tab-outreach-posts">
+              <Send className="h-4 w-4 text-purple-600" />
+              Outreach Posts
+              {(() => {
+                const count = (villages || []).filter((v) => v.outreachLatitude && v.outreachLongitude).length;
+                return count > 0 ? (
+                  <span className="ml-1 text-[10px] px-1.5 py-0.2 rounded-full font-semibold bg-purple-500/15 text-purple-700 dark:text-purple-300 border border-purple-500/30">
+                    {count}
+                  </span>
+                ) : null;
+              })()}
             </TabsTrigger>
             <TabsTrigger value="chvs" className="gap-2" data-testid="tab-chvs">
               <Contact className="h-4 w-4" />
@@ -4247,6 +4307,21 @@ export default function Facilities() {
               })()}
             </CardContent>
           </Card>
+        </TabsContent>
+
+        <TabsContent value="outreach-posts" className="space-y-6">
+          <OutreachPostsManager
+            villages={villages || []}
+            facilities={facilities || []}
+            districts={allDistricts || []}
+            provinces={provinces || []}
+            selectedRegionId={selectedRegionId}
+            selectedProvinceId={selectedProvinceId}
+            selectedDistrictId={selectedDistrictId}
+            selectedFacilityId={selectedFacilityId}
+            adminLabels={adminLabels}
+            canManage={(v) => canManageCommunity(v)}
+          />
         </TabsContent>
 
         <TabsContent value="chvs" className="space-y-6">

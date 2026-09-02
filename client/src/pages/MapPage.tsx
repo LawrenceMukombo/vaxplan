@@ -69,14 +69,16 @@ export default function MapPage() {
           ? offlineDb.facilities.where("tenantId").equals(_tid).toArray()
           : offlineDb.facilities.toArray()) as any;
       }
-      return [];
+      const res = await fetch("/api/facilities", { credentials: "include" });
+      if (!res.ok) return [];
+      return res.json();
     },
     enabled: !!activeTenantInfo?.id,
     staleTime: 5 * 60 * 1000,
     gcTime: 30 * 60 * 1000,
   });
 
-  const { data: villages } = useQuery<Village[]>({
+  const { data: villages = [] } = useQuery<Village[]>({
     queryKey: ["/api/villages/summary", "tenant", activeTenantInfo?.id],
     queryFn: async () => {
       if (!navigator.onLine) {
@@ -85,9 +87,12 @@ export default function MapPage() {
           ? offlineDb.villages.where("tenantId").equals(_tid).toArray()
           : offlineDb.villages.toArray()) as any;
       }
+      // When online, MapView automatically fetches viewport-bounded communities
+      // via /api/map/features on demand. Skipping the full 74,000+ national download
+      // here prevents 25MB+ JSON payloads and eliminates browser main-thread freezes.
       return [];
     },
-    enabled: !!activeTenantInfo?.id,
+    enabled: !isOnline && !!activeTenantInfo?.id,
     staleTime: 5 * 60 * 1000,
     gcTime: 30 * 60 * 1000,
   });

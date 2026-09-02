@@ -29,6 +29,7 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 import { PageHead } from "@/components/PageHead";
 import { versionLabel } from "@/lib/version";
 import { getDomainLinks } from "@/lib/navigation";
+import { saveTenantsCache, loadTenantsCache } from "@/lib/tenantCache";
 
 interface PublicTenant {
   id: string;
@@ -36,6 +37,16 @@ interface PublicTenant {
   name: string;
   countryCode: string;
 }
+
+const DEFAULT_TENANTS: PublicTenant[] = [
+  { id: "8c2f81fb-06f3-4688-90ea-e9ae27d73191", code: "PNG", name: "Papua New Guinea National Department of Health", countryCode: "PNG" },
+  { id: "705728db-4892-49d7-9b67-35aa67c7574b", code: "SSD", name: "Republic of South Sudan Ministry of Health", countryCode: "SSD" },
+  { id: "4bb7abba-11cd-4c99-96c2-eedc8a4dfd06", code: "ZMB", name: "Republic of Zambia Ministry of Health", countryCode: "ZMB" },
+  { id: "22571429-f7dd-4f1d-9dea-abdfbf4dc115", code: "BW", name: "Republic of Botswana Ministry of Health", countryCode: "BWA" },
+  { id: "08083581-cf5e-47d7-b3ed-a97b10be01ba", code: "KEN", name: "Republic of Kenya Ministry of Health", countryCode: "KEN" },
+  { id: "1a39bf12-bf10-4415-b2dd-96f1ece09b75", code: "VNM", name: "Republic of Vietnam Ministry of Health", countryCode: "VNM" },
+  { id: "c43e2923-b2d9-4175-a1a8-ff6b0cd58810", code: "ZAF", name: "Republic of South Africa National Department of Health", countryCode: "ZAF" },
+];
 
 
 const features = [
@@ -96,7 +107,15 @@ const trustPoints = [
   "Audit log on every change",
 ];
 
-function PasswordLoginDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
+function PasswordLoginDialog({
+  open,
+  onOpenChange,
+  tenants: propTenants,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  tenants?: PublicTenant[];
+}) {
   const [mode, setMode] = useState<"login" | "forgot">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -107,9 +126,41 @@ function PasswordLoginDialog({ open, onOpenChange }: { open: boolean; onOpenChan
   const [selectedTenantId, setSelectedTenantId] = useState("");
   const [keepMeSignedIn, setKeepMeSignedIn] = useState(false);
 
-  const { data: tenants } = useQuery<PublicTenant[]>({
+  const { data: fetchedTenants } = useQuery<PublicTenant[]>({
     queryKey: ["/api/public/tenants"],
+    queryFn: async () => {
+      try {
+        const res = await fetch("/api/public/tenants", { credentials: "include" });
+        if (res.ok) {
+          const list = await res.json();
+          if (Array.isArray(list) && list.length > 0) {
+            saveTenantsCache(list);
+            return list;
+          }
+        }
+      } catch (e) {
+        console.warn("Could not fetch public tenants:", e);
+      }
+      const cached = loadTenantsCache();
+      return cached && cached.length > 0 ? (cached as PublicTenant[]) : DEFAULT_TENANTS;
+    },
+    initialData: () => {
+      const cached = loadTenantsCache();
+      return cached && cached.length > 0 ? (cached as PublicTenant[]) : DEFAULT_TENANTS;
+    },
   });
+
+  const candidateTenants =
+    propTenants && propTenants.length > 0
+      ? propTenants
+      : fetchedTenants && fetchedTenants.length > 0
+        ? fetchedTenants
+        : DEFAULT_TENANTS;
+
+  const validTenants = candidateTenants.filter(
+    (t) => t && typeof t.id === "string" && typeof t.name === "string"
+  );
+  const activeTenants = validTenants.length > 0 ? validTenants : DEFAULT_TENANTS;
 
   function resetState() {
     setError(null);
@@ -247,9 +298,9 @@ function PasswordLoginDialog({ open, onOpenChange }: { open: boolean; onOpenChan
                       data-testid="select-tenant"
                     >
                       <option value="">Select country...</option>
-                      {tenants?.map((t) => (
+                      {activeTenants.map((t) => (
                         <option key={t.id} value={t.id}>
-                          {t.name} ({t.code})
+                          {t.name} ({t.code || t.countryCode})
                         </option>
                       ))}
                     </select>
@@ -431,10 +482,36 @@ function TenantCard({ tenant }: { tenant: PublicTenant }) {
 }
 
 export default function Landing() {
-  const { data: tenants } = useQuery<PublicTenant[]>({
+  const { data: fetchedTenants } = useQuery<PublicTenant[]>({
     queryKey: ["/api/public/tenants"],
+    queryFn: async () => {
+      try {
+        const res = await fetch("/api/public/tenants", { credentials: "include" });
+        if (res.ok) {
+          const list = await res.json();
+          if (Array.isArray(list) && list.length > 0) {
+            saveTenantsCache(list);
+            return list;
+          }
+        }
+      } catch (e) {
+        console.warn("Could not fetch public tenants:", e);
+      }
+      const cached = loadTenantsCache();
+      return cached && cached.length > 0 ? (cached as PublicTenant[]) : DEFAULT_TENANTS;
+    },
+    initialData: () => {
+      const cached = loadTenantsCache();
+      return cached && cached.length > 0 ? (cached as PublicTenant[]) : DEFAULT_TENANTS;
+    },
   });
-  const tenantCount = tenants?.length ?? 0;
+
+  const rawTenants = (fetchedTenants && fetchedTenants.length > 0) ? fetchedTenants : DEFAULT_TENANTS;
+  const tenants = rawTenants.filter(
+    (t) => t && typeof t.id === "string" && typeof t.name === "string"
+  );
+  const activeTenantsList = tenants.length > 0 ? tenants : DEFAULT_TENANTS;
+  const tenantCount = activeTenantsList.length;
   const [loginOpen, setLoginOpen] = useState(false);
   const { researchUrl, docsUrl } = getDomainLinks();
 
@@ -445,7 +522,7 @@ export default function Landing() {
         description="Multi-tenant GIS microplanning platform for national immunization and primary-care programs. Map facilities, plan sessions, forecast vaccines, approve budgets."
         image="/og-card.png"
       />
-      <PasswordLoginDialog open={loginOpen} onOpenChange={setLoginOpen} />
+      <PasswordLoginDialog open={loginOpen} onOpenChange={setLoginOpen} tenants={activeTenantsList} />
       <header className="sticky top-0 z-50 border-b bg-background/95 backdrop-blur">
         <div className="container mx-auto px-4 h-16 flex items-center justify-between gap-4">
           <div className="flex items-center gap-3" data-testid="brand-header">
@@ -570,7 +647,7 @@ export default function Landing() {
               className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4 max-w-4xl mx-auto"
               data-testid="grid-tenants"
             >
-              {(tenants ?? []).map((t) => (
+              {activeTenantsList.map((t) => (
                 <TenantCard key={t.id} tenant={t} />
               ))}
               <Card className="border-dashed hover-elevate" data-testid="card-tenant-cta">

@@ -76,6 +76,7 @@ import {
   Plus,
   Bell,
   ClipboardList,
+  Lock,
 } from "lucide-react";
 import { MapAlertsPanel } from "./MapAlertsPanel";
 import { MapRecommendationsPanel } from "./MapRecommendationsPanel";
@@ -83,7 +84,7 @@ import { LocationIntelligenceDrawer } from "./LocationIntelligenceDrawer";
 import type { Facility, Village, FacilityCatchment } from "@shared/schema";
 import { getMinScheduleDateInputValue } from "@shared/schedulingDates";
 import { deriveSessionLifecycle } from "@/lib/sessionStatus";
-import { distance, centroid as turfCentroid, polygon as turfPolygon } from "@turf/turf";
+import { distance, centroid as turfCentroid, polygon as turfPolygon, intersect as turfIntersect, area as turfArea } from "@turf/turf";
 import RBush from "rbush";
 // Vite worker import — runs centroid + point-in-polygon emphasis off the
 // main thread so Province / District / LLG changes never block the UI on
@@ -400,17 +401,30 @@ const missingHtrIcon = createFilledPinIcon("red", FILLED_PIN_SIZE_20x29);
 const villageIcon = createVillageWithChvsIcon(0); // Render as default community icon with 0 showing if no CHV data mapped here
 const htrIcon = createGapVillageIcon();
 
-// Custom violet pin icon for community outreach posts
-const outreachSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="35" viewBox="0 0 24 35" fill="none">` +
-  `<path d="M12 0C5.37 0 0 5.37 0 12c0 9.3 12 23 12 23s12-13.7 12-23c0-6.63-5.37-12-12-12z" fill="#a855f7"/>` +
-  `<circle cx="12" cy="12" r="4.5" fill="#ffffff"/>` +
-  `</svg>`;
-
-const outreachPostIcon = L.icon({
-  iconUrl: `data:image/svg+xml;base64,${typeof window !== "undefined" ? window.btoa(outreachSvg) : ""}`,
-  iconSize: [20, 29],
-  iconAnchor: [10, 29],
-  popupAnchor: [0, -29],
+// Custom glowing and flashing violet pin icon for community outreach posts
+const outreachPostIcon = L.divIcon({
+  html: `
+    <div class="outreach-glow-marker">
+      <div class="outreach-beacon-halo"></div>
+      <div class="outreach-beacon-halo-delay"></div>
+      <svg class="outreach-pin-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 34" width="26" height="36">
+        <defs>
+          <linearGradient id="outreachGradMap" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#e879f9" />
+            <stop offset="50%" stop-color="#a855f7" />
+            <stop offset="100%" stop-color="#7e22ce" />
+          </linearGradient>
+        </defs>
+        <path d="M12 0C5.37 0 0 5.37 0 12c0 9.3 12 22 12 22s12-12.7 12-22c0-6.63-5.37-12-12-12z" fill="url(#outreachGradMap)" stroke="#ffffff" stroke-width="1.8"/>
+        <circle cx="12" cy="11" r="5" fill="#ffffff"/>
+        <circle cx="12" cy="11" r="2.8" fill="#a855f7" class="outreach-pin-dot"/>
+      </svg>
+    </div>
+  `,
+  className: "outreach-leaflet-div-icon",
+  iconSize: [32, 40],
+  iconAnchor: [16, 36],
+  popupAnchor: [0, -36],
 });
 
 // Custom blue pin icon for reporting facilities in surveillance mode
@@ -525,14 +539,18 @@ function MapController({
 
   useMapEvents({
     zoomend: () => {
+      const z = map.getZoom();
+      prevZoomRef.current = z;
       if (onZoomChange) {
-        onZoomChange(map.getZoom());
+        onZoomChange(z);
       }
       if (onBoundsChange) {
         onBoundsChange(map.getBounds());
       }
     },
     moveend: () => {
+      const c = map.getCenter();
+      prevCenterRef.current = [c.lat, c.lng];
       if (onBoundsChange) {
         onBoundsChange(map.getBounds());
       }
@@ -588,8 +606,25 @@ function isPointInGeoJSONPolygon(lat: number, lng: number, coordinates: any[]) {
   return true;
 }
 
+const boundaryBboxCache = new WeakMap<any, { minLat: number; maxLat: number; minLng: number; maxLng: number }>();
+
+function getCachedBoundaryBBox(geojson: any) {
+  if (!geojson || typeof geojson !== "object") return null;
+  let bbox = boundaryBboxCache.get(geojson);
+  if (!bbox) {
+    bbox = getGeoJSONBBox(geojson);
+    boundaryBboxCache.set(geojson, bbox);
+  }
+  return bbox;
+}
+
 function isPointInGeoJSONBoundary(lat: number, lng: number, geojson: any): boolean {
   if (!Number.isFinite(lat) || !Number.isFinite(lng) || !geojson) return false;
+
+  const bbox = getCachedBoundaryBBox(geojson);
+  if (bbox && (lat < bbox.minLat || lat > bbox.maxLat || lng < bbox.minLng || lng > bbox.maxLng)) {
+    return false;
+  }
 
   if (geojson.type === "FeatureCollection") {
     return Array.isArray(geojson.features) && geojson.features.some((feature: any) => isPointInGeoJSONBoundary(lat, lng, feature));
@@ -613,6 +648,7 @@ function isPointInGeoJSONBoundary(lat: number, lng: number, geojson: any): boole
 function isPointInAnyGeoJSONBoundary(lat: number, lng: number, geojsons: any[]) {
   return geojsons.some((geojson) => isPointInGeoJSONBoundary(lat, lng, geojson));
 }
+
 interface MapLegendProps {
   leftOffset?: boolean;
   hiddenCategories: Set<string>;
@@ -629,6 +665,7 @@ interface MapLegendProps {
   showPopulationLegend?: boolean;
   /** Count of currently-visible health facilities (respects active province/district filters) */
   facilityCount?: number;
+  collisionCount?: number;
 }
 
 function MapLegend({
@@ -640,6 +677,7 @@ function MapLegend({
   planningStats = { planned: 0, missingStandard: 0, missingHtr: 0, total: 0, coverage: 0 },
   showPopulationLegend = false,
   facilityCount,
+  collisionCount = 0,
 }: MapLegendProps) {
   if (!isExpanded) {
     return (
@@ -651,6 +689,11 @@ function MapLegend({
         >
           <SlidersHorizontal className="h-3.5 w-3.5" />
           Show Legend ({planningStats.coverage}% Coverage)
+          {collisionCount > 0 && (
+            <span className="bg-rose-600 text-white text-[9px] px-1.5 py-0.2 rounded-full font-mono animate-pulse ml-1">
+              {collisionCount} ⚠
+            </span>
+          )}
         </Button>
       </div>
     );
@@ -666,6 +709,9 @@ function MapLegend({
     { key: "sessionInProgress", label: "Session • In Progress", color: "bg-amber-500", count: (planningStats as any).sessionInProgress ?? 0 },
     { key: "sessionOverdue", label: "Session • Overdue", color: "bg-rose-500", count: (planningStats as any).sessionOverdue ?? 0 },
     { key: "sessionCompleted", label: "Session • Completed", color: "bg-emerald-600", count: (planningStats as any).sessionCompleted ?? 0 },
+    ...(collisionCount > 0
+      ? [{ key: "collision", label: "Polygon Collision", color: "bg-rose-600", count: collisionCount }]
+      : []),
     { key: "unserved", label: "Unserved Place", color: "bg-red-600", count: (planningStats as any).unserved ?? 0 },
   ];
 
@@ -922,6 +968,8 @@ function MapLegend({
 export interface MapOverlayLayers {
   facilities: boolean;
   villages: boolean;
+  outreachPosts: boolean;
+  polygonCollisions: boolean;
   htrAreas: boolean;
   catchments: boolean;
   roads: boolean;
@@ -1034,6 +1082,12 @@ function LayerPanel({
                   } else if (key === "villages") {
                     displayName = "Communities / Villages";
                     subtext = "Settlement markers with planning status";
+                  } else if (key === "outreachPosts") {
+                    displayName = "Outreach Posts";
+                    subtext = "Dedicated service points (violet pins & community links)";
+                  } else if (key === "polygonCollisions") {
+                    displayName = "Polygon Collision Detection";
+                    subtext = "Real-time catchment overlap & conflict highlighting";
                   } else if (key === "htrAreas") {
                     displayName = "HTR Outreach Buffers";
                     subtext = "5 km radius around hard-to-reach communities";
@@ -1113,6 +1167,8 @@ function LayerPanel({
                     dotColor = "bg-violet-400";
                   } else if (key === "hcwCatchments") {
                     dotColor = "bg-sky-400";
+                  } else if (key === "outreachPosts") {
+                    dotColor = "bg-purple-500";
                   }
 
                   const isDisabled = false;
@@ -1159,6 +1215,8 @@ interface FilterPanelProps {
   onProvinceChange: (provinceId: number | "all") => void;
   selectedDistrictId: number | "all";
   onDistrictChange: (districtId: number | "all") => void;
+  selectedLlgId?: number | "all";
+  onLlgChange?: (llgId: number | "all") => void;
   selectedFacilityId: number | null;
   onFacilityChange: (facilityId: number | null) => void;
   villageCategory: "all" | "htr" | "standard";
@@ -1169,6 +1227,7 @@ interface FilterPanelProps {
   onPowerToggle: () => void;
   provinces: any[];
   districts: any[];
+  llgs?: any[];
   facilities: any[];
   adminLabels: { level1: string; level2: string; level3: string; level4: string };
   totalFacilitiesCount: number;
@@ -1186,6 +1245,8 @@ function FilterPanel({
   onProvinceChange,
   selectedDistrictId,
   onDistrictChange,
+  selectedLlgId = "all",
+  onLlgChange,
   selectedFacilityId,
   onFacilityChange,
   villageCategory,
@@ -1196,6 +1257,7 @@ function FilterPanel({
   onPowerToggle,
   provinces,
   districts,
+  llgs = [],
   facilities,
   adminLabels,
   totalFacilitiesCount,
@@ -1203,24 +1265,70 @@ function FilterPanel({
   totalVillagesCount,
   filteredVillagesCount,
 }: FilterPanelProps) {
-  // Cascading Selectors logic filtering Districts options by Province and Facilities by Province/District
-  const filteredDistrictsForSelect = useMemo(() => {
-    if (selectedProvinceId === "all") return districts;
-    return districts.filter((d) => Number(d.provinceId) === Number(selectedProvinceId));
-  }, [districts, selectedProvinceId]);
-
-  const filteredFacilitiesForSelect = useMemo(() => {
-    return facilities.filter((f) => {
-      if (selectedProvinceId !== "all") {
-        const dist = districts.find((d) => Number(d.id) === Number(f.districtId));
-        if (!dist || Number(dist.provinceId) !== Number(selectedProvinceId)) return false;
-      }
-      if (selectedDistrictId !== "all" && Number(f.districtId) !== Number(selectedDistrictId)) {
-        return false;
-      }
-      return true;
+  // Pre-calculate smart statistics for options
+  const provinceStats = useMemo(() => {
+    const map = new Map<number, { districts: number; facilities: number }>();
+    provinces.forEach((p) => {
+      const pId = Number(p.id);
+      const dInP = districts.filter((d) => Number(d.provinceId) === pId);
+      const dIds = new Set(dInP.map((d) => Number(d.id)));
+      const fInP = facilities.filter((f) => dIds.has(Number(f.districtId)));
+      map.set(pId, { districts: dInP.length, facilities: fInP.length });
     });
-  }, [facilities, districts, selectedProvinceId, selectedDistrictId]);
+    return map;
+  }, [provinces, districts, facilities]);
+
+  const districtStats = useMemo(() => {
+    const map = new Map<number, number>();
+    districts.forEach((d) => {
+      const dId = Number(d.id);
+      const count = facilities.filter((f) => Number(f.districtId) === dId).length;
+      map.set(dId, count);
+    });
+    return map;
+  }, [districts, facilities]);
+
+  // Smart Cascade: Districts are strictly filtered to the chosen Province
+  const isDistrictLocked = selectedProvinceId === "all";
+  const filteredDistrictsForSelect = useMemo(() => {
+    if (isDistrictLocked) return [];
+    return districts
+      .filter((d) => Number(d.provinceId) === Number(selectedProvinceId))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [districts, selectedProvinceId, isDistrictLocked]);
+
+  // Smart Cascade: LLGs/Wards are strictly filtered to the chosen District
+  const isLlgLocked = selectedDistrictId === "all";
+  const filteredLlgsForSelect = useMemo(() => {
+    if (isLlgLocked) return [];
+    return llgs
+      .filter((l) => Number(l.districtId) === Number(selectedDistrictId))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [llgs, selectedDistrictId, isLlgLocked]);
+
+  // Smart Cascade: Facilities are strictly filtered to the chosen District (or Province)
+  const isFacilityLocked = selectedProvinceId === "all";
+  const filteredFacilitiesForSelect = useMemo(() => {
+    if (isFacilityLocked) return [];
+    return facilities
+      .filter((f) => {
+        if (selectedDistrictId !== "all") {
+          return Number(f.districtId) === Number(selectedDistrictId);
+        }
+        const dist = districts.find((d) => Number(d.id) === Number(f.districtId));
+        return dist && Number(dist.provinceId) === Number(selectedProvinceId);
+      })
+      .sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+  }, [facilities, districts, selectedProvinceId, selectedDistrictId, isFacilityLocked]);
+
+  const activeFiltersCount = (selectedProvinceId !== "all" ? 1 : 0) +
+    (selectedDistrictId !== "all" ? 1 : 0) +
+    (selectedFacilityId !== null ? 1 : 0) +
+    (selectedLlgId !== "all" ? 1 : 0) +
+    (villageCategory !== "all" ? 1 : 0) +
+    (filterColdChain ? 1 : 0) +
+    (filterPower ? 1 : 0) +
+    (searchQuery.trim() ? 1 : 0);
 
   return (
     <div className={`transition-all duration-200 ${isOpen ? "w-64" : "w-auto"}`} ref={disableLeafletPropagation}>
@@ -1230,6 +1338,11 @@ function FilterPanel({
             <CardTitle className="text-sm font-bold flex items-center gap-1.5 text-primary">
               <Filter className="h-4 w-4" />
               Map Filters
+              {activeFiltersCount > 0 && (
+                <span className="ml-1 px-1.5 py-0.2 bg-primary/20 text-primary text-[10px] font-bold rounded-full">
+                  {activeFiltersCount}
+                </span>
+              )}
             </CardTitle>
           )}
           <Button size="icon" variant="ghost" onClick={onToggle} data-testid="button-toggle-filters">
@@ -1263,94 +1376,168 @@ function FilterPanel({
               </div>
             </div>
 
-            {/* Province Selector */}
+            {/* Smart Cascade Level 1: Province Selector */}
             <div className="space-y-1.5">
-              <Label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">
-                {adminLabels.level1} Filter
+              <Label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider flex items-center justify-between">
+                <span>{adminLabels.level1} Filter</span>
+                <span className="text-[9px] text-primary font-normal">Level 1</span>
               </Label>
               <Select
                 value={selectedProvinceId === "all" ? "all" : String(selectedProvinceId)}
-                onValueChange={(val) => onProvinceChange(val === "all" ? "all" : Number(val))}
+                onValueChange={(val) => {
+                  const newProvId = val === "all" ? "all" : Number(val);
+                  onProvinceChange(newProvId);
+                  onDistrictChange("all");
+                  if (onLlgChange) onLlgChange("all");
+                  onFacilityChange(null);
+                }}
               >
                 <SelectTrigger className="h-9 text-xs bg-background/50">
                   <SelectValue placeholder={`Select ${adminLabels.level1}...`} />
                 </SelectTrigger>
                 <SelectContent className="max-h-56">
                   <SelectItem value="all">All {adminLabels.level1}s</SelectItem>
-                  {provinces.map((p) => (
-                    <SelectItem key={p.id} value={String(p.id)}>
-                      {p.name}
-                    </SelectItem>
-                  ))}
+                  {provinces.map((p) => {
+                    const stats = provinceStats.get(Number(p.id));
+                    return (
+                      <SelectItem key={p.id} value={String(p.id)}>
+                        <div className="flex items-center justify-between w-full gap-2">
+                          <span>{p.name}</span>
+                          {stats && (
+                            <span className="text-[10px] text-muted-foreground font-mono">
+                              ({stats.districts} {stats.districts === 1 ? adminLabels.level2 : `${adminLabels.level2}s`})
+                            </span>
+                          )}
+                        </div>
+                      </SelectItem>
+                    );
+                  })}
                 </SelectContent>
               </Select>
             </div>
 
-            {/* District Selector */}
+            {/* Smart Cascade Level 2: District Selector (Locked if Province = 'all') */}
             <div className="space-y-1.5">
-              <Label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">
-                {adminLabels.level2} Filter
+              <Label className={`text-[11px] font-bold uppercase tracking-wider flex items-center justify-between ${isDistrictLocked ? "text-muted-foreground/40" : "text-muted-foreground"}`}>
+                <span className="flex items-center gap-1">
+                  {adminLabels.level2} Filter
+                  {isDistrictLocked && <Lock className="h-2.5 w-2.5 opacity-60" />}
+                </span>
+                <span className="text-[9px] text-primary font-normal">Level 2</span>
               </Label>
               <Select
                 value={selectedDistrictId === "all" ? "all" : String(selectedDistrictId)}
-                onValueChange={(val) => onDistrictChange(val === "all" ? "all" : Number(val))}
+                onValueChange={(val) => {
+                  const newDistId = val === "all" ? "all" : Number(val);
+                  onDistrictChange(newDistId);
+                  if (onLlgChange) onLlgChange("all");
+                  onFacilityChange(null);
+                }}
+                disabled={isDistrictLocked || filteredDistrictsForSelect.length === 0}
               >
-                <SelectTrigger className="h-9 text-xs bg-background/50">
-                  <SelectValue placeholder={`Select ${adminLabels.level2}...`} />
+                <SelectTrigger className={`h-9 text-xs bg-background/50 ${isDistrictLocked ? "opacity-50 cursor-not-allowed" : ""}`}>
+                  <SelectValue
+                    placeholder={
+                      isDistrictLocked
+                        ? `🔒 Select ${adminLabels.level1} first`
+                        : `All ${adminLabels.level2}s`
+                    }
+                  />
                 </SelectTrigger>
                 <SelectContent className="max-h-56">
                   <SelectItem value="all">All {adminLabels.level2}s</SelectItem>
-                  {filteredDistrictsForSelect.map((d) => (
-                    <SelectItem key={d.id} value={String(d.id)}>
-                      {d.name}
-                    </SelectItem>
-                  ))}
+                  {filteredDistrictsForSelect.map((d) => {
+                    const facCount = districtStats.get(Number(d.id)) || 0;
+                    return (
+                      <SelectItem key={d.id} value={String(d.id)}>
+                        <div className="flex items-center justify-between w-full gap-2">
+                          <span>{d.name}</span>
+                          <span className="text-[10px] text-muted-foreground font-mono">
+                            ({facCount} {facCount === 1 ? "fac" : "facs"})
+                          </span>
+                        </div>
+                      </SelectItem>
+                    );
+                  })}
                 </SelectContent>
               </Select>
             </div>
 
-            {/* Original LLG Selector commented out for safety:
-            {/* LLG / Ward Selector */}
-            {/*
+            {/* Smart Cascade Level 3: LLG / Ward Selector (Optional if tenant has LLGs) */}
+            {llgs && llgs.length > 0 && (
+              <div className="space-y-1.5">
+                <Label className={`text-[11px] font-bold uppercase tracking-wider flex items-center justify-between ${isLlgLocked ? "text-muted-foreground/40" : "text-muted-foreground"}`}>
+                  <span className="flex items-center gap-1">
+                    {adminLabels.level3 || "Ward / LLG"} Filter
+                    {isLlgLocked && <Lock className="h-2.5 w-2.5 opacity-60" />}
+                  </span>
+                  <span className="text-[9px] text-primary font-normal">Level 3</span>
+                </Label>
+                <Select
+                  value={selectedLlgId === "all" ? "all" : String(selectedLlgId)}
+                  onValueChange={(val) => {
+                    const newLlgId = val === "all" ? "all" : Number(val);
+                    if (onLlgChange) onLlgChange(newLlgId);
+                    onFacilityChange(null);
+                  }}
+                  disabled={isLlgLocked || filteredLlgsForSelect.length === 0}
+                >
+                  <SelectTrigger className={`h-9 text-xs bg-background/50 ${isLlgLocked ? "opacity-50 cursor-not-allowed" : ""}`}>
+                    <SelectValue
+                      placeholder={
+                        isLlgLocked
+                          ? `🔒 Select ${adminLabels.level2} first`
+                          : `All ${adminLabels.level3 || "Ward / LLG"}s`
+                      }
+                    />
+                  </SelectTrigger>
+                  <SelectContent className="max-h-56">
+                    <SelectItem value="all">All {adminLabels.level3 || "Ward / LLG"}s</SelectItem>
+                    {filteredLlgsForSelect.map((l) => (
+                      <SelectItem key={l.id} value={String(l.id)}>
+                        {l.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            {/* Smart Cascade Level 4: Health Facility Selector (Locked if Province = 'all') */}
             <div className="space-y-1.5">
-              <Label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">
-                {adminLabels.level3} Filter
-              </Label>
-              <Select
-                value={selectedLlgId === "all" ? "all" : String(selectedLlgId)}
-                onValueChange={(val) => onLlgChange(val === "all" ? "all" : Number(val))}
-              >
-                <SelectTrigger className="h-9 text-xs bg-background/50">
-                  <SelectValue placeholder={`Select ${adminLabels.level3}...`} />
-                </SelectTrigger>
-                <SelectContent className="max-h-56">
-                  <SelectItem value="all">All {adminLabels.level3}s</SelectItem>
-                  {filteredLlgsForSelect.map((l) => (
-                    <SelectItem key={l.id} value={String(l.id)}>
-                      {l.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            */}
-            {/* Health Facility Selector (replacing Constituency filter) */}
-            <div className="space-y-1.5">
-              <Label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">
-                Health Facility Filter
+              <Label className={`text-[11px] font-bold uppercase tracking-wider flex items-center justify-between ${isFacilityLocked ? "text-muted-foreground/40" : "text-muted-foreground"}`}>
+                <span className="flex items-center gap-1">
+                  Health Facility Filter
+                  {isFacilityLocked && <Lock className="h-2.5 w-2.5 opacity-60" />}
+                </span>
+                <span className="text-[9px] text-primary font-normal">Facility</span>
               </Label>
               <Select
                 value={selectedFacilityId === null ? "all" : String(selectedFacilityId)}
                 onValueChange={(val) => onFacilityChange(val === "all" ? null : Number(val))}
+                disabled={isFacilityLocked || filteredFacilitiesForSelect.length === 0}
               >
-                <SelectTrigger className="h-9 text-xs bg-background/50">
-                  <SelectValue placeholder="All Health Facilities" />
+                <SelectTrigger className={`h-9 text-xs bg-background/50 ${isFacilityLocked ? "opacity-50 cursor-not-allowed" : ""}`}>
+                  <SelectValue
+                    placeholder={
+                      isFacilityLocked
+                        ? `🔒 Select ${adminLabels.level1} first`
+                        : "All Health Facilities"
+                    }
+                  />
                 </SelectTrigger>
                 <SelectContent className="max-h-56">
                   <SelectItem value="all">All Health Facilities</SelectItem>
                   {filteredFacilitiesForSelect.map((f) => (
                     <SelectItem key={f.id} value={String(f.id)}>
-                      {f.name}
+                      <div className="flex items-center justify-between w-full gap-2">
+                        <span className="truncate">{f.name}</span>
+                        {f.facilityType && (
+                          <span className="text-[9px] px-1 py-0.2 bg-muted text-muted-foreground rounded uppercase shrink-0">
+                            {f.facilityType}
+                          </span>
+                        )}
+                      </div>
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -1860,7 +2047,7 @@ const FacilityMarkerItem = memo(({
       icon={facilityIcon}
       eventHandlers={{
         click: () => {
-          handleFocusFacility(facility);
+          setSelectedFacilityId(facility.id);
         },
       }}
       ref={(el) => {
@@ -2243,44 +2430,52 @@ export function MapView({
   const [mapBounds, setMapBounds] = useState<L.LatLngBounds | null>(null);
   const [currentZoom, setCurrentZoom] = useState(zoom);
   const [intelligencePoint, setIntelligencePoint] = useState<{lat: number, lng: number} | null>(null);
+  const [debouncedViewportBbox, setDebouncedViewportBbox] = useState<{ bbox: string; key: string } | null>(null);
 
   useEffect(() => {
-    setCurrentZoom(zoom);
-  }, [zoom]);
-
-  const viewportBbox = useMemo(() => {
-    if (!mapBounds) return null;
+    if (!mapBounds) {
+      setDebouncedViewportBbox(null);
+      return;
+    }
     const padded = mapBounds.pad(0.25);
     const west = Number(padded.getWest().toFixed(5));
     const south = Number(padded.getSouth().toFixed(5));
     const east = Number(padded.getEast().toFixed(5));
     const north = Number(padded.getNorth().toFixed(5));
-    return {
+    const nextBbox = {
       bbox: `${west},${south},${east},${north}`,
       key: `${west.toFixed(3)},${south.toFixed(3)},${east.toFixed(3)},${north.toFixed(3)}`,
     };
+
+    const timer = setTimeout(() => {
+      setDebouncedViewportBbox(nextBbox);
+    }, 250);
+
+    return () => clearTimeout(timer);
   }, [mapBounds]);
+
+  const viewportBbox = debouncedViewportBbox;
 
   // WorldPop population-density overlay (off by default, session-scoped).
   const populationOverlay = usePopulationOverlay();
 
   // Map overlay visibility layers (moved to top of states block to be declared before query hooks dependent on them)
-  // Updated Code: Default layers differ in surveillance mode to prevent cluttering.
+  // Default layers optimized for instant startup without heavy raster bottlenecks.
   const [layers, setLayers] = useState<MapOverlayLayers>(() => {
     const isSurveillance = mode === "surveillance";
     return {
       facilities: !isSurveillance,
       villages: !isSurveillance,
+      outreachPosts: !isSurveillance,
+      polygonCollisions: !isSurveillance,
       htrAreas: !isSurveillance,
       catchments: false,
       roads: false,
       boundaries: true,
-      // Updated: Saved Catchments overlay defaults ON so HCW-drawn polygons are
-      // immediately visible after saving (no buried toggle).
       hcwCatchments: true,
       wards: false,
       constituencies: false,
-      populationGeoTIFF: !isSurveillance,
+      populationGeoTIFF: false, // Off by default for fast instant map loading
       populationChoropleth: false,
       grid3Settlements: false,
       zeroDoseVillages: false,
@@ -2289,7 +2484,6 @@ export function MapView({
     };
   });
 
-  // Advanced GIS-Microplanning States & Refs
   const georasterRef = useRef<any>(null);
   const [clickDialogOpen, setClickDialogOpen] = useState(false);
   const [mapClickDetails, setMapClickDetails] = useState<{
@@ -2790,9 +2984,11 @@ export function MapView({
 
   const mapFeatureLayers = useMemo(() => {
     const activeLayers = ["facilities"];
-    if (layers.villages && !hiddenCategories.has("villages")) activeLayers.push("communities");
+    if ((layers.villages && !hiddenCategories.has("villages")) || layers.outreachPosts) {
+      activeLayers.push("communities");
+    }
     return activeLayers.join(",");
-  }, [hiddenCategories, layers.villages]);
+  }, [hiddenCategories, layers.villages, layers.outreachPosts]);
 
   const mapFeatureQueryEnabled =
     mode === "planning" &&
@@ -2818,6 +3014,7 @@ export function MapView({
     enabled: mapFeatureQueryEnabled,
     staleTime: 60 * 1000,
     gcTime: 10 * 60 * 1000,
+    placeholderData: (prev) => prev,
     queryFn: async () => {
       const params = new URLSearchParams();
       if (viewportBbox) params.set("bbox", viewportBbox.bbox);
@@ -3204,11 +3401,23 @@ export function MapView({
     enabled: !!selectedFacilityId,
   });
 
-  // Fit bounds to show facility and all its routed communities when routes load
-  useEffect(() => {
-    if (!selectedFacilityId || !mapRef.current || !communityRoutes || communityRoutes.length === 0) return;
+  const hasFittedRouteFacilityIdRef = useRef<number | null>(null);
 
-    const facility = facilities.find((f) => f.id === selectedFacilityId);
+  // Fit bounds to show facility and all its routed communities ONLY once upon initial facility selection
+  useEffect(() => {
+    if (!selectedFacilityId || !mapRef.current || !communityRoutes || communityRoutes.length === 0) {
+      if (!selectedFacilityId) {
+        hasFittedRouteFacilityIdRef.current = null;
+      }
+      return;
+    }
+
+    // Only auto-fit once per selected facility to allow user to zoom in/out freely without being snapped back
+    if (hasFittedRouteFacilityIdRef.current === selectedFacilityId) {
+      return;
+    }
+
+    const facility = (facilities || []).find((f) => f.id === selectedFacilityId);
     if (!facility || !facility.latitude || !facility.longitude) return;
 
     const coords: [number, number][] = [];
@@ -3230,6 +3439,8 @@ export function MapView({
       const minLng = Math.min(...lngs);
       const maxLng = Math.max(...lngs);
 
+      hasFittedRouteFacilityIdRef.current = selectedFacilityId;
+
       mapRef.current.fitBounds(
         [
           [minLat, minLng],
@@ -3238,11 +3449,11 @@ export function MapView({
         {
           padding: [80, 80],
           animate: true,
-          duration: 1.5,
+          duration: 1.2,
         }
       );
     }
-  }, [selectedFacilityId, communityRoutes, facilities]);
+  }, [selectedFacilityId, communityRoutes]);
 
   const adminLabels = useMemo(() => {
     const skipRegionLevel = tenantInfo?.settings?.skipRegionLevel ?? (tenantInfo?.countryCode === "ZMB" || false);
@@ -3763,6 +3974,14 @@ export function MapView({
       return true;
     });
   }, [villages, selectedProvinceId, selectedDistrictId, selectedLlgId, searchQuery, villageCategory, districtLookup, llgLookup]);
+
+  // Filtered outreach posts independent of community layer toggle
+  const filteredOutreachPosts = useMemo(() => {
+    if (mode === "surveillance") return [];
+    return filteredVillages.filter(
+      (v) => v.latitude && v.longitude && v.outreachLatitude && v.outreachLongitude
+    );
+  }, [filteredVillages, mode]);
 
   const filteredUnservedPlaces = useMemo(() => {
     if (mode === "surveillance") return [];
@@ -4321,18 +4540,25 @@ export function MapView({
     if (!facility.latitude || !facility.longitude) return;
     const lat = Number(facility.latitude);
     const lng = Number(facility.longitude);
+    setSelectedFacilityId(facility.id);
 
-    mapRef.current?.flyTo([lat, lng], 14, {
-      animate: true,
-      duration: 1.5,
-    });
+    if (mapRef.current) {
+      const map = mapRef.current;
+      const targetZoom = Math.max(map.getZoom(), 13);
+      map.flyTo([lat, lng], targetZoom, {
+        animate: true,
+        duration: 0.8,
+      });
 
-    setTimeout(() => {
-      const marker = markerRefs.current[facility.id];
-      if (marker) {
-        marker.openPopup();
-      }
-    }, 450);
+      map.once("moveend", () => {
+        setTimeout(() => {
+          const marker = markerRefs.current[facility.id];
+          if (marker) {
+            marker.openPopup();
+          }
+        }, 100);
+      });
+    }
   };
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -5800,6 +6026,242 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
     };
   };
 
+  // ── Polygon Collision Detection Engine ────────────────────────────────
+  const detectedPolygonCollisions = useMemo<Array<{
+    id: string;
+    nameA: string;
+    typeA: string;
+    idA: string;
+    nameB: string;
+    typeB: string;
+    idB: string;
+    areaKm2: number;
+    overlapPctA: number;
+    overlapPctB: number;
+    intersectionPositions: [number, number][][];
+    centroid: [number, number];
+  }>>(() => {
+    if (!layers.polygonCollisions) return [];
+
+    const polygonEntities: Array<{
+      id: string;
+      name: string;
+      type: "Session Plan" | "Community Catchment" | "Saved Catchment";
+      geometry: any;
+      areaSqM: number;
+    }> = [];
+
+    // 1. Session plan polygons
+    (activeSessionPlans || []).forEach((plan: any) => {
+      if (plan?.geojson?.type === "Polygon" && Array.isArray(plan.geojson.coordinates?.[0]) && plan.geojson.coordinates[0].length >= 4) {
+        try {
+          const areaSqM = turfArea({ type: "Feature", properties: {}, geometry: plan.geojson });
+          if (areaSqM > 0) {
+            polygonEntities.push({
+              id: `session-${plan.id}`,
+              name: plan.name || `Session Plan #${plan.id}`,
+              type: "Session Plan",
+              geometry: plan.geojson,
+              areaSqM,
+            });
+          }
+        } catch {}
+      }
+    });
+
+    // 2. Community catchment boundary polygons
+    if (layers.villages) {
+      (activeMapVillages || []).forEach((village: any) => {
+        const coords = (village as any)?.boundary?.coordinates?.[0];
+        if (Array.isArray(coords) && coords.length >= 4) {
+          try {
+            const areaSqM = turfArea({ type: "Feature", properties: {}, geometry: (village as any).boundary });
+            if (areaSqM > 0) {
+              polygonEntities.push({
+                id: `village-${village.id}`,
+                name: village.name || `Community #${village.id}`,
+                type: "Community Catchment",
+                geometry: (village as any).boundary,
+                areaSqM,
+              });
+            }
+          } catch {}
+        }
+      });
+    }
+
+    // 3. Saved HCW facility catchments
+    if (layers.hcwCatchments && Array.isArray(hcwCatchments)) {
+      hcwCatchments.forEach((c: any) => {
+        if (c?.geojson?.type === "Polygon" && Array.isArray(c.geojson.coordinates?.[0]) && c.geojson.coordinates[0].length >= 4) {
+          try {
+            const areaSqM = turfArea({ type: "Feature", properties: {}, geometry: c.geojson });
+            if (areaSqM > 0) {
+              polygonEntities.push({
+                id: `catchment-${c.id}`,
+                name: c.name || `Facility Catchment #${c.id}`,
+                type: "Saved Catchment",
+                geometry: c.geojson,
+                areaSqM,
+              });
+            }
+          } catch {}
+        }
+      });
+    }
+
+    if (polygonEntities.length < 2) return [];
+
+    const collisions: Array<{
+      id: string;
+      nameA: string;
+      typeA: string;
+      idA: string;
+      nameB: string;
+      typeB: string;
+      idB: string;
+      areaKm2: number;
+      overlapPctA: number;
+      overlapPctB: number;
+      intersectionPositions: [number, number][][];
+      centroid: [number, number];
+    }> = [];
+
+    for (let i = 0; i < polygonEntities.length; i++) {
+      for (let j = i + 1; j < polygonEntities.length; j++) {
+        const A = polygonEntities[i];
+        const B = polygonEntities[j];
+
+        try {
+          const overlap = turfIntersect({
+            type: "FeatureCollection",
+            features: [
+              { type: "Feature", properties: {}, geometry: A.geometry },
+              { type: "Feature", properties: {}, geometry: B.geometry },
+            ],
+          });
+
+          if (overlap && overlap.geometry) {
+            const overlapAreaSqM = turfArea(overlap);
+            if (overlapAreaSqM > 25) {
+              const areaKm2 = overlapAreaSqM / 1_000_000;
+              const overlapPctA = Math.min(100, Math.round((overlapAreaSqM / A.areaSqM) * 100));
+              const overlapPctB = Math.min(100, Math.round((overlapAreaSqM / B.areaSqM) * 100));
+
+              let rings: [number, number][][] = [];
+              if (overlap.geometry.type === "Polygon") {
+                rings = [(overlap.geometry.coordinates[0] as number[][]).map((c) => [c[1], c[0]])];
+              } else if (overlap.geometry.type === "MultiPolygon") {
+                rings = (overlap.geometry.coordinates as number[][][][]).map((poly) =>
+                  poly[0].map((c) => [c[1], c[0]])
+                );
+              }
+
+              let centroid: [number, number] = [0, 0];
+              try {
+                const cPt = turfCentroid(overlap);
+                centroid = [cPt.geometry.coordinates[1], cPt.geometry.coordinates[0]];
+              } catch {
+                if (rings[0]?.[0]) centroid = rings[0][0];
+              }
+
+              collisions.push({
+                id: `${A.id}-x-${B.id}`,
+                nameA: A.name,
+                typeA: A.type,
+                idA: A.id,
+                nameB: B.name,
+                typeB: B.type,
+                idB: B.id,
+                areaKm2,
+                overlapPctA,
+                overlapPctB,
+                intersectionPositions: rings,
+                centroid,
+              });
+            }
+          }
+        } catch {}
+      }
+    }
+
+    return collisions;
+  }, [layers.polygonCollisions, activeSessionPlans, activeMapVillages, layers.villages, layers.hcwCatchments, hcwCatchments]);
+
+  const collidingPolygonEntityIds = useMemo(() => {
+    const set = new Set<string>();
+    detectedPolygonCollisions.forEach((col) => {
+      set.add(String(col.idA));
+      set.add(String(col.idB));
+    });
+    return set;
+  }, [detectedPolygonCollisions]);
+
+  // Live drawing collision detection
+  const liveDrawingCollision = useMemo<{ collidingName: string; areaKm2: number } | null>(() => {
+    let latlngs: Array<{ lat: number; lng: number }> = [];
+    if (isDrawingSessionPolygon && sessionPolygonPoints.length >= 3) {
+      latlngs = sessionPolygonPoints.map((p) => ({ lat: p.lat, lng: p.lng }));
+    } else if (isDrawingCatchment && drawPoints.length >= 3) {
+      latlngs = drawPoints.map((p) => ({ lat: p[0], lng: p[1] }));
+    } else {
+      return null;
+    }
+
+    try {
+      const closedCoords = [...latlngs.map((p) => [p.lng, p.lat]), [latlngs[0].lng, latlngs[0].lat]];
+      const drawGeo = { type: "Polygon", coordinates: [closedCoords] };
+
+      for (const plan of activeSessionPlans || []) {
+        if (plan?.geojson?.type === "Polygon" && Array.isArray(plan.geojson.coordinates?.[0])) {
+          const overlap = turfIntersect({
+            type: "FeatureCollection",
+            features: [
+              { type: "Feature", properties: {}, geometry: drawGeo },
+              { type: "Feature", properties: {}, geometry: plan.geojson },
+            ],
+          });
+          if (overlap && overlap.geometry) {
+            const areaSqM = turfArea(overlap);
+            if (areaSqM > 25) {
+              return {
+                collidingName: plan.name || `Session #${plan.id}`,
+                areaKm2: areaSqM / 1_000_000,
+              };
+            }
+          }
+        }
+      }
+
+      if (layers.villages) {
+        for (const village of activeMapVillages || []) {
+          const coords = (village as any)?.boundary?.coordinates?.[0];
+          if (Array.isArray(coords) && coords.length >= 4) {
+            const overlap = turfIntersect({
+              type: "FeatureCollection",
+              features: [
+                { type: "Feature", properties: {}, geometry: drawGeo },
+                { type: "Feature", properties: {}, geometry: (village as any).boundary },
+              ],
+            });
+            if (overlap && overlap.geometry) {
+              const areaSqM = turfArea(overlap);
+              if (areaSqM > 25) {
+                return {
+                  collidingName: village.name || `Community #${village.id}`,
+                  areaKm2: areaSqM / 1_000_000,
+                };
+              }
+            }
+          }
+        }
+      }
+    } catch {
+      return null;
+    }
+    return null;
+  }, [isDrawingSessionPolygon, sessionPolygonPoints, isDrawingCatchment, drawPoints, activeSessionPlans, activeMapVillages, layers.villages]);
+
   // Measurement & Catchment Drawing handlers
   const handleMapClick = (e: L.LeafletMouseEvent) => {
     if (isPickingFromMap && pickingOutreachForVillage) {
@@ -6301,9 +6763,9 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
               <Polyline
                 positions={sessionPolygonPoints}
                 pathOptions={{
-                  color: "#d97706", // Amber
-                  weight: 4,
-                  opacity: 0.8,
+                  color: liveDrawingCollision ? "#e11d48" : "#d97706", // Crimson on collision, else Amber
+                  weight: liveDrawingCollision ? 5 : 4,
+                  opacity: 0.85,
                 }}
               />
             ) : (
@@ -6311,10 +6773,10 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
               <Polygon
                 positions={sessionPolygonPoints}
                 pathOptions={{
-                  color: "#d97706", // Amber
-                  weight: 3,
-                  fillColor: "#f59e0b",
-                  fillOpacity: 0.15,
+                  color: liveDrawingCollision ? "#e11d48" : "#d97706",
+                  weight: liveDrawingCollision ? 4 : 3,
+                  fillColor: liveDrawingCollision ? "#f43f5e" : "#f59e0b",
+                  fillOpacity: liveDrawingCollision ? 0.35 : 0.15,
                   dashArray: "5, 10"
                 }}
               />
@@ -6337,18 +6799,19 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
           </>
         )}
 
-        {/* Render Active Session Plans (Planned vs Achieved) */}
+        {/* Render Active Session Plans (Planned vs Achieved with Polygon Collision Detection) */}
         {activeSessionPlans.map((plan: any) => {
           if (!plan.geojson || !plan.geojson.coordinates) return null;
 
           const isAchieved = plan.isAchieved;
+          const isColliding = collidingPolygonEntityIds.has(`session-${plan.id}`);
 
-          // Color coding: Achieved = Solid Green (#10b981), Planned = Dashed Gold-Amber (#f59e0b)
-          const color = isAchieved ? "#10b981" : "#f59e0b";
-          const weight = isAchieved ? 3.5 : 2.5;
-          const dashArray = isAchieved ? undefined : "5, 8";
-          const fillColor = isAchieved ? "#10b981" : "#f59e0b";
-          const fillOpacity = isAchieved ? 0.25 : 0.12;
+          // Color coding: Colliding = Crimson (#e11d48), Achieved = Solid Green (#10b981), Planned = Dashed Gold-Amber (#f59e0b)
+          const color = isColliding ? "#e11d48" : isAchieved ? "#10b981" : "#f59e0b";
+          const weight = isColliding ? 4 : isAchieved ? 3.5 : 2.5;
+          const dashArray = isColliding ? "4, 6" : isAchieved ? undefined : "5, 8";
+          const fillColor = isColliding ? "#f43f5e" : isAchieved ? "#10b981" : "#f59e0b";
+          const fillOpacity = isColliding ? 0.35 : isAchieved ? 0.25 : 0.12;
 
           const centroid = getSessionCentroid(plan);
 
@@ -6370,6 +6833,15 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
                       {plan.sessionType}
                     </span>
                     <div className="flex items-center gap-1">
+                      {isColliding && (
+                        <Badge
+                          variant="destructive"
+                          className="bg-rose-600 text-white text-[9px] font-bold uppercase tracking-wider animate-pulse flex items-center gap-1"
+                        >
+                          <AlertTriangle className="h-2.5 w-2.5" />
+                          Collision
+                        </Badge>
+                      )}
                       {lifecycle.isOverdue && (
                         <Badge
                           variant="secondary"
@@ -6388,6 +6860,13 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
                   <p className="text-[10px] text-muted-foreground mb-2">
                     Catchment Target: <strong>{plan.targetPopulation || 0}</strong> people
                   </p>
+
+                  {isColliding && (
+                    <div className="mb-2 p-2 bg-rose-500/15 border border-rose-500/30 rounded-lg text-rose-600 dark:text-rose-400 text-[10px] font-bold flex items-center gap-1.5 leading-tight">
+                      <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-rose-500 animate-bounce" />
+                      <span>Polygon Collision Detected with overlapping service boundary</span>
+                    </div>
+                  )}
 
                   {linkedVils && linkedVils.length > 0 && (
                     <div className="mb-3">
@@ -6506,6 +6985,63 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
           );
         })}
 
+        {/* ── Active Polygon Collision Highlight Layer ───────────────────────── */}
+        {layers.polygonCollisions &&
+          detectedPolygonCollisions.map((col) => (
+            <Fragment key={`polygon-col-frag-${col.id}`}>
+              {col.intersectionPositions.map((ringPositions, rIdx) => (
+                <Polygon
+                  key={`col-geom-${col.id}-${rIdx}`}
+                  positions={ringPositions}
+                  pathOptions={{
+                    color: "#e11d48",
+                    weight: 3.5,
+                    fillColor: "#f43f5e",
+                    fillOpacity: 0.48,
+                    dashArray: "4, 6",
+                    className: "polygon-collision-flash",
+                  }}
+                >
+                  <Tooltip permanent direction="center" className="collision-badge-tooltip">
+                    ⚠ Collision: {col.areaKm2 >= 0.01 ? `${col.areaKm2.toFixed(2)} km²` : `${Math.round(col.areaKm2 * 1_000_000)} m²`} Overlap
+                  </Tooltip>
+                  <Popup className="premium-map-popup">
+                    <div className="p-3 w-64 select-text font-sans">
+                      <div className="flex items-center gap-1.5 text-rose-600 dark:text-rose-400 font-bold text-xs mb-1.5 pb-1 border-b border-rose-500/20">
+                        <AlertTriangle className="h-4 w-4 shrink-0 text-rose-500 animate-bounce" />
+                        Catchment Collision Detected
+                      </div>
+                      <p className="text-[11px] text-muted-foreground mb-2 leading-relaxed">
+                        Two service catchments are overlapping in this identical geographical area.
+                      </p>
+                      <div className="space-y-1.5 bg-rose-500/10 p-2 rounded-lg border border-rose-500/20 text-xs mb-2">
+                        <div className="flex justify-between items-center">
+                          <span className="font-semibold text-foreground truncate max-w-[130px]">{col.nameA}</span>
+                          <Badge variant="secondary" className="bg-rose-500/20 text-rose-600 dark:text-rose-400 border-rose-500/30 text-[9px] font-bold">
+                            {col.overlapPctA}% overlap
+                          </Badge>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="font-semibold text-foreground truncate max-w-[130px]">{col.nameB}</span>
+                          <Badge variant="secondary" className="bg-rose-500/20 text-rose-600 dark:text-rose-400 border-rose-500/30 text-[9px] font-bold">
+                            {col.overlapPctB}% overlap
+                          </Badge>
+                        </div>
+                        <div className="text-[10px] text-muted-foreground pt-1.5 border-t border-rose-500/20 flex justify-between font-mono">
+                          <span>Colliding Shared Area:</span>
+                          <span className="font-bold text-foreground">{col.areaKm2.toFixed(2)} km²</span>
+                        </div>
+                      </div>
+                      <div className="text-[10px] text-rose-600 dark:text-rose-400 font-medium">
+                        💡 Re-align boundaries or adjust outreach session vertices to eliminate duplication.
+                      </div>
+                    </div>
+                  </Popup>
+                </Polygon>
+              ))}
+            </Fragment>
+          ))}
+
         {/* Roads transparent transport network overlay */}
         {/* Updated Code: Added opacity=0.75 for clear visibility; also added OpenStreetMap-Roads as a
             secondary fallback layer since the primary Esri Transportation service may be rate-limited
@@ -6589,7 +7125,8 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
                   onEachFeature={(feature, layer) => {
                     const name = getBoundaryFeatureName(feature, b.adminLevel);
 
-                    if (layers.showLabels && name) {
+                    const isTopLevelOrFew = b.adminLevel === 1 || (geojson.features || []).length <= 25;
+                    if (layers.showLabels && name && isTopLevelOrFew) {
                       layer.bindTooltip(resolveLabel(name), {
                         permanent: true,
                         direction: "center",
@@ -6614,10 +7151,7 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
                       });
                     }
 
-                    // Pre-match boundary polygons with database entities for renaming and filtering
-                    const fName = getBoundaryFeatureName(feature, b.adminLevel);
-                    const normFName = normalizeName(fName);
-
+                    const normFName = normalizeName(name);
                     let matchedEntityId: number | null = null;
                     let matchedEntityType: "province" | "district" | "llg" | null = null;
 
@@ -6714,45 +7248,6 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
                     container.appendChild(buttonsDiv);
                     layer.bindPopup(container);
 
-                    /* Original Code: mouseover and mouseout only
-                    layer.on({
-                      mouseover: (e) => {
-                        const l = e.target;
-                        l.setStyle({
-                          color: "#3b82f6", // Royal blue highlight stroke
-                          weight: 3,
-                          fillColor: "#3b82f6", // Royal blue highlight fill
-                          fillOpacity: 0.2,
-                        });
-                      },
-                      mouseout: (e) => {
-                        const l = e.target;
-                        l.setStyle(getBoundaryStyle(b.adminLevel, mode)); // Restores exact level style dynamically
-                      },
-                    });
-                    */
-
-                    // Updated Code: Listen to clicks to store coordinate, compute gridded population/nearest HF, and update popup content dynamically before opening
-                    /* Original click handler commented out to support calculating and displaying gridded population, nearest HF, and coordinates inside the boundary popup:
-                    layer.on({
-                      click: (e: any) => {
-                        currentLatLng = e.latlng;
-                      },
-                      mouseover: (e) => {
-                        const l = e.target;
-                        l.setStyle({
-                          color: "#3b82f6", // Royal blue highlight stroke
-                          weight: 3,
-                          fillColor: "#3b82f6", // Royal blue highlight fill
-                          fillOpacity: 0.2,
-                        });
-                      },
-                      mouseout: (e) => {
-                        const l = e.target;
-                        l.setStyle(getBoundaryStyle(b.adminLevel, mode)); // Restores exact level style dynamically
-                      },
-                    });
-                    */
                     layer.on({
                       click: (e: any) => {
                         currentLatLng = e.latlng;
@@ -6893,71 +7388,17 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
             })}
 
         {/* Render HCW Catchments (Drawn catchment areas) */}
-        {/* Original Code commented out to preserve backward compatibility:
-        {layers.hcwCatchments &&
-          hcwCatchments &&
-          hcwCatchments.map((catchment) => {
-            const facilityName =
-              facilities.find((f) => f.id === catchment.facilityId)?.name || "Facility";
-            return (
-              <GeoJSON
-                key={`hcw-catchment-${catchment.id}`}
-                data={catchment.geojson as any}
-                style={{
-                  color: "#0284c7", // Sky blue stroke
-                  weight: 2,
-                  fillOpacity: 0.25,
-                  fillColor: "#38bdf8", // Sky blue fill
-                }}
-                onEachFeature={(feature, layer) => {
-                  const areaStr = catchment.areaSqKm ? `${Number(catchment.areaSqKm).toFixed(2)} kmÂ²` : "N/A";
-                  const popStr = catchment.populationEstimate ? `${catchment.populationEstimate}` : "N/A";
-                  const savedAt = (catchment as any).createdAt
-                    ? new Date((catchment as any).createdAt).toLocaleString()
-                    : "—";
-                  const drawnBy = (catchment as any).drawnByUserId
-                    ? String((catchment as any).drawnByUserId).slice(0, 8) + "…"
-                    : "—";
-                  const tooltipContent = `
-                    <div class="p-1 space-y-1">
-                      <p class="font-bold text-sm text-sky-900">${catchment.name}</p>
-                      <p class="text-xs text-muted-foreground">${facilityName}</p>
-                      <p class="text-[11px]"><b>Area:</b> ${areaStr}</p>
-                      <p class="text-[11px]"><b>Est. Population:</b> ${popStr}</p>
-                      <p class="text-[11px]"><b>Drawn by:</b> ${drawnBy}</p>
-                      <p class="text-[11px]"><b>Saved:</b> ${savedAt}</p>
-                      <p class="text-[11px]"><b>Status:</b> ${catchment.isOfficial ? "Official Catchment" : "Drawn Catchment"}</p>
-                    </div>
-                  `;
-                  layer.bindPopup(tooltipContent);
-                  // Leaflet vector layers swallow click events by default, so a
-                  // user clicking ON a catchment polygon never triggered the
-                  // map's click handler (which is what initiates a new session
-                  // plan from the clicked location). Re-fire the click on the
-                  // map so the "Plan a session here" flow runs even when the
-                  // click lands inside a drawn catchment area. We stop the
-                  // underlying DOM event first so any latent bubbling from the
-                  // SVG renderer can't double-dispatch into handleMapClick (one
-                  // click → one session-start / one drawn point).
-                  layer.on("click", (e: any) => {
-                    if (e?.originalEvent) {
-                      L.DomEvent.stopPropagation(e.originalEvent);
-                    }
-                    if (mapRef.current) {
-                      mapRef.current.fire("click", e);
-                    }
-                  });
-                }}
-              />
-            );
-          })}
-        */}
-
-        {/* Updated Code: Render visibleHcwCatchments (which are already bounds-pruned in a memoized hook) */}
         {layers.hcwCatchments &&
           visibleHcwCatchments.map((catchment) => {
-            const facilityName =
-              facilities.find((f) => f.id === catchment.facilityId)?.name || "Facility";
+            const facility = facilities.find((f) => f.id === catchment.facilityId);
+            const facilityName = facility?.name || `Health Facility #${catchment.facilityId}`;
+
+            // Resolve proper catchment title: replace HF <id> placeholder with real facility name if present
+            const rawName = catchment.name || "";
+            const displayName = rawName.includes("HF ")
+              ? rawName.replace(/HF \d+/, facilityName)
+              : rawName || `Official Catchment for ${facilityName}`;
+
             return (
               <GeoJSON
                 key={`hcw-catchment-${catchment.id}`}
@@ -6969,35 +7410,34 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
                   fillColor: "#38bdf8", // Sky blue fill
                 }}
                 onEachFeature={(feature, layer) => {
-                  const areaStr = catchment.areaSqKm ? `${Number(catchment.areaSqKm).toFixed(2)} kmÂ²` : "N/A";
+                  const areaStr = catchment.areaSqKm ? `${Number(catchment.areaSqKm).toFixed(2)} km²` : "N/A";
                   const popStr = catchment.populationEstimate ? `${catchment.populationEstimate}` : "N/A";
                   const savedAt = (catchment as any).createdAt
                     ? new Date((catchment as any).createdAt).toLocaleString()
                     : "—";
-                  const drawnBy = (catchment as any).drawnByUserId
-                    ? String((catchment as any).drawnByUserId).slice(0, 8) + "…"
+
+                  // Extract full author name without arbitrary substring truncation
+                  const rawAuthor = (catchment as any).drawnByUserName || (catchment as any).drawnByName || (catchment as any).drawnByUserId;
+                  const drawnBy = rawAuthor
+                    ? String(rawAuthor).replace(/^user-/, "").replace(/[-_]/g, " ").trim()
                     : "—";
+
                   const tooltipContent = `
-                    <div class="p-1 space-y-1">
-                      <p class="font-bold text-sm text-sky-900">${catchment.name}</p>
-                      <p class="text-xs text-muted-foreground">${facilityName}</p>
-                      <p class="text-[11px]"><b>Area:</b> ${areaStr}</p>
-                      <p class="text-[11px]"><b>Est. Population:</b> ${popStr}</p>
-                      <p class="text-[11px]"><b>Drawn by:</b> ${drawnBy}</p>
-                      <p class="text-[11px]"><b>Saved:</b> ${savedAt}</p>
-                      <p class="text-[11px]"><b>Status:</b> ${catchment.isOfficial ? "Official Catchment" : "Drawn Catchment"}</p>
+                    <div class="p-2 space-y-1.5 min-w-[210px] max-w-[290px] select-text font-sans">
+                      <p class="font-bold text-sm text-sky-900 leading-snug">${displayName}</p>
+                      <div class="inline-flex items-center px-1.5 py-0.5 rounded bg-sky-500/10 border border-sky-500/20 text-sky-700 text-[11px] font-semibold">
+                        ${facilityName}
+                      </div>
+                      <div class="pt-1 space-y-0.5 text-[11px] text-foreground">
+                        <p><b>Area:</b> ${areaStr}</p>
+                        <p><b>Est. Population:</b> ${popStr}</p>
+                        <p class="break-words"><b>Drawn by:</b> <span class="font-semibold capitalize text-foreground">${drawnBy}</span></p>
+                        <p><b>Saved:</b> ${savedAt}</p>
+                        <p><b>Status:</b> <span class="font-semibold text-emerald-600">${catchment.isOfficial ? "Official Catchment" : "Drawn Catchment"}</span></p>
+                      </div>
                     </div>
                   `;
                   layer.bindPopup(tooltipContent);
-                  // Leaflet vector layers swallow click events by default, so a
-                  // user clicking ON a catchment polygon never triggered the
-                  // map's click handler (which is what initiates a new session
-                  // plan from the clicked location). Re-fire the click on the
-                  // map so the "Plan a session here" flow runs even when the
-                  // click lands inside a drawn catchment area. We stop the
-                  // underlying DOM event first so any latent bubbling from the
-                  // SVG renderer can't double-dispatch into handleMapClick (one
-                  // click → one session-start / one drawn point).
                   layer.on("click", (e: any) => {
                     if (e?.originalEvent) {
                       L.DomEvent.stopPropagation(e.originalEvent);
@@ -7011,171 +7451,41 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
             );
           })}
 
-        {/*
-        // Original Code: Concentric circles and catchment lines rendered without O(1) lookups or zoom pruning, resulting in significant rendering lockups
+        {/* Concentric Walkability circles for health facilities */}
         {layers.catchments &&
-          filteredFacilities
-            .filter((f) => f.latitude && f.longitude)
-            .map((facility) => {
-              const lat = Number(facility.latitude);
-              const lng = Number(facility.longitude);
-              return (
-                <div key={`catchment-circles-${facility.id}`}>
-                  <Circle
-                    center={[lat, lng]}
-                    radius={5000}
-                    pathOptions={{
-                      fillColor: "#22c55e",
-                      color: "#22c55e",
-                      fillOpacity: 0.04,
-                      weight: 1.5,
-                      dashArray: "4, 4"
-                    }}
-                  />
-                  <Circle
-                    center={[lat, lng]}
-                    radius={10000}
-                    pathOptions={{
-                      fillColor: "#ea580c",
-                      color: "#ea580c",
-                      fillOpacity: 0.02,
-                      weight: 1.5,
-                      dashArray: "4, 4"
-                    }}
-                  />
-                </div>
-              );
-            })}
-
-        {layers.catchments &&
-          filteredVillages
-            .filter((v) => v.latitude && v.longitude && v.assignedFacilityId)
-            .map((village) => {
-              const facility = filteredFacilities.find((f) => f.id === village.assignedFacilityId);
-              if (!facility || !facility.latitude || !facility.longitude) return null;
-              ...
-            })}
-        {/* Updated Code: High-performance Concentric Walkability circles for health facilities */}
-        {layers.catchments &&
-          filteredFacilities
-            .filter((f) => {
-              if (!f.latitude || !f.longitude) return false;
-              if (!mapBounds) return true;
-              return mapBounds.contains([Number(f.latitude), Number(f.longitude)]);
-            })
-            .map((facility) => {
-              const lat = Number(facility.latitude);
-              const lng = Number(facility.longitude);
-              return (
-                <div key={`catchment-circles-${facility.id}`}>
-                  {/* 5km Walkable Buffer (Green) */}
-                  <Circle
-                    center={[lat, lng]}
-                    radius={5000}
-                    pathOptions={{
-                      fillColor: "#22c55e",
-                      color: "#22c55e",
-                      fillOpacity: 0.04,
-                      weight: 1.5,
-                      dashArray: "4, 4"
-                    }}
-                  />
-                  {/* 10km Outreach Buffer (Orange) */}
-                  <Circle
-                    center={[lat, lng]}
-                    radius={10000}
-                    pathOptions={{
-                      fillColor: "#ea580c",
-                      color: "#ea580c",
-                      fillOpacity: 0.02,
-                      weight: 1.5,
-                      dashArray: "4, 4"
-                    }}
-                  />
-                </div>
-              );
-            })}
-
-        {/* Original Code:
-        {layers.catchments &&
-          showVillageMarkers &&
-          visibleVillages
-            .filter((v) => v.latitude && v.longitude && v.assignedFacilityId)
-            .map((village) => {
-              const facility = filteredFacilitiesMap.get(Number(village.assignedFacilityId));
-              if (!facility || !facility.latitude || !facility.longitude) return null;
-
-              const vLat = Number(village.latitude);
-              const vLng = Number(village.longitude);
-              const fLat = Number(facility.latitude);
-              const fLng = Number(facility.longitude);
-
-              // Calculate Turf geodesic distance
-              const dist = distance([vLng, vLat], [fLng, fLat], { units: "kilometers" });
-
-              // Color code based on walkability distance
-              let color = "#22c55e"; // Walkable (<5km)
-              if (dist > 10) {
-                color = "#ef4444"; // HTR (>10km)
-              } else if (dist > 5) {
-                color = "#ea580c"; // Outreach (5-10km)
-              }
-
-              return (
-                <Polyline
-                  key={`link-${village.id}-${facility.id}`}
-                  positions={[[vLat, vLng], [fLat, fLng]]}
-                  color={color}
-                  weight={1.5}
-                  opacity={0.7}
-                  dashArray="2, 4"
+          visibleFacilitiesFiltered.map((facility) => {
+            const lat = Number(facility.latitude);
+            const lng = Number(facility.longitude);
+            if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+            return (
+              <div key={`catchment-circles-${facility.id}`}>
+                {/* 5km Walkable Buffer (Green) */}
+                <Circle
+                  center={[lat, lng]}
+                  radius={5000}
+                  pathOptions={{
+                    fillColor: "#22c55e",
+                    color: "#22c55e",
+                    fillOpacity: 0.04,
+                    weight: 1.5,
+                    dashArray: "4, 4",
+                  }}
                 />
-              );
-            })}
-        {/* Updated Code: High-performance O(1) Village-to-Facility Catchment Lines.
-            Removed showVillageMarkers dependency — visibleVillagesFiltered now handles bounds
-            pruning unconditionally, so these lines render immediately when the toggle is enabled. */}
-        {/* Original Code commented out to preserve backward compatibility and prevent redundant Turf distance calculations inside loop:
-        {layers.catchments &&
-          showVillageMarkers &&
-          visibleVillagesFiltered
-            .filter((v) => v.latitude && v.longitude && v.assignedFacilityId)
-            .map((village) => {
-              const facility = filteredFacilitiesMap.get(Number(village.assignedFacilityId));
-              if (!facility || !facility.latitude || !facility.longitude) return null;
-
-              const vLat = Number(village.latitude);
-              const vLng = Number(village.longitude);
-              const fLat = Number(facility.latitude);
-              const fLng = Number(facility.longitude);
-
-              // Calculate Turf geodesic distance
-              const dist = distance([vLng, vLat], [fLng, fLat], { units: "kilometers" });
-
-              // Color code based on walkability distance
-              let color = "#22c55e"; // Walkable (<5km)
-              if (dist > 10) {
-                color = "#ef4444"; // HTR (>10km)
-              } else if (dist > 5) {
-                color = "#ea580c"; // Outreach (5-10km)
-              }
-
-              return (
-                <Polyline
-                  key={`link-${village.id}-${facility.id}`}
-                  positions={[[vLat, vLng], [fLat, fLng]]}
-                  color={color}
-                  weight={1.5}
-                  opacity={0.7}
-                  dashArray="2, 4"
+                {/* 10km Outreach Buffer (Orange) */}
+                <Circle
+                  center={[lat, lng]}
+                  radius={10000}
+                  pathOptions={{
+                    fillColor: "#ea580c",
+                    color: "#ea580c",
+                    fillOpacity: 0.02,
+                    weight: 1.5,
+                    dashArray: "4, 4",
+                  }}
                 />
-              );
-            })}
-        */}
-
-        {/* Facility-community links must be routed roads, not straight-line hints.
-            Straight geometry is intentionally hidden; selecting a facility below
-            draws only OSRM road route geometry returned by the API. */}
+              </div>
+            );
+          })}
 
         {/* Network routes rendering when a facility is selected */}
         {selectedFacilityId && communityRoutes && communityRoutes.length > 0 &&
@@ -7207,7 +7517,15 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
           })}
 
         {layers.facilities && (
-          <MarkerClusterGroup chunkedLoading maxClusterRadius={50} iconCreateFunction={createFacilityClusterIcon}>
+          <MarkerClusterGroup
+            chunkedLoading={true}
+            chunkInterval={100}
+            chunkDelay={20}
+            removeOutsideVisibleBounds={true}
+            animate={false}
+            maxClusterRadius={50}
+            iconCreateFunction={createFacilityClusterIcon}
+          >
             {visibleFacilitiesFiltered
               .filter((f) => f.latitude && f.longitude)
               .map((facility) => (
@@ -7227,51 +7545,16 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
           </MarkerClusterGroup>
         )}
 
-        {/*
-        // Original Code: Rendering thousands of villages without zoom-based pruning
-        {layers.villages &&
-          filteredVillages
-            .filter((v) => v.latitude && v.longitude)
-            .map((village) => (
-        */}
-        {/* Updated Code: Village markers use visibleVillagesFiltered which already applies bounds-based
-            pruning unconditionally. Removed the showVillageMarkers zoom-gate from the render condition
-            so the toggle responds immediately when enabled, regardless of zoom level. */}
         {layers.villages && (
-          <MarkerClusterGroup chunkedLoading maxClusterRadius={40} iconCreateFunction={createVillageClusterIcon}>
-            {/* Original code (commented out to preserve working code while optimizing performance):
-            {(() => {
-              if (showVillageMarkers) return visibleVillagesFiltered;
-              if (selectedFacilityId && communityRoutes && communityRoutes.length > 0) {
-                const routedVillageIds = new Set(communityRoutes.map((r: any) => r.villageId));
-                return villages.filter((v) => routedVillageIds.has(v.id));
-              }
-              return [];
-            })()
-              .filter((v) => v.latitude && v.longitude)
-              .map((village) => (
-                <Marker
-                key={`village-${village.id}`}
-                position={[Number(village.latitude), Number(village.longitude)]}
-                icon={
-                  plannedVillageIds.has(village.id)
-                    ? plannedIcon
-                    : village.isHardToReach
-                      ? missingHtrIcon
-                      : missingStandardIcon
-                }
-              >
-                {layers.showLabels && (
-                  <Tooltip
-                    permanent
-                    direction="bottom"
-                    offset={[0, 8]}
-                    className="map-village-label"
-                  >
-                    {resolveLabel(village.name)}
-                  </Tooltip>
-                )}
-            */}
+          <MarkerClusterGroup
+            chunkedLoading={true}
+            chunkInterval={100}
+            chunkDelay={20}
+            removeOutsideVisibleBounds={true}
+            animate={false}
+            maxClusterRadius={40}
+            iconCreateFunction={createVillageClusterIcon}
+          >
             {activeClusteredVillages
               .filter((v) => v.latitude && v.longitude)
               .map((village) => (
@@ -7566,24 +7849,10 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
         )}
 
         {/* Render outreach posts and connecting dashed lines for villages that have them */}
-        {layers.villages &&
-          /* Original code (commented out to preserve working code while optimizing performance):
-          (() => {
-            if (showVillageMarkers) return visibleVillagesFiltered;
-            if (selectedFacilityId && communityRoutes && communityRoutes.length > 0) {
-              const routedVillageIds = new Set(communityRoutes.map((r: any) => r.villageId));
-              return villages.filter((v) => routedVillageIds.has(v.id));
-            }
-            return [];
-          })()
-            .filter((v) => v.latitude && v.longitude && v.outreachLatitude && v.outreachLongitude)
-            .map((village) => {
-          */
-          activeMapVillages
-            .filter((v) => v.latitude && v.longitude && v.outreachLatitude && v.outreachLongitude)
-            .map((village) => {
-              const villagePos: [number, number] = [Number(village.latitude), Number(village.longitude)];
-              const outreachPos: [number, number] = [Number(village.outreachLatitude), Number(village.outreachLongitude)];
+        {layers.outreachPosts &&
+          filteredOutreachPosts.map((village) => {
+            const villagePos: [number, number] = [Number(village.latitude), Number(village.longitude)];
+            const outreachPos: [number, number] = [Number(village.outreachLatitude), Number(village.outreachLongitude)];
               return (
                 <Fragment key={`outreach-post-container-${village.id}`}>
                   <Polyline
@@ -7601,12 +7870,17 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
                       {village.outreachPostName || "Outreach Post"} ({village.name})
                     </Tooltip>
                     <Popup className="premium-map-popup">
-                      <div className="w-56 p-3 font-sans text-xs">
-                        <h4 className="font-bold text-sm text-[#a855f7] mb-1">
-                                {village.outreachPostName || "Outreach Post"}
-                        </h4>
-                        <p className="text-muted-foreground mb-2">
-                          Outreach post for community: <strong>{village.name}</strong>
+                      <div className="w-60 p-3 font-sans text-xs select-none">
+                        <div className="flex items-start justify-between gap-1 mb-1">
+                          <h4 className="font-bold text-sm text-[#a855f7] leading-tight">
+                            {village.outreachPostName || "Outreach Post"}
+                          </h4>
+                          <Badge variant="outline" className="text-[9px] border-purple-500/30 text-purple-600 dark:text-purple-400 uppercase font-semibold">
+                            Outreach
+                          </Badge>
+                        </div>
+                        <p className="text-muted-foreground text-[11px] mb-2">
+                          Service post for community: <strong className="text-foreground">{village.name}</strong>
                         </p>
                         <div className="space-y-1 border-t border-border/40 pt-2 text-[10px]">
                           <p><span className="font-semibold text-muted-foreground">Coordinates:</span> {Number(village.outreachLatitude).toFixed(5)}, {Number(village.outreachLongitude).toFixed(5)}</p>
@@ -7618,6 +7892,40 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
                               return null;
                             }
                           })()}
+                        </div>
+                        <div className="mt-3 pt-2 border-t border-border/40 flex items-center justify-between gap-1.5">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-6 text-[10px] px-2 text-purple-600 hover:bg-purple-50 border-purple-500/20"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setOutreachDialogTarget(village);
+                            }}
+                          >
+                            Edit Post
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-6 text-[10px] px-2 text-red-500 hover:text-red-600 hover:bg-red-50"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleClearOutreachPost(village);
+                            }}
+                          >
+                            Clear
+                          </Button>
+                          <Button
+                            size="sm"
+                            className="h-6 text-[10px] px-2 bg-purple-600 hover:bg-purple-700 text-white font-semibold ml-auto"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setLocation(`/sessions?villageId=${village.id}&type=outreach`);
+                            }}
+                          >
+                            Plan Session →
+                          </Button>
                         </div>
                       </div>
                     </Popup>
@@ -7632,29 +7940,38 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
             are visible app-wide. */}
         {layers.villages &&
           showVillageMarkers &&
-          /* Original code (commented out to preserve working code while optimizing performance):
-          visibleVillagesFiltered
-            .filter((v) => {
-          */
           activeMapVillages
             .filter((v) => {
               const coords = (v as any).boundary?.coordinates?.[0];
               return Array.isArray(coords) && coords.length >= 4;
             })
             .map((village) => {
+              const isColliding = collidingPolygonEntityIds.has(`village-${village.id}`);
               const ring = (village as any).boundary.coordinates[0] as number[][];
               const positions = ring.map((c) => [c[1], c[0]] as [number, number]);
-              const color = village.isHardToReach ? "#dc2626" : "#6366f1";
+              const color = isColliding ? "#e11d48" : village.isHardToReach ? "#dc2626" : "#6366f1";
               return (
                 <Polygon
                   key={`village-boundary-${village.id}`}
                   positions={positions}
-                  pathOptions={{ color, fillColor: color, fillOpacity: 0.1, weight: 2 }}
+                  pathOptions={{
+                    color,
+                    fillColor: color,
+                    fillOpacity: isColliding ? 0.35 : 0.1,
+                    weight: isColliding ? 3.5 : 2,
+                    dashArray: isColliding ? "4, 6" : undefined,
+                  }}
                 >
                   <Popup className="premium-map-popup">
                     <div className="w-48 text-xs font-sans">
                       <div className="font-bold text-sm mb-1">{village.name}</div>
                       <div className="text-muted-foreground">Community catchment boundary</div>
+                      {isColliding && (
+                        <div className="mt-2 p-1.5 bg-rose-500/15 border border-rose-500/30 rounded text-rose-600 dark:text-rose-400 text-[10px] font-bold flex items-center gap-1">
+                          <AlertTriangle className="h-3 w-3 shrink-0" />
+                          Catchment Collision Detected
+                        </div>
+                      )}
                     </div>
                   </Popup>
                 </Polygon>
@@ -8072,17 +8389,18 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
               <Polygon
                 positions={drawPoints}
                 pathOptions={{
-                  color: "#059669",
-                  fillColor: "#10b981",
-                  fillOpacity: 0.3,
-                  weight: 3,
+                  color: liveDrawingCollision ? "#e11d48" : "#059669",
+                  fillColor: liveDrawingCollision ? "#f43f5e" : "#10b981",
+                  fillOpacity: liveDrawingCollision ? 0.45 : 0.3,
+                  weight: liveDrawingCollision ? 4 : 3,
+                  dashArray: liveDrawingCollision ? "5, 10" : undefined,
                 }}
               />
             ) : drawPoints.length === 2 ? (
               <Polyline
                 positions={drawPoints}
                 pathOptions={{
-                  color: "#059669",
+                  color: liveDrawingCollision ? "#e11d48" : "#059669",
                   weight: 3,
                 }}
               />
@@ -8094,7 +8412,7 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
                 center={pt}
                 radius={6}
                 pathOptions={{
-                  color: "#059669",
+                  color: liveDrawingCollision ? "#e11d48" : "#059669",
                   fillColor: "#ffffff",
                   fillOpacity: 1,
                   weight: 2,
@@ -8241,6 +8559,48 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
                 </Button>
               );
             })}
+        </div>
+      )}
+
+      {/* Floating Polygon Collision Alert Badge */}
+      {!isPrinting && detectedPolygonCollisions.length > 0 && layers.polygonCollisions && (
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[1100]" ref={disableLeafletPropagation}>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              const first = detectedPolygonCollisions[0];
+              if (first && mapRef.current) {
+                mapRef.current.flyTo(first.centroid, 14, { duration: 1 });
+                toast({
+                  title: `Catchment Collision: ${first.nameA} × ${first.nameB}`,
+                  description: `Overlap Area: ${first.areaKm2.toFixed(2)} km² (${first.overlapPctA}% overlap)`,
+                  variant: "destructive",
+                });
+              }
+            }}
+            className="bg-rose-600/90 text-white hover:bg-rose-700 border border-white/30 text-xs font-bold gap-2 h-8 px-3.5 rounded-full shadow-lg backdrop-blur-md animate-pulse"
+          >
+            <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-white animate-bounce" />
+            <span>
+              {detectedPolygonCollisions.length} Polygon {detectedPolygonCollisions.length === 1 ? "Collision" : "Collisions"} Detected
+            </span>
+            <span className="bg-white/25 px-1.5 py-0.5 rounded-full text-[10px] font-mono">
+              Zoom
+            </span>
+          </Button>
+        </div>
+      )}
+
+      {/* Live Drawing Real-Time Collision Notification Banner */}
+      {!isPrinting && liveDrawingCollision && (
+        <div className="absolute top-14 left-1/2 -translate-x-1/2 z-[1200] pointer-events-none animate-in fade-in slide-in-from-top-3 duration-200">
+          <div className="bg-rose-600 text-white px-4 py-2 rounded-full shadow-2xl flex items-center gap-2 text-xs font-bold border border-white/40 backdrop-blur-md">
+            <AlertTriangle className="h-4 w-4 shrink-0 animate-bounce" />
+            <span>
+              Drawing Collision Warning: Overlaps "{liveDrawingCollision.collidingName}" ({liveDrawingCollision.areaKm2.toFixed(2)} km²)
+            </span>
+          </div>
         </div>
       )}
 
@@ -8557,13 +8917,25 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
                 onProvinceChange={handleProvinceChange}
                 selectedDistrictId={selectedDistrictId}
                 onDistrictChange={handleDistrictChange}
+                selectedLlgId={selectedLlgId}
+                onLlgChange={handleLlgChange}
                 selectedFacilityId={selectedFacilityId}
                 onFacilityChange={(id) => {
                   if (id === null) {
                     setSelectedFacilityId(null);
                   } else {
-                    const fac = facilities.find((f) => f.id === id);
-                    if (fac) handleFocusFacility(fac);
+                    const fac = facilities.find((f) => Number(f.id) === Number(id));
+                    if (fac) {
+                      setSelectedFacilityId(Number(fac.id));
+                      if (fac.districtId) {
+                        setSelectedDistrictId(Number(fac.districtId));
+                        const dist = districts.find((d) => Number(d.id) === Number(fac.districtId));
+                        if (dist && dist.provinceId) {
+                          setSelectedProvinceId(Number(dist.provinceId));
+                        }
+                      }
+                      handleFocusFacility(fac);
+                    }
                   }
                 }}
                 villageCategory={villageCategory}
@@ -8574,6 +8946,7 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
                 onPowerToggle={() => setFilterPower(!filterPower)}
                 provinces={provinces}
                 districts={districts}
+                llgs={llgs}
                 facilities={facilities}
                 adminLabels={adminLabels}
                 totalFacilitiesCount={facilities.length}
@@ -8743,6 +9116,7 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
           planningStats={stats}
           showPopulationLegend={layers.populationGeoTIFF}
           facilityCount={filteredFacilities.length}
+          collisionCount={detectedPolygonCollisions.length}
         />
       )}
 
