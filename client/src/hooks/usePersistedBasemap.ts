@@ -30,13 +30,18 @@ const VALID_BASEMAPS = [
 function readStored(): Basemap | null {
   try {
     const v = localStorage.getItem(STORAGE_KEY);
-    return v && VALID_BASEMAPS.includes(v) ? (v as Basemap) : null;
+    if (!v || !VALID_BASEMAPS.includes(v)) return null;
+    const hasCartoKey = !!import.meta.env.VITE_CARTO_API_KEY;
+    if (!hasCartoKey && (v === "positron" || v === "voyager" || v === "carto" || v === "light" || v === "boundary")) {
+      return "osm";
+    }
+    return v as Basemap;
   } catch {
     return null;
   }
 }
 
-export function usePersistedBasemap(defaultValue: Basemap = "positron") {
+export function usePersistedBasemap(defaultValue: Basemap = "osm") {
   const [basemap, setBasemapState] = useState<Basemap>(
     () => readStored() ?? defaultValue,
   );

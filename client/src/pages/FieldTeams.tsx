@@ -125,8 +125,8 @@ function TeamMap({ teams }: { teams: FieldTeamMember[] }) {
           center: [0, 25],
           zoomControl: true,
         });
-        L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
-          attribution: "&copy; OpenStreetMap contributors &copy; CARTO",
+        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+          attribution: "&copy; OpenStreetMap contributors",
           maxNativeZoom: 19,
           maxZoom: 22,
         }).addTo(mapRef.current);

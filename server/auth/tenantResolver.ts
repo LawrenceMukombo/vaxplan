@@ -47,7 +47,7 @@ export const tenantContext: RequestHandler = async (req, _res, next) => {
   // Original check:
   // if (!req.isAuthenticated?.()) return next();
 
-  const headerTenantRaw = req.headers["x-tenant-id"] || req.query["x-tenant-id"];
+  const headerTenantRaw = req.headers["x-tenant-id"] || req.query["x-tenant-id"] || req.query["tenantId"];
   const headerTenantStr = typeof headerTenantRaw === "string" && headerTenantRaw.trim() ? headerTenantRaw.trim() : null;
 
   if (!req.isAuthenticated?.()) {

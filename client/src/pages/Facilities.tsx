@@ -575,7 +575,10 @@ export default function Facilities() {
     queryKey: ["/api/provinces", tenantQueryKey],
     enabled: !!tenantInfo?.id,
     queryFn: async () => {
-      const res = await fetch("/api/provinces", { credentials: "include" });
+      const res = await fetch(`/api/provinces?tenantId=${encodeURIComponent(tenantQueryKey)}`, {
+        credentials: "include",
+        headers: { "Cache-Control": "no-cache", "x-tenant-id": tenantQueryKey },
+      });
       if (!res.ok) throw new Error("Failed to fetch provinces");
       return res.json();
     },
@@ -586,7 +589,10 @@ export default function Facilities() {
     queryKey: ["/api/districts", tenantQueryKey],
     enabled: !!tenantInfo?.id,
     queryFn: async () => {
-      const res = await fetch("/api/districts", { credentials: "include" });
+      const res = await fetch(`/api/districts?tenantId=${encodeURIComponent(tenantQueryKey)}`, {
+        credentials: "include",
+        headers: { "Cache-Control": "no-cache", "x-tenant-id": tenantQueryKey },
+      });
       if (!res.ok) throw new Error("Failed to fetch districts");
       return res.json();
     },
@@ -596,7 +602,10 @@ export default function Facilities() {
     queryKey: ["/api/facilities", tenantQueryKey],
     enabled: !!tenantInfo?.id,
     queryFn: async () => {
-      const res = await fetch("/api/facilities", { credentials: "include", headers: { "Cache-Control": "no-cache" } });
+      const res = await fetch(`/api/facilities?tenantId=${encodeURIComponent(tenantQueryKey)}`, {
+        credentials: "include",
+        headers: { "Cache-Control": "no-cache", "x-tenant-id": tenantQueryKey },
+      });
       if (!res.ok) throw new Error("Failed to fetch facilities");
       const list = await res.json();
       try {
@@ -616,10 +625,19 @@ export default function Facilities() {
     if (!facility) return;
 
     setSelectedFacilityId(facility.id);
+    if (facility.districtId && allDistricts) {
+      setSelectedDistrictId(facility.districtId);
+      const d = allDistricts.find((item) => Number(item.id) === Number(facility.districtId));
+      if (d && (d as any).provinceId) {
+        setSelectedProvinceId((d as any).provinceId);
+      }
+    } else if ((facility as any).provinceId) {
+      setSelectedProvinceId((facility as any).provinceId);
+    }
     setTimeout(() => {
       document.querySelector('[data-selected-facility-panel="true"]')?.scrollIntoView({ behavior: "smooth", block: "start" });
     }, 100);
-  }, [location, facilities]);
+  }, [location, facilities, allDistricts]);
 
   const { data: villages, isLoading: loadingVillages } = useQuery<Village[]>({
     queryKey: ["/api/villages", tenantQueryKey],
@@ -2643,6 +2661,7 @@ export default function Facilities() {
                 <Card className="mb-6 bg-card border-border/40 shadow-sm">
           <CardContent className="pt-4 pb-4">
             <GeoCascadeFilter
+              strictCascade={false}
               showRegion={!skipRegionLevel}
               regionId={selectedRegionId}
               provinceId={selectedProvinceId}
@@ -2663,8 +2682,30 @@ export default function Facilities() {
               onDistrictChange={(id) => {
                 setSelectedDistrictId(id);
                 setSelectedFacilityId(null);
+                if (id && allDistricts) {
+                  const d = allDistricts.find((item) => Number(item.id) === Number(id));
+                  if (d && (d as any).provinceId) {
+                    setSelectedProvinceId((d as any).provinceId);
+                  }
+                }
               }}
-              onFacilityChange={setSelectedFacilityId}
+              onFacilityChange={(id) => {
+                setSelectedFacilityId(id);
+                if (id && facilities) {
+                  const fac = facilities.find((item) => Number(item.id) === Number(id));
+                  if (fac) {
+                    if (fac.districtId) {
+                      setSelectedDistrictId(fac.districtId);
+                      const d = allDistricts?.find((item) => Number(item.id) === Number(fac.districtId));
+                      if (d && (d as any).provinceId) {
+                        setSelectedProvinceId((d as any).provinceId);
+                      }
+                    } else if ((fac as any).provinceId) {
+                      setSelectedProvinceId((fac as any).provinceId);
+                    }
+                  }
+                }
+              }}
               regions={regions}
               provinces={provinces}
               districts={allDistricts}

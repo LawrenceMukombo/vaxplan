@@ -67,8 +67,8 @@ import { MapContainer, CircleMarker, TileLayer, Popup } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 
 // Dynamic basemap configuration
-const BASEMAP_URL = "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png";
-const BASEMAP_ATTRIBUTION = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>';
+const BASEMAP_URL = "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png";
+const BASEMAP_ATTRIBUTION = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
 import { getDomainLinks } from "@/lib/navigation";
 
 export default function ResearchHub() {

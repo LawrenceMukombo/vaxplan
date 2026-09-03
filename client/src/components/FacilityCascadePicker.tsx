@@ -40,8 +40,13 @@ export interface FacilityCascadePickerProps {
   onDistrictChange?: (districtId: number | null) => void;
 }
 
-async function fetchJson<T>(url: string): Promise<T> {
-  const res = await fetch(url, { credentials: "include" });
+async function fetchJson<T>(url: string, tenantId?: string | null): Promise<T> {
+  const fullUrl = tenantId
+    ? `${url}${url.includes("?") ? "&" : "?"}tenantId=${encodeURIComponent(tenantId)}`
+    : url;
+  const headers: Record<string, string> = { "Cache-Control": "no-cache" };
+  if (tenantId) headers["x-tenant-id"] = tenantId;
+  const res = await fetch(fullUrl, { credentials: "include", headers });
   if (!res.ok) throw new Error(`Failed to fetch ${url}`);
   return res.json();
 }
@@ -94,20 +99,22 @@ export function FacilityCascadePicker({
   // Backward compatibility with legacy flag
   const isFacilityStaff = isFacilityUser;
 
+  const activeTenantId = tenantInfo?.activeTenant?.id || tenantInfo?.id;
+
   const { data: provinces } = useQuery<Province[]>({
-    queryKey: ["/api/provinces", tenantInfo?.id],
-    queryFn: () => fetchJson<Province[]>("/api/provinces"),
-    enabled: !!tenantInfo?.id,
+    queryKey: ["/api/provinces", activeTenantId],
+    queryFn: () => fetchJson<Province[]>("/api/provinces", activeTenantId),
+    enabled: !!activeTenantId,
   });
   const { data: districts } = useQuery<District[]>({
-    queryKey: ["/api/districts", tenantInfo?.id],
-    queryFn: () => fetchJson<District[]>("/api/districts"),
-    enabled: !!tenantInfo?.id,
+    queryKey: ["/api/districts", activeTenantId],
+    queryFn: () => fetchJson<District[]>("/api/districts", activeTenantId),
+    enabled: !!activeTenantId,
   });
   const { data: facilities } = useQuery<Facility[]>({
-    queryKey: ["/api/facilities", tenantInfo?.id],
-    queryFn: () => fetchJson<Facility[]>("/api/facilities"),
-    enabled: !!tenantInfo?.id,
+    queryKey: ["/api/facilities", activeTenantId],
+    queryFn: () => fetchJson<Facility[]>("/api/facilities", activeTenantId),
+    enabled: !!activeTenantId,
   });
 
   const [provinceId, setProvinceId] = useState<number | null>(null);
@@ -278,36 +285,54 @@ export function FacilityCascadePicker({
     let list = districts ?? [];
     if (isDistrictUser || isFacilityUser) {
       if (user?.districtId) {
-        list = list.filter((d) => Number(d.id) === Number(user.districtId));
+        list = list.filter((d) => Number(d.id) === Number(user.districtId) || String(d.id) === String(user.districtId));
       }
     } else if (provinceId) {
-      list = list.filter(
-        (d) => Number((d as any).provinceId) === Number(provinceId),
-      );
+      const targetProv = provinces?.find((p) => Number(p.id) === Number(provinceId) || String(p.id) === String(provinceId));
+      list = list.filter((d) => {
+        const dProvId = (d as any).provinceId;
+        if (dProvId != null && (Number(dProvId) === Number(provinceId) || String(dProvId) === String(provinceId))) return true;
+        if (targetProv && (d as any).provinceName) {
+          return (d as any).provinceName.toLowerCase() === targetProv.name.toLowerCase();
+        }
+        return false;
+      });
     }
     return [...list].sort((a, b) => a.name.localeCompare(b.name));
-  }, [districts, provinceId, isDistrictUser, isFacilityUser, user?.districtId]);
+  }, [districts, provinces, provinceId, isDistrictUser, isFacilityUser, user?.districtId]);
 
   const filteredFacilities = useMemo(() => {
     let list = facilities ?? [];
     if (isFacilityUser) {
       if (user?.facilityId) {
-        list = list.filter((f) => Number(f.id) === Number(user.facilityId));
+        list = list.filter((f) => Number(f.id) === Number(user.facilityId) || String(f.id) === String(user.facilityId));
       }
     } else if (districtId) {
       list = list.filter(
-        (f) => Number((f as any).districtId) === Number(districtId),
+        (f) => Number((f as any).districtId) === Number(districtId) || String((f as any).districtId) === String(districtId),
       );
     } else if (provinceId) {
+      const targetProv = provinces?.find((p) => Number(p.id) === Number(provinceId) || String(p.id) === String(provinceId));
+      const targetDistIds = new Set(
+        (districts ?? [])
+          .filter((d) => {
+            const dProvId = (d as any).provinceId;
+            return (dProvId != null && (Number(dProvId) === Number(provinceId) || String(dProvId) === String(provinceId))) ||
+              (targetProv && (d as any).provinceName && (d as any).provinceName.toLowerCase() === targetProv.name.toLowerCase());
+          })
+          .map((d) => Number(d.id))
+      );
+
       list = list.filter((f) => {
-        const d = (districts ?? []).find(
-          (dd) => Number(dd.id) === Number((f as any).districtId),
-        );
-        return d && Number((d as any).provinceId) === Number(provinceId);
+        const fProvId = (f as any).provinceId;
+        if (fProvId != null && (Number(fProvId) === Number(provinceId) || String(fProvId) === String(provinceId))) return true;
+        if (targetProv && (f as any).province && (f as any).province.toLowerCase() === targetProv.name.toLowerCase()) return true;
+        const fDistId = Number((f as any).districtId);
+        return Number.isFinite(fDistId) && targetDistIds.has(fDistId);
       });
     }
     return [...list].sort((a, b) => a.name.localeCompare(b.name));
-  }, [facilities, districts, provinceId, districtId, isFacilityUser, user?.facilityId]);
+  }, [facilities, districts, provinces, provinceId, districtId, isFacilityUser, user?.facilityId]);
 
   const selectedProvince = sortedProvinces.find(
     (p) => Number(p.id) === Number(provinceId),

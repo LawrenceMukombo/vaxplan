@@ -111,7 +111,7 @@ function MiniMapLocationPicker({
         className="h-full w-full"
         attributionControl={false}
       >
-        <TileLayer url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png" />
+        <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" attribution='&copy; OpenStreetMap contributors' />
         <MapEvents />
         {latitude !== null && longitude !== null && (
           <Marker

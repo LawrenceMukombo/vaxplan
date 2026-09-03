@@ -497,6 +497,7 @@ type GeoScope = {
  * Combined with React Query staleTime, eliminates most cold-start round-trips.
  */
 function setCacheHeaders(res: any, maxAgeSeconds = 300): void {
+  res.setHeader("Vary", "x-tenant-id");
   res.setHeader(
     "Cache-Control",
     `private, max-age=${maxAgeSeconds}, stale-while-revalidate=${maxAgeSeconds * 2}`

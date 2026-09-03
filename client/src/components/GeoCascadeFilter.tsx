@@ -46,8 +46,13 @@ export interface GeoCascadeFilterProps {
   strictCascade?: boolean;
 }
 
-async function fetchJson<T>(url: string): Promise<T> {
-  const res = await fetch(url, { credentials: "include" });
+async function fetchJson<T>(url: string, tenantId?: string | null): Promise<T> {
+  const fullUrl = tenantId
+    ? `${url}${url.includes("?") ? "&" : "?"}tenantId=${encodeURIComponent(tenantId)}`
+    : url;
+  const headers: Record<string, string> = { "Cache-Control": "no-cache" };
+  if (tenantId) headers["x-tenant-id"] = tenantId;
+  const res = await fetch(fullUrl, { credentials: "include", headers });
   if (!res.ok) throw new Error(`Failed to fetch ${url}`);
   return res.json();
 }
@@ -87,8 +92,6 @@ export function GeoCascadeFilter({
   testIdPrefix = "geo",
   strictCascade = true,
 }: GeoCascadeFilterProps) {
-  const [districtSelectOpen, setDistrictSelectOpen] = useState(false);
-  const [facilitySelectOpen, setFacilitySelectOpen] = useState(false);
   const { user } = useAuth();
   
   // Resolve user role scoping
@@ -111,25 +114,25 @@ export function GeoCascadeFilter({
 
   const { data: fetchedRegions } = useQuery<Region[]>({
     queryKey: ["/api/regions", activeTenantId],
-    queryFn: () => fetchJson<Region[]>("/api/regions"),
+    queryFn: () => fetchJson<Region[]>("/api/regions", activeTenantId),
     enabled: showRegion && providedRegions === undefined,
   });
 
   const { data: fetchedProvinces } = useQuery<Province[]>({
     queryKey: ["/api/provinces", activeTenantId],
-    queryFn: () => fetchJson<Province[]>("/api/provinces"),
+    queryFn: () => fetchJson<Province[]>("/api/provinces", activeTenantId),
     enabled: providedProvinces === undefined,
   });
 
   const { data: fetchedDistricts } = useQuery<District[]>({
     queryKey: ["/api/districts", activeTenantId],
-    queryFn: () => fetchJson<District[]>("/api/districts"),
+    queryFn: () => fetchJson<District[]>("/api/districts", activeTenantId),
     enabled: providedDistricts === undefined,
   });
 
   const { data: fetchedFacilities } = useQuery<Facility[]>({
     queryKey: ["/api/facilities", activeTenantId],
-    queryFn: () => fetchJson<Facility[]>("/api/facilities"),
+    queryFn: () => fetchJson<Facility[]>("/api/facilities", activeTenantId),
     enabled: showFacility && providedFacilities === undefined,
   });
 
@@ -196,14 +199,14 @@ export function GeoCascadeFilter({
     let list = districts;
     if (isDistrictUser || isFacilityUser) {
       if (user?.districtId) {
-        list = list.filter((d) => Number(d.id) === Number(user.districtId));
+        list = list.filter((d) => Number(d.id) === Number(user.districtId) || String(d.id) === String(user.districtId));
       }
     } else if (provinceId) {
-      const targetProv = provinces.find((p) => Number(p.id) === Number(provinceId));
+      const targetProv = provinces.find((p) => Number(p.id) === Number(provinceId) || String(p.id) === String(provinceId));
       list = list.filter((d) => {
-        const dProvId = Number((d as any).provinceId);
-        if (Number.isFinite(dProvId) && dProvId > 0) {
-          return dProvId === Number(provinceId);
+        const dProvId = (d as any).provinceId;
+        if (dProvId != null && (Number(dProvId) === Number(provinceId) || String(dProvId) === String(provinceId))) {
+          return true;
         }
         if (targetProv && (d as any).provinceName) {
           return (d as any).provinceName.toLowerCase() === targetProv.name.toLowerCase();
@@ -222,14 +225,14 @@ export function GeoCascadeFilter({
     
     if (isFacilityUser) {
       if (user?.facilityId) {
-        list = list.filter((f) => Number(f.id) === Number(user.facilityId));
+        list = list.filter((f) => Number(f.id) === Number(user.facilityId) || String(f.id) === String(user.facilityId));
       }
     } else if (usesDistrictLevel && districtId) {
-      const targetDist = districts.find((d) => Number(d.id) === Number(districtId));
+      const targetDist = districts.find((d) => Number(d.id) === Number(districtId) || String(d.id) === String(districtId));
       list = list.filter((f) => {
-        const fDistId = Number((f as any).districtId);
-        if (Number.isFinite(fDistId) && fDistId > 0) {
-          return fDistId === Number(districtId);
+        const fDistId = (f as any).districtId;
+        if (fDistId != null && (Number(fDistId) === Number(districtId) || String(fDistId) === String(districtId))) {
+          return true;
         }
         if (targetDist && (f as any).districtName) {
           return (f as any).districtName.toLowerCase() === targetDist.name.toLowerCase();
@@ -237,21 +240,28 @@ export function GeoCascadeFilter({
         return false;
       });
     } else if (provinceId) {
-      const targetProv = provinces.find((p) => Number(p.id) === Number(provinceId));
+      const targetProv = provinces.find((p) => Number(p.id) === Number(provinceId) || String(p.id) === String(provinceId));
+      const targetDistIds = new Set(
+        districts
+          .filter((d) => {
+            const dProvId = (d as any).provinceId;
+            return (dProvId != null && (Number(dProvId) === Number(provinceId) || String(dProvId) === String(provinceId))) ||
+              (targetProv && (d as any).provinceName && (d as any).provinceName.toLowerCase() === targetProv.name.toLowerCase());
+          })
+          .map((d) => Number(d.id))
+      );
+
       list = list.filter((f) => {
-        const directProvinceId = Number((f as any).provinceId);
-        if (Number.isFinite(directProvinceId) && directProvinceId === Number(provinceId)) {
+        const directProvinceId = (f as any).provinceId;
+        if (directProvinceId != null && (Number(directProvinceId) === Number(provinceId) || String(directProvinceId) === String(provinceId))) {
           return true;
         }
-        if (targetProv && (f as any).province) {
-          return (f as any).province.toLowerCase() === targetProv.name.toLowerCase();
+        if (targetProv && (f as any).province && (f as any).province.toLowerCase() === targetProv.name.toLowerCase()) {
+          return true;
         }
-        const d = districts.find(
-          (dd) => Number(dd.id) === Number((f as any).districtId),
-        );
-        if (d && Number((d as any).provinceId) === Number(provinceId)) return true;
-        if (d && targetProv && (d as any).provinceName) {
-          return (d as any).provinceName.toLowerCase() === targetProv.name.toLowerCase();
+        const fDistId = Number((f as any).districtId);
+        if (Number.isFinite(fDistId) && targetDistIds.has(fDistId)) {
+          return true;
         }
         return false;
       });
@@ -267,12 +277,17 @@ export function GeoCascadeFilter({
     provinces.forEach((p) => {
       const pId = Number(p.id);
       const dInP = districts.filter((d) => {
-        const dProvId = Number((d as any).provinceId);
-        if (Number.isFinite(dProvId) && dProvId > 0) return dProvId === pId;
+        const dProvId = (d as any).provinceId;
+        if (dProvId != null && (Number(dProvId) === pId || String(dProvId) === String(p.id))) return true;
         return (d as any).provinceName && (d as any).provinceName.toLowerCase() === p.name.toLowerCase();
       });
       const dIds = new Set(dInP.map((d) => Number(d.id)));
-      const fInP = facilities.filter((f) => dIds.has(Number((f as any).districtId)) || Number((f as any).provinceId) === pId);
+      const fInP = facilities.filter((f) => {
+        const fDistId = Number((f as any).districtId);
+        const fProvId = (f as any).provinceId;
+        return (Number.isFinite(fDistId) && dIds.has(fDistId)) ||
+          (fProvId != null && (Number(fProvId) === pId || String(fProvId) === String(p.id)));
+      });
       map.set(pId, { districts: dInP.length, facilities: fInP.length });
     });
     return map;
@@ -320,21 +335,45 @@ export function GeoCascadeFilter({
     onProvinceChange(id);
     onDistrictChange(null);
     if (showFacility && onFacilityChange) onFacilityChange(null);
-    setDistrictSelectOpen(usesDistrictLevel && id !== null);
-    setFacilitySelectOpen(showFacility && !usesDistrictLevel && id !== null);
   };
 
   const handleDistrict = (val: string) => {
     const id = val === "all" ? null : Number(val);
     onDistrictChange(id);
     if (showFacility && onFacilityChange) onFacilityChange(null);
-    setDistrictSelectOpen(false);
-    setFacilitySelectOpen(showFacility && id !== null);
+    if (id !== null) {
+      const d = districts.find((dd) => Number(dd.id) === id || String(dd.id) === String(id));
+      if (d) {
+        const dProvId = Number((d as any).provinceId);
+        if (Number.isFinite(dProvId) && dProvId > 0 && Number(provinceId) !== dProvId) {
+          onProvinceChange(dProvId);
+        }
+      }
+    }
   };
 
   const handleFacility = (val: string) => {
     if (!onFacilityChange) return;
-    onFacilityChange(val === "all" ? null : Number(val));
+    const id = val === "all" ? null : Number(val);
+    onFacilityChange(id);
+    if (id !== null) {
+      const fac = facilities.find((f) => Number(f.id) === id || String(f.id) === String(id));
+      if (fac) {
+        const facDistId = Number((fac as any).districtId);
+        if (Number.isFinite(facDistId) && facDistId > 0) {
+          if (Number(districtId) !== facDistId) {
+            onDistrictChange(facDistId);
+          }
+          const d = districts.find((dd) => Number(dd.id) === facDistId || String(dd.id) === String(facDistId));
+          if (d) {
+            const dProvId = Number((d as any).provinceId);
+            if (Number.isFinite(dProvId) && dProvId > 0 && Number(provinceId) !== dProvId) {
+              onProvinceChange(dProvId);
+            }
+          }
+        }
+      }
+    }
   };
 
   return (
@@ -424,8 +463,6 @@ export function GeoCascadeFilter({
           <Select
             value={districtId?.toString() ?? "all"}
             onValueChange={handleDistrict}
-            open={districtSelectOpen && !districtLocked && filteredDistricts.length > 0}
-            onOpenChange={setDistrictSelectOpen}
             disabled={districtLocked || filteredDistricts.length === 0}
           >
             <SelectTrigger
@@ -476,8 +513,6 @@ export function GeoCascadeFilter({
           <Select
             value={facilityId?.toString() ?? "all"}
             onValueChange={handleFacility}
-            open={facilitySelectOpen && !facilityLocked && filteredFacilities.length > 0}
-            onOpenChange={setFacilitySelectOpen}
             disabled={facilityLocked || filteredFacilities.length === 0}
           >
             <SelectTrigger

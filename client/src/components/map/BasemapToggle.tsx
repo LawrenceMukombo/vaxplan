@@ -77,6 +77,9 @@ export const BASEMAP_CONFIGS: Record<
 */
 
 // Updated BASEMAP_CONFIGS: specifies maxZoom (22) and maxNativeZoom for all basemaps
+const cartoApiKey = (typeof import.meta !== "undefined" && import.meta.env?.VITE_CARTO_API_KEY) ? `?api_key=${import.meta.env.VITE_CARTO_API_KEY}` : "";
+
+// Configs with maxNativeZoom and maxZoom set explicitly
 // so Leaflet can stretch tiles at close zooms (up to zoom 22) instead of failing to render.
 export const BASEMAP_CONFIGS: Record<
   Basemap,
@@ -90,17 +93,23 @@ export const BASEMAP_CONFIGS: Record<
     maxZoom: 22,
   },
   positron: {
-    name: "CARTO Positron",
-    url: "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
-    attribution: CARTO_POSITRON_ATTRIBUTION,
+    name: "Clean Light Canvas",
+    url: cartoApiKey 
+      ? `https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png${cartoApiKey}`
+      : "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}",
+    attribution: cartoApiKey 
+      ? CARTO_POSITRON_ATTRIBUTION 
+      : "Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ",
     maxNativeZoom: 18,
     maxZoom: 22,
   },
   voyager: {
-    name: "CARTO Voyager",
-    url: "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",
-    attribution: CARTO_VOYAGER_ATTRIBUTION,
-    maxNativeZoom: 17,
+    name: "OpenStreetMap Voyager",
+    url: cartoApiKey
+      ? `https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png${cartoApiKey}`
+      : "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+    attribution: cartoApiKey ? CARTO_VOYAGER_ATTRIBUTION : '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    maxNativeZoom: 19,
     maxZoom: 22,
   },
   satellite: {
@@ -112,9 +121,11 @@ export const BASEMAP_CONFIGS: Record<
   },
   carto: {
     name: "CARTO Voyager",
-    url: "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",
-    attribution: CARTO_VOYAGER_ATTRIBUTION,
-    maxNativeZoom: 17,
+    url: cartoApiKey
+      ? `https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png${cartoApiKey}`
+      : "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+    attribution: cartoApiKey ? CARTO_VOYAGER_ATTRIBUTION : '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    maxNativeZoom: 19,
     maxZoom: 22,
   },
   terrain: {
@@ -133,22 +144,28 @@ export const BASEMAP_CONFIGS: Record<
   },
   dark: {
     name: "Dark Mode Map",
-    url: "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+    url: cartoApiKey
+      ? `https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png${cartoApiKey}`
+      : "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}",
+    attribution: cartoApiKey ? '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>' : "Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ",
     maxNativeZoom: 18,
     maxZoom: 22,
   },
   light: {
     name: "Light Mode Map",
-    url: "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
-    attribution: CARTO_POSITRON_ATTRIBUTION,
+    url: cartoApiKey
+      ? `https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png${cartoApiKey}`
+      : "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}",
+    attribution: cartoApiKey ? CARTO_POSITRON_ATTRIBUTION : "Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ",
     maxNativeZoom: 18,
     maxZoom: 22,
   },
   boundary: {
     name: "Administrative Boundaries",
-    url: "https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png",
-    attribution: CARTO_POSITRON_ATTRIBUTION,
+    url: cartoApiKey
+      ? `https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png${cartoApiKey}`
+      : "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}",
+    attribution: cartoApiKey ? CARTO_POSITRON_ATTRIBUTION : "Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ",
     maxNativeZoom: 18,
     maxZoom: 22,
   },
