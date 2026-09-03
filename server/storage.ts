@@ -1043,27 +1043,14 @@ export class DatabaseStorage implements IStorage {
       ) as unknown as Village[];
     */
 
-    // Modified Code: Include a dynamic subquery to retrieve the latest NSO census
-    // population for each village, which is needed by the frontend map widgets.
+    // PERFORMANCE: exclude `boundary` (GeoJSON polygon, potentially 10s of KB per row)
+    // from list queries. Include all other operational columns (such as outreach coordinates,
+    // outreach post names, catchment populations, and HTR indicators).
+    const { boundary, catchmentPolygon, ...listColumns } = getTableColumns(villages);
+
     return await db
       .select({
-        id: villages.id,
-        tenantId: villages.tenantId,
-        name: villages.name,
-        code: villages.code,
-        districtId: villages.districtId,
-        llgId: villages.llgId,
-        assignedFacilityId: villages.assignedFacilityId,
-        latitude: villages.latitude,
-        longitude: villages.longitude,
-        distanceToFacility: villages.distanceToFacility,
-        travelTimeMinutes: villages.travelTimeMinutes,
-        terrainDifficulty: villages.terrainDifficulty,
-        isHardToReach: villages.isHardToReach,
-        seasonalAccessibility: villages.seasonalAccessibility,
-        transportMode: villages.transportMode,
-        insecurityLevel: villages.insecurityLevel,
-        comments: villages.comments,
+        ...listColumns,
         population: sql<number>`COALESCE(
           (
             SELECT total_population
@@ -1075,8 +1062,6 @@ export class DatabaseStorage implements IStorage {
           ${villages.totalCatchmentPopulation},
           ${villages.griddedPopulation}
         )`.mapWith(Number),
-        createdAt: villages.createdAt,
-        updatedAt: villages.updatedAt,
       })
       .from(villages)
       .where(

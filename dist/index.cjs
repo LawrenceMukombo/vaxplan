@@ -4519,24 +4519,9 @@ var init_storage = __esm({
       }
       // --- Villages ---
       async getVillages(tenantId, districtId, facilityId) {
+        const { boundary, catchmentPolygon, ...listColumns } = (0, import_drizzle_orm5.getTableColumns)(villages);
         return await db.select({
-          id: villages.id,
-          tenantId: villages.tenantId,
-          name: villages.name,
-          code: villages.code,
-          districtId: villages.districtId,
-          llgId: villages.llgId,
-          assignedFacilityId: villages.assignedFacilityId,
-          latitude: villages.latitude,
-          longitude: villages.longitude,
-          distanceToFacility: villages.distanceToFacility,
-          travelTimeMinutes: villages.travelTimeMinutes,
-          terrainDifficulty: villages.terrainDifficulty,
-          isHardToReach: villages.isHardToReach,
-          seasonalAccessibility: villages.seasonalAccessibility,
-          transportMode: villages.transportMode,
-          insecurityLevel: villages.insecurityLevel,
-          comments: villages.comments,
+          ...listColumns,
           population: import_drizzle_orm5.sql`COALESCE(
           (
             SELECT total_population
@@ -4547,9 +4532,7 @@ var init_storage = __esm({
           ),
           ${villages.totalCatchmentPopulation},
           ${villages.griddedPopulation}
-        )`.mapWith(Number),
-          createdAt: villages.createdAt,
-          updatedAt: villages.updatedAt
+        )`.mapWith(Number)
         }).from(villages).where(
           withTenant(
             villages,
