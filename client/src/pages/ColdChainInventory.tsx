@@ -24,6 +24,7 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
+import { FacilityCascadePicker } from "@/components/FacilityCascadePicker";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -971,7 +972,7 @@ function ColdChainItemDialog({
 }) {
   const { toast } = useToast();
   const [formData, setFormData] = useState({
-    facilityId: item?.facilityId ? item.facilityId.toString() : (facilities[0]?.id?.toString() || ""),
+    facilityId: item?.facilityId ? item.facilityId.toString() : "",
     equipmentType: item?.equipmentType || "refrigerator",
     brand: item?.brand || "",
     model: item?.model || "",
@@ -1029,24 +1030,16 @@ function ColdChainItemDialog({
           <DialogTitle>{item ? "Edit Cold Chain Equipment" : "Add Cold Chain Equipment"}</DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4 pt-2">
-          {!item && (
-            <div className="space-y-1">
-              <label className="text-xs font-semibold">Health Facility</label>
-              <Select
-                value={formData.facilityId}
-                onValueChange={(val) => setFormData((prev) => ({ ...prev, facilityId: val }))}
-              >
-                <SelectTrigger><SelectValue placeholder="Select facility..." /></SelectTrigger>
-                <SelectContent className="max-h-60">
-                  {facilities.map((f: any) => (
-                    <SelectItem key={f.id} value={f.id.toString()}>
-                      {f.name} ({f.code || `#${f.id}`})
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          )}
+          <div className="space-y-1">
+            <FacilityCascadePicker
+              value={formData.facilityId ? Number(formData.facilityId) : null}
+              onChange={(fId) => setFormData((prev) => ({ ...prev, facilityId: fId ? String(fId) : "" }))}
+              required
+              disabled={!!item}
+              layout="stacked"
+              facilityLabel="Health Facility"
+            />
+          </div>
 
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">

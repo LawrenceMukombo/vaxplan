@@ -34,6 +34,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { FacilityCascadePicker } from "@/components/FacilityCascadePicker";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { tenantCodeOf } from "@/lib/tenantGeo";
@@ -1053,17 +1054,19 @@ export function OutreachPostsManager({
               </SelectContent>
             </Select>
 
-            <Select value={facilityFilter} onValueChange={setFacilityFilter}>
+            <Select value={facilityFilter} onValueChange={setFacilityFilter} disabled={districtFilter === "all"}>
               <SelectTrigger className="h-9 text-xs">
-                <SelectValue placeholder="Filter Facility" />
+                <SelectValue placeholder={districtFilter === "all" ? "Select District first" : "Filter Facility"} />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Facilities</SelectItem>
-                {facilities.map((f) => (
-                  <SelectItem key={f.id} value={String(f.id)}>
-                    {f.name}
-                  </SelectItem>
-                ))}
+                {facilities
+                  .filter((f) => districtFilter === "all" || f.districtId === Number(districtFilter))
+                  .map((f) => (
+                    <SelectItem key={f.id} value={String(f.id)}>
+                      {f.name}
+                    </SelectItem>
+                  ))}
               </SelectContent>
             </Select>
           </div>
@@ -1544,24 +1547,17 @@ export function OutreachPostsManager({
           <div className="space-y-4 py-2 text-xs">
             {/* Facility & Village selector (if not locked to existing village) */}
             {!editingVillage ? (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="space-y-1.5">
-                  <Label htmlFor="create-facility" className="text-xs font-semibold">
-                    1. Select Health Facility
-                  </Label>
-                  <Select value={formFacilityId} onValueChange={(val) => { setFormFacilityId(val); setFormVillageId(""); }}>
-                    <SelectTrigger id="create-facility" className="h-9 text-xs">
-                      <SelectValue placeholder="Choose facility..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {facilities.map((f) => (
-                        <SelectItem key={f.id} value={String(f.id)}>
-                          {f.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
+              <div className="space-y-3">
+                <FacilityCascadePicker
+                  value={formFacilityId ? Number(formFacilityId) : null}
+                  onChange={(fId) => {
+                    setFormFacilityId(fId ? String(fId) : "");
+                    setFormVillageId("");
+                  }}
+                  layout="stacked"
+                  facilityLabel="1. Health Facility"
+                  required
+                />
 
                 <div className="space-y-1.5">
                   <Label htmlFor="create-village" className="text-xs font-semibold">

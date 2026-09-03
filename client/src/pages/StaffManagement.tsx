@@ -63,6 +63,7 @@ import {
   DialogDescription,
   DialogFooter,
 } from "@/components/ui/dialog";
+import { FacilityCascadePicker } from "@/components/FacilityCascadePicker";
 import { Switch } from "@/components/ui/switch";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
@@ -2229,30 +2230,13 @@ export default function StaffManagement() {
                 {/* Global admin must pick a facility when none is pre-selected */}
                 {isGlobalAdmin && !editingStaff && (
                   <div className="space-y-1.5">
-                    <Label htmlFor="form-facility" className="text-sm font-medium flex items-center gap-1">
-                      <Building2 className="h-3.5 w-3.5 text-muted-foreground" />
-                      Health Facility <span className="text-destructive">*</span>
-                    </Label>
-                    <Select
-                      value={formFacilityId || "none"}
-                      onValueChange={(v) => setFormFacilityId(v === "none" ? "" : v)}
-                      disabled={saveMutation.isPending}
-                    >
-                      <SelectTrigger id="form-facility" className="h-9 border-amber-500/30 bg-amber-500/5">
-                        <SelectValue placeholder="— Select a facility —" />
-                      </SelectTrigger>
-                      <SelectContent className="max-h-[280px]">
-                        <SelectItem value="none" disabled>— Select a facility —</SelectItem>
-                        {allFacilities.map((f) => {
-                          const count = staffList.filter((s) => s.facilityId === f.id).length;
-                          return (
-                            <SelectItem key={f.id} value={f.id.toString()}>
-                              {f.name}{count > 0 ? ` (${count} staff)` : ""}
-                            </SelectItem>
-                          );
-                        })}
-                      </SelectContent>
-                    </Select>
+                    <FacilityCascadePicker
+                      value={formFacilityId ? Number(formFacilityId) : null}
+                      onChange={(fId) => setFormFacilityId(fId ? String(fId) : "")}
+                      required
+                      layout="stacked"
+                      facilityLabel="Health Facility"
+                    />
                     {!formFacilityId && (
                       <p className="text-[11px] text-amber-600 dark:text-amber-400 flex items-center gap-1">
                         <AlertCircle className="h-3 w-3" />
@@ -2783,23 +2767,16 @@ export default function StaffManagement() {
                   </span>
                 )}
                 {!selectedFacilityId ? (
-                  <div className="flex items-center gap-1.5 ml-auto">
-                    <span className="text-xs text-muted-foreground">Target Facility:</span>
-                    <Select
-                      value={importTargetFacilityId || "none"}
-                      onValueChange={(v) => setImportTargetFacilityId(v === "none" ? "" : v)}
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-1.5 ml-auto">
+                    <span className="text-xs text-muted-foreground whitespace-nowrap">Target Facility:</span>
+                    <FacilityCascadePicker
+                      value={importTargetFacilityId ? Number(importTargetFacilityId) : null}
+                      onChange={(fId) => setImportTargetFacilityId(fId ? String(fId) : "")}
                       disabled={importMutation.isPending}
-                    >
-                      <SelectTrigger className="h-8 text-xs w-[180px] bg-background border-border">
-                        <SelectValue placeholder="Select target facility" />
-                      </SelectTrigger>
-                      <SelectContent className="max-h-[200px]">
-                        <SelectItem value="none" disabled>Select target facility</SelectItem>
-                        {allFacilities.map((f) => (
-                          <SelectItem key={f.id} value={f.id.toString()}>{f.name}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                      showLabels={false}
+                      layout="row"
+                      facilityLabel="Target Facility"
+                    />
                   </div>
                 ) : (
                   <Badge
