@@ -4,7 +4,7 @@ import { Link } from "wouter";
 import {
   Snowflake, Thermometer, Wrench, AlertTriangle, CheckCircle2,
   Plus, Download, Upload, Search, Filter, RefreshCw, Building2,
-  SlidersHorizontal, Eye, FileSpreadsheet, Lock
+  SlidersHorizontal, Eye, FileSpreadsheet, Lock, Loader2
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -140,6 +140,7 @@ export default function ColdChainInventory() {
   // Modal States
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<ColdChainRow | null>(null);
+  const [isImporting, setIsImporting] = useState(false);
 
   // Queries
   const { data: rawEquipment = [], isLoading, isError, refetch } = useQuery<ColdChainRow[]>({
@@ -280,6 +281,147 @@ export default function ColdChainInventory() {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+  };
+
+  // Download Import Template
+  const handleDownloadTemplate = () => {
+    const headers = [
+      "ID", "Facility ID", "Facility Name", "Equipment Type", "Brand", "Model",
+      "Serial Number", "Catalog Number", "Capacity (L)", "Net Storage Capacity (L)",
+      "Power Source", "Condition", "Manufacture Year", "Installation Date", "Last Service Date"
+    ];
+    const sampleRows = [
+      ',25318,"Addo Clinic",solar_direct_drive_refrigerator,"Dulas Arctiko","PURE 50","SN-ADD-001290","E003/042",55.00,45.00,solar,functional,2023,2023-08-15,2026-05-10',
+      ',25318,"Addo Clinic",icm,"Haier","HBC-80","SN-ADD-001291","E003/014",80.00,68.00,electric,functional,2021,2021-11-20,2026-04-18',
+      ',25318,"Addo Clinic",freezer,"Vestfrost","MF 314","SN-ADD-001292","E003/023",281.00,230.00,electric,functional,2020,2021-02-14,2026-05-22',
+      ',25318,"Addo Clinic",cold_box,"AOV","AOV-CB-25","SN-ADD-001293","E004/008",24.00,20.00,none,functional,2022,2022-03-10,2026-04-01'
+    ];
+    const content = [headers.join(","), ...sampleRows].join("\n");
+    const blob = new Blob([content], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.setAttribute("download", "cold_chain_equipment_template.csv");
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const handleImportCSVClick = () => {
+    document.getElementById("csv-cce-import")?.click();
+  };
+
+  const handleImportCSVChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsImporting(true);
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      const text = event.target?.result as string;
+      try {
+        const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
+        if (lines.length < 2) throw new Error("CSV file must contain at least a header row and one data row.");
+
+        const parseRow = (line: string) => {
+          const cells: string[] = [];
+          let cur = "";
+          let inQuotes = false;
+          for (let i = 0; i < line.length; i++) {
+            const char = line[i];
+            if (char === '"') {
+              if (inQuotes && line[i + 1] === '"') {
+                cur += '"';
+                i++;
+              } else {
+                inQuotes = !inQuotes;
+              }
+            } else if (char === "," && !inQuotes) {
+              cells.push(cur.trim());
+              cur = "";
+            } else {
+              cur += char;
+            }
+          }
+          cells.push(cur.trim());
+          return cells;
+        };
+
+        const headers = parseRow(lines[0]).map((h) => h.toLowerCase().replace(/[^a-z0-9]/g, ""));
+        const getColIdx = (aliases: string[]) => headers.findIndex((h) => aliases.includes(h));
+
+        const idIdx = getColIdx(["id"]);
+        const facIdIdx = getColIdx(["facilityid", "facility_id", "facid"]);
+        const facNameIdx = getColIdx(["facilityname", "facility_name", "facility"]);
+        const typeIdx = getColIdx(["equipmenttype", "equipment_type", "type"]);
+        const brandIdx = getColIdx(["brand", "make", "manufacturer"]);
+        const modelIdx = getColIdx(["model", "modelnumber", "model_number"]);
+        const serialIdx = getColIdx(["serialnumber", "serial_number", "serial", "serialno"]);
+        const catalogIdx = getColIdx(["catalognumber", "catalog_number", "catalog", "piscode"]);
+        const capIdx = getColIdx(["capacityl", "capacityliters", "capacity", "grosscapacity"]);
+        const netCapIdx = getColIdx(["netstoragecapacityl", "netstoragecapacityliters", "netcapacity", "netstorage"]);
+        const powerIdx = getColIdx(["powersource", "power_source", "power"]);
+        const condIdx = getColIdx(["condition", "status", "operationalstatus"]);
+        const mfgIdx = getColIdx(["manufactureyear", "manufacture_year", "year"]);
+        const installIdx = getColIdx(["installationdate", "installation_date", "installed"]);
+        const serviceIdx = getColIdx(["lastservicedate", "last_service_date", "servicedate", "lastservice"]);
+
+        const items = [];
+        for (let i = 1; i < lines.length; i++) {
+          const vals = parseRow(lines[i]);
+          if (!vals || vals.length === 0 || vals.every((v) => !v)) continue;
+
+          const getVal = (idx: number) => (idx > -1 && vals[idx] !== undefined && vals[idx] !== "" ? vals[idx] : undefined);
+
+          items.push({
+            id: getVal(idIdx),
+            facilityId: getVal(facIdIdx),
+            facilityName: getVal(facNameIdx),
+            equipmentType: getVal(typeIdx) || "refrigerator",
+            brand: getVal(brandIdx),
+            model: getVal(modelIdx),
+            serialNumber: getVal(serialIdx),
+            catalogNumber: getVal(catalogIdx),
+            capacityLiters: getVal(capIdx),
+            netStorageCapacityLiters: getVal(netCapIdx),
+            powerSource: getVal(powerIdx),
+            condition: getVal(condIdx) || "functional",
+            manufactureYear: getVal(mfgIdx),
+            installationDate: getVal(installIdx),
+            lastServiceDate: getVal(serviceIdx),
+          });
+        }
+
+        if (items.length === 0) throw new Error("No valid data rows found in CSV file.");
+
+        const res = await fetch("/api/cold-chain/import", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ items }),
+        });
+
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.message || "Failed to import cold chain equipment");
+
+        toast({
+          title: "Import Complete",
+          description: data.message || `Successfully processed ${items.length} equipment units.`,
+        });
+
+        void queryClient.invalidateQueries({ queryKey: ["/api/cold-chain"] });
+      } catch (err: any) {
+        toast({
+          variant: "destructive",
+          title: "Import Failed",
+          description: err.message || "Could not parse or process the CSV file.",
+        });
+      } finally {
+        setIsImporting(false);
+        e.target.value = "";
+      }
+    };
+    reader.readAsText(file);
   };
 
   // Reset Filters
@@ -446,6 +588,43 @@ export default function ColdChainInventory() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <input
+            id="csv-cce-import"
+            type="file"
+            accept=".csv"
+            className="hidden"
+            onChange={handleImportCSVChange}
+          />
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleDownloadTemplate}
+            className="gap-1.5"
+            title="Download cold chain equipment CSV template"
+          >
+            <FileSpreadsheet className="h-4 w-4 text-emerald-600" />
+            Template
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleImportCSVClick}
+            disabled={isImporting}
+            className="gap-1.5 border-primary/30 text-primary hover:bg-primary/5"
+            title="Import Cold Chain equipment from CSV"
+          >
+            {isImporting ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                <span>Importing...</span>
+              </>
+            ) : (
+              <>
+                <Upload className="h-4 w-4" />
+                <span>Import CSV</span>
+              </>
+            )}
+          </Button>
           <Button variant="outline" size="sm" onClick={handleExportCSV} className="gap-2">
             <Download className="h-4 w-4" />
             Export CSV

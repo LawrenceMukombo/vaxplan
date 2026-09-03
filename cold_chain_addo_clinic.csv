@@ -1,0 +1,7 @@
+ID,Facility ID,Facility Name,Equipment Type,Brand,Model,Serial Number,Catalog Number,Capacity (L),Net Storage Capacity (L),Power Source,Condition,Manufacture Year,Installation Date,Last Service Date
+,25318,"Addo Clinic",solar_direct_drive_refrigerator,"Dulas Arctiko","PURE 50","SN-ADD-CCE-001","E003/042",52.00,45.00,solar,functional,2023,2023-08-15,2026-05-10
+,25318,"Addo Clinic",icm,"Haier","HBC-80","SN-ADD-CCE-002","E003/014",80.00,68.00,electric,functional,2021,2021-11-20,2026-04-18
+,25318,"Addo Clinic",freezer,"Vestfrost","MF 314","SN-ADD-CCE-003","E003/023",281.00,230.00,electric,functional,2020,2021-02-14,2026-05-22
+,25318,"Addo Clinic",cold_box,"AOV","AOV-CB-25","SN-ADD-CCE-004","E004/008",24.00,20.00,none,functional,2022,2022-03-10,2026-04-01
+,25318,"Addo Clinic",vaccine_carrier,"Blow Kings","BK-VC-2.6","SN-ADD-CCE-005","E004/015",2.60,2.20,none,functional,2023,2023-05-02,2026-05-15
+,25318,"Addo Clinic",generator,"Cummins","C22 D5","SN-ADD-CCE-006","GEN-22KVA",0.00,0.00,electric,functional,2019,2020-01-10,2026-03-25

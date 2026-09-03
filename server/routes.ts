@@ -5903,6 +5903,150 @@ export async function registerRoutes(
     }
   });
 
+  // POST /api/cold-chain/import (Tenant-wide bulk import matching by Facility ID, Facility Name, or HMIS Code)
+  app.post("/api/cold-chain/import", ...auth, async (req: any, res) => {
+    try {
+      const { coldChainEquipment, facilities } = await import("@shared/schema");
+      const items: any[] = Array.isArray(req.body) ? req.body : (req.body?.items ?? []);
+      if (!items.length) return res.status(400).json({ message: "No equipment items provided" });
+
+      const allFacs = await db.select().from(facilities).where(eq(facilities.tenantId, req.tenantId));
+      const idMap = new Map<number, typeof allFacs[0]>();
+      const nameMap = new Map<string, typeof allFacs[0]>();
+      const hmisMap = new Map<string, typeof allFacs[0]>();
+
+      for (const f of allFacs) {
+        idMap.set(f.id, f);
+        if (f.name) nameMap.set(f.name.toLowerCase().trim(), f);
+        if (f.hmisCode) hmisMap.set(f.hmisCode.toLowerCase().trim(), f);
+      }
+
+      let imported = 0;
+      let updated = 0;
+      const errors: { row: number; error: string }[] = [];
+
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        const rowNum = i + 1;
+
+        // Resolve facility
+        let matchedFacility: typeof allFacs[0] | undefined;
+        const rawFacId = item.facilityId ? Number(item.facilityId) : (item["Facility ID"] ? Number(item["Facility ID"]) : null);
+        const rawFacName = (item.facilityName || item["Facility Name"] || "").toString().trim();
+
+        if (rawFacId && idMap.has(rawFacId)) {
+          matchedFacility = idMap.get(rawFacId);
+        } else if (rawFacName) {
+          const normName = rawFacName.toLowerCase();
+          matchedFacility = nameMap.get(normName) || hmisMap.get(normName);
+          if (!matchedFacility) {
+            matchedFacility = allFacs.find(f => {
+              const fn = (f.name || "").toLowerCase();
+              return fn.includes(normName) || normName.includes(fn);
+            });
+          }
+        }
+
+        if (!matchedFacility) {
+          errors.push({ row: rowNum, error: `Facility could not be resolved (${rawFacName || rawFacId || "missing facility"})` });
+          continue;
+        }
+
+        // Normalize equipment type
+        let eqType = (item.equipmentType || item["Equipment Type"] || "refrigerator").toString().toLowerCase().trim().replace(/[\s-]+/g, "_");
+        if (eqType === "icr") eqType = "icm";
+        if (eqType.includes("solar") && eqType.includes("refrigerator")) eqType = "solar_direct_drive_refrigerator";
+
+        // Normalize condition
+        let cond = (item.condition || item["Condition"] || "functional").toString().toLowerCase().trim().replace(/[\s-]+/g, "_");
+        if (!["functional", "needs_repair", "non_functional", "condemned", "decommissioned"].includes(cond)) {
+          cond = "functional";
+        }
+
+        // Normalize power source
+        let pwr = (item.powerSource || item["Power Source"] || null)?.toString().toLowerCase().trim().replace(/[\s-]+/g, "_");
+        if (pwr === "dual") pwr = "electric";
+
+        const brand = item.brand || item["Brand"] || null;
+        const model = item.model || item["Model"] || null;
+        const serialNumber = item.serialNumber || item["Serial Number"] || null;
+        const catalogNumber = item.catalogNumber || item["Catalog Number"] || null;
+        const capacityLiters = item.capacityLiters || item["Capacity (L)"] || null;
+        const netStorageCapacityLiters = item.netStorageCapacityLiters || item["Net Storage Capacity (L)"] || null;
+        const mfgYear = item.manufactureYear || item["Manufacture Year"] ? parseInt(String(item.manufactureYear || item["Manufacture Year"]), 10) : null;
+        const installDate = item.installationDate || item["Installation Date"] ? String(item.installationDate || item["Installation Date"]).trim() : null;
+        const serviceDate = item.lastServiceDate || item["Last Service Date"] ? String(item.lastServiceDate || item["Last Service Date"]).trim() : null;
+
+        const payload: any = {
+          tenantId: req.tenantId,
+          facilityId: matchedFacility.id,
+          equipmentType: eqType,
+          brand,
+          model,
+          serialNumber,
+          catalogNumber,
+          capacityLiters: capacityLiters ? String(capacityLiters) : null,
+          netStorageCapacityLiters: netStorageCapacityLiters ? String(netStorageCapacityLiters) : null,
+          powerSource: pwr,
+          condition: cond,
+          manufactureYear: isNaN(mfgYear as any) ? null : mfgYear,
+          installationDate: installDate,
+          lastServiceDate: serviceDate,
+          isActive: true,
+          updatedAt: new Date(),
+          updatedByUserId: req.user?.claims?.sub ?? null,
+        };
+
+        // Check if existing record by ID or serial number exists (Safe Upsert)
+        let existingId: number | null = null;
+        const rawId = item.id || item["ID"];
+        if (rawId && !isNaN(Number(rawId))) {
+          const [exist] = await db.select({ id: coldChainEquipment.id })
+            .from(coldChainEquipment)
+            .where(and(eq(coldChainEquipment.id, Number(rawId)), eq(coldChainEquipment.tenantId, req.tenantId)))
+            .limit(1);
+          if (exist) existingId = exist.id;
+        }
+
+        if (!existingId && serialNumber) {
+          const [exist] = await db.select({ id: coldChainEquipment.id })
+            .from(coldChainEquipment)
+            .where(and(
+              eq(coldChainEquipment.tenantId, req.tenantId),
+              eq(coldChainEquipment.facilityId, matchedFacility.id),
+              eq(coldChainEquipment.serialNumber, String(serialNumber))
+            ))
+            .limit(1);
+          if (exist) existingId = exist.id;
+        }
+
+        if (existingId) {
+          await db.update(coldChainEquipment).set(payload).where(eq(coldChainEquipment.id, existingId));
+          updated++;
+        } else {
+          await db.insert(coldChainEquipment).values({
+            ...payload,
+            createdByUserId: req.user?.claims?.sub ?? null,
+            createdAt: new Date(),
+          });
+          imported++;
+        }
+      }
+
+      res.json({
+        success: true,
+        imported,
+        updated,
+        failed: errors.length,
+        message: `Processed ${imported + updated} equipment records (${imported} added, ${updated} updated${errors.length > 0 ? `, ${errors.length} failed` : ""}).`,
+        errors: errors.slice(0, 20),
+      });
+    } catch (err: any) {
+      console.error("POST /api/cold-chain/import error:", err);
+      res.status(500).json({ message: "Failed to import cold chain equipment: " + err.message });
+    }
+  });
+
   // GET /api/facilities/:id/cold-chain/export  (IGA-format JSON and CSV)
   app.get("/api/facilities/:id/cold-chain/export", ...auth, requireGeoAccess(req => ({ facilityId: parseInt(req.params.id) })), async (req: any, res) => {
     try {
