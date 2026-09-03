@@ -4537,12 +4537,16 @@ var init_storage = __esm({
           transportMode: villages.transportMode,
           insecurityLevel: villages.insecurityLevel,
           comments: villages.comments,
-          population: import_drizzle_orm5.sql`(
-          SELECT total_population
-          FROM population_data p
-          WHERE p.village_id = ${villages.id}
-          ORDER BY p.year DESC, CASE WHEN p.source = 'nso' THEN 1 ELSE 2 END ASC
-          LIMIT 1
+          population: import_drizzle_orm5.sql`COALESCE(
+          (
+            SELECT total_population
+            FROM population_data p
+            WHERE p.village_id = ${villages.id}
+            ORDER BY p.year DESC, CASE WHEN p.source = 'nso' THEN 1 ELSE 2 END ASC
+            LIMIT 1
+          ),
+          ${villages.totalCatchmentPopulation},
+          ${villages.griddedPopulation}
         )`.mapWith(Number),
           createdAt: villages.createdAt,
           updatedAt: villages.updatedAt
@@ -4558,12 +4562,16 @@ var init_storage = __esm({
       async getVillage(tenantId, id) {
         const [v] = await db.select({
           ...(0, import_drizzle_orm5.getTableColumns)(villages),
-          population: import_drizzle_orm5.sql`(
-          SELECT total_population
-          FROM population_data p
-          WHERE p.village_id = ${villages.id}
-          ORDER BY p.year DESC, CASE WHEN p.source = 'nso' THEN 1 ELSE 2 END ASC
-          LIMIT 1
+          population: import_drizzle_orm5.sql`COALESCE(
+          (
+            SELECT total_population
+            FROM population_data p
+            WHERE p.village_id = ${villages.id}
+            ORDER BY p.year DESC, CASE WHEN p.source = 'nso' THEN 1 ELSE 2 END ASC
+            LIMIT 1
+          ),
+          ${villages.totalCatchmentPopulation},
+          ${villages.griddedPopulation}
         )`.mapWith(Number)
         }).from(villages).where((0, import_drizzle_orm5.and)((0, import_drizzle_orm5.eq)(villages.id, id), (0, import_drizzle_orm5.eq)(villages.tenantId, tenantId)));
         return v;

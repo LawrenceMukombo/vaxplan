@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect } from "react";
 import { useLocation } from "wouter";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueryClient, useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,6 +14,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -31,6 +36,8 @@ import {
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
+import { tenantCodeOf } from "@/lib/tenantGeo";
+import { loadActiveTenant } from "@/lib/tenantCache";
 import {
   MapPin,
   Send,
@@ -52,6 +59,11 @@ import {
   CheckCircle2,
   AlertCircle,
   Crosshair,
+  Globe,
+  Loader2,
+  Sparkles,
+  RefreshCw,
+  Check,
 } from "lucide-react";
 import { MapContainer, TileLayer, Marker, useMapEvents } from "react-leaflet";
 import L from "leaflet";
@@ -199,7 +211,26 @@ export function OutreachPostsManager({
   const [formName, setFormName] = useState("");
   const [formLat, setFormLat] = useState("");
   const [formLng, setFormLng] = useState("");
+  const [formPopulation, setFormPopulation] = useState("");
+  const [formPopSource, setFormPopSource] = useState("worldpop");
+  const [isExtractingModalPop, setIsExtractingModalPop] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+
+  // Quick WorldPop & Manual inline population states
+  const [loadingPopVillageId, setLoadingPopVillageId] = useState<number | null>(null);
+  const [isBatchLoading, setIsBatchLoading] = useState(false);
+  const [batchProgress, setBatchProgress] = useState<{ current: number; total: number } | null>(null);
+  const [manualPopInputs, setManualPopInputs] = useState<Record<number, string>>({});
+  const [popoverOpenVillageId, setPopoverOpenVillageId] = useState<number | null>(null);
+
+  // Active tenant and country code for WorldPop point extraction
+  const { data: tenantInfo } = useQuery<any>({
+    queryKey: ["/api/me/tenant"],
+  });
+  const cachedTenant = loadActiveTenant();
+  const activeTenant = tenantInfo || cachedTenant;
+  const activeTenantId = activeTenant?.id;
+  const iso3 = tenantCodeOf(activeTenant) || "ZAF";
 
   // Delete Confirmation State
   const [deleteTarget, setDeleteTarget] = useState<Village | null>(null);
@@ -350,6 +381,8 @@ export function OutreachPostsManager({
       setFormName(targetVillage.outreachPostName || `${targetVillage.name} Outreach Post`);
       setFormLat(targetVillage.outreachLatitude ? String(targetVillage.outreachLatitude) : (targetVillage.latitude ? String(targetVillage.latitude) : ""));
       setFormLng(targetVillage.outreachLongitude ? String(targetVillage.outreachLongitude) : (targetVillage.longitude ? String(targetVillage.longitude) : ""));
+      setFormPopulation(targetVillage.population ? String(targetVillage.population) : (targetVillage.totalCatchmentPopulation ? String(targetVillage.totalCatchmentPopulation) : ""));
+      setFormPopSource(targetVillage.populationSourceLabel || "worldpop");
     } else {
       setEditingVillage(null);
       setFormFacilityId(selectedFacilityId ? String(selectedFacilityId) : "");
@@ -357,6 +390,8 @@ export function OutreachPostsManager({
       setFormName("");
       setFormLat("");
       setFormLng("");
+      setFormPopulation("");
+      setFormPopSource("worldpop");
     }
     setDialogOpen(true);
   };
@@ -371,6 +406,248 @@ export function OutreachPostsManager({
       }
       if (!formLat && chosen.latitude) setFormLat(String(chosen.latitude));
       if (!formLng && chosen.longitude) setFormLng(String(chosen.longitude));
+      if (!formPopulation && chosen.population) setFormPopulation(String(chosen.population));
+    }
+  };
+
+  // 1. Pull WorldPop for a single village / outreach post
+  const handlePullWorldPop = async (targetVillage: Village) => {
+    const lat = targetVillage.outreachLatitude ? parseFloat(String(targetVillage.outreachLatitude)) : (targetVillage.latitude ? parseFloat(String(targetVillage.latitude)) : null);
+    const lng = targetVillage.outreachLongitude ? parseFloat(String(targetVillage.outreachLongitude)) : (targetVillage.longitude ? parseFloat(String(targetVillage.longitude)) : null);
+
+    if (!lat || !lng || isNaN(lat) || isNaN(lng)) {
+      toast({
+        title: "Coordinates Required",
+        description: "Please configure GPS coordinates for this outreach post before pulling WorldPop.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setLoadingPopVillageId(targetVillage.id);
+    try {
+      const headers: Record<string, string> = {};
+      if (activeTenantId) headers["x-tenant-id"] = activeTenantId;
+
+      const res = await fetch(
+        `/api/population/worldpop-point?lat=${lat}&lng=${lng}&radiusKm=1.5&iso3=${iso3}${activeTenantId ? `&tenantId=${encodeURIComponent(activeTenantId)}` : ""}`,
+        { headers, credentials: "include" }
+      );
+
+      if (!res.ok) throw new Error("Failed to fetch WorldPop estimates.");
+
+      const data = await res.json();
+      const count = Math.round(data.gridPop || 0);
+
+      // Update village in DB
+      const updated = await apiRequest<Village>("PATCH", `/api/villages/${targetVillage.id}`, {
+        totalCatchmentPopulation: count,
+        griddedPopulation: count,
+        populationSourceLabel: "worldpop",
+      });
+
+      // Also upsert into population_data
+      try {
+        await apiRequest("POST", "/api/population", {
+          source: "worldpop",
+          year: new Date().getFullYear(),
+          locationType: "village",
+          villageId: targetVillage.id,
+          totalPopulation: count,
+          under5Population: data.under5Pop || Math.round(count * 0.18),
+        });
+      } catch {
+        // non-blocking
+      }
+
+      const merged = { ...updated, population: count };
+      queryClient.setQueriesData<Village[]>({ queryKey: ["/api/villages"] }, (current) =>
+        Array.isArray(current) ? current.map((v) => (v.id === targetVillage.id ? merged : v)) : current
+      );
+      void queryClient.invalidateQueries({ queryKey: ["/api/villages"] });
+      void queryClient.invalidateQueries({ queryKey: ["/api/population"] });
+
+      toast({
+        title: "WorldPop Applied",
+        description: `Population set to ${count.toLocaleString()} for ${targetVillage.outreachPostName || targetVillage.name}.`,
+      });
+      setPopoverOpenVillageId(null);
+    } catch (err: any) {
+      toast({
+        title: "WorldPop Extraction Failed",
+        description: err.message || "An error occurred while contacting WorldPop API.",
+        variant: "destructive",
+      });
+    } finally {
+      setLoadingPopVillageId(null);
+    }
+  };
+
+  // 2. Save manual population count
+  const handleSaveManualPopulation = async (villageId: number, countNum: number) => {
+    if (isNaN(countNum) || countNum < 0) {
+      toast({ title: "Invalid Population", description: "Please enter a valid non-negative number.", variant: "destructive" });
+      return;
+    }
+
+    setLoadingPopVillageId(villageId);
+    try {
+      const updated = await apiRequest<Village>("PATCH", `/api/villages/${villageId}`, {
+        totalCatchmentPopulation: countNum,
+        populationSourceLabel: "manual",
+      });
+
+      try {
+        await apiRequest("POST", "/api/population", {
+          source: "community_census",
+          year: new Date().getFullYear(),
+          locationType: "village",
+          villageId,
+          totalPopulation: countNum,
+          under5Population: Math.round(countNum * 0.18),
+        });
+      } catch {
+        // non-blocking
+      }
+
+      const merged = { ...updated, population: countNum };
+      queryClient.setQueriesData<Village[]>({ queryKey: ["/api/villages"] }, (current) =>
+        Array.isArray(current) ? current.map((v) => (v.id === villageId ? merged : v)) : current
+      );
+      void queryClient.invalidateQueries({ queryKey: ["/api/villages"] });
+      void queryClient.invalidateQueries({ queryKey: ["/api/population"] });
+
+      toast({
+        title: "Population Saved",
+        description: `Population updated to ${countNum.toLocaleString()}.`,
+      });
+      setPopoverOpenVillageId(null);
+    } catch (err: any) {
+      toast({
+        title: "Failed to Save Population",
+        description: err.message || "Could not save population.",
+        variant: "destructive",
+      });
+    } finally {
+      setLoadingPopVillageId(null);
+    }
+  };
+
+  // 3. Batch Auto-Fill WorldPop for all unpopulated outreach posts
+  const handleBatchWorldPop = async () => {
+    const unpopulated = filteredVillages.filter((v) => {
+      const hasCoords = (v.outreachLatitude && v.outreachLongitude) || (v.latitude && v.longitude);
+      const hasPop = v.population && Number(v.population) > 0;
+      return hasCoords && !hasPop;
+    });
+
+    if (unpopulated.length === 0) {
+      toast({
+        title: "All Outreach Posts Populated",
+        description: "All configured outreach posts in the current view already have population recorded.",
+      });
+      return;
+    }
+
+    setIsBatchLoading(true);
+    setBatchProgress({ current: 0, total: unpopulated.length });
+    let successCount = 0;
+
+    const headers: Record<string, string> = {};
+    if (activeTenantId) headers["x-tenant-id"] = activeTenantId;
+
+    for (let i = 0; i < unpopulated.length; i++) {
+      const v = unpopulated[i];
+      setBatchProgress({ current: i + 1, total: unpopulated.length });
+      const lat = v.outreachLatitude ? parseFloat(String(v.outreachLatitude)) : parseFloat(String(v.latitude));
+      const lng = v.outreachLongitude ? parseFloat(String(v.outreachLongitude)) : parseFloat(String(v.longitude));
+
+      if (!isNaN(lat) && !isNaN(lng)) {
+        try {
+          const res = await fetch(
+            `/api/population/worldpop-point?lat=${lat}&lng=${lng}&radiusKm=1.5&iso3=${iso3}${activeTenantId ? `&tenantId=${encodeURIComponent(activeTenantId)}` : ""}`,
+            { headers, credentials: "include" }
+          );
+          if (res.ok) {
+            const data = await res.json();
+            const count = Math.round(data.gridPop || 0);
+            await apiRequest("PATCH", `/api/villages/${v.id}`, {
+              totalCatchmentPopulation: count,
+              griddedPopulation: count,
+              populationSourceLabel: "worldpop",
+            });
+            try {
+              await apiRequest("POST", "/api/population", {
+                source: "worldpop",
+                year: new Date().getFullYear(),
+                locationType: "village",
+                villageId: v.id,
+                totalPopulation: count,
+                under5Population: data.under5Pop || Math.round(count * 0.18),
+              });
+            } catch {}
+            successCount++;
+          }
+        } catch (e) {
+          console.warn(`[Batch WorldPop] Failed for village ${v.id}:`, e);
+        }
+      }
+    }
+
+    setIsBatchLoading(false);
+    setBatchProgress(null);
+    void queryClient.invalidateQueries({ queryKey: ["/api/villages"] });
+    void queryClient.invalidateQueries({ queryKey: ["/api/population"] });
+
+    toast({
+      title: "Batch WorldPop Complete",
+      description: `Successfully populated ${successCount} outreach post${successCount === 1 ? "" : "s"} using WorldPop!`,
+    });
+  };
+
+  // 4. Modal WorldPop extraction
+  const handleExtractModalWorldPop = async () => {
+    const latNum = parseFloat(formLat);
+    const lngNum = parseFloat(formLng);
+
+    if (isNaN(latNum) || isNaN(lngNum)) {
+      toast({
+        title: "Coordinates Required",
+        description: "Please specify latitude and longitude first.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsExtractingModalPop(true);
+    try {
+      const headers: Record<string, string> = {};
+      if (activeTenantId) headers["x-tenant-id"] = activeTenantId;
+
+      const res = await fetch(
+        `/api/population/worldpop-point?lat=${latNum}&lng=${lngNum}&radiusKm=1.5&iso3=${iso3}${activeTenantId ? `&tenantId=${encodeURIComponent(activeTenantId)}` : ""}`,
+        { headers, credentials: "include" }
+      );
+
+      if (!res.ok) throw new Error("WorldPop extraction failed");
+      const data = await res.json();
+      const count = Math.round(data.gridPop || 0);
+
+      setFormPopulation(String(count));
+      setFormPopSource("worldpop");
+
+      toast({
+        title: "WorldPop Estimated",
+        description: `Extracted estimated population of ${count.toLocaleString()} (under-5: ~${(data.under5Pop || Math.round(count * 0.18)).toLocaleString()}).`,
+      });
+    } catch (err: any) {
+      toast({
+        title: "WorldPop Failed",
+        description: err.message || "Could not retrieve WorldPop estimate.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsExtractingModalPop(false);
     }
   };
 
@@ -408,18 +685,43 @@ export function OutreachPostsManager({
 
     setIsSaving(true);
     try {
-      const updated = await apiRequest<Village>("PATCH", `/api/villages/${targetVillageId}`, {
+      const popNum = formPopulation.trim() ? parseInt(formPopulation.trim(), 10) : null;
+      const patchData: any = {
         outreachPostName: formName.trim(),
         outreachLatitude: String(latNum),
         outreachLongitude: String(lngNum),
-      });
+      };
+      if (popNum !== null && !isNaN(popNum)) {
+        patchData.totalCatchmentPopulation = popNum;
+        patchData.griddedPopulation = popNum;
+        patchData.populationSourceLabel = formPopSource || "worldpop";
+      }
 
+      const updated = await apiRequest<Village>("PATCH", `/api/villages/${targetVillageId}`, patchData);
+
+      if (popNum !== null && !isNaN(popNum)) {
+        try {
+          await apiRequest("POST", "/api/population", {
+            source: formPopSource || "worldpop",
+            year: new Date().getFullYear(),
+            locationType: "village",
+            villageId: targetVillageId,
+            totalPopulation: popNum,
+            under5Population: Math.round(popNum * 0.18),
+          });
+        } catch {
+          // non-blocking
+        }
+      }
+
+      const mergedUpdated = { ...updated, population: popNum ?? (updated as any).population };
       queryClient.setQueriesData<Village[]>({ queryKey: ["/api/villages"] }, (current) =>
         Array.isArray(current)
-          ? current.map((v) => (v.id === updated.id ? updated : v))
+          ? current.map((v) => (v.id === mergedUpdated.id ? mergedUpdated : v))
           : current,
       );
       void queryClient.invalidateQueries({ queryKey: ["/api/villages"], refetchType: "none" });
+      void queryClient.invalidateQueries({ queryKey: ["/api/population"], refetchType: "none" });
 
       toast({
         title: "Outreach Post Saved",
@@ -683,6 +985,27 @@ export function OutreachPostsManager({
               </DropdownMenu>
 
               <Button
+                variant="outline"
+                size="sm"
+                onClick={handleBatchWorldPop}
+                disabled={isBatchLoading}
+                className="gap-1.5 text-xs border-purple-500/30 text-purple-700 dark:text-purple-300 hover:bg-purple-50 dark:hover:bg-purple-950/40 font-medium"
+                title="Automatically pull and populate WorldPop population estimates for all outreach posts in this view"
+              >
+                {isBatchLoading ? (
+                  <>
+                    <Loader2 className="h-3.5 w-3.5 animate-spin text-purple-600" />
+                    <span>Pulling {batchProgress ? `(${batchProgress.current}/${batchProgress.total})` : "..."}</span>
+                  </>
+                ) : (
+                  <>
+                    <Globe className="h-3.5 w-3.5 text-purple-600" />
+                    <span>Auto-Fill WorldPop</span>
+                  </>
+                )}
+              </Button>
+
+              <Button
                 size="sm"
                 onClick={() => handleOpenCreate()}
                 className="gap-1.5 text-xs bg-purple-600 hover:bg-purple-700 text-white font-semibold shadow-xs"
@@ -890,8 +1213,183 @@ export function OutreachPostsManager({
                           </td>
                         )}
                         {visibleColumns.population && (
-                          <td className="px-4 py-3 font-medium">
-                            {v.population ? Number(v.population).toLocaleString() : "-"}
+                          <td className="px-4 py-3">
+                            {v.population && Number(v.population) > 0 ? (
+                              <div className="flex items-center gap-1.5 group">
+                                <div className="flex flex-col">
+                                  <span className="font-semibold text-foreground font-mono">
+                                    {Number(v.population).toLocaleString()}
+                                  </span>
+                                  {v.populationSourceLabel && (
+                                    <span className="text-[9px] text-muted-foreground uppercase tracking-tight">
+                                      {v.populationSourceLabel === "worldpop" ? "WorldPop" : v.populationSourceLabel}
+                                    </span>
+                                  )}
+                                </div>
+
+                                <Popover
+                                  open={popoverOpenVillageId === v.id}
+                                  onOpenChange={(open) => {
+                                    setPopoverOpenVillageId(open ? v.id : null);
+                                    if (open) {
+                                      setManualPopInputs((prev) => ({
+                                        ...prev,
+                                        [v.id]: v.population ? String(v.population) : "",
+                                      }));
+                                    }
+                                  }}
+                                >
+                                  <PopoverTrigger asChild>
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      className="h-6 w-6 text-muted-foreground opacity-60 group-hover:opacity-100 hover:text-purple-600 hover:bg-purple-50 dark:hover:bg-purple-950/40"
+                                      title="Edit or re-pull population"
+                                    >
+                                      <Pencil className="h-3 w-3" />
+                                    </Button>
+                                  </PopoverTrigger>
+                                  <PopoverContent className="w-64 p-3 text-xs space-y-2.5 font-sans" align="start">
+                                    <div className="font-semibold text-foreground flex items-center justify-between border-b border-border/40 pb-1.5">
+                                      <span>Update Population</span>
+                                      <Badge variant="outline" className="text-[10px] max-w-[120px] truncate">{v.name}</Badge>
+                                    </div>
+                                    <div className="space-y-1">
+                                      <Label className="text-[11px] text-muted-foreground">Target Population</Label>
+                                      <Input
+                                        type="number"
+                                        min="0"
+                                        className="h-8 text-xs font-mono"
+                                        placeholder="e.g. 1250"
+                                        value={manualPopInputs[v.id] ?? String(v.population)}
+                                        onChange={(e) =>
+                                          setManualPopInputs((prev) => ({ ...prev, [v.id]: e.target.value }))
+                                        }
+                                      />
+                                    </div>
+                                    <div className="flex items-center justify-between pt-1">
+                                      <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        className="h-7 text-[11px] gap-1 text-purple-600 border-purple-500/20 hover:bg-purple-50"
+                                        onClick={() => handlePullWorldPop(v)}
+                                        disabled={loadingPopVillageId === v.id}
+                                      >
+                                        {loadingPopVillageId === v.id ? (
+                                          <Loader2 className="h-3 w-3 animate-spin" />
+                                        ) : (
+                                          <RefreshCw className="h-3 w-3" />
+                                        )}
+                                        <span>WorldPop</span>
+                                      </Button>
+                                      <Button
+                                        type="button"
+                                        size="sm"
+                                        className="h-7 text-[11px] bg-purple-600 hover:bg-purple-700 text-white font-medium"
+                                        onClick={() =>
+                                          handleSaveManualPopulation(
+                                            v.id,
+                                            parseInt(manualPopInputs[v.id] || "0", 10)
+                                          )
+                                        }
+                                        disabled={loadingPopVillageId === v.id}
+                                      >
+                                        Apply
+                                      </Button>
+                                    </div>
+                                  </PopoverContent>
+                                </Popover>
+                              </div>
+                            ) : (
+                              <div className="flex items-center gap-1.5">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-6 text-[11px] px-2 gap-1 border-purple-500/30 text-purple-700 dark:text-purple-300 hover:bg-purple-50 dark:hover:bg-purple-950/40 font-medium"
+                                  onClick={() => handlePullWorldPop(v)}
+                                  disabled={loadingPopVillageId === v.id}
+                                  title="Pull WorldPop estimate for this outreach post"
+                                >
+                                  {loadingPopVillageId === v.id ? (
+                                    <Loader2 className="h-3 w-3 animate-spin text-purple-600" />
+                                  ) : (
+                                    <Globe className="h-3 w-3 text-purple-600" />
+                                  )}
+                                  <span>Pull WorldPop</span>
+                                </Button>
+
+                                <Popover
+                                  open={popoverOpenVillageId === v.id}
+                                  onOpenChange={(open) => {
+                                    setPopoverOpenVillageId(open ? v.id : null);
+                                    if (open) {
+                                      setManualPopInputs((prev) => ({
+                                        ...prev,
+                                        [v.id]: "",
+                                      }));
+                                    }
+                                  }}
+                                >
+                                  <PopoverTrigger asChild>
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      className="h-6 w-6 text-muted-foreground hover:text-foreground"
+                                      title="Enter manual population"
+                                    >
+                                      <Pencil className="h-3 w-3" />
+                                    </Button>
+                                  </PopoverTrigger>
+                                  <PopoverContent className="w-64 p-3 text-xs space-y-2.5 font-sans" align="start">
+                                    <div className="font-semibold text-foreground flex items-center justify-between border-b border-border/40 pb-1.5">
+                                      <span>Enter Population</span>
+                                      <Badge variant="outline" className="text-[10px] max-w-[120px] truncate">{v.name}</Badge>
+                                    </div>
+                                    <div className="space-y-1">
+                                      <Label className="text-[11px] text-muted-foreground">Target Population</Label>
+                                      <Input
+                                        type="number"
+                                        min="0"
+                                        className="h-8 text-xs font-mono"
+                                        placeholder="e.g. 1250"
+                                        value={manualPopInputs[v.id] ?? ""}
+                                        onChange={(e) =>
+                                          setManualPopInputs((prev) => ({ ...prev, [v.id]: e.target.value }))
+                                        }
+                                      />
+                                    </div>
+                                    <div className="flex items-center justify-between pt-1">
+                                      <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        className="h-7 text-[11px] gap-1 text-purple-600 border-purple-500/20 hover:bg-purple-50"
+                                        onClick={() => handlePullWorldPop(v)}
+                                        disabled={loadingPopVillageId === v.id}
+                                      >
+                                        <Globe className="h-3 w-3" />
+                                        WorldPop
+                                      </Button>
+                                      <Button
+                                        type="button"
+                                        size="sm"
+                                        className="h-7 text-[11px] bg-purple-600 hover:bg-purple-700 text-white font-medium"
+                                        onClick={() =>
+                                          handleSaveManualPopulation(
+                                            v.id,
+                                            parseInt(manualPopInputs[v.id] || "0", 10)
+                                          )
+                                        }
+                                        disabled={loadingPopVillageId === v.id}
+                                      >
+                                        Save
+                                      </Button>
+                                    </div>
+                                  </PopoverContent>
+                                </Popover>
+                              </div>
+                            )}
                           </td>
                         )}
                         {visibleColumns.status && (
@@ -1191,6 +1689,91 @@ export function OutreachPostsManager({
                   />
                 </div>
               </div>
+            </div>
+
+            {/* Target Population Section */}
+            <div className="space-y-2 p-3 bg-purple-500/5 rounded-xl border border-purple-500/20">
+              <div className="flex items-center justify-between">
+                <div>
+                  <Label htmlFor="outreach-pop-input" className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                    <Users className="h-3.5 w-3.5 text-purple-600" />
+                    <span>Target Population (Pop. Served)</span>
+                  </Label>
+                  <p className="text-[10px] text-muted-foreground mt-0.5">
+                    Catchment population assigned to this mobile immunization post
+                  </p>
+                </div>
+
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-7 text-[11px] gap-1.5 border-purple-500/30 text-purple-700 dark:text-purple-300 hover:bg-purple-100 dark:hover:bg-purple-950 font-medium"
+                  onClick={handleExtractModalWorldPop}
+                  disabled={isExtractingModalPop || (!formLat && !formLng)}
+                  title="Extract gridded population estimate from WorldPop for these coordinates"
+                >
+                  {isExtractingModalPop ? (
+                    <>
+                      <Loader2 className="h-3.5 w-3.5 animate-spin text-purple-600" />
+                      <span>Extracting...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Globe className="h-3.5 w-3.5 text-purple-600" />
+                      <span>Pull WorldPop</span>
+                    </>
+                  )}
+                </Button>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                <div className="space-y-1">
+                  <Label htmlFor="outreach-pop-input" className="text-[11px] text-muted-foreground">Population Count</Label>
+                  <Input
+                    id="outreach-pop-input"
+                    type="number"
+                    min="0"
+                    value={formPopulation}
+                    onChange={(e) => {
+                      setFormPopulation(e.target.value);
+                      setFormPopSource("manual");
+                    }}
+                    placeholder="e.g. 1450"
+                    className="h-8 text-xs font-mono"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <Label htmlFor="outreach-source-select" className="text-[11px] text-muted-foreground">Data Source</Label>
+                  <Select value={formPopSource} onValueChange={setFormPopSource}>
+                    <SelectTrigger id="outreach-source-select" className="h-8 text-xs">
+                      <SelectValue placeholder="Source" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="worldpop">WorldPop Gridded Estimate</SelectItem>
+                      <SelectItem value="community_census">Community Census / CHW</SelectItem>
+                      <SelectItem value="hmis">HMIS / DHIS2 Facility Catchment</SelectItem>
+                      <SelectItem value="nso">National Statistics Office (NSO)</SelectItem>
+                      <SelectItem value="manual">Manual Estimate</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              {formPopulation && !isNaN(Number(formPopulation)) && Number(formPopulation) > 0 && (
+                <div className="pt-2 border-t border-purple-500/10 grid grid-cols-3 gap-2 text-[10px] text-muted-foreground">
+                  <div className="bg-background/80 px-2 py-1 rounded border border-border/50">
+                    <span className="font-semibold text-foreground">~{Math.round(Number(formPopulation) * 0.04).toLocaleString()}</span> Under-1 (4%)
+                  </div>
+                  <div className="bg-background/80 px-2 py-1 rounded border border-border/50">
+                    <span className="font-semibold text-foreground">~{Math.round(Number(formPopulation) * 0.18).toLocaleString()}</span> Under-5 (18%)
+                  </div>
+                  <div className="bg-background/80 px-2 py-1 rounded border border-border/50">
+                    <span className="font-semibold text-foreground">~{Math.round(Number(formPopulation) * 0.22).toLocaleString()}</span> WCBA (22%)
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Interactive Mini-Map */}

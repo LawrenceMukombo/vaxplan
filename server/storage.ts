@@ -1064,12 +1064,16 @@ export class DatabaseStorage implements IStorage {
         transportMode: villages.transportMode,
         insecurityLevel: villages.insecurityLevel,
         comments: villages.comments,
-        population: sql<number>`(
-          SELECT total_population
-          FROM population_data p
-          WHERE p.village_id = ${villages.id}
-          ORDER BY p.year DESC, CASE WHEN p.source = 'nso' THEN 1 ELSE 2 END ASC
-          LIMIT 1
+        population: sql<number>`COALESCE(
+          (
+            SELECT total_population
+            FROM population_data p
+            WHERE p.village_id = ${villages.id}
+            ORDER BY p.year DESC, CASE WHEN p.source = 'nso' THEN 1 ELSE 2 END ASC
+            LIMIT 1
+          ),
+          ${villages.totalCatchmentPopulation},
+          ${villages.griddedPopulation}
         )`.mapWith(Number),
         createdAt: villages.createdAt,
         updatedAt: villages.updatedAt,
@@ -1097,12 +1101,16 @@ export class DatabaseStorage implements IStorage {
     const [v] = await db
       .select({
         ...getTableColumns(villages),
-        population: sql<number>`(
-          SELECT total_population
-          FROM population_data p
-          WHERE p.village_id = ${villages.id}
-          ORDER BY p.year DESC, CASE WHEN p.source = 'nso' THEN 1 ELSE 2 END ASC
-          LIMIT 1
+        population: sql<number>`COALESCE(
+          (
+            SELECT total_population
+            FROM population_data p
+            WHERE p.village_id = ${villages.id}
+            ORDER BY p.year DESC, CASE WHEN p.source = 'nso' THEN 1 ELSE 2 END ASC
+            LIMIT 1
+          ),
+          ${villages.totalCatchmentPopulation},
+          ${villages.griddedPopulation}
         )`.mapWith(Number),
       })
       .from(villages)
