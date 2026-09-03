@@ -1,0 +1,11 @@
+name,facilityHmisCode,gender,phone,nrc,age,educationLevel,trainingReceived,roleDescription,yearsOfService,siaRole,employmentStatus
+Noluthando Dlamini,ZAF-50487,female,0723456781,8904120234081,35,Grade 12 / Matric,EPI Cold Chain & SIA Mobilization,Community Health Volunteer,5,team_leader,Active - In-service
+Sipho Mthembu,ZAF-50487,male,0834567892,9208155210087,32,Secondary,IMCI & Routine Immunization,Community Health Volunteer,4,mobilizer,Active - In-service
+Thandeka Ndlovu,ZAF-50487,female,0619876543,9503220198083,29,Grade 12 / Matric,Integrated Community Case Management (ICCM),Community Health Volunteer,3,recorder,Active - In-service
+Babalwa Booi,ZAF-50487,female,0781234560,8607180456089,38,Secondary,Defaulter Tracking & Community Census,Community Health Volunteer,7,defaulter_tracer,Active - In-service
+Lwazi Mabandla,ZAF-50487,male,0842345671,9401105342080,30,Grade 12 / Matric,Basic First Aid & IPC,Community Health Volunteer,3,crowd_controller,Active - In-service
+Nomsa Khumalo,ZAF-50487,female,0738765432,9109050678082,33,Grade 12 / Matric,SIA Social Mobilization & IPC,Community Health Volunteer,4,mobilizer,Active - In-service
+Andile Mkhize,ZAF-50487,male,0829871234,9706145890084,27,Secondary,Tally Sheet & Microplan Logistics,Community Health Volunteer,2,tally_sheet_handler,Active - In-service
+Zukiswa Gqirana,ZAF-50487,female,0765432109,8811250321085,36,Tertiary (Certificate),Childhood Nutrition & EPI Surveillance,Community Health Volunteer,6,team_leader,Active - In-service
+Vuyokazi Ntuli,ZAF-50487,female,0641239876,9305190245088,31,Grade 12 / Matric,Cold Chain Handling & SIA Logistics,Community Health Volunteer,4,mobilizer,Active - In-service
+Bongani Jacobs,ZAF-50487,male,0813456789,9012035123086,34,Secondary,House-to-House Mobilization,Community Health Volunteer,5,mobilizer,Active - In-service

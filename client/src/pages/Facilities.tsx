@@ -6149,10 +6149,12 @@ function CommunityWorkersTab({ provinces, allDistricts, facilities, villages, se
         const getIdx = (aliases: string[]) => headers.findIndex(h => aliases.includes(h));
         
         const nameIdx = getIdx(["name", "fullname", "full_name"]);
-        const hmisIdx = getIdx(["facilityhmiscode", "facility_hmis_code", "hmis", "facility_id"]);
+        const hmisIdx = getIdx(["facilityhmiscode", "facility_hmis_code", "hmis", "facility_id", "facility", "facilityname", "facility_name"]);
         
         if (nameIdx === -1) throw new Error("CSV must contain a 'name' column.");
-        if (hmisIdx === -1) throw new Error("CSV must contain a 'facilityHmisCode' column.");
+        if (hmisIdx === -1 && !selectedFacilityId) {
+          throw new Error("CSV must contain a 'facilityHmisCode' or 'facility' column, or a facility must be selected in the filter bar.");
+        }
 
         const nrcIdx = getIdx(["nrc"]);
         const genderIdx = getIdx(["gender"]);
@@ -6160,9 +6162,9 @@ function CommunityWorkersTab({ provinces, allDistricts, facilities, villages, se
         const eduIdx = getIdx(["educationlevel", "education_level", "education"]);
         const trainIdx = getIdx(["trainingreceived", "training_received", "training"]);
         const roleDescIdx = getIdx(["roledescription", "role_description", "description"]);
-        const phoneIdx = getIdx(["contactphone", "contact_phone", "phone"]);
-        const yearsIdx = getIdx(["yearsofservice", "years_of_service", "years"]);
-        const siaIdx = getIdx(["siarole", "sia_role"]);
+        const phoneIdx = getIdx(["contactphone", "contact_phone", "phone", "phonenumber", "mobile"]);
+        const yearsIdx = getIdx(["yearsofservice", "years_of_service", "years", "experience"]);
+        const siaIdx = getIdx(["siarole", "sia_role", "role", "campaignrole"]);
         const empIdx = getIdx(["employmentstatus", "employment_status", "status"]);
 
         const chvs = [];
@@ -6173,7 +6175,7 @@ function CommunityWorkersTab({ provinces, allDistricts, facilities, villages, se
 
           chvs.push({
             fullName: vals[nameIdx],
-            facilityHmisCode: vals[hmisIdx],
+            facilityHmisCode: hmisIdx > -1 ? vals[hmisIdx] : undefined,
             nrc: getVal(nrcIdx),
             gender: getVal(genderIdx) || "female",
             age: getVal(ageIdx) ? parseInt(getVal(ageIdx)!) : undefined,
@@ -6187,7 +6189,7 @@ function CommunityWorkersTab({ provinces, allDistricts, facilities, villages, se
           });
         }
         
-        importChvMutation.mutate({ chvs });
+        importChvMutation.mutate({ chvs, facilityId: selectedFacilityId || undefined });
       } catch (err: any) {
         toast({ title: "Failed to parse CSV", description: err.message, variant: "destructive" });
       }

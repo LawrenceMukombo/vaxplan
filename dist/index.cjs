@@ -33159,12 +33159,38 @@ This response is powered by the local VaxPlan database query engine. You can que
       const { chvs } = req.body;
       if (!Array.isArray(chvs) || chvs.length === 0) return res.status(400).json({ message: "No CHVs provided" });
       const allFacs = await db.select().from(facilities4).where((0, import_drizzle_orm26.eq)(facilities4.tenantId, req.tenantId));
-      const hmisMap = new Map(allFacs.map((f) => [f.hmisCode.toLowerCase(), f.id]));
+      const hmisMap = /* @__PURE__ */ new Map();
+      const nameMap = /* @__PURE__ */ new Map();
+      const idMap = /* @__PURE__ */ new Map();
+      for (const f of allFacs) {
+        if (f.hmisCode) hmisMap.set(f.hmisCode.toLowerCase().trim(), f.id);
+        if (f.name) nameMap.set(f.name.toLowerCase().trim(), f.id);
+        idMap.set(String(f.id), f.id);
+      }
       let added = 0;
+      let skippedNoFacility = 0;
       for (const chv of chvs) {
-        if (!chv.fullName || !chv.facilityHmisCode) continue;
-        const facId = hmisMap.get(chv.facilityHmisCode.toLowerCase());
-        if (!facId) continue;
+        if (!chv.fullName) continue;
+        const rawCode = (chv.facilityHmisCode || chv.facilityName || chv.facilityId || "").toString().trim().toLowerCase();
+        let facId = rawCode ? hmisMap.get(rawCode) || nameMap.get(rawCode) || idMap.get(rawCode) : void 0;
+        if (!facId && rawCode) {
+          const match = allFacs.find((f) => {
+            const fName = (f.name || "").toLowerCase();
+            const fCode = (f.hmisCode || "").toLowerCase();
+            return fName.includes(rawCode) || rawCode.includes(fName) || fCode.includes(rawCode) || rawCode.includes(fCode);
+          });
+          if (match) facId = match.id;
+        }
+        if (!facId && req.body.facilityId) {
+          const fallbackId = Number(req.body.facilityId);
+          if (!isNaN(fallbackId) && allFacs.some((f) => f.id === fallbackId)) {
+            facId = fallbackId;
+          }
+        }
+        if (!facId) {
+          skippedNoFacility++;
+          continue;
+        }
         await db.insert(chvProfiles2).values({
           tenantId: req.tenantId,
           facilityId: facId,
@@ -33183,7 +33209,15 @@ This response is powered by the local VaxPlan database query engine. You can que
         });
         added++;
       }
-      res.json({ success: true, message: `Successfully imported ${added} community workers.` });
+      if (added === 0 && skippedNoFacility > 0) {
+        return res.status(400).json({
+          message: `Could not match facility for ${skippedNoFacility} record(s). Please verify the facility HMIS code or name (e.g. ZAF-50487 or Addo Clinic).`
+        });
+      }
+      res.json({
+        success: true,
+        message: `Successfully imported ${added} community workers.${skippedNoFacility > 0 ? ` (${skippedNoFacility} skipped - facility not found)` : ""}`
+      });
     } catch (e) {
       res.status(500).json({ message: e.message });
     }
