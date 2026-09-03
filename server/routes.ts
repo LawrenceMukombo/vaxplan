@@ -22538,23 +22538,25 @@ Instructions:
         }
       }
 
-      if (!req.body.nrc) {
-        return res.status(400).json({ message: "NRC is required" });
-      }
-      const cleanNrc = req.body.nrc.trim();
-      const nrcPattern = /^\d{6}\/\d{2}\/\d{1}$/;
-      if (!nrcPattern.test(cleanNrc)) {
-        return res.status(400).json({ message: "Invalid NRC format. Must be XXXXXX/XX/X (e.g. 123456/78/9)" });
-      }
-      const [nrcDup] = await db.select().from(chvProfiles)
-        .where(and(
-          eq(chvProfiles.tenantId, req.tenantId),
-          ne(chvProfiles.id, id),
-          eq(dsql`LOWER(REPLACE(${chvProfiles.nrc}, '/', ''))`, cleanNrc.replace(/\//g, "").toLowerCase())
-        )).limit(1);
-      if (nrcDup) {
-        const [nrcFac] = await db.select({ name: facilities.name }).from(facilities).where(eq(facilities.id, nrcDup.facilityId)).limit(1);
-        return res.status(400).json({ message: `Duplicate NRC: "${nrcDup.fullName}" at "${nrcFac?.name || 'another facility'}" has this NRC.` });
+      if (req.body.nrc !== undefined) {
+        if (!req.body.nrc) {
+          return res.status(400).json({ message: "NRC cannot be empty" });
+        }
+        const cleanNrc = req.body.nrc.trim();
+        const nrcPattern = /^\d{6}\/\d{2}\/\d{1}$/;
+        if (!nrcPattern.test(cleanNrc)) {
+          return res.status(400).json({ message: "Invalid NRC format. Must be XXXXXX/XX/X (e.g. 123456/78/9)" });
+        }
+        const [nrcDup] = await db.select().from(chvProfiles)
+          .where(and(
+            eq(chvProfiles.tenantId, req.tenantId),
+            ne(chvProfiles.id, id),
+            eq(dsql`LOWER(REPLACE(${chvProfiles.nrc}, '/', ''))`, cleanNrc.replace(/\//g, "").toLowerCase())
+          )).limit(1);
+        if (nrcDup) {
+          const [nrcFac] = await db.select({ name: facilities.name }).from(facilities).where(eq(facilities.id, nrcDup.facilityId)).limit(1);
+          return res.status(400).json({ message: `Duplicate NRC: "${nrcDup.fullName}" at "${nrcFac?.name || 'another facility'}" has this NRC.` });
+        }
       }
 
       const allowed: any = {};

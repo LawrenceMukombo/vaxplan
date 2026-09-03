@@ -33433,22 +33433,24 @@ This response is powered by the local VaxPlan database query engine. You can que
           return res.status(400).json({ message: `Duplicate name: "${cleanName}" is already registered in this facility.` });
         }
       }
-      if (!req.body.nrc) {
-        return res.status(400).json({ message: "NRC is required" });
-      }
-      const cleanNrc = req.body.nrc.trim();
-      const nrcPattern = /^\d{6}\/\d{2}\/\d{1}$/;
-      if (!nrcPattern.test(cleanNrc)) {
-        return res.status(400).json({ message: "Invalid NRC format. Must be XXXXXX/XX/X (e.g. 123456/78/9)" });
-      }
-      const [nrcDup] = await db.select().from(chvProfiles2).where((0, import_drizzle_orm26.and)(
-        (0, import_drizzle_orm26.eq)(chvProfiles2.tenantId, req.tenantId),
-        (0, import_drizzle_orm26.ne)(chvProfiles2.id, id),
-        (0, import_drizzle_orm26.eq)(import_drizzle_orm26.sql`LOWER(REPLACE(${chvProfiles2.nrc}, '/', ''))`, cleanNrc.replace(/\//g, "").toLowerCase())
-      )).limit(1);
-      if (nrcDup) {
-        const [nrcFac] = await db.select({ name: facilities.name }).from(facilities).where((0, import_drizzle_orm26.eq)(facilities.id, nrcDup.facilityId)).limit(1);
-        return res.status(400).json({ message: `Duplicate NRC: "${nrcDup.fullName}" at "${nrcFac?.name || "another facility"}" has this NRC.` });
+      if (req.body.nrc !== void 0) {
+        if (!req.body.nrc) {
+          return res.status(400).json({ message: "NRC cannot be empty" });
+        }
+        const cleanNrc = req.body.nrc.trim();
+        const nrcPattern = /^\d{6}\/\d{2}\/\d{1}$/;
+        if (!nrcPattern.test(cleanNrc)) {
+          return res.status(400).json({ message: "Invalid NRC format. Must be XXXXXX/XX/X (e.g. 123456/78/9)" });
+        }
+        const [nrcDup] = await db.select().from(chvProfiles2).where((0, import_drizzle_orm26.and)(
+          (0, import_drizzle_orm26.eq)(chvProfiles2.tenantId, req.tenantId),
+          (0, import_drizzle_orm26.ne)(chvProfiles2.id, id),
+          (0, import_drizzle_orm26.eq)(import_drizzle_orm26.sql`LOWER(REPLACE(${chvProfiles2.nrc}, '/', ''))`, cleanNrc.replace(/\//g, "").toLowerCase())
+        )).limit(1);
+        if (nrcDup) {
+          const [nrcFac] = await db.select({ name: facilities.name }).from(facilities).where((0, import_drizzle_orm26.eq)(facilities.id, nrcDup.facilityId)).limit(1);
+          return res.status(400).json({ message: `Duplicate NRC: "${nrcDup.fullName}" at "${nrcFac?.name || "another facility"}" has this NRC.` });
+        }
       }
       const allowed = {};
       if (req.body.name !== void 0) allowed.fullName = req.body.name.trim();
