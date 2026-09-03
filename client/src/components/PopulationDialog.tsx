@@ -31,6 +31,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { FacilityCascadePicker } from "@/components/FacilityCascadePicker";
+import { VillageCascadePicker } from "@/components/VillageCascadePicker";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Globe, Loader2 } from "lucide-react";
@@ -87,6 +88,7 @@ export function PopulationDialog({
 
   const [locationType, setLocationType] = useState<string>("province");
   const [autoCalculate, setAutoCalculate] = useState<boolean>(true);
+  const [selectedVillageObj, setSelectedVillageObj] = useState<Village | null>(null);
 
   // Retrieve Tenant Context for multitenant support and dynamic terminology translation
   const { data: tenantInfo } = useQuery<any>({
@@ -153,10 +155,6 @@ export function PopulationDialog({
       return res.json();
     },
     enabled: !!tenantInfo?.id,
-  });
-
-  const { data: villages } = useQuery<Village[]>({
-    queryKey: ["/api/villages"],
   });
 
   const { data: facilities } = useQuery<Facility[]>({
@@ -299,8 +297,14 @@ export function PopulationDialog({
       return null;
     };
 
-    if (villageId && villages) {
-      const v = villages.find((item) => Number(item.id) === Number(villageId));
+    if (villageId) {
+      let v = selectedVillageObj;
+      if (!v || Number(v.id) !== Number(villageId)) {
+        try {
+          const res = await fetch(`/api/villages/${villageId}`, { credentials: "include" });
+          if (res.ok) v = await res.json();
+        } catch {}
+      }
       const coords = extractCoords(v);
       if (coords) {
         lat = coords[0];
@@ -681,25 +685,18 @@ export function PopulationDialog({
                   control={form.control}
                   name="villageId"
                   render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Village</FormLabel>
-                      <Select 
-                        value={field.value?.toString() || ""} 
-                        onValueChange={(v) => field.onChange(parseInt(v))}
-                      >
-                        <FormControl>
-                          <SelectTrigger data-testid="select-village-form">
-                            <SelectValue placeholder="Select village" />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          {villages?.map((v) => (
-                            <SelectItem key={v.id} value={v.id.toString()}>
-                              {v.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                    <FormItem className="col-span-1 md:col-span-2">
+                      <FormLabel>Village / Community Hierarchy</FormLabel>
+                      <VillageCascadePicker
+                        value={field.value ?? null}
+                        onChange={(id, v) => {
+                          field.onChange(id);
+                          setSelectedVillageObj(v);
+                        }}
+                        showLabels={true}
+                        layout="grid"
+                        testIdPrefix="population-village"
+                      />
                       <FormMessage />
                     </FormItem>
                   )}
