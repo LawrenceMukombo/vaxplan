@@ -35,6 +35,8 @@ import { VillageCascadePicker } from "@/components/VillageCascadePicker";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Globe, Loader2 } from "lucide-react";
+import { tenantCodeOf, getTenantMapDefaults } from "@/lib/tenantGeo";
+import { loadActiveTenant } from "@/lib/tenantCache";
 import type { PopulationData, Province, District, Village, Facility } from "@shared/schema";
 
 type PopulationSource = "nso" | "hmis" | "worldpop" | "survey" | "community_census";
@@ -136,29 +138,47 @@ export function PopulationDialog({
   });
   */
 
+  const cachedTenant = loadActiveTenant();
+  const activeTenantId = tenantInfo?.id || tenantInfo?.activeTenant?.id || cachedTenant?.id;
+
   // Updated Code: Scope queries to tenant ID and use custom queryFn to fetch the array of all provinces/districts for the tenant.
   const { data: provinces } = useQuery<Province[]>({
-    queryKey: ["/api/provinces", tenantInfo?.id],
+    queryKey: ["/api/provinces", activeTenantId],
     queryFn: async () => {
-      const res = await fetch("/api/provinces", { credentials: "include" });
+      const url = activeTenantId ? `/api/provinces?tenantId=${encodeURIComponent(activeTenantId)}` : "/api/provinces";
+      const headers: Record<string, string> = {};
+      if (activeTenantId) headers["x-tenant-id"] = activeTenantId;
+      const res = await fetch(url, { credentials: "include", headers });
       if (!res.ok) throw new Error("Failed to fetch provinces");
       return res.json();
     },
-    enabled: !!tenantInfo?.id,
+    enabled: !!activeTenantId,
   });
 
   const { data: districts } = useQuery<District[]>({
-    queryKey: ["/api/districts", tenantInfo?.id],
+    queryKey: ["/api/districts", activeTenantId],
     queryFn: async () => {
-      const res = await fetch("/api/districts", { credentials: "include" });
+      const url = activeTenantId ? `/api/districts?tenantId=${encodeURIComponent(activeTenantId)}` : "/api/districts";
+      const headers: Record<string, string> = {};
+      if (activeTenantId) headers["x-tenant-id"] = activeTenantId;
+      const res = await fetch(url, { credentials: "include", headers });
       if (!res.ok) throw new Error("Failed to fetch districts");
       return res.json();
     },
-    enabled: !!tenantInfo?.id,
+    enabled: !!activeTenantId,
   });
 
   const { data: facilities } = useQuery<Facility[]>({
-    queryKey: ["/api/facilities"],
+    queryKey: ["/api/facilities", activeTenantId],
+    queryFn: async () => {
+      const url = activeTenantId ? `/api/facilities?tenantId=${encodeURIComponent(activeTenantId)}` : "/api/facilities";
+      const headers: Record<string, string> = {};
+      if (activeTenantId) headers["x-tenant-id"] = activeTenantId;
+      const res = await fetch(url, { credentials: "include", headers });
+      if (!res.ok) throw new Error("Failed to fetch facilities");
+      return res.json();
+    },
+    enabled: !!activeTenantId,
   });
 
   const form = useForm<FormValues>({
@@ -334,14 +354,20 @@ export function PopulationDialog({
     }
 
     if (!lat || !lng || isNaN(lat) || isNaN(lng)) {
-      lat = -15.4167;
-      lng = 28.2833;
+      const defaults = getTenantMapDefaults(tenantInfo || cachedTenant);
+      lat = defaults.center[0];
+      lng = defaults.center[1];
     }
 
     setIsExtractingWorldPop(true);
     try {
-      const iso3 = tenantInfo?.tenant?.countryCode || "ZMB";
-      const res = await fetch(`/api/population/worldpop-point?lat=${lat}&lng=${lng}&radiusKm=1.5&iso3=${iso3}`);
+      const iso3 = tenantCodeOf(tenantInfo || cachedTenant) || "ZMB";
+      const headers: Record<string, string> = {};
+      if (activeTenantId) headers["x-tenant-id"] = activeTenantId;
+      const res = await fetch(
+        `/api/population/worldpop-point?lat=${lat}&lng=${lng}&radiusKm=1.5&iso3=${iso3}${activeTenantId ? `&tenantId=${encodeURIComponent(activeTenantId)}` : ""}`,
+        { headers, credentials: "include" }
+      );
       if (res.ok) {
         const data = await res.json();
         const total = Math.round(data.gridPop || 0);

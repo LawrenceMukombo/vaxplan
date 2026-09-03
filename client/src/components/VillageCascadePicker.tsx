@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Check, ChevronsUpDown, MapPin, Building2, Home } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
+import { loadActiveTenant } from "@/lib/tenantCache";
 import {
   Popover,
   PopoverContent,
@@ -92,7 +93,20 @@ export function VillageCascadePicker({
   const resolvedProvLabel = provinceLabel || (skipRegionLevel ? adminLabels.level1 : "Province");
   const resolvedDistLabel = districtLabel || (skipRegionLevel ? adminLabels.level2 : "District");
 
-  const activeTenantId = tenantInfo?.activeTenant?.id || tenantInfo?.id;
+  const cachedActiveTenant = loadActiveTenant();
+  const activeTenantId = tenantInfo?.id || tenantInfo?.activeTenant?.id || cachedActiveTenant?.id;
+
+  // Reset cascade selections if tenant switches
+  const prevTenantIdRef = useRef(activeTenantId);
+  useEffect(() => {
+    if (prevTenantIdRef.current && prevTenantIdRef.current !== activeTenantId) {
+      setProvinceId(null);
+      setDistrictId(null);
+      setFacilityId(null);
+      onChange(null, null);
+    }
+    prevTenantIdRef.current = activeTenantId;
+  }, [activeTenantId, onChange]);
 
   // 1. Fetch Provinces
   const { data: provinces } = useQuery<Province[]>({
