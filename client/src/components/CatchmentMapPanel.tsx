@@ -1194,7 +1194,20 @@ export function CatchmentMapPanel({
 
           {/* Facility marker */}
           <Marker position={center}>
-            <Popup><strong>{facilityName}</strong><br />Health Facility</Popup>
+            <Popup>
+              <div className="p-1.5 space-y-1 text-xs select-none">
+                <div className="border-b border-border/50 pb-1">
+                  <span className="text-[10px] font-semibold text-primary uppercase">Health Facility</span>
+                  <p className="font-bold text-sm text-foreground leading-tight">{facilityName}</p>
+                </div>
+                <div className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground pt-0.5">
+                  <span>Communities: <strong className="text-foreground">{communities.length}</strong></span>
+                  {catchment?.gridPopulation ? (
+                    <span>Catchment Pop: <strong className="text-foreground">{catchment.gridPopulation.toLocaleString()}</strong></span>
+                  ) : null}
+                </div>
+              </div>
+            </Popup>
           </Marker>
 
           {lifecycleEdit?.action === "edit" && lifecycleEdit.entityType === "facility" && catchment && (

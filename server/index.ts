@@ -278,6 +278,11 @@ async function backfillClientIds() {
   // GIS Advanced Polygons
   const { gisPolygonsRouter } = await import("./routes/gisPolygons");
   app.use("/api/gis/polygons", gisPolygonsRouter);
+  // Self-Hosted MapLibre Vector Styles & GIS Infrastructure Health
+  const { mapStylesRouter } = await import("./routes/mapStyles");
+  app.use("/api/maps", mapStylesRouter);
+  app.use("/api/health/maps", (req, res) => res.redirect("/api/maps/health"));
+  app.use("/api/health/tiles", (req, res) => res.redirect("/api/maps/health"));
   if (skipDbBootstrap) {
     log("DB bootstrap disabled: skipping startup migrations and schema/data ensure jobs", "db");
   } else {

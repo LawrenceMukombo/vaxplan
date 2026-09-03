@@ -1,39 +1,43 @@
 import { useCallback, useEffect, useState } from "react";
+import {
+  BASEMAP_REGISTRY,
+  LEGACY_BASEMAP_ALIAS_MAP,
+  getBasemapProvider,
+  isBasemapMissingApiKey,
+} from "@/lib/gis/basemapRegistry";
 
 export type Basemap =
+  | "vaxplan_light"
+  | "vaxplan_streets"
+  | "vaxplan_dark"
+  | "openstreetmap"
+  | "satellite"
+  | "terrain"
+  | "humanitarian"
+  | "carto_positron"
+  | "carto_voyager"
   | "positron"
   | "voyager"
   | "osm"
-  | "satellite"
   | "carto"
-  | "terrain"
-  | "humanitarian"
   | "dark"
   | "light"
   | "boundary";
 
 const STORAGE_KEY = "vaxplan.basemap";
 
-const VALID_BASEMAPS = [
-  "positron",
-  "voyager",
-  "osm",
-  "satellite",
-  "carto",
-  "terrain",
-  "humanitarian",
-  "dark",
-  "light",
-  "boundary",
-];
+const KNOWN_BASEMAP_KEYS = new Set([
+  ...Object.keys(BASEMAP_REGISTRY),
+  ...Object.keys(LEGACY_BASEMAP_ALIAS_MAP),
+]);
 
 function readStored(): Basemap | null {
   try {
     const v = localStorage.getItem(STORAGE_KEY);
-    if (!v || !VALID_BASEMAPS.includes(v)) return null;
-    const hasCartoKey = !!import.meta.env.VITE_CARTO_API_KEY;
-    if (!hasCartoKey && (v === "positron" || v === "voyager" || v === "carto" || v === "light" || v === "boundary")) {
-      return "osm";
+    if (!v || !KNOWN_BASEMAP_KEYS.has(v)) return null;
+    const provider = getBasemapProvider(v);
+    if (isBasemapMissingApiKey(provider)) {
+      return "vaxplan_light";
     }
     return v as Basemap;
   } catch {
@@ -41,7 +45,7 @@ function readStored(): Basemap | null {
   }
 }
 
-export function usePersistedBasemap(defaultValue: Basemap = "osm") {
+export function usePersistedBasemap(defaultValue: Basemap = "vaxplan_light") {
   const [basemap, setBasemapState] = useState<Basemap>(
     () => readStored() ?? defaultValue,
   );
@@ -57,7 +61,7 @@ export function usePersistedBasemap(defaultValue: Basemap = "osm") {
   useEffect(() => {
     const onStorage = (e: StorageEvent) => {
       if (e.key !== STORAGE_KEY) return;
-      if (e.newValue && VALID_BASEMAPS.includes(e.newValue)) {
+      if (e.newValue && KNOWN_BASEMAP_KEYS.has(e.newValue)) {
         setBasemapState(e.newValue as Basemap);
       }
     };

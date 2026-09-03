@@ -2048,6 +2048,8 @@ const FacilityMarkerItem = memo(({
       eventHandlers={{
         click: () => {
           setSelectedFacilityId(facility.id);
+          setPanelVis((prev: any) => ({ ...prev, facilities: true }));
+          handleFocusFacility(facility);
         },
       }}
       ref={(el) => {
@@ -8492,6 +8494,13 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
                 key={`reporting-facility-${facility.id}`}
                 position={[Number(facility.latitude), Number(facility.longitude)]}
                 icon={reportingFacilityIcon}
+                eventHandlers={{
+                  click: () => {
+                    setSelectedFacilityId(facility.id);
+                    setPanelVis((prev: any) => ({ ...prev, facilities: true }));
+                    handleFocusFacility(facility);
+                  },
+                }}
               >
                 <Popup className="premium-map-popup">
                   <div className="w-64 p-3 font-sans text-xs">
@@ -8512,6 +8521,18 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
                         Suspected: <strong>{cases.filter(c => c.facilityId === facility.id && c.classification === 'suspected').length}</strong>
                       </p>
                     </div>
+                    <Button
+                      size="sm"
+                      variant="default"
+                      className="w-full h-7 text-[11px] font-semibold mt-2.5 bg-primary text-primary-foreground"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedFacilityId(facility.id);
+                        setPanelVis((prev: any) => ({ ...prev, facilities: true }));
+                      }}
+                    >
+                      View Facility Details →
+                    </Button>
                   </div>
                 </Popup>
               </Marker>
@@ -9383,8 +9404,8 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
         />
       )}
 
-      {/* Floating Facility List Panel */}
-      {showFacilityList && panelVis.facilities && !isPrinting && (
+      {/* Floating Facility List Panel & Details Drawer */}
+      {((showFacilityList && panelVis.facilities) || (selectedFacilityId && panelVis.facilities)) && !isPrinting && (
         <div
           className="absolute right-4 top-16 w-80 h-[calc(100vh-140px)] max-h-[700px] z-[1000] flex flex-col bg-background/95 backdrop-blur-md border border-border shadow-2xl rounded-xl overflow-hidden transition-all duration-300"
           ref={disableLeafletPropagation}
@@ -9602,7 +9623,12 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
                 districtName={districtLookup.get(Number(facilities.find((f) => f.id === selectedFacilityId)?.districtId))?.name || "District"}
                 communityRoutes={communityRoutes || []}
                 activeSessionPlans={activeSessionPlans.filter((p: any) => Number(p.facilityId) === Number(selectedFacilityId))}
-                onClose={() => setSelectedFacilityId(null)}
+                onClose={() => {
+                  setSelectedFacilityId(null);
+                  if (!showFacilityList) {
+                    setPanelVis((prev: any) => ({ ...prev, facilities: false }));
+                  }
+                }}
                 onEdit={(fac) => {
                   setLocation(`/facilities?id=${fac.id}`);
                 }}

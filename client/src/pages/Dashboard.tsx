@@ -80,7 +80,7 @@ function DeferredDashboardMap({ facilities, villages }: { facilities: Facility[]
     <div ref={containerRef} className="h-full w-full">
       {shouldLoad ? (
         <Suspense fallback={<Skeleton className="h-full w-full rounded-none" />}>
-          <MapView facilities={facilities} villages={villages} height="100%" />
+          <MapView facilities={facilities} villages={villages} height="100%" showFacilityList={true} />
         </Suspense>
       ) : (
         <Skeleton className="h-full w-full rounded-none" />

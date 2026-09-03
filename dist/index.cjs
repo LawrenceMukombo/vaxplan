@@ -6460,7 +6460,7 @@ var init_tenantResolver = __esm({
     init_storage();
     UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     tenantContext = async (req, _res, next) => {
-      const headerTenantRaw = req.headers["x-tenant-id"] || req.query["x-tenant-id"];
+      const headerTenantRaw = req.headers["x-tenant-id"] || req.query["x-tenant-id"] || req.query["tenantId"];
       const headerTenantStr = typeof headerTenantRaw === "string" && headerTenantRaw.trim() ? headerTenantRaw.trim() : null;
       if (!req.isAuthenticated?.()) {
         if (headerTenantStr) {
@@ -16741,6 +16741,7 @@ function invalidateGeoScopeCache(userId, tenantId) {
   _geoScopeCache.delete(`${userId}:${tenantId}`);
 }
 function setCacheHeaders(res, maxAgeSeconds = 300) {
+  res.setHeader("Vary", "x-tenant-id");
   res.setHeader(
     "Cache-Control",
     `private, max-age=${maxAgeSeconds}, stale-while-revalidate=${maxAgeSeconds * 2}`
@@ -40078,6 +40079,171 @@ var init_gisPolygons = __esm({
   }
 });
 
+// server/routes/mapStyles.ts
+var mapStyles_exports = {};
+__export(mapStyles_exports, {
+  mapStylesRouter: () => mapStylesRouter
+});
+function getVaxPlanStyleJson(styleId, hostUrl) {
+  const isDark = styleId.includes("dark");
+  const isStreets = styleId.includes("streets");
+  const displayName = isDark ? "VaxPlan Dark" : isStreets ? "VaxPlan Streets" : "VaxPlan Light";
+  const tileUrl = isStreets ? "https://a.tile.openstreetmap.org/{z}/{x}/{y}.png" : isDark ? "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}" : "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}";
+  const attribution = isStreets ? '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors' : "Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ";
+  return {
+    version: 8,
+    name: displayName,
+    metadata: {
+      "vaxplan:generator": "vaxplan-map-service-1.0",
+      "vaxplan:styleId": styleId,
+      "vaxplan:selfHosted": true
+    },
+    sources: {
+      "vaxplan-basemap-source": {
+        type: "raster",
+        tiles: [tileUrl],
+        tileSize: 256,
+        attribution,
+        minzoom: 1,
+        maxzoom: 19
+      }
+    },
+    layers: [
+      {
+        id: "background",
+        type: "background",
+        paint: {
+          "background-color": isDark ? "#0f172a" : "#f8fafc"
+        }
+      },
+      {
+        id: "vaxplan-basemap-layer",
+        type: "raster",
+        source: "vaxplan-basemap-source",
+        paint: {
+          "raster-opacity": 1,
+          "raster-fade-duration": 150
+        }
+      }
+    ]
+  };
+}
+var import_express9, mapStylesRouter;
+var init_mapStyles = __esm({
+  "server/routes/mapStyles.ts"() {
+    "use strict";
+    import_express9 = require("express");
+    mapStylesRouter = (0, import_express9.Router)();
+    mapStylesRouter.get("/styles/:styleId/style.json", (req, res) => {
+      const { styleId } = req.params;
+      const validStyles = ["vaxplan-light", "vaxplan-streets", "vaxplan-dark"];
+      const normalizedId = styleId.toLowerCase().replace(/\.json$/, "");
+      if (!validStyles.includes(normalizedId)) {
+        return res.status(404).json({
+          success: false,
+          message: `Unknown style: ${styleId}. Available styles: ${validStyles.join(", ")}`,
+          code: "STYLE_NOT_FOUND"
+        });
+      }
+      const hostUrl = `${req.protocol}://${req.get("host")}`;
+      const style = getVaxPlanStyleJson(normalizedId, hostUrl);
+      res.setHeader("Content-Type", "application/json; charset=utf-8");
+      res.setHeader("Cache-Control", "public, max-age=86400, stale-while-revalidate=604800");
+      return res.json(style);
+    });
+    mapStylesRouter.get("/health", async (_req, res) => {
+      const startTime = Date.now();
+      let postgisReady = false;
+      let postgisVersion = "unavailable";
+      try {
+        const { db: db2 } = await Promise.resolve().then(() => (init_db(), db_exports));
+        const { sql: sql33 } = await import("drizzle-orm");
+        const result = await db2.execute(sql33`SELECT PostGIS_Full_Version() as ver`);
+        if (result && result.rows && result.rows.length > 0) {
+          postgisReady = true;
+          postgisVersion = String(result.rows[0].ver).slice(0, 80);
+        }
+      } catch (err) {
+        postgisReady = false;
+        postgisVersion = `Error: ${err?.message || "PostGIS extension check failed"}`;
+      }
+      const responseTimeMs = Date.now() - startTime;
+      res.json({
+        success: true,
+        service: "vaxplan-gis-infrastructure",
+        status: postgisReady ? "healthy" : "degraded",
+        timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+        responseTimeMs,
+        capabilities: {
+          maplibreVectorStyles: true,
+          rasterFallbacks: true,
+          postgisSpatialQueries: postgisReady,
+          offlinePackagesReady: true
+        },
+        stylesAvailable: [
+          "/api/maps/styles/vaxplan-light/style.json",
+          "/api/maps/styles/vaxplan-streets/style.json",
+          "/api/maps/styles/vaxplan-dark/style.json"
+        ],
+        postgis: {
+          installed: postgisReady,
+          details: postgisVersion
+        }
+      });
+    });
+    mapStylesRouter.get("/packages", (_req, res) => {
+      const packages = [
+        {
+          countryCode: "ZMB",
+          name: "Zambia National Immunisation GIS Package",
+          version: "v1.0",
+          format: "PMTiles / Vector MVT",
+          extent: [21.99, -18.08, 33.71, -8.22],
+          layers: ["boundaries", "facilities", "communities", "roads", "population"],
+          estimatedSizeMb: 48,
+          status: "available"
+        },
+        {
+          countryCode: "ZAF",
+          name: "South Africa National Immunisation GIS Package",
+          version: "v1.0",
+          format: "PMTiles / Vector MVT",
+          extent: [16.45, -34.83, 32.89, -22.13],
+          layers: ["boundaries", "facilities", "communities", "subdistricts"],
+          estimatedSizeMb: 110,
+          status: "available"
+        },
+        {
+          countryCode: "SSD",
+          name: "South Sudan National Immunisation GIS Package",
+          version: "v1.0",
+          format: "PMTiles / Vector MVT",
+          extent: [23.44, 3.49, 35.95, 12.23],
+          layers: ["boundaries", "facilities", "settlements", "insecurity_zones"],
+          estimatedSizeMb: 35,
+          status: "available"
+        },
+        {
+          countryCode: "PNG",
+          name: "Papua New Guinea National Immunisation GIS Package",
+          version: "v1.0",
+          format: "PMTiles / Vector MVT",
+          extent: [140.84, -11.66, 157.03, -0.87],
+          layers: ["boundaries", "facilities", "villages", "terrain", "remote_islands"],
+          estimatedSizeMb: 62,
+          status: "available"
+        }
+      ];
+      res.setHeader("Cache-Control", "public, max-age=3600");
+      return res.json({
+        success: true,
+        totalPackages: packages.length,
+        packages
+      });
+    });
+  }
+});
+
 // server/migrations/027-stock-ledger-columns.ts
 var stock_ledger_columns_exports = {};
 __export(stock_ledger_columns_exports, {
@@ -40606,10 +40772,10 @@ async function backfillClientIds() {
     log(`Client ID backfill failed: ${error}`, "backfill");
   }
 }
-var import_express9, import_compression, import_http, app, httpServer, skipDbBootstrap, sessionMiddleware, NATIVE_ALLOWED_ORIGINS;
+var import_express10, import_compression, import_http, app, httpServer, skipDbBootstrap, sessionMiddleware, NATIVE_ALLOWED_ORIGINS;
 var init_index = __esm({
   "server/index.ts"() {
-    import_express9 = __toESM(require("express"), 1);
+    import_express10 = __toESM(require("express"), 1);
     import_compression = __toESM(require("compression"), 1);
     init_routes();
     init_static();
@@ -40647,7 +40813,7 @@ var init_index = __esm({
       process.loadEnvFile?.();
     } catch {
     }
-    app = (0, import_express9.default)();
+    app = (0, import_express10.default)();
     httpServer = (0, import_http.createServer)(app);
     skipDbBootstrap = process.env.SKIP_DB_BOOTSTRAP === "1";
     sessionMiddleware = getSession();
@@ -40660,14 +40826,14 @@ var init_index = __esm({
     });
     app.use((0, import_compression.default)({ level: 6, threshold: 1024 }));
     app.use(
-      import_express9.default.json({
+      import_express10.default.json({
         limit: "50mb",
         verify: (req, _res, buf) => {
           req.rawBody = buf;
         }
       })
     );
-    app.use(import_express9.default.urlencoded({ extended: false, limit: "50mb" }));
+    app.use(import_express10.default.urlencoded({ extended: false, limit: "50mb" }));
     NATIVE_ALLOWED_ORIGINS = /* @__PURE__ */ new Set([
       "https://localhost",
       // Capacitor Android (androidScheme: "https")
@@ -40747,6 +40913,10 @@ var init_index = __esm({
       app.use("/api/surveillance", surveillanceRouter2);
       const { gisPolygonsRouter: gisPolygonsRouter2 } = await Promise.resolve().then(() => (init_gisPolygons(), gisPolygons_exports));
       app.use("/api/gis/polygons", gisPolygonsRouter2);
+      const { mapStylesRouter: mapStylesRouter2 } = await Promise.resolve().then(() => (init_mapStyles(), mapStyles_exports));
+      app.use("/api/maps", mapStylesRouter2);
+      app.use("/api/health/maps", (req, res) => res.redirect("/api/maps/health"));
+      app.use("/api/health/tiles", (req, res) => res.redirect("/api/maps/health"));
       if (skipDbBootstrap) {
         log("DB bootstrap disabled: skipping startup migrations and schema/data ensure jobs", "db");
       } else {

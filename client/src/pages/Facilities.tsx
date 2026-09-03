@@ -94,7 +94,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { Plus, Building2, Users, Thermometer, Filter, X, Pencil, Trash2 } from "lucide-react";
 */
 // Updated Code: Added Snowflake, Wrench, AlertTriangle, RefreshCw icons for Cold Chain tab
-import { Plus, Building2, Users, Thermometer, X, Pencil, Trash2, Download, Upload, Snowflake, Wrench, AlertTriangle, RefreshCw, CheckCircle2, Loader2, SlidersHorizontal, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ArrowUpDown, Check, Contact, Search, MapPin, History, UserMinus, ArrowLeftRight } from "lucide-react";
+import { Plus, Building2, Users, Thermometer, Clock, Zap, X, Pencil, Trash2, Download, Upload, Snowflake, Wrench, AlertTriangle, RefreshCw, CheckCircle2, Loader2, SlidersHorizontal, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ArrowUpDown, Check, Contact, Search, MapPin, History, UserMinus, ArrowLeftRight } from "lucide-react";
 import { GeoCascadeFilter } from "@/components/GeoCascadeFilter";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useAuth } from "@/hooks/useAuth";
@@ -4030,10 +4030,81 @@ export default function Facilities() {
                                   }
                                 }}
                               >
-                                <Popup>
-                                  <div className="p-1">
-                                    <p className="font-semibold text-sm">{fac.name}</p>
-                                    <p className="text-xs text-muted-foreground">{fac.hmisCode}</p>
+                                <Popup maxWidth={320} minWidth={260} autoPan autoPanPadding={[20, 20]}>
+                                  <div className="p-2 space-y-2 text-xs select-none">
+                                    <div className="border-b border-border/60 pb-1.5">
+                                      <div className="flex items-center gap-1.5 text-[10px] font-semibold text-primary uppercase tracking-wider mb-0.5">
+                                        <Building2 className="h-3 w-3 shrink-0" />
+                                        <span>{fac.facilityType || "Health Facility"}</span>
+                                      </div>
+                                      <h4 className="font-bold text-sm text-foreground leading-tight">{fac.name}</h4>
+                                      <Badge variant="outline" className="text-[9px] mt-1 font-mono uppercase tracking-wider border-primary/30 text-primary">
+                                        {fac.hmisCode || `FAC-${fac.id}`}
+                                      </Badge>
+                                    </div>
+
+                                    <div className="grid grid-cols-2 gap-1.5 text-[11px] py-0.5">
+                                      <div className="flex items-center gap-1.5 text-muted-foreground">
+                                        <Clock className="h-3 w-3 text-primary shrink-0" />
+                                        <span className="truncate">{fac.operatingHours || "24/7 Service"}</span>
+                                      </div>
+                                      <div className="flex items-center gap-1.5 text-muted-foreground">
+                                        <Users className="h-3 w-3 text-primary shrink-0" />
+                                        <span>{fac.staffCount || 0} Staff</span>
+                                      </div>
+                                    </div>
+
+                                    <div className="flex items-center gap-1.5 text-[10px]">
+                                      <span className={`px-2 py-0.5 rounded-full font-medium ${
+                                        fac.hasRefrigerator
+                                          ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20"
+                                          : "bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20"
+                                      }`}>
+                                        {fac.hasRefrigerator ? "❄️ Cold Chain Ready" : "⚠️ No Refrigerator"}
+                                      </span>
+                                      <span className={`px-2 py-0.5 rounded-full font-medium ${
+                                        fac.hasPower
+                                          ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20"
+                                          : "bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20"
+                                      }`}>
+                                        {fac.hasPower ? "⚡ Power Active" : "❌ No Power"}
+                                      </span>
+                                    </div>
+
+                                    <div className="grid grid-cols-2 gap-1.5 p-1.5 bg-muted/40 rounded border border-border/50 text-[10px]">
+                                      <div>
+                                        <span className="text-muted-foreground block text-[9px]">Assigned Villages</span>
+                                        <span className="font-bold text-xs text-foreground">{facilityCommunities.length}</span>
+                                      </div>
+                                      <div>
+                                        <span className="text-muted-foreground block text-[9px]">Catchment Pop</span>
+                                        <span className="font-bold text-xs text-foreground">
+                                          {facilityCommunities.reduce((s, v) => s + (Number(v.population) || 0), 0).toLocaleString()}
+                                        </span>
+                                      </div>
+                                    </div>
+
+                                    <div className="pt-1.5 flex gap-1.5 border-t border-border/60">
+                                      <Button
+                                        type="button"
+                                        size="sm"
+                                        className="flex-1 h-7 text-xs font-semibold bg-primary hover:bg-primary/90 text-primary-foreground"
+                                        onClick={() => handleOpenFacility(fac)}
+                                      >
+                                        View Details →
+                                      </Button>
+                                      {canManageFacility(fac) && (
+                                        <Button
+                                          type="button"
+                                          variant="outline"
+                                          size="sm"
+                                          className="h-7 text-xs"
+                                          onClick={() => handleEdit(fac)}
+                                        >
+                                          Edit
+                                        </Button>
+                                      )}
+                                    </div>
                                   </div>
                                 </Popup>
                               </Marker>
@@ -4671,7 +4742,14 @@ export default function Facilities() {
                                   iconSize: [16, 16],
                                   iconAnchor: [8, 8]
                                 })}
-                              />
+                              >
+                                <Popup>
+                                  <div className="p-1.5 space-y-0.5 text-xs">
+                                    <p className="font-bold text-sm text-foreground">{fac.name}</p>
+                                    <p className="text-[10px] text-muted-foreground">{fac.facilityType || "Health Facility"} ({fac.hmisCode || `FAC-${fac.id}`})</p>
+                                  </div>
+                                </Popup>
+                              </Marker>
                             );
                           }
                         }
