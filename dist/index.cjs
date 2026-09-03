@@ -13690,7 +13690,11 @@ async function pullChanges(tenantId, since) {
     stockData,
     reportsData,
     popData,
-    vaccineConfigsData
+    vaccineConfigsData,
+    microplansData,
+    supervisionVisitsData,
+    supervisionTemplatesData,
+    catchmentsData
   ] = await Promise.all([
     db.select().from(regions).where(tenantFilter(regions)),
     db.select().from(provinces).where(tenantFilter(provinces)),
@@ -13714,7 +13718,11 @@ async function pullChanges(tenantId, since) {
     db.select().from(stockTransactions).where(tenantFilter(stockTransactions)),
     db.select().from(monthlyReports).where(tenantFilter(monthlyReports)),
     db.select().from(populationData).where(tenantFilter(populationData)),
-    db.select().from(vaccineConfigurations).where(tenantFilter(vaccineConfigurations))
+    db.select().from(vaccineConfigurations).where(tenantFilter(vaccineConfigurations)),
+    db.select().from(microplans).where(tenantFilter(microplans)),
+    db.select().from(supervisionVisits).where(tenantFilter(supervisionVisits)),
+    db.select().from(supervisionChecklistTemplates).where(tenantFilter(supervisionChecklistTemplates)),
+    db.select().from(facilityCatchments).where(tenantFilter(facilityCatchments))
   ]);
   const clientsData = clientsRawData.map(({ client: client3, ...geo }) => ({
     ...client3,
@@ -13740,7 +13748,11 @@ async function pullChanges(tenantId, since) {
     stockTransactions: stockData,
     monthlyReports: reportsData,
     populationData: popData,
-    vaccineConfigs: vaccineConfigsData
+    vaccineConfigs: vaccineConfigsData,
+    microplans: microplansData,
+    supervisionVisits: supervisionVisitsData,
+    supervisionTemplates: supervisionTemplatesData,
+    catchments: catchmentsData
   };
 }
 async function batchMutate(tenantId, mutations, performedById) {
@@ -14010,6 +14022,93 @@ async function batchMutate(tenantId, mutations, performedById) {
           if (villageId) {
             await storage.deleteVillage(tenantId, villageId);
             serverId = villageId;
+          }
+        }
+      } else if (mutation.url.startsWith("/api/facilities")) {
+        if (mutation.method === "POST") {
+          const fac = await storage.createFacility(tenantId, payload);
+          serverId = fac.id;
+        } else if ((mutation.method === "PATCH" || mutation.method === "PUT") && mutation.serverId) {
+          const fac = await storage.updateFacility(tenantId, Number(mutation.serverId), payload);
+          serverId = fac?.id;
+        } else if (mutation.method === "DELETE") {
+          let facId = mutation.serverId ? Number(mutation.serverId) : null;
+          if (!facId) {
+            const parts = mutation.url.split("/");
+            const lastPart = parts[parts.length - 1];
+            if (lastPart && !isNaN(Number(lastPart))) {
+              facId = Number(lastPart);
+            }
+          }
+          if (facId) {
+            await storage.deleteFacility(tenantId, facId);
+            serverId = facId;
+          }
+        }
+      } else if (mutation.url.startsWith("/api/microplans")) {
+        if (mutation.method === "POST") {
+          const plan = await storage.createMicroplan(tenantId, payload);
+          serverId = plan.id;
+        } else if ((mutation.method === "PATCH" || mutation.method === "PUT") && mutation.serverId) {
+          await storage.updateMicroplan(tenantId, Number(mutation.serverId), payload);
+          serverId = mutation.serverId;
+        } else if (mutation.method === "DELETE") {
+          let planId = mutation.serverId ? Number(mutation.serverId) : null;
+          if (!planId) {
+            const parts = mutation.url.split("/");
+            const lastPart = parts[parts.length - 1];
+            if (lastPart && !isNaN(Number(lastPart))) {
+              planId = Number(lastPart);
+            }
+          }
+          if (planId) {
+            await storage.deleteMicroplan(tenantId, planId);
+            serverId = planId;
+          }
+        }
+      } else if (mutation.url.startsWith("/api/supervision-visits")) {
+        if (mutation.method === "POST") {
+          const visit = await storage.createSupervisionVisit(tenantId, {
+            ...payload,
+            createdByUserId: performedById
+          });
+          serverId = visit.id;
+        } else if ((mutation.method === "PATCH" || mutation.method === "PUT") && mutation.serverId) {
+          await storage.updateSupervisionVisit(tenantId, Number(mutation.serverId), payload);
+          serverId = mutation.serverId;
+        } else if (mutation.method === "DELETE") {
+          let visitId = mutation.serverId ? Number(mutation.serverId) : null;
+          if (!visitId) {
+            const parts = mutation.url.split("/");
+            const lastPart = parts[parts.length - 1];
+            if (lastPart && !isNaN(Number(lastPart))) {
+              visitId = Number(lastPart);
+            }
+          }
+          if (visitId) {
+            await storage.deleteSupervisionVisit(tenantId, visitId);
+            serverId = visitId;
+          }
+        }
+      } else if (mutation.url.startsWith("/api/supervision-checklist-templates")) {
+        if (mutation.method === "POST") {
+          const tmpl = await storage.createChecklistTemplate(tenantId, performedById ?? null, payload);
+          serverId = tmpl.id;
+        } else if ((mutation.method === "PATCH" || mutation.method === "PUT") && mutation.serverId) {
+          await storage.updateChecklistTemplate(tenantId, Number(mutation.serverId), payload);
+          serverId = mutation.serverId;
+        } else if (mutation.method === "DELETE") {
+          let tmplId = mutation.serverId ? Number(mutation.serverId) : null;
+          if (!tmplId) {
+            const parts = mutation.url.split("/");
+            const lastPart = parts[parts.length - 1];
+            if (lastPart && !isNaN(Number(lastPart))) {
+              tmplId = Number(lastPart);
+            }
+          }
+          if (tmplId) {
+            await storage.deleteChecklistTemplate(tenantId, tmplId);
+            serverId = tmplId;
           }
         }
       } else {
@@ -15103,9 +15202,9 @@ async function runCli() {
   }
   const { db: db2 } = await Promise.resolve().then(() => (init_db(), db_exports));
   const { tenants: tenants3 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
-  const { eq: eq35 } = await import("drizzle-orm");
+  const { eq: eq36 } = await import("drizzle-orm");
   const code = tenantCode.toUpperCase();
-  const rows = await db2.select().from(tenants3).where(eq35(tenants3.code, code)).limit(1);
+  const rows = await db2.select().from(tenants3).where(eq36(tenants3.code, code)).limit(1);
   if (rows.length === 0) {
     console.error(`Tenant with code '${code}' not found.`);
     process.exit(1);
@@ -33270,15 +33369,15 @@ This response is powered by the local VaxPlan database query engine. You can que
     try {
       const { entityType, status } = req.query;
       const { entityHistoryVersions: entityHistoryVersions2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
-      const { eq: eq35, and: and28, desc: desc10 } = await import("drizzle-orm");
-      const conditions = [eq35(entityHistoryVersions2.tenantId, req.tenantId)];
+      const { eq: eq36, and: and29, desc: desc10 } = await import("drizzle-orm");
+      const conditions = [eq36(entityHistoryVersions2.tenantId, req.tenantId)];
       if (entityType && entityType !== "all") {
-        conditions.push(eq35(entityHistoryVersions2.entityType, String(entityType)));
+        conditions.push(eq36(entityHistoryVersions2.entityType, String(entityType)));
       }
       if (status && status !== "all") {
-        conditions.push(eq35(entityHistoryVersions2.status, String(status)));
+        conditions.push(eq36(entityHistoryVersions2.status, String(status)));
       }
-      const versions = await db.select().from(entityHistoryVersions2).where(and28(...conditions)).orderBy(desc10(entityHistoryVersions2.createdAt)).limit(200);
+      const versions = await db.select().from(entityHistoryVersions2).where(and29(...conditions)).orderBy(desc10(entityHistoryVersions2.createdAt)).limit(200);
       res.json(versions);
     } catch (err) {
       res.status(500).json({ message: err?.message || "Failed to fetch global entity history" });
@@ -33359,13 +33458,13 @@ This response is powered by the local VaxPlan database query engine. You can que
   app2.get("/api/entity-history/pending-approvals", ...auth, requireTenant, async (req, res) => {
     try {
       const { entityHistoryVersions: entityHistoryVersions2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
-      const { eq: eq35, and: and28, or: or6, desc: desc10 } = await import("drizzle-orm");
+      const { eq: eq36, and: and29, or: or6, desc: desc10 } = await import("drizzle-orm");
       const pending = await db.select().from(entityHistoryVersions2).where(
-        and28(
-          eq35(entityHistoryVersions2.tenantId, req.tenantId),
+        and29(
+          eq36(entityHistoryVersions2.tenantId, req.tenantId),
           or6(
-            eq35(entityHistoryVersions2.status, "pending_review"),
-            eq35(entityHistoryVersions2.status, "draft")
+            eq36(entityHistoryVersions2.status, "pending_review"),
+            eq36(entityHistoryVersions2.status, "draft")
           )
         )
       ).orderBy(desc10(entityHistoryVersions2.createdAt));
@@ -33754,10 +33853,30 @@ function setupRealtime(httpServer2, sessionMiddleware2) {
       }
     };
     try {
-      sessionMiddleware2(req, stubRes, () => {
+      sessionMiddleware2(req, stubRes, async () => {
         const session3 = req.session;
-        const passportUser = session3?.passport?.user;
-        if (!passportUser) {
+        let authenticated = !!session3?.passport?.user;
+        if (!authenticated) {
+          try {
+            const parsed = (0, import_url.parse)(req.url || "", true);
+            const token = parsed.query.token || parsed.query.deviceToken;
+            if (token && typeof token === "string" && token.length > 10) {
+              const hash = nodeCrypto.createHash("sha256").update(token).digest("hex");
+              const rows = await db.select({ id: deviceTokens.id }).from(deviceTokens).where(
+                (0, import_drizzle_orm27.and)(
+                  (0, import_drizzle_orm27.eq)(deviceTokens.tokenHash, hash),
+                  (0, import_drizzle_orm27.isNull)(deviceTokens.revokedAt),
+                  (0, import_drizzle_orm27.gt)(deviceTokens.expiresAt, /* @__PURE__ */ new Date())
+                )
+              ).limit(1);
+              if (rows.length > 0) {
+                authenticated = true;
+              }
+            }
+          } catch (e) {
+          }
+        }
+        if (!authenticated) {
           try {
             socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
           } catch {
@@ -33842,12 +33961,16 @@ function setupRealtime(httpServer2, sessionMiddleware2) {
     });
   }, KEEPALIVE_MS);
 }
-var import_ws, import_url, tenants2, debounceTimers, wss, POKE_DEBOUNCE_MS, KEEPALIVE_MS, UUID_RE2, realtimeBroadcastMiddleware;
+var import_ws, import_url, nodeCrypto, import_drizzle_orm27, tenants2, debounceTimers, wss, POKE_DEBOUNCE_MS, KEEPALIVE_MS, UUID_RE2, realtimeBroadcastMiddleware;
 var init_realtime = __esm({
   "server/services/realtime.ts"() {
     "use strict";
     import_ws = require("ws");
     import_url = require("url");
+    nodeCrypto = __toESM(require("crypto"), 1);
+    init_db();
+    init_schema();
+    import_drizzle_orm27 = require("drizzle-orm");
     tenants2 = /* @__PURE__ */ new Map();
     debounceTimers = /* @__PURE__ */ new Map();
     wss = null;
@@ -33873,10 +33996,10 @@ var init_realtime = __esm({
 async function runSessionArchive() {
   const cutoff = new Date(Date.now() - ARCHIVE_AFTER_DAYS * 24 * 60 * 60 * 1e3);
   const result = await db.update(sessionPlans).set({ status: "archived", updatedAt: /* @__PURE__ */ new Date() }).where(
-    (0, import_drizzle_orm27.and)(
-      (0, import_drizzle_orm27.eq)(sessionPlans.status, "completed"),
-      (0, import_drizzle_orm27.isNotNull)(sessionPlans.completedAt),
-      (0, import_drizzle_orm27.lt)(sessionPlans.completedAt, cutoff)
+    (0, import_drizzle_orm28.and)(
+      (0, import_drizzle_orm28.eq)(sessionPlans.status, "completed"),
+      (0, import_drizzle_orm28.isNotNull)(sessionPlans.completedAt),
+      (0, import_drizzle_orm28.lt)(sessionPlans.completedAt, cutoff)
     )
   ).returning({ id: sessionPlans.id });
   const archived = result.length;
@@ -33900,11 +34023,11 @@ function startSessionArchiveScheduler() {
     // 00:05 UTC — staggered from other midnight jobs
   );
 }
-var import_drizzle_orm27, ARCHIVE_AFTER_DAYS;
+var import_drizzle_orm28, ARCHIVE_AFTER_DAYS;
 var init_sessionArchive = __esm({
   "server/jobs/sessionArchive.ts"() {
     "use strict";
-    import_drizzle_orm27 = require("drizzle-orm");
+    import_drizzle_orm28 = require("drizzle-orm");
     init_db();
     init_schema();
     init_scheduler();
@@ -34200,9 +34323,9 @@ async function runApprovalScheduler() {
   console.log(`[approval-scheduler] Running daily auto-approvals and reminders check at ${now.toISOString()}`);
   try {
     const pendingToApprove = await db.select().from(microplans).where(
-      (0, import_drizzle_orm28.and)(
-        (0, import_drizzle_orm28.eq)(microplans.status, "pending"),
-        (0, import_drizzle_orm28.lt)(microplans.autoApproveAt, now)
+      (0, import_drizzle_orm29.and)(
+        (0, import_drizzle_orm29.eq)(microplans.status, "pending"),
+        (0, import_drizzle_orm29.lt)(microplans.autoApproveAt, now)
       )
     );
     console.log(`[approval-scheduler] Found ${pendingToApprove.length} microplans eligible for auto-approval.`);
@@ -34212,13 +34335,13 @@ async function runApprovalScheduler() {
       await db.update(microplans).set({
         status: "auto_approved",
         updatedAt: now
-      }).where((0, import_drizzle_orm28.and)((0, import_drizzle_orm28.eq)(microplans.id, mp.id), (0, import_drizzle_orm28.eq)(microplans.tenantId, mp.tenantId)));
+      }).where((0, import_drizzle_orm29.and)((0, import_drizzle_orm29.eq)(microplans.id, mp.id), (0, import_drizzle_orm29.eq)(microplans.tenantId, mp.tenantId)));
       const matchingRequests = await db.select().from(approvalRequests).where(
-        (0, import_drizzle_orm28.and)(
-          (0, import_drizzle_orm28.eq)(approvalRequests.tenantId, mp.tenantId),
-          (0, import_drizzle_orm28.eq)(approvalRequests.entityType, "microplan"),
-          (0, import_drizzle_orm28.eq)(approvalRequests.entityId, mp.id),
-          (0, import_drizzle_orm28.eq)(approvalRequests.status, "pending")
+        (0, import_drizzle_orm29.and)(
+          (0, import_drizzle_orm29.eq)(approvalRequests.tenantId, mp.tenantId),
+          (0, import_drizzle_orm29.eq)(approvalRequests.entityType, "microplan"),
+          (0, import_drizzle_orm29.eq)(approvalRequests.entityId, mp.id),
+          (0, import_drizzle_orm29.eq)(approvalRequests.status, "pending")
         )
       );
       for (const req of matchingRequests) {
@@ -34227,7 +34350,7 @@ async function runApprovalScheduler() {
           comments: "Auto-approved after 2 weeks of inactivity",
           resolvedAt: now,
           resolvedById: "system"
-        }).where((0, import_drizzle_orm28.and)((0, import_drizzle_orm28.eq)(approvalRequests.id, req.id), (0, import_drizzle_orm28.eq)(approvalRequests.tenantId, mp.tenantId)));
+        }).where((0, import_drizzle_orm29.and)((0, import_drizzle_orm29.eq)(approvalRequests.id, req.id), (0, import_drizzle_orm29.eq)(approvalRequests.tenantId, mp.tenantId)));
       }
       try {
         const seeded = await seedQuarterlySupervisionVisits(mp.tenantId, mp, null);
@@ -34244,10 +34367,10 @@ async function runApprovalScheduler() {
     }
     const sevenDaysAgo = new Date(now.getTime() - 7 * DAY_MS2);
     const pendingToRemind = await db.select().from(microplans).where(
-      (0, import_drizzle_orm28.and)(
-        (0, import_drizzle_orm28.eq)(microplans.status, "pending"),
-        (0, import_drizzle_orm28.lt)(microplans.submittedAt, sevenDaysAgo),
-        (0, import_drizzle_orm28.isNull)(microplans.reminderSentAt)
+      (0, import_drizzle_orm29.and)(
+        (0, import_drizzle_orm29.eq)(microplans.status, "pending"),
+        (0, import_drizzle_orm29.lt)(microplans.submittedAt, sevenDaysAgo),
+        (0, import_drizzle_orm29.isNull)(microplans.reminderSentAt)
       )
     );
     console.log(`[approval-scheduler] Found ${pendingToRemind.length} pending microplans requiring a 1-week review reminder.`);
@@ -34259,10 +34382,10 @@ async function runApprovalScheduler() {
       const recipients = [];
       if (facility.districtId) {
         const distUsers = await db.select({ email: users.email }).from(users).where(
-          (0, import_drizzle_orm28.and)(
-            (0, import_drizzle_orm28.eq)(users.tenantId, mp.tenantId),
-            (0, import_drizzle_orm28.eq)(users.districtId, facility.districtId),
-            (0, import_drizzle_orm28.or)((0, import_drizzle_orm28.eq)(users.role, "district_manager"), import_drizzle_orm28.sql`${users.roles}::jsonb ? 'district_manager'`)
+          (0, import_drizzle_orm29.and)(
+            (0, import_drizzle_orm29.eq)(users.tenantId, mp.tenantId),
+            (0, import_drizzle_orm29.eq)(users.districtId, facility.districtId),
+            (0, import_drizzle_orm29.or)((0, import_drizzle_orm29.eq)(users.role, "district_manager"), import_drizzle_orm29.sql`${users.roles}::jsonb ? 'district_manager'`)
           )
         );
         distUsers.forEach((u) => {
@@ -34272,10 +34395,10 @@ async function runApprovalScheduler() {
       const district = await storage.getDistrict(mp.tenantId, facility.districtId);
       if (district && district.provinceId) {
         const provUsers = await db.select({ email: users.email }).from(users).where(
-          (0, import_drizzle_orm28.and)(
-            (0, import_drizzle_orm28.eq)(users.tenantId, mp.tenantId),
-            (0, import_drizzle_orm28.eq)(users.provinceId, district.provinceId),
-            (0, import_drizzle_orm28.or)((0, import_drizzle_orm28.eq)(users.role, "provincial_coordinator"), import_drizzle_orm28.sql`${users.roles}::jsonb ? 'provincial_coordinator'`)
+          (0, import_drizzle_orm29.and)(
+            (0, import_drizzle_orm29.eq)(users.tenantId, mp.tenantId),
+            (0, import_drizzle_orm29.eq)(users.provinceId, district.provinceId),
+            (0, import_drizzle_orm29.or)((0, import_drizzle_orm29.eq)(users.role, "provincial_coordinator"), import_drizzle_orm29.sql`${users.roles}::jsonb ? 'provincial_coordinator'`)
           )
         );
         provUsers.forEach((u) => {
@@ -34295,7 +34418,7 @@ async function runApprovalScheduler() {
       await db.update(microplans).set({
         reminderSentAt: now,
         updatedAt: now
-      }).where((0, import_drizzle_orm28.and)((0, import_drizzle_orm28.eq)(microplans.id, mp.id), (0, import_drizzle_orm28.eq)(microplans.tenantId, mp.tenantId)));
+      }).where((0, import_drizzle_orm29.and)((0, import_drizzle_orm29.eq)(microplans.id, mp.id), (0, import_drizzle_orm29.eq)(microplans.tenantId, mp.tenantId)));
       console.log(`[approval-scheduler] Sent reminder email to ${uniqueRecipients.length} reviewers for microplan ID ${mp.id}`);
     }
   } catch (error) {
@@ -34314,13 +34437,13 @@ function startApprovalScheduler() {
     // Run at 00:45 UTC, staggered from other jobs
   );
 }
-var import_drizzle_orm28, DAY_MS2, schedulerHandle2;
+var import_drizzle_orm29, DAY_MS2, schedulerHandle2;
 var init_approvalScheduler = __esm({
   "server/jobs/approvalScheduler.ts"() {
     "use strict";
     init_db();
     init_schema();
-    import_drizzle_orm28 = require("drizzle-orm");
+    import_drizzle_orm29 = require("drizzle-orm");
     init_scheduler();
     init_mailer();
     init_storage();
@@ -34347,9 +34470,9 @@ async function runMicroplanApprovalCron(now = /* @__PURE__ */ new Date()) {
   for (const tenant of tenants3) {
     try {
       const pendingMicroplans = await db.select().from(microplans).where(
-        (0, import_drizzle_orm29.and)(
-          (0, import_drizzle_orm29.eq)(microplans.tenantId, tenant.id),
-          (0, import_drizzle_orm29.eq)(microplans.status, "pending")
+        (0, import_drizzle_orm30.and)(
+          (0, import_drizzle_orm30.eq)(microplans.tenantId, tenant.id),
+          (0, import_drizzle_orm30.eq)(microplans.status, "pending")
         )
       );
       for (const mp of pendingMicroplans) {
@@ -34374,9 +34497,9 @@ async function runMicroplanApprovalCron(now = /* @__PURE__ */ new Date()) {
               autoApprovedAt: now
             }).catch(() => {
             });
-            const facilityUsers = await db.select({ id: users.id }).from(users).where((0, import_drizzle_orm29.and)(
-              (0, import_drizzle_orm29.eq)(users.tenantId, tenant.id),
-              (0, import_drizzle_orm29.eq)(users.facilityId, mp.facilityId)
+            const facilityUsers = await db.select({ id: users.id }).from(users).where((0, import_drizzle_orm30.and)(
+              (0, import_drizzle_orm30.eq)(users.tenantId, tenant.id),
+              (0, import_drizzle_orm30.eq)(users.facilityId, mp.facilityId)
             ));
             for (const u of facilityUsers) {
               await db.insert(notifications).values({
@@ -34403,9 +34526,9 @@ async function runMicroplanApprovalCron(now = /* @__PURE__ */ new Date()) {
             const allFacilities = await storage.getFacilities(tenant.id);
             const fac = allFacilities.find((f) => f.id === mp.facilityId);
             if (!fac?.districtId) continue;
-            const districtUsers = await db.select({ id: users.id, role: users.role }).from(users).where((0, import_drizzle_orm29.and)(
-              (0, import_drizzle_orm29.eq)(users.tenantId, tenant.id),
-              (0, import_drizzle_orm29.eq)(users.districtId, fac.districtId)
+            const districtUsers = await db.select({ id: users.id, role: users.role }).from(users).where((0, import_drizzle_orm30.and)(
+              (0, import_drizzle_orm30.eq)(users.tenantId, tenant.id),
+              (0, import_drizzle_orm30.eq)(users.districtId, fac.districtId)
             ));
             const targets = districtUsers.filter(
               (u) => ["district_coordinator", "district_supervisor", "national_admin", "provincial_coordinator"].includes(u.role)
@@ -34454,13 +34577,13 @@ function startMicroplanApprovalCron() {
   setTimeout(tick, 6e4);
   schedulerHandle3 = setInterval(tick, intervalMs);
 }
-var import_drizzle_orm29, HOUR_MS, DAY_MS3, schedulerHandle3;
+var import_drizzle_orm30, HOUR_MS, DAY_MS3, schedulerHandle3;
 var init_microplanApprovalCron = __esm({
   "server/jobs/microplanApprovalCron.ts"() {
     "use strict";
     init_storage();
     init_db();
-    import_drizzle_orm29 = require("drizzle-orm");
+    import_drizzle_orm30 = require("drizzle-orm");
     init_schema();
     HOUR_MS = 60 * 60 * 1e3;
     DAY_MS3 = 24 * HOUR_MS;
@@ -34477,7 +34600,7 @@ async function pickFacilities(tenantId) {
     districtName: districts.name,
     provinceId: provinces.id,
     provinceName: provinces.name
-  }).from(facilities).innerJoin(districts, (0, import_drizzle_orm30.eq)(districts.id, facilities.districtId)).innerJoin(provinces, (0, import_drizzle_orm30.eq)(provinces.id, districts.provinceId)).where((0, import_drizzle_orm30.and)((0, import_drizzle_orm30.eq)(facilities.tenantId, tenantId), (0, import_drizzle_orm30.eq)(facilities.isActive, true))).orderBy(facilities.id).limit(FACILITIES_PER_TENANT);
+  }).from(facilities).innerJoin(districts, (0, import_drizzle_orm31.eq)(districts.id, facilities.districtId)).innerJoin(provinces, (0, import_drizzle_orm31.eq)(provinces.id, districts.provinceId)).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(facilities.tenantId, tenantId), (0, import_drizzle_orm31.eq)(facilities.isActive, true))).orderBy(facilities.id).limit(FACILITIES_PER_TENANT);
   return rows;
 }
 function emailFor(tenantCode, slug) {
@@ -34533,7 +34656,7 @@ async function seedUsers(tenantCode, tenantId, picks) {
   let inserted = 0;
   for (const s of seeds) {
     const email = emailFor(tenantCode, s.slug);
-    const existing = await db.select({ id: users.id }).from(users).where((0, import_drizzle_orm30.eq)(users.email, email)).limit(1);
+    const existing = await db.select({ id: users.id }).from(users).where((0, import_drizzle_orm31.eq)(users.email, email)).limit(1);
     if (existing.length > 0) continue;
     await db.insert(users).values({
       tenantId,
@@ -34566,7 +34689,7 @@ async function seedPopulationData(tenantId, picks, demographics) {
     source: populationData.source,
     year: populationData.year,
     totalPopulation: populationData.totalPopulation
-  }).from(populationData).where((0, import_drizzle_orm30.eq)(populationData.tenantId, tenantId));
+  }).from(populationData).where((0, import_drizzle_orm31.eq)(populationData.tenantId, tenantId));
   const existingByFacility = /* @__PURE__ */ new Map();
   const existingKeys = /* @__PURE__ */ new Set();
   for (const r of existing) {
@@ -34618,7 +34741,7 @@ async function seedVaccineRequirements(tenantId, picks, demographics, catchmentB
     vaccineName: vaccineRequirements.vaccineName,
     quarter: vaccineRequirements.quarter,
     year: vaccineRequirements.year
-  }).from(vaccineRequirements).where((0, import_drizzle_orm30.eq)(vaccineRequirements.tenantId, tenantId));
+  }).from(vaccineRequirements).where((0, import_drizzle_orm31.eq)(vaccineRequirements.tenantId, tenantId));
   const existingKeys = new Set(
     existing.map((r) => `${r.facilityId}|${r.vaccineName}|${r.quarter}|${r.year}`)
   );
@@ -34673,7 +34796,7 @@ async function seedMonthlyReports(tenantId, picks, demographics, catchmentByFaci
     facilityId: monthlyReports.facilityId,
     month: monthlyReports.month,
     year: monthlyReports.year
-  }).from(monthlyReports).where((0, import_drizzle_orm30.eq)(monthlyReports.tenantId, tenantId));
+  }).from(monthlyReports).where((0, import_drizzle_orm31.eq)(monthlyReports.tenantId, tenantId));
   const existingKeys = new Set(
     existing.map((r) => `${r.facilityId}|${r.month}|${r.year}`)
   );
@@ -34732,11 +34855,11 @@ async function backfillMissingVaccinesInMonthlyReports(tenantId, picks, demograp
     month: monthlyReports.month,
     immunizations: monthlyReports.immunizations
   }).from(monthlyReports).where(
-    (0, import_drizzle_orm30.and)(
-      (0, import_drizzle_orm30.eq)(monthlyReports.tenantId, tenantId),
-      (0, import_drizzle_orm30.eq)(monthlyReports.year, YEAR),
-      (0, import_drizzle_orm30.inArray)(monthlyReports.facilityId, facilityIds),
-      (0, import_drizzle_orm30.inArray)(monthlyReports.month, months)
+    (0, import_drizzle_orm31.and)(
+      (0, import_drizzle_orm31.eq)(monthlyReports.tenantId, tenantId),
+      (0, import_drizzle_orm31.eq)(monthlyReports.year, YEAR),
+      (0, import_drizzle_orm31.inArray)(monthlyReports.facilityId, facilityIds),
+      (0, import_drizzle_orm31.inArray)(monthlyReports.month, months)
     )
   );
   if (reports.length === 0) return 0;
@@ -34768,7 +34891,7 @@ async function backfillMissingVaccinesInMonthlyReports(tenantId, picks, demograp
         changed = true;
       }
       if (!changed) continue;
-      await db.update(monthlyReports).set({ immunizations: imm }).where((0, import_drizzle_orm30.eq)(monthlyReports.id, r.id));
+      await db.update(monthlyReports).set({ immunizations: imm }).where((0, import_drizzle_orm31.eq)(monthlyReports.id, r.id));
       updated++;
     }
   }
@@ -34781,7 +34904,7 @@ async function seedSessionPlans(tenantId, picks, demographics, catchmentByFacili
     name: sessionPlans.name,
     quarter: sessionPlans.quarter,
     year: sessionPlans.year
-  }).from(sessionPlans).where((0, import_drizzle_orm30.eq)(sessionPlans.tenantId, tenantId));
+  }).from(sessionPlans).where((0, import_drizzle_orm31.eq)(sessionPlans.tenantId, tenantId));
   const existingKeys = new Set(
     existing.map((r) => `${r.facilityId}|${r.name}|${r.quarter}|${r.year}`)
   );
@@ -34791,12 +34914,12 @@ async function seedSessionPlans(tenantId, picks, demographics, catchmentByFacili
     if (catchmentPop === void 0) continue;
     const microplanName = `${p.facilityName} \u2014 Demo Microplan Q${QUARTER} ${YEAR}`;
     const existingMicroplan = await db.select({ id: microplans.id }).from(microplans).where(
-      (0, import_drizzle_orm30.and)(
-        (0, import_drizzle_orm30.eq)(microplans.tenantId, tenantId),
-        (0, import_drizzle_orm30.eq)(microplans.facilityId, p.facilityId),
-        (0, import_drizzle_orm30.eq)(microplans.name, microplanName),
-        (0, import_drizzle_orm30.eq)(microplans.year, YEAR),
-        (0, import_drizzle_orm30.eq)(microplans.quarter, QUARTER)
+      (0, import_drizzle_orm31.and)(
+        (0, import_drizzle_orm31.eq)(microplans.tenantId, tenantId),
+        (0, import_drizzle_orm31.eq)(microplans.facilityId, p.facilityId),
+        (0, import_drizzle_orm31.eq)(microplans.name, microplanName),
+        (0, import_drizzle_orm31.eq)(microplans.year, YEAR),
+        (0, import_drizzle_orm31.eq)(microplans.quarter, QUARTER)
       )
     ).limit(1);
     let microplanId;
@@ -34845,7 +34968,7 @@ async function seedSessionPlans(tenantId, picks, demographics, catchmentByFacili
   return inserted;
 }
 async function ensureVaccineConfigs(tenantId) {
-  const existing = await db.select({ id: vaccineConfigurations.id, name: vaccineConfigurations.name }).from(vaccineConfigurations).where((0, import_drizzle_orm30.eq)(vaccineConfigurations.tenantId, tenantId));
+  const existing = await db.select({ id: vaccineConfigurations.id, name: vaccineConfigurations.name }).from(vaccineConfigurations).where((0, import_drizzle_orm31.eq)(vaccineConfigurations.tenantId, tenantId));
   const byName = /* @__PURE__ */ new Map();
   for (const r of existing) byName.set(r.name, r.id);
   for (const cfg of VACCINE_CONFIG_DEFAULTS) {
@@ -34933,13 +35056,13 @@ async function pickVillagesPerFacility(tenantCode, tenantId, picks) {
     longitude: villages.longitude,
     transportMode: villages.transportMode,
     seasonalAccessibility: villages.seasonalAccessibility
-  }).from(villages).where((0, import_drizzle_orm30.eq)(villages.tenantId, tenantId));
+  }).from(villages).where((0, import_drizzle_orm31.eq)(villages.tenantId, tenantId));
   const facilityIds = picks.map((p) => p.facilityId);
   const facilityRows = await db.select({
     id: facilities.id,
     latitude: facilities.latitude,
     longitude: facilities.longitude
-  }).from(facilities).where((0, import_drizzle_orm30.and)((0, import_drizzle_orm30.eq)(facilities.tenantId, tenantId), (0, import_drizzle_orm30.inArray)(facilities.id, facilityIds)));
+  }).from(facilities).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(facilities.tenantId, tenantId), (0, import_drizzle_orm31.inArray)(facilities.id, facilityIds)));
   const facilityCoords = /* @__PURE__ */ new Map();
   for (const f of facilityRows) {
     if (f.latitude != null && f.longitude != null) {
@@ -34974,7 +35097,7 @@ async function pickVillagesPerFacility(tenantCode, tenantId, picks) {
             slot - 1
           );
           if (v.name !== expectedName) {
-            await db.update(villages).set({ name: expectedName }).where((0, import_drizzle_orm30.eq)(villages.id, v.id));
+            await db.update(villages).set({ name: expectedName }).where((0, import_drizzle_orm31.eq)(villages.id, v.id));
             v.name = expectedName;
           }
         }
@@ -35008,7 +35131,7 @@ async function pickVillagesPerFacility(tenantCode, tenantId, picks) {
         if (reused.seasonalAccessibility == null)
           updates.seasonalAccessibility = seasonalAccessibility;
         if (Object.keys(updates).length > 0) {
-          await db.update(villages).set(updates).where((0, import_drizzle_orm30.eq)(villages.id, reused.id));
+          await db.update(villages).set(updates).where((0, import_drizzle_orm31.eq)(villages.id, reused.id));
           reused.name = demoName;
           reused.code = demoCode;
         }
@@ -35100,7 +35223,7 @@ async function seedDemoClients(tenantId, picks, villagesByFacility, vaccineConfi
       continue;
     }
     const roster = buildClientRoster(pi);
-    const existing = await db.select({ id: clients.id, name: clients.name }).from(clients).where((0, import_drizzle_orm30.and)((0, import_drizzle_orm30.eq)(clients.tenantId, tenantId), (0, import_drizzle_orm30.eq)(clients.facilityId, p.facilityId)));
+    const existing = await db.select({ id: clients.id, name: clients.name }).from(clients).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(clients.tenantId, tenantId), (0, import_drizzle_orm31.eq)(clients.facilityId, p.facilityId)));
     const existingNames = new Set(existing.map((r) => r.name));
     const clientIdBySlug = /* @__PURE__ */ new Map();
     for (const c of roster) {
@@ -35157,10 +35280,10 @@ async function seedDemoClients(tenantId, picks, villagesByFacility, vaccineConfi
       month: monthlyReports.month,
       immunizations: monthlyReports.immunizations
     }).from(monthlyReports).where(
-      (0, import_drizzle_orm30.and)(
-        (0, import_drizzle_orm30.eq)(monthlyReports.tenantId, tenantId),
-        (0, import_drizzle_orm30.eq)(monthlyReports.facilityId, p.facilityId),
-        (0, import_drizzle_orm30.eq)(monthlyReports.year, YEAR)
+      (0, import_drizzle_orm31.and)(
+        (0, import_drizzle_orm31.eq)(monthlyReports.tenantId, tenantId),
+        (0, import_drizzle_orm31.eq)(monthlyReports.facilityId, p.facilityId),
+        (0, import_drizzle_orm31.eq)(monthlyReports.year, YEAR)
       )
     );
     const reportByMonth = /* @__PURE__ */ new Map();
@@ -35186,7 +35309,7 @@ async function seedDemoClients(tenantId, picks, villagesByFacility, vaccineConfi
     }
     const updates = Array.from(reportByMonth.values());
     for (const { id, imm } of updates) {
-      await db.update(monthlyReports).set({ immunizations: imm }).where((0, import_drizzle_orm30.eq)(monthlyReports.id, id));
+      await db.update(monthlyReports).set({ immunizations: imm }).where((0, import_drizzle_orm31.eq)(monthlyReports.id, id));
     }
   }
   return { clientsInserted, vaccinationsInserted };
@@ -35198,10 +35321,10 @@ async function seedVillagePopulation(tenantId, villagesByFacility, picks) {
     id: villages.id,
     districtId: villages.districtId,
     assignedFacilityId: villages.assignedFacilityId
-  }).from(villages).where((0, import_drizzle_orm30.and)((0, import_drizzle_orm30.eq)(villages.tenantId, tenantId), (0, import_drizzle_orm30.inArray)(villages.id, villageIds)));
+  }).from(villages).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(villages.tenantId, tenantId), (0, import_drizzle_orm31.inArray)(villages.id, villageIds)));
   const provinceByDistrict = /* @__PURE__ */ new Map();
   for (const p of picks) provinceByDistrict.set(p.districtId, p.provinceId);
-  const existing = await db.select({ villageId: populationData.villageId, year: populationData.year, source: populationData.source }).from(populationData).where((0, import_drizzle_orm30.and)((0, import_drizzle_orm30.eq)(populationData.tenantId, tenantId), (0, import_drizzle_orm30.inArray)(populationData.villageId, villageIds)));
+  const existing = await db.select({ villageId: populationData.villageId, year: populationData.year, source: populationData.source }).from(populationData).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(populationData.tenantId, tenantId), (0, import_drizzle_orm31.inArray)(populationData.villageId, villageIds)));
   const existingKeys = new Set(existing.map((r) => `${r.villageId}|${r.source}|${r.year}`));
   let inserted = 0;
   for (let i = 0; i < villageRows.length; i++) {
@@ -35241,7 +35364,7 @@ async function seedImportedCoverage(tenantId, picks, villagesByFacility) {
   if (picks.length === 0) return 0;
   const periods = lastNPeriods(3);
   const villageIds = Array.from(new Set(Array.from(villagesByFacility.values()).flat()));
-  const popRows = villageIds.length ? await db.select({ villageId: populationData.villageId, under1: populationData.under1Population }).from(populationData).where((0, import_drizzle_orm30.and)((0, import_drizzle_orm30.eq)(populationData.tenantId, tenantId), (0, import_drizzle_orm30.inArray)(populationData.villageId, villageIds))) : [];
+  const popRows = villageIds.length ? await db.select({ villageId: populationData.villageId, under1: populationData.under1Population }).from(populationData).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(populationData.tenantId, tenantId), (0, import_drizzle_orm31.inArray)(populationData.villageId, villageIds))) : [];
   const popByVillage = /* @__PURE__ */ new Map();
   for (const r of popRows) {
     if (r.villageId == null) continue;
@@ -35295,9 +35418,9 @@ async function seedImportedCoverage(tenantId, picks, villagesByFacility) {
           importedCoverage.source
         ],
         set: {
-          dosesAdministered: import_drizzle_orm30.sql`excluded.doses_administered`,
-          sourceRef: import_drizzle_orm30.sql`excluded.source_ref`,
-          importedAt: import_drizzle_orm30.sql`now()`
+          dosesAdministered: import_drizzle_orm31.sql`excluded.doses_administered`,
+          sourceRef: import_drizzle_orm31.sql`excluded.source_ref`,
+          importedAt: import_drizzle_orm31.sql`now()`
         }
       });
       inserted += rows.length;
@@ -35318,11 +35441,11 @@ async function seedStockSummary(tenantId, picks) {
     immunizations: monthlyReports.immunizations,
     stockSummary: monthlyReports.stockSummary
   }).from(monthlyReports).where(
-    (0, import_drizzle_orm30.and)(
-      (0, import_drizzle_orm30.eq)(monthlyReports.tenantId, tenantId),
-      (0, import_drizzle_orm30.eq)(monthlyReports.year, YEAR),
-      (0, import_drizzle_orm30.inArray)(monthlyReports.facilityId, facilityIds),
-      (0, import_drizzle_orm30.inArray)(monthlyReports.month, monthsInQuarter)
+    (0, import_drizzle_orm31.and)(
+      (0, import_drizzle_orm31.eq)(monthlyReports.tenantId, tenantId),
+      (0, import_drizzle_orm31.eq)(monthlyReports.year, YEAR),
+      (0, import_drizzle_orm31.inArray)(monthlyReports.facilityId, facilityIds),
+      (0, import_drizzle_orm31.inArray)(monthlyReports.month, monthsInQuarter)
     )
   );
   const byFacility = {};
@@ -35356,7 +35479,7 @@ async function seedStockSummary(tenantId, picks) {
       }
       if (alreadyFilled) continue;
       if (Object.keys(summary).length === 0) continue;
-      await db.update(monthlyReports).set({ stockSummary: summary }).where((0, import_drizzle_orm30.eq)(monthlyReports.id, r.id));
+      await db.update(monthlyReports).set({ stockSummary: summary }).where((0, import_drizzle_orm31.eq)(monthlyReports.id, r.id));
       updated++;
     }
   }
@@ -35368,9 +35491,9 @@ async function seedStockTransactions(tenantId, picks) {
   const monthsInQuarter = [startMonth, startMonth + 1, startMonth + 2];
   const facilityIds = picks.map((p) => p.facilityId);
   const existing = await db.select({ facilityId: stockTransactions.facilityId }).from(stockTransactions).where(
-    (0, import_drizzle_orm30.and)(
-      (0, import_drizzle_orm30.eq)(stockTransactions.tenantId, tenantId),
-      (0, import_drizzle_orm30.inArray)(stockTransactions.facilityId, facilityIds)
+    (0, import_drizzle_orm31.and)(
+      (0, import_drizzle_orm31.eq)(stockTransactions.tenantId, tenantId),
+      (0, import_drizzle_orm31.inArray)(stockTransactions.facilityId, facilityIds)
     )
   );
   const seededFacilityIds = new Set(existing.map((r) => r.facilityId));
@@ -35379,11 +35502,11 @@ async function seedStockTransactions(tenantId, picks) {
     month: monthlyReports.month,
     immunizations: monthlyReports.immunizations
   }).from(monthlyReports).where(
-    (0, import_drizzle_orm30.and)(
-      (0, import_drizzle_orm30.eq)(monthlyReports.tenantId, tenantId),
-      (0, import_drizzle_orm30.eq)(monthlyReports.year, YEAR),
-      (0, import_drizzle_orm30.inArray)(monthlyReports.facilityId, facilityIds),
-      (0, import_drizzle_orm30.inArray)(monthlyReports.month, monthsInQuarter)
+    (0, import_drizzle_orm31.and)(
+      (0, import_drizzle_orm31.eq)(monthlyReports.tenantId, tenantId),
+      (0, import_drizzle_orm31.eq)(monthlyReports.year, YEAR),
+      (0, import_drizzle_orm31.inArray)(monthlyReports.facilityId, facilityIds),
+      (0, import_drizzle_orm31.inArray)(monthlyReports.month, monthsInQuarter)
     )
   );
   const immsByFacMonth = /* @__PURE__ */ new Map();
@@ -35479,14 +35602,14 @@ async function seedStockTransactions(tenantId, picks) {
 }
 async function seedSurveillanceCases(tenantId, picks, villagesByFacility) {
   if (picks.length === 0) return 0;
-  const existing = await db.select({ id: surveillanceCases.id }).from(surveillanceCases).where((0, import_drizzle_orm30.eq)(surveillanceCases.tenantId, tenantId)).limit(1);
+  const existing = await db.select({ id: surveillanceCases.id }).from(surveillanceCases).where((0, import_drizzle_orm31.eq)(surveillanceCases.tenantId, tenantId)).limit(1);
   if (existing.length > 0) return 0;
   let inserted = 0;
   const diseases = ["afp", "measles", "cholera"];
   for (let pi = 0; pi < picks.length; pi++) {
     const p = picks[pi];
     const villagePool = villagesByFacility.get(p.facilityId) || [];
-    const [fac] = await db.select({ latitude: facilities.latitude, longitude: facilities.longitude }).from(facilities).where((0, import_drizzle_orm30.eq)(facilities.id, p.facilityId)).limit(1);
+    const [fac] = await db.select({ latitude: facilities.latitude, longitude: facilities.longitude }).from(facilities).where((0, import_drizzle_orm31.eq)(facilities.id, p.facilityId)).limit(1);
     if (!fac || !fac.latitude || !fac.longitude) continue;
     const lat = Number(fac.latitude);
     const lng = Number(fac.longitude);
@@ -35496,7 +35619,7 @@ async function seedSurveillanceCases(tenantId, picks, villagesByFacility) {
       gender: clients.gender,
       dateOfBirth: clients.dateOfBirth,
       villageId: clients.villageId
-    }).from(clients).where((0, import_drizzle_orm30.eq)(clients.facilityId, p.facilityId)).limit(10);
+    }).from(clients).where((0, import_drizzle_orm31.eq)(clients.facilityId, p.facilityId)).limit(10);
     const numCases = 3;
     for (let cIdx = 0; cIdx < numCases; cIdx++) {
       const disease = diseases[(pi + cIdx) % diseases.length];
@@ -35543,12 +35666,12 @@ async function seedSurveillanceCases(tenantId, picks, villagesByFacility) {
 }
 async function backfillPasswordHashes() {
   const nullDemoUsers = await db.execute(
-    import_drizzle_orm30.sql`SELECT id FROM users WHERE password_hash IS NULL AND email LIKE 'demo+%@%.vaxplan.test'`
+    import_drizzle_orm31.sql`SELECT id FROM users WHERE password_hash IS NULL AND email LIKE 'demo+%@%.vaxplan.test'`
   );
   const count2 = nullDemoUsers.rows.length;
   if (count2 === 0) return 0;
   const hash = await hashPassword("vaxplan2024");
-  await db.execute(import_drizzle_orm30.sql`
+  await db.execute(import_drizzle_orm31.sql`
     UPDATE users SET password_hash = ${hash}
     WHERE password_hash IS NULL AND email LIKE 'demo+%@%.vaxplan.test'
   `);
@@ -35556,7 +35679,7 @@ async function backfillPasswordHashes() {
 }
 async function seedDemoOperational() {
   for (const code of ["ZMB", "SSD", "PNG", "ZAF"]) {
-    const rows = await db.select().from(tenants).where((0, import_drizzle_orm30.eq)(tenants.code, code)).limit(1);
+    const rows = await db.select().from(tenants).where((0, import_drizzle_orm31.eq)(tenants.code, code)).limit(1);
     const tenant = rows[0];
     if (!tenant) {
       console.warn(`[${code}] tenant not found \u2014 skipping demo seed.`);
@@ -35612,7 +35735,7 @@ async function seedDemoOperational() {
 }
 async function runCli2() {
   await seedDemoOperational();
-  const summary = await db.execute(import_drizzle_orm30.sql`
+  const summary = await db.execute(import_drizzle_orm31.sql`
     SELECT
       t.code,
       (SELECT COUNT(*) FROM users                u WHERE u.tenant_id = t.id) AS users,
@@ -35635,14 +35758,14 @@ async function runCli2() {
   console.log("Done.");
   process.exit(0);
 }
-var import_node_fs, import_node_path, import_drizzle_orm30, FACILITIES_PER_TENANT, YEAR, QUARTER, VACCINES, SESSION_TEMPLATES, DEMO_CATCHMENTS, DEMO_COVERAGE_FRACTIONS, VACCINE_CONFIG_DEFAULTS, MIN_VILLAGES_PER_FACILITY, ZMB_DISTRICT_POOLS, ZMB_PROVINCE_POOLS, SSD_DISTRICT_POOLS, PNG_DISTRICT_POOLS, ZAF_PROVINCE_POOLS, DEMO_VILLAGE_NAME_POOLS, D_BIRTH, D_6W, D_10W, D_14W, D_9M, CHILD_FIRST_NAMES, CHILD_LAST_NAMES, MOTHER_NAMES, COHORTS, COVERAGE_ANTIGENS, isDirectCli;
+var import_node_fs, import_node_path, import_drizzle_orm31, FACILITIES_PER_TENANT, YEAR, QUARTER, VACCINES, SESSION_TEMPLATES, DEMO_CATCHMENTS, DEMO_COVERAGE_FRACTIONS, VACCINE_CONFIG_DEFAULTS, MIN_VILLAGES_PER_FACILITY, ZMB_DISTRICT_POOLS, ZMB_PROVINCE_POOLS, SSD_DISTRICT_POOLS, PNG_DISTRICT_POOLS, ZAF_PROVINCE_POOLS, DEMO_VILLAGE_NAME_POOLS, D_BIRTH, D_6W, D_10W, D_14W, D_9M, CHILD_FIRST_NAMES, CHILD_LAST_NAMES, MOTHER_NAMES, COHORTS, COVERAGE_ANTIGENS, isDirectCli;
 var init_seed_demo_operational = __esm({
   "server/migrations/006-seed-demo-operational.ts"() {
     "use strict";
     import_node_fs = __toESM(require("node:fs"), 1);
     import_node_path = __toESM(require("node:path"), 1);
     init_db();
-    import_drizzle_orm30 = require("drizzle-orm");
+    import_drizzle_orm31 = require("drizzle-orm");
     init_schema();
     init_passwordAuth();
     try {
@@ -37181,18 +37304,18 @@ async function applyPerfIndexes() {
   ];
   for (const stmt of statements) {
     try {
-      await db.execute(import_drizzle_orm31.sql.raw(stmt));
+      await db.execute(import_drizzle_orm32.sql.raw(stmt));
     } catch (err) {
       console.warn(`[perf-indexes] Skipped (${err?.message ?? err}): ${stmt.split("\n")[0].trim()}`);
     }
   }
 }
-var import_drizzle_orm31;
+var import_drizzle_orm32;
 var init_perf_indexes = __esm({
   "server/migrations/011-perf-indexes.ts"() {
     "use strict";
     init_db();
-    import_drizzle_orm31 = require("drizzle-orm");
+    import_drizzle_orm32 = require("drizzle-orm");
   }
 });
 
@@ -37204,19 +37327,19 @@ async function applyVillageColumns() {
   ];
   for (const stmt of statements) {
     try {
-      await db.execute(import_drizzle_orm32.sql.raw(stmt));
+      await db.execute(import_drizzle_orm33.sql.raw(stmt));
       console.log(`[migration] Executed statement: ${stmt}`);
     } catch (err) {
       console.error(`[migration] Failed statement: ${stmt} - ${err.message}`);
     }
   }
 }
-var import_drizzle_orm32;
+var import_drizzle_orm33;
 var init_village_route_columns = __esm({
   "server/migrations/013-village-route-columns.ts"() {
     "use strict";
     init_db();
-    import_drizzle_orm32 = require("drizzle-orm");
+    import_drizzle_orm33 = require("drizzle-orm");
   }
 });
 
@@ -37229,19 +37352,19 @@ async function applyOutreachColumns() {
   ];
   for (const stmt of statements) {
     try {
-      await db.execute(import_drizzle_orm33.sql.raw(stmt));
+      await db.execute(import_drizzle_orm34.sql.raw(stmt));
       console.log(`[migration] Executed statement: ${stmt}`);
     } catch (err) {
       console.error(`[migration] Failed statement: ${stmt} - ${err.message}`);
     }
   }
 }
-var import_drizzle_orm33;
+var import_drizzle_orm34;
 var init_outreach_columns = __esm({
   "server/migrations/014-outreach-columns.ts"() {
     "use strict";
     init_db();
-    import_drizzle_orm33 = require("drizzle-orm");
+    import_drizzle_orm34 = require("drizzle-orm");
   }
 });
 
@@ -37255,19 +37378,19 @@ async function applyMicroplanApprovalColumns() {
   ];
   for (const stmt of statements) {
     try {
-      await db.execute(import_drizzle_orm34.sql.raw(stmt));
+      await db.execute(import_drizzle_orm35.sql.raw(stmt));
       console.log(`[migration] Executed statement: ${stmt}`);
     } catch (err) {
       console.error(`[migration] Failed statement: ${stmt} - ${err.message}`);
     }
   }
 }
-var import_drizzle_orm34;
+var import_drizzle_orm35;
 var init_microplan_approval_columns = __esm({
   "server/migrations/015-microplan-approval-columns.ts"() {
     "use strict";
     init_db();
-    import_drizzle_orm34 = require("drizzle-orm");
+    import_drizzle_orm35 = require("drizzle-orm");
   }
 });
 
@@ -37283,19 +37406,19 @@ async function applySessionsTable() {
   ];
   for (const stmt of statements) {
     try {
-      await db.execute(import_drizzle_orm35.sql.raw(stmt));
+      await db.execute(import_drizzle_orm36.sql.raw(stmt));
       console.log(`[migration] sessions table ensured`);
     } catch (err) {
       console.error(`[migration] sessions table warning: ${err.message}`);
     }
   }
 }
-var import_drizzle_orm35;
+var import_drizzle_orm36;
 var init_sessions_table = __esm({
   "server/migrations/016-sessions-table.ts"() {
     "use strict";
     init_db();
-    import_drizzle_orm35 = require("drizzle-orm");
+    import_drizzle_orm36 = require("drizzle-orm");
   }
 });
 
@@ -37319,7 +37442,7 @@ async function applyWikiPages() {
   ];
   for (const stmt of createStatements) {
     try {
-      await db.execute(import_drizzle_orm36.sql.raw(stmt));
+      await db.execute(import_drizzle_orm37.sql.raw(stmt));
       console.log(`[migration:017] OK \u2014 ${stmt.slice(0, 60).trim()}\u2026`);
     } catch (err) {
       console.error(`[migration:017] Warning: ${err.message}`);
@@ -37327,7 +37450,7 @@ async function applyWikiPages() {
   }
   try {
     const countResult = await db.execute(
-      import_drizzle_orm36.sql.raw("SELECT COUNT(*)::int AS n FROM wiki_pages")
+      import_drizzle_orm37.sql.raw("SELECT COUNT(*)::int AS n FROM wiki_pages")
     );
     const existingCount = Number(countResult.rows[0]?.n ?? 0);
     if (existingCount > 0) {
@@ -37360,7 +37483,7 @@ async function applyWikiPages() {
     const slug = slugify(title);
     try {
       await db.execute(
-        import_drizzle_orm36.sql.raw(
+        import_drizzle_orm37.sql.raw(
           `INSERT INTO wiki_pages (slug, title, body, sort_order, is_published)
            VALUES (${sqlStr(slug)}, ${sqlStr(title)}, ${sqlStr(body)}, ${i * 10}, TRUE)
            ON CONFLICT (slug) DO NOTHING`
@@ -37397,12 +37520,12 @@ function slugify(s) {
 function sqlStr(s) {
   return "'" + s.replace(/'/g, "''") + "'";
 }
-var import_drizzle_orm36, import_fs7, import_path6;
+var import_drizzle_orm37, import_fs7, import_path6;
 var init_wiki_pages = __esm({
   "server/migrations/017-wiki-pages.ts"() {
     "use strict";
     init_db();
-    import_drizzle_orm36 = require("drizzle-orm");
+    import_drizzle_orm37 = require("drizzle-orm");
     import_fs7 = require("fs");
     import_path6 = require("path");
   }
@@ -37413,7 +37536,7 @@ async function promoteAdminUser() {
   const adminEmail = "lawrencemukombo2@gmail.com";
   try {
     const findResult = await db.execute(
-      import_drizzle_orm37.sql.raw(`SELECT id, role, roles, is_platform_admin, is_active FROM users WHERE LOWER(email) = LOWER('${adminEmail}') LIMIT 1`)
+      import_drizzle_orm38.sql.raw(`SELECT id, role, roles, is_platform_admin, is_active FROM users WHERE LOWER(email) = LOWER('${adminEmail}') LIMIT 1`)
     );
     const row = findResult.rows[0];
     if (!row) {
@@ -37442,7 +37565,7 @@ async function promoteAdminUser() {
     const updatedRoles = currentRoles.includes("national_admin") ? currentRoles : [...currentRoles, "national_admin"];
     const rolesJson = JSON.stringify(updatedRoles).replace(/'/g, "''");
     await db.execute(
-      import_drizzle_orm37.sql.raw(
+      import_drizzle_orm38.sql.raw(
         `UPDATE users
          SET role              = 'national_admin',
              roles             = '${rolesJson}'::jsonb,
@@ -37459,12 +37582,12 @@ async function promoteAdminUser() {
     console.error(`[migration:018] Warning: could not promote admin user: ${err?.message ?? err}`);
   }
 }
-var import_drizzle_orm37;
+var import_drizzle_orm38;
 var init_promote_admin = __esm({
   "server/migrations/018-promote-admin.ts"() {
     "use strict";
     init_db();
-    import_drizzle_orm37 = require("drizzle-orm");
+    import_drizzle_orm38 = require("drizzle-orm");
   }
 });
 
@@ -37480,7 +37603,7 @@ async function applyNewUserRoles() {
   for (const role of newRoles) {
     try {
       await db.execute(
-        import_drizzle_orm38.sql.raw(`ALTER TYPE user_role ADD VALUE IF NOT EXISTS '${role}'`)
+        import_drizzle_orm39.sql.raw(`ALTER TYPE user_role ADD VALUE IF NOT EXISTS '${role}'`)
       );
       console.log(`[migration:019] Added enum value '${role}' to user_role.`);
     } catch (err) {
@@ -37490,18 +37613,18 @@ async function applyNewUserRoles() {
     }
   }
 }
-var import_drizzle_orm38;
+var import_drizzle_orm39;
 var init_new_user_roles = __esm({
   "server/migrations/019-new-user-roles.ts"() {
     "use strict";
     init_db();
-    import_drizzle_orm38 = require("drizzle-orm");
+    import_drizzle_orm39 = require("drizzle-orm");
   }
 });
 
 // server/migrations/020-cold-chain-equipment.ts
 async function up(db2) {
-  await db2.execute(import_drizzle_orm39.sql`
+  await db2.execute(import_drizzle_orm40.sql`
     CREATE TABLE IF NOT EXISTS cold_chain_equipment (
       id                           SERIAL PRIMARY KEY,
       tenant_id                    VARCHAR NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -37565,17 +37688,17 @@ async function up(db2) {
       ON cold_chain_equipment(tenant_id, condition);
   `);
 }
-var import_drizzle_orm39;
+var import_drizzle_orm40;
 var init_cold_chain_equipment = __esm({
   "server/migrations/020-cold-chain-equipment.ts"() {
     "use strict";
-    import_drizzle_orm39 = require("drizzle-orm");
+    import_drizzle_orm40 = require("drizzle-orm");
   }
 });
 
 // server/migrations/021-normalize-stock-vaccine-names.ts
 async function up2(db2) {
-  await db2.execute(import_drizzle_orm40.sql`
+  await db2.execute(import_drizzle_orm41.sql`
     UPDATE stock_transactions
     SET vaccine_name = CASE 
       WHEN UPPER(TRIM(vaccine_name)) IN ('OPV-0', 'OPV-1', 'OPV-2', 'OPV-3') THEN 'OPV'
@@ -37598,17 +37721,17 @@ async function up2(db2) {
     );
   `);
 }
-var import_drizzle_orm40;
+var import_drizzle_orm41;
 var init_normalize_stock_vaccine_names = __esm({
   "server/migrations/021-normalize-stock-vaccine-names.ts"() {
     "use strict";
-    import_drizzle_orm40 = require("drizzle-orm");
+    import_drizzle_orm41 = require("drizzle-orm");
   }
 });
 
 // server/migrations/022-research-hub-schema.ts
 async function up3(db2) {
-  await db2.execute(import_drizzle_orm41.sql`
+  await db2.execute(import_drizzle_orm42.sql`
     CREATE TABLE IF NOT EXISTS research_documents (
       id                   SERIAL PRIMARY KEY,
       tenant_id            VARCHAR NOT NULL,
@@ -37646,7 +37769,7 @@ async function up3(db2) {
       archived_at          TIMESTAMPTZ
     );
   `);
-  await db2.execute(import_drizzle_orm41.sql`
+  await db2.execute(import_drizzle_orm42.sql`
     CREATE TABLE IF NOT EXISTS pilot_activities (
       id                   SERIAL PRIMARY KEY,
       tenant_id            VARCHAR NOT NULL,
@@ -37686,7 +37809,7 @@ async function up3(db2) {
       published_at         TIMESTAMPTZ
     );
   `);
-  await db2.execute(import_drizzle_orm41.sql`
+  await db2.execute(import_drizzle_orm42.sql`
     CREATE TABLE IF NOT EXISTS pilot_updates (
       id                   SERIAL PRIMARY KEY,
       pilot_id             INTEGER NOT NULL REFERENCES pilot_activities(id) ON DELETE CASCADE,
@@ -37703,7 +37826,7 @@ async function up3(db2) {
       updated_at           TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
   `);
-  await db2.execute(import_drizzle_orm41.sql`
+  await db2.execute(import_drizzle_orm42.sql`
     CREATE TABLE IF NOT EXISTS implementation_lessons (
       id                   SERIAL PRIMARY KEY,
       tenant_id            VARCHAR NOT NULL,
@@ -37725,7 +37848,7 @@ async function up3(db2) {
       updated_at           TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
   `);
-  await db2.execute(import_drizzle_orm41.sql`
+  await db2.execute(import_drizzle_orm42.sql`
     CREATE TABLE IF NOT EXISTS download_assets (
       id                   SERIAL PRIMARY KEY,
       tenant_id            VARCHAR NOT NULL,
@@ -37748,7 +37871,7 @@ async function up3(db2) {
       updated_at           TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
   `);
-  await db2.execute(import_drizzle_orm41.sql`
+  await db2.execute(import_drizzle_orm42.sql`
     CREATE TABLE IF NOT EXISTS research_interest_submissions (
       id                   SERIAL PRIMARY KEY,
       tenant_id            VARCHAR NOT NULL,
@@ -37765,7 +37888,7 @@ async function up3(db2) {
       updated_at           TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
   `);
-  await db2.execute(import_drizzle_orm41.sql`
+  await db2.execute(import_drizzle_orm42.sql`
     CREATE TABLE IF NOT EXISTS research_download_events (
       id                   SERIAL PRIMARY KEY,
       document_id          INTEGER REFERENCES research_documents(id) ON DELETE CASCADE,
@@ -37776,19 +37899,19 @@ async function up3(db2) {
       downloaded_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
   `);
-  await db2.execute(import_drizzle_orm41.sql`CREATE INDEX IF NOT EXISTS idx_research_doc_tenant ON research_documents(tenant_id);`);
-  await db2.execute(import_drizzle_orm41.sql`CREATE INDEX IF NOT EXISTS idx_research_doc_status ON research_documents(status);`);
-  await db2.execute(import_drizzle_orm41.sql`CREATE INDEX IF NOT EXISTS idx_pilot_act_tenant ON pilot_activities(tenant_id);`);
-  await db2.execute(import_drizzle_orm41.sql`CREATE INDEX IF NOT EXISTS idx_pilot_act_status ON pilot_activities(status);`);
-  await db2.execute(import_drizzle_orm41.sql`CREATE INDEX IF NOT EXISTS idx_pilot_upd_pilot ON pilot_updates(pilot_id);`);
-  await db2.execute(import_drizzle_orm41.sql`CREATE INDEX IF NOT EXISTS idx_impl_lesson_tenant ON implementation_lessons(tenant_id);`);
-  await db2.execute(import_drizzle_orm41.sql`CREATE INDEX IF NOT EXISTS idx_download_asset_tenant ON download_assets(tenant_id);`);
-  const docCount = await db2.execute(import_drizzle_orm41.sql`SELECT COUNT(*) as count FROM research_documents`);
+  await db2.execute(import_drizzle_orm42.sql`CREATE INDEX IF NOT EXISTS idx_research_doc_tenant ON research_documents(tenant_id);`);
+  await db2.execute(import_drizzle_orm42.sql`CREATE INDEX IF NOT EXISTS idx_research_doc_status ON research_documents(status);`);
+  await db2.execute(import_drizzle_orm42.sql`CREATE INDEX IF NOT EXISTS idx_pilot_act_tenant ON pilot_activities(tenant_id);`);
+  await db2.execute(import_drizzle_orm42.sql`CREATE INDEX IF NOT EXISTS idx_pilot_act_status ON pilot_activities(status);`);
+  await db2.execute(import_drizzle_orm42.sql`CREATE INDEX IF NOT EXISTS idx_pilot_upd_pilot ON pilot_updates(pilot_id);`);
+  await db2.execute(import_drizzle_orm42.sql`CREATE INDEX IF NOT EXISTS idx_impl_lesson_tenant ON implementation_lessons(tenant_id);`);
+  await db2.execute(import_drizzle_orm42.sql`CREATE INDEX IF NOT EXISTS idx_download_asset_tenant ON download_assets(tenant_id);`);
+  const docCount = await db2.execute(import_drizzle_orm42.sql`SELECT COUNT(*) as count FROM research_documents`);
   const count2 = Number(docCount.rows[0]?.count || 0);
   if (count2 === 0) {
-    const tenantRows = await db2.execute(import_drizzle_orm41.sql`SELECT id FROM tenants LIMIT 1`);
+    const tenantRows = await db2.execute(import_drizzle_orm42.sql`SELECT id FROM tenants LIMIT 1`);
     const tenantId = tenantRows.rows[0]?.id || "default-tenant-uuid";
-    await db2.execute(import_drizzle_orm41.sql`
+    await db2.execute(import_drizzle_orm42.sql`
       INSERT INTO research_documents (
         tenant_id, title, slug, abstract, document_type, authors, organizations,
         publication_date, year, version, country, region, tags, status, visibility,
@@ -37900,7 +38023,7 @@ async function up3(db2) {
         76
       );
     `);
-    await db2.execute(import_drizzle_orm41.sql`
+    await db2.execute(import_drizzle_orm42.sql`
       INSERT INTO pilot_activities (
         tenant_id, title, slug, summary, country, province, district, facility,
         communities, latitude, longitude, start_date, end_date, status, pilot_type,
@@ -37973,7 +38096,7 @@ async function up3(db2) {
         true
       );
     `);
-    await db2.execute(import_drizzle_orm41.sql`
+    await db2.execute(import_drizzle_orm42.sql`
       INSERT INTO implementation_lessons (
         tenant_id, title, slug, category, context, what_was_tested, what_worked,
         what_did_not_work, recommendation, pilot_id, document_id, tags, status, visibility, author
@@ -38013,7 +38136,7 @@ async function up3(db2) {
         'T. Smith'
       );
     `);
-    await db2.execute(import_drizzle_orm41.sql`
+    await db2.execute(import_drizzle_orm42.sql`
       INSERT INTO download_assets (
         tenant_id, title, slug, description, category, recommended_audience,
         file_url, file_name, file_type, file_size, version, status, visibility, download_count
@@ -38085,45 +38208,45 @@ async function up3(db2) {
     `);
   }
 }
-var import_drizzle_orm41;
+var import_drizzle_orm42;
 var init_research_hub_schema = __esm({
   "server/migrations/022-research-hub-schema.ts"() {
     "use strict";
-    import_drizzle_orm41 = require("drizzle-orm");
+    import_drizzle_orm42 = require("drizzle-orm");
   }
 });
 
 // server/migrations/023-safe-geometry.ts
 async function applySafeGeometryFixes(db2) {
   try {
-    await db2.execute(import_drizzle_orm42.sql`CREATE EXTENSION IF NOT EXISTS postgis`);
+    await db2.execute(import_drizzle_orm43.sql`CREATE EXTENSION IF NOT EXISTS postgis`);
   } catch (err) {
   }
-  await db2.execute(import_drizzle_orm42.sql`
+  await db2.execute(import_drizzle_orm43.sql`
     ALTER TABLE population_grids 
     ADD COLUMN IF NOT EXISTS geometry geometry(Geometry, 4326),
     ADD COLUMN IF NOT EXISTS geojson jsonb
   `);
   try {
-    await db2.execute(import_drizzle_orm42.sql`
+    await db2.execute(import_drizzle_orm43.sql`
       ALTER TABLE imported_coverage
       ADD CONSTRAINT imported_coverage_unique UNIQUE (tenant_id, village_id, parameter, year)
     `);
   } catch (err) {
   }
 }
-var import_drizzle_orm42;
+var import_drizzle_orm43;
 var init_safe_geometry = __esm({
   "server/migrations/023-safe-geometry.ts"() {
     "use strict";
-    import_drizzle_orm42 = require("drizzle-orm");
+    import_drizzle_orm43 = require("drizzle-orm");
   }
 });
 
 // server/migrations/024-settlements-gis-microplanning.ts
 async function applySettlementsGisMigration(db2) {
   try {
-    await db2.execute(import_drizzle_orm43.sql`
+    await db2.execute(import_drizzle_orm44.sql`
       ALTER TABLE villages 
       ADD COLUMN IF NOT EXISTS linked_settlement_id integer
     `);
@@ -38131,7 +38254,7 @@ async function applySettlementsGisMigration(db2) {
     console.error("Migration: failed to add linked_settlement_id to villages:", err.message);
   }
   try {
-    await db2.execute(import_drizzle_orm43.sql`
+    await db2.execute(import_drizzle_orm44.sql`
       ALTER TABLE settlements_master 
       ADD COLUMN IF NOT EXISTS province_id integer,
       ADD COLUMN IF NOT EXISTS district_id integer,
@@ -38156,18 +38279,18 @@ async function applySettlementsGisMigration(db2) {
     console.error("Migration: failed to add columns to settlements_master:", err.message);
   }
 }
-var import_drizzle_orm43;
+var import_drizzle_orm44;
 var init_settlements_gis_microplanning = __esm({
   "server/migrations/024-settlements-gis-microplanning.ts"() {
     "use strict";
-    import_drizzle_orm43 = require("drizzle-orm");
+    import_drizzle_orm44 = require("drizzle-orm");
   }
 });
 
 // server/migrations/026-polygon-planning.ts
 async function applyPolygonPlanningMigration(db2) {
   try {
-    await db2.execute(import_drizzle_orm44.sql`
+    await db2.execute(import_drizzle_orm45.sql`
       ALTER TABLE gis_polygons 
       ADD COLUMN IF NOT EXISTS centroid jsonb,
       ADD COLUMN IF NOT EXISTS population_estimate integer,
@@ -38186,17 +38309,17 @@ async function applyPolygonPlanningMigration(db2) {
     console.error("Migration: failed to add columns to gis_polygons:", err.message);
   }
 }
-var import_drizzle_orm44;
+var import_drizzle_orm45;
 var init_polygon_planning = __esm({
   "server/migrations/026-polygon-planning.ts"() {
     "use strict";
-    import_drizzle_orm44 = require("drizzle-orm");
+    import_drizzle_orm45 = require("drizzle-orm");
   }
 });
 
 // server/migrations/028-polygon-lifecycle.ts
 async function applyPolygonLifecycleMigration(db2) {
-  await db2.execute(import_drizzle_orm45.sql`
+  await db2.execute(import_drizzle_orm46.sql`
     ALTER TABLE gis_polygons
       ADD COLUMN IF NOT EXISTS previous_version_id integer,
       ADD COLUMN IF NOT EXISTS replaced_version_id integer,
@@ -38210,15 +38333,15 @@ async function applyPolygonLifecycleMigration(db2) {
       ADD COLUMN IF NOT EXISTS rejection_reason text,
       ADD COLUMN IF NOT EXISTS metadata_json jsonb DEFAULT '{}'::jsonb
   `);
-  await db2.execute(import_drizzle_orm45.sql`
+  await db2.execute(import_drizzle_orm46.sql`
     CREATE INDEX IF NOT EXISTS idx_gis_polygons_owner_version
       ON gis_polygons (tenant_id, owner_type, owner_id, version DESC)
   `);
-  await db2.execute(import_drizzle_orm45.sql`
+  await db2.execute(import_drizzle_orm46.sql`
     CREATE INDEX IF NOT EXISTS idx_gis_polygons_parent_facility
       ON gis_polygons (tenant_id, parent_facility_id)
   `);
-  await db2.execute(import_drizzle_orm45.sql`
+  await db2.execute(import_drizzle_orm46.sql`
     WITH ranked_active AS (
       SELECT id,
              row_number() OVER (
@@ -38239,12 +38362,12 @@ async function applyPolygonLifecycleMigration(db2) {
      WHERE polygon.id = ranked_active.id
        AND ranked_active.active_rank > 1
   `);
-  await db2.execute(import_drizzle_orm45.sql`
+  await db2.execute(import_drizzle_orm46.sql`
     CREATE UNIQUE INDEX IF NOT EXISTS idx_gis_polygons_one_active_owner
       ON gis_polygons (tenant_id, owner_type, owner_id, polygon_type)
       WHERE is_active = true AND status = 'active'
   `);
-  await db2.execute(import_drizzle_orm45.sql`
+  await db2.execute(import_drizzle_orm46.sql`
     UPDATE gis_polygons
        SET version = COALESCE(version, 1),
            valid_from = COALESCE(valid_from, created_at, now()),
@@ -38256,11 +38379,11 @@ async function applyPolygonLifecycleMigration(db2) {
         OR metadata_json IS NULL
   `);
 }
-var import_drizzle_orm45;
+var import_drizzle_orm46;
 var init_polygon_lifecycle = __esm({
   "server/migrations/028-polygon-lifecycle.ts"() {
     "use strict";
-    import_drizzle_orm45 = require("drizzle-orm");
+    import_drizzle_orm46 = require("drizzle-orm");
   }
 });
 
@@ -38273,19 +38396,19 @@ async function upsertPolygonPermissionsForAllTenants(db2) {
   const tenantRows = await db2.select({ id: tenants.id }).from(tenants);
   for (const tenant of tenantRows) {
     for (const permission of polygonPermissions) {
-      const [existing] = await db2.select({ id: userPermissions.id }).from(userPermissions).where((0, import_drizzle_orm46.and)((0, import_drizzle_orm46.eq)(userPermissions.tenantId, tenant.id), (0, import_drizzle_orm46.eq)(userPermissions.code, permission.code))).limit(1);
+      const [existing] = await db2.select({ id: userPermissions.id }).from(userPermissions).where((0, import_drizzle_orm47.and)((0, import_drizzle_orm47.eq)(userPermissions.tenantId, tenant.id), (0, import_drizzle_orm47.eq)(userPermissions.code, permission.code))).limit(1);
       if (existing) {
-        await db2.update(userPermissions).set({ name: permission.name, description: permission.description, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm46.eq)(userPermissions.id, existing.id));
+        await db2.update(userPermissions).set({ name: permission.name, description: permission.description, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm47.eq)(userPermissions.id, existing.id));
       } else {
         await db2.insert(userPermissions).values({ tenantId: tenant.id, ...permission });
       }
     }
     for (const roleCode of managedRoleCodes) {
       const defaults = ROLE_PERMISSIONS[roleCode] || [];
-      const [existingRole] = await db2.select().from(userRoles).where((0, import_drizzle_orm46.and)((0, import_drizzle_orm46.eq)(userRoles.tenantId, tenant.id), (0, import_drizzle_orm46.eq)(userRoles.code, roleCode))).limit(1);
+      const [existingRole] = await db2.select().from(userRoles).where((0, import_drizzle_orm47.and)((0, import_drizzle_orm47.eq)(userRoles.tenantId, tenant.id), (0, import_drizzle_orm47.eq)(userRoles.code, roleCode))).limit(1);
       const permissions2 = mergePermissions(existingRole?.permissions, defaults);
       if (existingRole) {
-        await db2.update(userRoles).set({ permissions: permissions2, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm46.eq)(userRoles.id, existingRole.id));
+        await db2.update(userRoles).set({ permissions: permissions2, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm47.eq)(userRoles.id, existingRole.id));
       } else {
         await db2.insert(userRoles).values({
           tenantId: tenant.id,
@@ -38297,11 +38420,11 @@ async function upsertPolygonPermissionsForAllTenants(db2) {
     }
   }
 }
-var import_drizzle_orm46, polygonPermissions, managedRoleCodes;
+var import_drizzle_orm47, polygonPermissions, managedRoleCodes;
 var init_polygon_permissions_all_tenants = __esm({
   "server/migrations/029-polygon-permissions-all-tenants.ts"() {
     "use strict";
-    import_drizzle_orm46 = require("drizzle-orm");
+    import_drizzle_orm47 = require("drizzle-orm");
     init_schema();
     init_permissions();
     polygonPermissions = [
@@ -38330,14 +38453,14 @@ var init_polygon_permissions_all_tenants = __esm({
 
 // server/migrations/030-microplan-version-control.ts
 async function applyMicroplanVersionControlMigration(db2) {
-  await db2.execute(import_drizzle_orm47.sql.raw("CREATE TABLE IF NOT EXISTS microplan_versions (id integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY, tenant_id varchar NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, microplan_id integer NOT NULL REFERENCES microplans(id) ON DELETE CASCADE, version_number integer NOT NULL, version_label varchar(50) NOT NULL, event_type varchar(50) NOT NULL, status varchar(50) NOT NULL, reason text, snapshot jsonb NOT NULL, created_by_user_id varchar REFERENCES users(id) ON DELETE SET NULL, created_at timestamp NOT NULL DEFAULT now(), CONSTRAINT uq_microplan_versions_plan_number UNIQUE (microplan_id, version_number))"));
-  await db2.execute(import_drizzle_orm47.sql.raw("CREATE INDEX IF NOT EXISTS idx_microplan_versions_tenant_plan ON microplan_versions (tenant_id, microplan_id, version_number DESC)"));
+  await db2.execute(import_drizzle_orm48.sql.raw("CREATE TABLE IF NOT EXISTS microplan_versions (id integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY, tenant_id varchar NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, microplan_id integer NOT NULL REFERENCES microplans(id) ON DELETE CASCADE, version_number integer NOT NULL, version_label varchar(50) NOT NULL, event_type varchar(50) NOT NULL, status varchar(50) NOT NULL, reason text, snapshot jsonb NOT NULL, created_by_user_id varchar REFERENCES users(id) ON DELETE SET NULL, created_at timestamp NOT NULL DEFAULT now(), CONSTRAINT uq_microplan_versions_plan_number UNIQUE (microplan_id, version_number))"));
+  await db2.execute(import_drizzle_orm48.sql.raw("CREATE INDEX IF NOT EXISTS idx_microplan_versions_tenant_plan ON microplan_versions (tenant_id, microplan_id, version_number DESC)"));
 }
-var import_drizzle_orm47;
+var import_drizzle_orm48;
 var init_microplan_version_control = __esm({
   "server/migrations/030-microplan-version-control.ts"() {
     "use strict";
-    import_drizzle_orm47 = require("drizzle-orm");
+    import_drizzle_orm48 = require("drizzle-orm");
   }
 });
 
@@ -38349,25 +38472,25 @@ async function upsertMicroplanVersionPermissionsForAllTenants(db2) {
   const tenantRows = await db2.select({ id: tenants.id }).from(tenants);
   for (const tenant of tenantRows) {
     for (const permission of permissions) {
-      const [current] = await db2.select({ id: userPermissions.id }).from(userPermissions).where((0, import_drizzle_orm48.and)((0, import_drizzle_orm48.eq)(userPermissions.tenantId, tenant.id), (0, import_drizzle_orm48.eq)(userPermissions.code, permission.code))).limit(1);
+      const [current] = await db2.select({ id: userPermissions.id }).from(userPermissions).where((0, import_drizzle_orm49.and)((0, import_drizzle_orm49.eq)(userPermissions.tenantId, tenant.id), (0, import_drizzle_orm49.eq)(userPermissions.code, permission.code))).limit(1);
       if (current) {
-        await db2.update(userPermissions).set({ name: permission.name, description: permission.description, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm48.eq)(userPermissions.id, current.id));
+        await db2.update(userPermissions).set({ name: permission.name, description: permission.description, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm49.eq)(userPermissions.id, current.id));
       } else {
         await db2.insert(userPermissions).values({ tenantId: tenant.id, ...permission });
       }
     }
     for (const [code, defaults] of Object.entries(ROLE_PERMISSIONS)) {
-      const [role] = await db2.select().from(userRoles).where((0, import_drizzle_orm48.and)((0, import_drizzle_orm48.eq)(userRoles.tenantId, tenant.id), (0, import_drizzle_orm48.eq)(userRoles.code, code))).limit(1);
+      const [role] = await db2.select().from(userRoles).where((0, import_drizzle_orm49.and)((0, import_drizzle_orm49.eq)(userRoles.tenantId, tenant.id), (0, import_drizzle_orm49.eq)(userRoles.code, code))).limit(1);
       if (!role) continue;
-      await db2.update(userRoles).set({ permissions: merge(role.permissions, defaults), updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm48.eq)(userRoles.id, role.id));
+      await db2.update(userRoles).set({ permissions: merge(role.permissions, defaults), updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm49.eq)(userRoles.id, role.id));
     }
   }
 }
-var import_drizzle_orm48, permissions;
+var import_drizzle_orm49, permissions;
 var init_microplan_version_permissions = __esm({
   "server/migrations/031-microplan-version-permissions.ts"() {
     "use strict";
-    import_drizzle_orm48 = require("drizzle-orm");
+    import_drizzle_orm49 = require("drizzle-orm");
     init_schema();
     init_permissions();
     permissions = [
@@ -38384,13 +38507,13 @@ var init_microplan_version_permissions = __esm({
 
 // server/services/identitySequences.ts
 async function realignIdentitySequences(db2) {
-  await db2.execute(import_drizzle_orm49.sql.raw(REALIGN_IDENTITY_SEQUENCES_SQL));
+  await db2.execute(import_drizzle_orm50.sql.raw(REALIGN_IDENTITY_SEQUENCES_SQL));
 }
-var import_drizzle_orm49, REALIGN_IDENTITY_SEQUENCES_SQL;
+var import_drizzle_orm50, REALIGN_IDENTITY_SEQUENCES_SQL;
 var init_identitySequences = __esm({
   "server/services/identitySequences.ts"() {
     "use strict";
-    import_drizzle_orm49 = require("drizzle-orm");
+    import_drizzle_orm50 = require("drizzle-orm");
     REALIGN_IDENTITY_SEQUENCES_SQL = `
 DO $$
 DECLARE
@@ -38511,8 +38634,8 @@ async function applySupervisionTemplatesSeed() {
     CREATE INDEX IF NOT EXISTS idx_supervision_template_tenant ON supervision_checklist_templates(tenant_id);
   `;
   try {
-    await db.execute(import_drizzle_orm50.sql.raw(createTableStmt));
-    await db.execute(import_drizzle_orm50.sql`
+    await db.execute(import_drizzle_orm51.sql.raw(createTableStmt));
+    await db.execute(import_drizzle_orm51.sql`
       ALTER TABLE supervision_checklist_templates ADD COLUMN IF NOT EXISTS sections JSONB NOT NULL DEFAULT '[]'::jsonb;
       ALTER TABLE supervision_checklist_templates ADD COLUMN IF NOT EXISTS category VARCHAR(50) NOT NULL DEFAULT 'supervision';
       ALTER TABLE supervision_checklist_templates ADD COLUMN IF NOT EXISTS items JSONB NOT NULL DEFAULT '[]'::jsonb;
@@ -38555,7 +38678,7 @@ async function applySupervisionTemplatesSeed() {
     return;
   }
   try {
-    const tenantsRes = await db.execute(import_drizzle_orm50.sql`SELECT id, code, country_code FROM tenants`);
+    const tenantsRes = await db.execute(import_drizzle_orm51.sql`SELECT id, code, country_code FROM tenants`);
     const tenantRows = tenantsRes.rows;
     const countryScopedTemplates = parsedTemplates.filter((t) => t.countryCodes.length > 0);
     if (tenantRows.length === 0) {
@@ -38565,7 +38688,7 @@ async function applySupervisionTemplatesSeed() {
     for (const t of countryScopedTemplates) {
       for (const tenant of tenantRows) {
         if (isTemplateInScopeForTenant(t.countryCodes, tenant)) continue;
-        await db.execute(import_drizzle_orm50.sql`
+        await db.execute(import_drizzle_orm51.sql`
           DELETE FROM supervision_checklist_templates
           WHERE tenant_id = ${tenant.id}
             AND name = ${t.name}
@@ -38583,7 +38706,7 @@ async function applySupervisionTemplatesSeed() {
           continue;
         }
         try {
-          const checkRes = await db.execute(import_drizzle_orm50.sql`
+          const checkRes = await db.execute(import_drizzle_orm51.sql`
             SELECT id FROM supervision_checklist_templates
             WHERE tenant_id = ${tenantId}
               AND name = ${t.name}
@@ -38593,7 +38716,7 @@ async function applySupervisionTemplatesSeed() {
           const itemsJsonStr = JSON.stringify(t.items);
           if (checkRes.rows.length > 0) {
             const existingId = checkRes.rows[0].id;
-            await db.execute(import_drizzle_orm50.sql`
+            await db.execute(import_drizzle_orm51.sql`
               UPDATE supervision_checklist_templates
               SET category = ${t.category},
                   description = ${t.description},
@@ -38605,7 +38728,7 @@ async function applySupervisionTemplatesSeed() {
             `);
             console.log(`[migration:028] Updated template "${t.name}" (ID ${existingId}) for tenant "${tenantId}".`);
           } else {
-            await db.execute(import_drizzle_orm50.sql`
+            await db.execute(import_drizzle_orm51.sql`
               INSERT INTO supervision_checklist_templates (
                 tenant_id, name, category, description, sections, items, is_active
               ) VALUES (
@@ -38635,12 +38758,12 @@ async function applySupervisionTemplatesSeed() {
     console.error(`[migration:028] Fatal error during seed: ${err?.message || err}`);
   }
 }
-var import_drizzle_orm50, import_fs8, import_path7;
+var import_drizzle_orm51, import_fs8, import_path7;
 var init_supervision_templates_seed = __esm({
   "server/migrations/028-supervision-templates-seed.ts"() {
     "use strict";
     init_db();
-    import_drizzle_orm50 = require("drizzle-orm");
+    import_drizzle_orm51 = require("drizzle-orm");
     import_fs8 = require("fs");
     import_path7 = require("path");
   }
@@ -38657,19 +38780,19 @@ __export(remoteSensingService_exports, {
 });
 async function calculateSpatialGaps(districtId, radiusKm = 5) {
   try {
-    const [districtRow] = await db.select().from(districts).where((0, import_drizzle_orm51.eq)(districts.id, districtId)).limit(1);
+    const [districtRow] = await db.select().from(districts).where((0, import_drizzle_orm52.eq)(districts.id, districtId)).limit(1);
     if (!districtRow) {
       return { gaps: [], totalSettlements: 0, servedSettlements: 0 };
     }
-    const allSettlements = await db.select().from(settlementsMaster).where((0, import_drizzle_orm51.eq)(settlementsMaster.districtName, districtRow.name));
+    const allSettlements = await db.select().from(settlementsMaster).where((0, import_drizzle_orm52.eq)(settlementsMaster.districtName, districtRow.name));
     if (allSettlements.length === 0) {
       return { gaps: [], totalSettlements: 0, servedSettlements: 0 };
     }
-    const activeFacilities = await db.select().from(facilities).where((0, import_drizzle_orm51.eq)(facilities.districtId, districtId));
+    const activeFacilities = await db.select().from(facilities).where((0, import_drizzle_orm52.eq)(facilities.districtId, districtId));
     const plannedOutposts = await db.select().from(sessionPlans).where(
-      (0, import_drizzle_orm51.and)(
-        (0, import_drizzle_orm51.eq)(sessionPlans.facilityId, activeFacilities[0]?.id || 0),
-        (0, import_drizzle_orm51.eq)(sessionPlans.status, "planned")
+      (0, import_drizzle_orm52.and)(
+        (0, import_drizzle_orm52.eq)(sessionPlans.facilityId, activeFacilities[0]?.id || 0),
+        (0, import_drizzle_orm52.eq)(sessionPlans.status, "planned")
       )
     );
     const servedSet = /* @__PURE__ */ new Set();
@@ -38878,7 +39001,7 @@ function registerRemoteSensingRoutes(app2) {
         const result2 = await calculateSpatialGaps(firstDistrict.id, 5);
         return res.json({ ...result2, districtId: firstDistrict.id, districtName: firstDistrict.name });
       }
-      const [districtRow] = await db.select().from(districts).where((0, import_drizzle_orm51.eq)(districts.id, districtId)).limit(1);
+      const [districtRow] = await db.select().from(districts).where((0, import_drizzle_orm52.eq)(districts.id, districtId)).limit(1);
       if (!districtRow) return res.status(404).json({ message: "District not found" });
       const result = await calculateSpatialGaps(districtId, 5);
       res.json({ ...result, districtId, districtName: districtRow.name });
@@ -38899,7 +39022,7 @@ function registerRemoteSensingRoutes(app2) {
         targetDistrictId = firstDistrict.id;
         targetDistrictName = firstDistrict.name;
       } else {
-        const [districtRow] = await db.select().from(districts).where((0, import_drizzle_orm51.eq)(districts.id, targetDistrictId)).limit(1);
+        const [districtRow] = await db.select().from(districts).where((0, import_drizzle_orm52.eq)(districts.id, targetDistrictId)).limit(1);
         if (!districtRow) return res.status(404).json({ message: "District not found" });
         targetDistrictName = districtRow.name;
       }
@@ -38935,12 +39058,12 @@ function registerRemoteSensingRoutes(app2) {
     }
   });
 }
-var import_drizzle_orm51;
+var import_drizzle_orm52;
 var init_remoteSensingService = __esm({
   "server/services/remoteSensingService.ts"() {
     "use strict";
     init_db();
-    import_drizzle_orm51 = require("drizzle-orm");
+    import_drizzle_orm52 = require("drizzle-orm");
     init_schema();
     init_index();
     init_replitAuth();
@@ -38954,20 +39077,20 @@ function intList(values) {
 }
 function idInClause(column, values) {
   const ids = intList(values);
-  if (ids.length === 0) return import_drizzle_orm52.sql``;
-  return import_drizzle_orm52.sql.raw(` AND ${column} IN (${ids.join(",")})`);
+  if (ids.length === 0) return import_drizzle_orm53.sql``;
+  return import_drizzle_orm53.sql.raw(` AND ${column} IN (${ids.join(",")})`);
 }
 function facilityScopeClause(filters) {
-  return filters.facilityIds?.length ? idInClause("f.id", filters.facilityIds) : filters.facilityId ? import_drizzle_orm52.sql` AND f.id = ${filters.facilityId}` : import_drizzle_orm52.sql``;
+  return filters.facilityIds?.length ? idInClause("f.id", filters.facilityIds) : filters.facilityId ? import_drizzle_orm53.sql` AND f.id = ${filters.facilityId}` : import_drizzle_orm53.sql``;
 }
 function districtScopeClause(filters) {
-  return filters.districtIds?.length ? idInClause("d.id", filters.districtIds) : filters.districtId ? import_drizzle_orm52.sql` AND d.id = ${filters.districtId}` : import_drizzle_orm52.sql``;
+  return filters.districtIds?.length ? idInClause("d.id", filters.districtIds) : filters.districtId ? import_drizzle_orm53.sql` AND d.id = ${filters.districtId}` : import_drizzle_orm53.sql``;
 }
 function provinceScopeClause(filters) {
-  return filters.provinceIds?.length ? idInClause("p.id", filters.provinceIds) : filters.provinceId ? import_drizzle_orm52.sql` AND p.id = ${filters.provinceId}` : import_drizzle_orm52.sql``;
+  return filters.provinceIds?.length ? idInClause("p.id", filters.provinceIds) : filters.provinceId ? import_drizzle_orm53.sql` AND p.id = ${filters.provinceId}` : import_drizzle_orm53.sql``;
 }
 async function getProvincesMap(tenantId) {
-  const provincesList = await db.execute(import_drizzle_orm52.sql`
+  const provincesList = await db.execute(import_drizzle_orm53.sql`
     SELECT id, name FROM provinces WHERE tenant_id = ${tenantId}
   `);
   const provincesMap = /* @__PURE__ */ new Map();
@@ -38977,7 +39100,7 @@ async function getProvincesMap(tenantId) {
   return provincesMap;
 }
 async function getDistrictsMap(tenantId) {
-  const districtsList = await db.execute(import_drizzle_orm52.sql`
+  const districtsList = await db.execute(import_drizzle_orm53.sql`
     SELECT id, name, province_id FROM districts WHERE tenant_id = ${tenantId}
   `);
   const districtsMap = /* @__PURE__ */ new Map();
@@ -39094,12 +39217,12 @@ function rollupHierarchy(facilities4, provincesMap, districtsMap, sumKeys, avgKe
   ];
 }
 async function getSessionReport(filters) {
-  const yearClause = filters.year ? import_drizzle_orm52.sql` AND sp.year = ${filters.year}` : import_drizzle_orm52.sql``;
-  const quarterClause = filters.quarter ? import_drizzle_orm52.sql` AND sp.quarter = ${filters.quarter}` : import_drizzle_orm52.sql``;
+  const yearClause = filters.year ? import_drizzle_orm53.sql` AND sp.year = ${filters.year}` : import_drizzle_orm53.sql``;
+  const quarterClause = filters.quarter ? import_drizzle_orm53.sql` AND sp.quarter = ${filters.quarter}` : import_drizzle_orm53.sql``;
   const facilityFilter = facilityScopeClause(filters);
   const districtFilter = districtScopeClause(filters);
   const provinceFilter = provinceScopeClause(filters);
-  const dbRows = await db.execute(import_drizzle_orm52.sql`
+  const dbRows = await db.execute(import_drizzle_orm53.sql`
     SELECT
       f.id                                     AS id,
       f.name                                   AS name,
@@ -39175,12 +39298,12 @@ async function getSessionReport(filters) {
   );
 }
 async function getMicroplanReport(filters) {
-  const yearClause = filters.year ? import_drizzle_orm52.sql` AND m.year = ${filters.year}` : import_drizzle_orm52.sql``;
-  const quarterClause = filters.quarter ? import_drizzle_orm52.sql` AND m.quarter = ${filters.quarter}` : import_drizzle_orm52.sql``;
+  const yearClause = filters.year ? import_drizzle_orm53.sql` AND m.year = ${filters.year}` : import_drizzle_orm53.sql``;
+  const quarterClause = filters.quarter ? import_drizzle_orm53.sql` AND m.quarter = ${filters.quarter}` : import_drizzle_orm53.sql``;
   const facilityFilter = facilityScopeClause(filters);
   const districtFilter = districtScopeClause(filters);
   const provinceFilter = provinceScopeClause(filters);
-  const dbRows = await db.execute(import_drizzle_orm52.sql`
+  const dbRows = await db.execute(import_drizzle_orm53.sql`
     SELECT
       f.id                                                                AS id,
       f.name                                                              AS name,
@@ -39239,7 +39362,7 @@ async function getZeroDoseReport(filters) {
   const facilityFilter = facilityScopeClause(filters);
   const districtFilter = districtScopeClause(filters);
   const provinceFilter = provinceScopeClause(filters);
-  const dbRows = await db.execute(import_drizzle_orm52.sql`
+  const dbRows = await db.execute(import_drizzle_orm53.sql`
     SELECT
       f.id                              AS id,
       f.name                            AS name,
@@ -39301,12 +39424,12 @@ async function getZeroDoseReport(filters) {
   );
 }
 async function getMissedCommunitiesReport(filters) {
-  const yearClause = filters.year ? import_drizzle_orm52.sql` AND sp.year = ${filters.year}` : import_drizzle_orm52.sql``;
-  const quarterClause = filters.quarter ? import_drizzle_orm52.sql` AND sp.quarter = ${filters.quarter}` : import_drizzle_orm52.sql``;
+  const yearClause = filters.year ? import_drizzle_orm53.sql` AND sp.year = ${filters.year}` : import_drizzle_orm53.sql``;
+  const quarterClause = filters.quarter ? import_drizzle_orm53.sql` AND sp.quarter = ${filters.quarter}` : import_drizzle_orm53.sql``;
   const facilityFilter = facilityScopeClause(filters);
   const districtFilter = districtScopeClause(filters);
   const provinceFilter = provinceScopeClause(filters);
-  const dbRows = await db.execute(import_drizzle_orm52.sql`
+  const dbRows = await db.execute(import_drizzle_orm53.sql`
     SELECT
       f.id                               AS id,
       f.name                             AS name,
@@ -39354,12 +39477,12 @@ async function getMissedCommunitiesReport(filters) {
   );
 }
 async function getCoverageReport(filters) {
-  const yearClause = filters.year ? import_drizzle_orm52.sql` AND sp.year = ${filters.year}` : import_drizzle_orm52.sql``;
-  const quarterClause = filters.quarter ? import_drizzle_orm52.sql` AND sp.quarter = ${filters.quarter}` : import_drizzle_orm52.sql``;
+  const yearClause = filters.year ? import_drizzle_orm53.sql` AND sp.year = ${filters.year}` : import_drizzle_orm53.sql``;
+  const quarterClause = filters.quarter ? import_drizzle_orm53.sql` AND sp.quarter = ${filters.quarter}` : import_drizzle_orm53.sql``;
   const facilityFilter = facilityScopeClause(filters);
   const districtFilter = districtScopeClause(filters);
   const provinceFilter = provinceScopeClause(filters);
-  const dbRows = await db.execute(import_drizzle_orm52.sql`
+  const dbRows = await db.execute(import_drizzle_orm53.sql`
     SELECT
       f.id                               AS id,
       f.name                             AS name,
@@ -39417,7 +39540,7 @@ async function getHtrReport(filters) {
   const facilityFilter = facilityScopeClause(filters);
   const districtFilter = districtScopeClause(filters);
   const provinceFilter = provinceScopeClause(filters);
-  const dbRows = await db.execute(import_drizzle_orm52.sql`
+  const dbRows = await db.execute(import_drizzle_orm53.sql`
     SELECT
       f.id AS id,
       f.name AS name,
@@ -39476,12 +39599,12 @@ async function getHtrReport(filters) {
   );
 }
 async function getBudgetReport(filters) {
-  const yearClause = filters.year ? import_drizzle_orm52.sql` AND bi.year = ${filters.year}` : import_drizzle_orm52.sql``;
-  const quarterClause = filters.quarter ? import_drizzle_orm52.sql` AND bi.quarter = ${filters.quarter}` : import_drizzle_orm52.sql``;
+  const yearClause = filters.year ? import_drizzle_orm53.sql` AND bi.year = ${filters.year}` : import_drizzle_orm53.sql``;
+  const quarterClause = filters.quarter ? import_drizzle_orm53.sql` AND bi.quarter = ${filters.quarter}` : import_drizzle_orm53.sql``;
   const facilityFilter = facilityScopeClause(filters);
   const districtFilter = districtScopeClause(filters);
   const provinceFilter = provinceScopeClause(filters);
-  const dbRows = await db.execute(import_drizzle_orm52.sql`
+  const dbRows = await db.execute(import_drizzle_orm53.sql`
     SELECT
       f.id AS id,
       f.name AS name,
@@ -39549,12 +39672,12 @@ async function getBudgetReport(filters) {
   );
 }
 async function getSupervisionReport(filters) {
-  const yearClause = filters.year ? import_drizzle_orm52.sql` AND EXTRACT(YEAR FROM sv.scheduled_date) = ${filters.year}` : import_drizzle_orm52.sql``;
-  const quarterClause = filters.quarter ? import_drizzle_orm52.sql` AND CEIL(EXTRACT(MONTH FROM sv.scheduled_date) / 3.0) = ${filters.quarter}` : import_drizzle_orm52.sql``;
+  const yearClause = filters.year ? import_drizzle_orm53.sql` AND EXTRACT(YEAR FROM sv.scheduled_date) = ${filters.year}` : import_drizzle_orm53.sql``;
+  const quarterClause = filters.quarter ? import_drizzle_orm53.sql` AND CEIL(EXTRACT(MONTH FROM sv.scheduled_date) / 3.0) = ${filters.quarter}` : import_drizzle_orm53.sql``;
   const facilityFilter = facilityScopeClause(filters);
   const districtFilter = districtScopeClause(filters);
   const provinceFilter = provinceScopeClause(filters);
-  const dbRows = await db.execute(import_drizzle_orm52.sql`
+  const dbRows = await db.execute(import_drizzle_orm53.sql`
     SELECT
       f.id AS id,
       f.name AS name,
@@ -39614,12 +39737,12 @@ async function getSupervisionReport(filters) {
     }
   );
 }
-var import_drizzle_orm52;
+var import_drizzle_orm53;
 var init_reportingService = __esm({
   "server/services/reportingService.ts"() {
     "use strict";
     init_db();
-    import_drizzle_orm52 = require("drizzle-orm");
+    import_drizzle_orm53 = require("drizzle-orm");
   }
 });
 
@@ -39807,12 +39930,12 @@ var gisPolygons_exports = {};
 __export(gisPolygons_exports, {
   gisPolygonsRouter: () => gisPolygonsRouter
 });
-var import_express8, import_drizzle_orm53, gisPolygonsRouter;
+var import_express8, import_drizzle_orm54, gisPolygonsRouter;
 var init_gisPolygons = __esm({
   "server/routes/gisPolygons.ts"() {
     "use strict";
     import_express8 = require("express");
-    import_drizzle_orm53 = require("drizzle-orm");
+    import_drizzle_orm54 = require("drizzle-orm");
     init_db();
     init_schema();
     init_populationIntelligenceService();
@@ -39824,13 +39947,13 @@ var init_gisPolygons = __esm({
       try {
         const tenantId = req.user?.tenantId;
         const { ownerType, ownerId } = req.query;
-        let query = db.select().from(gisPolygons).where((0, import_drizzle_orm53.eq)(gisPolygons.tenantId, tenantId));
+        let query = db.select().from(gisPolygons).where((0, import_drizzle_orm54.eq)(gisPolygons.tenantId, tenantId));
         if (ownerType && ownerId) {
           query = db.select().from(gisPolygons).where(
-            (0, import_drizzle_orm53.and)(
-              (0, import_drizzle_orm53.eq)(gisPolygons.tenantId, tenantId),
-              (0, import_drizzle_orm53.eq)(gisPolygons.ownerType, String(ownerType)),
-              (0, import_drizzle_orm53.eq)(gisPolygons.ownerId, parseInt(String(ownerId), 10))
+            (0, import_drizzle_orm54.and)(
+              (0, import_drizzle_orm54.eq)(gisPolygons.tenantId, tenantId),
+              (0, import_drizzle_orm54.eq)(gisPolygons.ownerType, String(ownerType)),
+              (0, import_drizzle_orm54.eq)(gisPolygons.ownerId, parseInt(String(ownerId), 10))
             )
           );
         }
@@ -39864,14 +39987,14 @@ var init_gisPolygons = __esm({
         const tenantId = req.user?.tenantId;
         const id = parseInt(req.params.id, 10);
         const data = req.body;
-        const [current] = await db.select({ id: gisPolygons.id, status: gisPolygons.status, isActive: gisPolygons.isActive }).from(gisPolygons).where((0, import_drizzle_orm53.and)((0, import_drizzle_orm53.eq)(gisPolygons.id, id), (0, import_drizzle_orm53.eq)(gisPolygons.tenantId, tenantId))).limit(1);
+        const [current] = await db.select({ id: gisPolygons.id, status: gisPolygons.status, isActive: gisPolygons.isActive }).from(gisPolygons).where((0, import_drizzle_orm54.and)((0, import_drizzle_orm54.eq)(gisPolygons.id, id), (0, import_drizzle_orm54.eq)(gisPolygons.tenantId, tenantId))).limit(1);
         if (current && (current.status === "active" || current.isActive || data?.status === "active" || data?.isActive === true)) {
           return res.status(409).json({
             code: "POLYGON_LIFECYCLE_REQUIRED",
             message: "Approved polygons must be changed through the polygon lifecycle workflow."
           });
         }
-        const [updated] = await db.update(gisPolygons).set({ ...data, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm53.and)((0, import_drizzle_orm53.eq)(gisPolygons.id, id), (0, import_drizzle_orm53.eq)(gisPolygons.tenantId, tenantId))).returning();
+        const [updated] = await db.update(gisPolygons).set({ ...data, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm54.and)((0, import_drizzle_orm54.eq)(gisPolygons.id, id), (0, import_drizzle_orm54.eq)(gisPolygons.tenantId, tenantId))).returning();
         if (!updated) return res.status(404).json({ message: "Polygon not found" });
         res.json(updated);
       } catch (err) {
@@ -39882,14 +40005,14 @@ var init_gisPolygons = __esm({
       try {
         const tenantId = req.user?.tenantId;
         const id = parseInt(req.params.id, 10);
-        const [current] = await db.select({ id: gisPolygons.id, status: gisPolygons.status, isActive: gisPolygons.isActive }).from(gisPolygons).where((0, import_drizzle_orm53.and)((0, import_drizzle_orm53.eq)(gisPolygons.id, id), (0, import_drizzle_orm53.eq)(gisPolygons.tenantId, tenantId))).limit(1);
+        const [current] = await db.select({ id: gisPolygons.id, status: gisPolygons.status, isActive: gisPolygons.isActive }).from(gisPolygons).where((0, import_drizzle_orm54.and)((0, import_drizzle_orm54.eq)(gisPolygons.id, id), (0, import_drizzle_orm54.eq)(gisPolygons.tenantId, tenantId))).limit(1);
         if (current && (current.status === "active" || current.isActive)) {
           return res.status(409).json({
             code: "POLYGON_LIFECYCLE_REQUIRED",
             message: "Approved polygons must be archived or replaced through the polygon lifecycle workflow."
           });
         }
-        await db.delete(gisPolygons).where((0, import_drizzle_orm53.and)((0, import_drizzle_orm53.eq)(gisPolygons.id, id), (0, import_drizzle_orm53.eq)(gisPolygons.tenantId, tenantId)));
+        await db.delete(gisPolygons).where((0, import_drizzle_orm54.and)((0, import_drizzle_orm54.eq)(gisPolygons.id, id), (0, import_drizzle_orm54.eq)(gisPolygons.tenantId, tenantId)));
         res.json({ success: true });
       } catch (err) {
         res.status(500).json({ message: "Failed to delete polygon", error: err.message });
@@ -39962,12 +40085,12 @@ __export(stock_ledger_columns_exports, {
 });
 async function applyStockLedgerColumnsMigration(db2) {
   try {
-    await db2.execute(import_drizzle_orm54.sql`
+    await db2.execute(import_drizzle_orm55.sql`
       ALTER TABLE client_vaccinations 
       ADD COLUMN IF NOT EXISTS schedule_dose_id integer,
       ADD COLUMN IF NOT EXISTS stock_transaction_id integer;
     `);
-    await db2.execute(import_drizzle_orm54.sql`
+    await db2.execute(import_drizzle_orm55.sql`
       ALTER TABLE stock_transactions 
       DROP CONSTRAINT IF EXISTS stock_transactions_product_id_fkey,
       DROP CONSTRAINT IF EXISTS stock_transactions_product_id_catalogue_vaccines_id_fk,
@@ -39980,11 +40103,11 @@ async function applyStockLedgerColumnsMigration(db2) {
     console.error("Migration: failed to apply stock ledger columns:", err.message);
   }
 }
-var import_drizzle_orm54;
+var import_drizzle_orm55;
 var init_stock_ledger_columns = __esm({
   "server/migrations/027-stock-ledger-columns.ts"() {
     "use strict";
-    import_drizzle_orm54 = require("drizzle-orm");
+    import_drizzle_orm55 = require("drizzle-orm");
   }
 });
 
@@ -40296,7 +40419,7 @@ var workers_exports = {};
 __export(workers_exports, {
   communicationWorker: () => communicationWorker
 });
-var import_bullmq2, import_drizzle_orm55, communicationWorker;
+var import_bullmq2, import_drizzle_orm56, communicationWorker;
 var init_workers = __esm({
   "server/services/uce/workers.ts"() {
     "use strict";
@@ -40305,7 +40428,7 @@ var init_workers = __esm({
     init_db();
     init_schema();
     init_messaging();
-    import_drizzle_orm55 = require("drizzle-orm");
+    import_drizzle_orm56 = require("drizzle-orm");
     communicationWorker = new import_bullmq2.Worker(
       "communication-queue",
       async (job) => {
@@ -40323,7 +40446,7 @@ var init_workers = __esm({
           let commConfig = null;
           if (tenantId) {
             const { tenants: tenants3 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
-            const [tenant] = await db.select().from(tenants3).where((0, import_drizzle_orm55.eq)(tenants3.id, tenantId)).limit(1);
+            const [tenant] = await db.select().from(tenants3).where((0, import_drizzle_orm56.eq)(tenants3.id, tenantId)).limit(1);
             if (tenant && tenant.settings && tenant.settings.communication) {
               commConfig = tenant.settings.communication[channel];
             }
@@ -40352,8 +40475,8 @@ var init_workers = __esm({
             response: dispatchResult.error || dispatchResult.messageId || "Success"
           });
           if (dispatchResult.success) {
-            await db.update(communicationChannels).set({ delivered: true, responseCode: dispatchResult.messageId }).where((0, import_drizzle_orm55.eq)(communicationChannels.id, channelRecord.id));
-            await db.update(communications).set({ status: "completed" }).where((0, import_drizzle_orm55.eq)(communications.id, communicationId));
+            await db.update(communicationChannels).set({ delivered: true, responseCode: dispatchResult.messageId }).where((0, import_drizzle_orm56.eq)(communicationChannels.id, channelRecord.id));
+            await db.update(communications).set({ status: "completed" }).where((0, import_drizzle_orm56.eq)(communications.id, communicationId));
             return { status: "delivered", channel };
           } else {
             throw new Error(dispatchResult.error || "Unknown error");
@@ -40384,7 +40507,7 @@ var init_workers = __esm({
               channel: nextChannel
             }, { delay: delayMs });
           } else {
-            await db.update(communications).set({ status: "failed" }).where((0, import_drizzle_orm55.eq)(communications.id, communicationId));
+            await db.update(communications).set({ status: "failed" }).where((0, import_drizzle_orm56.eq)(communications.id, communicationId));
           }
           throw err;
         }
@@ -40443,9 +40566,9 @@ async function backfillClientIds() {
   try {
     const { clients: clients2, facilities: facilities4, districts: districts3, provinces: provinces4 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
     const { db: db2 } = await Promise.resolve().then(() => (init_db(), db_exports));
-    const { sql: sql33, isNull: isNull8, eq: eq35, and: and28 } = await import("drizzle-orm");
+    const { sql: sql33, isNull: isNull9, eq: eq36, and: and29 } = await import("drizzle-orm");
     const { getInitials: getInitials2, computeCheckDigit: computeCheckDigit2 } = await Promise.resolve().then(() => (init_routes(), routes_exports));
-    const pendingClients = await db2.select().from(clients2).where(isNull8(clients2.clientId));
+    const pendingClients = await db2.select().from(clients2).where(isNull9(clients2.clientId));
     if (pendingClients.length === 0) {
       return;
     }
@@ -40455,16 +40578,16 @@ async function backfillClientIds() {
         facilityName: facilities4.name,
         districtName: districts3.name,
         provinceName: provinces4.name
-      }).from(facilities4).innerJoin(districts3, eq35(facilities4.districtId, districts3.id)).innerJoin(provinces4, eq35(districts3.provinceId, provinces4.id)).where(eq35(facilities4.id, client3.facilityId)).limit(1);
+      }).from(facilities4).innerJoin(districts3, eq36(facilities4.districtId, districts3.id)).innerJoin(provinces4, eq36(districts3.provinceId, provinces4.id)).where(eq36(facilities4.id, client3.facilityId)).limit(1);
       const provInit = getInitials2(facInfo?.provinceName || "PRV");
       const distInit = getInitials2(facInfo?.districtName || "DST");
       const hfInit = getInitials2(facInfo?.facilityName || "FAC");
       const regYear = client3.createdAt ? new Date(client3.createdAt).getFullYear() : (/* @__PURE__ */ new Date()).getFullYear();
       const [maxClient] = await db2.select({ maxSerial: sql33`MAX(${clients2.serialNumber})` }).from(clients2).where(
-        and28(
-          eq35(clients2.facilityId, client3.facilityId),
-          eq35(clients2.registrationYear, regYear),
-          eq35(clients2.tenantId, client3.tenantId)
+        and29(
+          eq36(clients2.facilityId, client3.facilityId),
+          eq36(clients2.registrationYear, regYear),
+          eq36(clients2.tenantId, client3.tenantId)
         )
       );
       const serialNum = (maxClient?.maxSerial ?? 0) + 1;
@@ -40476,7 +40599,7 @@ async function backfillClientIds() {
         clientId: generatedClientId,
         serialNumber: serialNum,
         registrationYear: regYear
-      }).where(eq35(clients2.id, client3.id));
+      }).where(eq36(clients2.id, client3.id));
     }
     log(`Successfully backfilled ${pendingClients.length} Client IDs.`, "backfill");
   } catch (error) {

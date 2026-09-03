@@ -69,7 +69,26 @@ export function useRealtimeSync(): void {
     }
     clientRef.current.connect(tenantId);
 
+    const onLocalSyncComplete = () => {
+      try {
+        queryClient.invalidateQueries({
+          predicate: (q) =>
+            typeof q.queryKey?.[0] === "string" &&
+            (q.queryKey[0] as string).startsWith("/api"),
+          refetchType: "all",
+        });
+      } catch {
+        /* non-fatal */
+      }
+    };
+    if (typeof window !== "undefined") {
+      window.addEventListener("vaxplan_sync_complete", onLocalSyncComplete);
+    }
+
     return () => {
+      if (typeof window !== "undefined") {
+        window.removeEventListener("vaxplan_sync_complete", onLocalSyncComplete);
+      }
       clientRef.current?.disconnect();
       clientRef.current = null;
     };

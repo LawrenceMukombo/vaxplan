@@ -1,0 +1,1 @@
+import{l as i}from"./leaflet-src-BS8ePkqZ.js";import{a as l,b as s,e as u}from"./TileLayer-D_qzfSl6.js";function o(t,e,r){e.center!==r.center&&t.setLatLng(e.center),e.radius!=null&&e.radius!==r.radius&&t.setRadius(e.radius)}const f=l(function({center:e,children:r,...n},c){const a=new i.CircleMarker(e,n);return s(a,u(c,{overlayContainer:a}))},o);export{f as C,o as u};

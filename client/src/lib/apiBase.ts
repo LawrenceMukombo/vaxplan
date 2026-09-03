@@ -30,14 +30,35 @@ export function isNativeShell(): boolean {
   );
 }
 
+export const DEFAULT_PRODUCTION_API_BASE = "https://vaxplan.org";
+
 /**
  * The absolute origin the native app should call, e.g.
- * "https://api.your-domain.org". Empty string on the web (relative requests).
+ * "https://vaxplan.org". Empty string on the web (relative requests).
  */
 export function getApiBase(): string {
   if (!isNativeShell()) return "";
-  const base = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "";
-  return base.replace(/\/+$/, "");
+
+  // 1. Runtime override from localStorage (allows switching backend environments)
+  try {
+    if (typeof localStorage !== "undefined") {
+      const custom = localStorage.getItem("vaxplan_server_url");
+      if (custom && custom.trim()) {
+        return custom.trim().replace(/\/+$/, "");
+      }
+    }
+  } catch {
+    /* localStorage unavailable */
+  }
+
+  // 2. Build-time baked in variable
+  const envBase = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "";
+  if (envBase && envBase.trim()) {
+    return envBase.trim().replace(/\/+$/, "");
+  }
+
+  // 3. Fallback to production VaxPlan domain for native mobile / desktop shells
+  return DEFAULT_PRODUCTION_API_BASE;
 }
 
 /**

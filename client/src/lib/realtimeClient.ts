@@ -14,17 +14,27 @@
  */
 
 import { getApiBase } from "./apiBase";
+import { getDeviceToken } from "./deviceAuth";
+import { onNetworkChange } from "./platformNetwork";
 
 type ChangeHandler = (msg: any) => void;
 
-function buildWsUrl(tenantId: string): string {
+async function buildWsUrl(tenantId: string): Promise<string> {
   const base = getApiBase(); // non-empty only inside a packaged native shell
+  let tokenParam = "";
+  try {
+    const token = await getDeviceToken();
+    if (token) tokenParam = `&token=${encodeURIComponent(token)}`;
+  } catch {
+    /* ignore token read errors */
+  }
+
   if (base) {
     const wsBase = base.replace(/^http/i, "ws"); // https→wss, http→ws
-    return `${wsBase}/ws?tenantId=${encodeURIComponent(tenantId)}`;
+    return `${wsBase}/ws?tenantId=${encodeURIComponent(tenantId)}${tokenParam}`;
   }
   const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-  return `${proto}//${window.location.host}/ws?tenantId=${encodeURIComponent(tenantId)}`;
+  return `${proto}//${window.location.host}/ws?tenantId=${encodeURIComponent(tenantId)}${tokenParam}`;
 }
 
 export class RealtimeClient {
@@ -35,9 +45,17 @@ export class RealtimeClient {
   private retry = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  private unsubNetwork: (() => void) | null = null;
 
   constructor(onChange: ChangeHandler) {
     this.onChange = onChange;
+    // Auto-reconnect the instant connectivity is restored
+    this.unsubNetwork = onNetworkChange((connected) => {
+      if (connected && !this.closedByUser && (!this.ws || this.ws.readyState !== WebSocket.OPEN)) {
+        this.retry = 0;
+        this.open();
+      }
+    });
   }
 
   connect(tenantId: string): void {
@@ -56,13 +74,14 @@ export class RealtimeClient {
     this.open();
   }
 
-  private open(): void {
+  private async open(): Promise<void> {
     let url: string;
     try {
-      url = buildWsUrl(this.tenantId);
+      url = await buildWsUrl(this.tenantId);
     } catch {
       return;
     }
+    if (this.closedByUser) return;
     let ws: WebSocket;
     try {
       ws = new WebSocket(url);
@@ -133,6 +152,10 @@ export class RealtimeClient {
 
   disconnect(): void {
     this.closedByUser = true;
+    if (this.unsubNetwork) {
+      this.unsubNetwork();
+      this.unsubNetwork = null;
+    }
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;

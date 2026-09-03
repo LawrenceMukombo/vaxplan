@@ -358,6 +358,95 @@ export interface LocalVaccineConfig {
   _syncedAt: number;
 }
 
+export interface LocalMicroplan {
+  id: string | number;
+  tenantId: string;
+  name?: string;
+  year?: number;
+  status?: string;
+  districtId?: number | null;
+  provinceId?: number | null;
+  targetPopulation?: number | null;
+  totalBudget?: number | null;
+  data?: any;
+  approvalWorkflow?: any;
+  _syncedAt?: number;
+  _localOnly?: boolean;
+}
+
+export interface LocalSupervisionVisit {
+  id: string | number;
+  tenantId: string;
+  facilityId: number;
+  supervisorName?: string;
+  supervisorRole?: string;
+  date?: string;
+  status?: string;
+  score?: number | null;
+  checklist?: any;
+  findings?: string | null;
+  actionPoints?: any;
+  recommendations?: any;
+  location?: any;
+  _syncedAt?: number;
+  _localOnly?: boolean;
+}
+
+export interface LocalSupervisionTemplate {
+  id: string | number;
+  tenantId?: string | null;
+  name: string;
+  description?: string | null;
+  sections?: any;
+  isActive?: boolean;
+  version?: number;
+  _syncedAt?: number;
+}
+
+export interface LocalColdChainEquipment {
+  id: string | number;
+  tenantId: string;
+  facilityId: number;
+  equipmentType?: string;
+  model?: string;
+  serialNumber?: string;
+  status?: string;
+  temperature?: number | null;
+  lastServiceDate?: string | null;
+  notes?: string | null;
+  _syncedAt?: number;
+  _localOnly?: boolean;
+}
+
+export interface LocalGisPolygon {
+  id: string | number;
+  tenantId: string;
+  facilityId?: number | null;
+  districtId?: number | null;
+  name?: string;
+  layerType?: string;
+  geometry?: any;
+  properties?: any;
+  _syncedAt?: number;
+  _localOnly?: boolean;
+}
+
+export interface LocalSettlement {
+  id: string | number;
+  tenantId: string;
+  name: string;
+  districtId?: number | null;
+  provinceId?: number | null;
+  facilityId?: number | null;
+  population?: number | null;
+  riskCategory?: string | null;
+  coordinates?: any;
+  latitude?: number | null;
+  longitude?: number | null;
+  _syncedAt?: number;
+  _localOnly?: boolean;
+}
+
 export interface LocalGisCache {
   key: string;          // e.g. "grid3_settlements" | "geotiff_zmb_2020"
   tenantId: string;
@@ -471,6 +560,14 @@ export class VaxPlanOfflineDb extends Dexie {
   // GIS Cache (high-performance vector and metadata caching)
   gisCache!: Table<LocalGisCache>;
 
+  // Comprehensive offline domain tables
+  microplans!: Table<LocalMicroplan>;
+  supervisionVisits!: Table<LocalSupervisionVisit>;
+  supervisionTemplates!: Table<LocalSupervisionTemplate>;
+  coldChainEquipment!: Table<LocalColdChainEquipment>;
+  gisPolygons!: Table<LocalGisPolygon>;
+  settlements!: Table<LocalSettlement>;
+
   constructor() {
     super("VaxPlanOfflineDB");
 
@@ -575,6 +672,37 @@ export class VaxPlanOfflineDb extends Dexie {
       vaccineConfigs:  "id, tenantId",
       gisCache:        "[key+tenantId], tenantId",
     });
+
+    // Version 5: Comprehensive offline compliance across Microplans, Supervision, Cold Chain, GIS Polygons, and Settlements
+    this.version(5).stores({
+      outbox:                 "++id, tenantId, entityType, createdAt",
+      conflictLog:            "++id, tenantId, entityType, entityId",
+      syncMeta:               "key",
+      regions:                "id, tenantId, name",
+      provinces:              "id, tenantId, regionId",
+      districts:              "id, tenantId, provinceId",
+      llgs:                   "id, tenantId, districtId",
+      facilities:             "id, tenantId, districtId, provinceId",
+      villages:               "id, tenantId, facilityId, districtId",
+      clients:                "id, tenantId, facilityId, villageId, clientType",
+      clientVaccinations:     "id, tenantId, clientId, facilityId",
+      sessionPlans:           "id, tenantId, facilityId, status",
+      sessionDayPlans:        "id, tenantId, sessionPlanId",
+      sessionVillageLinks:    "[sessionId+villageId], sessionId, tenantId",
+      budgetItems:            "id, tenantId, facilityId, quarter, year",
+      mobilizationActivities: "id, tenantId, facilityId",
+      stockTransactions:      "id, tenantId, facilityId",
+      monthlyReports:         "id, tenantId, facilityId, year, month",
+      populationData:         "id, tenantId, provinceId, districtId, year",
+      vaccineConfigs:         "id, tenantId",
+      gisCache:               "[key+tenantId], tenantId",
+      microplans:             "id, tenantId, status, districtId, provinceId",
+      supervisionVisits:      "id, tenantId, facilityId, status, date",
+      supervisionTemplates:   "id, tenantId, isActive",
+      coldChainEquipment:     "id, tenantId, facilityId, status",
+      gisPolygons:            "id, tenantId, facilityId, districtId, layerType",
+      settlements:            "id, tenantId, districtId, provinceId",
+    });
   }
 }
 
@@ -615,6 +743,12 @@ export async function clearLocalTenantCache(): Promise<void> {
     offlineDb.populationData.clear(),
     offlineDb.vaccineConfigs.clear(),
     offlineDb.gisCache.clear(),
+    offlineDb.microplans.clear(),
+    offlineDb.supervisionVisits.clear(),
+    offlineDb.supervisionTemplates.clear(),
+    offlineDb.coldChainEquipment.clear(),
+    offlineDb.gisPolygons.clear(),
+    offlineDb.settlements.clear(),
   ]);
 }
 

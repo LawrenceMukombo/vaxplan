@@ -54,7 +54,7 @@ if (-not $SkipViteBuild) {
   # server by its full address. Override VITE_API_BASE_URL to point at your
   # published server; defaults to the Replit development URL.
   if (-not $env:VITE_API_BASE_URL) {
-    $env:VITE_API_BASE_URL = "https://ca8e169b-0ca1-4ef3-b713-3cf9f5df8381-00-3ezbyhzujzwhu.picard.replit.dev"
+    $env:VITE_API_BASE_URL = "https://vaxplan.org"
   }
   $env:VITE_NATIVE_BUILD = "1"
   Write-Host "  Server address: $env:VITE_API_BASE_URL" -ForegroundColor Gray

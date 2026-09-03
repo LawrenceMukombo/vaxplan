@@ -188,12 +188,10 @@ async function getOfflineData(url: string): Promise<any> {
     return await _byTenant(offlineDb.sessionDayPlans);
   }
   if (pathname === "/api/sessions/villages") {
-    // Session ↔ village junction data is not replicated offline; return empty array
-    return [];
+    return await _byTenant(offlineDb.sessionVillageLinks);
   }
   if (pathname === "/api/microplans") {
-    // Microplans are not replicated offline; return empty array
-    return [];
+    return await _byTenant(offlineDb.microplans);
   }
   if (pathname === "/api/budget-items") {
     return await _byTenant(offlineDb.budgetItems);
@@ -201,8 +199,48 @@ async function getOfflineData(url: string): Promise<any> {
   if (pathname === "/api/mobilization") {
     return await _byTenant(offlineDb.mobilizationActivities);
   }
+  if (pathname === "/api/supervision-visits") {
+    const facilityId = searchParams.get("facilityId");
+    const status = searchParams.get("status");
+    let rows = await _byTenant(offlineDb.supervisionVisits);
+    if (facilityId) rows = rows.filter((r: any) => Number(r.facilityId) === Number(facilityId));
+    if (status && status !== "all") rows = rows.filter((r: any) => r.status === status);
+    return rows;
+  }
+  if (pathname === "/api/supervision-checklist-templates") {
+    return await offlineDb.supervisionTemplates.toArray();
+  }
+  if (pathname === "/api/cold-chain") {
+    const facilityId = searchParams.get("facilityId");
+    if (facilityId) {
+      return await offlineDb.coldChainEquipment.where("facilityId").equals(Number(facilityId)).toArray();
+    }
+    return await _byTenant(offlineDb.coldChainEquipment);
+  }
+  if (pathname === "/api/gis-polygons") {
+    return await _byTenant(offlineDb.gisPolygons);
+  }
+  if (pathname === "/api/settlements") {
+    return await _byTenant(offlineDb.settlements);
+  }
 
   // Handle dynamic / parameterized endpoints
+  const microplanDetailRegex = /^\/api\/microplans\/([^/]+)$/;
+  const matchMicroplan = pathname.match(microplanDetailRegex);
+  if (matchMicroplan) {
+    const rawId = matchMicroplan[1];
+    const id = isNaN(Number(rawId)) ? rawId : Number(rawId);
+    return (await offlineDb.microplans.get(id as any)) || null;
+  }
+
+  const supervisionDetailRegex = /^\/api\/supervision-visits\/([^/]+)$/;
+  const matchSupervision = pathname.match(supervisionDetailRegex);
+  if (matchSupervision) {
+    const rawId = matchSupervision[1];
+    const id = isNaN(Number(rawId)) ? rawId : Number(rawId);
+    return (await offlineDb.supervisionVisits.get(id as any)) || null;
+  }
+
   const clientsVaccinationsRegex = /^\/api\/clients\/([^/]+)\/vaccinations$/;
   const matchVaccinations = pathname.match(clientsVaccinationsRegex);
   if (matchVaccinations) {
@@ -213,7 +251,11 @@ async function getOfflineData(url: string): Promise<any> {
   const facilityCatchmentRegex = /^\/api\/facilities\/([^/]+)\/catchments$/;
   const matchCatchment = pathname.match(facilityCatchmentRegex);
   if (matchCatchment) {
-    return []; // Return empty array offline for catchments
+    const fid = Number(matchCatchment[1]);
+    if (!isNaN(fid)) {
+      return await offlineDb.gisPolygons.where("facilityId").equals(fid).toArray();
+    }
+    return [];
   }
 
   if (pathname === "/api/auth/user") {
@@ -357,6 +399,18 @@ async function writeToIndexedDB(method: string, url: string, data: any): Promise
     }
   } else if (resource === "monthly-reports") {
     table = offlineDb.monthlyReports;
+  } else if (resource === "microplans") {
+    table = offlineDb.microplans;
+  } else if (resource === "supervision-visits") {
+    table = offlineDb.supervisionVisits;
+  } else if (resource === "supervision-checklist-templates") {
+    table = offlineDb.supervisionTemplates;
+  } else if (resource === "cold-chain") {
+    table = offlineDb.coldChainEquipment;
+  } else if (resource === "gis-polygons") {
+    table = offlineDb.gisPolygons;
+  } else if (resource === "settlements") {
+    table = offlineDb.settlements;
   } else if (resource === "population") {
     table = offlineDb.populationData;
   } else if (resource === "vaccines") {
@@ -852,6 +906,26 @@ export const getQueryFn: <T>(options: {
     const isJson = contentType.includes("application/json");
 
     if (res.status === 401) {
+      if (isAuthUserQuery) {
+        // Attempt native device token session restoration before giving up
+        try {
+          const { restoreSessionFromDeviceToken } = await import("./deviceAuth");
+          const restored = await restoreSessionFromDeviceToken();
+          if (restored) {
+            const retryRes = await fetch(url, { credentials: "include" });
+            if (retryRes.ok) return await retryRes.json();
+          }
+        } catch {
+          /* ignore token restore failure */
+        }
+
+        // Fall back to valid offline session user if available
+        if (hasValidOfflineSession()) {
+          const offlineUser = getValidOfflineUser();
+          if (offlineUser) return offlineUser;
+        }
+      }
+
       if (typeof window !== "undefined") {
         clearClientAuthStorage({
           reason: "unauthenticated",

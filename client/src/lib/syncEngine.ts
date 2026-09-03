@@ -70,6 +70,10 @@ interface PullPayload {
   monthlyReports?: any[];
   populationData?: any[];
   vaccineConfigs?: any[];
+  microplans?: any[];
+  supervisionVisits?: any[];
+  supervisionTemplates?: any[];
+  catchments?: any[];
 }
 
 // ─── Outbox flush result (mirrors POST /api/sync/batch response) ─────────────
@@ -534,6 +538,17 @@ class SyncEngine {
       this.setState({ currentStage: `Syncing Vaccine Configurations (${payload.vaccineConfigs.length} records)...`, progressPercent: 98 });
       await bulkSyncEntities(offlineDb.vaccineConfigs, payload.vaccineConfigs.map(stamp));
     }
+    if (payload.microplans) {
+      this.setState({ currentStage: `Syncing Microplans (${payload.microplans.length} records)...`, progressPercent: 98 });
+      await bulkSyncEntities(offlineDb.microplans, payload.microplans.map(stamp));
+    }
+    if (payload.supervisionVisits) {
+      this.setState({ currentStage: `Syncing Supervision Visits (${payload.supervisionVisits.length} records)...`, progressPercent: 99 });
+      await bulkSyncEntities(offlineDb.supervisionVisits, payload.supervisionVisits.map(stamp));
+    }
+    if (payload.supervisionTemplates) {
+      await bulkSyncEntities(offlineDb.supervisionTemplates, payload.supervisionTemplates.map(stamp));
+    }
 
     await setLastSyncAt(payload.serverTime);
     this.setState({ lastSyncAt: payload.serverTime });
@@ -600,6 +615,10 @@ class SyncEngine {
             this.setState({ currentStage: "", progressPercent: 0 });
           }
         }, 3000);
+      }
+
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("vaxplan_sync_complete", { detail: { tenantId } }));
       }
     } catch (err: any) {
       console.error("[SyncEngine] sync failed:", err);

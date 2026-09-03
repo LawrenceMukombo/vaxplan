@@ -34,7 +34,11 @@ import {
   llgs,
   sessionDayPlans,
   sessionVillages,
-  mobilizationActivities, // COMMENT: Added mobilizationActivities import for social mobilization offline sync
+  mobilizationActivities,
+  microplans,
+  supervisionVisits,
+  supervisionChecklistTemplates,
+  facilityCatchments,
 } from "@shared/schema";
 import { eq, and, gt, sql, inArray } from "drizzle-orm";
 import { canonicalizePerAntigen, normalizeStockVaccineName } from "@shared/vaccineSchedule";
@@ -96,6 +100,10 @@ export interface PullPayload {
   vaccineConfigs?: any[];
   budgetItems?: any[];
   mobilizationActivities?: any[];
+  microplans?: any[];
+  supervisionVisits?: any[];
+  supervisionTemplates?: any[];
+  catchments?: any[];
 }
 
 // ─── PULL — server → client ───────────────────────────────────────────────────
@@ -218,6 +226,10 @@ export async function pullChanges(
     reportsData,
     popData,
     vaccineConfigsData,
+    microplansData,
+    supervisionVisitsData,
+    supervisionTemplatesData,
+    catchmentsData,
   ] = await Promise.all([
     db.select().from(regions).where(tenantFilter(regions)),
     db.select().from(provinces).where(tenantFilter(provinces)),
@@ -248,6 +260,10 @@ export async function pullChanges(
     db.select().from(monthlyReports).where(tenantFilter(monthlyReports)),
     db.select().from(populationData).where(tenantFilter(populationData)),
     db.select().from(vaccineConfigurations).where(tenantFilter(vaccineConfigurations)),
+    db.select().from(microplans).where(tenantFilter(microplans)),
+    db.select().from(supervisionVisits).where(tenantFilter(supervisionVisits)),
+    db.select().from(supervisionChecklistTemplates).where(tenantFilter(supervisionChecklistTemplates)),
+    db.select().from(facilityCatchments).where(tenantFilter(facilityCatchments)),
   ]);
 
   const clientsData = clientsRawData.map(({ client, ...geo }) => ({
@@ -283,6 +299,10 @@ export async function pullChanges(
     monthlyReports: reportsData,
     populationData: popData,
     vaccineConfigs: vaccineConfigsData,
+    microplans: microplansData,
+    supervisionVisits: supervisionVisitsData,
+    supervisionTemplates: supervisionTemplatesData,
+    catchments: catchmentsData,
   };
 }
 
@@ -651,6 +671,97 @@ export async function batchMutate(
           if (villageId) {
             await storage.deleteVillage(tenantId, villageId);
             serverId = villageId;
+          }
+        }
+
+      } else if (mutation.url.startsWith("/api/facilities")) {
+        if (mutation.method === "POST") {
+          const fac = await storage.createFacility(tenantId, payload);
+          serverId = fac.id;
+        } else if ((mutation.method === "PATCH" || mutation.method === "PUT") && mutation.serverId) {
+          const fac = await storage.updateFacility(tenantId, Number(mutation.serverId), payload);
+          serverId = fac?.id;
+        } else if (mutation.method === "DELETE") {
+          let facId = mutation.serverId ? Number(mutation.serverId) : null;
+          if (!facId) {
+            const parts = mutation.url.split("/");
+            const lastPart = parts[parts.length - 1];
+            if (lastPart && !isNaN(Number(lastPart))) {
+              facId = Number(lastPart);
+            }
+          }
+          if (facId) {
+            await storage.deleteFacility(tenantId, facId);
+            serverId = facId;
+          }
+        }
+
+      } else if (mutation.url.startsWith("/api/microplans")) {
+        if (mutation.method === "POST") {
+          const plan = await storage.createMicroplan(tenantId, payload);
+          serverId = plan.id;
+        } else if ((mutation.method === "PATCH" || mutation.method === "PUT") && mutation.serverId) {
+          await storage.updateMicroplan(tenantId, Number(mutation.serverId), payload);
+          serverId = mutation.serverId;
+        } else if (mutation.method === "DELETE") {
+          let planId = mutation.serverId ? Number(mutation.serverId) : null;
+          if (!planId) {
+            const parts = mutation.url.split("/");
+            const lastPart = parts[parts.length - 1];
+            if (lastPart && !isNaN(Number(lastPart))) {
+              planId = Number(lastPart);
+            }
+          }
+          if (planId) {
+            await storage.deleteMicroplan(tenantId, planId);
+            serverId = planId;
+          }
+        }
+
+      } else if (mutation.url.startsWith("/api/supervision-visits")) {
+        if (mutation.method === "POST") {
+          const visit = await storage.createSupervisionVisit(tenantId, {
+            ...payload,
+            createdByUserId: performedById,
+          });
+          serverId = visit.id;
+        } else if ((mutation.method === "PATCH" || mutation.method === "PUT") && mutation.serverId) {
+          await storage.updateSupervisionVisit(tenantId, Number(mutation.serverId), payload);
+          serverId = mutation.serverId;
+        } else if (mutation.method === "DELETE") {
+          let visitId = mutation.serverId ? Number(mutation.serverId) : null;
+          if (!visitId) {
+            const parts = mutation.url.split("/");
+            const lastPart = parts[parts.length - 1];
+            if (lastPart && !isNaN(Number(lastPart))) {
+              visitId = Number(lastPart);
+            }
+          }
+          if (visitId) {
+            await storage.deleteSupervisionVisit(tenantId, visitId);
+            serverId = visitId;
+          }
+        }
+
+      } else if (mutation.url.startsWith("/api/supervision-checklist-templates")) {
+        if (mutation.method === "POST") {
+          const tmpl = await storage.createChecklistTemplate(tenantId, performedById ?? null, payload);
+          serverId = tmpl.id;
+        } else if ((mutation.method === "PATCH" || mutation.method === "PUT") && mutation.serverId) {
+          await storage.updateChecklistTemplate(tenantId, Number(mutation.serverId), payload);
+          serverId = mutation.serverId;
+        } else if (mutation.method === "DELETE") {
+          let tmplId = mutation.serverId ? Number(mutation.serverId) : null;
+          if (!tmplId) {
+            const parts = mutation.url.split("/");
+            const lastPart = parts[parts.length - 1];
+            if (lastPart && !isNaN(Number(lastPart))) {
+              tmplId = Number(lastPart);
+            }
+          }
+          if (tmplId) {
+            await storage.deleteChecklistTemplate(tenantId, tmplId);
+            serverId = tmplId;
           }
         }
 

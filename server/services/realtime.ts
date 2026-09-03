@@ -23,6 +23,10 @@ import type { Server, IncomingMessage } from "http";
 import type { RequestHandler } from "express";
 import { WebSocketServer, WebSocket } from "ws";
 import { parse as parseUrl } from "url";
+import * as nodeCrypto from "crypto";
+import { db } from "../db";
+import { deviceTokens } from "@shared/schema";
+import { eq, and, gt, isNull } from "drizzle-orm";
 
 type TenantSockets = Set<WebSocket>;
 
@@ -125,10 +129,41 @@ export function setupRealtime(
     } as any;
 
     try {
-      sessionMiddleware(req as any, stubRes, () => {
+      sessionMiddleware(req as any, stubRes, async () => {
         const session = (req as any).session;
-        const passportUser = session?.passport?.user;
-        if (!passportUser) {
+        let authenticated = !!session?.passport?.user;
+
+        // If no active session cookie (e.g. Capacitor Android cross-origin WebView),
+        // authenticate using device token passed in query parameters
+        if (!authenticated) {
+          try {
+            const parsed = parseUrl(req.url || "", true);
+            const token =
+              (parsed.query.token as string) ||
+              (parsed.query.deviceToken as string);
+            if (token && typeof token === "string" && token.length > 10) {
+              const hash = nodeCrypto.createHash("sha256").update(token).digest("hex");
+              const rows = await db
+                .select({ id: deviceTokens.id })
+                .from(deviceTokens)
+                .where(
+                  and(
+                    eq(deviceTokens.tokenHash, hash),
+                    isNull(deviceTokens.revokedAt),
+                    gt(deviceTokens.expiresAt, new Date()),
+                  ),
+                )
+                .limit(1);
+              if (rows.length > 0) {
+                authenticated = true;
+              }
+            }
+          } catch (e) {
+            /* ignore token check failure */
+          }
+        }
+
+        if (!authenticated) {
           try {
             socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
           } catch {}
