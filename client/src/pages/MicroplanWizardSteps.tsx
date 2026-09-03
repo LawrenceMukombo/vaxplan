@@ -78,6 +78,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { getCountryConfig } from "@/lib/countryConfig";
 import { getCachedPopulation, setCachedPopulation } from "@/lib/populationCache";
 import {
   estimateCatchmentPopulation,
@@ -1018,6 +1019,7 @@ export function Step2({
   planType?: string;
 }) {
   const { data: tenant } = useQuery<any>({ queryKey: ["/api/me/tenant"] });
+  const countryConfig = getCountryConfig(tenant);
   const settings = tenant?.settings?.demographics || {};
   const under1Ratio = settings.under1 !== undefined ? Number(settings.under1) : 0.04;
 
@@ -1294,12 +1296,12 @@ export function Step2({
       return;
     }
     const routinePlan = planType !== "campaign";
-    if (routinePlan) {
-      const nrcPattern = /^\d{6}\/\d{2}\/\d{1}$/;
-      if (!nrcPattern.test(focalChvForm.nrc.trim())) {
+    if (routinePlan && focalChvForm.nrc.trim()) {
+      const idVal = countryConfig.formatSpec.validateId(focalChvForm.nrc.trim());
+      if (!idVal.valid) {
         toast({
-          title: "NRC required for CHV registry",
-          description: "Enter NRC as XXXXXX/XX/X, or use the manual focal person fields if NRC is not available.",
+          title: `${countryConfig.idShortLabel || "ID"} format invalid`,
+          description: idVal.message,
           variant: "destructive",
         });
         return;
@@ -2488,16 +2490,16 @@ export function Step2({
                     className="mt-1"
                     value={focalChvForm.contactPhone}
                     onChange={(e) => setFocalChvForm({ ...focalChvForm, contactPhone: e.target.value })}
-                    placeholder="+84..."
+                    placeholder={countryConfig.phonePlaceholder || "+27 82 123 4567"}
                   />
                 </div>
                 <div>
-                  <Label className="text-xs font-semibold">NRC / ID {planType !== "campaign" ? "*" : ""}</Label>
+                  <Label className="text-xs font-semibold">{countryConfig.idShortLabel || "National ID"} {planType !== "campaign" ? "*" : ""}</Label>
                   <Input
                     className="mt-1"
                     value={focalChvForm.nrc}
                     onChange={(e) => setFocalChvForm({ ...focalChvForm, nrc: e.target.value })}
-                    placeholder="123456/78/9"
+                    placeholder={countryConfig.idFormatPlaceholder || "9001015009087"}
                   />
                 </div>
                 <div className="flex items-end gap-2">
@@ -2525,7 +2527,7 @@ export function Step2({
               <div>
                 <Label className="text-xs font-semibold">Focal Person Phone</Label>
                 <Input
-                  placeholder="+260..."
+                  placeholder={countryConfig.phonePlaceholder || "+27 82 123 4567"}
                   className="mt-1"
                   value={communities[selectedIdx].focalPersonPhone || ""}
                   onChange={(e) => update(selectedIdx, { focalPersonPhone: e.target.value, focalPersonSource: communities[selectedIdx].focalPersonSource || "Manual entry" })}
@@ -4265,6 +4267,8 @@ export function AddStaffDialog({ facilityId }: { facilityId: number | null }) {
   const [phone, setPhone] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const { toast } = useToast();
+  const { data: tenant } = useQuery<any>({ queryKey: ["/api/me/tenant"] });
+  const countryConfig = getCountryConfig(tenant);
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -4274,12 +4278,20 @@ export function AddStaffDialog({ facilityId }: { facilityId: number | null }) {
       return;
     }
 
+    if (phone.trim()) {
+      const phoneVal = countryConfig.formatSpec.validatePhone(phone.trim());
+      if (!phoneVal.valid) {
+        toast({ title: "Invalid Phone Number", description: phoneVal.message, variant: "destructive" });
+        return;
+      }
+    }
+
     try {
       setSubmitting(true);
       await apiRequest("POST", `/api/facilities/${facilityId}/staff`, {
         fullName: fullName.trim(),
         role,
-        contactPhone: phone.trim(),
+        contactPhone: phone.trim() ? countryConfig.formatSpec.normalizePhone(phone.trim()) : null,
         isActive: true,
       });
 
@@ -4353,7 +4365,7 @@ export function AddStaffDialog({ facilityId }: { facilityId: number | null }) {
                 <Label htmlFor="staff-phone">Phone Number</Label>
                 <Input
                   id="staff-phone"
-                  placeholder="e.g. +260977000000"
+                  placeholder={countryConfig.phonePlaceholder || "+27 82 123 4567"}
                   value={phone}
                   onChange={(e) => setPhone(e.target.value)}
                   disabled={submitting}
@@ -5393,6 +5405,8 @@ export function Step7({
 // --- Step HFC Board (Sheet 9) ---------------------------------------------
 export function StepHfcBoard({ facilityId }: { facilityId: number | null }) {
   const { toast } = useToast();
+  const { data: tenant } = useQuery<any>({ queryKey: ["/api/me/tenant"] });
+  const countryConfig = getCountryConfig(tenant);
   const { data: members = [], isLoading } = useQuery<any[]>({
     queryKey: [`/api/facilities/${facilityId}/hfc-committee`],
     enabled: !!facilityId,
@@ -5488,7 +5502,7 @@ export function StepHfcBoard({ facilityId }: { facilityId: number | null }) {
           </div>
           <div>
             <Label className="text-xs">Contact Phone</Label>
-            <Input value={form.contactPhone} onChange={(e) => setForm({ ...form, contactPhone: e.target.value })} placeholder="+260..." />
+            <Input value={form.contactPhone} onChange={(e) => setForm({ ...form, contactPhone: e.target.value })} placeholder={countryConfig.phonePlaceholder || "+27 82 123 4567"} />
           </div>
           <div>
             <Label className="text-xs">Committee Established</Label>
@@ -5556,6 +5570,8 @@ const CHV_EDUCATION_LEVELS = ["Primary", "Secondary", "Certificate", "Diploma", 
 
 export function StepChvProfile({ facilityId, villages, planType = "routine" }: { facilityId: number | null; villages: any[]; planType?: string }) {
   const { toast } = useToast();
+  const { data: tenant } = useQuery<any>({ queryKey: ["/api/me/tenant"] });
+  const countryConfig = getCountryConfig(tenant);
 
   const { data: staffList } = useQuery<any[]>({
     queryKey: ["/api/facilities", Number(facilityId), "staff"],
@@ -5606,11 +5622,22 @@ export function StepChvProfile({ facilityId, villages, planType = "routine" }: {
       toast({ title: "CHV name is required", variant: "destructive" }); return;
     }
     if (form.nrc && form.nrc.trim()) {
-      const nrcPattern = /^\d{6}\/\d{2}\/\d{1}$/;
-      if (!nrcPattern.test(form.nrc.trim())) {
+      const idVal = countryConfig.formatSpec.validateId(form.nrc.trim());
+      if (!idVal.valid) {
         toast({
-          title: "Invalid NRC format",
-          description: "NRC must be formatted as XXXXXX/XX/X (e.g. 123456/78/9)",
+          title: `Invalid ${countryConfig.idShortLabel || "ID"} format`,
+          description: idVal.message,
+          variant: "destructive",
+        });
+        return;
+      }
+    }
+    if (form.contactPhone && form.contactPhone.trim()) {
+      const phoneVal = countryConfig.formatSpec.validatePhone(form.contactPhone.trim());
+      if (!phoneVal.valid) {
+        toast({
+          title: "Invalid Phone Number",
+          description: phoneVal.message,
           variant: "destructive",
         });
         return;
@@ -5626,9 +5653,9 @@ export function StepChvProfile({ facilityId, villages, planType = "routine" }: {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ...form,
-          nrc: form.nrc ? form.nrc.trim() : null,
-          contactPhone: form.contactPhone ? form.contactPhone.trim() : null,
-          phone: form.contactPhone ? form.contactPhone.trim() : null,
+          nrc: form.nrc ? countryConfig.formatSpec.normalizeId(form.nrc.trim()) : null,
+          contactPhone: form.contactPhone ? countryConfig.formatSpec.normalizePhone(form.contactPhone.trim()) : null,
+          phone: form.contactPhone ? countryConfig.formatSpec.normalizePhone(form.contactPhone.trim()) : null,
           yearsOfService: form.yearsOfService ? Number(form.yearsOfService) : null,
           villageId: form.villageId ? Number(form.villageId) : null,
           employmentStatus: form.employmentStatus,
@@ -5669,12 +5696,12 @@ export function StepChvProfile({ facilityId, villages, planType = "routine" }: {
             <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. Grace Mutale" />
           </div>
           <div>
-            <Label className="text-xs">National Registration Card (NRC)</Label>
-            <Input value={form.nrc} onChange={(e) => setForm({ ...form, nrc: e.target.value })} placeholder="XXXXXX/XX/X (e.g. 123456/78/9)" />
+            <Label className="text-xs">{countryConfig.idLabel || "National ID Number"}</Label>
+            <Input value={form.nrc} onChange={(e) => setForm({ ...form, nrc: e.target.value })} placeholder={countryConfig.idFormatPlaceholder || "9001015009087"} />
           </div>
           <div>
             <Label className="text-xs">Contact Phone</Label>
-            <Input value={form.contactPhone} onChange={(e) => setForm({ ...form, contactPhone: e.target.value })} placeholder="+260..." />
+            <Input value={form.contactPhone} onChange={(e) => setForm({ ...form, contactPhone: e.target.value })} placeholder={countryConfig.phonePlaceholder || "+27 82 123 4567"} />
           </div>
           <div>
             <Label className="text-xs">Gender</Label>

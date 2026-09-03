@@ -21,6 +21,7 @@ import { ChvCoverageTab } from "@/components/ChvCoverageTab";
 import { EntityHistoryDrawer } from "@/components/history/EntityHistoryDrawer";
 import { ViewAsOfDateControl } from "@/components/history/ViewAsOfDateControl";
 import { offlineDb } from "@/lib/offlineDb";
+import { getCountryConfig } from "@/lib/countryConfig";
 
 // Fix Leaflet default marker icon asset pathways
 delete (L.Icon.Default.prototype as any)._getIconUrl;
@@ -5077,6 +5078,8 @@ function FacilityStaffRosterManager({
   const [submitting, setSubmitting] = useState(false);
   const [form, setForm] = useState({ ...EMPTY_ROSTER_FORM });
   const { toast } = useToast();
+  const { data: tenant } = useQuery<any>({ queryKey: ["/api/me/tenant"] });
+  const countryConfig = getCountryConfig(tenant);
 
   const setField = <K extends keyof typeof EMPTY_ROSTER_FORM>(key: K, val: any) =>
     setForm(prev => ({ ...prev, [key]: val }));
@@ -5120,14 +5123,26 @@ function FacilityStaffRosterManager({
       return;
     }
     if (!form.nrc.trim()) {
-      toast({ title: "NRC Number is required", description: "Every staff member must have a unique NRC.", variant: "destructive" });
+      toast({ title: `${countryConfig.idShortLabel || "ID"} Number is required`, description: `Every staff member must have a unique ${countryConfig.idShortLabel || "ID"}.`, variant: "destructive" });
       return;
     }
-    // Client-side NRC duplicate check
-    const nrcLower = form.nrc.trim().toLowerCase();
-    const dup = staff.find(s => s.nrc && s.nrc.toLowerCase() === nrcLower && s.id !== editingStaff?.id);
+    const idValidation = countryConfig.formatSpec.validateId(form.nrc);
+    if (!idValidation.valid) {
+      toast({ title: `Invalid ${countryConfig.idShortLabel || "ID"}`, description: idValidation.message, variant: "destructive" });
+      return;
+    }
+    if (form.contactPhone.trim()) {
+      const phoneValidation = countryConfig.formatSpec.validatePhone(form.contactPhone);
+      if (!phoneValidation.valid) {
+        toast({ title: "Invalid Phone Number", description: phoneValidation.message, variant: "destructive" });
+        return;
+      }
+    }
+    // Client-side ID duplicate check
+    const nrcNorm = countryConfig.formatSpec.normalizeId(form.nrc).replace(/[\/\-\s]/g, "").toLowerCase();
+    const dup = staff.find(s => s.nrc && countryConfig.formatSpec.normalizeId(s.nrc).replace(/[\/\-\s]/g, "").toLowerCase() === nrcNorm && s.id !== editingStaff?.id);
     if (dup) {
-      toast({ title: "Duplicate NRC", description: `NRC ${form.nrc} is already assigned to ${dup.fullName}.`, variant: "destructive" });
+      toast({ title: `Duplicate ${countryConfig.idShortLabel || "ID"}`, description: `${countryConfig.idShortLabel || "ID"} ${form.nrc} is already assigned to ${dup.fullName}.`, variant: "destructive" });
       return;
     }
 
@@ -5217,7 +5232,7 @@ function FacilityStaffRosterManager({
               <th className="p-3 text-left font-semibold">Role</th>
               <th className="p-3 text-left font-semibold hidden md:table-cell">Contact</th>
               <th className="p-3 text-left font-semibold hidden lg:table-cell">Training</th>
-              <th className="p-3 text-left font-semibold hidden lg:table-cell">NRC</th>
+              <th className="p-3 text-left font-semibold hidden lg:table-cell">{countryConfig.idShortLabel || "National ID"}</th>
               <th className="p-3 text-center font-semibold">Status</th>
               <th className="p-3 text-right font-semibold">Actions</th>
             </tr>
@@ -5327,13 +5342,16 @@ function FacilityStaffRosterManager({
                   </div>
                   <div className="space-y-1.5">
                     <Label htmlFor="rs-phone">Contact Phone</Label>
-                    <Input id="rs-phone" placeholder="+260977123456" value={form.contactPhone}
+                    <Input id="rs-phone" placeholder={countryConfig.phonePlaceholder || "+27 82 123 4567"} value={form.contactPhone}
                       onChange={e => setField("contactPhone", e.target.value)} disabled={submitting} />
                   </div>
                   <div className="space-y-1.5">
-                    <Label htmlFor="rs-nrc">NRC Number *</Label>
-                    <Input id="rs-nrc" placeholder="123456/10/1" value={form.nrc}
+                    <Label htmlFor="rs-nrc">{countryConfig.idShortLabel || countryConfig.idLabel || "National ID"} *</Label>
+                    <Input id="rs-nrc" placeholder={countryConfig.idFormatPlaceholder || "9001015009087"} value={form.nrc}
                       onChange={e => setField("nrc", e.target.value)} disabled={submitting} />
+                    {countryConfig.idPatternHelp && (
+                      <p className="text-[11px] text-muted-foreground">{countryConfig.idPatternHelp}</p>
+                    )}
                   </div>
                   <div className="space-y-1.5">
                     <Label htmlFor="rs-empId">Employee ID</Label>
@@ -5342,7 +5360,7 @@ function FacilityStaffRosterManager({
                   </div>
                   <div className="space-y-1.5">
                     <Label htmlFor="rs-village">Residence Village / Area</Label>
-                    <Input id="rs-village" placeholder="Kalingalinga" value={form.residenceVillage}
+                    <Input id="rs-village" placeholder="e.g. Local Area / Village" value={form.residenceVillage}
                       onChange={e => setField("residenceVillage", e.target.value)} disabled={submitting} />
                   </div>
                 </div>
@@ -5542,6 +5560,8 @@ function CommunityWorkerRosterManager({
   const [submitting, setSubmitting] = useState(false);
   const [form, setForm] = useState({ ...EMPTY_CHV_FORM });
   const { toast } = useToast();
+  const { data: tenant } = useQuery<any>({ queryKey: ["/api/me/tenant"] });
+  const countryConfig = getCountryConfig(tenant);
 
   const { data: staffList } = useQuery<any[]>({
     queryKey: ["/api/facilities", Number(facilityId), "staff"],
@@ -5570,13 +5590,13 @@ function CommunityWorkerRosterManager({
       name: member.name || member.fullName || "",
       nrc: member.nrc || "",
       gender: member.gender || "female",
-      contactPhone: member.contactPhone || "",
+      contactPhone: member.contactPhone || member.phone || "",
       age: member.age?.toString() || "",
       roleDescription: member.roleDescription || "",
       educationLevel: member.educationLevel || "Secondary",
-      trainingStatus: member.trainingStatus || "trained",
+      trainingStatus: member.trainingStatus || member.trainingReceived || "trained",
       yearsOfService: member.yearsOfService?.toString() || "",
-      campaignRole: member.campaignRole || "social_mobilizer",
+      campaignRole: member.campaignRole || member.siaRole || "social_mobilizer",
       active: member.active ?? member.isActive ?? true,
       employmentStatus: member.employmentStatus || "Active - In-service",
       supervisorId: member.supervisorId?.toString() || "",
@@ -5596,20 +5616,31 @@ function CommunityWorkerRosterManager({
 
     if (!form.nrc.trim()) {
       toast({
-        title: "NRC is required",
-        description: "National Registration Card is mandatory.",
+        title: `${countryConfig.idShortLabel || "ID"} is required`,
+        description: `${countryConfig.idLabel} is mandatory.`,
         variant: "destructive",
       });
       return;
     }
-    const nrcPattern = /^\d{6}\/\d{2}\/\d{1}$/;
-    if (!nrcPattern.test(form.nrc.trim())) {
+    const idValidation = countryConfig.formatSpec.validateId(form.nrc.trim());
+    if (!idValidation.valid) {
       toast({
-        title: "Invalid NRC format",
-        description: "NRC must be formatted as XXXXXX/XX/X (e.g. 123456/78/9)",
+        title: `Invalid ${countryConfig.idShortLabel || "ID"} format`,
+        description: idValidation.message,
         variant: "destructive",
       });
       return;
+    }
+    if (form.contactPhone.trim()) {
+      const phoneValidation = countryConfig.formatSpec.validatePhone(form.contactPhone.trim());
+      if (!phoneValidation.valid) {
+        toast({
+          title: "Invalid Phone Number",
+          description: phoneValidation.message,
+          variant: "destructive",
+        });
+        return;
+      }
     }
 
     try {
@@ -5795,9 +5826,12 @@ function CommunityWorkerRosterManager({
                       onChange={e => setField("name", e.target.value)} disabled={submitting} />
                   </div>
                   <div className="sm:col-span-2 space-y-1.5">
-                    <Label htmlFor="chv-nrc">National Registration Card (NRC) *</Label>
-                    <Input id="chv-nrc" placeholder="XXXXXX/XX/X (e.g. 123456/78/9)" value={form.nrc}
+                    <Label htmlFor="chv-nrc">{countryConfig.idLabel || "National ID Number"} *</Label>
+                    <Input id="chv-nrc" placeholder={countryConfig.idFormatPlaceholder || "9001015009087"} value={form.nrc}
                       onChange={e => setField("nrc", e.target.value)} disabled={submitting} />
+                    {countryConfig.idPatternHelp && (
+                      <p className="text-[11px] text-muted-foreground">{countryConfig.idPatternHelp}</p>
+                    )}
                   </div>
                   <div className="space-y-1.5">
                     <Label htmlFor="chv-gender">Gender</Label>
@@ -5812,7 +5846,7 @@ function CommunityWorkerRosterManager({
                   </div>
                   <div className="space-y-1.5">
                     <Label htmlFor="chv-phone">Contact Phone</Label>
-                    <Input id="chv-phone" placeholder="+260977123456" value={form.contactPhone}
+                    <Input id="chv-phone" placeholder={countryConfig.phonePlaceholder || "+27 82 123 4567"} value={form.contactPhone}
                       onChange={e => setField("contactPhone", e.target.value)} disabled={submitting} />
                   </div>
                   <div className="space-y-1.5">
@@ -5941,6 +5975,8 @@ interface CommunityWorkersTabProps {
 
 function CommunityWorkersTab({ provinces, allDistricts, facilities, villages, selectedProvinceId, selectedDistrictId, selectedFacilityId }: CommunityWorkersTabProps) {
   const { toast } = useToast();
+  const { data: tenant } = useQuery<any>({ queryKey: ["/api/me/tenant"] });
+  const countryConfig = getCountryConfig(tenant);
   const [selectedChwId, setSelectedChwId] = useState<number | null>(null);
   const [selectedChwData, setSelectedChwData] = useState<any>(null);
   const [chwDialogOpen, setChwDialogOpen] = useState(false);
@@ -5966,17 +6002,17 @@ function CommunityWorkersTab({ provinces, allDistricts, facilities, villages, se
     assignment: true,
     campaignRole: true,
     trainingStatus: true,
-    yearsOfService: true,
-    employmentStatus: true,
-    supervisorName: true,
+    yearsOfService: false,
+    employmentStatus: false,
+    supervisorName: false,
     active: true,
     options: true,
   });
 
-  // Debounce search input
+  // Debounce search query
   useEffect(() => {
     const handler = setTimeout(() => {
-      setDebouncedSearch(searchQuery);
+      setDebouncedSearch(searchQuery.trim());
       setPage(1); // Reset to page 1 on new search
     }, 400);
     return () => clearTimeout(handler);
@@ -6058,7 +6094,7 @@ function CommunityWorkersTab({ provinces, allDistricts, facilities, villages, se
       // Headers corresponding to active columns
       const headers = [
         "Full Name",
-        "NRC",
+        countryConfig.idShortLabel || "National ID",
         "Gender",
         "Phone",
         "Province",
@@ -6156,7 +6192,7 @@ function CommunityWorkersTab({ provinces, allDistricts, facilities, villages, se
           throw new Error("CSV must contain a 'facilityHmisCode' or 'facility' column, or a facility must be selected in the filter bar.");
         }
 
-        const nrcIdx = getIdx(["nrc"]);
+        const nrcIdx = getIdx(["nrc", "nationalid", "national_id", "id_number", "idnumber", "id"]);
         const genderIdx = getIdx(["gender"]);
         const ageIdx = getIdx(["age"]);
         const eduIdx = getIdx(["educationlevel", "education_level", "education"]);
@@ -6199,7 +6235,9 @@ function CommunityWorkersTab({ provinces, allDistricts, facilities, villages, se
   };
 
   const downloadChvTemplate = () => {
-    const csvContent = "data:text/csv;charset=utf-8,name,facilityHmisCode,gender,phone,nrc,age,educationLevel,trainingReceived,roleDescription,yearsOfService,siaRole,employmentStatus\nJane Doe,F-12345,female,0901234567,112233/11/1,35,Secondary,Basic First Aid,Community Health Volunteer,5,mobilizer,Active - In-service\n";
+    const sampleId = countryConfig.idFormatPlaceholder || "9001015009087";
+    const samplePhone = countryConfig.phonePlaceholder?.replace(/\s/g, "") || "+27821234567";
+    const csvContent = `data:text/csv;charset=utf-8,name,facilityHmisCode,gender,phone,nrc,age,educationLevel,trainingReceived,roleDescription,yearsOfService,siaRole,employmentStatus\nJane Doe,F-12345,female,${samplePhone},${sampleId},35,Secondary,Basic First Aid,Community Health Volunteer,5,mobilizer,Active - In-service\n`;
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement("a");
     link.setAttribute("href", encodedUri);
@@ -6375,7 +6413,7 @@ function CommunityWorkersTab({ provinces, allDistricts, facilities, villages, se
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
                 id="search-chw"
-                placeholder="Search by name, NRC or phone..."
+                placeholder={`Search by name, ${countryConfig.idShortLabel || "ID"} or phone...`}
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
                 className="pl-9"
@@ -6404,7 +6442,7 @@ function CommunityWorkersTab({ provinces, allDistricts, facilities, villages, se
                         }
                       />
                       <Label htmlFor={`col-${col}`} className="text-xs capitalize font-normal cursor-pointer">
-                        {col.replace(/([A-Z])/g, " $1")}
+                        {col === "nrc" ? (countryConfig.idShortLabel || "National ID") : col.replace(/([A-Z])/g, " $1")}
                       </Label>
                     </div>
                   ))}
@@ -6475,7 +6513,7 @@ function CommunityWorkersTab({ provinces, allDistricts, facilities, villages, se
                   {visibleCols.nrc && (
                     <th onClick={() => handleSort("nrc")} className="px-4 py-3 cursor-pointer hover:bg-muted/70 transition-colors">
                       <div className="flex items-center gap-1.5">
-                        NRC
+                        {countryConfig.idShortLabel || "National ID"}
                         <ArrowUpDown className="h-3 w-3 shrink-0" />
                       </div>
                     </th>
@@ -6787,6 +6825,8 @@ interface ChwDirectoryDialogProps {
 
 function ChwDirectoryDialog({ chvId, initialData, mode, provinces, allDistricts, facilities, onClose, onSaved, queryUrl }: ChwDirectoryDialogProps) {
   const { toast } = useToast();
+  const { data: tenant } = useQuery<any>({ queryKey: ["/api/me/tenant"] });
+  const countryConfig = getCountryConfig(tenant);
   const [formTab, setFormTab] = useState("basic");
   const [submitting, setSubmitting] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
@@ -6883,13 +6923,20 @@ function ChwDirectoryDialog({ chvId, initialData, mode, provinces, allDistricts,
       return;
     }
     if (!form.nrc.trim()) {
-      toast({ title: "NRC is required", description: "National Registration Card is mandatory.", variant: "destructive" });
+      toast({ title: `${countryConfig.idShortLabel || "ID"} is required`, description: `${countryConfig.idLabel} is mandatory.`, variant: "destructive" });
       return;
     }
-    const nrcPattern = /^\d{6}\/\d{2}\/\d{1}$/;
-    if (!nrcPattern.test(form.nrc.trim())) {
-      toast({ title: "Invalid NRC format", description: "Must be XXXXXX/XX/X (e.g. 123456/78/9)", variant: "destructive" });
+    const idValidation = countryConfig.formatSpec.validateId(form.nrc.trim());
+    if (!idValidation.valid) {
+      toast({ title: `Invalid ${countryConfig.idShortLabel || "ID"} format`, description: idValidation.message, variant: "destructive" });
       return;
+    }
+    if (form.contactPhone.trim()) {
+      const phoneValidation = countryConfig.formatSpec.validatePhone(form.contactPhone.trim());
+      if (!phoneValidation.valid) {
+        toast({ title: "Invalid Phone Number", description: phoneValidation.message, variant: "destructive" });
+        return;
+      }
     }
     try {
       setSubmitting(true);
@@ -7057,9 +7104,12 @@ function ChwDirectoryDialog({ chvId, initialData, mode, provinces, allDistricts,
                         onChange={e => setField("name", e.target.value)} disabled={submitting} />
                     </div>
                     <div className="sm:col-span-2 space-y-1.5">
-                      <Label htmlFor="chwd-nrc">National Registration Card (NRC) *</Label>
-                      <Input id="chwd-nrc" placeholder="XXXXXX/XX/X (e.g. 123456/78/9)" value={form.nrc}
+                      <Label htmlFor="chwd-nrc">{countryConfig.idLabel || "National ID Number"} *</Label>
+                      <Input id="chwd-nrc" placeholder={countryConfig.idFormatPlaceholder || "9001015009087"} value={form.nrc}
                         onChange={e => setField("nrc", e.target.value)} disabled={submitting} />
+                      {countryConfig.idPatternHelp && (
+                        <p className="text-[11px] text-muted-foreground">{countryConfig.idPatternHelp}</p>
+                      )}
                     </div>
                     <div className="space-y-1.5">
                       <Label htmlFor="chwd-gender">Gender</Label>
@@ -7074,7 +7124,7 @@ function ChwDirectoryDialog({ chvId, initialData, mode, provinces, allDistricts,
                     </div>
                     <div className="space-y-1.5">
                       <Label htmlFor="chwd-phone">Contact Phone</Label>
-                      <Input id="chwd-phone" placeholder="+260977123456" value={form.contactPhone}
+                      <Input id="chwd-phone" placeholder={countryConfig.phonePlaceholder || "+27 82 123 4567"} value={form.contactPhone}
                         onChange={e => setField("contactPhone", e.target.value)} disabled={submitting} />
                     </div>
                     <div className="space-y-1.5">

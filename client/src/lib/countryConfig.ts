@@ -1,3 +1,5 @@
+import { getCountryFormat, CountryFormatSpec } from "@shared/countryFormats";
+
 export interface CountryConfig {
   code: string;
   name: string;
@@ -6,9 +8,13 @@ export interface CountryConfig {
   
   // Identification & Phone
   idLabel: string;
+  idShortLabel?: string;
   idFormatPlaceholder: string;
+  idPatternHelp?: string;
   phonePrefix: string;
   phonePlaceholder: string;
+  phonePatternHelp?: string;
+  formatSpec?: CountryFormatSpec;
   
   // Currency
   currencyCode: string;
@@ -34,6 +40,8 @@ export interface CountryConfig {
     border: string;
   };
 }
+
+export * from "@shared/countryFormats";
 
 export const COUNTRY_CONFIGS: Record<string, CountryConfig> = {
   ZMB: {
@@ -238,23 +246,100 @@ export const COUNTRY_CONFIGS: Record<string, CountryConfig> = {
       border: "border-amber-500/30",
     },
   },
+
+  SSD: {
+    code: "SSD",
+    name: "South Sudan",
+    officialName: "Republic of South Sudan Ministry of Health",
+    flagEmoji: "🇸🇸",
+    idLabel: "National ID Number",
+    idShortLabel: "National ID",
+    idFormatPlaceholder: "SSD1234567",
+    idPatternHelp: "6 to 15 alphanumeric characters",
+    phonePrefix: "+211",
+    phonePlaceholder: "+211 92 123 4567",
+    phonePatternHelp: "+211 followed by 9 digits",
+    formatSpec: getCountryFormat("SSD"),
+    currencyCode: "SSP",
+    currencySymbol: "SS£",
+    currencyName: "South Sudanese Pound",
+    adminLabels: {
+      level1: "State",
+      level2: "County",
+      level3: "Payam",
+      level4: "Boma",
+    },
+    hasDistricts: true,
+    flagColors: ["#000000", "#da121a", "#078930", "#0f47af", "#fcdd09"],
+    primaryColor: "#078930",
+    themeGradient: "linear-gradient(135deg, #078930 0%, #0f47af 50%, #da121a 100%)",
+    badgeStyle: {
+      bg: "bg-emerald-500/10 dark:bg-emerald-500/20",
+      text: "text-emerald-700 dark:text-emerald-300",
+      border: "border-emerald-500/30",
+    },
+  },
+
+  BWA: {
+    code: "BWA",
+    name: "Botswana",
+    officialName: "Republic of Botswana Ministry of Health",
+    flagEmoji: "🇧🇼",
+    idLabel: "Omang (National ID) Number",
+    idShortLabel: "Omang ID",
+    idFormatPlaceholder: "123412345",
+    idPatternHelp: "9 numeric digits",
+    phonePrefix: "+267",
+    phonePlaceholder: "+267 71 234 567",
+    phonePatternHelp: "+267 followed by 7 or 8 digits",
+    formatSpec: getCountryFormat("BWA"),
+    currencyCode: "BWP",
+    currencySymbol: "P",
+    currencyName: "Botswana Pula",
+    adminLabels: {
+      level1: "District",
+      level2: "Sub-District",
+      level3: "Village",
+      level4: "Ward / Locality",
+    },
+    hasDistricts: true,
+    flagColors: ["#75aadb", "#000000", "#ffffff"],
+    primaryColor: "#0284c7",
+    themeGradient: "linear-gradient(135deg, #0284c7 0%, #0369a1 50%, #18181b 100%)",
+    badgeStyle: {
+      bg: "bg-sky-500/10 dark:bg-sky-500/20",
+      text: "text-sky-700 dark:text-sky-300",
+      border: "border-sky-500/30",
+    },
+  },
 };
 
-export const DEFAULT_COUNTRY_CONFIG: CountryConfig = COUNTRY_CONFIGS.ZMB;
+export const DEFAULT_COUNTRY_CONFIG: CountryConfig & { formatSpec: CountryFormatSpec } = {
+  ...COUNTRY_CONFIGS.ZMB,
+  formatSpec: getCountryFormat("ZMB"),
+  idShortLabel: getCountryFormat("ZMB").idShortLabel,
+  idPatternHelp: getCountryFormat("ZMB").idPatternHelp,
+  phonePatternHelp: getCountryFormat("ZMB").phonePatternHelp,
+};
 
-export function getCountryConfig(tenant: any): CountryConfig {
+export function getCountryConfig(tenant: any): CountryConfig & { formatSpec: CountryFormatSpec } {
   if (!tenant) return DEFAULT_COUNTRY_CONFIG;
   
   const code = (tenant.countryCode || tenant.code || "").toUpperCase();
+  const formatSpec = getCountryFormat(code);
   const baseConfig = COUNTRY_CONFIGS[code] || {
     code: code || "GLOBAL",
     name: tenant.name || "Global Health",
     officialName: tenant.name || "Ministry of Health",
     flagEmoji: "🌐",
-    idLabel: "National ID / Registration No.",
-    idFormatPlaceholder: "ID12345678",
-    phonePrefix: "+1",
-    phonePlaceholder: "+1 555 123456",
+    idLabel: formatSpec.idLabel,
+    idShortLabel: formatSpec.idShortLabel,
+    idFormatPlaceholder: formatSpec.idPlaceholder,
+    idPatternHelp: formatSpec.idPatternHelp,
+    phonePrefix: formatSpec.phonePrefix,
+    phonePlaceholder: formatSpec.phonePlaceholder,
+    phonePatternHelp: formatSpec.phonePatternHelp,
+    formatSpec,
     currencyCode: tenant.settings?.currency || "USD",
     currencySymbol: tenant.settings?.currencySymbol || "$",
     currencyName: "United States Dollar",
@@ -279,10 +364,16 @@ export function getCountryConfig(tenant: any): CountryConfig {
   const settings = tenant.settings || {};
   return {
     ...baseConfig,
+    formatSpec,
     currencyCode: settings.currency || baseConfig.currencyCode,
     currencySymbol: settings.currencySymbol || baseConfig.currencySymbol,
-    idLabel: settings.idLabel || baseConfig.idLabel,
-    phonePrefix: settings.phonePrefix || baseConfig.phonePrefix,
+    idLabel: settings.idLabel || formatSpec.idLabel || baseConfig.idLabel,
+    idShortLabel: formatSpec.idShortLabel || baseConfig.idShortLabel,
+    idFormatPlaceholder: formatSpec.idPlaceholder || baseConfig.idFormatPlaceholder,
+    idPatternHelp: formatSpec.idPatternHelp || baseConfig.idPatternHelp,
+    phonePrefix: settings.phonePrefix || formatSpec.phonePrefix || baseConfig.phonePrefix,
+    phonePlaceholder: formatSpec.phonePlaceholder || baseConfig.phonePlaceholder,
+    phonePatternHelp: formatSpec.phonePatternHelp || baseConfig.phonePatternHelp,
     adminLabels: {
       ...baseConfig.adminLabels,
       ...(settings.adminLevelLabels || {}),

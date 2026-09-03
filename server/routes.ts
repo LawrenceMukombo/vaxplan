@@ -46,6 +46,7 @@ import {
 } from "./services/microplanVersionService";
 import catalogueRouter from "./routes/catalogue";
 import { VgieService } from "./services/vgieService";
+import { getCountryFormat } from "@shared/countryFormats";
 import {
   FACILITY_AUTHOR_ROLES,
   insertFacilitySchema,
@@ -4926,18 +4927,39 @@ export async function registerRoutes(
         facilityId,
       });
 
-      // NRC uniqueness: reject if another staff member in this tenant already has this NRC
+      const tenant = req.tenantId ? await storage.getTenant(req.tenantId) : null;
+      const formatSpec = getCountryFormat(tenant);
+
+      // National ID uniqueness and validation
       if (parsed.nrc) {
+        const idVal = formatSpec.validateId(parsed.nrc);
+        if (!idVal.valid) {
+          return res.status(400).json({ message: idVal.message });
+        }
+        parsed.nrc = idVal.normalized || formatSpec.normalizeId(parsed.nrc);
+        const compactNrc = parsed.nrc.replace(/[\/\-\s]/g, "").toLowerCase();
+
         const [existingNrc] = await db
           .select({ id: facilityStaff.id, fullName: facilityStaff.fullName })
           .from(facilityStaff)
-          .where(and(eq(facilityStaff.tenantId, req.tenantId), eq(facilityStaff.nrc, parsed.nrc)))
+          .where(and(
+            eq(facilityStaff.tenantId, req.tenantId),
+            eq(dsql`LOWER(REPLACE(REPLACE(REPLACE(${facilityStaff.nrc}, '/', ''), '-', ''), ' ', ''))`, compactNrc)
+          ))
           .limit(1);
         if (existingNrc) {
           return res.status(409).json({
-            message: `NRC ${parsed.nrc} is already registered to ${existingNrc.fullName}. NRC must be unique per staff member.`,
+            message: `${formatSpec.idShortLabel} ${parsed.nrc} is already registered to ${existingNrc.fullName}. ${formatSpec.idShortLabel} must be unique per staff member.`,
           });
         }
+      }
+
+      if (parsed.contactPhone) {
+        const phoneVal = formatSpec.validatePhone(parsed.contactPhone);
+        if (!phoneVal.valid) {
+          return res.status(400).json({ message: phoneVal.message });
+        }
+        parsed.contactPhone = phoneVal.normalized || formatSpec.normalizePhone(parsed.contactPhone);
       }
 
       const [inserted] = await db
@@ -4987,14 +5009,6 @@ export async function registerRoutes(
       if (body.isActive !== undefined && body.active === undefined) body.active = body.isActive;
 
       const allowed: any = {};
-      /* Original fields:
-      for (const k of [
-        "fullName", "name", "gender", "position", "contactPhone", "phone",
-        "yearsOfProfessionalExperience", "yearsExperience", "yearsAtFacility",
-        "role", "campaignRole", "isActive", "active", "educationLevel",
-        "trainingStatus", "residenceVillage", "isVolunteer", "userId"
-      ]) {
-      */
       for (const k of [
         "fullName", "name", "gender", "position", "contactPhone", "phone",
         "yearsOfProfessionalExperience", "yearsExperience", "yearsAtFacility",
@@ -5006,18 +5020,39 @@ export async function registerRoutes(
       }
       allowed.updatedAt = new Date();
 
-      // NRC uniqueness: reject if another staff member in this tenant already has this NRC (excluding self)
+      const tenant = req.tenantId ? await storage.getTenant(req.tenantId) : null;
+      const formatSpec = getCountryFormat(tenant);
+
+      // National ID uniqueness: reject if another staff member in this tenant already has this ID (excluding self)
       if (allowed.nrc) {
+        const idVal = formatSpec.validateId(allowed.nrc);
+        if (!idVal.valid) {
+          return res.status(400).json({ message: idVal.message });
+        }
+        allowed.nrc = idVal.normalized || formatSpec.normalizeId(allowed.nrc);
+        const compactNrc = allowed.nrc.replace(/[\/\-\s]/g, "").toLowerCase();
+
         const [existingNrc] = await db
           .select({ id: facilityStaff.id, fullName: facilityStaff.fullName })
           .from(facilityStaff)
-          .where(and(eq(facilityStaff.tenantId, req.tenantId), eq(facilityStaff.nrc, allowed.nrc)))
+          .where(and(
+            eq(facilityStaff.tenantId, req.tenantId),
+            eq(dsql`LOWER(REPLACE(REPLACE(REPLACE(${facilityStaff.nrc}, '/', ''), '-', ''), ' ', ''))`, compactNrc)
+          ))
           .limit(1);
         if (existingNrc && existingNrc.id !== staffId) {
           return res.status(409).json({
-            message: `NRC ${allowed.nrc} is already registered to ${existingNrc.fullName}. NRC must be unique per staff member.`,
+            message: `${formatSpec.idShortLabel} ${allowed.nrc} is already registered to ${existingNrc.fullName}. ${formatSpec.idShortLabel} must be unique per staff member.`,
           });
         }
+      }
+
+      if (allowed.contactPhone) {
+        const phoneVal = formatSpec.validatePhone(allowed.contactPhone);
+        if (!phoneVal.valid) {
+          return res.status(400).json({ message: phoneVal.message });
+        }
+        allowed.contactPhone = phoneVal.normalized || formatSpec.normalizePhone(allowed.contactPhone);
       }
 
       const [updated] = await db
@@ -5314,23 +5349,39 @@ export async function registerRoutes(
           return res.status(400).json({ message: "Full name is required" });
         }
 
+        const tenant = req.tenantId ? await storage.getTenant(req.tenantId) : null;
+        const formatSpec = getCountryFormat(tenant);
+
         if (!req.body.nrc) {
-          return res.status(400).json({ message: "NRC is required" });
+          return res.status(400).json({ message: `${formatSpec.idShortLabel} is required` });
         }
-        let cleanNrc = req.body.nrc.trim();
-        const nrcPattern = /^\d{6}\/\d{2}\/\d{1}$/;
-        if (!nrcPattern.test(cleanNrc)) {
-          return res.status(400).json({ message: "Invalid NRC format. Must be XXXXXX/XX/X (e.g. 123456/78/9)" });
+        const idVal = formatSpec.validateId(req.body.nrc);
+        if (!idVal.valid) {
+          return res.status(400).json({ message: idVal.message });
         }
+        const cleanNrc = idVal.normalized || formatSpec.normalizeId(req.body.nrc);
+        const compactNrc = cleanNrc.replace(/[\/\-\s]/g, "").toLowerCase();
+
         const [nrcDup] = await db.select().from(chvProfiles)
           .where(and(
             eq(chvProfiles.tenantId, req.tenantId),
-            eq(dsql`LOWER(REPLACE(${chvProfiles.nrc}, '/', ''))`, cleanNrc.replace(/\//g, "").toLowerCase())
+            eq(dsql`LOWER(REPLACE(REPLACE(REPLACE(${chvProfiles.nrc}, '/', ''), '-', ''), ' ', ''))`, compactNrc)
           )).limit(1);
         if (nrcDup) {
           const [nrcFac] = await db.select({ name: facilities.name }).from(facilities).where(eq(facilities.id, nrcDup.facilityId)).limit(1);
-          return res.status(400).json({ message: `Duplicate NRC: "${nrcDup.fullName}" at "${nrcFac?.name || 'another facility'}" has this NRC.` });
+          return res.status(400).json({ message: `Duplicate ${formatSpec.idShortLabel}: "${nrcDup.fullName}" at "${nrcFac?.name || 'another facility'}" has this ${formatSpec.idShortLabel}.` });
         }
+
+        // Phone validation & normalization
+        let cleanPhone: string | null = null;
+        if (req.body.contactPhone) {
+          const phoneVal = formatSpec.validatePhone(req.body.contactPhone);
+          if (!phoneVal.valid) {
+            return res.status(400).json({ message: phoneVal.message });
+          }
+          cleanPhone = phoneVal.normalized || formatSpec.normalizePhone(req.body.contactPhone);
+        }
+
         // Local duplicate check: name in the same facility
         const [nameDup] = await db.select().from(chvProfiles)
           .where(and(
@@ -5351,7 +5402,7 @@ export async function registerRoutes(
           siaRole: req.body.campaignRole,
           assignedVillageId: req.body.villageId ? Number(req.body.villageId) : null,
           isActive: req.body.active ?? true,
-          contactPhone: req.body.contactPhone || null,
+          contactPhone: cleanPhone,
           age: req.body.age || null,
           roleDescription: req.body.roleDescription || null,
           employmentStatus: req.body.employmentStatus || "Active - In-service",
@@ -5441,26 +5492,45 @@ export async function registerRoutes(
           }
         }
 
-        // NRC duplicate and format check
+        const tenant = req.tenantId ? await storage.getTenant(req.tenantId) : null;
+        const formatSpec = getCountryFormat(tenant);
+
+        // National ID duplicate and format check
+        let cleanNrc: string | null = null;
         if (req.body.nrc !== undefined && req.body.nrc) {
-          const cleanNrc = req.body.nrc.trim();
-          const nrcPattern = /^\d{6}\/\d{2}\/\d{1}$/;
-          if (!nrcPattern.test(cleanNrc)) {
-            return res.status(400).json({ message: "Invalid NRC format. Must be in the format XXXXXX/XX/X (e.g. 123456/78/9)" });
+          const idVal = formatSpec.validateId(req.body.nrc);
+          if (!idVal.valid) {
+            return res.status(400).json({ message: idVal.message });
           }
+          cleanNrc = idVal.normalized || formatSpec.normalizeId(req.body.nrc);
+          const compactNrc = cleanNrc.replace(/[\/\-\s]/g, "").toLowerCase();
 
           const [nrcDup] = await db.select().from(chvProfiles)
             .where(and(
               eq(chvProfiles.tenantId, req.tenantId),
               ne(chvProfiles.id, chvId),
-              eq(dsql`LOWER(REPLACE(${chvProfiles.nrc}, '/', ''))`, cleanNrc.replace(/\//g, "").toLowerCase())
+              eq(dsql`LOWER(REPLACE(REPLACE(REPLACE(${chvProfiles.nrc}, '/', ''), '-', ''), ' ', ''))`, compactNrc)
             )).limit(1);
 
           if (nrcDup) {
             const [fac] = await db.select({ name: facilities.name }).from(facilities).where(eq(facilities.id, nrcDup.facilityId)).limit(1);
             return res.status(400).json({
-              message: `Duplicate NRC: A worker with NRC ${cleanNrc} is already registered as "${nrcDup.fullName}" at facility "${fac?.name || 'another facility'}".`
+              message: `Duplicate ${formatSpec.idShortLabel}: A worker with ${formatSpec.idShortLabel} ${cleanNrc} is already registered as "${nrcDup.fullName}" at facility "${fac?.name || 'another facility'}".`
             });
+          }
+        }
+
+        // Phone validation & normalization
+        let cleanPhone: string | null | undefined = undefined;
+        if (req.body.contactPhone !== undefined) {
+          if (req.body.contactPhone) {
+            const phoneVal = formatSpec.validatePhone(req.body.contactPhone);
+            if (!phoneVal.valid) {
+              return res.status(400).json({ message: phoneVal.message });
+            }
+            cleanPhone = phoneVal.normalized || formatSpec.normalizePhone(req.body.contactPhone);
+          } else {
+            cleanPhone = null;
           }
         }
 
@@ -5468,7 +5538,7 @@ export async function registerRoutes(
 
         // Enhanced allowed assignments supporting additional basic/professional fields
         if (req.body.name !== undefined) allowed.fullName = req.body.name.trim();
-        if (req.body.nrc !== undefined) allowed.nrc = req.body.nrc ? req.body.nrc.trim() : null;
+        if (req.body.nrc !== undefined) allowed.nrc = cleanNrc;
         if (req.body.gender !== undefined) allowed.gender = req.body.gender;
         if (req.body.educationLevel !== undefined) allowed.educationLevel = req.body.educationLevel;
         if (req.body.trainingStatus !== undefined) allowed.trainingReceived = req.body.trainingStatus;
@@ -5476,7 +5546,7 @@ export async function registerRoutes(
         if (req.body.campaignRole !== undefined) allowed.siaRole = req.body.campaignRole;
         if (req.body.villageId !== undefined) allowed.assignedVillageId = req.body.villageId ? Number(req.body.villageId) : null;
         if (req.body.active !== undefined) allowed.isActive = req.body.active;
-        if (req.body.contactPhone !== undefined) allowed.contactPhone = req.body.contactPhone || null;
+        if (cleanPhone !== undefined) allowed.contactPhone = cleanPhone;
         if (req.body.age !== undefined) allowed.age = req.body.age ? Number(req.body.age) : null;
         if (req.body.roleDescription !== undefined) allowed.roleDescription = req.body.roleDescription || null;
         if (req.body.employmentStatus !== undefined) allowed.employmentStatus = req.body.employmentStatus;
@@ -22448,22 +22518,37 @@ Instructions:
         return res.status(400).json({ message: `Duplicate name: A worker named "${cleanName}" is already registered in this facility.` });
       }
 
+      const tenant = req.tenantId ? await storage.getTenant(req.tenantId) : null;
+      const formatSpec = getCountryFormat(tenant);
+
       if (!req.body.nrc) {
-        return res.status(400).json({ message: "NRC is required" });
+        return res.status(400).json({ message: `${formatSpec.idShortLabel} is required` });
       }
-      let cleanNrc = req.body.nrc.trim();
-      const nrcPattern = /^\d{6}\/\d{2}\/\d{1}$/;
-      if (!nrcPattern.test(cleanNrc)) {
-        return res.status(400).json({ message: "Invalid NRC format. Must be XXXXXX/XX/X (e.g. 123456/78/9)" });
+      const idVal = formatSpec.validateId(req.body.nrc);
+      if (!idVal.valid) {
+        return res.status(400).json({ message: idVal.message });
       }
+      const cleanNrc = idVal.normalized || formatSpec.normalizeId(req.body.nrc);
+      const compactNrc = cleanNrc.replace(/[\/\-\s]/g, "").toLowerCase();
+
       const [nrcDup] = await db.select().from(chvProfiles)
         .where(and(
           eq(chvProfiles.tenantId, req.tenantId),
-          eq(dsql`LOWER(REPLACE(${chvProfiles.nrc}, '/', ''))`, cleanNrc.replace(/\//g, "").toLowerCase())
+          eq(dsql`LOWER(REPLACE(REPLACE(REPLACE(${chvProfiles.nrc}, '/', ''), '-', ''), ' ', ''))`, compactNrc)
         )).limit(1);
       if (nrcDup) {
         const [nrcFac] = await db.select({ name: facilities.name }).from(facilities).where(eq(facilities.id, nrcDup.facilityId)).limit(1);
-        return res.status(400).json({ message: `Duplicate NRC: "${nrcDup.fullName}" at "${nrcFac?.name || 'another facility'}" has this NRC.` });
+        return res.status(400).json({ message: `Duplicate ${formatSpec.idShortLabel}: "${nrcDup.fullName}" at "${nrcFac?.name || 'another facility'}" has this ${formatSpec.idShortLabel}.` });
+      }
+
+      // Phone validation & normalization
+      let cleanPhone: string | null = null;
+      if (req.body.contactPhone) {
+        const phoneVal = formatSpec.validatePhone(req.body.contactPhone);
+        if (!phoneVal.valid) {
+          return res.status(400).json({ message: phoneVal.message });
+        }
+        cleanPhone = phoneVal.normalized || formatSpec.normalizePhone(req.body.contactPhone);
       }
 
       const mappedBody = {
@@ -22476,7 +22561,7 @@ Instructions:
         siaRole: req.body.campaignRole || "social_mobilizer",
         assignedVillageId: req.body.villageId ? Number(req.body.villageId) : null,
         isActive: req.body.active ?? true,
-        contactPhone: req.body.contactPhone || null,
+        contactPhone: cleanPhone,
         age: req.body.age ? Number(req.body.age) : null,
         roleDescription: req.body.roleDescription || null,
         employmentStatus: req.body.employmentStatus || "Active - In-service",
@@ -22538,30 +22623,49 @@ Instructions:
         }
       }
 
+      const tenant = req.tenantId ? await storage.getTenant(req.tenantId) : null;
+      const formatSpec = getCountryFormat(tenant);
+
+      let cleanNrc: string | null = null;
       if (req.body.nrc !== undefined) {
         if (!req.body.nrc) {
-          return res.status(400).json({ message: "NRC cannot be empty" });
+          return res.status(400).json({ message: `${formatSpec.idShortLabel} cannot be empty` });
         }
-        const cleanNrc = req.body.nrc.trim();
-        const nrcPattern = /^\d{6}\/\d{2}\/\d{1}$/;
-        if (!nrcPattern.test(cleanNrc)) {
-          return res.status(400).json({ message: "Invalid NRC format. Must be XXXXXX/XX/X (e.g. 123456/78/9)" });
+        const idVal = formatSpec.validateId(req.body.nrc);
+        if (!idVal.valid) {
+          return res.status(400).json({ message: idVal.message });
         }
+        cleanNrc = idVal.normalized || formatSpec.normalizeId(req.body.nrc);
+        const compactNrc = cleanNrc.replace(/[\/\-\s]/g, "").toLowerCase();
+
         const [nrcDup] = await db.select().from(chvProfiles)
           .where(and(
             eq(chvProfiles.tenantId, req.tenantId),
             ne(chvProfiles.id, id),
-            eq(dsql`LOWER(REPLACE(${chvProfiles.nrc}, '/', ''))`, cleanNrc.replace(/\//g, "").toLowerCase())
+            eq(dsql`LOWER(REPLACE(REPLACE(REPLACE(${chvProfiles.nrc}, '/', ''), '-', ''), ' ', ''))`, compactNrc)
           )).limit(1);
         if (nrcDup) {
           const [nrcFac] = await db.select({ name: facilities.name }).from(facilities).where(eq(facilities.id, nrcDup.facilityId)).limit(1);
-          return res.status(400).json({ message: `Duplicate NRC: "${nrcDup.fullName}" at "${nrcFac?.name || 'another facility'}" has this NRC.` });
+          return res.status(400).json({ message: `Duplicate ${formatSpec.idShortLabel}: "${nrcDup.fullName}" at "${nrcFac?.name || 'another facility'}" has this ${formatSpec.idShortLabel}.` });
+        }
+      }
+
+      let cleanPhone: string | null | undefined = undefined;
+      if (req.body.contactPhone !== undefined) {
+        if (req.body.contactPhone) {
+          const phoneVal = formatSpec.validatePhone(req.body.contactPhone);
+          if (!phoneVal.valid) {
+            return res.status(400).json({ message: phoneVal.message });
+          }
+          cleanPhone = phoneVal.normalized || formatSpec.normalizePhone(req.body.contactPhone);
+        } else {
+          cleanPhone = null;
         }
       }
 
       const allowed: any = {};
       if (req.body.name !== undefined) allowed.fullName = req.body.name.trim();
-      if (req.body.nrc !== undefined) allowed.nrc = req.body.nrc ? req.body.nrc.trim() : null;
+      if (cleanNrc !== null) allowed.nrc = cleanNrc;
       if (req.body.gender !== undefined) allowed.gender = req.body.gender;
       if (req.body.age !== undefined) allowed.age = req.body.age ? Number(req.body.age) : null;
       if (req.body.educationLevel !== undefined) allowed.educationLevel = req.body.educationLevel;
@@ -22570,7 +22674,7 @@ Instructions:
       if (req.body.campaignRole !== undefined) allowed.siaRole = req.body.campaignRole;
       if (req.body.villageId !== undefined) allowed.assignedVillageId = req.body.villageId ? Number(req.body.villageId) : null;
       if (req.body.active !== undefined) allowed.isActive = req.body.active;
-      if (req.body.contactPhone !== undefined) allowed.contactPhone = req.body.contactPhone || null;
+      if (cleanPhone !== undefined) allowed.contactPhone = cleanPhone;
       if (req.body.roleDescription !== undefined) allowed.roleDescription = req.body.roleDescription || null;
       if (req.body.employmentStatus !== undefined) allowed.employmentStatus = req.body.employmentStatus;
       if (req.body.supervisorId !== undefined) allowed.supervisorId = req.body.supervisorId ? Number(req.body.supervisorId) : null;

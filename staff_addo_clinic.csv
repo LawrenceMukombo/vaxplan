@@ -1,0 +1,19 @@
+# gender: female | male | other
+# role: vaccinator | recorder | supervisor | facility_in_charge | nurse | midwife | chw | driver | cold_chain_officer
+# campaign_role: vaccinator | mobilizer | volunteer | supervisor | recorder | logistics
+# education_level: primary | secondary | certificate | bachelors | masters | phd
+# training_status: trained | not_trained | refresher_needed | in_training
+# is_active: Yes | No  (default Yes)
+# is_volunteer: Yes | No  (default No)
+# facility_name, district_name, province_name are optional but recommended for bulk uploading across facilities
+full_name,employee_id,nrc,gender,role,campaign_role,position,contact_phone,education_level,training_status,years_experience,years_at_facility,residence_village,is_active,is_volunteer,facility_name,district_name,province_name
+Sister Nomthandazo Majola,EMP-EC-0101,7803150523089,female,facility_in_charge,supervisor,Operational Manager / Sister-in-Charge,+27721098451,bachelors,trained,16,7,Addo,Yes,No,Addo Clinic,Cacadu,Eastern Cape
+Dr. Luvuyo Gxilishe,EMP-EC-0102,8407225198084,male,supervisor,supervisor,Medical Officer / Clinical Supervisor,+27834521908,masters,trained,11,4,Hermiston,Yes,No,Addo Clinic,Cacadu,Eastern Cape
+Nwabisa Mbeki,EMP-EC-0103,8811090342081,female,nurse,vaccinator,Senior Professional Nurse (EPI Coordinator),+27765412890,bachelors,trained,9,5,Sunland,Yes,No,Addo Clinic,Cacadu,Eastern Cape
+Zintle Ndamase,EMP-EC-0104,9105140287083,female,midwife,vaccinator,Advanced Midwife & Maternal Child Health Nurse,+27823901456,bachelors,trained,7,3,Barkly Bridge,Yes,No,Addo Clinic,Cacadu,Eastern Cape
+Thembani Klaas,EMP-EC-0105,9309285409088,male,cold_chain_officer,logistics,Cold Chain Technician & Vaccine Depot Officer,+27739014562,certificate,trained,6,4,Addo,Yes,No,Addo Clinic,Cacadu,Eastern Cape
+Phumzile Radebe,EMP-EC-0106,9504170198082,female,recorder,recorder,Health Information Data Capturer / HMIS Clerk,+27618902345,certificate,trained,4,2,Newlands,Yes,No,Addo Clinic,Cacadu,Eastern Cape
+Bongani Matshoba,EMP-EC-0107,8712035290086,male,driver,logistics,Mobile Outreach Vehicle Driver & Field Logistics Assistant,+27845671239,secondary,trained,10,6,Prospect Vale,Yes,No,Addo Clinic,Cacadu,Eastern Cape
+Ayanda Mthunzi,EMP-EC-0108,9608240412085,female,vaccinator,vaccinator,Enrolled Staff Nurse (Routine & SIA Vaccinator),+27781290345,certificate,trained,3,2,Depus,Yes,No,Addo Clinic,Cacadu,Eastern Cape
+Siyabonga Ndlovu,EMP-EC-0109,9402195318080,male,vaccinator,vaccinator,Staff Nurse / Outreach Vaccinator,+27632901847,certificate,refresher_needed,4,1,Hermiston,Yes,No,Addo Clinic,Cacadu,Eastern Cape
+Nosipho Sithole,EMP-EC-0110,9006120154087,female,chw,mobilizer,Community Health Worker Team Supervisor,+27749018234,secondary,trained,8,5,Barkly Bridge,Yes,No,Addo Clinic,Cacadu,Eastern Cape

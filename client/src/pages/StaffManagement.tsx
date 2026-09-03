@@ -44,6 +44,7 @@ import {
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
+import { getCountryConfig } from "@/lib/countryConfig";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -299,6 +300,8 @@ export default function StaffManagement() {
   const { user } = useAuth();
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const { data: tenant } = useQuery<any>({ queryKey: ["/api/me/tenant"] });
+  const countryConfig = getCountryConfig(tenant);
 
   // National admin / platform admin can see all facilities without selecting one
   const isGlobalAdmin = !!(user?.isPlatformAdmin || user?.role === "national_admin");
@@ -349,7 +352,7 @@ export default function StaffManagement() {
     experience: "Experience",
     contact: "Contact Phone",
     employeeId: "Employee ID",
-    nrc: "NRC Number",
+    nrc: `${countryConfig.idShortLabel || "National ID"} Number`,
     active: "Status",
   };
 
@@ -745,6 +748,18 @@ export default function StaffManagement() {
       if (!facilityId) {
         throw new Error("Please select a facility before adding staff.");
       }
+      if (form.nrc.trim()) {
+        const idVal = countryConfig.formatSpec.validateId(form.nrc.trim());
+        if (!idVal.valid) {
+          throw new Error(idVal.message);
+        }
+      }
+      if (form.contactPhone.trim()) {
+        const phoneVal = countryConfig.formatSpec.validatePhone(form.contactPhone.trim());
+        if (!phoneVal.valid) {
+          throw new Error(phoneVal.message);
+        }
+      }
       const payload = {
         fullName: form.fullName.trim(),
         gender: form.gender,
@@ -929,10 +944,12 @@ export default function StaffManagement() {
       "# is_volunteer: Yes | No  (default No)",
       "# facility_name, district_name, province_name are optional but recommended for bulk uploading across facilities",
     ];
+    const sampleId = countryConfig.idFormatPlaceholder || "9001015009087";
+    const samplePhone = countryConfig.phonePlaceholder?.replace(/\s/g, "") || "+27821234567";
     const sampleRow = [
-      "Mary Phiri", "EMP-0042", "123456/10/1", "female", "vaccinator", "vaccinator",
-      "Clinical Officer", "+260977123456", "certificate",
-      "trained", "5", "2", "Kalingalinga", "Yes", "No",
+      "Mary Phiri", "EMP-0042", sampleId, "female", "vaccinator", "vaccinator",
+      "Clinical Officer", samplePhone, "certificate",
+      "trained", "5", "2", "Local Area", "Yes", "No",
       selectedFacility?.name || "Mushitala Urban Health Centre",
       selectedDistrict?.name || "Solwezi",
       selectedProvince?.name || "North-Western",
@@ -2277,20 +2294,22 @@ export default function StaffManagement() {
                   </div>
                   <div className="space-y-1.5">
                     <Label htmlFor="staff-nrc" className="text-sm font-medium">
-                      NRC Number <span className="text-destructive">*</span>
+                      {countryConfig.idShortLabel || countryConfig.idLabel || "National ID"} Number <span className="text-destructive">*</span>
                     </Label>
                     <Input
                       id="staff-nrc"
-                      placeholder="e.g. 123456/10/1"
+                      placeholder={`e.g. ${countryConfig.idFormatPlaceholder || "9001015009087"}`}
                       value={form.nrc}
                       onChange={(e) => setField("nrc", e.target.value)}
                       disabled={saveMutation.isPending}
                       required
                       className={`h-9 font-mono ${!form.nrc.trim() ? "border-amber-400 focus:border-amber-500" : ""}`}
                     />
-                    {!form.nrc.trim() && (
+                    {countryConfig.idPatternHelp ? (
+                      <p className="text-[11px] text-muted-foreground">{countryConfig.idPatternHelp}</p>
+                    ) : !form.nrc.trim() ? (
                       <p className="text-[11px] text-amber-600 dark:text-amber-400">Required — used for identity verification</p>
-                    )}
+                    ) : null}
                   </div>
                 </div>
 
@@ -2317,7 +2336,7 @@ export default function StaffManagement() {
                     </Label>
                     <Input
                       id="staff-phone"
-                      placeholder="+260977112233"
+                      placeholder={countryConfig.phonePlaceholder || "+27 82 123 4567"}
                       value={form.contactPhone}
                       onChange={(e) => setField("contactPhone", e.target.value)}
                       disabled={saveMutation.isPending}
