@@ -128,10 +128,11 @@ async function seedAssessmentForTenant(
 ) {
   // Check if an assessment already exists
   const existingAssessment = await db.execute(sql`
-    SELECT id FROM risk_assessments WHERE tenant_id = ${tenantId} LIMIT 1;
+    SELECT id, active_run_id FROM risk_assessments WHERE tenant_id = ${tenantId} LIMIT 1;
   `);
 
   let assessmentId: string;
+  let activeRunId: string | null = null;
 
   if (existingAssessment.rows.length === 0) {
     const insertRes = await db.execute(sql`
@@ -156,6 +157,7 @@ async function seedAssessmentForTenant(
     assessmentId = insertRes.rows[0].id as string;
   } else {
     assessmentId = existingAssessment.rows[0].id as string;
+    activeRunId = existingAssessment.rows[0].active_run_id as string | null;
   }
 
   // Check if a run exists
@@ -171,19 +173,32 @@ async function seedAssessmentForTenant(
         tenant_id,
         assessment_id,
         run_number,
-        status,
-        parameters_json
+        calculated_at,
+        is_official,
+        summary_stats,
+        execution_log
       ) VALUES (
         ${tenantId},
         ${assessmentId},
         1,
-        'completed',
-        '{"methodology": "WHO_MEASLES_GLOBAL_RECONCILED_V1", "zeroDenominatorSafe": true}'::jsonb
+        NOW(),
+        true,
+        '{"methodology": "WHO_MEASLES_GLOBAL_RECONCILED_V1", "zeroDenominatorSafe": true}'::jsonb,
+        'Official baseline run executed successfully.'
       ) RETURNING id;
     `);
     runId = insertRun.rows[0].id as string;
   } else {
     runId = existingRun.rows[0].id as string;
+  }
+
+  // Ensure assessment points to the active run
+  if (activeRunId !== runId) {
+    await db.execute(sql`
+      UPDATE risk_assessments
+      SET active_run_id = ${runId}, status = 'completed', updated_at = NOW()
+      WHERE id = ${assessmentId};
+    `);
   }
 
   // Check if area results exist
@@ -194,7 +209,7 @@ async function seedAssessmentForTenant(
   if (Number(existingAreas.rows[0]?.count || 0) === 0) {
     // Get all districts for this tenant
     const districtRows = await db
-      .select({ id: districts.id, name: districts.name })
+      .select({ id: districts.id, name: districts.name, provinceId: districts.provinceId })
       .from(districts)
       .where(eq(districts.tenantId, tenantId));
 
@@ -206,6 +221,8 @@ async function seedAssessmentForTenant(
         const s2 = ((d.id * 49297 + 9301) % 233280) / 233280;
 
         const pop = Math.round(45000 + s * 350000);
+        const areaKm2 = Math.round(500 + s2 * 4500);
+        const popDensity = Number((pop / areaKm2).toFixed(1));
         
         // Calibrate domain scores matching WHO scale:
         // PI: 0-40, SQ: 0-20, PD: 0-16, TA: 0-24
@@ -229,41 +246,68 @@ async function seedAssessmentForTenant(
         else if (total >= 50) cat = "HIGH";
         else if (total >= 40) cat = "MEDIUM";
 
+        const domainScores = { PI: pi, SQ: sq, PD: pd, TA: ta };
         const summaryText = `PI Score: ${pi}/40, SQ: ${sq}/20, PD: ${pd}/16, TA: ${ta}/24. Routine MCV1 estimate: ${Math.max(50, Math.min(97, Math.round(100 - pi * 1.3)))}%.`;
 
         await db.execute(sql`
           INSERT INTO risk_area_results (
             run_id,
-            administrative_area_id,
-            area_name,
-            population,
-            population_immunity_score,
-            surveillance_quality_score,
-            programme_delivery_score,
-            threat_assessment_score,
-            total_risk_score,
+            tenant_id,
+            district_id,
+            province_id,
+            total_score,
             risk_category,
-            is_incomplete,
-            min_possible_score,
-            max_possible_score,
+            completeness_rate,
+            population,
+            area_km2,
+            population_density,
+            domain_scores_json,
             summary_explanation
           ) VALUES (
             ${runId},
-            ${String(d.id)},
-            ${d.name},
-            ${pop},
-            ${pi},
-            ${sq},
-            ${pd},
-            ${ta},
+            ${tenantId},
+            ${d.id},
+            ${d.provinceId || null},
             ${total},
             ${cat},
-            false,
-            ${total},
-            ${total},
+            100.00,
+            ${pop},
+            ${areaKm2},
+            ${popDensity},
+            ${JSON.stringify(domainScores)}::jsonb,
             ${summaryText}
-          );
+          ) ON CONFLICT (run_id, district_id) DO NOTHING;
         `);
+
+        // Also seed domain breakdown
+        const domains = [
+          { code: "PI", score: pi, max: 40 },
+          { code: "SQ", score: sq, max: 20 },
+          { code: "PD", score: pd, max: 16 },
+          { code: "TA", score: ta, max: 24 },
+        ];
+        for (const dom of domains) {
+          const domCat = dom.score >= dom.max * 0.65 ? "HIGH" : dom.score >= dom.max * 0.4 ? "MEDIUM" : "LOW";
+          await db.execute(sql`
+            INSERT INTO risk_domain_results (
+              run_id,
+              tenant_id,
+              district_id,
+              domain_code,
+              domain_score,
+              max_score,
+              domain_risk_category
+            ) VALUES (
+              ${runId},
+              ${tenantId},
+              ${d.id},
+              ${dom.code},
+              ${dom.score},
+              ${dom.max},
+              ${domCat}
+            ) ON CONFLICT (run_id, district_id, domain_code) DO NOTHING;
+          `);
+        }
       }
 
       // Seed 2 sample linked actions
@@ -271,24 +315,26 @@ async function seedAssessmentForTenant(
       if (sampleHighRisk) {
         await db.execute(sql`
           INSERT INTO risk_action_links (
+            tenant_id,
             assessment_id,
-            administrative_area_id,
-            area_name,
-            action_type,
-            title,
+            district_id,
+            action_title,
+            action_description,
+            linked_module,
             responsible_person,
-            budget_amount,
-            status
+            status,
+            budget_estimate_usd
           ) VALUES (
+            ${tenantId},
             ${assessmentId},
-            ${String(sampleHighRisk.id)},
-            ${sampleHighRisk.name},
-            'SUPERVISION_VISIT',
+            ${sampleHighRisk.id},
             ${`Intensified Supportive Supervision & Cold Chain Audit - ${sampleHighRisk.name}`},
+            'Targeted EPI cold chain audit and supportive supervision following high threat score.',
+            'supervision',
             'District EPI Supervisor',
-            15000,
-            'PLANNED'
-          ) ON CONFLICT DO NOTHING;
+            'PLANNED',
+            15000.00
+          );
         `);
       }
     }
