@@ -11791,6 +11791,292 @@ export async function registerRoutes(
   });
 
   // ─── Supportive Supervision ───────────────────────────
+
+  // GET /api/facilities/:facilityId/supervisors — Get supervisors available for a facility,
+  // partitioned into district, province, and national levels (strictly excluding staff from the facility itself).
+  app.get("/api/facilities/:facilityId/supervisors", ...auth, requireTenant, async (req: any, res) => {
+    try {
+      const facilityId = parseInt(req.params.facilityId);
+      if (isNaN(facilityId)) {
+        return res.status(400).json({ message: "Invalid facilityId" });
+      }
+
+      // Fetch facility with district and province info
+      const [facilityRow] = await db
+        .select({
+          id: facilities.id,
+          name: facilities.name,
+          districtId: facilities.districtId,
+          districtName: districts.name,
+          provinceId: districts.provinceId,
+          provinceName: provinces.name,
+        })
+        .from(facilities)
+        .leftJoin(districts, eq(facilities.districtId, districts.id))
+        .leftJoin(provinces, eq(districts.provinceId, provinces.id))
+        .where(and(eq(facilities.id, facilityId), eq(facilities.tenantId, req.tenantId)))
+        .limit(1);
+
+      if (!facilityRow) {
+        return res.status(404).json({ message: "Facility not found" });
+      }
+
+      // Fetch candidate supervisor users in this tenant who do NOT belong to this facility
+      const userRows = await db
+        .select({
+          id: users.id,
+          firstName: users.firstName,
+          lastName: users.lastName,
+          email: users.email,
+          role: users.role,
+          roles: users.roles,
+          districtId: users.districtId,
+          provinceId: users.provinceId,
+          facilityId: users.facilityId,
+          isActive: users.isActive,
+        })
+        .from(users)
+        .where(
+          and(
+            eq(users.tenantId, req.tenantId),
+            eq(users.isActive, true),
+            or(isNull(users.facilityId), ne(users.facilityId, facilityId))
+          )
+        );
+
+      const districtSupervisors: any[] = [];
+      const provinceSupervisors: any[] = [];
+      const nationalSupervisors: any[] = [];
+
+      // Helper to format role names cleanly
+      const formatRole = (r: string) => {
+        if (!r) return "Supervisor";
+        return r
+          .split("_")
+          .map((w: string) => w.charAt(0).toUpperCase() + w.slice(1))
+          .join(" ");
+      };
+
+      for (const u of userRows) {
+        const fullName = `${u.firstName || ""} ${u.lastName || ""}`.trim() || u.email?.split("@")[0] || "Supervisor";
+        const roleLabel = formatRole(u.role);
+
+        if (facilityRow.districtId && u.districtId === facilityRow.districtId) {
+          districtSupervisors.push({
+            id: `user-${u.id}`,
+            userId: u.id,
+            name: fullName,
+            role: roleLabel,
+            level: "district",
+            districtId: u.districtId,
+            districtName: facilityRow.districtName,
+            email: u.email,
+            source: "user",
+          });
+        } else if (facilityRow.provinceId && u.provinceId === facilityRow.provinceId && !u.districtId) {
+          provinceSupervisors.push({
+            id: `user-${u.id}`,
+            userId: u.id,
+            name: fullName,
+            role: roleLabel,
+            level: "province",
+            provinceId: u.provinceId,
+            provinceName: facilityRow.provinceName,
+            email: u.email,
+            source: "user",
+          });
+        } else if (!u.districtId && !u.provinceId) {
+          nationalSupervisors.push({
+            id: `user-${u.id}`,
+            userId: u.id,
+            name: fullName,
+            role: roleLabel,
+            level: "national",
+            email: u.email,
+            source: "user",
+          });
+        }
+      }
+
+      // Also check other facilities/offices in the same district for staff with supervisor roles
+      if (facilityRow.districtId) {
+        const districtStaffRows = await db
+          .select({
+            id: facilityStaff.id,
+            fullName: facilityStaff.fullName,
+            name: facilityStaff.name,
+            role: facilityStaff.role,
+            position: facilityStaff.position,
+            contactPhone: facilityStaff.contactPhone,
+            facilityId: facilityStaff.facilityId,
+            facilityName: facilities.name,
+          })
+          .from(facilityStaff)
+          .innerJoin(facilities, eq(facilityStaff.facilityId, facilities.id))
+          .where(
+            and(
+              eq(facilityStaff.tenantId, req.tenantId),
+              eq(facilities.districtId, facilityRow.districtId),
+              ne(facilityStaff.facilityId, facilityId),
+              eq(facilityStaff.isActive, true),
+              or(
+                ilike(facilityStaff.role, "%supervis%"),
+                ilike(facilityStaff.position, "%supervis%"),
+                ilike(facilityStaff.role, "%officer%"),
+                ilike(facilityStaff.position, "%officer%"),
+                ilike(facilityStaff.role, "%coordinator%"),
+                ilike(facilityStaff.position, "%coordinator%")
+              )
+            )
+          );
+
+        for (const st of districtStaffRows) {
+          const staffName = st.fullName || st.name || "District Supervisor";
+          if (!districtSupervisors.some((d) => d.name.toLowerCase() === staffName.toLowerCase())) {
+            districtSupervisors.push({
+              id: `staff-${st.id}`,
+              name: staffName,
+              role: st.position || st.role || "District Health Supervisor",
+              level: "district",
+              districtId: facilityRow.districtId,
+              districtName: facilityRow.districtName,
+              facilityName: st.facilityName,
+              phone: st.contactPhone,
+              source: "facility_staff",
+            });
+          }
+        }
+      }
+
+      res.json({
+        facility: facilityRow,
+        district: districtSupervisors,
+        province: provinceSupervisors,
+        national: nationalSupervisors,
+        all: [...districtSupervisors, ...provinceSupervisors, ...nationalSupervisors],
+      });
+    } catch (error: any) {
+      console.error("Error fetching supervisors:", error);
+      res.status(500).json({ message: "Failed to fetch supervisors: " + error.message });
+    }
+  });
+
+  // POST /api/facilities/:facilityId/supervisors — Add a supervisor at the district, province, or national level
+  app.post("/api/facilities/:facilityId/supervisors", ...auth, requireTenant, async (req: any, res) => {
+    try {
+      const facilityId = parseInt(req.params.facilityId);
+      if (isNaN(facilityId)) {
+        return res.status(400).json({ message: "Invalid facilityId" });
+      }
+
+      const [facilityRow] = await db
+        .select({
+          id: facilities.id,
+          districtId: facilities.districtId,
+          districtName: districts.name,
+          provinceId: districts.provinceId,
+          provinceName: provinces.name,
+        })
+        .from(facilities)
+        .leftJoin(districts, eq(facilities.districtId, districts.id))
+        .leftJoin(provinces, eq(districts.provinceId, provinces.id))
+        .where(and(eq(facilities.id, facilityId), eq(facilities.tenantId, req.tenantId)))
+        .limit(1);
+
+      if (!facilityRow) {
+        return res.status(404).json({ message: "Facility not found" });
+      }
+
+      const { name, role, level = "district", phone, email } = req.body;
+      if (!name || typeof name !== "string" || !name.trim()) {
+        return res.status(400).json({ message: "Supervisor name is required" });
+      }
+
+      const tenant = await storage.getTenant(req.tenantId);
+      const formatSpec = getCountryFormat(tenant);
+
+      if (phone && typeof phone === "string" && phone.trim()) {
+        const phoneVal = formatSpec.validatePhone(phone.trim());
+        if (!phoneVal.valid) {
+          return res.status(400).json({ message: phoneVal.message });
+        }
+      }
+
+      const parts = name.trim().split(/\s+/);
+      const firstName = parts[0] || "Supervisor";
+      const lastName = parts.slice(1).join(" ") || "Official";
+
+      let assignedDistrictId: number | null = null;
+      let assignedProvinceId: number | null = null;
+      let userRole: any = "district_manager";
+
+      if (level === "national") {
+        assignedDistrictId = null;
+        assignedProvinceId = null;
+        userRole = "national_manager";
+      } else if (level === "province") {
+        assignedDistrictId = null;
+        assignedProvinceId = facilityRow.provinceId || null;
+        userRole = "provincial_coordinator";
+      } else {
+        // District level
+        assignedDistrictId = facilityRow.districtId || null;
+        assignedProvinceId = facilityRow.provinceId || null;
+        userRole = "district_manager";
+      }
+
+      const cleanEmail = email && typeof email === "string" && email.trim()
+        ? email.trim().toLowerCase()
+        : `supervisor.${Date.now()}.${Math.floor(Math.random() * 1000)}@vaxplan.local`;
+
+      const [createdUser] = await db
+        .insert(users)
+        .values({
+          tenantId: req.tenantId,
+          firstName,
+          lastName,
+          email: cleanEmail,
+          role: userRole,
+          roles: ["supervisor", userRole],
+          permissions: ["supervision.conduct", "supervision.view", "view_reports"],
+          districtId: assignedDistrictId,
+          provinceId: assignedProvinceId,
+          facilityId: null, // NOT tied to any facility
+          isActive: true,
+        })
+        .returning();
+
+      await logAudit(req, "create", "supervisor_user", createdUser.id, null, {
+        name: `${firstName} ${lastName}`,
+        role: role || userRole,
+        level,
+        districtId: assignedDistrictId,
+        provinceId: assignedProvinceId,
+        phone: phone ? formatSpec.normalizePhone(phone.trim()) : null,
+      });
+
+      res.status(201).json({
+        success: true,
+        supervisor: {
+          id: `user-${createdUser.id}`,
+          userId: createdUser.id,
+          name: `${createdUser.firstName} ${createdUser.lastName}`,
+          role: role || (level === "national" ? "National Supervisor" : level === "province" ? "Provincial Supervisor" : "District Supervisor"),
+          level,
+          districtId: assignedDistrictId,
+          districtName: level === "district" ? facilityRow.districtName : null,
+          provinceId: assignedProvinceId,
+          provinceName: level !== "national" ? facilityRow.provinceName : null,
+          phone: phone ? formatSpec.normalizePhone(phone.trim()) : null,
+          email: createdUser.email,
+        },
+      });
+    } catch (error: any) {
+      console.error("Error creating supervisor:", error);
+      res.status(500).json({ message: "Failed to create supervisor: " + error.message });
+    }
+  });
+
   app.get("/api/supervision-visits", ...auth, async (req: any, res) => {
     try {
       const facilityId = req.query.facilityId ? parseInt(req.query.facilityId as string) : undefined;

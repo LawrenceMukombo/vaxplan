@@ -14,7 +14,10 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
+  SelectGroup,
+  SelectLabel,
 } from "@/components/ui/select";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Slider } from "@/components/ui/slider";
 import {
@@ -50,6 +53,9 @@ import {
   Calendar,
   Printer,
   Package,
+  Building2,
+  Shield,
+  UserPlus,
 } from "lucide-react";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
 import { useToast } from "@/hooks/use-toast";
@@ -6017,6 +6023,287 @@ export function Step9({
   );
 }
 
+// Reusable inline AddSupervisorDialog component for Step 10
+// Follows WHO RED guidelines: supportive supervision is an external oversight mechanism.
+// Supervisors are drawn from the District, Province, or National levels (never local clinic staff).
+export function AddSupervisorDialog({
+  facilityId,
+  facilityDetails,
+  onSupervisorAdded,
+}: {
+  facilityId: number | null;
+  facilityDetails?: {
+    id?: number;
+    name?: string;
+    districtId?: number;
+    districtName?: string;
+    provinceId?: number;
+    provinceName?: string;
+  };
+  onSupervisorAdded?: (supervisorName: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [level, setLevel] = useState<"district" | "province" | "national">("district");
+  const [fullName, setFullName] = useState("");
+  const [role, setRole] = useState("District EPI Supervisor");
+  const [phone, setPhone] = useState("");
+  const [email, setEmail] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  const { toast } = useToast();
+  const { data: tenant } = useQuery<any>({ queryKey: ["/api/me/tenant"] });
+  const countryConfig = getCountryConfig(tenant);
+
+  const districtName = facilityDetails?.districtName || "District";
+  const provinceName = facilityDetails?.provinceName || "Province";
+
+  const handleLevelChange = (newLevel: "district" | "province" | "national") => {
+    setLevel(newLevel);
+    if (newLevel === "district") {
+      setRole("District EPI Supervisor");
+    } else if (newLevel === "province") {
+      setRole("Provincial EPI Coordinator");
+    } else {
+      setRole("National EPI Supervisor");
+    }
+  };
+
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!facilityId) return;
+    if (!fullName.trim()) {
+      toast({ title: "Name is required", description: "Please enter the supervisor's full name.", variant: "destructive" });
+      return;
+    }
+
+    if (phone.trim()) {
+      const phoneVal = countryConfig.formatSpec.validatePhone(phone.trim());
+      if (!phoneVal.valid) {
+        toast({ title: "Invalid Phone Number", description: phoneVal.message, variant: "destructive" });
+        return;
+      }
+    }
+
+    try {
+      setSubmitting(true);
+      const data: any = await apiRequest("POST", `/api/facilities/${facilityId}/supervisors`, {
+        name: fullName.trim(),
+        role: role.trim() || undefined,
+        level,
+        phone: phone.trim() ? countryConfig.formatSpec.normalizePhone(phone.trim()) : undefined,
+        email: email.trim() || undefined,
+      });
+
+      // Refetch the supervisors list so dropdowns update immediately
+      await queryClient.invalidateQueries({ queryKey: ["/api/facilities", facilityId, "supervisors"] });
+
+      const createdName = data?.supervisor?.name || fullName.trim();
+      toast({
+        title: "Supervisor Added",
+        description: `Successfully registered ${createdName} at the ${level} level.`,
+      });
+
+      onSupervisorAdded?.(createdName);
+      setOpen(false);
+      setFullName("");
+      setPhone("");
+      setEmail("");
+      setLevel("district");
+      setRole("District EPI Supervisor");
+    } catch (error: any) {
+      toast({
+        title: "Failed to add supervisor",
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  if (!facilityId) return null;
+
+  return (
+    <>
+      <Button
+        size="sm"
+        variant="outline"
+        onClick={() => setOpen(true)}
+        type="button"
+        className="gap-1.5"
+        data-testid="button-add-supervisor"
+      >
+        <UserPlus className="h-4 w-4 text-primary" /> Add Supervisor
+      </Button>
+
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="sm:max-w-[480px]" data-testid="dialog-add-supervisor">
+          <form onSubmit={handleSave} className="space-y-4">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Shield className="h-5 w-5 text-primary" /> Add Supportive Supervisor
+              </DialogTitle>
+              <DialogDescription>
+                Register an external supportive supervisor from the District ({districtName}), Province ({provinceName}), or National MOH level.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-3">
+              {/* Level selector */}
+              <div className="space-y-1.5">
+                <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Supervisory Level</Label>
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleLevelChange("district")}
+                    className={`flex flex-col items-center justify-center p-2.5 rounded-lg border text-xs font-medium transition-all ${
+                      level === "district"
+                        ? "border-primary bg-primary/10 text-primary ring-1 ring-primary"
+                        : "border-border/70 hover:bg-muted/50 text-muted-foreground"
+                    }`}
+                  >
+                    <Building2 className="h-4 w-4 mb-1" />
+                    <span>District Level</span>
+                    <span className="text-[10px] text-muted-foreground truncate max-w-full font-normal">
+                      {districtName}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleLevelChange("province")}
+                    className={`flex flex-col items-center justify-center p-2.5 rounded-lg border text-xs font-medium transition-all ${
+                      level === "province"
+                        ? "border-blue-600 bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 ring-1 ring-blue-600"
+                        : "border-border/70 hover:bg-muted/50 text-muted-foreground"
+                    }`}
+                  >
+                    <Building2 className="h-4 w-4 mb-1" />
+                    <span>Province Level</span>
+                    <span className="text-[10px] text-muted-foreground truncate max-w-full font-normal">
+                      {provinceName}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleLevelChange("national")}
+                    className={`flex flex-col items-center justify-center p-2.5 rounded-lg border text-xs font-medium transition-all ${
+                      level === "national"
+                        ? "border-amber-600 bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 ring-1 ring-amber-600"
+                        : "border-border/70 hover:bg-muted/50 text-muted-foreground"
+                    }`}
+                  >
+                    <Shield className="h-4 w-4 mb-1" />
+                    <span>National Level</span>
+                    <span className="text-[10px] text-muted-foreground font-normal">Ministry / WHO</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Supervisor Name */}
+              <div className="space-y-1">
+                <Label htmlFor="supervisor-name">Full Name <span className="text-destructive">*</span></Label>
+                <Input
+                  id="supervisor-name"
+                  placeholder="e.g. Dr. Derek Mthembu"
+                  value={fullName}
+                  onChange={(e) => setFullName(e.target.value)}
+                  disabled={submitting}
+                  autoFocus
+                />
+              </div>
+
+              {/* Designation / Role */}
+              <div className="space-y-1">
+                <div className="flex justify-between items-center">
+                  <Label htmlFor="supervisor-role">Position / Role</Label>
+                  <span className="text-[11px] text-muted-foreground">Custom or select preset</span>
+                </div>
+                <Select value={role} onValueChange={setRole} disabled={submitting}>
+                  <SelectTrigger id="supervisor-role">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {level === "district" && (
+                      <SelectGroup>
+                        <SelectLabel>District Roles</SelectLabel>
+                        <SelectItem value="District EPI Supervisor">District EPI Supervisor</SelectItem>
+                        <SelectItem value="District Health Officer (DHO)">District Health Officer (DHO)</SelectItem>
+                        <SelectItem value="District Surveillance Officer">District Surveillance Officer</SelectItem>
+                        <SelectItem value="Sub-District Coordinator">Sub-District Coordinator</SelectItem>
+                        <SelectItem value="Cold Chain & Vaccine Logistics Officer">Cold Chain & Vaccine Logistics Officer</SelectItem>
+                        <SelectItem value="M&E / HMIS Officer">M&E / HMIS Officer</SelectItem>
+                      </SelectGroup>
+                    )}
+                    {level === "province" && (
+                      <SelectGroup>
+                        <SelectLabel>Provincial Roles</SelectLabel>
+                        <SelectItem value="Provincial EPI Coordinator">Provincial EPI Coordinator</SelectItem>
+                        <SelectItem value="Provincial Surveillance Officer">Provincial Surveillance Officer</SelectItem>
+                        <SelectItem value="Provincial Cold Chain Officer">Provincial Cold Chain Officer</SelectItem>
+                        <SelectItem value="Provincial Child Health Officer">Provincial Child Health Officer</SelectItem>
+                      </SelectGroup>
+                    )}
+                    {level === "national" && (
+                      <SelectGroup>
+                        <SelectLabel>National Roles</SelectLabel>
+                        <SelectItem value="National EPI Supervisor">National EPI Supervisor</SelectItem>
+                        <SelectItem value="National EPI Manager">National EPI Manager</SelectItem>
+                        <SelectItem value="WHO / UNICEF External Supervisor">WHO / UNICEF External Supervisor</SelectItem>
+                      </SelectGroup>
+                    )}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Phone & Email */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <Label htmlFor="supervisor-phone">Phone Number</Label>
+                  <Input
+                    id="supervisor-phone"
+                    placeholder={countryConfig.phonePlaceholder || "+27 82 123 4567"}
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                    disabled={submitting}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="supervisor-email">Email (Optional)</Label>
+                  <Input
+                    id="supervisor-email"
+                    type="email"
+                    placeholder="official@health.gov"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    disabled={submitting}
+                  />
+                </div>
+              </div>
+            </div>
+
+            <DialogFooter className="pt-2">
+              <Button type="button" variant="outline" onClick={() => setOpen(false)} disabled={submitting}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={submitting} className="gap-1.5">
+                {submitting ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" /> Saving...
+                  </>
+                ) : (
+                  <>
+                    <Shield className="h-4 w-4" /> Save Supervisor
+                  </>
+                )}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
 export function Step10({
   supervision,
   setSupervision,
@@ -6036,14 +6323,29 @@ export function Step10({
 }) {
   const errorRowRef = useRef<HTMLButtonElement | null>(null);
 
-  const { data: roster } = useQuery<any[]>({
-    queryKey: ["/api/facilities", facilityId, "staff"],
+  // Fetch supervisors from District, Province, and National levels
+  // WHO RED requirement: supportive supervision must be external oversight (not same facility staff)
+  const { data: supervisorData, isLoading: loadingSupervisors } = useQuery<{
+    facility?: {
+      id: number;
+      name: string;
+      districtId: number;
+      districtName: string;
+      provinceId: number;
+      provinceName: string;
+    };
+    district: any[];
+    province: any[];
+    national: any[];
+    all: any[];
+  }>({
+    queryKey: ["/api/facilities", facilityId, "supervisors"],
     enabled: !!facilityId,
     queryFn: async () => {
-      const res = await fetch(`/api/facilities/${facilityId}/staff`, { credentials: "include" });
-      if (!res.ok) return [];
+      const res = await fetch(`/api/facilities/${facilityId}/supervisors`, { credentials: "include" });
+      if (!res.ok) return { district: [], province: [], national: [], all: [] };
       return res.json();
-    }
+    },
   });
 
   const { data: templates } = useQuery<any[]>({
@@ -6052,10 +6354,9 @@ export function Step10({
       const res = await fetch("/api/supervision-checklist-templates", { credentials: "include" });
       if (!res.ok) return [];
       return res.json();
-    }
+    },
   });
 
-  const staffOptions = roster || [];
   const templateOptions = templates || [];
 
   const upd = (i: number, patch: any) => {
@@ -6078,20 +6379,41 @@ export function Step10({
       },
     ]);
   const remove = (i: number) => onDelete(i);
+
+  const districtName = supervisorData?.facility?.districtName || "District";
+  const provinceName = supervisorData?.facility?.provinceName || "Province";
+
   return (
     <div className="space-y-3">
-      <div className="flex justify-end gap-2">
-        <AddStaffDialog facilityId={facilityId} />
-        <Button size="sm" variant="outline" onClick={add} data-testid="button-add-supervision">
-          <Plus className="mr-1 h-4 w-4" /> Add visit
-        </Button>
+      <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-2 bg-muted/20 p-2.5 rounded-md border border-border/60">
+        <div className="text-xs text-muted-foreground flex items-center gap-1.5">
+          <Shield className="h-4 w-4 text-primary shrink-0" />
+          <span>
+            Supportive supervision is external oversight: select supervisors from the <strong>{districtName}</strong> district, <strong>{provinceName}</strong> province, or <strong>National</strong> MOH level.
+          </span>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <AddSupervisorDialog
+            facilityId={facilityId}
+            facilityDetails={supervisorData?.facility}
+            onSupervisorAdded={(newName) => {
+              const emptyIdx = supervision.findIndex((s) => !s.supervisorName || !s.supervisorName.trim());
+              if (emptyIdx !== -1) {
+                upd(emptyIdx, { supervisorName: newName });
+              }
+            }}
+          />
+          <Button size="sm" variant="outline" onClick={add} data-testid="button-add-supervision">
+            <Plus className="mr-1 h-4 w-4" /> Add visit
+          </Button>
+        </div>
       </div>
       <table className="w-full text-sm">
         <thead className="border-b text-left text-xs uppercase text-muted-foreground">
           <tr>
             <th className="p-2">Qtr</th>
             <th className="p-2">Date</th>
-            <th className="p-2 w-48">Supervisor</th>
+            <th className="p-2 w-56">Supervisor</th>
             <th className="p-2 w-48">Checklist</th>
             <th className="p-2">Follow-up</th>
             <th className="p-2"></th>
@@ -6101,64 +6423,120 @@ export function Step10({
           {supervision.map((v, i) => {
             const isError = errorRowId != null && `sup-${i}` === errorRowId;
             return (
-            <tr key={v.rowId} className={`border-b align-top ${isError ? "ring-1 ring-destructive" : ""}`}>
-              <td className="p-1">
-                <Select value={String(v.quarter)} onValueChange={(x) => upd(i, { quarter: Number(x) })}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {[1, 2, 3, 4].map((q) => (<SelectItem key={q} value={String(q)}>Q{q}</SelectItem>))}
-                  </SelectContent>
-                </Select>
-              </td>
-              <td className="p-1"><Input type="date" value={v.scheduledDate} onChange={(e) => upd(i, { scheduledDate: e.target.value })} /></td>
-              <td className="p-1">
-                <Select value={v.supervisorName} onValueChange={(x) => upd(i, { supervisorName: x })}>
-                  <SelectTrigger ref={isError ? errorRowRef : undefined} className={isError ? "border-destructive ring-1 ring-destructive" : undefined}>
-                    <SelectValue placeholder="Select supervisor" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {staffOptions.map(staff => (
-                      <SelectItem key={staff.id} value={staff.name}>
-                        {staff.name} ({staff.role})
-                      </SelectItem>
-                    ))}
-                    {v.supervisorName && !staffOptions.some(st => st.name === v.supervisorName) && (
-                      <SelectItem value={v.supervisorName}>{v.supervisorName} (custom)</SelectItem>
-                    )}
-                  </SelectContent>
-                </Select>
-                {isError && errorMessage && (
-                  <p
-                    className="mt-1 text-xs text-destructive"
-                    data-testid="supervision-row-error"
-                  >
-                    {errorMessage}
-                  </p>
-                )}
-              </td>
-              <td className="p-1">
-                <Select value={v.checklist} onValueChange={(x) => upd(i, { checklist: x })}>
-                  <SelectTrigger className="w-48"><SelectValue placeholder="Select checklist" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="WHO RED checklist">WHO RED checklist (Default)</SelectItem>
-                    {templateOptions.map(t => (
-                      <SelectItem key={t.id} value={t.name}>
-                        {t.name}
-                      </SelectItem>
-                    ))}
-                    {v.checklist && v.checklist !== "WHO RED checklist" && !templateOptions.some(t => t.name === v.checklist) && (
-                      <SelectItem value={v.checklist}>{v.checklist} (custom)</SelectItem>
-                    )}
-                  </SelectContent>
-                </Select>
-              </td>
-              <td className="p-1"><Textarea rows={2} value={v.followUp} onChange={(e) => upd(i, { followUp: e.target.value })} /></td>
-              <td className="p-1">
-                <Button size="icon" variant="ghost" onClick={() => remove(i)}>
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-              </td>
-            </tr>
+              <tr key={v.rowId} className={`border-b align-top ${isError ? "ring-1 ring-destructive" : ""}`}>
+                <td className="p-1">
+                  <Select value={String(v.quarter)} onValueChange={(x) => upd(i, { quarter: Number(x) })}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {[1, 2, 3, 4].map((q) => (<SelectItem key={q} value={String(q)}>Q{q}</SelectItem>))}
+                    </SelectContent>
+                  </Select>
+                </td>
+                <td className="p-1"><Input type="date" value={v.scheduledDate} onChange={(e) => upd(i, { scheduledDate: e.target.value })} /></td>
+                <td className="p-1">
+                  <Select value={v.supervisorName} onValueChange={(x) => upd(i, { supervisorName: x })}>
+                    <SelectTrigger ref={isError ? errorRowRef : undefined} className={isError ? "border-destructive ring-1 ring-destructive" : undefined}>
+                      <SelectValue placeholder={loadingSupervisors ? "Loading supervisors..." : "Select supervisor"} />
+                    </SelectTrigger>
+                    <SelectContent className="max-h-72">
+                      {supervisorData?.district && supervisorData.district.length > 0 && (
+                        <SelectGroup>
+                          <SelectLabel className="text-xs font-semibold text-primary flex items-center gap-1.5 px-2 py-1 bg-primary/5 rounded">
+                            <Building2 className="h-3 w-3" />
+                            District Supervisors ({districtName})
+                          </SelectLabel>
+                          {supervisorData.district.map((sup) => (
+                            <SelectItem key={sup.id} value={sup.name}>
+                              <span className="font-medium">{sup.name}</span>
+                              <span className="text-muted-foreground ml-1 text-xs">({sup.role})</span>
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
+                      )}
+
+                      {supervisorData?.province && supervisorData.province.length > 0 && (
+                        <SelectGroup>
+                          <SelectLabel className="text-xs font-semibold text-blue-700 dark:text-blue-400 flex items-center gap-1.5 px-2 py-1 bg-blue-500/10 rounded mt-1">
+                            <Building2 className="h-3 w-3" />
+                            Provincial Supervisors ({provinceName})
+                          </SelectLabel>
+                          {supervisorData.province.map((sup) => (
+                            <SelectItem key={sup.id} value={sup.name}>
+                              <span className="font-medium">{sup.name}</span>
+                              <span className="text-muted-foreground ml-1 text-xs">({sup.role})</span>
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
+                      )}
+
+                      {supervisorData?.national && supervisorData.national.length > 0 && (
+                        <SelectGroup>
+                          <SelectLabel className="text-xs font-semibold text-amber-700 dark:text-amber-400 flex items-center gap-1.5 px-2 py-1 bg-amber-500/10 rounded mt-1">
+                            <Shield className="h-3 w-3" />
+                            National Supervisors
+                          </SelectLabel>
+                          {supervisorData.national.map((sup) => (
+                            <SelectItem key={sup.id} value={sup.name}>
+                              <span className="font-medium">{sup.name}</span>
+                              <span className="text-muted-foreground ml-1 text-xs">({sup.role})</span>
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
+                      )}
+
+                      {/* Fallback for already saved custom or assigned supervisor */}
+                      {v.supervisorName &&
+                        !supervisorData?.all?.some((s) => s.name === v.supervisorName) && (
+                          <SelectGroup>
+                            <SelectLabel className="text-xs font-semibold text-muted-foreground px-2 py-1 mt-1">
+                              Assigned Supervisor
+                            </SelectLabel>
+                            <SelectItem value={v.supervisorName}>
+                              <span className="font-medium">{v.supervisorName}</span>
+                              <span className="text-muted-foreground ml-1 text-xs">(assigned)</span>
+                            </SelectItem>
+                          </SelectGroup>
+                        )}
+
+                      {(!supervisorData?.all || supervisorData.all.length === 0) && !v.supervisorName && (
+                        <div className="p-2 text-xs text-muted-foreground text-center">
+                          No supervisors found. Use "+ Add Supervisor" above.
+                        </div>
+                      )}
+                    </SelectContent>
+                  </Select>
+                  {isError && errorMessage && (
+                    <p
+                      className="mt-1 text-xs text-destructive"
+                      data-testid="supervision-row-error"
+                    >
+                      {errorMessage}
+                    </p>
+                  )}
+                </td>
+                <td className="p-1">
+                  <Select value={v.checklist} onValueChange={(x) => upd(i, { checklist: x })}>
+                    <SelectTrigger className="w-48"><SelectValue placeholder="Select checklist" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="WHO RED checklist">WHO RED checklist (Default)</SelectItem>
+                      {templateOptions.map((t) => (
+                        <SelectItem key={t.id} value={t.name}>
+                          {t.name}
+                        </SelectItem>
+                      ))}
+                      {v.checklist && v.checklist !== "WHO RED checklist" && !templateOptions.some((t) => t.name === v.checklist) && (
+                        <SelectItem value={v.checklist}>{v.checklist} (custom)</SelectItem>
+                      )}
+                    </SelectContent>
+                  </Select>
+                </td>
+                <td className="p-1"><Textarea rows={2} value={v.followUp} onChange={(e) => upd(i, { followUp: e.target.value })} /></td>
+                <td className="p-1">
+                  <Button size="icon" variant="ghost" onClick={() => remove(i)}>
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </td>
+              </tr>
             );
           })}
         </tbody>

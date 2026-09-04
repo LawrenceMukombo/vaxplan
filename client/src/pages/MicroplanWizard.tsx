@@ -4255,6 +4255,7 @@ import {
   Step3,
   Step4,
   AddStaffDialog,
+  AddSupervisorDialog,
   Step5,
   AddColdChainDialog,
   Step6,
