@@ -27,6 +27,15 @@ import {
   BookOpen,
   TrendingDown,
   TrendingUp,
+  UploadCloud,
+  FileText,
+  Play,
+  Pencil,
+  Trash2,
+  Workflow,
+  Check,
+  RotateCcw,
+  Sparkles,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -34,6 +43,7 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
@@ -46,6 +56,7 @@ interface RiskAssessmentItem {
   id: string;
   countryCode: string;
   title: string;
+  notes?: string | null;
   assessmentYear: number;
   status: "DRAFT" | "IMPORTING" | "VALIDATION_REQUIRED" | "READY_TO_CALCULATE" | "CALCULATING" | "CALCULATED" | "UNDER_REVIEW" | "APPROVED" | "SUPERSEDED";
   administrativeLevelName: string;
@@ -61,6 +72,7 @@ interface RiskContextData {
   adminLevelLabelPlural: string;
   districtsCount: number;
   boundaryId: string | null;
+  defaultBoundaryId?: string | null;
   boundaryFeatureCount: number;
   districts: Array<{ id: number; name: string; code: string; provinceId: number | null }>;
 }
@@ -70,9 +82,25 @@ export default function RiskAssessmentList() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
-  const [activeTab, setActiveTab] = useState<"overview" | "table" | "rounds" | "guidance">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "table" | "rounds" | "dataflow" | "guidance">("overview");
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [selectedDistrict, setSelectedDistrict] = useState<DistrictCoveragePerformance | null>(null);
+
+  // Edit Round Dialog State
+  const [editingAssessment, setEditingAssessment] = useState<RiskAssessmentItem | null>(null);
+  const [isEditOpen, setIsEditOpen] = useState(false);
+  const [editTitle, setEditTitle] = useState("");
+  const [editNotes, setEditNotes] = useState("");
+
+  // Delete Round Dialog State
+  const [deletingAssessment, setDeletingAssessment] = useState<RiskAssessmentItem | null>(null);
+  const [isDeleteOpen, setIsDeleteOpen] = useState(false);
+
+  // Quick Ingestion State on Data Flow tab
+  const [uploadRoundId, setUploadRoundId] = useState<string>("");
+  const [uploadType, setUploadType] = useState<"aggregates" | "linelist">("aggregates");
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
 
   // Read active tenant from cache as initial fallback
   const cachedTenant = useMemo(() => loadActiveTenant(), []);
@@ -104,6 +132,13 @@ export default function RiskAssessmentList() {
   const adminLevel = context?.adminLevelLabel || (activeCountryCode === "SSD" ? "County" : "District");
   const adminLevelPlural = context?.adminLevelLabelPlural || (activeCountryCode === "SSD" ? "Counties" : "Districts");
   const totalUnitsCount = context?.districtsCount || coverageData?.districtsCount || 0;
+
+  // Auto-select latest assessment round for uploads
+  useEffect(() => {
+    if (assessments.length > 0 && !uploadRoundId) {
+      setUploadRoundId(assessments[0].id);
+    }
+  }, [assessments, uploadRoundId]);
 
   // Form State for New Assessment
   const [title, setTitle] = useState(`${new Date().getFullYear()} Measles Programmatic Risk Assessment`);
@@ -137,6 +172,19 @@ export default function RiskAssessmentList() {
     riskCategory: true,
   });
 
+  // Risk Strata Counts for Interactive Cross-Filtering (Rule 25)
+  const riskCounts = useMemo(() => {
+    const rows = coverageData?.performance || [];
+    let low = 0, med = 0, high = 0, veryHigh = 0;
+    for (const r of rows) {
+      if (r.riskCategory === "LOW") low++;
+      else if (r.riskCategory === "MEDIUM") med++;
+      else if (r.riskCategory === "HIGH") high++;
+      else if (r.riskCategory === "VERY_HIGH") veryHigh++;
+    }
+    return { total: rows.length, low, med, high, veryHigh };
+  }, [coverageData]);
+
   // Create Mutation with robust error handling
   const createMutation = useMutation({
     mutationFn: async (payload: any) => {
@@ -161,6 +209,74 @@ export default function RiskAssessmentList() {
     },
   });
 
+  // Edit Mutation (Full CRUD - Rule 1 & 24)
+  const editMutation = useMutation({
+    mutationFn: async ({ id, ...payload }: { id: string; title: string; notes?: string }) => {
+      return await apiRequest("PATCH", `/api/risk/assessments/${id}`, payload);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/risk/assessments"] });
+      setIsEditOpen(false);
+      toast({
+        title: "Assessment Updated",
+        description: "Assessment round details updated successfully.",
+      });
+    },
+    onError: (err: any) => {
+      toast({
+        title: "Update Failed",
+        description: err.message || "Failed to update assessment round.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  // Delete Mutation (Full CRUD - accidental-data-loss-prevention compliant)
+  const deleteMutation = useMutation({
+    mutationFn: async (id: string) => {
+      return await apiRequest("DELETE", `/api/risk/assessments/${id}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/risk/assessments"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/risk/coverage-performance"] });
+      setIsDeleteOpen(false);
+      toast({
+        title: "Assessment Removed",
+        description: "The assessment round has been deleted.",
+      });
+    },
+    onError: (err: any) => {
+      toast({
+        title: "Delete Failed",
+        description: err.message || "Failed to delete assessment round.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  // Calculate Mutation
+  const calculateMutation = useMutation({
+    mutationFn: async (id: string) => {
+      return await apiRequest("POST", `/api/risk/assessments/${id}/calculate`);
+    },
+    onSuccess: (_, id) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/risk/assessments"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/risk/coverage-performance"] });
+      toast({
+        title: "Calculations Complete",
+        description: "The 4-domain risk algorithm executed successfully.",
+      });
+      setLocation(`/risk-assessments/${id}`);
+    },
+    onError: (err: any) => {
+      toast({
+        title: "Calculation Failed",
+        description: err.message || "Failed to calculate assessment.",
+        variant: "destructive",
+      });
+    },
+  });
+
   const handleCreate = (e: React.FormEvent) => {
     e.preventDefault();
     createMutation.mutate({
@@ -170,6 +286,68 @@ export default function RiskAssessmentList() {
       administrativeLevelName: formAdminLevel,
       methodologyVersionId: "WHO_MEASLES_GLOBAL_RECONCILED_V1",
     });
+  };
+
+  const handleEditSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingAssessment) return;
+    editMutation.mutate({
+      id: editingAssessment.id,
+      title: editTitle,
+      notes: editNotes,
+    });
+  };
+
+  const handleDeleteConfirm = () => {
+    if (!deletingAssessment) return;
+    deleteMutation.mutate(deletingAssessment.id);
+  };
+
+  const handleDirectUpload = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!uploadRoundId) {
+      toast({ title: "Select Assessment", description: "Please select an assessment round to ingest data into.", variant: "destructive" });
+      return;
+    }
+    if (!uploadFile) {
+      toast({ title: "Select File", description: "Please choose a CSV file to upload.", variant: "destructive" });
+      return;
+    }
+
+    setIsUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", uploadFile);
+
+      const endpoint = uploadType === "aggregates"
+        ? `/api/risk/assessments/${uploadRoundId}/import-aggregates`
+        : `/api/risk/assessments/${uploadRoundId}/import-linelist`;
+
+      const res = await fetch(endpoint, {
+        method: "POST",
+        body: formData,
+      });
+
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.message || "Upload failed");
+
+      queryClient.invalidateQueries({ queryKey: ["/api/risk/assessments"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/risk/coverage-performance"] });
+      toast({
+        title: "Ingestion Successful",
+        description: json.message || "Data records ingested into assessment workspace.",
+      });
+      setUploadFile(null);
+      setLocation(`/risk-assessments/${uploadRoundId}`);
+    } catch (err: any) {
+      toast({
+        title: "Upload Failed",
+        description: err.message || "Failed to parse or ingest file.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsUploading(false);
+    }
   };
 
   // Status Badge Helper
@@ -460,7 +638,7 @@ export default function RiskAssessmentList() {
 
       {/* Main Module Tabs */}
       <Tabs value={activeTab} onValueChange={(val: any) => setActiveTab(val)} className="space-y-4">
-        <TabsList className="bg-muted/60 p-1">
+        <TabsList className="bg-muted/60 p-1 flex-wrap h-auto">
           <TabsTrigger value="overview" className="gap-1.5 text-xs">
             <Layers className="w-3.5 h-3.5" />
             Coverage Map & Analytics
@@ -473,19 +651,100 @@ export default function RiskAssessmentList() {
             <Calendar className="w-3.5 h-3.5" />
             Assessment Rounds ({assessments.length})
           </TabsTrigger>
+          <TabsTrigger value="dataflow" className="gap-1.5 text-xs">
+            <Workflow className="w-3.5 h-3.5 text-primary" />
+            Data Flow & Ingestion
+            <Badge variant="secondary" className="ml-1 text-[10px] py-0 px-1 font-semibold">Templates</Badge>
+          </TabsTrigger>
           <TabsTrigger value="guidance" className="gap-1.5 text-xs">
             <BookOpen className="w-3.5 h-3.5" />
-            WHO Guidance & Documentation
+            WHO Guidance & Docs
           </TabsTrigger>
         </TabsList>
 
         {/* TAB 1: INTERACTIVE CHOROPLETH COVERAGE MAP (RULE 25) */}
         <TabsContent value="overview" className="space-y-4">
+          {/* Interactive Cross-Filtering Bar (Rule 25) */}
+          <div className="flex flex-wrap items-center justify-between gap-2 p-2.5 bg-muted/40 rounded-lg border text-xs">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-muted-foreground font-medium flex items-center gap-1 mr-1">
+                <Filter className="w-3.5 h-3.5 text-primary" /> Filter by Risk Tier:
+              </span>
+              <Button
+                size="sm"
+                variant={selectedCategoryFilter === "ALL" ? "default" : "outline"}
+                className="h-7 text-xs"
+                onClick={() => setSelectedCategoryFilter("ALL")}
+              >
+                All Districts ({riskCounts.total})
+              </Button>
+              <Button
+                size="sm"
+                variant={selectedCategoryFilter === "LOW" ? "default" : "outline"}
+                className={`h-7 text-xs ${
+                  selectedCategoryFilter === "LOW"
+                    ? "bg-emerald-600 hover:bg-emerald-700 text-white"
+                    : "border-emerald-600/30 text-emerald-700 dark:text-emerald-400"
+                }`}
+                onClick={() => setSelectedCategoryFilter(selectedCategoryFilter === "LOW" ? "ALL" : "LOW")}
+              >
+                Low ({riskCounts.low})
+              </Button>
+              <Button
+                size="sm"
+                variant={selectedCategoryFilter === "MEDIUM" ? "default" : "outline"}
+                className={`h-7 text-xs ${
+                  selectedCategoryFilter === "MEDIUM"
+                    ? "bg-amber-600 hover:bg-amber-700 text-white"
+                    : "border-amber-600/30 text-amber-700 dark:text-amber-400"
+                }`}
+                onClick={() => setSelectedCategoryFilter(selectedCategoryFilter === "MEDIUM" ? "ALL" : "MEDIUM")}
+              >
+                Medium ({riskCounts.med})
+              </Button>
+              <Button
+                size="sm"
+                variant={selectedCategoryFilter === "HIGH" ? "default" : "outline"}
+                className={`h-7 text-xs ${
+                  selectedCategoryFilter === "HIGH"
+                    ? "bg-orange-600 hover:bg-orange-700 text-white"
+                    : "border-orange-600/30 text-orange-700 dark:text-orange-400"
+                }`}
+                onClick={() => setSelectedCategoryFilter(selectedCategoryFilter === "HIGH" ? "ALL" : "HIGH")}
+              >
+                High ({riskCounts.high})
+              </Button>
+              <Button
+                size="sm"
+                variant={selectedCategoryFilter === "VERY_HIGH" ? "default" : "outline"}
+                className={`h-7 text-xs ${
+                  selectedCategoryFilter === "VERY_HIGH"
+                    ? "bg-rose-600 hover:bg-rose-700 text-white"
+                    : "border-rose-600/30 text-rose-700 dark:text-rose-400"
+                }`}
+                onClick={() => setSelectedCategoryFilter(selectedCategoryFilter === "VERY_HIGH" ? "ALL" : "VERY_HIGH")}
+              >
+                Very High ({riskCounts.veryHigh})
+              </Button>
+            </div>
+
+            {selectedCategoryFilter !== "ALL" && (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-7 text-xs gap-1 text-muted-foreground hover:text-foreground"
+                onClick={() => setSelectedCategoryFilter("ALL")}
+              >
+                <RotateCcw className="w-3 h-3" /> Clear Filter
+              </Button>
+            )}
+          </div>
+
           <RiskChoroplethMap
             countryCode={activeCountryCode}
             countryName={activeCountryName}
             adminLevelLabel={adminLevel}
-            boundaryId={context?.boundaryId}
+            boundaryId={context?.defaultBoundaryId || context?.boundaryId}
             data={coverageData?.performance || []}
             selectedDistrictId={selectedDistrict?.districtId}
             onSelectDistrict={(dist) => {
@@ -493,7 +752,7 @@ export default function RiskAssessmentList() {
               if (dist) {
                 toast({
                   title: `${dist.districtName} (${dist.provinceName})`,
-                  description: `MCV1 Coverage: ${dist.mcv1Coverage}% • MCV2: ${dist.mcv2Coverage}% • Dropout: ${dist.dropoutRate}% • Risk Category: ${dist.riskCategory}`,
+                  description: `MCV1: ${dist.mcv1Coverage}% • MCV2: ${dist.mcv2Coverage}% • Dropout: ${dist.dropoutRate}% • Risk Category: ${dist.riskCategory}`,
                 });
               }
             }}
@@ -527,7 +786,7 @@ export default function RiskAssessmentList() {
                         setSearchTerm(e.target.value);
                         setPage(1);
                       }}
-                      className="h-8 pl-8 text-xs w-[180px] md:w-[220px]"
+                      className="h-8 pl-8 text-xs w-[160px] md:w-[200px]"
                     />
                   </div>
 
@@ -538,7 +797,7 @@ export default function RiskAssessmentList() {
                       setPage(1);
                     }}
                   >
-                    <SelectTrigger className="h-8 text-xs w-[140px]">
+                    <SelectTrigger className="h-8 text-xs w-[130px]">
                       <SelectValue placeholder="Risk Filter" />
                     </SelectTrigger>
                     <SelectContent>
@@ -547,6 +806,45 @@ export default function RiskAssessmentList() {
                       <SelectItem value="MEDIUM">Medium Risk</SelectItem>
                       <SelectItem value="HIGH">High Risk</SelectItem>
                       <SelectItem value="VERY_HIGH">Very High Risk</SelectItem>
+                    </SelectContent>
+                  </Select>
+
+                  {/* Column Visibility Selector (Rule 24) */}
+                  <Select
+                    value="manage_columns"
+                    onValueChange={(col) => {
+                      if (col !== "manage_columns") {
+                        setVisibleColumns((prev) => ({ ...prev, [col]: !prev[col] }));
+                      }
+                    }}
+                  >
+                    <SelectTrigger className="h-8 text-xs w-[130px]">
+                      <SlidersHorizontal className="w-3 h-3 mr-1" />
+                      Columns
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="manage_columns" disabled>Toggle Visible Columns</SelectItem>
+                      <SelectItem value="province">
+                        {visibleColumns.province ? "✓ " : ""}Province
+                      </SelectItem>
+                      <SelectItem value="mcv1">
+                        {visibleColumns.mcv1 ? "✓ " : ""}MCV1 Coverage
+                      </SelectItem>
+                      <SelectItem value="mcv2">
+                        {visibleColumns.mcv2 ? "✓ " : ""}MCV2 Coverage
+                      </SelectItem>
+                      <SelectItem value="dropout">
+                        {visibleColumns.dropout ? "✓ " : ""}Dropout Rate
+                      </SelectItem>
+                      <SelectItem value="suspectedCases">
+                        {visibleColumns.suspectedCases ? "✓ " : ""}Suspected Cases
+                      </SelectItem>
+                      <SelectItem value="riskScore">
+                        {visibleColumns.riskScore ? "✓ " : ""}Risk Score
+                      </SelectItem>
+                      <SelectItem value="riskCategory">
+                        {visibleColumns.riskCategory ? "✓ " : ""}Risk Category
+                      </SelectItem>
                     </SelectContent>
                   </Select>
 
@@ -737,17 +1035,22 @@ export default function RiskAssessmentList() {
           </Card>
         </TabsContent>
 
-        {/* TAB 3: ASSESSMENT ROUNDS REGISTER */}
+        {/* TAB 3: ASSESSMENT ROUNDS REGISTER (FULL CRUD AS PER PERMISSIONS) */}
         <TabsContent value="rounds" className="space-y-4">
           <Card>
-            <CardHeader>
-              <CardTitle className="text-lg font-semibold flex items-center gap-2">
-                <Layers className="w-5 h-5 text-primary" />
-                Assessment Rounds Register
-              </CardTitle>
-              <CardDescription className="text-xs">
-                Official programmatic risk assessments created under {activeCountryName}.
-              </CardDescription>
+            <CardHeader className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div>
+                <CardTitle className="text-lg font-semibold flex items-center gap-2">
+                  <Layers className="w-5 h-5 text-primary" />
+                  Assessment Rounds Register
+                </CardTitle>
+                <CardDescription className="text-xs">
+                  Official programmatic risk assessments created under {activeCountryName}. Edit, calculate, or review assessment rounds.
+                </CardDescription>
+              </div>
+              <Button size="sm" onClick={() => setIsCreateOpen(true)} className="gap-1.5 shrink-0">
+                <Plus className="w-4 h-4" /> New Assessment Round
+              </Button>
             </CardHeader>
             <CardContent>
               {isAssessmentsLoading ? (
@@ -767,18 +1070,24 @@ export default function RiskAssessmentList() {
                   {assessments.map((a) => (
                     <div
                       key={a.id}
-                      className="p-4 flex flex-col md:flex-row md:items-center justify-between gap-4 hover:bg-muted/40 transition-colors"
+                      className="p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-4 hover:bg-muted/40 transition-colors"
                     >
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2">
-                          <h4 className="font-semibold text-base hover:underline cursor-pointer" onClick={() => setLocation(`/risk-assessments/${a.id}`)}>
+                      <div className="space-y-1.5">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <h4
+                            className="font-semibold text-base hover:underline cursor-pointer text-foreground"
+                            onClick={() => setLocation(`/risk-assessments/${a.id}`)}
+                          >
                             {a.title}
                           </h4>
                           {getStatusBadge(a.status)}
                         </div>
+                        {a.notes && (
+                          <p className="text-xs text-muted-foreground line-clamp-1">{a.notes}</p>
+                        )}
                         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
                           <span className="flex items-center gap-1">
-                            <Calendar className="w-3.5 h-3.5" /> Assessment Year: {a.assessmentYear}
+                            <Calendar className="w-3.5 h-3.5" /> Assessment Year: <strong>{a.assessmentYear}</strong>
                           </span>
                           <span className="flex items-center gap-1">
                             <MapPin className="w-3.5 h-3.5" /> Country: {a.countryCode} ({a.administrativeLevelName})
@@ -787,9 +1096,54 @@ export default function RiskAssessmentList() {
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-2 shrink-0">
-                        <Button variant="outline" size="sm" onClick={() => setLocation(`/risk-assessments/${a.id}`)}>
-                          Open Workspace <ChevronRight className="w-4 h-4 ml-1" />
+                      {/* Full CRUD Actions */}
+                      <div className="flex flex-wrap items-center gap-2 shrink-0">
+                        <Button
+                          variant="default"
+                          size="sm"
+                          className="h-8 text-xs gap-1"
+                          onClick={() => setLocation(`/risk-assessments/${a.id}`)}
+                        >
+                          Workspace <ChevronRight className="w-3.5 h-3.5" />
+                        </Button>
+
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-8 text-xs gap-1"
+                          onClick={() => calculateMutation.mutate(a.id)}
+                          disabled={calculateMutation.isPending}
+                        >
+                          <Play className="w-3.5 h-3.5 text-blue-600" />
+                          Calculate
+                        </Button>
+
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 w-8 p-0 text-muted-foreground hover:text-foreground"
+                          title="Edit Assessment Details"
+                          onClick={() => {
+                            setEditingAssessment(a);
+                            setEditTitle(a.title);
+                            setEditNotes(a.notes || "");
+                            setIsEditOpen(true);
+                          }}
+                        >
+                          <Pencil className="w-3.5 h-3.5" />
+                        </Button>
+
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 w-8 p-0 text-rose-600 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/30"
+                          title="Delete Assessment"
+                          onClick={() => {
+                            setDeletingAssessment(a);
+                            setIsDeleteOpen(true);
+                          }}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
                         </Button>
                       </div>
                     </div>
@@ -800,7 +1154,170 @@ export default function RiskAssessmentList() {
           </Card>
         </TabsContent>
 
-        {/* TAB 4: WHO GUIDANCE & DOCUMENTATION */}
+        {/* TAB 4: DATA FLOW & INGESTION ARCHITECTURE (WITH TEMPLATES) */}
+        <TabsContent value="dataflow" className="space-y-6">
+          {/* Architecture Visual Diagram Card */}
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base font-semibold flex items-center gap-2">
+                <Workflow className="w-5 h-5 text-primary" />
+                VPD Programmatic Risk Assessment Data Flow Architecture
+              </CardTitle>
+              <CardDescription className="text-xs">
+                How routine health facility data, case linelists, and spatial layers are processed into WHO risk classifications.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              {/* 5-Stage Visual Stepper */}
+              <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
+                <div className="p-3.5 rounded-lg border bg-card/60 space-y-2 relative">
+                  <div className="w-6 h-6 rounded-full bg-primary/10 text-primary font-bold text-xs flex items-center justify-center">1</div>
+                  <h5 className="font-semibold text-xs text-foreground">Multi-Source Ingestion</h5>
+                  <p className="text-[11px] text-muted-foreground leading-relaxed">
+                    DHIS2 monthly routine coverage, VPD case-based surveillance linelists, and census/WorldPop population counts.
+                  </p>
+                </div>
+
+                <div className="p-3.5 rounded-lg border bg-card/60 space-y-2 relative">
+                  <div className="w-6 h-6 rounded-full bg-blue-500/10 text-blue-600 font-bold text-xs flex items-center justify-center">2</div>
+                  <h5 className="font-semibold text-xs text-foreground">Data Quality Audit</h5>
+                  <p className="text-[11px] text-muted-foreground leading-relaxed">
+                    Deduplication, geographic code reconciliation, boundary alignment, and numerator/denominator range validation.
+                  </p>
+                </div>
+
+                <div className="p-3.5 rounded-lg border bg-card/60 space-y-2 relative">
+                  <div className="w-6 h-6 rounded-full bg-indigo-500/10 text-indigo-600 font-bold text-xs flex items-center justify-center">3</div>
+                  <h5 className="font-semibold text-xs text-foreground">4-Domain Scoring Engine</h5>
+                  <p className="text-[11px] text-muted-foreground leading-relaxed">
+                    Population Immunity (40), Surveillance Quality (20), Delivery Performance (16), and Threat Assessment (24).
+                  </p>
+                </div>
+
+                <div className="p-3.5 rounded-lg border bg-card/60 space-y-2 relative">
+                  <div className="w-6 h-6 rounded-full bg-amber-500/10 text-amber-600 font-bold text-xs flex items-center justify-center">4</div>
+                  <h5 className="font-semibold text-xs text-foreground">Stratification & Mapping</h5>
+                  <p className="text-[11px] text-muted-foreground leading-relaxed">
+                    Automated categorization into Low, Medium, High, and Very High risk strata with keyless choropleth spatial rendering.
+                  </p>
+                </div>
+
+                <div className="p-3.5 rounded-lg border bg-card/60 space-y-2 relative">
+                  <div className="w-6 h-6 rounded-full bg-emerald-500/10 text-emerald-600 font-bold text-xs flex items-center justify-center">5</div>
+                  <h5 className="font-semibold text-xs text-foreground">Programmatic Action Feedback</h5>
+                  <p className="text-[11px] text-muted-foreground leading-relaxed">
+                    Direct integration into routine microplanning, active surveillance sweeps, cold-chain audits, and supervision schedules.
+                  </p>
+                </div>
+              </div>
+
+              {/* Template Downloads Section */}
+              <div className="border-t pt-5">
+                <h4 className="text-sm font-semibold text-foreground mb-3 flex items-center gap-2">
+                  <Download className="w-4 h-4 text-primary" /> Official Ingestion Templates (CSV)
+                </h4>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="p-4 rounded-lg border bg-muted/20 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="font-semibold text-xs text-foreground flex items-center gap-1.5">
+                        <FileSpreadsheet className="w-4 h-4 text-emerald-600" /> WHO Measles Case Linelist Template
+                      </span>
+                      <Badge variant="outline" className="text-[10px]">CSV Format</Badge>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Standard WHO case-based surveillance headers (epidNumber, district, dateOnset, vaccinationStatus, labResult, specimenCollected, investigated48h).
+                    </p>
+                    <a href="/api/risk/templates/linelist" download="who_measles_linelist_template.csv">
+                      <Button size="sm" variant="outline" className="text-xs gap-1.5 mt-2 w-full">
+                        <Download className="w-3.5 h-3.5" /> Download Linelist Template (CSV)
+                      </Button>
+                    </a>
+                  </div>
+
+                  <div className="p-4 rounded-lg border bg-muted/20 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="font-semibold text-xs text-foreground flex items-center gap-1.5">
+                        <FileSpreadsheet className="w-4 h-4 text-blue-600" /> Subnational Aggregates Ingestion Template
+                      </span>
+                      <Badge variant="outline" className="text-[10px]">Pre-populated</Badge>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Pre-populated with all {totalUnitsCount} {adminLevelPlural.toLowerCase()} for {activeCountryName} (targetPopulation, mcv1Coverage, mcv2Coverage, dropout, discardedRate).
+                    </p>
+                    <a href="/api/risk/templates/district-aggregates" download={`${activeCountryCode}_district_aggregates_template.csv`}>
+                      <Button size="sm" variant="outline" className="text-xs gap-1.5 mt-2 w-full">
+                        <Download className="w-3.5 h-3.5" /> Download District Aggregates Template (CSV)
+                      </Button>
+                    </a>
+                  </div>
+                </div>
+              </div>
+
+              {/* Direct Ingestion Dropzone */}
+              <div className="border-t pt-5">
+                <h4 className="text-sm font-semibold text-foreground mb-3 flex items-center gap-2">
+                  <UploadCloud className="w-4 h-4 text-primary" /> Direct Data Ingestion
+                </h4>
+                <form onSubmit={handleDirectUpload} className="p-4 rounded-lg border bg-muted/10 space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="targetRound" className="text-xs">Target Assessment Round</Label>
+                      <Select value={uploadRoundId} onValueChange={setUploadRoundId}>
+                        <SelectTrigger id="targetRound" className="text-xs">
+                          <SelectValue placeholder="Select Assessment Round" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {assessments.map((a) => (
+                            <SelectItem key={a.id} value={a.id}>
+                              {a.title} ({a.assessmentYear})
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <Label htmlFor="uploadType" className="text-xs">Data Stream Type</Label>
+                      <Select value={uploadType} onValueChange={(val: any) => setUploadType(val)}>
+                        <SelectTrigger id="uploadType" className="text-xs">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="aggregates">Subnational Coverage & Surveillance Aggregates</SelectItem>
+                          <SelectItem value="linelist">WHO Measles Case Linelist</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <Label htmlFor="fileInput" className="text-xs">Select CSV File</Label>
+                    <Input
+                      id="fileInput"
+                      type="file"
+                      accept=".csv,text/csv"
+                      className="text-xs cursor-pointer"
+                      onChange={(e) => setUploadFile(e.target.files?.[0] || null)}
+                    />
+                    <p className="text-[11px] text-muted-foreground">
+                      Upload standard CSV files matching the template structure above. Existing records will be safely updated (upsert only).
+                    </p>
+                  </div>
+
+                  <Button type="submit" disabled={isUploading || !uploadFile || !uploadRoundId} className="text-xs gap-1.5">
+                    {isUploading ? "Processing & Validating..." : (
+                      <>
+                        <UploadCloud className="w-3.5 h-3.5" /> Ingest & Validate File
+                      </>
+                    )}
+                  </Button>
+                </form>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* TAB 5: WHO GUIDANCE & DOCUMENTATION */}
         <TabsContent value="guidance" className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <Card>
@@ -878,6 +1395,76 @@ export default function RiskAssessmentList() {
           </div>
         </TabsContent>
       </Tabs>
+
+      {/* Edit Assessment Dialog (Full CRUD) */}
+      <Dialog open={isEditOpen} onOpenChange={setIsEditOpen}>
+        <DialogContent className="sm:max-w-[480px]">
+          <form onSubmit={handleEditSubmit}>
+            <DialogHeader>
+              <DialogTitle>Edit Assessment Round</DialogTitle>
+              <DialogDescription>
+                Update the title and contextual notes for this assessment round.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+              <div className="space-y-2">
+                <Label htmlFor="edit-title">Round Title</Label>
+                <Input
+                  id="edit-title"
+                  value={editTitle}
+                  onChange={(e) => setEditTitle(e.target.value)}
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="edit-notes">Context Notes & Scope</Label>
+                <Textarea
+                  id="edit-notes"
+                  value={editNotes}
+                  onChange={(e) => setEditNotes(e.target.value)}
+                  rows={3}
+                  placeholder="e.g. National baseline prior to Q3 routine catch-up intensification..."
+                />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setIsEditOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={editMutation.isPending}>
+                {editMutation.isPending ? "Saving..." : "Save Changes"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Assessment Confirmation Dialog (Full CRUD & Accidental Data Loss Prevention) */}
+      <Dialog open={isDeleteOpen} onOpenChange={setIsDeleteOpen}>
+        <DialogContent className="sm:max-w-[420px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-destructive">
+              <AlertTriangle className="w-5 h-5" /> Delete Assessment Round
+            </DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete <strong>{deletingAssessment?.title}</strong>? All associated subnational indicator calculations for this round will be removed.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2">
+            <Button type="button" variant="outline" onClick={() => setIsDeleteOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={handleDeleteConfirm}
+              disabled={deleteMutation.isPending}
+            >
+              {deleteMutation.isPending ? "Deleting..." : "Delete Round"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

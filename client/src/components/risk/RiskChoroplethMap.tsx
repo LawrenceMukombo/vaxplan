@@ -1,7 +1,6 @@
 import React, { useState, useMemo, useEffect, useRef } from "react";
 import {
   MapContainer,
-  TileLayer,
   GeoJSON,
   useMap,
 } from "react-leaflet";
@@ -27,6 +26,7 @@ import {
   TrendingUp,
 } from "lucide-react";
 import { getTenantMapDefaults, type TenantLike } from "@/lib/tenantGeo";
+import { usePersistedBasemap, BasemapTileLayer, BasemapSwitcher, type Basemap } from "@/components/map/BasemapToggle";
 
 export interface DistrictCoveragePerformance {
   districtId: number;
@@ -100,12 +100,37 @@ export function RiskChoroplethMap({
 }: RiskChoroplethMapProps) {
   const [metric, setMetric] = useState<ChoroplethMetric>("mcv1");
   const [searchTerm, setSearchTerm] = useState("");
+  const [basemap, setBasemap] = usePersistedBasemap();
   const geoJsonRef = useRef<L.GeoJSON | null>(null);
+
+  // Fallback context query for defaultBoundaryId if not provided
+  const { data: contextData } = useQuery<any>({
+    queryKey: ["/api/risk/context"],
+    enabled: !boundaryId,
+    staleTime: 60 * 60 * 1000,
+  });
+
+  const effectiveBoundaryId = boundaryId || contextData?.defaultBoundaryId;
+
+  // Fallback query if data is empty (ensures the map always renders coverage indicators)
+  const { data: fallbackResponse } = useQuery<{ performance?: DistrictCoveragePerformance[] }>({
+    queryKey: ["/api/risk/coverage-performance"],
+    enabled: !data || data.length === 0,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const effectiveData = useMemo(() => {
+    if (data && data.length > 0) return data;
+    if (fallbackResponse?.performance && fallbackResponse.performance.length > 0) {
+      return fallbackResponse.performance;
+    }
+    return [];
+  }, [data, fallbackResponse]);
 
   // GeoJSON boundary query
   const { data: geoJsonData, isLoading: isGeoLoading } = useQuery<any>({
-    queryKey: [`/api/boundaries/${boundaryId}/geojson`],
-    enabled: Boolean(boundaryId),
+    queryKey: [`/api/boundaries/${effectiveBoundaryId}/geojson`],
+    enabled: Boolean(effectiveBoundaryId),
     staleTime: 60 * 60 * 1000, // Boundaries are static, cache for 1 hr
   });
 
@@ -115,14 +140,14 @@ export function RiskChoroplethMap({
   // Index performance data by normalized district name
   const districtDataMap = useMemo(() => {
     const map = new Map<string, DistrictCoveragePerformance>();
-    for (const item of data) {
+    for (const item of effectiveData) {
       const clean = item.districtName.toLowerCase().trim().replace(/[^a-z0-9]/g, "");
       map.set(clean, item);
       map.set(item.districtName.toLowerCase().trim(), item);
       map.set(String(item.districtId), item);
     }
     return map;
-  }, [data]);
+  }, [effectiveData]);
 
   // Helper to find district by geojson feature properties
   const findDistrictForFeature = (feature: any): DistrictCoveragePerformance | undefined => {
@@ -298,26 +323,26 @@ export function RiskChoroplethMap({
 
   // KPIs
   const summary = useMemo(() => {
-    if (!data.length) return { mcv1Avg: 0, mcv2Avg: 0, dropoutAvg: 0, targetMetCount: 0, highRiskCount: 0 };
-    const mcv1Sum = data.reduce((acc, d) => acc + d.mcv1Coverage, 0);
-    const mcv2Sum = data.reduce((acc, d) => acc + d.mcv2Coverage, 0);
-    const dropSum = data.reduce((acc, d) => acc + d.dropoutRate, 0);
-    const targetMet = data.filter((d) => d.mcv1Coverage >= 90).length;
-    const highRisk = data.filter((d) => d.riskCategory === "HIGH" || d.riskCategory === "VERY_HIGH").length;
+    if (!effectiveData.length) return { mcv1Avg: 0, mcv2Avg: 0, dropoutAvg: 0, targetMetCount: 0, highRiskCount: 0 };
+    const mcv1Sum = effectiveData.reduce((acc, d) => acc + d.mcv1Coverage, 0);
+    const mcv2Sum = effectiveData.reduce((acc, d) => acc + d.mcv2Coverage, 0);
+    const dropSum = effectiveData.reduce((acc, d) => acc + d.dropoutRate, 0);
+    const targetMet = effectiveData.filter((d) => d.mcv1Coverage >= 90).length;
+    const highRisk = effectiveData.filter((d) => d.riskCategory === "HIGH" || d.riskCategory === "VERY_HIGH").length;
 
     return {
-      mcv1Avg: Number((mcv1Sum / data.length).toFixed(1)),
-      mcv2Avg: Number((mcv2Sum / data.length).toFixed(1)),
-      dropoutAvg: Number((dropSum / data.length).toFixed(1)),
+      mcv1Avg: Number((mcv1Sum / effectiveData.length).toFixed(1)),
+      mcv2Avg: Number((mcv2Sum / effectiveData.length).toFixed(1)),
+      dropoutAvg: Number((dropSum / effectiveData.length).toFixed(1)),
       targetMetCount: targetMet,
       highRiskCount: highRisk,
     };
-  }, [data]);
+  }, [effectiveData]);
 
   const selectedDistrict = useMemo(() => {
     if (!selectedDistrictId) return null;
-    return data.find((d) => d.districtId === selectedDistrictId) || null;
-  }, [selectedDistrictId, data]);
+    return effectiveData.find((d) => d.districtId === selectedDistrictId) || null;
+  }, [selectedDistrictId, effectiveData]);
 
   return (
     <Card className="overflow-hidden border-border/80 shadow-sm">
@@ -330,7 +355,7 @@ export function RiskChoroplethMap({
                 {countryName} • Coverage Performance & Vulnerability Map
               </CardTitle>
               <Badge variant="outline" className="text-xs bg-background">
-                {data.length} {adminLevelLabel}s
+                {effectiveData.length} {adminLevelLabel}s
               </Badge>
             </div>
             <CardDescription className="text-xs mt-1">
@@ -406,7 +431,7 @@ export function RiskChoroplethMap({
             <div>
               <p className="text-[10px] text-muted-foreground uppercase font-semibold">High / Very High Risk</p>
               <p className="text-base font-bold text-rose-600">
-                {summary.highRiskCount} <span className="text-xs font-normal text-muted-foreground">/ {data.length}</span>
+                {summary.highRiskCount} <span className="text-xs font-normal text-muted-foreground">/ {effectiveData.length}</span>
               </p>
             </div>
             <ShieldAlert className="w-4 h-4 text-rose-600" />
@@ -417,22 +442,21 @@ export function RiskChoroplethMap({
       <CardContent className="p-0 relative">
         {/* Map Container */}
         <div className="h-[500px] w-full relative z-0">
+          <BasemapSwitcher basemap={basemap} onChange={setBasemap} className="top-3 right-3" />
+
           <MapContainer
             center={mapDefaults.center}
             zoom={mapDefaults.zoom}
             className="h-full w-full"
             scrollWheelZoom={true}
           >
-            <TileLayer
-              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
-              url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
-            />
+            <BasemapTileLayer basemap={basemap} />
 
             {geoJsonData && (
               <>
                 <GeoJSON
                   ref={geoJsonRef}
-                  key={`${boundaryId}-${metric}-${selectedDistrictId}`}
+                  key={`${effectiveBoundaryId}-${metric}-${selectedDistrictId}`}
                   data={geoJsonData}
                   style={styleFeature}
                   onEachFeature={onEachFeature}

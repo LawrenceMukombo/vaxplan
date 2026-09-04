@@ -1,6 +1,6 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useParams, Link } from "wouter";
+import { useParams, Link, useLocation } from "wouter";
 import {
   ShieldAlert,
   ArrowLeft,
@@ -25,6 +25,10 @@ import {
   ExternalLink,
   Plus,
   RefreshCw,
+  Trash2,
+  Edit3,
+  FileDown,
+  BookOpen,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -74,6 +78,7 @@ interface IndicatorDetail {
 
 export default function RiskResultsWorkspace() {
   const { id } = useParams<{ id: string }>();
+  const [, setLocation] = useLocation();
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
@@ -108,10 +113,34 @@ export default function RiskResultsWorkspace() {
   const [actionResponsible, setActionResponsible] = useState("");
   const [actionBudget, setActionBudget] = useState("");
 
+  // Edit / Delete Round Dialogs
+  const [isEditOpen, setIsEditOpen] = useState(false);
+  const [editTitle, setEditTitle] = useState("");
+  const [editNotes, setEditNotes] = useState("");
+
   // Import Dialog
   const [isImportOpen, setIsImportOpen] = useState(false);
   const [importType, setImportType] = useState<"cases" | "aggregates">("cases");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+
+  // Query all assessments for switching and fallback
+  const { data: allAssessments = [] } = useQuery<any[]>({
+    queryKey: ["/api/risk/assessments"],
+  });
+
+  // Resilient assessment ID resolution
+  const effectiveId = useMemo(() => {
+    if (id && id !== "undefined") return id;
+    if (allAssessments.length > 0) return allAssessments[0].id;
+    return null;
+  }, [id, allAssessments]);
+
+  // Seamless URL synchronization if accessed with undefined
+  useEffect(() => {
+    if (id === "undefined" && effectiveId) {
+      setLocation(`/risk-assessments/${effectiveId}`, { replace: true });
+    }
+  }, [id, effectiveId, setLocation]);
 
   // Queries
   const { data: context } = useQuery<any>({
@@ -119,37 +148,54 @@ export default function RiskResultsWorkspace() {
   });
 
   const { data: assessment, isLoading: isAssessmentLoading } = useQuery<any>({
-    queryKey: [`/api/risk/assessments/${id}`],
+    queryKey: [`/api/risk/assessments/${effectiveId}`],
+    enabled: Boolean(effectiveId),
   });
+
+  useEffect(() => {
+    if (assessment) {
+      setEditTitle(assessment.title || "");
+      setEditNotes(assessment.notes || "");
+    }
+  }, [assessment]);
 
   const { data: resultsData, isLoading: isResultsLoading } = useQuery<{
     rows: AreaResult[];
     totalCount: number;
     latestRun: any;
   }>({
-    queryKey: [`/api/risk/assessments/${id}/results`, selectedCategory, searchTerm, page, pageSize],
+    queryKey: [`/api/risk/assessments/${effectiveId}/results`, selectedCategory, searchTerm, page, pageSize],
     queryFn: async () => {
+      if (!effectiveId) return { rows: [], totalCount: 0, latestRun: null };
       return await apiRequest<{
         rows: AreaResult[];
         totalCount: number;
         latestRun: any;
       }>(
         "GET",
-        `/api/risk/assessments/${id}/results?category=${selectedCategory}&search=${encodeURIComponent(searchTerm)}&page=${page}&pageSize=${pageSize}`
+        `/api/risk/assessments/${effectiveId}/results?category=${selectedCategory}&search=${encodeURIComponent(searchTerm)}&page=${page}&pageSize=${pageSize}`
       );
     },
+    enabled: Boolean(effectiveId),
   });
 
   const { data: explanationData, isLoading: isExplanationLoading } = useQuery<{
     area: AreaResult;
     indicators: IndicatorDetail[];
   }>({
-    queryKey: [`/api/risk/assessments/${id}/results/${selectedAreaForExplanation?.id}/explanation`],
-    enabled: Boolean(selectedAreaForExplanation?.id),
+    queryKey: [`/api/risk/assessments/${effectiveId}/results/${selectedAreaForExplanation?.id}/explanation`],
+    enabled: Boolean(effectiveId && selectedAreaForExplanation?.id),
   });
 
   const { data: linkedActions = [] } = useQuery<any[]>({
-    queryKey: [`/api/risk/assessments/${id}/actions`],
+    queryKey: [`/api/risk/assessments/${effectiveId}/actions`],
+    enabled: Boolean(effectiveId),
+  });
+
+  // Fallback coverage query if assessment results not yet calculated
+  const { data: fallbackCoverage } = useQuery<{ performance?: DistrictCoveragePerformance[] }>({
+    queryKey: ["/api/risk/coverage-performance"],
+    enabled: (!resultsData || !resultsData.rows || resultsData.rows.length === 0),
   });
 
   // Transform results rows for Choropleth map
@@ -184,14 +230,19 @@ export default function RiskResultsWorkspace() {
     });
   }, [resultsData]);
 
+  const effectiveChoroplethData = useMemo(() => {
+    if (choroplethData.length > 0) return choroplethData;
+    return fallbackCoverage?.performance || [];
+  }, [choroplethData, fallbackCoverage]);
+
   // Mutations
   const calculateMutation = useMutation({
     mutationFn: async () => {
-      return await apiRequest<any>("POST", `/api/risk/assessments/${id}/calculate`);
+      return await apiRequest<any>("POST", `/api/risk/assessments/${effectiveId}/calculate`);
     },
     onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: [`/api/risk/assessments/${id}`] });
-      queryClient.invalidateQueries({ queryKey: [`/api/risk/assessments/${id}/results`] });
+      queryClient.invalidateQueries({ queryKey: [`/api/risk/assessments/${effectiveId}`] });
+      queryClient.invalidateQueries({ queryKey: [`/api/risk/assessments/${effectiveId}/results`] });
       queryClient.invalidateQueries({ queryKey: ["/api/risk/coverage-performance"] });
       toast({
         title: "Calculation Completed",
@@ -208,15 +259,16 @@ export default function RiskResultsWorkspace() {
       const formData = new FormData();
       formData.append("file", file);
       const endpoint = importType === "cases" ? "import-cases" : "import-aggregates";
-      const res = await fetch(`/api/risk/assessments/${id}/${endpoint}`, {
+      const res = await fetch(`/api/risk/assessments/${effectiveId}/${endpoint}`, {
         method: "POST",
         body: formData,
+        credentials: "include",
       });
       if (!res.ok) throw new Error(await res.text());
       return res.json();
     },
     onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: [`/api/risk/assessments/${id}`] });
+      queryClient.invalidateQueries({ queryKey: [`/api/risk/assessments/${effectiveId}`] });
       setIsImportOpen(false);
       setSelectedFile(null);
       toast({
@@ -231,12 +283,41 @@ export default function RiskResultsWorkspace() {
     },
   });
 
+  const updateMutation = useMutation({
+    mutationFn: async (payload: { title?: string; notes?: string }) => {
+      return await apiRequest<any>("PATCH", `/api/risk/assessments/${effectiveId}`, payload);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [`/api/risk/assessments/${effectiveId}`] });
+      queryClient.invalidateQueries({ queryKey: ["/api/risk/assessments"] });
+      setIsEditOpen(false);
+      toast({ title: "Updated", description: "Assessment round details updated successfully." });
+    },
+    onError: (err: any) => {
+      toast({ title: "Update Failed", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async () => {
+      return await apiRequest<any>("DELETE", `/api/risk/assessments/${effectiveId}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/risk/assessments"] });
+      toast({ title: "Deleted", description: "Assessment round deleted." });
+      setLocation("/risk-assessments");
+    },
+    onError: (err: any) => {
+      toast({ title: "Delete Failed", description: err.message, variant: "destructive" });
+    },
+  });
+
   const actionMutation = useMutation({
     mutationFn: async (payload: any) => {
       return await apiRequest<any>("POST", "/api/risk/actions", payload);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: [`/api/risk/assessments/${id}/actions`] });
+      queryClient.invalidateQueries({ queryKey: [`/api/risk/assessments/${effectiveId}/actions`] });
       setIsActionModalOpen(false);
       setActionTitle("");
       setActionResponsible("");
@@ -253,16 +334,13 @@ export default function RiskResultsWorkspace() {
 
   const reviewMutation = useMutation({
     mutationFn: async (decision: string) => {
-      const res = await fetch(`/api/risk/assessments/${id}/reviews`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ decision, reviewNotes: "Official validation completed." }),
+      return await apiRequest<any>("POST", `/api/risk/assessments/${effectiveId}/reviews`, {
+        decision,
+        reviewNotes: "Official validation completed.",
       });
-      if (!res.ok) throw new Error(await res.text());
-      return res.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: [`/api/risk/assessments/${id}`] });
+      queryClient.invalidateQueries({ queryKey: [`/api/risk/assessments/${effectiveId}`] });
       toast({ title: "Review Submitted", description: "Assessment review decision recorded." });
     },
     onError: (err: any) => {
@@ -328,37 +406,127 @@ export default function RiskResultsWorkspace() {
       {/* Top Navigation & Status */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b pb-5">
         <div className="space-y-1">
-          <Link href="/risk-assessments" className="inline-flex items-center text-xs text-muted-foreground hover:text-foreground mb-1">
-            <ArrowLeft className="w-3 h-3 mr-1" /> Back to Assessment Rounds
-          </Link>
           <div className="flex items-center gap-3">
+            <Link href="/risk-assessments" className="inline-flex items-center text-xs text-muted-foreground hover:text-foreground">
+              <ArrowLeft className="w-3 h-3 mr-1" /> Back to Rounds
+            </Link>
+
+            {allAssessments.length > 1 && (
+              <div className="flex items-center gap-1.5 ml-2 border-l pl-3">
+                <span className="text-xs text-muted-foreground font-medium">Switch Round:</span>
+                <Select
+                  value={effectiveId || ""}
+                  onValueChange={(newId) => setLocation(`/risk-assessments/${newId}`)}
+                >
+                  <SelectTrigger className="h-7 text-xs w-[240px] bg-background">
+                    <SelectValue placeholder="Select Assessment Round" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {allAssessments.map((a) => (
+                      <SelectItem key={a.id} value={a.id}>
+                        {a.title} ({a.assessmentYear})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+          </div>
+
+          <div className="flex items-center gap-3 pt-1">
             <h1 className="text-2xl font-bold tracking-tight text-foreground flex items-center gap-2">
               <Activity className="w-7 h-7 text-primary" />
               {assessment?.title || "Assessment Workspace"}
             </h1>
-            <Badge variant="outline">{assessment?.status || "Draft"}</Badge>
+            <Badge variant="outline" className="capitalize">{assessment?.status || "Draft"}</Badge>
           </div>
           <p className="text-xs text-muted-foreground">
-            {assessment?.countryCode} • Year {assessment?.assessmentYear} • Second Subnational ({assessment?.administrativeLevelName || "County"}) Level
+            {assessment?.countryCode} • Assessment Year {assessment?.assessmentYear} • Second Subnational ({context?.adminLevelLabel || "District"}) Level
           </p>
         </div>
 
-        <div className="flex items-center gap-2 shrink-0">
-          <Button variant="outline" size="sm" onClick={() => setIsImportOpen(true)}>
-            <Upload className="w-4 h-4 mr-1.5" /> Import Data
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
+          <Button variant="outline" size="sm" onClick={() => setIsEditOpen(true)} className="h-8 text-xs gap-1">
+            <Edit3 className="w-3.5 h-3.5" /> Edit Round
+          </Button>
+
+          <Button variant="outline" size="sm" onClick={() => setIsImportOpen(true)} className="h-8 text-xs gap-1">
+            <Upload className="w-3.5 h-3.5 mr-0.5" /> Import Data
           </Button>
 
           <Button
             size="sm"
             onClick={() => calculateMutation.mutate()}
-            disabled={calculateMutation.isPending}
-            className="gap-1.5"
+            disabled={calculateMutation.isPending || !effectiveId}
+            className="h-8 text-xs gap-1.5"
           >
-            <RefreshCw className={`w-4 h-4 ${calculateMutation.isPending ? "animate-spin" : ""}`} />
+            <RefreshCw className={`w-3.5 h-3.5 ${calculateMutation.isPending ? "animate-spin" : ""}`} />
             {calculateMutation.isPending ? "Calculating..." : "Run Calculation"}
+          </Button>
+
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              if (confirm("Are you sure you want to delete this assessment round? All calculated results and linelist records will be removed.")) {
+                deleteMutation.mutate();
+              }
+            }}
+            disabled={deleteMutation.isPending}
+            className="h-8 px-2 text-destructive hover:bg-destructive/10 hover:text-destructive"
+            title="Delete Assessment Round"
+          >
+            <Trash2 className="w-4 h-4" />
           </Button>
         </div>
       </div>
+
+      {/* Edit Round Dialog */}
+      <Dialog open={isEditOpen} onOpenChange={setIsEditOpen}>
+        <DialogContent className="sm:max-w-[480px]">
+          <DialogHeader>
+            <DialogTitle>Edit Assessment Round</DialogTitle>
+            <DialogDescription className="text-xs">
+              Update metadata and programmatic notes for this assessment round.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2 text-xs">
+            <div className="space-y-1.5">
+              <Label htmlFor="roundTitle">Assessment Title</Label>
+              <Input
+                id="roundTitle"
+                value={editTitle}
+                onChange={(e) => setEditTitle(e.target.value)}
+                placeholder="e.g. 2025 National Measles Programmatic Risk Assessment"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="roundNotes">Programmatic Context & Notes</Label>
+              <textarea
+                id="roundNotes"
+                value={editNotes}
+                onChange={(e) => setEditNotes(e.target.value)}
+                rows={3}
+                className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                placeholder="Document methodology calibration notes, data sources used, or scope..."
+              />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => setIsEditOpen(false)}>Cancel</Button>
+            <Button
+              size="sm"
+              disabled={updateMutation.isPending || !editTitle.trim()}
+              onClick={() => updateMutation.mutate({ title: editTitle, notes: editNotes })}
+            >
+              {updateMutation.isPending ? "Saving..." : "Save Changes"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Disclaimers */}
       <Alert className="border-blue-500/20 bg-blue-500/5 text-blue-900 dark:text-blue-200">
@@ -701,8 +869,8 @@ export default function RiskResultsWorkspace() {
             countryCode={assessment?.countryCode || context?.countryCode || "ZAF"}
             countryName={context?.countryName || "National Programme"}
             adminLevelLabel={context?.adminLevelLabel || "District"}
-            boundaryId={context?.boundaryId}
-            data={choroplethData}
+            boundaryId={context?.defaultBoundaryId}
+            data={effectiveChoroplethData}
             onSelectDistrict={(dist) => {
               if (dist) {
                 const matched = resultsData?.rows.find(
@@ -948,7 +1116,7 @@ export default function RiskResultsWorkspace() {
               onClick={() => {
                 if (!actionTitle || !selectedAreaForAction) return;
                 actionMutation.mutate({
-                  assessmentId: id,
+                  assessmentId: effectiveId,
                   administrativeAreaId: selectedAreaForAction.areaName,
                   actionType,
                   actionTitle,
@@ -976,7 +1144,37 @@ export default function RiskResultsWorkspace() {
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-4 py-3 text-xs">
+          <div className="space-y-4 py-3">
+            {/* Downloadable Standard Templates */}
+            <div className="rounded-lg border bg-muted/30 p-3 space-y-2">
+              <p className="font-semibold text-foreground flex items-center gap-1.5">
+                <FileDown className="w-3.5 h-3.5 text-primary" /> Download Standard Ingestion Templates
+              </p>
+              <p className="text-[11px] text-muted-foreground">
+                Pre-calibrated CSV templates matching WHO Setup Guide v1.5 with active {context?.countryName || "national"} districts.
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8 text-[11px] justify-start bg-background"
+                  onClick={() => window.open("/api/risk/templates/linelist", "_blank")}
+                >
+                  <Download className="w-3 h-3 mr-1.5 text-primary" /> Case Linelist (CSV)
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8 text-[11px] justify-start bg-background"
+                  onClick={() => window.open("/api/risk/templates/district-aggregates", "_blank")}
+                >
+                  <Download className="w-3 h-3 mr-1.5 text-primary" /> District Aggregates (CSV)
+                </Button>
+              </div>
+            </div>
+
             <div className="space-y-1.5">
               <Label>Import Content</Label>
               <Select value={importType} onValueChange={(val: any) => setImportType(val)}>

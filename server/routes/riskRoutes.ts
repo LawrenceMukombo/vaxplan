@@ -313,13 +313,30 @@ riskRouter.post("/assessments", async (req: any, res) => {
 
 riskRouter.get("/assessments/:id", async (req: any, res) => {
   try {
-    const [assessment] = await db
-      .select()
-      .from(riskAssessments)
-      .where(and(eq(riskAssessments.id, req.params.id), eq(riskAssessments.tenantId, req.tenantId)));
+    const requestedId = req.params.id;
+    let assessment: any = null;
+
+    if (requestedId && requestedId !== "undefined" && requestedId !== "latest" && requestedId !== "default") {
+      const [found] = await db
+        .select()
+        .from(riskAssessments)
+        .where(and(eq(riskAssessments.id, requestedId), eq(riskAssessments.tenantId, req.tenantId)));
+      assessment = found;
+    }
+
+    // Graceful fallback to latest assessment if requested ID is "undefined", "latest", or not found
+    if (!assessment) {
+      const [latest] = await db
+        .select()
+        .from(riskAssessments)
+        .where(eq(riskAssessments.tenantId, req.tenantId))
+        .orderBy(desc(riskAssessments.createdAt))
+        .limit(1);
+      assessment = latest;
+    }
 
     if (!assessment) {
-      return res.status(404).json({ message: "Assessment not found" });
+      return res.status(404).json({ message: "No risk assessments found for this country" });
     }
 
     const runs = await db
@@ -329,6 +346,178 @@ riskRouter.get("/assessments/:id", async (req: any, res) => {
       .orderBy(desc(riskAssessmentRuns.runNumber));
 
     res.json({ ...assessment, runs });
+  } catch (err: any) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+riskRouter.patch("/assessments/:id", async (req: any, res) => {
+  try {
+    const body = req.body || {};
+    const updates: Record<string, any> = { updatedAt: new Date() };
+
+    if (body.title !== undefined) updates.title = body.title;
+    if (body.notes !== undefined) updates.notes = body.notes;
+    if (body.status !== undefined) updates.status = body.status;
+    if (body.assessmentYear !== undefined) updates.assessmentYear = Number(body.assessmentYear);
+    if (body.baselineYears !== undefined) updates.baselineYears = body.baselineYears;
+
+    const [updated] = await db
+      .update(riskAssessments)
+      .set(updates)
+      .where(and(eq(riskAssessments.id, req.params.id), eq(riskAssessments.tenantId, req.tenantId)))
+      .returning();
+
+    if (!updated) {
+      return res.status(404).json({ message: "Assessment not found" });
+    }
+
+    res.json(updated);
+  } catch (err: any) {
+    res.status(400).json({ message: err.message });
+  }
+});
+
+riskRouter.delete("/assessments/:id", async (req: any, res) => {
+  try {
+    const [deleted] = await db
+      .delete(riskAssessments)
+      .where(and(eq(riskAssessments.id, req.params.id), eq(riskAssessments.tenantId, req.tenantId)))
+      .returning();
+
+    if (!deleted) {
+      return res.status(404).json({ message: "Assessment not found" });
+    }
+
+    res.json({ message: "Assessment deleted successfully", id: deleted.id });
+  } catch (err: any) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// ============================================================================
+// DOWNLOADABLE TEMPLATES (WHO STANDARDIZED CSV FORMATS)
+// ============================================================================
+
+riskRouter.get("/templates/linelist", async (_req: any, res) => {
+  try {
+    const headers = [
+      "case_id",
+      "reporting_district",
+      "province_name",
+      "date_rash_onset",
+      "date_notification",
+      "date_investigation",
+      "date_specimen_collected",
+      "date_lab_results",
+      "final_classification",
+      "age_in_months",
+      "vaccination_status",
+      "lab_result",
+    ];
+
+    const sampleRows = [
+      [
+        "CASE-2025-001",
+        "Johannesburg",
+        "Gauteng",
+        "2025-01-12",
+        "2025-01-13",
+        "2025-01-14",
+        "2025-01-15",
+        "2025-01-22",
+        "LAB_CONFIRMED_MEASLES",
+        "24",
+        "0_DOSES",
+        "POSITIVE",
+      ],
+      [
+        "CASE-2025-002",
+        "City of Cape Town",
+        "Western Cape",
+        "2025-02-04",
+        "2025-02-05",
+        "2025-02-06",
+        "2025-02-07",
+        "2025-02-14",
+        "EPI_LINKED_MEASLES",
+        "48",
+        "1_DOSE",
+        "NOT_TESTED",
+      ],
+      [
+        "CASE-2025-003",
+        "eThekwini",
+        "KwaZulu-Natal",
+        "2025-02-18",
+        "2025-02-19",
+        "2025-02-20",
+        "2025-02-21",
+        "2025-02-28",
+        "DISCARDED_NON_MEASLES",
+        "36",
+        "2_PLUS_DOSES",
+        "NEGATIVE",
+      ],
+    ];
+
+    let csvContent = headers.join(",") + "\n";
+    for (const r of sampleRows) {
+      csvContent += r.map((f) => `"${f}"`).join(",") + "\n";
+    }
+
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", 'attachment; filename="WHO_Measles_Linelist_Template.csv"');
+    res.send(csvContent);
+  } catch (err: any) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+riskRouter.get("/templates/district-aggregates", async (req: any, res) => {
+  try {
+    const tenantDistricts = await db
+      .select({
+        id: districts.id,
+        name: districts.name,
+        code: districts.code,
+      })
+      .from(districts)
+      .where(eq(districts.tenantId, req.tenantId))
+      .orderBy(districts.name);
+
+    const headers = [
+      "district_id",
+      "district_name",
+      "target_population_under1",
+      "mcv1_coverage_pct",
+      "mcv2_coverage_pct",
+      "penta1_coverage_pct",
+      "sia_coverage_pct",
+      "time_since_sia_months",
+      "suspected_cases_count",
+      "outbreak_in_last_12mos_yes_no",
+    ];
+
+    let csvContent = headers.join(",") + "\n";
+    for (const d of tenantDistricts) {
+      csvContent += [
+        d.id,
+        `"${d.name.replace(/"/g, '""')}"`,
+        12500,
+        85.0,
+        78.5,
+        92.0,
+        95.0,
+        18,
+        2,
+        "NO",
+      ].join(",") + "\n";
+    }
+
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", 'attachment; filename="VPD_Risk_District_Aggregates_Template.csv"');
+    res.send(csvContent);
   } catch (err: any) {
     res.status(500).json({ message: err.message });
   }
