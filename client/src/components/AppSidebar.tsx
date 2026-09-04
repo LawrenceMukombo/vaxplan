@@ -127,6 +127,7 @@ const adminNavItems = [
   { title: "Wiki / Docs", path: "/admin/wiki", icon: BookOpen, wikiAdminOnly: true },
 ];
 const systemNavItems = [
+  { title: "VPD Risk Assessment", path: "/risk-assessments", icon: Activity },
   { title: "Surveillance", path: "/surveillance", icon: ShieldCheck },
   { title: "Supervision", path: "/supervision", icon: ClipboardCheck },
   { title: "Standards Alignment", path: "/standards-alignment", icon: ShieldCheck },

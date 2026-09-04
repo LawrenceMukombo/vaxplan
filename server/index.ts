@@ -275,6 +275,9 @@ async function backfillClientIds() {
   // VPD Surveillance Engine
   const { surveillanceRouter } = await import("./routes/surveillance");
   app.use("/api/surveillance", surveillanceRouter);
+  // VPD Risk Assessment Engine
+  const { riskRouter } = await import("./routes/riskRoutes");
+  app.use("/api/risk", riskRouter);
   // GIS Advanced Polygons
   const { gisPolygonsRouter } = await import("./routes/gisPolygons");
   app.use("/api/gis/polygons", gisPolygonsRouter);

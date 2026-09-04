@@ -36,6 +36,7 @@ import { dispatchNotification } from "./services/uce";
 import { surveillanceRouter } from "./routes/surveillance";
 import vgieRouter from "./routes/vgie";
 import { researchRouter } from "./routes/research";
+import { riskRouter } from "./routes/riskRoutes";
 import { registerPolygonLifecycleRoutes } from "./routes/polygonLifecycle";
 import {
   compareMicroplanSnapshots,
@@ -1711,6 +1712,7 @@ export async function registerRoutes(
   app.use("/api/vgie", ...auth, vgieRouter);
   app.use("/api/surveillance", surveillanceRouter);
   app.use("/api/research", researchRouter);
+  app.use("/api/risk", riskRouter);
   app.use("/api/catalogue", catalogueRouter);
 
   // --- USER ACCESS MANAGEMENT ENDPOINTS ---

@@ -1,0 +1,1025 @@
+import React, { useState, useMemo } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useParams, Link } from "wouter";
+import {
+  ShieldAlert,
+  ArrowLeft,
+  Activity,
+  Download,
+  Upload,
+  Play,
+  CheckCircle,
+  Clock,
+  AlertTriangle,
+  Info,
+  Search,
+  Filter,
+  Eye,
+  FileSpreadsheet,
+  Layers,
+  BarChart3,
+  Map as MapIcon,
+  ChevronDown,
+  ChevronUp,
+  ChevronsUpDown,
+  ExternalLink,
+  Plus,
+  RefreshCw,
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { useToast } from "@/hooks/use-toast";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Progress } from "@/components/ui/progress";
+
+interface AreaResult {
+  id: string;
+  administrativeAreaId: string;
+  areaName: string;
+  population: number;
+  areaKm2: string;
+  populationImmunityScore: string | null;
+  surveillanceQualityScore: string | null;
+  programmeDeliveryScore: string | null;
+  threatAssessmentScore: string | null;
+  totalRiskScore: string | null;
+  riskCategory: "LOW" | "MEDIUM" | "HIGH" | "VERY_HIGH" | "INCOMPLETE";
+  isIncomplete: boolean;
+  minPossibleScore: string;
+  maxPossibleScore: string;
+  summaryExplanation: string;
+}
+
+interface IndicatorDetail {
+  id: string;
+  indicatorCode: string;
+  domainCode: string;
+  pointsAwarded: string | null;
+  maxPoints: number;
+  valueState: string;
+  displayedValue: string;
+  thresholdApplied: string;
+  explanationText: string;
+  validationWarnings: string[];
+}
+
+export default function RiskResultsWorkspace() {
+  const { id } = useParams<{ id: string }>();
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  // Active view tab
+  const [activeTab, setActiveTab] = useState("results");
+
+  // Enterprise Table State (Rule 24)
+  const [searchTerm, setSearchTerm] = useState("");
+  const [selectedCategory, setSelectedCategory] = useState("ALL");
+  const [sortColumn, setSortColumn] = useState<keyof AreaResult>("totalRiskScore");
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
+
+  // Column Visibility Controls (Rule 24)
+  const [visibleColumns, setVisibleColumns] = useState<Record<string, boolean>>({
+    population: true,
+    pi: true,
+    sq: true,
+    pd: true,
+    ta: true,
+    total: true,
+    category: true,
+  });
+
+  // Drawer states
+  const [selectedAreaForExplanation, setSelectedAreaForExplanation] = useState<AreaResult | null>(null);
+  const [isActionModalOpen, setIsActionModalOpen] = useState(false);
+  const [selectedAreaForAction, setSelectedAreaForAction] = useState<AreaResult | null>(null);
+  const [actionTitle, setActionTitle] = useState("");
+  const [actionType, setActionType] = useState("SUPERVISION_VISIT");
+  const [actionResponsible, setActionResponsible] = useState("");
+  const [actionBudget, setActionBudget] = useState("");
+
+  // Import Dialog
+  const [isImportOpen, setIsImportOpen] = useState(false);
+  const [importType, setImportType] = useState<"cases" | "aggregates">("cases");
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+
+  // Queries
+  const { data: assessment, isLoading: isAssessmentLoading } = useQuery<any>({
+    queryKey: [`/api/risk/assessments/${id}`],
+  });
+
+  const { data: resultsData, isLoading: isResultsLoading } = useQuery<{
+    rows: AreaResult[];
+    totalCount: number;
+    latestRun: any;
+  }>({
+    queryKey: [`/api/risk/assessments/${id}/results`, selectedCategory, searchTerm, page, pageSize],
+    queryFn: async () => {
+      const res = await fetch(
+        `/api/risk/assessments/${id}/results?category=${selectedCategory}&search=${encodeURIComponent(searchTerm)}&page=${page}&pageSize=${pageSize}`
+      );
+      if (!res.ok) throw new Error("Failed to load results");
+      return res.json();
+    },
+  });
+
+  const { data: explanationData, isLoading: isExplanationLoading } = useQuery<{
+    area: AreaResult;
+    indicators: IndicatorDetail[];
+  }>({
+    queryKey: [`/api/risk/assessments/${id}/results/${selectedAreaForExplanation?.id}/explanation`],
+    enabled: Boolean(selectedAreaForExplanation?.id),
+  });
+
+  const { data: linkedActions = [] } = useQuery<any[]>({
+    queryKey: [`/api/risk/assessments/${id}/actions`],
+  });
+
+  // Mutations
+  const calculateMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(`/api/risk/assessments/${id}/calculate`, {
+        method: "POST",
+      });
+      if (!res.ok) throw new Error(await res.text());
+      return res.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: [`/api/risk/assessments/${id}`] });
+      queryClient.invalidateQueries({ queryKey: [`/api/risk/assessments/${id}/results`] });
+      toast({
+        title: "Calculation Completed",
+        description: `Successfully scored ${data.totalAreas} districts across all 21 WHO indicators.`,
+      });
+    },
+    onError: (err: any) => {
+      toast({ title: "Calculation Failed", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const uploadMutation = useMutation({
+    mutationFn: async (file: File) => {
+      const formData = new FormData();
+      formData.append("file", file);
+      const endpoint = importType === "cases" ? "import-cases" : "import-aggregates";
+      const res = await fetch(`/api/risk/assessments/${id}/${endpoint}`, {
+        method: "POST",
+        body: formData,
+      });
+      if (!res.ok) throw new Error(await res.text());
+      return res.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: [`/api/risk/assessments/${id}`] });
+      setIsImportOpen(false);
+      setSelectedFile(null);
+      toast({
+        title: "Import Successful",
+        description: importType === "cases"
+          ? `Ingested ${data.acceptedRows} case records with verified checksum.`
+          : `Ingested data for ${data.acceptedCount} districts.`,
+      });
+    },
+    onError: (err: any) => {
+      toast({ title: "Import Failed", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const actionMutation = useMutation({
+    mutationFn: async (payload: any) => {
+      const res = await fetch("/api/risk/actions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [`/api/risk/assessments/${id}/actions`] });
+      setIsActionModalOpen(false);
+      setActionTitle("");
+      setActionResponsible("");
+      setActionBudget("");
+      toast({
+        title: "Action Linked",
+        description: "Programmatic action successfully linked to routine microplanning register.",
+      });
+    },
+    onError: (err: any) => {
+      toast({ title: "Action Failed", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const reviewMutation = useMutation({
+    mutationFn: async (decision: string) => {
+      const res = await fetch(`/api/risk/assessments/${id}/reviews`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ decision, reviewNotes: "Official validation completed." }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [`/api/risk/assessments/${id}`] });
+      toast({ title: "Review Submitted", description: "Assessment review decision recorded." });
+    },
+    onError: (err: any) => {
+      toast({ title: "Review Failed", description: err.message, variant: "destructive" });
+    },
+  });
+
+  // Client-side sorting on current page
+  const sortedRows = useMemo(() => {
+    if (!resultsData?.rows) return [];
+    return [...resultsData.rows].sort((a, b) => {
+      let valA: any = a[sortColumn];
+      let valB: any = b[sortColumn];
+
+      if (valA === null || valA === undefined) return sortDirection === "asc" ? 1 : -1;
+      if (valB === null || valB === undefined) return sortDirection === "asc" ? -1 : 1;
+
+      const numA = Number(valA);
+      const numB = Number(valB);
+      if (!isNaN(numA) && !isNaN(numB)) {
+        return sortDirection === "asc" ? numA - numB : numB - numA;
+      }
+
+      return sortDirection === "asc"
+        ? String(valA).localeCompare(String(valB))
+        : String(valB).localeCompare(String(valA));
+    });
+  }, [resultsData?.rows, sortColumn, sortDirection]);
+
+  const handleSort = (column: keyof AreaResult) => {
+    if (sortColumn === column) {
+      setSortDirection(sortDirection === "asc" ? "desc" : "asc");
+    } else {
+      setSortColumn(column);
+      setSortDirection("desc");
+    }
+  };
+
+  const getSortIcon = (column: keyof AreaResult) => {
+    if (sortColumn !== column) return <ChevronsUpDown className="w-3.5 h-3.5 ml-1 opacity-50" />;
+    return sortDirection === "asc" ? <ChevronUp className="w-3.5 h-3.5 ml-1" /> : <ChevronDown className="w-3.5 h-3.5 ml-1" />;
+  };
+
+  const getCategoryBadge = (category: string) => {
+    switch (category) {
+      case "LOW":
+        return <Badge className="bg-emerald-600 hover:bg-emerald-700 text-white">Low Risk (0–47)</Badge>;
+      case "MEDIUM":
+        return <Badge className="bg-amber-600 hover:bg-amber-700 text-white">Medium Risk (48–54)</Badge>;
+      case "HIGH":
+        return <Badge className="bg-orange-600 hover:bg-orange-700 text-white">High Risk (55–60)</Badge>;
+      case "VERY_HIGH":
+        return <Badge className="bg-red-600 hover:bg-red-700 text-white">Very High Risk (61–100)</Badge>;
+      default:
+        return <Badge variant="outline" className="bg-slate-500/10 text-slate-700 dark:text-slate-300">Incomplete</Badge>;
+    }
+  };
+
+  const totalPages = Math.ceil((resultsData?.totalCount || 0) / pageSize);
+
+  return (
+    <div className="p-6 max-w-7xl mx-auto space-y-6">
+      {/* Top Navigation & Status */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b pb-5">
+        <div className="space-y-1">
+          <Link href="/risk-assessments" className="inline-flex items-center text-xs text-muted-foreground hover:text-foreground mb-1">
+            <ArrowLeft className="w-3 h-3 mr-1" /> Back to Assessment Rounds
+          </Link>
+          <div className="flex items-center gap-3">
+            <h1 className="text-2xl font-bold tracking-tight text-foreground flex items-center gap-2">
+              <Activity className="w-7 h-7 text-primary" />
+              {assessment?.title || "Assessment Workspace"}
+            </h1>
+            <Badge variant="outline">{assessment?.status || "Draft"}</Badge>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            {assessment?.countryCode} • Year {assessment?.assessmentYear} • Second Subnational ({assessment?.administrativeLevelName || "County"}) Level
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2 shrink-0">
+          <Button variant="outline" size="sm" onClick={() => setIsImportOpen(true)}>
+            <Upload className="w-4 h-4 mr-1.5" /> Import Data
+          </Button>
+
+          <Button
+            size="sm"
+            onClick={() => calculateMutation.mutate()}
+            disabled={calculateMutation.isPending}
+            className="gap-1.5"
+          >
+            <RefreshCw className={`w-4 h-4 ${calculateMutation.isPending ? "animate-spin" : ""}`} />
+            {calculateMutation.isPending ? "Calculating..." : "Run Calculation"}
+          </Button>
+        </div>
+      </div>
+
+      {/* Disclaimers */}
+      <Alert className="border-blue-500/20 bg-blue-500/5 text-blue-900 dark:text-blue-200">
+        <Info className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+        <AlertTitle className="text-xs font-semibold">Programme Strengthening Baseline</AlertTitle>
+        <AlertDescription className="text-xs leading-relaxed">
+          Scores reflect programmatic gaps across Routine Coverage, Surveillance Quality, Dropout Trends, and Threat Exposures.
+          High-risk classifications indicate districts requiring supportive supervision, microplan revisions, or active surveillance audits.
+        </AlertDescription>
+      </Alert>
+
+      {/* Workspace Tabs */}
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
+        <TabsList className="grid grid-cols-4 w-full md:w-[600px]">
+          <TabsTrigger value="results" className="text-xs gap-1.5">
+            <FileSpreadsheet className="w-3.5 h-3.5" /> District Results
+          </TabsTrigger>
+          <TabsTrigger value="map" className="text-xs gap-1.5">
+            <MapIcon className="w-3.5 h-3.5" /> Risk Map
+          </TabsTrigger>
+          <TabsTrigger value="actions" className="text-xs gap-1.5">
+            <CheckCircle className="w-3.5 h-3.5" /> Linked Actions ({linkedActions.length})
+          </TabsTrigger>
+          <TabsTrigger value="review" className="text-xs gap-1.5">
+            <Clock className="w-3.5 h-3.5" /> Review & Approval
+          </TabsTrigger>
+        </TabsList>
+
+        {/* ==================================================================== */}
+        {/* TAB 1: DISTRICT RESULTS (ENTERPRISE TABLE RULE 24) */}
+        {/* ==================================================================== */}
+        <TabsContent value="results" className="space-y-4">
+          {/* Filter, Search & Column Visibility Toolbar */}
+          <Card>
+            <CardContent className="p-4 space-y-4">
+              <div className="flex flex-col md:flex-row items-center justify-between gap-4">
+                {/* Search */}
+                <div className="relative w-full md:w-80">
+                  <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    placeholder="Search district name or code..."
+                    value={searchTerm}
+                    onChange={(e) => {
+                      setSearchTerm(e.target.value);
+                      setPage(1);
+                    }}
+                    className="pl-9 h-9 text-xs"
+                  />
+                </div>
+
+                {/* Category Filters */}
+                <div className="flex flex-wrap items-center gap-1.5 w-full md:w-auto">
+                  {["ALL", "VERY_HIGH", "HIGH", "MEDIUM", "LOW", "INCOMPLETE"].map((cat) => (
+                    <Button
+                      key={cat}
+                      size="sm"
+                      variant={selectedCategory === cat ? "default" : "outline"}
+                      onClick={() => {
+                        setSelectedCategory(cat);
+                        setPage(1);
+                      }}
+                      className="h-8 text-xs capitalize"
+                    >
+                      {cat.replace("_", " ").toLowerCase()}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Column Visibility Checkboxes */}
+              <div className="flex flex-wrap items-center gap-4 pt-2 border-t text-xs text-muted-foreground">
+                <span className="font-semibold text-foreground flex items-center gap-1">
+                  <Eye className="w-3.5 h-3.5" /> Columns:
+                </span>
+                <label className="flex items-center gap-1.5 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={visibleColumns.population}
+                    onChange={(e) => setVisibleColumns({ ...visibleColumns, population: e.target.checked })}
+                  />
+                  Population
+                </label>
+                <label className="flex items-center gap-1.5 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={visibleColumns.pi}
+                    onChange={(e) => setVisibleColumns({ ...visibleColumns, pi: e.target.checked })}
+                  />
+                  Population Immunity (40)
+                </label>
+                <label className="flex items-center gap-1.5 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={visibleColumns.sq}
+                    onChange={(e) => setVisibleColumns({ ...visibleColumns, sq: e.target.checked })}
+                  />
+                  Surveillance Quality (20)
+                </label>
+                <label className="flex items-center gap-1.5 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={visibleColumns.pd}
+                    onChange={(e) => setVisibleColumns({ ...visibleColumns, pd: e.target.checked })}
+                  />
+                  Delivery Trend (16)
+                </label>
+                <label className="flex items-center gap-1.5 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={visibleColumns.ta}
+                    onChange={(e) => setVisibleColumns({ ...visibleColumns, ta: e.target.checked })}
+                  />
+                  Threats (24)
+                </label>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Table Container */}
+          <Card>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead className="bg-muted/50 border-b">
+                  <tr>
+                    <th
+                      className="p-3 font-semibold cursor-pointer hover:bg-muted"
+                      onClick={() => handleSort("areaName")}
+                    >
+                      <div className="flex items-center">
+                        District / County {getSortIcon("areaName")}
+                      </div>
+                    </th>
+                    {visibleColumns.population && (
+                      <th
+                        className="p-3 font-semibold cursor-pointer hover:bg-muted"
+                        onClick={() => handleSort("population")}
+                      >
+                        <div className="flex items-center">
+                          Population {getSortIcon("population")}
+                        </div>
+                      </th>
+                    )}
+                    {visibleColumns.pi && (
+                      <th
+                        className="p-3 font-semibold cursor-pointer hover:bg-muted"
+                        onClick={() => handleSort("populationImmunityScore")}
+                      >
+                        <div className="flex items-center">
+                          Immunity (Max 40) {getSortIcon("populationImmunityScore")}
+                        </div>
+                      </th>
+                    )}
+                    {visibleColumns.sq && (
+                      <th
+                        className="p-3 font-semibold cursor-pointer hover:bg-muted"
+                        onClick={() => handleSort("surveillanceQualityScore")}
+                      >
+                        <div className="flex items-center">
+                          Surveillance (Max 20) {getSortIcon("surveillanceQualityScore")}
+                        </div>
+                      </th>
+                    )}
+                    {visibleColumns.pd && (
+                      <th
+                        className="p-3 font-semibold cursor-pointer hover:bg-muted"
+                        onClick={() => handleSort("programmeDeliveryScore")}
+                      >
+                        <div className="flex items-center">
+                          Delivery (Max 16) {getSortIcon("programmeDeliveryScore")}
+                        </div>
+                      </th>
+                    )}
+                    {visibleColumns.ta && (
+                      <th
+                        className="p-3 font-semibold cursor-pointer hover:bg-muted"
+                        onClick={() => handleSort("threatAssessmentScore")}
+                      >
+                        <div className="flex items-center">
+                          Threats (Max 24) {getSortIcon("threatAssessmentScore")}
+                        </div>
+                      </th>
+                    )}
+                    <th
+                      className="p-3 font-semibold cursor-pointer hover:bg-muted"
+                      onClick={() => handleSort("totalRiskScore")}
+                    >
+                      <div className="flex items-center">
+                        Total Risk Score (100) {getSortIcon("totalRiskScore")}
+                      </div>
+                    </th>
+                    <th className="p-3 font-semibold">Classification</th>
+                    <th className="p-3 font-semibold text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {isResultsLoading ? (
+                    <tr>
+                      <td colSpan={9} className="p-8 text-center text-muted-foreground">
+                        Loading district risk results...
+                      </td>
+                    </tr>
+                  ) : sortedRows.length === 0 ? (
+                    <tr>
+                      <td colSpan={9} className="p-8 text-center text-muted-foreground">
+                        No district results found. Run calculation or adjust search filters.
+                      </td>
+                    </tr>
+                  ) : (
+                    sortedRows.map((row) => (
+                      <tr key={row.id} className="hover:bg-muted/40 transition-colors">
+                        <td className="p-3 font-medium text-foreground">
+                          {row.areaName}
+                        </td>
+                        {visibleColumns.population && (
+                          <td className="p-3 text-muted-foreground">
+                            {row.population ? row.population.toLocaleString() : "N/A"}
+                          </td>
+                        )}
+                        {visibleColumns.pi && (
+                          <td className="p-3">
+                            <span className="font-semibold">{row.populationImmunityScore ?? "—"}</span>
+                            <span className="text-muted-foreground">/40</span>
+                          </td>
+                        )}
+                        {visibleColumns.sq && (
+                          <td className="p-3">
+                            <span className="font-semibold">{row.surveillanceQualityScore ?? "—"}</span>
+                            <span className="text-muted-foreground">/20</span>
+                          </td>
+                        )}
+                        {visibleColumns.pd && (
+                          <td className="p-3">
+                            <span className="font-semibold">{row.programmeDeliveryScore ?? "—"}</span>
+                            <span className="text-muted-foreground">/16</span>
+                          </td>
+                        )}
+                        {visibleColumns.ta && (
+                          <td className="p-3">
+                            <span className="font-semibold">{row.threatAssessmentScore ?? "—"}</span>
+                            <span className="text-muted-foreground">/24</span>
+                          </td>
+                        )}
+                        <td className="p-3">
+                          <span className="font-bold text-sm">
+                            {row.totalRiskScore ?? `${row.minPossibleScore}–${row.maxPossibleScore}`}
+                          </span>
+                          <span className="text-muted-foreground">/100</span>
+                        </td>
+                        <td className="p-3">
+                          {getCategoryBadge(row.riskCategory)}
+                        </td>
+                        <td className="p-3 text-right space-x-1 whitespace-nowrap">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-7 text-xs"
+                            onClick={() => setSelectedAreaForExplanation(row)}
+                          >
+                            Explain Score
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-7 text-xs"
+                            onClick={() => {
+                              setSelectedAreaForAction(row);
+                              setActionTitle(`Strengthen routine coverage in ${row.areaName}`);
+                              setIsActionModalOpen(true);
+                            }}
+                          >
+                            Link Action
+                          </Button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Pagination Controls (Rule 24) */}
+            <div className="p-4 border-t flex flex-col md:flex-row items-center justify-between gap-4 text-xs">
+              <div className="flex items-center gap-2">
+                <span className="text-muted-foreground">Rows per page:</span>
+                <Select
+                  value={String(pageSize)}
+                  onValueChange={(val) => {
+                    setPageSize(Number(val));
+                    setPage(1);
+                  }}
+                >
+                  <SelectTrigger className="h-8 w-18 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="10">10</SelectItem>
+                    <SelectItem value="25">25</SelectItem>
+                    <SelectItem value="50">50</SelectItem>
+                    <SelectItem value="100">100</SelectItem>
+                  </SelectContent>
+                </Select>
+                <span className="text-muted-foreground ml-2">
+                  Showing {sortedRows.length > 0 ? (page - 1) * pageSize + 1 : 0} to{" "}
+                  {Math.min(page * pageSize, resultsData?.totalCount || 0)} of {resultsData?.totalCount || 0} records
+                </span>
+              </div>
+
+              <div className="flex items-center gap-1">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-8 px-3 text-xs"
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  disabled={page <= 1}
+                >
+                  Previous
+                </Button>
+                <span className="px-3 py-1 bg-muted rounded font-medium text-xs">
+                  Page {page} of {totalPages || 1}
+                </span>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-8 px-3 text-xs"
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={page >= totalPages}
+                >
+                  Next
+                </Button>
+              </div>
+            </div>
+          </Card>
+        </TabsContent>
+
+        {/* ==================================================================== */}
+        {/* TAB 2: INTERACTIVE CHOROPLETH MAP (RULE 25) */}
+        {/* ==================================================================== */}
+        <TabsContent value="map" className="space-y-4">
+          <Card>
+            <CardHeader className="pb-3">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-2">
+                <div>
+                  <CardTitle className="text-base font-semibold">Subnational Programmatic Risk Distribution</CardTitle>
+                  <CardDescription className="text-xs">
+                    Interactive geographic visualization of district vulnerability classifications.
+                  </CardDescription>
+                </div>
+                {/* Legend */}
+                <div className="flex flex-wrap items-center gap-2 text-xs">
+                  <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-emerald-500 inline-block" /> Low (0–47)</span>
+                  <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-amber-500 inline-block" /> Medium (48–54)</span>
+                  <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-orange-500 inline-block" /> High (55–60)</span>
+                  <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-red-500 inline-block" /> Very High (61–100)</span>
+                  <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-slate-400 inline-block" /> Incomplete</span>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="h-[520px] w-full rounded-md border bg-slate-900/5 dark:bg-slate-950 flex items-center justify-center p-6 relative overflow-hidden">
+                {/* District Risk Grid Map Representation */}
+                <div className="w-full max-w-4xl grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3">
+                  {(resultsData?.rows || []).slice(0, 15).map((d) => {
+                    const colorMap: Record<string, string> = {
+                      LOW: "border-emerald-500/50 bg-emerald-500/10 text-emerald-900 dark:text-emerald-300",
+                      MEDIUM: "border-amber-500/50 bg-amber-500/10 text-amber-900 dark:text-amber-300",
+                      HIGH: "border-orange-500/50 bg-orange-500/10 text-orange-900 dark:text-orange-300",
+                      VERY_HIGH: "border-red-500/50 bg-red-500/10 text-red-900 dark:text-red-300",
+                      INCOMPLETE: "border-slate-400 bg-slate-400/10 text-slate-700 dark:text-slate-300",
+                    };
+
+                    return (
+                      <div
+                        key={d.id}
+                        onClick={() => setSelectedAreaForExplanation(d)}
+                        className={`p-3 rounded-lg border cursor-pointer hover:scale-105 transition-transform ${colorMap[d.riskCategory] || colorMap.INCOMPLETE}`}
+                      >
+                        <p className="font-bold text-xs truncate">{d.areaName}</p>
+                        <p className="text-[11px] font-semibold mt-1">
+                          Score: {d.totalRiskScore ?? `${d.minPossibleScore}–${d.maxPossibleScore}`}
+                        </p>
+                        <p className="text-[10px] opacity-80 mt-0.5 capitalize">
+                          {d.riskCategory.replace("_", " ").toLowerCase()}
+                        </p>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ==================================================================== */}
+        {/* TAB 3: LINKED PROGRAMME ACTIONS */}
+        {/* ==================================================================== */}
+        <TabsContent value="actions" className="space-y-4">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-3">
+              <div>
+                <CardTitle className="text-base font-semibold">Programme Strengthening Action Links</CardTitle>
+                <CardDescription className="text-xs">
+                  Connect identified district epidemiological vulnerabilities directly to routine microplans, supervision visits, and budgets.
+                </CardDescription>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {linkedActions.length === 0 ? (
+                <div className="py-12 text-center text-muted-foreground text-xs space-y-2">
+                  <CheckCircle className="w-8 h-8 mx-auto text-muted-foreground/50" />
+                  <p>No programme actions linked to this assessment round yet.</p>
+                  <p className="text-[11px]">Click "Link Action" on any district row in the results table to create an activity.</p>
+                </div>
+              ) : (
+                <div className="divide-y border rounded-md text-xs">
+                  {linkedActions.map((act: any) => (
+                    <div key={act.id} className="p-3 flex flex-col md:flex-row md:items-center justify-between gap-3">
+                      <div>
+                        <p className="font-semibold text-sm">{act.actionTitle}</p>
+                        <p className="text-muted-foreground mt-0.5">
+                          Type: <span className="font-medium text-foreground">{act.actionType}</span> • Area: <span className="font-medium text-foreground">{act.administrativeAreaId}</span>
+                        </p>
+                        {act.budgetCode && (
+                          <p className="text-muted-foreground text-[11px] mt-0.5">
+                            Budget Reference: <span className="font-mono">{act.budgetCode}</span>
+                          </p>
+                        )}
+                      </div>
+                      <Badge variant="outline">{act.status}</Badge>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ==================================================================== */}
+        {/* TAB 4: REVIEW & APPROVAL */}
+        {/* ==================================================================== */}
+        <TabsContent value="review" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base font-semibold">National Programme Validation & Sign-Off</CardTitle>
+              <CardDescription className="text-xs">
+                Formal review, sign-off, and locking of the subnational risk assessment round.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4 text-xs">
+              <div className="p-4 rounded-md border bg-muted/40 space-y-2">
+                <p className="font-semibold text-sm">Assessment Status: {assessment?.status}</p>
+                <p className="text-muted-foreground">
+                  Once approved by the National EPI Manager or Surveillance Lead, assessment scores become immutable snapshots for reporting and temporal comparison.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-3 pt-2">
+                <Button
+                  onClick={() => reviewMutation.mutate("APPROVED")}
+                  disabled={reviewMutation.isPending || assessment?.status === "APPROVED"}
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white gap-1.5"
+                >
+                  <CheckCircle className="w-4 h-4" />
+                  {assessment?.status === "APPROVED" ? "Assessment Approved" : "Approve Assessment"}
+                </Button>
+
+                <Button
+                  variant="outline"
+                  onClick={() => reviewMutation.mutate("CHANGES_REQUESTED")}
+                  disabled={reviewMutation.isPending}
+                >
+                  Request Re-Validation
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
+
+      {/* ==================================================================== */}
+      {/* EXPLAIN THIS SCORE SLIDING DRAWER */}
+      {/* ==================================================================== */}
+      <Sheet open={Boolean(selectedAreaForExplanation)} onOpenChange={(open) => !open && setSelectedAreaForExplanation(null)}>
+        <SheetContent className="sm:max-w-[620px] overflow-y-auto">
+          <SheetHeader className="pb-3 border-b">
+            <SheetTitle className="text-lg font-bold flex items-center gap-2">
+              <ShieldAlert className="w-5 h-5 text-primary" />
+              Explain Risk Score: {selectedAreaForExplanation?.areaName}
+            </SheetTitle>
+            <SheetDescription className="text-xs">
+              Mathematical lineage, applied thresholds, and indicator breakdown for this district.
+            </SheetDescription>
+          </SheetHeader>
+
+          <div className="py-4 space-y-4">
+            {/* Score Summary Box */}
+            <div className="p-3 bg-muted/50 rounded-lg border space-y-1 text-xs">
+              <div className="flex items-center justify-between">
+                <span className="font-semibold text-sm">Total Score:</span>
+                <span className="font-bold text-base">
+                  {selectedAreaForExplanation?.totalRiskScore ?? `${selectedAreaForExplanation?.minPossibleScore}–${selectedAreaForExplanation?.maxPossibleScore}`}/100
+                </span>
+              </div>
+              <p className="text-muted-foreground leading-relaxed">
+                {selectedAreaForExplanation?.summaryExplanation}
+              </p>
+            </div>
+
+            {/* Indicator Details */}
+            <div className="space-y-3">
+              <h4 className="font-semibold text-xs text-foreground uppercase tracking-wider">Indicator Lineage (21 WHO Indicators)</h4>
+
+              {isExplanationLoading ? (
+                <div className="py-8 text-center text-xs text-muted-foreground">Loading indicator lineage...</div>
+              ) : (
+                <div className="space-y-2">
+                  {(explanationData?.indicators || []).map((ind) => (
+                    <div key={ind.id} className="p-2.5 rounded border bg-card text-xs space-y-1">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-foreground">
+                          {ind.indicatorCode} ({ind.domainCode.replace("_", " ")})
+                        </span>
+                        <Badge variant="outline" className="font-mono">
+                          {ind.pointsAwarded ?? "—"} / {ind.maxPoints} pts
+                        </Badge>
+                      </div>
+
+                      <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                        <span>Observed: <strong className="text-foreground">{ind.displayedValue}</strong></span>
+                        <span>Threshold: <strong className="text-foreground">{ind.thresholdApplied}</strong></span>
+                      </div>
+
+                      <p className="text-[11px] text-muted-foreground leading-snug">
+                        {ind.explanationText}
+                      </p>
+
+                      {ind.validationWarnings && ind.validationWarnings.length > 0 && (
+                        <div className="text-[10px] text-amber-600 dark:text-amber-400">
+                          Warning: {ind.validationWarnings.join(", ")}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </SheetContent>
+      </Sheet>
+
+      {/* ==================================================================== */}
+      {/* LINK PROGRAMME ACTION MODAL */}
+      {/* ==================================================================== */}
+      <Dialog open={isActionModalOpen} onOpenChange={setIsActionModalOpen}>
+        <DialogContent className="sm:max-w-[480px]">
+          <DialogHeader>
+            <DialogTitle>Link Programme Action</DialogTitle>
+            <DialogDescription className="text-xs">
+              Connect this district weakness to routine microplanning, supportive supervision, or budget allocation.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3 py-3 text-xs">
+            <div className="space-y-1.5">
+              <Label htmlFor="area">Target District</Label>
+              <Input id="area" value={selectedAreaForAction?.areaName || ""} disabled />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="actType">Action Category</Label>
+              <Select value={actionType} onValueChange={setActionType}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="SUPERVISION_VISIT">Supportive Supervision Visit</SelectItem>
+                  <SelectItem value="MICROPLAN_REVISION">Microplan Revision / Defaulter Tracing</SelectItem>
+                  <SelectItem value="COLD_CHAIN_REPAIR">Cold Chain / Logistics Strengthening</SelectItem>
+                  <SelectItem value="COMMUNITY_ENGAGEMENT">Community Engagement & Hesitancy Outreach</SelectItem>
+                  <SelectItem value="SURVEILLANCE_AUDIT">Surveillance Active Case Search</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="actTitle">Action Title & Description</Label>
+              <Input
+                id="actTitle"
+                value={actionTitle}
+                onChange={(e) => setActionTitle(e.target.value)}
+                placeholder="e.g. Conduct active case search and sensitize surveillance focal persons"
+                required
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="resp">Responsible Unit / Lead</Label>
+                <Input
+                  id="resp"
+                  value={actionResponsible}
+                  onChange={(e) => setActionResponsible(e.target.value)}
+                  placeholder="e.g. County EPI Supervisor"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="budget">Budget Code (Optional)</Label>
+                <Input
+                  id="budget"
+                  value={actionBudget}
+                  onChange={(e) => setActionBudget(e.target.value)}
+                  placeholder="e.g. GAVI-HSIS-2023-04"
+                />
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => setIsActionModalOpen(false)}>Cancel</Button>
+            <Button
+              size="sm"
+              onClick={() => {
+                if (!actionTitle || !selectedAreaForAction) return;
+                actionMutation.mutate({
+                  assessmentId: id,
+                  administrativeAreaId: selectedAreaForAction.areaName,
+                  actionType,
+                  actionTitle,
+                  assignedTo: actionResponsible,
+                  budgetCode: actionBudget,
+                });
+              }}
+              disabled={actionMutation.isPending || !actionTitle}
+            >
+              {actionMutation.isPending ? "Linking..." : "Save Action Link"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ==================================================================== */}
+      {/* IMPORT DATA MODAL */}
+      {/* ==================================================================== */}
+      <Dialog open={isImportOpen} onOpenChange={setIsImportOpen}>
+        <DialogContent className="sm:max-w-[480px]">
+          <DialogHeader>
+            <DialogTitle>Import Assessment Data</DialogTitle>
+            <DialogDescription className="text-xs">
+              Upload case linelists or routine coverage aggregates from Excel (.xlsx/.xlsm) or CSV.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-3 text-xs">
+            <div className="space-y-1.5">
+              <Label>Import Content</Label>
+              <Select value={importType} onValueChange={(val: any) => setImportType(val)}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="cases">Case Linelist (WHO Case-Based-Data or CSV)</SelectItem>
+                  <SelectItem value="aggregates">Routine Coverage & Population Aggregates</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="fileUpload">Select File</Label>
+              <Input
+                id="fileUpload"
+                type="file"
+                accept=".xlsx,.xlsm,.csv"
+                onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
+              />
+              <p className="text-[11px] text-muted-foreground">
+                Safe parsing enabled. Macros in .xlsm workbooks are strictly ignored and never executed.
+              </p>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => setIsImportOpen(false)}>Cancel</Button>
+            <Button
+              size="sm"
+              disabled={!selectedFile || uploadMutation.isPending}
+              onClick={() => {
+                if (selectedFile) uploadMutation.mutate(selectedFile);
+              }}
+            >
+              {uploadMutation.isPending ? "Uploading..." : "Upload & Ingest"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}

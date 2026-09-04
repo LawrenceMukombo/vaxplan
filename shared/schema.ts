@@ -4128,8 +4128,7 @@ export const clientDuplicateCandidates = pgTable("client_duplicate_candidates", 
   tenantIdx: index("idx_client_dupes_tenant").on(table.tenantId),
   primaryClientIdx: index("idx_client_dupes_primary").on(table.primaryClientId),
 }));
-
-export const clientBulkActionLogs = pgTable("client_bulk_action_logs", {
+export const clientBulkActionLogs = pgTable("client_bulk_action_logs", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
   tenantId: varchar("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
   actionType: varchar("action_type", { length: 100 }).notNull(), // archive, restore, delete, assign_facility, status_update, add_tag, remove_tag
@@ -4151,3 +4150,5 @@ export type SupervisionQuestionBankItem = typeof supervisionQuestionBank.$inferS
 export const insertClientImportBatchSchema = createInsertSchema(clientImportBatches);
 export const selectClientImportBatchSchema = createSelectSchema(clientImportBatches);
 export type ClientImportBatch = typeof clientImportBatches.$inferSelect;
+
+export * from "./riskSchema";

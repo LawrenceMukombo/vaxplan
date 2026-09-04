@@ -103,6 +103,8 @@ const WikiEditor = lazy(() => import("@/pages/WikiEditor"));
 const CatalogueAdmin = lazy(() => import("@/pages/CatalogueAdmin"));
 const ResearchHubPage = lazy(() => import("@/pages/ResearchHub"));
 const TemporalHistory = lazy(() => import("@/pages/TemporalHistory"));
+const RiskAssessmentList = lazy(() => import("@/pages/risk/RiskAssessmentList"));
+const RiskResultsWorkspace = lazy(() => import("@/pages/risk/RiskResultsWorkspace"));
 import { DEFAULT_MODULES } from "@/lib/modules";
 // Task #50 - Small wrapper that reads :id from the route and passes it to
 // SessionPlanning as `lockedMicroplanId`, so the unserved-prefill auto-open
@@ -400,6 +402,8 @@ function AuthenticatedRouter({ user }: { user: User }) {
       <Route path="/indicators/manual" component={IndicatorManual} />
       <Route path="/api-reference" component={ApiReference} />
       <Route path="/surveillance" component={Surveillance} />
+      <Route path="/risk-assessments" component={RiskAssessmentList} />
+      <Route path="/risk-assessments/:id" component={RiskResultsWorkspace} />
       <Route path="/settings" component={Settings} />
       <Route path="/temporal-history" component={TemporalHistory} />
       <Route path="/help" component={Help} />
