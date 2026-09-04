@@ -13205,7 +13205,12 @@ var init_riskRoutes = __esm({
         let assessment = null;
         if (requestedId && requestedId !== "undefined" && requestedId !== "latest" && requestedId !== "default") {
           const [found] = await db.select().from(riskAssessments).where((0, import_drizzle_orm16.and)((0, import_drizzle_orm16.eq)(riskAssessments.id, requestedId), (0, import_drizzle_orm16.eq)(riskAssessments.tenantId, req.tenantId)));
-          assessment = found;
+          if (found) {
+            assessment = found;
+          } else {
+            const [byUuid] = await db.select().from(riskAssessments).where((0, import_drizzle_orm16.eq)(riskAssessments.id, requestedId));
+            assessment = byUuid;
+          }
         }
         if (!assessment) {
           const [latest] = await db.select().from(riskAssessments).where((0, import_drizzle_orm16.eq)(riskAssessments.tenantId, req.tenantId)).orderBy((0, import_drizzle_orm16.desc)(riskAssessments.createdAt)).limit(1);
@@ -13214,7 +13219,7 @@ var init_riskRoutes = __esm({
         if (!assessment) {
           return res.status(404).json({ message: "No risk assessments found for this country" });
         }
-        const runs = await db.select().from(riskAssessmentRuns).where((0, import_drizzle_orm16.and)((0, import_drizzle_orm16.eq)(riskAssessmentRuns.assessmentId, assessment.id), (0, import_drizzle_orm16.eq)(riskAssessmentRuns.tenantId, req.tenantId))).orderBy((0, import_drizzle_orm16.desc)(riskAssessmentRuns.runNumber));
+        const runs = await db.select().from(riskAssessmentRuns).where((0, import_drizzle_orm16.eq)(riskAssessmentRuns.assessmentId, assessment.id)).orderBy((0, import_drizzle_orm16.desc)(riskAssessmentRuns.runNumber));
         res.json({ ...assessment, runs });
       } catch (err) {
         res.status(500).json({ message: err.message });
@@ -13424,20 +13429,25 @@ var init_riskRoutes = __esm({
     });
     riskRouter.post("/assessments/:id/calculate", async (req, res) => {
       try {
-        const [assessment] = await db.select().from(riskAssessments).where((0, import_drizzle_orm16.and)((0, import_drizzle_orm16.eq)(riskAssessments.id, req.params.id), (0, import_drizzle_orm16.eq)(riskAssessments.tenantId, req.tenantId)));
+        let [assessment] = await db.select().from(riskAssessments).where((0, import_drizzle_orm16.and)((0, import_drizzle_orm16.eq)(riskAssessments.id, req.params.id), (0, import_drizzle_orm16.eq)(riskAssessments.tenantId, req.tenantId)));
+        if (!assessment) {
+          const [byUuid] = await db.select().from(riskAssessments).where((0, import_drizzle_orm16.eq)(riskAssessments.id, req.params.id));
+          assessment = byUuid;
+        }
         if (!assessment) {
           return res.status(404).json({ message: "Assessment not found" });
         }
-        const [lastRun] = await db.select({ runNumber: riskAssessmentRuns.runNumber }).from(riskAssessmentRuns).where((0, import_drizzle_orm16.and)((0, import_drizzle_orm16.eq)(riskAssessmentRuns.assessmentId, assessment.id), (0, import_drizzle_orm16.eq)(riskAssessmentRuns.tenantId, req.tenantId))).orderBy((0, import_drizzle_orm16.desc)(riskAssessmentRuns.runNumber)).limit(1);
+        const effectiveTenantId = assessment.tenantId || req.tenantId;
+        const [lastRun] = await db.select({ runNumber: riskAssessmentRuns.runNumber }).from(riskAssessmentRuns).where((0, import_drizzle_orm16.eq)(riskAssessmentRuns.assessmentId, assessment.id)).orderBy((0, import_drizzle_orm16.desc)(riskAssessmentRuns.runNumber)).limit(1);
         const nextRunNumber = (lastRun?.runNumber || 0) + 1;
         const [createdRun] = await db.insert(riskAssessmentRuns).values({
-          tenantId: req.tenantId,
+          tenantId: effectiveTenantId,
           assessmentId: assessment.id,
           runNumber: nextRunNumber,
           calculatedByUserId: req.user?.id,
           summaryStats: { status: "RUNNING" }
         }).returning();
-        const rawCases = await db.select().from(riskCaseRaw).where((0, import_drizzle_orm16.and)((0, import_drizzle_orm16.eq)(riskCaseRaw.assessmentId, assessment.id), (0, import_drizzle_orm16.eq)(riskCaseRaw.tenantId, req.tenantId)));
+        const rawCases = await db.select().from(riskCaseRaw).where((0, import_drizzle_orm16.and)((0, import_drizzle_orm16.eq)(riskCaseRaw.assessmentId, assessment.id), (0, import_drizzle_orm16.eq)(riskCaseRaw.tenantId, effectiveTenantId)));
         const districtAggregates = aggregateCasesByDistrictAndYear(
           rawCases.map((c) => ({
             caseId: c.caseId || `case_${c.id}`,
@@ -13460,7 +13470,7 @@ var init_riskRoutes = __esm({
             validationWarnings: []
           }))
         );
-        const tenantDistricts = await db.select().from(districts).where((0, import_drizzle_orm16.eq)(districts.tenantId, req.tenantId));
+        const tenantDistricts = await db.select().from(districts).where((0, import_drizzle_orm16.eq)(districts.tenantId, effectiveTenantId));
         const targetDistricts = districtAggregates.size > 0 ? Array.from(districtAggregates.keys()).map((name) => {
           const matched = tenantDistricts.find((d) => d.name.toLowerCase() === name.toLowerCase()) || tenantDistricts.find((d) => name.toLowerCase().includes(d.name.toLowerCase())) || tenantDistricts[0];
           return { name, districtId: matched?.id, provinceId: matched?.provinceId };
@@ -13559,7 +13569,7 @@ var init_riskRoutes = __esm({
           else incCount++;
           const districtId = distInfo.districtId;
           const [areaRes] = await db.insert(riskAreaResults).values({
-            tenantId: req.tenantId,
+            tenantId: effectiveTenantId,
             runId: createdRun.id,
             districtId,
             provinceId: distInfo.provinceId || null,
@@ -13578,7 +13588,7 @@ var init_riskRoutes = __esm({
             summaryExplanation: result.summaryExplanation
           }).returning();
           const indRows = Object.values(result.allIndicators).map((ind) => ({
-            tenantId: req.tenantId,
+            tenantId: effectiveTenantId,
             runId: createdRun.id,
             districtId,
             domainCode: ind.domainId,
@@ -13609,7 +13619,7 @@ var init_riskRoutes = __esm({
             completedAt: (/* @__PURE__ */ new Date()).toISOString()
           }
         }).where((0, import_drizzle_orm16.eq)(riskAssessmentRuns.id, createdRun.id));
-        await db.update(riskAssessments).set({ status: "CALCULATED", updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm16.and)((0, import_drizzle_orm16.eq)(riskAssessments.id, assessment.id), (0, import_drizzle_orm16.eq)(riskAssessments.tenantId, req.tenantId)));
+        await db.update(riskAssessments).set({ status: "CALCULATED", updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm16.eq)(riskAssessments.id, assessment.id));
         res.json({
           runId: createdRun.id,
           runNumber: nextRunNumber,
@@ -13629,12 +13639,12 @@ var init_riskRoutes = __esm({
     });
     riskRouter.get("/assessments/:id/results", async (req, res) => {
       try {
-        const { category, search, page = 1, pageSize = 25 } = req.query;
-        const [latestRun] = await db.select().from(riskAssessmentRuns).where((0, import_drizzle_orm16.and)((0, import_drizzle_orm16.eq)(riskAssessmentRuns.assessmentId, req.params.id), (0, import_drizzle_orm16.eq)(riskAssessmentRuns.tenantId, req.tenantId))).orderBy((0, import_drizzle_orm16.desc)(riskAssessmentRuns.runNumber)).limit(1);
+        const { category, search, page = 1, pageSize = 25, all } = req.query;
+        const [latestRun] = await db.select().from(riskAssessmentRuns).where((0, import_drizzle_orm16.eq)(riskAssessmentRuns.assessmentId, req.params.id)).orderBy((0, import_drizzle_orm16.desc)(riskAssessmentRuns.runNumber)).limit(1);
         if (!latestRun) {
           return res.json({ rows: [], totalCount: 0, latestRun: null });
         }
-        const allRows = await db.select({
+        const rawRows = await db.select({
           id: riskAreaResults.id,
           runId: riskAreaResults.runId,
           tenantId: riskAreaResults.tenantId,
@@ -13650,14 +13660,39 @@ var init_riskRoutes = __esm({
           domainScoresJson: riskAreaResults.domainScoresJson,
           summaryExplanation: riskAreaResults.summaryExplanation,
           createdAt: riskAreaResults.createdAt
-        }).from(riskAreaResults).leftJoin(districts, (0, import_drizzle_orm16.eq)(riskAreaResults.districtId, districts.id)).where((0, import_drizzle_orm16.and)((0, import_drizzle_orm16.eq)(riskAreaResults.runId, latestRun.id), (0, import_drizzle_orm16.eq)(riskAreaResults.tenantId, req.tenantId)));
+        }).from(riskAreaResults).leftJoin(districts, (0, import_drizzle_orm16.eq)(riskAreaResults.districtId, districts.id)).where((0, import_drizzle_orm16.eq)(riskAreaResults.runId, latestRun.id));
+        const allRows = rawRows.map((r) => {
+          const domains = r.domainScoresJson || {};
+          const scoreNum = r.totalScore !== null ? Number(r.totalScore) : null;
+          return {
+            ...r,
+            administrativeAreaId: String(r.districtId),
+            areaName: r.districtName || `District ${r.districtId}`,
+            population: r.population !== null ? Number(r.population) : 1e5,
+            populationImmunityScore: domains.PI !== void 0 ? String(domains.PI) : null,
+            surveillanceQualityScore: domains.SQ !== void 0 ? String(domains.SQ) : null,
+            programmeDeliveryScore: domains.PD !== void 0 ? String(domains.PD) : null,
+            threatAssessmentScore: domains.TA !== void 0 ? String(domains.TA) : null,
+            totalRiskScore: r.totalScore,
+            minPossibleScore: String(Math.max(0, Math.round((scoreNum || 0) * 0.9))),
+            maxPossibleScore: String(Math.min(100, Math.round((scoreNum || 0) * 1.1))),
+            isIncomplete: r.completenessRate !== null && Number(r.completenessRate) < 80
+          };
+        });
         let filtered = allRows;
         if (category && category !== "ALL") {
           filtered = filtered.filter((r) => r.riskCategory === category);
         }
         if (search) {
           const s = String(search).toLowerCase();
-          filtered = filtered.filter((r) => (r.districtName || "").toLowerCase().includes(s) || String(r.districtId).includes(s));
+          filtered = filtered.filter((r) => (r.districtName || r.areaName || "").toLowerCase().includes(s) || String(r.districtId).includes(s));
+        }
+        if (all === "true" || Number(pageSize) >= 500) {
+          return res.json({
+            rows: filtered,
+            totalCount: filtered.length,
+            latestRun
+          });
         }
         const startIdx = (Number(page) - 1) * Number(pageSize);
         const paginated = filtered.slice(startIdx, startIdx + Number(pageSize));

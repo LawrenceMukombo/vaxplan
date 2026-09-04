@@ -126,6 +126,9 @@ export default function RiskResultsWorkspace() {
   // Query all assessments for switching and fallback
   const { data: allAssessments = [] } = useQuery<any[]>({
     queryKey: ["/api/risk/assessments"],
+    queryFn: async () => {
+      return await apiRequest<any[]>("GET", "/api/risk/assessments");
+    },
   });
 
   // Resilient assessment ID resolution
@@ -149,6 +152,10 @@ export default function RiskResultsWorkspace() {
 
   const { data: assessment, isLoading: isAssessmentLoading } = useQuery<any>({
     queryKey: [`/api/risk/assessments/${effectiveId}`],
+    queryFn: async () => {
+      if (!effectiveId) return null;
+      return await apiRequest<any>("GET", `/api/risk/assessments/${effectiveId}`);
+    },
     enabled: Boolean(effectiveId),
   });
 
@@ -179,6 +186,22 @@ export default function RiskResultsWorkspace() {
     enabled: Boolean(effectiveId),
   });
 
+  // Dedicated query to fetch ALL district results for the choropleth map (not constrained by table pagination)
+  const { data: mapResultsData } = useQuery<{
+    rows: AreaResult[];
+    totalCount: number;
+  }>({
+    queryKey: [`/api/risk/assessments/${effectiveId}/results`, "all"],
+    queryFn: async () => {
+      if (!effectiveId) return { rows: [], totalCount: 0 };
+      return await apiRequest<{
+        rows: AreaResult[];
+        totalCount: number;
+      }>("GET", `/api/risk/assessments/${effectiveId}/results?all=true`);
+    },
+    enabled: Boolean(effectiveId),
+  });
+
   const { data: explanationData, isLoading: isExplanationLoading } = useQuery<{
     area: AreaResult;
     indicators: IndicatorDetail[];
@@ -200,21 +223,25 @@ export default function RiskResultsWorkspace() {
 
   // Transform results rows for Choropleth map
   const choroplethData: DistrictCoveragePerformance[] = useMemo(() => {
-    return (resultsData?.rows || []).map((r, idx) => {
-      const piScore = Number(r.populationImmunityScore) || 0;
-      const pdScore = Number(r.programmeDeliveryScore) || 0;
-      const taScore = Number(r.threatAssessmentScore) || 0;
-      const totalScore = Number(r.totalRiskScore) || 35;
+    const sourceRows = (mapResultsData?.rows && mapResultsData.rows.length > 0)
+      ? mapResultsData.rows
+      : (resultsData?.rows || []);
+
+    return sourceRows.map((r, idx) => {
+      const piScore = Number(r.populationImmunityScore ?? (r as any).domainScoresJson?.PI) || 0;
+      const pdScore = Number(r.programmeDeliveryScore ?? (r as any).domainScoresJson?.PD) || 0;
+      const taScore = Number(r.threatAssessmentScore ?? (r as any).domainScoresJson?.TA) || 0;
+      const totalScore = Number(r.totalRiskScore ?? (r as any).totalScore) || 35;
 
       const mcv1 = Math.max(40, Math.min(98, Math.round(100 - piScore * 1.5)));
       const mcv2 = Math.max(35, Math.min(95, Math.round(mcv1 - (5 + (idx % 6)))));
       const dropout = Math.max(0, Math.round(pdScore * 2.2));
 
       return {
-        districtId: Number(r.administrativeAreaId) || idx + 1,
-        districtName: r.areaName,
-        provinceId: null,
-        provinceName: "National",
+        districtId: Number((r as any).districtId || r.administrativeAreaId) || idx + 1,
+        districtName: (r as any).districtName || r.areaName || `District ${idx + 1}`,
+        provinceId: (r as any).provinceId || null,
+        provinceName: (r as any).provinceName || "National",
         population: r.population || 120000,
         targetUnder1: Math.round((r.population || 120000) * 0.035),
         mcv1Coverage: mcv1,
@@ -228,7 +255,7 @@ export default function RiskResultsWorkspace() {
         hasAssessmentRun: true,
       };
     });
-  }, [resultsData]);
+  }, [mapResultsData, resultsData]);
 
   const effectiveChoroplethData = useMemo(() => {
     if (choroplethData.length > 0) return choroplethData;
@@ -244,6 +271,7 @@ export default function RiskResultsWorkspace() {
       queryClient.invalidateQueries({ queryKey: [`/api/risk/assessments/${effectiveId}`] });
       queryClient.invalidateQueries({ queryKey: [`/api/risk/assessments/${effectiveId}/results`] });
       queryClient.invalidateQueries({ queryKey: ["/api/risk/coverage-performance"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/risk/assessments"] });
       toast({
         title: "Calculation Completed",
         description: `Successfully scored ${data.totalAreas} districts across all 21 WHO indicators.`,
@@ -867,14 +895,18 @@ export default function RiskResultsWorkspace() {
         <TabsContent value="map" className="space-y-4">
           <RiskChoroplethMap
             countryCode={assessment?.countryCode || context?.countryCode || "ZAF"}
-            countryName={context?.countryName || "National Programme"}
+            countryName={assessment?.countryName || context?.countryName || "Republic of South Africa National Department of Health"}
             adminLevelLabel={context?.adminLevelLabel || "District"}
-            boundaryId={context?.defaultBoundaryId}
+            boundaryId={context?.boundaryId || context?.defaultBoundaryId || (assessment?.countryCode === "ZAF" || !assessment ? "a942c119-c045-492f-97ee-b95a8dbb8440" : undefined)}
             data={effectiveChoroplethData}
+            selectedCategoryFilter={selectedCategory}
+            onSelectCategoryFilter={setSelectedCategory}
             onSelectDistrict={(dist) => {
               if (dist) {
-                const matched = resultsData?.rows.find(
-                  (r) => r.areaName.toLowerCase() === dist.districtName.toLowerCase() || String(r.administrativeAreaId) === String(dist.districtId)
+                const matched = (mapResultsData?.rows || resultsData?.rows || []).find(
+                  (r) =>
+                    (r.areaName || (r as any).districtName || "").toLowerCase() === dist.districtName.toLowerCase() ||
+                    String(r.administrativeAreaId || (r as any).districtId) === String(dist.districtId)
                 );
                 if (matched) {
                   setSelectedAreaForExplanation(matched);

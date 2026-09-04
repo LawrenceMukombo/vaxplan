@@ -1,0 +1,1 @@
+import{l}from"./leaflet-src-fTQPJLfb.js";import{a as s,b as r,e as c}from"./TileLayer-B1AdPuea.js";const i=s(function({data:t,...e},o){const n=new l.GeoJSON(t,e);return r(n,c(o,{overlayContainer:n}))},function(t,e,o){e.style!==o.style&&(e.style==null?t.resetStyle():t.setStyle(e.style))});export{i as G};
