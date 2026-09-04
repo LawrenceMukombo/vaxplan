@@ -10,6 +10,7 @@ import {
   jsonb,
   index,
   unique,
+  uniqueIndex,
   pgEnum,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema, createSelectSchema } from "drizzle-zod";
@@ -716,7 +717,14 @@ export const populationData = pgTable("population_data", {
   approvedByUserId: varchar("approved_by_user_id").references(() => users.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
-}, (table) => [index("idx_population_tenant").on(table.tenantId)]);
+}, (table) => [
+  index("idx_population_tenant").on(table.tenantId),
+  uniqueIndex("uq_pop_village_year_source").on(table.tenantId, table.villageId, table.year, table.source).where(sql`${table.villageId} IS NOT NULL`),
+  uniqueIndex("uq_pop_facility_year_source").on(table.tenantId, table.facilityId, table.year, table.source).where(sql`${table.villageId} IS NULL AND ${table.facilityId} IS NOT NULL`),
+  uniqueIndex("uq_pop_district_year_source").on(table.tenantId, table.districtId, table.year, table.source).where(sql`${table.villageId} IS NULL AND ${table.facilityId} IS NULL AND ${table.districtId} IS NOT NULL`),
+  uniqueIndex("uq_pop_province_year_source").on(table.tenantId, table.provinceId, table.year, table.source).where(sql`${table.villageId} IS NULL AND ${table.facilityId} IS NULL AND ${table.districtId} IS NULL AND ${table.provinceId} IS NOT NULL`),
+  uniqueIndex("uq_pop_national_year_source").on(table.tenantId, table.year, table.source).where(sql`${table.villageId} IS NULL AND ${table.facilityId} IS NULL AND ${table.districtId} IS NULL AND ${table.provinceId} IS NULL`),
+]);
 
 // ============================================================================
 // MICROPLANS — Differentiated SIA & Health Facility Master Microplans

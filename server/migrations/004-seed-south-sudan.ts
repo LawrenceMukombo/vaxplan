@@ -189,46 +189,9 @@ async function run() {
   if (existingTenant.length > 0) {
     tenantId = existingTenant[0].id;
     console.log(`SSD Tenant already exists: ${tenantId}`);
-    
-    // Clear old administrative settings and cascade children to ensure clean, high-fidelity seeding
-    console.log("Clearing old South Sudan administrative hierarchy and facilities…");
-    // 1a. Query all facility IDs and village IDs currently belonging to this tenant
-    const facilityIds = (await db
-      .select({ id: facilities.id })
-      .from(facilities)
-      .where(eq(facilities.tenantId, tenantId))
-    ).map((f) => f.id);
-
-    const villageIds = (await db
-      .select({ id: villages.id })
-      .from(villages)
-      .where(eq(villages.tenantId, tenantId))
-    ).map((v) => v.id);
-
-    // 1b. Delete referencing rows in operational tables to avoid foreign key violations (including cross-tenant ones)
-    if (villageIds.length > 0) {
-      await db.delete(sessionVillages).where(inArray(sessionVillages.villageId, villageIds));
-      await db.delete(htrScores).where(inArray(htrScores.villageId, villageIds));
-    }
-
-    if (facilityIds.length > 0) {
-      await db.delete(sessionPlans).where(inArray(sessionPlans.facilityId, facilityIds));
-      await db.delete(microplans).where(inArray(microplans.facilityId, facilityIds));
-      await db.delete(vaccineRequirements).where(inArray(vaccineRequirements.facilityId, facilityIds));
-    }
-
-    // 1c. Clear remaining tenant-scoped records
-    await db.delete(populationData).where(eq(populationData.tenantId, tenantId));
-    await db.delete(villages).where(eq(villages.tenantId, tenantId));
-    await db.delete(facilities).where(eq(facilities.tenantId, tenantId));
-    await db.delete(llgs).where(eq(llgs.tenantId, tenantId));
-    await db.delete(districts).where(eq(districts.tenantId, tenantId));
-    await db.delete(provinces).where(eq(provinces.tenantId, tenantId));
-    await db.delete(regions).where(eq(regions.tenantId, tenantId));
-    
-    // Update settings to keep them completely updated
-    await db.update(tenants).set({ settings: SSD_TENANT.settings }).where(eq(tenants.id, tenantId));
-    console.log("Cleared old entities and updated settings.");
+    // Refresh settings without wiping or deleting any data
+    await db.update(tenants).set({ settings: SSD_TENANT.settings, updatedAt: new Date() }).where(eq(tenants.id, tenantId));
+    console.log("Refreshed South Sudan tenant settings.");
   } else {
     const [created] = await db.insert(tenants).values(SSD_TENANT).returning();
     tenantId = created.id;
@@ -246,30 +209,42 @@ async function run() {
   const rows = parseCsv(rawCsvText);
   console.log(`Loaded ${rows.length} facilities rows from ${csvPath}\n`);
 
-  // 3. Seed Single National Region
-  const [region] = await db.insert(regions).values({
-    tenantId,
-    name: "South Sudan",
-    code: "SSD",
-  } as typeof regions.$inferInsert).returning();
-  console.log(`Created national region: id=${region.id}`);
+  // 3. Seed/Resolve Single National Region
+  let region = (await db.select().from(regions).where(
+    and(eq(regions.tenantId, tenantId), eq(regions.code, "SSD"))
+  ))[0];
+  if (!region) {
+    [region] = await db.insert(regions).values({
+      tenantId,
+      name: "South Sudan",
+      code: "SSD",
+    } as typeof regions.$inferInsert).returning();
+    console.log(`Created national region: id=${region.id}`);
+  } else {
+    console.log(`Existing national region: id=${region.id}`);
+  }
 
   // 4. States (Provinces) — extract unique states from CSV
   const provinceMap = new Map<string, number>(); // state_code -> province DB id
   const uniqueStates = Array.from(new Map(rows.map(r => [r.state_code.trim(), r.state.trim()])).entries());
   
-  console.log("Seeding states…");
+  console.log("Seeding/resolving states…");
   for (const [code, name] of uniqueStates) {
     if (!code || !name) continue;
-    const [prov] = await db.insert(provinces).values({
-      tenantId,
-      name,
-      code,
-      regionId: region.id,
-    } as typeof provinces.$inferInsert).returning();
+    let prov = (await db.select().from(provinces).where(
+      and(eq(provinces.tenantId, tenantId), eq(provinces.code, code))
+    ))[0];
+    if (!prov) {
+      [prov] = await db.insert(provinces).values({
+        tenantId,
+        name,
+        code,
+        regionId: region.id,
+      } as typeof provinces.$inferInsert).returning();
+    }
     provinceMap.set(code, prov.id);
   }
-  console.log(`Seeded ${provinceMap.size} unique States / Administrative Areas.`);
+  console.log(`Resolved/Seeded ${provinceMap.size} unique States / Administrative Areas.`);
 
   // 5. Counties (Districts) — extract unique counties from CSV
   const districtMap = new Map<string, number>(); // county_code -> district DB id
@@ -277,7 +252,7 @@ async function run() {
     new Map(rows.map(r => [r.county_code.trim(), { name: r.county.trim(), stateCode: r.state_code.trim() }])).entries()
   );
 
-  console.log("Seeding counties…");
+  console.log("Seeding/resolving counties…");
   for (const [code, info] of uniqueCounties) {
     if (!code || !info.name) continue;
     const provId = provinceMap.get(info.stateCode);
@@ -285,15 +260,20 @@ async function run() {
       console.warn(`Warning: Province key ${info.stateCode} not found for county ${info.name}`);
       continue;
     }
-    const [dist] = await db.insert(districts).values({
-      tenantId,
-      name: info.name,
-      code,
-      provinceId: provId,
-    } as typeof districts.$inferInsert).returning();
+    let dist = (await db.select().from(districts).where(
+      and(eq(districts.tenantId, tenantId), eq(districts.code, code))
+    ))[0];
+    if (!dist) {
+      [dist] = await db.insert(districts).values({
+        tenantId,
+        name: info.name,
+        code,
+        provinceId: provId,
+      } as typeof districts.$inferInsert).returning();
+    }
     districtMap.set(code, dist.id);
   }
-  console.log(`Seeded ${districtMap.size} unique Counties.`);
+  console.log(`Resolved/Seeded ${districtMap.size} unique Counties.`);
 
   // 6. Payams (LLGs) — extract unique payams from CSV
   const llgMap = new Map<string, number>(); // payam_code -> llg DB id
@@ -301,7 +281,7 @@ async function run() {
     new Map(rows.map(r => [r.payam_code.trim(), { name: r.payam.trim(), countyCode: r.county_code.trim() }])).entries()
   );
 
-  console.log("Seeding payams…");
+  console.log("Seeding/resolving payams…");
   for (const [code, info] of uniquePayams) {
     if (!code || !info.name) continue;
     const distId = districtMap.get(info.countyCode);
@@ -309,19 +289,28 @@ async function run() {
       console.warn(`Warning: County key ${info.countyCode} not found for payam ${info.name}`);
       continue;
     }
-    const [llg] = await db.insert(llgs).values({
-      tenantId,
-      name: info.name,
-      code,
-      districtId: distId,
-    } as typeof llgs.$inferInsert).returning();
+    let llg = (await db.select().from(llgs).where(
+      and(eq(llgs.tenantId, tenantId), eq(llgs.code, code))
+    ))[0];
+    if (!llg) {
+      [llg] = await db.insert(llgs).values({
+        tenantId,
+        name: info.name,
+        code,
+        districtId: distId,
+      } as typeof llgs.$inferInsert).returning();
+    }
     llgMap.set(code, llg.id);
   }
-  console.log(`Seeded ${llgMap.size} unique Payams.`);
+  console.log(`Resolved/Seeded ${llgMap.size} unique Payams.`);
 
   // 7. Facilities — 1,984 rows
   const facilityRows: (typeof facilities.$inferInsert)[] = [];
-  const existingHmis = new Set<string>();
+  const existingHmis = new Set<string>(
+    (await db.select({ hmisCode: facilities.hmisCode })
+      .from(facilities)
+      .where(eq(facilities.tenantId, tenantId))).map((r) => r.hmisCode)
+  );
 
   for (const r of rows) {
     const dhisId = r.site_dhis2_id.trim();
@@ -392,6 +381,16 @@ async function run() {
       
     if (matchingProv.length > 0) {
       const provId = matchingProv[0].id;
+      const existingPop = await db.select()
+        .from(populationData)
+        .where(and(
+          eq(populationData.tenantId, tenantId),
+          eq(populationData.provinceId, provId),
+          eq(populationData.year, YEAR),
+          eq(populationData.source, "nso")
+        ));
+      if (existingPop.length > 0) continue;
+
       popRows.push({
         tenantId,
         provinceId: provId,
@@ -413,6 +412,8 @@ async function run() {
   if (popRows.length > 0) {
     await db.insert(populationData).values(popRows);
     console.log(`Successfully seeded ${popRows.length} state-level population targets.`);
+  } else {
+    console.log("Population data already present, skipped.");
   }
 
   // 9. Rollup Verification Counts

@@ -8475,7 +8475,15 @@ export async function registerRoutes(
       const savedRecords: any[] = [];
       const skippedRecords: Array<{ item: any; reason: string }> = [];
 
+      // In-batch deduplication: if multiple items in the same payload target the same entity/year/source, keep the latest
+      const dedupeMap = new Map<string, typeof importedPop[0]>();
       for (const item of importedPop) {
+        const key = `${item.villageId || item.villageCode || item.villageName || ""}|${item.facilityId || item.facilityHmisCode || item.facilityName || ""}|${item.year}|${item.source}`;
+        dedupeMap.set(key, item);
+      }
+      const itemsToProcess = Array.from(dedupeMap.values());
+
+      for (const item of itemsToProcess) {
         let villageId: number | null = item.villageId || null;
         let districtId: number | null = item.districtId || null;
         let provinceId: number | null = item.provinceId || null;
@@ -8594,6 +8602,7 @@ export async function registerRoutes(
             .where(
               and(
                 eq(populationData.tenantId, req.tenantId),
+                isNull(populationData.villageId),
                 eq(populationData.facilityId, facilityId),
                 eq(populationData.year, item.year),
                 eq(populationData.source, item.source)
@@ -8635,34 +8644,77 @@ export async function registerRoutes(
             await storage.refreshPopulationOwnerAggregates(req.tenantId, updated);
           }
         } else {
-          const [created] = await db
-            .insert(populationData)
-            .values({
-              tenantId: req.tenantId,
-              provinceId: provinceId,
-              districtId: districtId,
-              villageId: villageId,
-              facilityId: facilityId,
-              source: item.source,
-              year: item.year,
-              totalPopulation: item.totalPopulation,
-              malePopulation: item.malePopulation ?? null,
-              femalePopulation: item.femalePopulation ?? null,
-              under1Population: item.under1Population ?? null,
-              under5Population: item.under5Population ?? null,
-              pregnantWomen: item.pregnantWomen ?? null,
-              schoolEntry: item.schoolEntry ?? null,
-              schoolExit: item.schoolExit ?? null,
-              growthRate: growthVal !== null && !isNaN(growthVal) ? growthVal.toFixed(2) : null,
-              confidenceScore: confidenceVal !== null && !isNaN(confidenceVal) ? confidenceVal.toFixed(2) : null,
-              metadata: resolvedMetadata,
-              approvalStatus: "approved",
-            })
-            .returning();
-          createdCount++;
-          if (created) {
-            savedRecords.push(created);
-            await storage.refreshPopulationOwnerAggregates(req.tenantId, created);
+          try {
+            const [created] = await db
+              .insert(populationData)
+              .values({
+                tenantId: req.tenantId,
+                provinceId: provinceId,
+                districtId: districtId,
+                villageId: villageId,
+                facilityId: facilityId,
+                source: item.source,
+                year: item.year,
+                totalPopulation: item.totalPopulation,
+                malePopulation: item.malePopulation ?? null,
+                femalePopulation: item.femalePopulation ?? null,
+                under1Population: item.under1Population ?? null,
+                under5Population: item.under5Population ?? null,
+                pregnantWomen: item.pregnantWomen ?? null,
+                schoolEntry: item.schoolEntry ?? null,
+                schoolExit: item.schoolExit ?? null,
+                growthRate: growthVal !== null && !isNaN(growthVal) ? growthVal.toFixed(2) : null,
+                confidenceScore: confidenceVal !== null && !isNaN(confidenceVal) ? confidenceVal.toFixed(2) : null,
+                metadata: resolvedMetadata,
+                approvalStatus: "approved",
+              })
+              .returning();
+            createdCount++;
+            if (created) {
+              savedRecords.push(created);
+              await storage.refreshPopulationOwnerAggregates(req.tenantId, created);
+            }
+          } catch (conflictErr: any) {
+            // If another process or unique constraint triggered, update the existing row gracefully
+            let conflictExisting: any = null;
+            if (villageId) {
+              [conflictExisting] = await db.select().from(populationData).where(
+                and(
+                  eq(populationData.tenantId, req.tenantId),
+                  eq(populationData.villageId, villageId),
+                  eq(populationData.year, item.year),
+                  eq(populationData.source, item.source)
+                )
+              ).limit(1);
+            } else if (facilityId) {
+              [conflictExisting] = await db.select().from(populationData).where(
+                and(
+                  eq(populationData.tenantId, req.tenantId),
+                  isNull(populationData.villageId),
+                  eq(populationData.facilityId, facilityId),
+                  eq(populationData.year, item.year),
+                  eq(populationData.source, item.source)
+                )
+              ).limit(1);
+            }
+            if (conflictExisting) {
+              const [updated] = await db.update(populationData).set({
+                totalPopulation: item.totalPopulation,
+                under1Population: item.under1Population ?? conflictExisting.under1Population,
+                under5Population: item.under5Population ?? conflictExisting.under5Population,
+                pregnantWomen: item.pregnantWomen ?? conflictExisting.pregnantWomen,
+                malePopulation: item.malePopulation ?? conflictExisting.malePopulation,
+                femalePopulation: item.femalePopulation ?? conflictExisting.femalePopulation,
+                updatedAt: new Date(),
+              }).where(eq(populationData.id, conflictExisting.id)).returning();
+              updatedCount++;
+              if (updated) {
+                savedRecords.push(updated);
+                await storage.refreshPopulationOwnerAggregates(req.tenantId, updated);
+              }
+            } else {
+              throw conflictErr;
+            }
           }
         }
       }
@@ -8795,7 +8847,20 @@ export async function registerRoutes(
         };
       });
 
-      res.json(enrichedPop);
+      // Defensive deduplication ensuring strictly ONE population per entity per year per source
+      const uniquePopMap = new Map<string, typeof enrichedPop[0]>();
+      for (const p of enrichedPop) {
+        const key = `${p.tenantId}|${p.source}|${p.year}|${p.villageId ?? 0}|${p.facilityId ?? 0}|${p.districtId ?? 0}|${p.provinceId ?? 0}`;
+        if (!uniquePopMap.has(key)) {
+          uniquePopMap.set(key, p);
+        } else {
+          const current = uniquePopMap.get(key)!;
+          if ((p.id && current.id && p.id > current.id) || (p.totalPopulation > 0 && current.totalPopulation === 0)) {
+            uniquePopMap.set(key, p);
+          }
+        }
+      }
+      res.json(Array.from(uniquePopMap.values()));
     } catch (error) {
       console.error("Error fetching population data:", error);
       res.status(500).json({ message: "Failed to fetch population data" });

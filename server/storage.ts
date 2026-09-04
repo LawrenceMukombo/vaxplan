@@ -1278,13 +1278,131 @@ export class DatabaseStorage implements IStorage {
 
   async createPopulationData(tenantId: string, data: InsertPopulationData): Promise<PopulationData> {
     const geographics = await this.resolvePopulationGeographics(tenantId, data);
+    const resolvedVillageId = data.villageId ? Number(data.villageId) : null;
+    const resolvedFacilityId = geographics.facilityId ?? (data.facilityId ? Number(data.facilityId) : null);
+    const resolvedDistrictId = geographics.districtId ?? (data.districtId ? Number(data.districtId) : null);
+    const resolvedProvinceId = geographics.provinceId ?? (data.provinceId ? Number(data.provinceId) : null);
+
+    // Look for existing record by exact entity scope + year + source to guarantee uniqueness
+    let existing: PopulationData | undefined;
+    if (resolvedVillageId) {
+      [existing] = await db
+        .select()
+        .from(populationData)
+        .where(
+          and(
+            eq(populationData.tenantId, tenantId),
+            eq(populationData.villageId, resolvedVillageId),
+            eq(populationData.year, data.year),
+            eq(populationData.source, data.source)
+          )
+        )
+        .limit(1);
+    } else if (resolvedFacilityId) {
+      [existing] = await db
+        .select()
+        .from(populationData)
+        .where(
+          and(
+            eq(populationData.tenantId, tenantId),
+            sql`${populationData.villageId} IS NULL`,
+            eq(populationData.facilityId, resolvedFacilityId),
+            eq(populationData.year, data.year),
+            eq(populationData.source, data.source)
+          )
+        )
+        .limit(1);
+    } else if (resolvedDistrictId) {
+      [existing] = await db
+        .select()
+        .from(populationData)
+        .where(
+          and(
+            eq(populationData.tenantId, tenantId),
+            sql`${populationData.villageId} IS NULL`,
+            sql`${populationData.facilityId} IS NULL`,
+            eq(populationData.districtId, resolvedDistrictId),
+            eq(populationData.year, data.year),
+            eq(populationData.source, data.source)
+          )
+        )
+        .limit(1);
+    } else if (resolvedProvinceId) {
+      [existing] = await db
+        .select()
+        .from(populationData)
+        .where(
+          and(
+            eq(populationData.tenantId, tenantId),
+            sql`${populationData.villageId} IS NULL`,
+            sql`${populationData.facilityId} IS NULL`,
+            sql`${populationData.districtId} IS NULL`,
+            eq(populationData.provinceId, resolvedProvinceId),
+            eq(populationData.year, data.year),
+            eq(populationData.source, data.source)
+          )
+        )
+        .limit(1);
+    } else {
+      [existing] = await db
+        .select()
+        .from(populationData)
+        .where(
+          and(
+            eq(populationData.tenantId, tenantId),
+            sql`${populationData.villageId} IS NULL`,
+            sql`${populationData.facilityId} IS NULL`,
+            sql`${populationData.districtId} IS NULL`,
+            sql`${populationData.provinceId} IS NULL`,
+            eq(populationData.year, data.year),
+            eq(populationData.source, data.source)
+          )
+        )
+        .limit(1);
+    }
+
+    if (existing) {
+      const mergedMetadata = {
+        ...(existing.metadata && typeof existing.metadata === "object" ? (existing.metadata as object) : {}),
+        ...(data.metadata && typeof data.metadata === "object" ? (data.metadata as object) : {}),
+      };
+
+      const [updated] = await db
+        .update(populationData)
+        .set({
+          totalPopulation: data.totalPopulation,
+          malePopulation: data.malePopulation ?? existing.malePopulation,
+          femalePopulation: data.femalePopulation ?? existing.femalePopulation,
+          under1Population: data.under1Population ?? existing.under1Population,
+          under5Population: data.under5Population ?? existing.under5Population,
+          pregnantWomen: data.pregnantWomen ?? existing.pregnantWomen,
+          schoolEntry: data.schoolEntry ?? existing.schoolEntry,
+          schoolExit: data.schoolExit ?? existing.schoolExit,
+          growthRate: data.growthRate !== undefined && data.growthRate !== null ? String(data.growthRate) : existing.growthRate,
+          confidenceScore: data.confidenceScore !== undefined && data.confidenceScore !== null ? String(data.confidenceScore) : existing.confidenceScore,
+          metadata: Object.keys(mergedMetadata).length > 0 ? mergedMetadata : null,
+          approvalStatus: data.approvalStatus ?? existing.approvalStatus,
+          provinceId: resolvedProvinceId ?? existing.provinceId,
+          districtId: resolvedDistrictId ?? existing.districtId,
+          facilityId: resolvedFacilityId ?? existing.facilityId,
+          villageId: resolvedVillageId ?? existing.villageId,
+          updatedAt: new Date(),
+        })
+        .where(eq(populationData.id, existing.id))
+        .returning();
+
+      await this.refreshPopulationOwnerAggregates(tenantId, updated);
+      return updated;
+    }
+
     const [p] = await db
       .insert(populationData)
       .values({
         ...data,
-        districtId: geographics.districtId,
-        provinceId: geographics.provinceId,
-        facilityId: geographics.facilityId ?? data.facilityId ?? null,
+        districtId: resolvedDistrictId,
+        provinceId: resolvedProvinceId,
+        facilityId: resolvedFacilityId,
+        villageId: resolvedVillageId,
         tenantId,
       } as typeof populationData.$inferInsert)
       .returning();

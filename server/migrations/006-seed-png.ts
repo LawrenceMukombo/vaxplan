@@ -201,68 +201,10 @@ async function run() {
   console.log(`PNG tenant: ${tenantId}`);
 
   // 2. Refresh tenant settings so demographics + populationSources stay in sync.
-  await db.update(tenants).set({ settings: PNG_TENANT_SETTINGS }).where(eq(tenants.id, tenantId));
+  await db.update(tenants).set({ settings: PNG_TENANT_SETTINGS, updatedAt: new Date() }).where(eq(tenants.id, tenantId));
+  console.log("Refreshed PNG tenant settings.");
 
-  // 3. Clear existing PNG hierarchy + facilities + population so seed is deterministic.
-  console.log("Clearing existing PNG hierarchy / facilities / population…");
-  // 3a. Query all facility IDs and village IDs currently belonging to this tenant
-  const facilityIds = (await db
-    .select({ id: facilities.id })
-    .from(facilities)
-    .where(eq(facilities.tenantId, tenantId))
-  ).map((f) => f.id);
-
-  const villageIds = (await db
-    .select({ id: villages.id })
-    .from(villages)
-    .where(eq(villages.tenantId, tenantId))
-  ).map((v) => v.id);
-
-  // 3b. Delete referencing rows in operational tables to avoid foreign key violations (including cross-tenant ones)
-  if (facilityIds.length > 0) {
-    const clientIds = (await db
-      .select({ id: clients.id })
-      .from(clients)
-      .where(inArray(clients.facilityId, facilityIds))
-    ).map((c) => c.id);
-
-    if (clientIds.length > 0) {
-      await db.delete(clientVaccinations).where(inArray(clientVaccinations.clientId, clientIds));
-    }
-    await db.delete(clients).where(inArray(clients.facilityId, facilityIds));
-    await db.delete(monthlyReports).where(inArray(monthlyReports.facilityId, facilityIds));
-    await db.delete(stockTransactions).where(inArray(stockTransactions.facilityId, facilityIds));
-
-    const sessionPlanIds = (await db
-      .select({ id: sessionPlans.id })
-      .from(sessionPlans)
-      .where(inArray(sessionPlans.facilityId, facilityIds))
-    ).map((sp) => sp.id);
-
-    if (sessionPlanIds.length > 0) {
-      await db.delete(sessionDayPlans).where(inArray(sessionDayPlans.sessionPlanId, sessionPlanIds));
-    }
-    await db.delete(sessionPlans).where(inArray(sessionPlans.facilityId, facilityIds));
-    await db.delete(microplans).where(inArray(microplans.facilityId, facilityIds));
-    await db.delete(vaccineRequirements).where(inArray(vaccineRequirements.facilityId, facilityIds));
-    await db.delete(importedCoverage).where(inArray(importedCoverage.facilityId, facilityIds));
-  }
-
-  if (villageIds.length > 0) {
-    await db.delete(sessionVillages).where(inArray(sessionVillages.villageId, villageIds));
-    await db.delete(htrScores).where(inArray(htrScores.villageId, villageIds));
-  }
-
-  // 3c. Clear remaining tenant-scoped records
-  await db.delete(populationData).where(eq(populationData.tenantId, tenantId));
-  await db.delete(villages).where(eq(villages.tenantId, tenantId));
-  await db.delete(facilities).where(eq(facilities.tenantId, tenantId));
-  await db.delete(llgs).where(eq(llgs.tenantId, tenantId));
-  await db.delete(districts).where(eq(districts.tenantId, tenantId));
-  await db.delete(provinces).where(eq(provinces.tenantId, tenantId));
-  await db.delete(regions).where(eq(regions.tenantId, tenantId));
-
-  // 4. Load CSV.
+  // 3. Load CSV.
   const csvPath = join(process.cwd(), "data", "png", "facilities.csv");
   if (!existsSync(csvPath)) {
     console.error(`CSV file not found at: ${csvPath}`);
@@ -271,19 +213,24 @@ async function run() {
   const rows = parseCsv(readFileSync(csvPath, "utf8"));
   console.log(`Loaded ${rows.length} facility rows from ${csvPath}\n`);
 
-  // 5. Regions — PNG's 4 official regions, plus a fallback for any unmapped province.
+  // 4. Regions — PNG's 4 official regions, plus a fallback for any unmapped province.
   const regionIdByName = new Map<string, number>();
   const regionNames = Array.from(new Set(rows.map((r) => r.region || "Unknown")));
   for (const name of regionNames) {
     const code = REGION_CODES[name] || "UNK";
-    const [reg] = await db.insert(regions).values({
-      tenantId, name, code,
-    } as typeof regions.$inferInsert).returning();
+    let reg = (await db.select().from(regions).where(
+      and(eq(regions.tenantId, tenantId), eq(regions.code, code))
+    ))[0];
+    if (!reg) {
+      [reg] = await db.insert(regions).values({
+        tenantId, name, code,
+      } as typeof regions.$inferInsert).returning();
+    }
     regionIdByName.set(name, reg.id);
   }
-  console.log(`Seeded ${regionIdByName.size} regions: ${Array.from(regionIdByName.keys()).join(", ")}`);
+  console.log(`Resolved/Seeded ${regionIdByName.size} regions: ${Array.from(regionIdByName.keys()).join(", ")}`);
 
-  // 6. Provinces — keyed by NSO ADM1 code (e.g. "070").
+  // 5. Provinces — keyed by NSO ADM1 code (e.g. "070").
   const provinceIdByCode = new Map<string, number>();
   const uniqueProvinces = new Map<string, { name: string; region: string }>();
   for (const r of rows) {
@@ -293,14 +240,19 @@ async function run() {
   }
   for (const [code, info] of Array.from(uniqueProvinces.entries())) {
     const regionId = regionIdByName.get(info.region);
-    const [p] = await db.insert(provinces).values({
-      tenantId, name: info.name, code, regionId,
-    } as typeof provinces.$inferInsert).returning();
+    let p = (await db.select().from(provinces).where(
+      and(eq(provinces.tenantId, tenantId), eq(provinces.code, code))
+    ))[0];
+    if (!p) {
+      [p] = await db.insert(provinces).values({
+        tenantId, name: info.name, code, regionId,
+      } as typeof provinces.$inferInsert).returning();
+    }
     provinceIdByCode.set(code, p.id);
   }
-  console.log(`Seeded ${provinceIdByCode.size} provinces.`);
+  console.log(`Resolved/Seeded ${provinceIdByCode.size} provinces.`);
 
-  // 7. Districts — keyed by NSO ADM2 code (e.g. "0703").
+  // 6. Districts — keyed by NSO ADM2 code (e.g. "0703").
   const districtIdByCode = new Map<string, number>();
   const uniqueDistricts = new Map<string, { name: string; provCode: string }>();
   for (const r of rows) {
@@ -314,14 +266,19 @@ async function run() {
       console.warn(`District ${code} (${info.name}) has no province ${info.provCode}, skipping.`);
       continue;
     }
-    const [d] = await db.insert(districts).values({
-      tenantId, name: info.name, code, provinceId: provId,
-    } as typeof districts.$inferInsert).returning();
+    let d = (await db.select().from(districts).where(
+      and(eq(districts.tenantId, tenantId), eq(districts.code, code))
+    ))[0];
+    if (!d) {
+      [d] = await db.insert(districts).values({
+        tenantId, name: info.name, code, provinceId: provId,
+      } as typeof districts.$inferInsert).returning();
+    }
     districtIdByCode.set(code, d.id);
   }
-  console.log(`Seeded ${districtIdByCode.size} districts.`);
+  console.log(`Resolved/Seeded ${districtIdByCode.size} districts.`);
 
-  // 8. LLGs — keyed by NSO ADM3 code (e.g. "070310").
+  // 7. LLGs — keyed by NSO ADM3 code (e.g. "070310").
   const llgIdByCode = new Map<string, number>();
   const uniqueLlgs = new Map<string, { name: string; distCode: string }>();
   for (const r of rows) {
@@ -333,17 +290,27 @@ async function run() {
   for (const [code, info] of Array.from(uniqueLlgs.entries())) {
     const distId = districtIdByCode.get(info.distCode);
     if (!distId) continue;
-    const [llg] = await db.insert(llgs).values({
-      tenantId, name: info.name, code, districtId: distId,
-    } as typeof llgs.$inferInsert).returning();
+    let llg = (await db.select().from(llgs).where(
+      and(eq(llgs.tenantId, tenantId), eq(llgs.code, code))
+    ))[0];
+    if (!llg) {
+      [llg] = await db.insert(llgs).values({
+        tenantId, name: info.name, code, districtId: distId,
+      } as typeof llgs.$inferInsert).returning();
+    }
     llgIdByCode.set(code, llg.id);
   }
-  console.log(`Seeded ${llgIdByCode.size} LLGs.`);
+  console.log(`Resolved/Seeded ${llgIdByCode.size} LLGs.`);
 
-  // 9. Facilities — synthesize a stable HMIS code per row (the NSO source has no
+  // 8. Facilities — synthesize a stable HMIS code per row (the NSO source has no
   //    eNHIS code column, so we use OBJECTID + slugged name to stay unique and
   //    reproducible across re-runs).
   const facilityRows: (typeof facilities.$inferInsert)[] = [];
+  const existingHmis = new Set<string>(
+    (await db.select({ hmisCode: facilities.hmisCode })
+      .from(facilities)
+      .where(eq(facilities.tenantId, tenantId))).map((r) => r.hmisCode)
+  );
   const seenHmis = new Set<string>();
   let skippedNoDistrict = 0;
 
@@ -360,6 +327,10 @@ async function run() {
       hmis = `${hmis.slice(0, 47)}-${suffix++}`;
     }
     seenHmis.add(hmis);
+    if (existingHmis.has(hmis)) {
+      continue;
+    }
+    existingHmis.add(hmis);
 
     const lat = toNumOrNull(r.latitude);
     const lon = toNumOrNull(r.longitude);
@@ -396,7 +367,7 @@ async function run() {
     await db.insert(facilities).values(facilityRows.slice(i, i + BATCH));
   }
 
-  // 10. Province-level population_data from NSO 2024 projection.
+  // 9. Province-level population_data from NSO 2024 projection.
   const provNameToId = new Map<string, number>();
   const provRows = await db.select({ id: provinces.id, name: provinces.name })
     .from(provinces).where(eq(provinces.tenantId, tenantId));
@@ -408,6 +379,16 @@ async function run() {
   for (const c of PNG_CENSUS_2024) {
     const provId = provNameToId.get(c.provinceName.toLowerCase());
     if (!provId) continue; // Hela / Jiwaka / Bougainville aren't in the 2000 NSO MFL — skip silently.
+    const existingPop = await db.select()
+      .from(populationData)
+      .where(and(
+        eq(populationData.tenantId, tenantId),
+        eq(populationData.provinceId, provId),
+        eq(populationData.year, YEAR),
+        eq(populationData.source, "nso")
+      ));
+    if (existingPop.length > 0) continue;
+
     matchedCensus++;
     popRows.push({
       tenantId,
@@ -427,8 +408,10 @@ async function run() {
   }
   if (popRows.length > 0) {
     await db.insert(populationData).values(popRows);
+    console.log(`Seeded ${popRows.length} province-level population rows (matched ${matchedCensus} of ${PNG_CENSUS_2024.length} census entries).`);
+  } else {
+    console.log("Population data already present, skipped.");
   }
-  console.log(`Seeded ${popRows.length} province-level population rows (matched ${matchedCensus} of ${PNG_CENSUS_2024.length} census entries).`);
 
   // 11. Rollup.
   const counts = await db.execute(sql`
