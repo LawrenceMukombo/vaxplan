@@ -916,7 +916,14 @@ var init_schema = __esm({
       approvedByUserId: (0, import_pg_core.varchar)("approved_by_user_id").references(() => users.id, { onDelete: "set null" }),
       createdAt: (0, import_pg_core.timestamp)("created_at").defaultNow(),
       updatedAt: (0, import_pg_core.timestamp)("updated_at").defaultNow()
-    }, (table) => [(0, import_pg_core.index)("idx_population_tenant").on(table.tenantId)]);
+    }, (table) => [
+      (0, import_pg_core.index)("idx_population_tenant").on(table.tenantId),
+      (0, import_pg_core.uniqueIndex)("uq_pop_village_year_source").on(table.tenantId, table.villageId, table.year, table.source).where(import_drizzle_orm.sql`${table.villageId} IS NOT NULL`),
+      (0, import_pg_core.uniqueIndex)("uq_pop_facility_year_source").on(table.tenantId, table.facilityId, table.year, table.source).where(import_drizzle_orm.sql`${table.villageId} IS NULL AND ${table.facilityId} IS NOT NULL`),
+      (0, import_pg_core.uniqueIndex)("uq_pop_district_year_source").on(table.tenantId, table.districtId, table.year, table.source).where(import_drizzle_orm.sql`${table.villageId} IS NULL AND ${table.facilityId} IS NULL AND ${table.districtId} IS NOT NULL`),
+      (0, import_pg_core.uniqueIndex)("uq_pop_province_year_source").on(table.tenantId, table.provinceId, table.year, table.source).where(import_drizzle_orm.sql`${table.villageId} IS NULL AND ${table.facilityId} IS NULL AND ${table.districtId} IS NULL AND ${table.provinceId} IS NOT NULL`),
+      (0, import_pg_core.uniqueIndex)("uq_pop_national_year_source").on(table.tenantId, table.year, table.source).where(import_drizzle_orm.sql`${table.villageId} IS NULL AND ${table.facilityId} IS NULL AND ${table.districtId} IS NULL AND ${table.provinceId} IS NULL`)
+    ]);
     microplanTypeEnum = (0, import_pg_core.pgEnum)("microplan_type", [
       "facility_routine",
       "sia_campaign"
@@ -4679,11 +4686,99 @@ var init_storage = __esm({
       }
       async createPopulationData(tenantId, data) {
         const geographics = await this.resolvePopulationGeographics(tenantId, data);
+        const resolvedVillageId = data.villageId ? Number(data.villageId) : null;
+        const resolvedFacilityId = geographics.facilityId ?? (data.facilityId ? Number(data.facilityId) : null);
+        const resolvedDistrictId = geographics.districtId ?? (data.districtId ? Number(data.districtId) : null);
+        const resolvedProvinceId = geographics.provinceId ?? (data.provinceId ? Number(data.provinceId) : null);
+        let existing;
+        if (resolvedVillageId) {
+          [existing] = await db.select().from(populationData).where(
+            (0, import_drizzle_orm5.and)(
+              (0, import_drizzle_orm5.eq)(populationData.tenantId, tenantId),
+              (0, import_drizzle_orm5.eq)(populationData.villageId, resolvedVillageId),
+              (0, import_drizzle_orm5.eq)(populationData.year, data.year),
+              (0, import_drizzle_orm5.eq)(populationData.source, data.source)
+            )
+          ).limit(1);
+        } else if (resolvedFacilityId) {
+          [existing] = await db.select().from(populationData).where(
+            (0, import_drizzle_orm5.and)(
+              (0, import_drizzle_orm5.eq)(populationData.tenantId, tenantId),
+              import_drizzle_orm5.sql`${populationData.villageId} IS NULL`,
+              (0, import_drizzle_orm5.eq)(populationData.facilityId, resolvedFacilityId),
+              (0, import_drizzle_orm5.eq)(populationData.year, data.year),
+              (0, import_drizzle_orm5.eq)(populationData.source, data.source)
+            )
+          ).limit(1);
+        } else if (resolvedDistrictId) {
+          [existing] = await db.select().from(populationData).where(
+            (0, import_drizzle_orm5.and)(
+              (0, import_drizzle_orm5.eq)(populationData.tenantId, tenantId),
+              import_drizzle_orm5.sql`${populationData.villageId} IS NULL`,
+              import_drizzle_orm5.sql`${populationData.facilityId} IS NULL`,
+              (0, import_drizzle_orm5.eq)(populationData.districtId, resolvedDistrictId),
+              (0, import_drizzle_orm5.eq)(populationData.year, data.year),
+              (0, import_drizzle_orm5.eq)(populationData.source, data.source)
+            )
+          ).limit(1);
+        } else if (resolvedProvinceId) {
+          [existing] = await db.select().from(populationData).where(
+            (0, import_drizzle_orm5.and)(
+              (0, import_drizzle_orm5.eq)(populationData.tenantId, tenantId),
+              import_drizzle_orm5.sql`${populationData.villageId} IS NULL`,
+              import_drizzle_orm5.sql`${populationData.facilityId} IS NULL`,
+              import_drizzle_orm5.sql`${populationData.districtId} IS NULL`,
+              (0, import_drizzle_orm5.eq)(populationData.provinceId, resolvedProvinceId),
+              (0, import_drizzle_orm5.eq)(populationData.year, data.year),
+              (0, import_drizzle_orm5.eq)(populationData.source, data.source)
+            )
+          ).limit(1);
+        } else {
+          [existing] = await db.select().from(populationData).where(
+            (0, import_drizzle_orm5.and)(
+              (0, import_drizzle_orm5.eq)(populationData.tenantId, tenantId),
+              import_drizzle_orm5.sql`${populationData.villageId} IS NULL`,
+              import_drizzle_orm5.sql`${populationData.facilityId} IS NULL`,
+              import_drizzle_orm5.sql`${populationData.districtId} IS NULL`,
+              import_drizzle_orm5.sql`${populationData.provinceId} IS NULL`,
+              (0, import_drizzle_orm5.eq)(populationData.year, data.year),
+              (0, import_drizzle_orm5.eq)(populationData.source, data.source)
+            )
+          ).limit(1);
+        }
+        if (existing) {
+          const mergedMetadata = {
+            ...existing.metadata && typeof existing.metadata === "object" ? existing.metadata : {},
+            ...data.metadata && typeof data.metadata === "object" ? data.metadata : {}
+          };
+          const [updated] = await db.update(populationData).set({
+            totalPopulation: data.totalPopulation,
+            malePopulation: data.malePopulation ?? existing.malePopulation,
+            femalePopulation: data.femalePopulation ?? existing.femalePopulation,
+            under1Population: data.under1Population ?? existing.under1Population,
+            under5Population: data.under5Population ?? existing.under5Population,
+            pregnantWomen: data.pregnantWomen ?? existing.pregnantWomen,
+            schoolEntry: data.schoolEntry ?? existing.schoolEntry,
+            schoolExit: data.schoolExit ?? existing.schoolExit,
+            growthRate: data.growthRate !== void 0 && data.growthRate !== null ? String(data.growthRate) : existing.growthRate,
+            confidenceScore: data.confidenceScore !== void 0 && data.confidenceScore !== null ? String(data.confidenceScore) : existing.confidenceScore,
+            metadata: Object.keys(mergedMetadata).length > 0 ? mergedMetadata : null,
+            approvalStatus: data.approvalStatus ?? existing.approvalStatus,
+            provinceId: resolvedProvinceId ?? existing.provinceId,
+            districtId: resolvedDistrictId ?? existing.districtId,
+            facilityId: resolvedFacilityId ?? existing.facilityId,
+            villageId: resolvedVillageId ?? existing.villageId,
+            updatedAt: /* @__PURE__ */ new Date()
+          }).where((0, import_drizzle_orm5.eq)(populationData.id, existing.id)).returning();
+          await this.refreshPopulationOwnerAggregates(tenantId, updated);
+          return updated;
+        }
         const [p] = await db.insert(populationData).values({
           ...data,
-          districtId: geographics.districtId,
-          provinceId: geographics.provinceId,
-          facilityId: geographics.facilityId ?? data.facilityId ?? null,
+          districtId: resolvedDistrictId,
+          provinceId: resolvedProvinceId,
+          facilityId: resolvedFacilityId,
+          villageId: resolvedVillageId,
           tenantId
         }).returning();
         await this.refreshPopulationOwnerAggregates(tenantId, p);
@@ -12039,6 +12134,499 @@ var init_catalogue = __esm({
   }
 });
 
+// shared/countryFormats.ts
+function getCountryFormat(countryCodeOrTenant) {
+  if (!countryCodeOrTenant) return DEFAULT_GLOBAL_FORMAT;
+  let code = "";
+  if (typeof countryCodeOrTenant === "string") {
+    code = countryCodeOrTenant.trim().toUpperCase();
+  } else {
+    code = (countryCodeOrTenant.countryCode || countryCodeOrTenant.code || "").trim().toUpperCase();
+  }
+  if (code === "BW") code = "BWA";
+  if (code === "ZA") code = "ZAF";
+  if (code === "ZM") code = "ZMB";
+  if (code === "KE") code = "KEN";
+  if (code === "VN") code = "VNM";
+  if (code === "PG") code = "PNG";
+  if (code === "SS") code = "SSD";
+  if (code === "NG") code = "NGA";
+  if (code === "MW") code = "MWI";
+  if (code === "UG") code = "UGA";
+  return COUNTRY_FORMATS[code] || DEFAULT_GLOBAL_FORMAT;
+}
+var clean, stripSpaces, COUNTRY_FORMATS, DEFAULT_GLOBAL_FORMAT;
+var init_countryFormats = __esm({
+  "shared/countryFormats.ts"() {
+    "use strict";
+    clean = (val) => (val || "").trim();
+    stripSpaces = (val) => (val || "").replace(/[\s\-_()]/g, "");
+    COUNTRY_FORMATS = {
+      // ───── South Africa ─────
+      ZAF: {
+        countryCode: "ZAF",
+        countryName: "South Africa",
+        idLabel: "South African ID Number",
+        idShortLabel: "ID Number",
+        idPlaceholder: "9001015009087",
+        idPatternHelp: "13 numeric digits (YYMMDDSSSSCAZ)",
+        phonePrefix: "+27",
+        phonePlaceholder: "+27 82 123 4567",
+        phonePatternHelp: "+27 followed by 9 digits (or local 0XX XXX XXXX)",
+        normalizeId: (id) => clean(id).replace(/[\s\-_]/g, ""),
+        normalizePhone: (phone) => {
+          const p = stripSpaces(phone);
+          if (p.startsWith("+27")) return p;
+          if (p.startsWith("27") && p.length === 11) return `+${p}`;
+          if (p.startsWith("0") && p.length === 10) return `+27${p.slice(1)}`;
+          return p.startsWith("+") ? p : `+27${p}`;
+        },
+        validateId: (id) => {
+          const c = clean(id).replace(/[\s\-_]/g, "");
+          if (!c) return { valid: false, message: "South African ID number is required" };
+          if (!/^\d{13}$/.test(c)) {
+            return {
+              valid: false,
+              message: "Invalid South African ID format. Must be exactly 13 numeric digits (e.g. 9001015009087)."
+            };
+          }
+          return { valid: true, normalized: c };
+        },
+        validatePhone: (phone) => {
+          const p = stripSpaces(phone);
+          if (!p) return { valid: true, normalized: "" };
+          if (!/^(\+27|27|0)[1-9]\d{8}$/.test(p) && !/^\+?\d{9,15}$/.test(p)) {
+            return {
+              valid: false,
+              message: "Invalid South African phone number. Must be +27 followed by 9 digits or local 10 digits (e.g. +27 82 123 4567 or 082 123 4567)."
+            };
+          }
+          return { valid: true, normalized: COUNTRY_FORMATS.ZAF.normalizePhone(phone) };
+        }
+      },
+      // ───── Zambia ─────
+      ZMB: {
+        countryCode: "ZMB",
+        countryName: "Zambia",
+        idLabel: "National Registration Card (NRC)",
+        idShortLabel: "NRC",
+        idPlaceholder: "123456/78/9",
+        idPatternHelp: "XXXXXX/XX/X (6 digits / 2 digits / 1 digit)",
+        phonePrefix: "+260",
+        phonePlaceholder: "+260 97 123 4567",
+        phonePatternHelp: "+260 followed by 9 digits (or local 09X / 07X)",
+        normalizeId: (id) => {
+          const c = clean(id);
+          const numOnly = c.replace(/\D/g, "");
+          if (numOnly.length === 9 && !c.includes("/")) {
+            return `${numOnly.slice(0, 6)}/${numOnly.slice(6, 8)}/${numOnly.slice(8)}`;
+          }
+          return c;
+        },
+        normalizePhone: (phone) => {
+          const p = stripSpaces(phone);
+          if (p.startsWith("+260")) return p;
+          if (p.startsWith("260") && p.length === 12) return `+${p}`;
+          if (p.startsWith("0") && p.length === 10) return `+260${p.slice(1)}`;
+          return p.startsWith("+") ? p : `+260${p}`;
+        },
+        validateId: (id) => {
+          const c = clean(id);
+          if (!c) return { valid: false, message: "NRC is required" };
+          const numOnly = c.replace(/\D/g, "");
+          if (!/^\d{6}\/\d{2}\/\d{1}$/.test(c) && numOnly.length !== 9) {
+            return {
+              valid: false,
+              message: "Invalid NRC format. Must be XXXXXX/XX/X (e.g. 123456/78/9)."
+            };
+          }
+          return { valid: true, normalized: COUNTRY_FORMATS.ZMB.normalizeId(id) };
+        },
+        validatePhone: (phone) => {
+          const p = stripSpaces(phone);
+          if (!p) return { valid: true, normalized: "" };
+          if (!/^(\+260|260|0)[79]\d{8}$/.test(p) && !/^\+?\d{9,15}$/.test(p)) {
+            return {
+              valid: false,
+              message: "Invalid Zambian phone number. Must be +260 followed by 9 digits or local 10 digits (e.g. +260 97 123 4567 or 0977123456)."
+            };
+          }
+          return { valid: true, normalized: COUNTRY_FORMATS.ZMB.normalizePhone(phone) };
+        }
+      },
+      // ───── Kenya ─────
+      KEN: {
+        countryCode: "KEN",
+        countryName: "Kenya",
+        idLabel: "National ID Number",
+        idShortLabel: "National ID",
+        idPlaceholder: "12345678",
+        idPatternHelp: "7 or 8 numeric digits",
+        phonePrefix: "+254",
+        phonePlaceholder: "+254 712 345678",
+        phonePatternHelp: "+254 followed by 9 digits (or local 07XX / 01XX)",
+        normalizeId: (id) => clean(id).replace(/[\s\-_]/g, ""),
+        normalizePhone: (phone) => {
+          const p = stripSpaces(phone);
+          if (p.startsWith("+254")) return p;
+          if (p.startsWith("254") && p.length === 12) return `+${p}`;
+          if (p.startsWith("0") && p.length === 10) return `+254${p.slice(1)}`;
+          return p.startsWith("+") ? p : `+254${p}`;
+        },
+        validateId: (id) => {
+          const c = clean(id).replace(/[\s\-_]/g, "");
+          if (!c) return { valid: false, message: "National ID is required" };
+          if (!/^\d{7,8}$/.test(c)) {
+            return {
+              valid: false,
+              message: "Invalid Kenyan National ID. Must be 7 or 8 numeric digits (e.g. 12345678)."
+            };
+          }
+          return { valid: true, normalized: c };
+        },
+        validatePhone: (phone) => {
+          const p = stripSpaces(phone);
+          if (!p) return { valid: true, normalized: "" };
+          if (!/^(\+254|254|0)[17]\d{8}$/.test(p) && !/^\+?\d{9,15}$/.test(p)) {
+            return {
+              valid: false,
+              message: "Invalid Kenyan phone number (e.g. +254 712 345678 or 0712345678)."
+            };
+          }
+          return { valid: true, normalized: COUNTRY_FORMATS.KEN.normalizePhone(phone) };
+        }
+      },
+      // ───── Vietnam ─────
+      VNM: {
+        countryCode: "VNM",
+        countryName: "Vietnam",
+        idLabel: "Citizen Identity Card (CCCD / CMND)",
+        idShortLabel: "CCCD / CMND",
+        idPlaceholder: "001099001234",
+        idPatternHelp: "12 digits (CCCD) or 9 digits (CMND)",
+        phonePrefix: "+84",
+        phonePlaceholder: "+84 91 234 5678",
+        phonePatternHelp: "+84 followed by 9 digits (or local 09X / 03X)",
+        normalizeId: (id) => clean(id).replace(/[\s\-_]/g, ""),
+        normalizePhone: (phone) => {
+          const p = stripSpaces(phone);
+          if (p.startsWith("+84")) return p;
+          if (p.startsWith("84") && p.length >= 11) return `+${p}`;
+          if (p.startsWith("0") && p.length === 10) return `+84${p.slice(1)}`;
+          return p.startsWith("+") ? p : `+84${p}`;
+        },
+        validateId: (id) => {
+          const c = clean(id).replace(/[\s\-_]/g, "");
+          if (!c) return { valid: false, message: "CCCD / CMND is required" };
+          if (!/^(\d{12}|\d{9})$/.test(c)) {
+            return {
+              valid: false,
+              message: "Invalid Vietnamese CCCD/CMND. Must be 12 digits (CCCD) or 9 digits (CMND) (e.g. 001099001234)."
+            };
+          }
+          return { valid: true, normalized: c };
+        },
+        validatePhone: (phone) => {
+          const p = stripSpaces(phone);
+          if (!p) return { valid: true, normalized: "" };
+          if (!/^(\+84|84|0)[35789]\d{8}$/.test(p) && !/^\+?\d{9,15}$/.test(p)) {
+            return {
+              valid: false,
+              message: "Invalid Vietnamese phone number (e.g. +84 91 234 5678 or 0912345678)."
+            };
+          }
+          return { valid: true, normalized: COUNTRY_FORMATS.VNM.normalizePhone(phone) };
+        }
+      },
+      // ───── Papua New Guinea ─────
+      PNG: {
+        countryCode: "PNG",
+        countryName: "Papua New Guinea",
+        idLabel: "National Identity (NID) Number",
+        idShortLabel: "NID",
+        idPlaceholder: "1001234567",
+        idPatternHelp: "8 to 12 alphanumeric characters",
+        phonePrefix: "+675",
+        phonePlaceholder: "+675 7123 4567",
+        phonePatternHelp: "+675 followed by 8 digits (or local 7XXX XXXX)",
+        normalizeId: (id) => clean(id).toUpperCase().replace(/[\s\-_]/g, ""),
+        normalizePhone: (phone) => {
+          const p = stripSpaces(phone);
+          if (p.startsWith("+675")) return p;
+          if (p.startsWith("675") && p.length === 11) return `+${p}`;
+          return p.startsWith("+") ? p : `+675${p}`;
+        },
+        validateId: (id) => {
+          const c = clean(id).replace(/[\s\-_]/g, "");
+          if (!c) return { valid: false, message: "NID number is required" };
+          if (!/^[A-Za-z0-9]{6,14}$/.test(c)) {
+            return {
+              valid: false,
+              message: "Invalid Papua New Guinea NID number (e.g. 1001234567)."
+            };
+          }
+          return { valid: true, normalized: c.toUpperCase() };
+        },
+        validatePhone: (phone) => {
+          const p = stripSpaces(phone);
+          if (!p) return { valid: true, normalized: "" };
+          if (!/^(\+675|675)?[78]\d{7}$/.test(p) && !/^\+?\d{8,15}$/.test(p)) {
+            return {
+              valid: false,
+              message: "Invalid Papua New Guinea phone number (e.g. +675 7123 4567)."
+            };
+          }
+          return { valid: true, normalized: COUNTRY_FORMATS.PNG.normalizePhone(phone) };
+        }
+      },
+      // ───── South Sudan ─────
+      SSD: {
+        countryCode: "SSD",
+        countryName: "South Sudan",
+        idLabel: "National ID Number",
+        idShortLabel: "National ID",
+        idPlaceholder: "SSD1234567",
+        idPatternHelp: "6 to 15 alphanumeric characters",
+        phonePrefix: "+211",
+        phonePlaceholder: "+211 92 123 4567",
+        phonePatternHelp: "+211 followed by 9 digits (or local 09X XXX XXX)",
+        normalizeId: (id) => clean(id).toUpperCase().replace(/[\s]/g, ""),
+        normalizePhone: (phone) => {
+          const p = stripSpaces(phone);
+          if (p.startsWith("+211")) return p;
+          if (p.startsWith("211") && p.length === 12) return `+${p}`;
+          if (p.startsWith("0") && p.length === 10) return `+211${p.slice(1)}`;
+          return p.startsWith("+") ? p : `+211${p}`;
+        },
+        validateId: (id) => {
+          const c = clean(id).replace(/[\s]/g, "");
+          if (!c) return { valid: false, message: "National ID is required" };
+          if (!/^[A-Za-z0-9\/-]{5,15}$/.test(c)) {
+            return {
+              valid: false,
+              message: "Invalid South Sudan National ID (e.g. SSD1234567)."
+            };
+          }
+          return { valid: true, normalized: c.toUpperCase() };
+        },
+        validatePhone: (phone) => {
+          const p = stripSpaces(phone);
+          if (!p) return { valid: true, normalized: "" };
+          if (!/^(\+211|211|0)9\d{8}$/.test(p) && !/^\+?\d{9,15}$/.test(p)) {
+            return {
+              valid: false,
+              message: "Invalid South Sudan phone number (e.g. +211 92 123 4567 or 0921234567)."
+            };
+          }
+          return { valid: true, normalized: COUNTRY_FORMATS.SSD.normalizePhone(phone) };
+        }
+      },
+      // ───── Botswana ─────
+      BWA: {
+        countryCode: "BWA",
+        countryName: "Botswana",
+        idLabel: "Omang (National ID) Number",
+        idShortLabel: "Omang ID",
+        idPlaceholder: "123412345",
+        idPatternHelp: "9 numeric digits",
+        phonePrefix: "+267",
+        phonePlaceholder: "+267 71 234 567",
+        phonePatternHelp: "+267 followed by 7 or 8 digits",
+        normalizeId: (id) => clean(id).replace(/[\s\-_]/g, ""),
+        normalizePhone: (phone) => {
+          const p = stripSpaces(phone);
+          if (p.startsWith("+267")) return p;
+          if (p.startsWith("267")) return `+${p}`;
+          return p.startsWith("+") ? p : `+267${p}`;
+        },
+        validateId: (id) => {
+          const c = clean(id).replace(/[\s\-_]/g, "");
+          if (!c) return { valid: false, message: "Omang ID is required" };
+          if (!/^\d{9}$/.test(c)) {
+            return {
+              valid: false,
+              message: "Invalid Botswana Omang ID. Must be exactly 9 numeric digits (e.g. 123412345)."
+            };
+          }
+          return { valid: true, normalized: c };
+        },
+        validatePhone: (phone) => {
+          const p = stripSpaces(phone);
+          if (!p) return { valid: true, normalized: "" };
+          if (!/^(\+267|267)?[7]\d{7}$/.test(p) && !/^\+?\d{8,15}$/.test(p)) {
+            return {
+              valid: false,
+              message: "Invalid Botswana phone number (e.g. +267 71 234 567)."
+            };
+          }
+          return { valid: true, normalized: COUNTRY_FORMATS.BWA.normalizePhone(phone) };
+        }
+      },
+      // ───── Nigeria ─────
+      NGA: {
+        countryCode: "NGA",
+        countryName: "Nigeria",
+        idLabel: "National Identification Number (NIN)",
+        idShortLabel: "NIN",
+        idPlaceholder: "12345678901",
+        idPatternHelp: "11 numeric digits",
+        phonePrefix: "+234",
+        phonePlaceholder: "+234 803 123 4567",
+        phonePatternHelp: "+234 followed by 10 digits (or local 080X / 070X)",
+        normalizeId: (id) => clean(id).replace(/[\s\-_]/g, ""),
+        normalizePhone: (phone) => {
+          const p = stripSpaces(phone);
+          if (p.startsWith("+234")) return p;
+          if (p.startsWith("234") && p.length === 13) return `+${p}`;
+          if (p.startsWith("0") && p.length === 11) return `+234${p.slice(1)}`;
+          return p.startsWith("+") ? p : `+234${p}`;
+        },
+        validateId: (id) => {
+          const c = clean(id).replace(/[\s\-_]/g, "");
+          if (!c) return { valid: false, message: "NIN is required" };
+          if (!/^\d{11}$/.test(c)) {
+            return {
+              valid: false,
+              message: "Invalid Nigeria NIN. Must be exactly 11 numeric digits (e.g. 12345678901)."
+            };
+          }
+          return { valid: true, normalized: c };
+        },
+        validatePhone: (phone) => {
+          const p = stripSpaces(phone);
+          if (!p) return { valid: true, normalized: "" };
+          if (!/^(\+234|234|0)[789]\d{9}$/.test(p) && !/^\+?\d{10,15}$/.test(p)) {
+            return {
+              valid: false,
+              message: "Invalid Nigeria phone number (e.g. +234 803 123 4567 or 08031234567)."
+            };
+          }
+          return { valid: true, normalized: COUNTRY_FORMATS.NGA.normalizePhone(phone) };
+        }
+      },
+      // ───── Malawi ─────
+      MWI: {
+        countryCode: "MWI",
+        countryName: "Malawi",
+        idLabel: "National ID Number",
+        idShortLabel: "National ID",
+        idPlaceholder: "MW12345678",
+        idPatternHelp: "8 to 12 alphanumeric characters",
+        phonePrefix: "+265",
+        phonePlaceholder: "+265 99 123 4567",
+        phonePatternHelp: "+265 followed by 9 digits (or local 099 / 088)",
+        normalizeId: (id) => clean(id).toUpperCase().replace(/[\s\-_]/g, ""),
+        normalizePhone: (phone) => {
+          const p = stripSpaces(phone);
+          if (p.startsWith("+265")) return p;
+          if (p.startsWith("265") && p.length === 12) return `+${p}`;
+          if (p.startsWith("0") && p.length === 10) return `+265${p.slice(1)}`;
+          return p.startsWith("+") ? p : `+265${p}`;
+        },
+        validateId: (id) => {
+          const c = clean(id).replace(/[\s\-_]/g, "");
+          if (!c) return { valid: false, message: "National ID is required" };
+          if (!/^[A-Za-z0-9]{6,14}$/.test(c)) {
+            return {
+              valid: false,
+              message: "Invalid Malawi National ID (e.g. MW12345678)."
+            };
+          }
+          return { valid: true, normalized: c.toUpperCase() };
+        },
+        validatePhone: (phone) => {
+          const p = stripSpaces(phone);
+          if (!p) return { valid: true, normalized: "" };
+          if (!/^(\+265|265|0)[89]\d{8}$/.test(p) && !/^\+?\d{9,15}$/.test(p)) {
+            return {
+              valid: false,
+              message: "Invalid Malawi phone number (e.g. +265 99 123 4567 or 0991234567)."
+            };
+          }
+          return { valid: true, normalized: COUNTRY_FORMATS.MWI.normalizePhone(phone) };
+        }
+      },
+      // ───── Uganda ─────
+      UGA: {
+        countryCode: "UGA",
+        countryName: "Uganda",
+        idLabel: "National Identification Number (NIN)",
+        idShortLabel: "NIN",
+        idPlaceholder: "CM9001015009087",
+        idPatternHelp: "14 alphanumeric characters",
+        phonePrefix: "+256",
+        phonePlaceholder: "+256 77 123 4567",
+        phonePatternHelp: "+256 followed by 9 digits (or local 07X)",
+        normalizeId: (id) => clean(id).toUpperCase().replace(/[\s\-_]/g, ""),
+        normalizePhone: (phone) => {
+          const p = stripSpaces(phone);
+          if (p.startsWith("+256")) return p;
+          if (p.startsWith("256") && p.length === 12) return `+${p}`;
+          if (p.startsWith("0") && p.length === 10) return `+256${p.slice(1)}`;
+          return p.startsWith("+") ? p : `+256${p}`;
+        },
+        validateId: (id) => {
+          const c = clean(id).replace(/[\s\-_]/g, "");
+          if (!c) return { valid: false, message: "Uganda NIN is required" };
+          if (!/^[A-Za-z0-9]{10,16}$/.test(c)) {
+            return {
+              valid: false,
+              message: "Invalid Uganda NIN format (e.g. CM9001015009087)."
+            };
+          }
+          return { valid: true, normalized: c.toUpperCase() };
+        },
+        validatePhone: (phone) => {
+          const p = stripSpaces(phone);
+          if (!p) return { valid: true, normalized: "" };
+          if (!/^(\+256|256|0)[7]\d{8}$/.test(p) && !/^\+?\d{9,15}$/.test(p)) {
+            return {
+              valid: false,
+              message: "Invalid Uganda phone number (e.g. +256 77 123 4567 or 0771234567)."
+            };
+          }
+          return { valid: true, normalized: COUNTRY_FORMATS.UGA.normalizePhone(phone) };
+        }
+      }
+    };
+    DEFAULT_GLOBAL_FORMAT = {
+      countryCode: "GLOBAL",
+      countryName: "Global",
+      idLabel: "National ID Number",
+      idShortLabel: "National ID",
+      idPlaceholder: "ID12345678",
+      idPatternHelp: "Valid national identification number (5-20 characters)",
+      phonePrefix: "+1",
+      phonePlaceholder: "+1 555 123 4567",
+      phonePatternHelp: "International E.164 phone format (e.g. +...)",
+      normalizeId: (id) => clean(id).replace(/[\s]/g, ""),
+      normalizePhone: (phone) => stripSpaces(phone),
+      validateId: (id) => {
+        const c = clean(id).replace(/[\s]/g, "");
+        if (!c) return { valid: false, message: "National ID number is required" };
+        if (!/^[A-Za-z0-9\/\-_]{4,25}$/.test(c)) {
+          return {
+            valid: false,
+            message: "Invalid National ID format. Must be 4 to 25 alphanumeric characters."
+          };
+        }
+        return { valid: true, normalized: c };
+      },
+      validatePhone: (phone) => {
+        const p = stripSpaces(phone);
+        if (!p) return { valid: true, normalized: "" };
+        if (!/^\+?[1-9]\d{6,14}$/.test(p) && !/^0\d{7,14}$/.test(p)) {
+          return {
+            valid: false,
+            message: "Invalid phone number. Must be a valid phone number (e.g. +27 82 123 4567)."
+          };
+        }
+        return { valid: true, normalized: p };
+      }
+    };
+  }
+});
+
 // shared/schedulingDates.ts
 function isAtLeastDaysAhead(value, days = DEFAULT_LEAD_TIME_DAYS) {
   const selected = value instanceof Date ? value : new Date(value);
@@ -16553,8 +17141,8 @@ __export(routes_exports, {
   validatePlanningLeadTimeAndNoConflict: () => validatePlanningLeadTimeAndNoConflict
 });
 function getInitials(name) {
-  const clean = (name || "").replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
-  return clean.substring(0, 3).padEnd(3, "X");
+  const clean2 = (name || "").replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
+  return clean2.substring(0, 3).padEnd(3, "X");
 }
 function computeCheckDigit(str) {
   let sum = 0;
@@ -20025,13 +20613,31 @@ async function registerRoutes(httpServer2, app2) {
         ...body,
         facilityId
       });
+      const tenant = req.tenantId ? await storage.getTenant(req.tenantId) : null;
+      const formatSpec = getCountryFormat(tenant);
       if (parsed.nrc) {
-        const [existingNrc] = await db.select({ id: facilityStaff.id, fullName: facilityStaff.fullName }).from(facilityStaff).where((0, import_drizzle_orm26.and)((0, import_drizzle_orm26.eq)(facilityStaff.tenantId, req.tenantId), (0, import_drizzle_orm26.eq)(facilityStaff.nrc, parsed.nrc))).limit(1);
+        const idVal = formatSpec.validateId(parsed.nrc);
+        if (!idVal.valid) {
+          return res.status(400).json({ message: idVal.message });
+        }
+        parsed.nrc = idVal.normalized || formatSpec.normalizeId(parsed.nrc);
+        const compactNrc = parsed.nrc.replace(/[\/\-\s]/g, "").toLowerCase();
+        const [existingNrc] = await db.select({ id: facilityStaff.id, fullName: facilityStaff.fullName }).from(facilityStaff).where((0, import_drizzle_orm26.and)(
+          (0, import_drizzle_orm26.eq)(facilityStaff.tenantId, req.tenantId),
+          (0, import_drizzle_orm26.eq)(import_drizzle_orm26.sql`LOWER(REPLACE(REPLACE(REPLACE(${facilityStaff.nrc}, '/', ''), '-', ''), ' ', ''))`, compactNrc)
+        )).limit(1);
         if (existingNrc) {
           return res.status(409).json({
-            message: `NRC ${parsed.nrc} is already registered to ${existingNrc.fullName}. NRC must be unique per staff member.`
+            message: `${formatSpec.idShortLabel} ${parsed.nrc} is already registered to ${existingNrc.fullName}. ${formatSpec.idShortLabel} must be unique per staff member.`
           });
         }
+      }
+      if (parsed.contactPhone) {
+        const phoneVal = formatSpec.validatePhone(parsed.contactPhone);
+        if (!phoneVal.valid) {
+          return res.status(400).json({ message: phoneVal.message });
+        }
+        parsed.contactPhone = phoneVal.normalized || formatSpec.normalizePhone(parsed.contactPhone);
       }
       const [inserted] = await db.insert(facilityStaff).values({ ...parsed, tenantId: req.tenantId }).returning();
       await logAudit(req, "create", "facility_staff", inserted.id, null, inserted);
@@ -20094,13 +20700,31 @@ async function registerRoutes(httpServer2, app2) {
         if (body[k] !== void 0) allowed[k] = body[k];
       }
       allowed.updatedAt = /* @__PURE__ */ new Date();
+      const tenant = req.tenantId ? await storage.getTenant(req.tenantId) : null;
+      const formatSpec = getCountryFormat(tenant);
       if (allowed.nrc) {
-        const [existingNrc] = await db.select({ id: facilityStaff.id, fullName: facilityStaff.fullName }).from(facilityStaff).where((0, import_drizzle_orm26.and)((0, import_drizzle_orm26.eq)(facilityStaff.tenantId, req.tenantId), (0, import_drizzle_orm26.eq)(facilityStaff.nrc, allowed.nrc))).limit(1);
+        const idVal = formatSpec.validateId(allowed.nrc);
+        if (!idVal.valid) {
+          return res.status(400).json({ message: idVal.message });
+        }
+        allowed.nrc = idVal.normalized || formatSpec.normalizeId(allowed.nrc);
+        const compactNrc = allowed.nrc.replace(/[\/\-\s]/g, "").toLowerCase();
+        const [existingNrc] = await db.select({ id: facilityStaff.id, fullName: facilityStaff.fullName }).from(facilityStaff).where((0, import_drizzle_orm26.and)(
+          (0, import_drizzle_orm26.eq)(facilityStaff.tenantId, req.tenantId),
+          (0, import_drizzle_orm26.eq)(import_drizzle_orm26.sql`LOWER(REPLACE(REPLACE(REPLACE(${facilityStaff.nrc}, '/', ''), '-', ''), ' ', ''))`, compactNrc)
+        )).limit(1);
         if (existingNrc && existingNrc.id !== staffId) {
           return res.status(409).json({
-            message: `NRC ${allowed.nrc} is already registered to ${existingNrc.fullName}. NRC must be unique per staff member.`
+            message: `${formatSpec.idShortLabel} ${allowed.nrc} is already registered to ${existingNrc.fullName}. ${formatSpec.idShortLabel} must be unique per staff member.`
           });
         }
+      }
+      if (allowed.contactPhone) {
+        const phoneVal = formatSpec.validatePhone(allowed.contactPhone);
+        if (!phoneVal.valid) {
+          return res.status(400).json({ message: phoneVal.message });
+        }
+        allowed.contactPhone = phoneVal.normalized || formatSpec.normalizePhone(allowed.contactPhone);
       }
       const [updated] = await db.update(facilityStaff).set(allowed).where((0, import_drizzle_orm26.eq)(facilityStaff.id, staffId)).returning();
       await logAudit(req, "update", "facility_staff", staffId, existing, updated);
@@ -20335,21 +20959,32 @@ async function registerRoutes(httpServer2, app2) {
         if (!cleanName) {
           return res.status(400).json({ message: "Full name is required" });
         }
+        const tenant = req.tenantId ? await storage.getTenant(req.tenantId) : null;
+        const formatSpec = getCountryFormat(tenant);
         if (!req.body.nrc) {
-          return res.status(400).json({ message: "NRC is required" });
+          return res.status(400).json({ message: `${formatSpec.idShortLabel} is required` });
         }
-        let cleanNrc = req.body.nrc.trim();
-        const nrcPattern = /^\d{6}\/\d{2}\/\d{1}$/;
-        if (!nrcPattern.test(cleanNrc)) {
-          return res.status(400).json({ message: "Invalid NRC format. Must be XXXXXX/XX/X (e.g. 123456/78/9)" });
+        const idVal = formatSpec.validateId(req.body.nrc);
+        if (!idVal.valid) {
+          return res.status(400).json({ message: idVal.message });
         }
+        const cleanNrc = idVal.normalized || formatSpec.normalizeId(req.body.nrc);
+        const compactNrc = cleanNrc.replace(/[\/\-\s]/g, "").toLowerCase();
         const [nrcDup] = await db.select().from(chvProfiles2).where((0, import_drizzle_orm26.and)(
           (0, import_drizzle_orm26.eq)(chvProfiles2.tenantId, req.tenantId),
-          (0, import_drizzle_orm26.eq)(import_drizzle_orm26.sql`LOWER(REPLACE(${chvProfiles2.nrc}, '/', ''))`, cleanNrc.replace(/\//g, "").toLowerCase())
+          (0, import_drizzle_orm26.eq)(import_drizzle_orm26.sql`LOWER(REPLACE(REPLACE(REPLACE(${chvProfiles2.nrc}, '/', ''), '-', ''), ' ', ''))`, compactNrc)
         )).limit(1);
         if (nrcDup) {
           const [nrcFac] = await db.select({ name: facilities.name }).from(facilities).where((0, import_drizzle_orm26.eq)(facilities.id, nrcDup.facilityId)).limit(1);
-          return res.status(400).json({ message: `Duplicate NRC: "${nrcDup.fullName}" at "${nrcFac?.name || "another facility"}" has this NRC.` });
+          return res.status(400).json({ message: `Duplicate ${formatSpec.idShortLabel}: "${nrcDup.fullName}" at "${nrcFac?.name || "another facility"}" has this ${formatSpec.idShortLabel}.` });
+        }
+        let cleanPhone = null;
+        if (req.body.contactPhone) {
+          const phoneVal = formatSpec.validatePhone(req.body.contactPhone);
+          if (!phoneVal.valid) {
+            return res.status(400).json({ message: phoneVal.message });
+          }
+          cleanPhone = phoneVal.normalized || formatSpec.normalizePhone(req.body.contactPhone);
         }
         const [nameDup] = await db.select().from(chvProfiles2).where((0, import_drizzle_orm26.and)(
           (0, import_drizzle_orm26.eq)(chvProfiles2.tenantId, req.tenantId),
@@ -20369,7 +21004,7 @@ async function registerRoutes(httpServer2, app2) {
           siaRole: req.body.campaignRole,
           assignedVillageId: req.body.villageId ? Number(req.body.villageId) : null,
           isActive: req.body.active ?? true,
-          contactPhone: req.body.contactPhone || null,
+          contactPhone: cleanPhone,
           age: req.body.age || null,
           roleDescription: req.body.roleDescription || null,
           employmentStatus: req.body.employmentStatus || "Active - In-service",
@@ -20431,27 +21066,43 @@ async function registerRoutes(httpServer2, app2) {
             return res.status(400).json({ message: `Duplicate name: A worker named "${cleanName}" is already registered in this facility.` });
           }
         }
+        const tenant = req.tenantId ? await storage.getTenant(req.tenantId) : null;
+        const formatSpec = getCountryFormat(tenant);
+        let cleanNrc = null;
         if (req.body.nrc !== void 0 && req.body.nrc) {
-          const cleanNrc = req.body.nrc.trim();
-          const nrcPattern = /^\d{6}\/\d{2}\/\d{1}$/;
-          if (!nrcPattern.test(cleanNrc)) {
-            return res.status(400).json({ message: "Invalid NRC format. Must be in the format XXXXXX/XX/X (e.g. 123456/78/9)" });
+          const idVal = formatSpec.validateId(req.body.nrc);
+          if (!idVal.valid) {
+            return res.status(400).json({ message: idVal.message });
           }
+          cleanNrc = idVal.normalized || formatSpec.normalizeId(req.body.nrc);
+          const compactNrc = cleanNrc.replace(/[\/\-\s]/g, "").toLowerCase();
           const [nrcDup] = await db.select().from(chvProfiles2).where((0, import_drizzle_orm26.and)(
             (0, import_drizzle_orm26.eq)(chvProfiles2.tenantId, req.tenantId),
             (0, import_drizzle_orm26.ne)(chvProfiles2.id, chvId),
-            (0, import_drizzle_orm26.eq)(import_drizzle_orm26.sql`LOWER(REPLACE(${chvProfiles2.nrc}, '/', ''))`, cleanNrc.replace(/\//g, "").toLowerCase())
+            (0, import_drizzle_orm26.eq)(import_drizzle_orm26.sql`LOWER(REPLACE(REPLACE(REPLACE(${chvProfiles2.nrc}, '/', ''), '-', ''), ' ', ''))`, compactNrc)
           )).limit(1);
           if (nrcDup) {
             const [fac] = await db.select({ name: facilities.name }).from(facilities).where((0, import_drizzle_orm26.eq)(facilities.id, nrcDup.facilityId)).limit(1);
             return res.status(400).json({
-              message: `Duplicate NRC: A worker with NRC ${cleanNrc} is already registered as "${nrcDup.fullName}" at facility "${fac?.name || "another facility"}".`
+              message: `Duplicate ${formatSpec.idShortLabel}: A worker with ${formatSpec.idShortLabel} ${cleanNrc} is already registered as "${nrcDup.fullName}" at facility "${fac?.name || "another facility"}".`
             });
+          }
+        }
+        let cleanPhone = void 0;
+        if (req.body.contactPhone !== void 0) {
+          if (req.body.contactPhone) {
+            const phoneVal = formatSpec.validatePhone(req.body.contactPhone);
+            if (!phoneVal.valid) {
+              return res.status(400).json({ message: phoneVal.message });
+            }
+            cleanPhone = phoneVal.normalized || formatSpec.normalizePhone(req.body.contactPhone);
+          } else {
+            cleanPhone = null;
           }
         }
         const allowed = {};
         if (req.body.name !== void 0) allowed.fullName = req.body.name.trim();
-        if (req.body.nrc !== void 0) allowed.nrc = req.body.nrc ? req.body.nrc.trim() : null;
+        if (req.body.nrc !== void 0) allowed.nrc = cleanNrc;
         if (req.body.gender !== void 0) allowed.gender = req.body.gender;
         if (req.body.educationLevel !== void 0) allowed.educationLevel = req.body.educationLevel;
         if (req.body.trainingStatus !== void 0) allowed.trainingReceived = req.body.trainingStatus;
@@ -20459,7 +21110,7 @@ async function registerRoutes(httpServer2, app2) {
         if (req.body.campaignRole !== void 0) allowed.siaRole = req.body.campaignRole;
         if (req.body.villageId !== void 0) allowed.assignedVillageId = req.body.villageId ? Number(req.body.villageId) : null;
         if (req.body.active !== void 0) allowed.isActive = req.body.active;
-        if (req.body.contactPhone !== void 0) allowed.contactPhone = req.body.contactPhone || null;
+        if (cleanPhone !== void 0) allowed.contactPhone = cleanPhone;
         if (req.body.age !== void 0) allowed.age = req.body.age ? Number(req.body.age) : null;
         if (req.body.roleDescription !== void 0) allowed.roleDescription = req.body.roleDescription || null;
         if (req.body.employmentStatus !== void 0) allowed.employmentStatus = req.body.employmentStatus;
@@ -22684,7 +23335,13 @@ Note from the requester: ${conflict.note}` : ""}`,
       let updatedCount = 0;
       const savedRecords = [];
       const skippedRecords = [];
+      const dedupeMap = /* @__PURE__ */ new Map();
       for (const item of importedPop) {
+        const key = `${item.villageId || item.villageCode || item.villageName || ""}|${item.facilityId || item.facilityHmisCode || item.facilityName || ""}|${item.year}|${item.source}`;
+        dedupeMap.set(key, item);
+      }
+      const itemsToProcess = Array.from(dedupeMap.values());
+      for (const item of itemsToProcess) {
         let villageId = item.villageId || null;
         let districtId = item.districtId || null;
         let provinceId = item.provinceId || null;
@@ -22778,6 +23435,7 @@ Note from the requester: ${conflict.note}` : ""}`,
           [existing] = await db.select().from(populationData).where(
             (0, import_drizzle_orm26.and)(
               (0, import_drizzle_orm26.eq)(populationData.tenantId, req.tenantId),
+              (0, import_drizzle_orm26.isNull)(populationData.villageId),
               (0, import_drizzle_orm26.eq)(populationData.facilityId, facilityId),
               (0, import_drizzle_orm26.eq)(populationData.year, item.year),
               (0, import_drizzle_orm26.eq)(populationData.source, item.source)
@@ -22813,31 +23471,73 @@ Note from the requester: ${conflict.note}` : ""}`,
             await storage.refreshPopulationOwnerAggregates(req.tenantId, updated);
           }
         } else {
-          const [created] = await db.insert(populationData).values({
-            tenantId: req.tenantId,
-            provinceId,
-            districtId,
-            villageId,
-            facilityId,
-            source: item.source,
-            year: item.year,
-            totalPopulation: item.totalPopulation,
-            malePopulation: item.malePopulation ?? null,
-            femalePopulation: item.femalePopulation ?? null,
-            under1Population: item.under1Population ?? null,
-            under5Population: item.under5Population ?? null,
-            pregnantWomen: item.pregnantWomen ?? null,
-            schoolEntry: item.schoolEntry ?? null,
-            schoolExit: item.schoolExit ?? null,
-            growthRate: growthVal !== null && !isNaN(growthVal) ? growthVal.toFixed(2) : null,
-            confidenceScore: confidenceVal !== null && !isNaN(confidenceVal) ? confidenceVal.toFixed(2) : null,
-            metadata: resolvedMetadata,
-            approvalStatus: "approved"
-          }).returning();
-          createdCount++;
-          if (created) {
-            savedRecords.push(created);
-            await storage.refreshPopulationOwnerAggregates(req.tenantId, created);
+          try {
+            const [created] = await db.insert(populationData).values({
+              tenantId: req.tenantId,
+              provinceId,
+              districtId,
+              villageId,
+              facilityId,
+              source: item.source,
+              year: item.year,
+              totalPopulation: item.totalPopulation,
+              malePopulation: item.malePopulation ?? null,
+              femalePopulation: item.femalePopulation ?? null,
+              under1Population: item.under1Population ?? null,
+              under5Population: item.under5Population ?? null,
+              pregnantWomen: item.pregnantWomen ?? null,
+              schoolEntry: item.schoolEntry ?? null,
+              schoolExit: item.schoolExit ?? null,
+              growthRate: growthVal !== null && !isNaN(growthVal) ? growthVal.toFixed(2) : null,
+              confidenceScore: confidenceVal !== null && !isNaN(confidenceVal) ? confidenceVal.toFixed(2) : null,
+              metadata: resolvedMetadata,
+              approvalStatus: "approved"
+            }).returning();
+            createdCount++;
+            if (created) {
+              savedRecords.push(created);
+              await storage.refreshPopulationOwnerAggregates(req.tenantId, created);
+            }
+          } catch (conflictErr) {
+            let conflictExisting = null;
+            if (villageId) {
+              [conflictExisting] = await db.select().from(populationData).where(
+                (0, import_drizzle_orm26.and)(
+                  (0, import_drizzle_orm26.eq)(populationData.tenantId, req.tenantId),
+                  (0, import_drizzle_orm26.eq)(populationData.villageId, villageId),
+                  (0, import_drizzle_orm26.eq)(populationData.year, item.year),
+                  (0, import_drizzle_orm26.eq)(populationData.source, item.source)
+                )
+              ).limit(1);
+            } else if (facilityId) {
+              [conflictExisting] = await db.select().from(populationData).where(
+                (0, import_drizzle_orm26.and)(
+                  (0, import_drizzle_orm26.eq)(populationData.tenantId, req.tenantId),
+                  (0, import_drizzle_orm26.isNull)(populationData.villageId),
+                  (0, import_drizzle_orm26.eq)(populationData.facilityId, facilityId),
+                  (0, import_drizzle_orm26.eq)(populationData.year, item.year),
+                  (0, import_drizzle_orm26.eq)(populationData.source, item.source)
+                )
+              ).limit(1);
+            }
+            if (conflictExisting) {
+              const [updated] = await db.update(populationData).set({
+                totalPopulation: item.totalPopulation,
+                under1Population: item.under1Population ?? conflictExisting.under1Population,
+                under5Population: item.under5Population ?? conflictExisting.under5Population,
+                pregnantWomen: item.pregnantWomen ?? conflictExisting.pregnantWomen,
+                malePopulation: item.malePopulation ?? conflictExisting.malePopulation,
+                femalePopulation: item.femalePopulation ?? conflictExisting.femalePopulation,
+                updatedAt: /* @__PURE__ */ new Date()
+              }).where((0, import_drizzle_orm26.eq)(populationData.id, conflictExisting.id)).returning();
+              updatedCount++;
+              if (updated) {
+                savedRecords.push(updated);
+                await storage.refreshPopulationOwnerAggregates(req.tenantId, updated);
+              }
+            } else {
+              throw conflictErr;
+            }
           }
         }
       }
@@ -22939,7 +23639,19 @@ Note from the requester: ${conflict.note}` : ""}`,
           }
         };
       });
-      res.json(enrichedPop);
+      const uniquePopMap = /* @__PURE__ */ new Map();
+      for (const p of enrichedPop) {
+        const key = `${p.tenantId}|${p.source}|${p.year}|${p.villageId ?? 0}|${p.facilityId ?? 0}|${p.districtId ?? 0}|${p.provinceId ?? 0}`;
+        if (!uniquePopMap.has(key)) {
+          uniquePopMap.set(key, p);
+        } else {
+          const current = uniquePopMap.get(key);
+          if (p.id && current.id && p.id > current.id || p.totalPopulation > 0 && current.totalPopulation === 0) {
+            uniquePopMap.set(key, p);
+          }
+        }
+      }
+      res.json(Array.from(uniquePopMap.values()));
     } catch (error) {
       console.error("Error fetching population data:", error);
       res.status(500).json({ message: "Failed to fetch population data" });
@@ -25201,6 +25913,233 @@ Note from the requester: ${conflict.note}` : ""}`,
     } catch (error) {
       console.error("Error deleting mobilization activity:", error);
       res.status(500).json({ message: "Failed to delete mobilization activity" });
+    }
+  });
+  app2.get("/api/facilities/:facilityId/supervisors", ...auth, requireTenant, async (req, res) => {
+    try {
+      const facilityId = parseInt(req.params.facilityId);
+      if (isNaN(facilityId)) {
+        return res.status(400).json({ message: "Invalid facilityId" });
+      }
+      const [facilityRow] = await db.select({
+        id: facilities.id,
+        name: facilities.name,
+        districtId: facilities.districtId,
+        districtName: districts.name,
+        provinceId: districts.provinceId,
+        provinceName: provinces.name
+      }).from(facilities).leftJoin(districts, (0, import_drizzle_orm26.eq)(facilities.districtId, districts.id)).leftJoin(provinces, (0, import_drizzle_orm26.eq)(districts.provinceId, provinces.id)).where((0, import_drizzle_orm26.and)((0, import_drizzle_orm26.eq)(facilities.id, facilityId), (0, import_drizzle_orm26.eq)(facilities.tenantId, req.tenantId))).limit(1);
+      if (!facilityRow) {
+        return res.status(404).json({ message: "Facility not found" });
+      }
+      const userRows = await db.select({
+        id: users.id,
+        firstName: users.firstName,
+        lastName: users.lastName,
+        email: users.email,
+        role: users.role,
+        roles: users.roles,
+        districtId: users.districtId,
+        provinceId: users.provinceId,
+        facilityId: users.facilityId,
+        isActive: users.isActive
+      }).from(users).where(
+        (0, import_drizzle_orm26.and)(
+          (0, import_drizzle_orm26.eq)(users.tenantId, req.tenantId),
+          (0, import_drizzle_orm26.eq)(users.isActive, true),
+          (0, import_drizzle_orm26.or)((0, import_drizzle_orm26.isNull)(users.facilityId), (0, import_drizzle_orm26.ne)(users.facilityId, facilityId))
+        )
+      );
+      const districtSupervisors = [];
+      const provinceSupervisors = [];
+      const nationalSupervisors = [];
+      const formatRole = (r) => {
+        if (!r) return "Supervisor";
+        return r.split("_").map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+      };
+      for (const u of userRows) {
+        const fullName = `${u.firstName || ""} ${u.lastName || ""}`.trim() || u.email?.split("@")[0] || "Supervisor";
+        const roleLabel = formatRole(u.role);
+        if (facilityRow.districtId && u.districtId === facilityRow.districtId) {
+          districtSupervisors.push({
+            id: `user-${u.id}`,
+            userId: u.id,
+            name: fullName,
+            role: roleLabel,
+            level: "district",
+            districtId: u.districtId,
+            districtName: facilityRow.districtName,
+            email: u.email,
+            source: "user"
+          });
+        } else if (facilityRow.provinceId && u.provinceId === facilityRow.provinceId && !u.districtId) {
+          provinceSupervisors.push({
+            id: `user-${u.id}`,
+            userId: u.id,
+            name: fullName,
+            role: roleLabel,
+            level: "province",
+            provinceId: u.provinceId,
+            provinceName: facilityRow.provinceName,
+            email: u.email,
+            source: "user"
+          });
+        } else if (!u.districtId && !u.provinceId) {
+          nationalSupervisors.push({
+            id: `user-${u.id}`,
+            userId: u.id,
+            name: fullName,
+            role: roleLabel,
+            level: "national",
+            email: u.email,
+            source: "user"
+          });
+        }
+      }
+      if (facilityRow.districtId) {
+        const districtStaffRows = await db.select({
+          id: facilityStaff.id,
+          fullName: facilityStaff.fullName,
+          name: facilityStaff.name,
+          role: facilityStaff.role,
+          position: facilityStaff.position,
+          contactPhone: facilityStaff.contactPhone,
+          facilityId: facilityStaff.facilityId,
+          facilityName: facilities.name
+        }).from(facilityStaff).innerJoin(facilities, (0, import_drizzle_orm26.eq)(facilityStaff.facilityId, facilities.id)).where(
+          (0, import_drizzle_orm26.and)(
+            (0, import_drizzle_orm26.eq)(facilityStaff.tenantId, req.tenantId),
+            (0, import_drizzle_orm26.eq)(facilities.districtId, facilityRow.districtId),
+            (0, import_drizzle_orm26.ne)(facilityStaff.facilityId, facilityId),
+            (0, import_drizzle_orm26.eq)(facilityStaff.isActive, true),
+            (0, import_drizzle_orm26.or)(
+              (0, import_drizzle_orm26.ilike)(facilityStaff.role, "%supervis%"),
+              (0, import_drizzle_orm26.ilike)(facilityStaff.position, "%supervis%"),
+              (0, import_drizzle_orm26.ilike)(facilityStaff.role, "%officer%"),
+              (0, import_drizzle_orm26.ilike)(facilityStaff.position, "%officer%"),
+              (0, import_drizzle_orm26.ilike)(facilityStaff.role, "%coordinator%"),
+              (0, import_drizzle_orm26.ilike)(facilityStaff.position, "%coordinator%")
+            )
+          )
+        );
+        for (const st of districtStaffRows) {
+          const staffName = st.fullName || st.name || "District Supervisor";
+          if (!districtSupervisors.some((d) => d.name.toLowerCase() === staffName.toLowerCase())) {
+            districtSupervisors.push({
+              id: `staff-${st.id}`,
+              name: staffName,
+              role: st.position || st.role || "District Health Supervisor",
+              level: "district",
+              districtId: facilityRow.districtId,
+              districtName: facilityRow.districtName,
+              facilityName: st.facilityName,
+              phone: st.contactPhone,
+              source: "facility_staff"
+            });
+          }
+        }
+      }
+      res.json({
+        facility: facilityRow,
+        district: districtSupervisors,
+        province: provinceSupervisors,
+        national: nationalSupervisors,
+        all: [...districtSupervisors, ...provinceSupervisors, ...nationalSupervisors]
+      });
+    } catch (error) {
+      console.error("Error fetching supervisors:", error);
+      res.status(500).json({ message: "Failed to fetch supervisors: " + error.message });
+    }
+  });
+  app2.post("/api/facilities/:facilityId/supervisors", ...auth, requireTenant, async (req, res) => {
+    try {
+      const facilityId = parseInt(req.params.facilityId);
+      if (isNaN(facilityId)) {
+        return res.status(400).json({ message: "Invalid facilityId" });
+      }
+      const [facilityRow] = await db.select({
+        id: facilities.id,
+        districtId: facilities.districtId,
+        districtName: districts.name,
+        provinceId: districts.provinceId,
+        provinceName: provinces.name
+      }).from(facilities).leftJoin(districts, (0, import_drizzle_orm26.eq)(facilities.districtId, districts.id)).leftJoin(provinces, (0, import_drizzle_orm26.eq)(districts.provinceId, provinces.id)).where((0, import_drizzle_orm26.and)((0, import_drizzle_orm26.eq)(facilities.id, facilityId), (0, import_drizzle_orm26.eq)(facilities.tenantId, req.tenantId))).limit(1);
+      if (!facilityRow) {
+        return res.status(404).json({ message: "Facility not found" });
+      }
+      const { name, role, level = "district", phone, email } = req.body;
+      if (!name || typeof name !== "string" || !name.trim()) {
+        return res.status(400).json({ message: "Supervisor name is required" });
+      }
+      const tenant = await storage.getTenant(req.tenantId);
+      const formatSpec = getCountryFormat(tenant);
+      if (phone && typeof phone === "string" && phone.trim()) {
+        const phoneVal = formatSpec.validatePhone(phone.trim());
+        if (!phoneVal.valid) {
+          return res.status(400).json({ message: phoneVal.message });
+        }
+      }
+      const parts = name.trim().split(/\s+/);
+      const firstName = parts[0] || "Supervisor";
+      const lastName = parts.slice(1).join(" ") || "Official";
+      let assignedDistrictId = null;
+      let assignedProvinceId = null;
+      let userRole = "district_manager";
+      if (level === "national") {
+        assignedDistrictId = null;
+        assignedProvinceId = null;
+        userRole = "national_manager";
+      } else if (level === "province") {
+        assignedDistrictId = null;
+        assignedProvinceId = facilityRow.provinceId || null;
+        userRole = "provincial_coordinator";
+      } else {
+        assignedDistrictId = facilityRow.districtId || null;
+        assignedProvinceId = facilityRow.provinceId || null;
+        userRole = "district_manager";
+      }
+      const cleanEmail = email && typeof email === "string" && email.trim() ? email.trim().toLowerCase() : `supervisor.${Date.now()}.${Math.floor(Math.random() * 1e3)}@vaxplan.local`;
+      const [createdUser] = await db.insert(users).values({
+        tenantId: req.tenantId,
+        firstName,
+        lastName,
+        email: cleanEmail,
+        role: userRole,
+        roles: ["supervisor", userRole],
+        permissions: ["supervision.conduct", "supervision.view", "view_reports"],
+        districtId: assignedDistrictId,
+        provinceId: assignedProvinceId,
+        facilityId: null,
+        // NOT tied to any facility
+        isActive: true
+      }).returning();
+      await logAudit(req, "create", "supervisor_user", createdUser.id, null, {
+        name: `${firstName} ${lastName}`,
+        role: role || userRole,
+        level,
+        districtId: assignedDistrictId,
+        provinceId: assignedProvinceId,
+        phone: phone ? formatSpec.normalizePhone(phone.trim()) : null
+      });
+      res.status(201).json({
+        success: true,
+        supervisor: {
+          id: `user-${createdUser.id}`,
+          userId: createdUser.id,
+          name: `${createdUser.firstName} ${createdUser.lastName}`,
+          role: role || (level === "national" ? "National Supervisor" : level === "province" ? "Provincial Supervisor" : "District Supervisor"),
+          level,
+          districtId: assignedDistrictId,
+          districtName: level === "district" ? facilityRow.districtName : null,
+          provinceId: assignedProvinceId,
+          provinceName: level !== "national" ? facilityRow.provinceName : null,
+          phone: phone ? formatSpec.normalizePhone(phone.trim()) : null,
+          email: createdUser.email
+        }
+      });
+    } catch (error) {
+      console.error("Error creating supervisor:", error);
+      res.status(500).json({ message: "Failed to create supervisor: " + error.message });
     }
   });
   app2.get("/api/supervision-visits", ...auth, async (req, res) => {
@@ -33356,21 +34295,32 @@ This response is powered by the local VaxPlan database query engine. You can que
       if (nameDup) {
         return res.status(400).json({ message: `Duplicate name: A worker named "${cleanName}" is already registered in this facility.` });
       }
+      const tenant = req.tenantId ? await storage.getTenant(req.tenantId) : null;
+      const formatSpec = getCountryFormat(tenant);
       if (!req.body.nrc) {
-        return res.status(400).json({ message: "NRC is required" });
+        return res.status(400).json({ message: `${formatSpec.idShortLabel} is required` });
       }
-      let cleanNrc = req.body.nrc.trim();
-      const nrcPattern = /^\d{6}\/\d{2}\/\d{1}$/;
-      if (!nrcPattern.test(cleanNrc)) {
-        return res.status(400).json({ message: "Invalid NRC format. Must be XXXXXX/XX/X (e.g. 123456/78/9)" });
+      const idVal = formatSpec.validateId(req.body.nrc);
+      if (!idVal.valid) {
+        return res.status(400).json({ message: idVal.message });
       }
+      const cleanNrc = idVal.normalized || formatSpec.normalizeId(req.body.nrc);
+      const compactNrc = cleanNrc.replace(/[\/\-\s]/g, "").toLowerCase();
       const [nrcDup] = await db.select().from(chvProfiles2).where((0, import_drizzle_orm26.and)(
         (0, import_drizzle_orm26.eq)(chvProfiles2.tenantId, req.tenantId),
-        (0, import_drizzle_orm26.eq)(import_drizzle_orm26.sql`LOWER(REPLACE(${chvProfiles2.nrc}, '/', ''))`, cleanNrc.replace(/\//g, "").toLowerCase())
+        (0, import_drizzle_orm26.eq)(import_drizzle_orm26.sql`LOWER(REPLACE(REPLACE(REPLACE(${chvProfiles2.nrc}, '/', ''), '-', ''), ' ', ''))`, compactNrc)
       )).limit(1);
       if (nrcDup) {
         const [nrcFac] = await db.select({ name: facilities.name }).from(facilities).where((0, import_drizzle_orm26.eq)(facilities.id, nrcDup.facilityId)).limit(1);
-        return res.status(400).json({ message: `Duplicate NRC: "${nrcDup.fullName}" at "${nrcFac?.name || "another facility"}" has this NRC.` });
+        return res.status(400).json({ message: `Duplicate ${formatSpec.idShortLabel}: "${nrcDup.fullName}" at "${nrcFac?.name || "another facility"}" has this ${formatSpec.idShortLabel}.` });
+      }
+      let cleanPhone = null;
+      if (req.body.contactPhone) {
+        const phoneVal = formatSpec.validatePhone(req.body.contactPhone);
+        if (!phoneVal.valid) {
+          return res.status(400).json({ message: phoneVal.message });
+        }
+        cleanPhone = phoneVal.normalized || formatSpec.normalizePhone(req.body.contactPhone);
       }
       const mappedBody = {
         fullName: cleanName,
@@ -33382,7 +34332,7 @@ This response is powered by the local VaxPlan database query engine. You can que
         siaRole: req.body.campaignRole || "social_mobilizer",
         assignedVillageId: req.body.villageId ? Number(req.body.villageId) : null,
         isActive: req.body.active ?? true,
-        contactPhone: req.body.contactPhone || null,
+        contactPhone: cleanPhone,
         age: req.body.age ? Number(req.body.age) : null,
         roleDescription: req.body.roleDescription || null,
         employmentStatus: req.body.employmentStatus || "Active - In-service",
@@ -33433,28 +34383,44 @@ This response is powered by the local VaxPlan database query engine. You can que
           return res.status(400).json({ message: `Duplicate name: "${cleanName}" is already registered in this facility.` });
         }
       }
+      const tenant = req.tenantId ? await storage.getTenant(req.tenantId) : null;
+      const formatSpec = getCountryFormat(tenant);
+      let cleanNrc = null;
       if (req.body.nrc !== void 0) {
         if (!req.body.nrc) {
-          return res.status(400).json({ message: "NRC cannot be empty" });
+          return res.status(400).json({ message: `${formatSpec.idShortLabel} cannot be empty` });
         }
-        const cleanNrc = req.body.nrc.trim();
-        const nrcPattern = /^\d{6}\/\d{2}\/\d{1}$/;
-        if (!nrcPattern.test(cleanNrc)) {
-          return res.status(400).json({ message: "Invalid NRC format. Must be XXXXXX/XX/X (e.g. 123456/78/9)" });
+        const idVal = formatSpec.validateId(req.body.nrc);
+        if (!idVal.valid) {
+          return res.status(400).json({ message: idVal.message });
         }
+        cleanNrc = idVal.normalized || formatSpec.normalizeId(req.body.nrc);
+        const compactNrc = cleanNrc.replace(/[\/\-\s]/g, "").toLowerCase();
         const [nrcDup] = await db.select().from(chvProfiles2).where((0, import_drizzle_orm26.and)(
           (0, import_drizzle_orm26.eq)(chvProfiles2.tenantId, req.tenantId),
           (0, import_drizzle_orm26.ne)(chvProfiles2.id, id),
-          (0, import_drizzle_orm26.eq)(import_drizzle_orm26.sql`LOWER(REPLACE(${chvProfiles2.nrc}, '/', ''))`, cleanNrc.replace(/\//g, "").toLowerCase())
+          (0, import_drizzle_orm26.eq)(import_drizzle_orm26.sql`LOWER(REPLACE(REPLACE(REPLACE(${chvProfiles2.nrc}, '/', ''), '-', ''), ' ', ''))`, compactNrc)
         )).limit(1);
         if (nrcDup) {
           const [nrcFac] = await db.select({ name: facilities.name }).from(facilities).where((0, import_drizzle_orm26.eq)(facilities.id, nrcDup.facilityId)).limit(1);
-          return res.status(400).json({ message: `Duplicate NRC: "${nrcDup.fullName}" at "${nrcFac?.name || "another facility"}" has this NRC.` });
+          return res.status(400).json({ message: `Duplicate ${formatSpec.idShortLabel}: "${nrcDup.fullName}" at "${nrcFac?.name || "another facility"}" has this ${formatSpec.idShortLabel}.` });
+        }
+      }
+      let cleanPhone = void 0;
+      if (req.body.contactPhone !== void 0) {
+        if (req.body.contactPhone) {
+          const phoneVal = formatSpec.validatePhone(req.body.contactPhone);
+          if (!phoneVal.valid) {
+            return res.status(400).json({ message: phoneVal.message });
+          }
+          cleanPhone = phoneVal.normalized || formatSpec.normalizePhone(req.body.contactPhone);
+        } else {
+          cleanPhone = null;
         }
       }
       const allowed = {};
       if (req.body.name !== void 0) allowed.fullName = req.body.name.trim();
-      if (req.body.nrc !== void 0) allowed.nrc = req.body.nrc ? req.body.nrc.trim() : null;
+      if (cleanNrc !== null) allowed.nrc = cleanNrc;
       if (req.body.gender !== void 0) allowed.gender = req.body.gender;
       if (req.body.age !== void 0) allowed.age = req.body.age ? Number(req.body.age) : null;
       if (req.body.educationLevel !== void 0) allowed.educationLevel = req.body.educationLevel;
@@ -33463,7 +34429,7 @@ This response is powered by the local VaxPlan database query engine. You can que
       if (req.body.campaignRole !== void 0) allowed.siaRole = req.body.campaignRole;
       if (req.body.villageId !== void 0) allowed.assignedVillageId = req.body.villageId ? Number(req.body.villageId) : null;
       if (req.body.active !== void 0) allowed.isActive = req.body.active;
-      if (req.body.contactPhone !== void 0) allowed.contactPhone = req.body.contactPhone || null;
+      if (cleanPhone !== void 0) allowed.contactPhone = cleanPhone;
       if (req.body.roleDescription !== void 0) allowed.roleDescription = req.body.roleDescription || null;
       if (req.body.employmentStatus !== void 0) allowed.employmentStatus = req.body.employmentStatus;
       if (req.body.supervisorId !== void 0) allowed.supervisorId = req.body.supervisorId ? Number(req.body.supervisorId) : null;
@@ -33798,6 +34764,7 @@ var init_routes = __esm({
     init_polygonLifecycle();
     init_microplanVersionService();
     init_catalogue();
+    init_countryFormats();
     init_schema();
     init_vaccineSchedule();
     init_schedulingDates();

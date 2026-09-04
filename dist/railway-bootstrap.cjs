@@ -827,7 +827,14 @@ var populationData = (0, import_pg_core.pgTable)("population_data", {
   approvedByUserId: (0, import_pg_core.varchar)("approved_by_user_id").references(() => users.id, { onDelete: "set null" }),
   createdAt: (0, import_pg_core.timestamp)("created_at").defaultNow(),
   updatedAt: (0, import_pg_core.timestamp)("updated_at").defaultNow()
-}, (table) => [(0, import_pg_core.index)("idx_population_tenant").on(table.tenantId)]);
+}, (table) => [
+  (0, import_pg_core.index)("idx_population_tenant").on(table.tenantId),
+  (0, import_pg_core.uniqueIndex)("uq_pop_village_year_source").on(table.tenantId, table.villageId, table.year, table.source).where(import_drizzle_orm.sql`${table.villageId} IS NOT NULL`),
+  (0, import_pg_core.uniqueIndex)("uq_pop_facility_year_source").on(table.tenantId, table.facilityId, table.year, table.source).where(import_drizzle_orm.sql`${table.villageId} IS NULL AND ${table.facilityId} IS NOT NULL`),
+  (0, import_pg_core.uniqueIndex)("uq_pop_district_year_source").on(table.tenantId, table.districtId, table.year, table.source).where(import_drizzle_orm.sql`${table.villageId} IS NULL AND ${table.facilityId} IS NULL AND ${table.districtId} IS NOT NULL`),
+  (0, import_pg_core.uniqueIndex)("uq_pop_province_year_source").on(table.tenantId, table.provinceId, table.year, table.source).where(import_drizzle_orm.sql`${table.villageId} IS NULL AND ${table.facilityId} IS NULL AND ${table.districtId} IS NULL AND ${table.provinceId} IS NOT NULL`),
+  (0, import_pg_core.uniqueIndex)("uq_pop_national_year_source").on(table.tenantId, table.year, table.source).where(import_drizzle_orm.sql`${table.villageId} IS NULL AND ${table.facilityId} IS NULL AND ${table.districtId} IS NULL AND ${table.provinceId} IS NULL`)
+]);
 var microplanTypeEnum = (0, import_pg_core.pgEnum)("microplan_type", [
   "facility_routine",
   "sia_campaign"
