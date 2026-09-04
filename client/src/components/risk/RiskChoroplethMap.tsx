@@ -24,6 +24,7 @@ import {
   AlertTriangle,
   TrendingDown,
   TrendingUp,
+  Filter,
 } from "lucide-react";
 import { getTenantMapDefaults, type TenantLike } from "@/lib/tenantGeo";
 import { usePersistedBasemap, BasemapTileLayer, BasemapSwitcher, type Basemap } from "@/components/map/BasemapToggle";
@@ -52,6 +53,8 @@ interface RiskChoroplethMapProps {
   adminLevelLabel: string;
   boundaryId?: string | null;
   data: DistrictCoveragePerformance[];
+  selectedCategoryFilter?: string;
+  onSelectCategoryFilter?: (category: string) => void;
   selectedDistrictId?: number | null;
   onSelectDistrict?: (district: DistrictCoveragePerformance | null) => void;
   isLoading?: boolean;
@@ -94,14 +97,35 @@ export function RiskChoroplethMap({
   adminLevelLabel,
   boundaryId,
   data,
+  selectedCategoryFilter: controlledFilter,
+  onSelectCategoryFilter,
   selectedDistrictId,
   onSelectDistrict,
   isLoading = false,
 }: RiskChoroplethMapProps) {
-  const [metric, setMetric] = useState<ChoroplethMetric>("mcv1");
+  const [internalFilter, setInternalFilter] = useState<string>("ALL");
+  const selectedCategoryFilter = controlledFilter !== undefined ? controlledFilter : internalFilter;
+
+  const handleCategoryFilter = (cat: string) => {
+    if (onSelectCategoryFilter) {
+      onSelectCategoryFilter(cat);
+    }
+    if (controlledFilter === undefined) {
+      setInternalFilter(cat);
+    }
+  };
+
+  const [metric, setMetric] = useState<ChoroplethMetric>("risk");
   const [searchTerm, setSearchTerm] = useState("");
   const [basemap, setBasemap] = usePersistedBasemap();
   const geoJsonRef = useRef<L.GeoJSON | null>(null);
+
+  // When a risk tier is selected from either top filter or map legend, ensure metric shows programmatic risk
+  useEffect(() => {
+    if (selectedCategoryFilter && selectedCategoryFilter !== "ALL") {
+      setMetric("risk");
+    }
+  }, [selectedCategoryFilter]);
 
   // Fallback context query for defaultBoundaryId if not provided
   const { data: contextData } = useQuery<any>({
@@ -251,14 +275,27 @@ export function RiskChoroplethMap({
   const styleFeature = (feature: any) => {
     const d = findDistrictForFeature(feature);
     const isSelected = selectedDistrictId && d && d.districtId === selectedDistrictId;
+    const isFilteredTierActive = Boolean(selectedCategoryFilter && selectedCategoryFilter !== "ALL");
+    const matchesTier = !isFilteredTierActive || (d && d.riskCategory === selectedCategoryFilter);
+
+    if (isFilteredTierActive && !matchesTier) {
+      return {
+        fillColor: "#94a3b8",
+        weight: 1,
+        opacity: 0.35,
+        color: "#cbd5e1",
+        dashArray: "2",
+        fillOpacity: 0.12,
+      };
+    }
 
     return {
       fillColor: getColor(d),
-      weight: isSelected ? 3 : 1.5,
+      weight: isSelected ? 3.5 : (isFilteredTierActive ? 2.5 : 1.5),
       opacity: 1,
-      color: isSelected ? "#000000" : "#ffffff",
+      color: isSelected ? "#000000" : (isFilteredTierActive ? "#0f172a" : "#ffffff"),
       dashArray: isSelected ? "3" : undefined,
-      fillOpacity: isSelected ? 0.9 : 0.72,
+      fillOpacity: isSelected ? 0.95 : (isFilteredTierActive ? 0.9 : 0.75),
     };
   };
 
@@ -333,6 +370,46 @@ export function RiskChoroplethMap({
     });
   };
 
+  // Category counts for all metrics
+  const categoryCounts = useMemo(() => {
+    let lowRisk = 0, medRisk = 0, highRisk = 0, veryHighRisk = 0;
+    let mcv1Target = 0, mcv1Suboptimal = 0, mcv1Poor = 0, mcv1Critical = 0;
+    let mcv2Target = 0, mcv2Moderate = 0, mcv2Low = 0, mcv2Critical = 0;
+    let dropLow = 0, dropHigh = 0, dropSevere = 0;
+
+    for (const d of effectiveData) {
+      // Risk categories
+      if (d.riskCategory === "LOW") lowRisk++;
+      else if (d.riskCategory === "MEDIUM") medRisk++;
+      else if (d.riskCategory === "HIGH") highRisk++;
+      else if (d.riskCategory === "VERY_HIGH") veryHighRisk++;
+
+      // MCV1
+      if (d.mcv1Coverage >= 90) mcv1Target++;
+      else if (d.mcv1Coverage >= 80) mcv1Suboptimal++;
+      else if (d.mcv1Coverage >= 70) mcv1Poor++;
+      else mcv1Critical++;
+
+      // MCV2
+      if (d.mcv2Coverage >= 80) mcv2Target++;
+      else if (d.mcv2Coverage >= 70) mcv2Moderate++;
+      else if (d.mcv2Coverage >= 60) mcv2Low++;
+      else mcv2Critical++;
+
+      // Dropout
+      if (d.dropoutRate <= 10) dropLow++;
+      else if (d.dropoutRate <= 19.9) dropHigh++;
+      else dropSevere++;
+    }
+
+    return {
+      risk: { low: lowRisk, medium: medRisk, high: highRisk, veryHigh: veryHighRisk, total: effectiveData.length },
+      mcv1: { target: mcv1Target, suboptimal: mcv1Suboptimal, poor: mcv1Poor, critical: mcv1Critical },
+      mcv2: { target: mcv2Target, moderate: mcv2Moderate, low: mcv2Low, critical: mcv2Critical },
+      dropout: { low: dropLow, high: dropHigh, severe: dropSevere },
+    };
+  }, [effectiveData]);
+
   // KPIs
   const summary = useMemo(() => {
     if (!effectiveData.length) return { mcv1Avg: 0, mcv2Avg: 0, dropoutAvg: 0, targetMetCount: 0, highRiskCount: 0 };
@@ -361,14 +438,29 @@ export function RiskChoroplethMap({
       <CardHeader className="pb-3 border-b bg-muted/20">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <Layers className="w-5 h-5 text-primary" />
               <CardTitle className="text-base font-semibold">
                 {countryName} • Coverage Performance & Vulnerability Map
               </CardTitle>
-              <Badge variant="outline" className="text-xs bg-background">
-                {effectiveData.length} {adminLevelLabel}s
-              </Badge>
+              {selectedCategoryFilter && selectedCategoryFilter !== "ALL" ? (
+                <Badge className="text-xs bg-primary text-primary-foreground gap-1 font-semibold">
+                  <Filter className="w-3 h-3" />
+                  {selectedCategoryFilter.replace("_", " ")} Risk: {
+                    selectedCategoryFilter === "LOW"
+                      ? categoryCounts.risk.low
+                      : selectedCategoryFilter === "MEDIUM"
+                        ? categoryCounts.risk.medium
+                        : selectedCategoryFilter === "HIGH"
+                          ? categoryCounts.risk.high
+                          : categoryCounts.risk.veryHigh
+                  } of {effectiveData.length} {adminLevelLabel}s
+                </Badge>
+              ) : (
+                <Badge variant="outline" className="text-xs bg-background">
+                  {effectiveData.length} {adminLevelLabel}s
+                </Badge>
+              )}
             </div>
             <CardDescription className="text-xs mt-1">
               Interactive choropleth visualization of routine immunization indicators aligned with WHO VPD surveillance benchmarks.
@@ -382,12 +474,24 @@ export function RiskChoroplethMap({
                 <SelectValue placeholder="Select Layer Metric" />
               </SelectTrigger>
               <SelectContent>
+                <SelectItem value="risk">WHO Programmatic Risk Score</SelectItem>
                 <SelectItem value="mcv1">Routine MCV1 Coverage (%)</SelectItem>
                 <SelectItem value="mcv2">Routine MCV2 Coverage (%)</SelectItem>
                 <SelectItem value="dropout">Penta1 to MCV1 Dropout (%)</SelectItem>
-                <SelectItem value="risk">WHO Programmatic Risk Score</SelectItem>
               </SelectContent>
             </Select>
+
+            {selectedCategoryFilter && selectedCategoryFilter !== "ALL" && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-8 text-xs gap-1 border-primary/40 text-primary hover:bg-primary/10"
+                onClick={() => handleCategoryFilter("ALL")}
+              >
+                <RotateCcw className="w-3 h-3" />
+                Reset Tier Filter
+              </Button>
+            )}
 
             {selectedDistrict && (
               <Button
@@ -468,7 +572,7 @@ export function RiskChoroplethMap({
               <>
                 <GeoJSON
                   ref={geoJsonRef}
-                  key={`${effectiveBoundaryId}-${metric}-${selectedDistrictId}`}
+                  key={`${effectiveBoundaryId}-${metric}-${selectedDistrictId}-${selectedCategoryFilter}`}
                   data={geoJsonData}
                   style={styleFeature}
                   onEachFeature={onEachFeature}
@@ -493,81 +597,208 @@ export function RiskChoroplethMap({
 
             {metric === "mcv1" && (
               <div className="space-y-1 text-[11px]">
-                <div className="flex items-center gap-2">
-                  <span className="w-3.5 h-3.5 rounded bg-[#10b981] inline-block border border-black/10" />
-                  <span>&ge; 90% Target Met (High population immunity)</span>
+                <div className="flex items-center justify-between p-1 rounded hover:bg-muted/50">
+                  <div className="flex items-center gap-2">
+                    <span className="w-3.5 h-3.5 rounded bg-[#10b981] inline-block border border-black/10 shrink-0" />
+                    <span>&ge; 90% Target Met (High population immunity)</span>
+                  </div>
+                  <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-4 font-semibold ml-1.5 shrink-0">
+                    {categoryCounts.mcv1.target}
+                  </Badge>
                 </div>
-                <div className="flex items-center gap-2">
-                  <span className="w-3.5 h-3.5 rounded bg-[#84cc16] inline-block border border-black/10" />
-                  <span>80% – 89% Suboptimal immunity</span>
+                <div className="flex items-center justify-between p-1 rounded hover:bg-muted/50">
+                  <div className="flex items-center gap-2">
+                    <span className="w-3.5 h-3.5 rounded bg-[#84cc16] inline-block border border-black/10 shrink-0" />
+                    <span>80% – 89% Suboptimal immunity</span>
+                  </div>
+                  <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-4 font-semibold ml-1.5 shrink-0">
+                    {categoryCounts.mcv1.suboptimal}
+                  </Badge>
                 </div>
-                <div className="flex items-center gap-2">
-                  <span className="w-3.5 h-3.5 rounded bg-[#f59e0b] inline-block border border-black/10" />
-                  <span>70% – 79% Poor coverage</span>
+                <div className="flex items-center justify-between p-1 rounded hover:bg-muted/50">
+                  <div className="flex items-center gap-2">
+                    <span className="w-3.5 h-3.5 rounded bg-[#f59e0b] inline-block border border-black/10 shrink-0" />
+                    <span>70% – 79% Poor coverage</span>
+                  </div>
+                  <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-4 font-semibold ml-1.5 shrink-0">
+                    {categoryCounts.mcv1.poor}
+                  </Badge>
                 </div>
-                <div className="flex items-center gap-2">
-                  <span className="w-3.5 h-3.5 rounded bg-[#ef4444] inline-block border border-black/10" />
-                  <span>&lt; 70% Critical susceptibility accumulation</span>
+                <div className="flex items-center justify-between p-1 rounded hover:bg-muted/50">
+                  <div className="flex items-center gap-2">
+                    <span className="w-3.5 h-3.5 rounded bg-[#ef4444] inline-block border border-black/10 shrink-0" />
+                    <span>&lt; 70% Critical susceptibility accumulation</span>
+                  </div>
+                  <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-4 font-semibold ml-1.5 shrink-0">
+                    {categoryCounts.mcv1.critical}
+                  </Badge>
                 </div>
               </div>
             )}
 
             {metric === "mcv2" && (
               <div className="space-y-1 text-[11px]">
-                <div className="flex items-center gap-2">
-                  <span className="w-3.5 h-3.5 rounded bg-[#10b981] inline-block border border-black/10" />
-                  <span>&ge; 80% Full 2-dose protection</span>
+                <div className="flex items-center justify-between p-1 rounded hover:bg-muted/50">
+                  <div className="flex items-center gap-2">
+                    <span className="w-3.5 h-3.5 rounded bg-[#10b981] inline-block border border-black/10 shrink-0" />
+                    <span>&ge; 80% Full 2-dose protection</span>
+                  </div>
+                  <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-4 font-semibold ml-1.5 shrink-0">
+                    {categoryCounts.mcv2.target}
+                  </Badge>
                 </div>
-                <div className="flex items-center gap-2">
-                  <span className="w-3.5 h-3.5 rounded bg-[#84cc16] inline-block border border-black/10" />
-                  <span>70% – 79% Moderate 2-dose completion</span>
+                <div className="flex items-center justify-between p-1 rounded hover:bg-muted/50">
+                  <div className="flex items-center gap-2">
+                    <span className="w-3.5 h-3.5 rounded bg-[#84cc16] inline-block border border-black/10 shrink-0" />
+                    <span>70% – 79% Moderate 2-dose completion</span>
+                  </div>
+                  <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-4 font-semibold ml-1.5 shrink-0">
+                    {categoryCounts.mcv2.moderate}
+                  </Badge>
                 </div>
-                <div className="flex items-center gap-2">
-                  <span className="w-3.5 h-3.5 rounded bg-[#f59e0b] inline-block border border-black/10" />
-                  <span>60% – 69% Low 2-dose coverage</span>
+                <div className="flex items-center justify-between p-1 rounded hover:bg-muted/50">
+                  <div className="flex items-center gap-2">
+                    <span className="w-3.5 h-3.5 rounded bg-[#f59e0b] inline-block border border-black/10 shrink-0" />
+                    <span>60% – 69% Low 2-dose coverage</span>
+                  </div>
+                  <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-4 font-semibold ml-1.5 shrink-0">
+                    {categoryCounts.mcv2.low}
+                  </Badge>
                 </div>
-                <div className="flex items-center gap-2">
-                  <span className="w-3.5 h-3.5 rounded bg-[#ef4444] inline-block border border-black/10" />
-                  <span>&lt; 60% Critical 2-dose failure</span>
+                <div className="flex items-center justify-between p-1 rounded hover:bg-muted/50">
+                  <div className="flex items-center gap-2">
+                    <span className="w-3.5 h-3.5 rounded bg-[#ef4444] inline-block border border-black/10 shrink-0" />
+                    <span>&lt; 60% Critical 2-dose failure</span>
+                  </div>
+                  <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-4 font-semibold ml-1.5 shrink-0">
+                    {categoryCounts.mcv2.critical}
+                  </Badge>
                 </div>
               </div>
             )}
 
             {metric === "dropout" && (
               <div className="space-y-1 text-[11px]">
-                <div className="flex items-center gap-2">
-                  <span className="w-3.5 h-3.5 rounded bg-[#10b981] inline-block border border-black/10" />
-                  <span>&le; 10% Low Dropout (System retention good)</span>
+                <div className="flex items-center justify-between p-1 rounded hover:bg-muted/50">
+                  <div className="flex items-center gap-2">
+                    <span className="w-3.5 h-3.5 rounded bg-[#10b981] inline-block border border-black/10 shrink-0" />
+                    <span>&le; 10% Low Dropout (System retention good)</span>
+                  </div>
+                  <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-4 font-semibold ml-1.5 shrink-0">
+                    {categoryCounts.dropout.low}
+                  </Badge>
                 </div>
-                <div className="flex items-center gap-2">
-                  <span className="w-3.5 h-3.5 rounded bg-[#f59e0b] inline-block border border-black/10" />
-                  <span>10.1% – 19.9% High Dropout</span>
+                <div className="flex items-center justify-between p-1 rounded hover:bg-muted/50">
+                  <div className="flex items-center gap-2">
+                    <span className="w-3.5 h-3.5 rounded bg-[#f59e0b] inline-block border border-black/10 shrink-0" />
+                    <span>10.1% – 19.9% High Dropout</span>
+                  </div>
+                  <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-4 font-semibold ml-1.5 shrink-0">
+                    {categoryCounts.dropout.high}
+                  </Badge>
                 </div>
-                <div className="flex items-center gap-2">
-                  <span className="w-3.5 h-3.5 rounded bg-[#ef4444] inline-block border border-black/10" />
-                  <span>&ge; 20% Severe service delivery bottleneck</span>
+                <div className="flex items-center justify-between p-1 rounded hover:bg-muted/50">
+                  <div className="flex items-center gap-2">
+                    <span className="w-3.5 h-3.5 rounded bg-[#ef4444] inline-block border border-black/10 shrink-0" />
+                    <span>&ge; 20% Severe service delivery bottleneck</span>
+                  </div>
+                  <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-4 font-semibold ml-1.5 shrink-0">
+                    {categoryCounts.dropout.severe}
+                  </Badge>
                 </div>
               </div>
             )}
 
             {metric === "risk" && (
               <div className="space-y-1 text-[11px]">
-                <div className="flex items-center gap-2">
-                  <span className="w-3.5 h-3.5 rounded bg-[#10b981] inline-block border border-black/10" />
-                  <span>Low Risk (0–47 pts)</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="w-3.5 h-3.5 rounded bg-[#f59e0b] inline-block border border-black/10" />
-                  <span>Medium Risk (48–54 pts)</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="w-3.5 h-3.5 rounded bg-[#f97316] inline-block border border-black/10" />
-                  <span>High Risk (55–60 pts)</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="w-3.5 h-3.5 rounded bg-[#ef4444] inline-block border border-black/10" />
-                  <span>Very High Risk (61–100 pts)</span>
-                </div>
+                <button
+                  type="button"
+                  title="Click to filter map to Low Risk districts"
+                  onClick={() => handleCategoryFilter(selectedCategoryFilter === "LOW" ? "ALL" : "LOW")}
+                  className={`w-full flex items-center justify-between p-1.5 rounded-md transition-all text-left cursor-pointer border ${
+                    selectedCategoryFilter === "LOW"
+                      ? "bg-emerald-500/15 border-emerald-500 font-semibold text-emerald-900 dark:text-emerald-200 shadow-sm"
+                      : "hover:bg-muted/80 border-transparent text-foreground"
+                  }`}
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="w-3.5 h-3.5 rounded bg-[#10b981] inline-block border border-black/10 shrink-0" />
+                    <span className="truncate">Low Risk (0–47 pts)</span>
+                  </div>
+                  <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-4 bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 font-bold ml-2 shrink-0">
+                    {categoryCounts.risk.low}
+                  </Badge>
+                </button>
+
+                <button
+                  type="button"
+                  title="Click to filter map to Medium Risk districts"
+                  onClick={() => handleCategoryFilter(selectedCategoryFilter === "MEDIUM" ? "ALL" : "MEDIUM")}
+                  className={`w-full flex items-center justify-between p-1.5 rounded-md transition-all text-left cursor-pointer border ${
+                    selectedCategoryFilter === "MEDIUM"
+                      ? "bg-amber-500/15 border-amber-500 font-semibold text-amber-900 dark:text-amber-200 shadow-sm"
+                      : "hover:bg-muted/80 border-transparent text-foreground"
+                  }`}
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="w-3.5 h-3.5 rounded bg-[#f59e0b] inline-block border border-black/10 shrink-0" />
+                    <span className="truncate">Medium Risk (48–54 pts)</span>
+                  </div>
+                  <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-4 bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300 font-bold ml-2 shrink-0">
+                    {categoryCounts.risk.medium}
+                  </Badge>
+                </button>
+
+                <button
+                  type="button"
+                  title="Click to filter map to High Risk districts"
+                  onClick={() => handleCategoryFilter(selectedCategoryFilter === "HIGH" ? "ALL" : "HIGH")}
+                  className={`w-full flex items-center justify-between p-1.5 rounded-md transition-all text-left cursor-pointer border ${
+                    selectedCategoryFilter === "HIGH"
+                      ? "bg-orange-500/15 border-orange-500 font-semibold text-orange-900 dark:text-orange-200 shadow-sm"
+                      : "hover:bg-muted/80 border-transparent text-foreground"
+                  }`}
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="w-3.5 h-3.5 rounded bg-[#f97316] inline-block border border-black/10 shrink-0" />
+                    <span className="truncate">High Risk (55–60 pts)</span>
+                  </div>
+                  <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-4 bg-orange-100 dark:bg-orange-950 text-orange-800 dark:text-orange-300 font-bold ml-2 shrink-0">
+                    {categoryCounts.risk.high}
+                  </Badge>
+                </button>
+
+                <button
+                  type="button"
+                  title="Click to filter map to Very High Risk districts"
+                  onClick={() => handleCategoryFilter(selectedCategoryFilter === "VERY_HIGH" ? "ALL" : "VERY_HIGH")}
+                  className={`w-full flex items-center justify-between p-1.5 rounded-md transition-all text-left cursor-pointer border ${
+                    selectedCategoryFilter === "VERY_HIGH"
+                      ? "bg-rose-500/15 border-rose-500 font-semibold text-rose-900 dark:text-rose-200 shadow-sm"
+                      : "hover:bg-muted/80 border-transparent text-foreground"
+                  }`}
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="w-3.5 h-3.5 rounded bg-[#ef4444] inline-block border border-black/10 shrink-0" />
+                    <span className="truncate">Very High Risk (61–100 pts)</span>
+                  </div>
+                  <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-4 bg-rose-100 dark:bg-rose-950 text-rose-800 dark:text-rose-300 font-bold ml-2 shrink-0">
+                    {categoryCounts.risk.veryHigh}
+                  </Badge>
+                </button>
+
+                {selectedCategoryFilter && selectedCategoryFilter !== "ALL" && (
+                  <div className="pt-1.5 border-t flex items-center justify-between">
+                    <span className="text-[10px] text-muted-foreground">Filtered: {selectedCategoryFilter.replace('_', ' ')}</span>
+                    <button
+                      type="button"
+                      onClick={() => handleCategoryFilter("ALL")}
+                      className="text-[10px] text-primary hover:underline font-semibold cursor-pointer"
+                    >
+                      Show All ({categoryCounts.risk.total})
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </div>
