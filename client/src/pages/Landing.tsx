@@ -511,8 +511,12 @@ export default function Landing() {
     (t) => t && typeof t.id === "string" && typeof t.name === "string"
   );
   const activeTenantsList = tenants.length > 0 ? tenants : DEFAULT_TENANTS;
-  const tenantCount = activeTenantsList.length;
-  const [loginOpen, setLoginOpen] = useState(false);
+  const [loginOpen, setLoginOpen] = useState(() => {
+    if (typeof window !== "undefined") {
+      return window.location.search.includes("login") || window.location.hash === "#login";
+    }
+    return false;
+  });
   const { researchUrl, docsUrl } = getDomainLinks();
 
   return (

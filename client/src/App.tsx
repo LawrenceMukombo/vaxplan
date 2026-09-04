@@ -23,6 +23,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useQuery } from "@tanstack/react-query";
 import { IdleTimeoutController } from "@/components/IdleTimeoutController";
 import Landing from "@/pages/Landing";
+import LoginPage from "@/pages/Login";
 import NotFound from "@/pages/not-found";
 import { TenantSwitcher } from "@/components/TenantSwitcher";
 import { InstallPrompt } from "@/components/InstallPrompt";
@@ -143,25 +144,7 @@ function RouteFallback() {
   );
 }
 function OfflineAuthLockScreen() {
-  const online = typeof navigator === "undefined" ? true : navigator.onLine;
-  return (
-    <div className="min-h-screen bg-background text-foreground flex items-center justify-center p-6">
-      <div className="w-full max-w-md rounded-lg border bg-card p-8 text-center shadow-sm">
-        <div className="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-md bg-primary text-primary-foreground">
-          <ShieldCheck className="h-7 w-7" />
-        </div>
-        <h1 className="text-2xl font-semibold tracking-tight">VaxPlan sign-in required</h1>
-        <p className="mt-3 text-sm text-muted-foreground">{getOfflineAuthMessage()}</p>
-        <button
-          type="button"
-          className="mt-6 inline-flex h-10 items-center justify-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90"
-          onClick={() => window.location.reload()}
-        >
-          {online ? "Continue" : "Retry connection"}
-        </button>
-      </div>
-    </div>
-  );
+  return <LoginPage />;
 }
 // Public, unauthenticated chrome for pages that are meant to be viewable
 // without signing in (e.g. the Data Sources & Acknowledgements page). Provides
@@ -489,10 +472,11 @@ function AuthenticatedLayout() {
     );
   }
   if (!user) {
+    const pathname = typeof window !== "undefined" ? window.location.pathname : "";
     const offline = typeof navigator !== "undefined" && !navigator.onLine;
     const logoutState = getLogoutState();
-    if (offline || logoutState?.pendingServerLogout) {
-      return <OfflineAuthLockScreen />;
+    if (offline || logoutState?.pendingServerLogout || pathname === "/login") {
+      return <LoginPage />;
     }
     return <Landing />;
   }
