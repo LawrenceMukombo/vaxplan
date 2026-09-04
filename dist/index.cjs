@@ -35091,6 +35091,10 @@ var init_realtime = __esm({
       const method = req.method.toUpperCase();
       if (method === "GET" || method === "HEAD" || method === "OPTIONS") return next();
       if (!req.path.startsWith("/api/")) return next();
+      const p = req.path.toLowerCase();
+      if (p.startsWith("/api/analytics") || p.startsWith("/api/auth") || p.startsWith("/api/presence") || p.startsWith("/api/version") || p.startsWith("/api/notifications/read")) {
+        return next();
+      }
       res.on("finish", () => {
         if (res.statusCode >= 200 && res.statusCode < 300) {
           const tenantId = req.tenantId;

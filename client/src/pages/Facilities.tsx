@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { DataTable } from "@/components/DataTable";
 import { Button } from "@/components/ui/button";
@@ -193,6 +193,8 @@ export default function Facilities() {
   // Manager instead of letting them click into a red error toast.
   const { data: boundaries = [] } = useQuery<any[]>({
     queryKey: ["/api/boundaries"],
+    staleTime: 10 * 60 * 1000,
+    refetchOnWindowFocus: false,
   });
   const hasBoundaries = Array.isArray(boundaries) && boundaries.length > 0;
   const { user } = useAuth();
@@ -396,15 +398,21 @@ export default function Facilities() {
   // Retrieve Tenant Context for premium multitenant configuration and dynamic terminology translation
   const { data: tenantInfo } = useQuery<any>({
     queryKey: ["/api/me/tenant"],
+    staleTime: 10 * 60 * 1000,
+    refetchOnWindowFocus: false,
   });
 
+  const prevTenantIdRef = useRef<string | null>(null);
   // Reset all geographic filters on tenant/country switch to prevent cross-tenant ID bleed
   useEffect(() => {
     if (tenantInfo?.id) {
-      setSelectedRegionId(null);
-      setSelectedProvinceId(null);
-      setSelectedDistrictId(null);
-      setSelectedFacilityId(null);
+      if (prevTenantIdRef.current && prevTenantIdRef.current !== String(tenantInfo.id)) {
+        setSelectedRegionId(null);
+        setSelectedProvinceId(null);
+        setSelectedDistrictId(null);
+        setSelectedFacilityId(null);
+      }
+      prevTenantIdRef.current = String(tenantInfo.id);
     }
   }, [tenantInfo?.id]);
 
@@ -569,12 +577,16 @@ export default function Facilities() {
   const { data: regions, isLoading: loadingRegions } = useQuery<Region[]>({
     queryKey: ["/api/regions", tenantQueryKey],
     enabled: !!tenantInfo?.id,
+    staleTime: 10 * 60 * 1000,
+    refetchOnWindowFocus: false,
   });
 
   // Fetch all provinces for the tenant.
   const { data: provinces, isLoading: loadingProvinces } = useQuery<Province[]>({
     queryKey: ["/api/provinces", tenantQueryKey],
     enabled: !!tenantInfo?.id,
+    staleTime: 10 * 60 * 1000,
+    refetchOnWindowFocus: false,
     queryFn: async () => {
       const res = await fetch(`/api/provinces?tenantId=${encodeURIComponent(tenantQueryKey)}`, {
         credentials: "include",
@@ -589,6 +601,8 @@ export default function Facilities() {
   const { data: allDistricts, isLoading: loadingDistricts } = useQuery<District[]>({
     queryKey: ["/api/districts", tenantQueryKey],
     enabled: !!tenantInfo?.id,
+    staleTime: 10 * 60 * 1000,
+    refetchOnWindowFocus: false,
     queryFn: async () => {
       const res = await fetch(`/api/districts?tenantId=${encodeURIComponent(tenantQueryKey)}`, {
         credentials: "include",
@@ -602,6 +616,8 @@ export default function Facilities() {
   const { data: facilities, isLoading: loadingFacilities } = useQuery<Facility[]>({
     queryKey: ["/api/facilities", tenantQueryKey],
     enabled: !!tenantInfo?.id,
+    staleTime: 5 * 60 * 1000,
+    refetchOnWindowFocus: false,
     queryFn: async () => {
       const res = await fetch(`/api/facilities?tenantId=${encodeURIComponent(tenantQueryKey)}`, {
         credentials: "include",
@@ -616,15 +632,20 @@ export default function Facilities() {
     },
   });
 
+  const handledUrlFacilityIdRef = useRef<number | null>(null);
   useEffect(() => {
     const search = typeof window !== "undefined" ? window.location.search : "";
     const facilityIdParam = new URLSearchParams(search).get("facilityId");
     const facilityId = facilityIdParam ? Number(facilityIdParam) : NaN;
     if (!Number.isFinite(facilityId) || facilityId <= 0 || !facilities) return;
 
+    // Only process URL facilityId once to prevent scrolling loops on background refetches
+    if (handledUrlFacilityIdRef.current === facilityId) return;
+
     const facility = facilities.find((item) => Number(item.id) === facilityId);
     if (!facility) return;
 
+    handledUrlFacilityIdRef.current = facilityId;
     setSelectedFacilityId(facility.id);
     if (facility.districtId && allDistricts) {
       setSelectedDistrictId(facility.districtId);
@@ -643,6 +664,8 @@ export default function Facilities() {
   const { data: villages, isLoading: loadingVillages } = useQuery<Village[]>({
     queryKey: ["/api/villages", tenantQueryKey],
     enabled: !!tenantInfo?.id,
+    staleTime: 5 * 60 * 1000,
+    refetchOnWindowFocus: false,
     queryFn: async () => {
       const res = await fetch("/api/villages", { credentials: "include" });
       if (!res.ok) throw new Error("Failed to fetch villages");
@@ -1588,6 +1611,8 @@ export default function Facilities() {
   // Fetch population data list
   const { data: populationList } = useQuery<any[]>({
     queryKey: ["/api/population"],
+    staleTime: 5 * 60 * 1000,
+    refetchOnWindowFocus: false,
   });
 
   const toPositiveNumber = (value: unknown): number => {
@@ -2596,7 +2621,10 @@ export default function Facilities() {
   // own facility; district staff are locked to their district; coordinators and
   // admins get the full searchable Province → District → Facility cascade.
 
-  if (isLoading) {
+  // Only show the initial loading skeleton on first mount when core data has not arrived yet.
+  // Never unmount or flash skeletons during subsequent background refetches when data is already loaded in memory.
+  const hasLoadedCoreData = Array.isArray(facilities) && Array.isArray(allDistricts) && Array.isArray(provinces);
+  if (isLoading && !hasLoadedCoreData) {
     return (
       <div className="p-6 space-y-6">
         <div className="flex items-center justify-between">

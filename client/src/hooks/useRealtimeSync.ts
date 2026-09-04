@@ -75,7 +75,7 @@ export function useRealtimeSync(): void {
           predicate: (q) =>
             typeof q.queryKey?.[0] === "string" &&
             (q.queryKey[0] as string).startsWith("/api"),
-          refetchType: "all",
+          refetchType: "active",
         });
       } catch {
         /* non-fatal */

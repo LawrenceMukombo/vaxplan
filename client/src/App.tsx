@@ -236,7 +236,12 @@ function HelpGate() {
 }
 // VgieGate removed: VGIE routes now render within the main AuthenticatedRouter shell.
 function AuthenticatedRouter({ user }: { user: User }) {
-  const { data: tenant } = useQuery<any>({ queryKey: ["/api/me/tenant"], retry: false });
+  const { data: tenant } = useQuery<any>({
+    queryKey: ["/api/me/tenant"],
+    retry: false,
+    staleTime: 10 * 60 * 1000,
+    refetchOnWindowFocus: false,
+  });
   useEffect(() => {
     if (tenant) {
       localStorage.setItem("vaxplan_active_tenant", JSON.stringify(tenant));
