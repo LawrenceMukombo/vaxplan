@@ -110,7 +110,19 @@ export function RiskChoroplethMap({
     staleTime: 60 * 60 * 1000,
   });
 
-  const effectiveBoundaryId = boundaryId || contextData?.defaultBoundaryId;
+  const effectiveBoundaryId =
+    boundaryId ||
+    contextData?.boundaryId ||
+    contextData?.defaultBoundaryId ||
+    (countryCode === "ZAF"
+      ? "a942c119-c045-492f-97ee-b95a8dbb8440"
+      : countryCode === "ZMB"
+        ? "1edd5bcf-d20a-4910-a3cb-dd44c7e84c61"
+        : countryCode === "SSD"
+          ? "af760f67-cc8e-4075-8938-777c387f141f"
+          : countryCode === "PNG"
+            ? "90336ae8-7f06-4133-b5dd-d962a145d5c2"
+            : null);
 
   // Fallback query if data is empty (ensures the map always renders coverage indicators)
   const { data: fallbackResponse } = useQuery<{ performance?: DistrictCoveragePerformance[] }>({

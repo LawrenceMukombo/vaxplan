@@ -117,6 +117,28 @@ export async function applyRiskPermissionsAndSeed(db: NodePgDatabase<any>): Prom
   if (ssdTenant) {
     await seedAssessmentForTenant(db, ssdTenant.id, "SSD", "2024 National Measles Programmatic Risk Assessment", 2024);
   }
+
+  // 4. Seed realistic assessment for Zambia (ZMB)
+  const [zmbTenant] = await db
+    .select({ id: tenants.id })
+    .from(tenants)
+    .where(eq(tenants.countryCode, "ZMB"))
+    .limit(1);
+
+  if (zmbTenant) {
+    await seedAssessmentForTenant(db, zmbTenant.id, "ZMB", "2025 National Measles Programmatic Risk Assessment", 2025);
+  }
+
+  // 5. Seed realistic assessment for Papua New Guinea (PNG)
+  const [pngTenant] = await db
+    .select({ id: tenants.id })
+    .from(tenants)
+    .where(eq(tenants.countryCode, "PNG"))
+    .limit(1);
+
+  if (pngTenant) {
+    await seedAssessmentForTenant(db, pngTenant.id, "PNG", "2024 National Measles Programmatic Risk Assessment", 2024);
+  }
 }
 
 async function seedAssessmentForTenant(
