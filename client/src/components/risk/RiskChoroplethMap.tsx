@@ -20,12 +20,14 @@ import {
   Info,
   Activity,
   ShieldAlert,
+  ShieldCheck,
   CheckCircle,
   AlertTriangle,
   TrendingDown,
   TrendingUp,
   Filter,
 } from "lucide-react";
+import * as turf from "@turf/turf";
 import { getTenantMapDefaults, type TenantLike } from "@/lib/tenantGeo";
 import { usePersistedBasemap, BasemapTileLayer, BasemapSwitcher, type Basemap } from "@/components/map/BasemapToggle";
 
@@ -61,6 +63,8 @@ interface RiskChoroplethMapProps {
   initialMetric?: ChoroplethMetric;
   metric?: ChoroplethMetric;
   onMetricChange?: (metric: ChoroplethMetric) => void;
+  isolateCountry?: boolean;
+  onIsolateCountryChange?: (isolate: boolean) => void;
 }
 
 export type ChoroplethMetric = "mcv1" | "mcv2" | "dropout" | "risk";
@@ -108,6 +112,8 @@ export function RiskChoroplethMap({
   initialMetric,
   metric: controlledMetric,
   onMetricChange,
+  isolateCountry: controlledIsolateCountry,
+  onIsolateCountryChange,
 }: RiskChoroplethMapProps) {
   const [internalFilter, setInternalFilter] = useState<string>("ALL");
   const selectedCategoryFilter = controlledFilter !== undefined ? controlledFilter : internalFilter;
@@ -126,6 +132,13 @@ export function RiskChoroplethMap({
   const setMetric = (m: ChoroplethMetric) => {
     if (onMetricChange) onMetricChange(m);
     if (controlledMetric === undefined) setInternalMetric(m);
+  };
+
+  const [internalIsolateCountry, setInternalIsolateCountry] = useState<boolean>(true);
+  const isolateCountry = controlledIsolateCountry !== undefined ? controlledIsolateCountry : internalIsolateCountry;
+  const setIsolateCountry = (iso: boolean) => {
+    if (onIsolateCountryChange) onIsolateCountryChange(iso);
+    if (controlledIsolateCountry === undefined) setInternalIsolateCountry(iso);
   };
 
   const [searchTerm, setSearchTerm] = useState("");
@@ -181,6 +194,49 @@ export function RiskChoroplethMap({
     enabled: Boolean(effectiveBoundaryId),
     staleTime: 60 * 60 * 1000, // Boundaries are static, cache for 1 hr
   });
+
+  // Inverted country mask: covers all neighboring countries and outer world with solid clean background
+  const countryMaskGeoJson = useMemo(() => {
+    if (!geoJsonData || !isolateCountry) return null;
+    try {
+      if (!geoJsonData.features || geoJsonData.features.length === 0) return null;
+      return (turf as any).mask(geoJsonData);
+    } catch (err) {
+      console.warn("Could not generate country mask via turf.mask:", err);
+      try {
+        const worldRing = [
+          [-180, -89.9],
+          [-180, 89.9],
+          [180, 89.9],
+          [180, -89.9],
+          [-180, -89.9],
+        ];
+        const interiorRings: any[] = [];
+        for (const f of geoJsonData.features) {
+          const g = f.geometry;
+          if (!g) continue;
+          if (g.type === "Polygon" && Array.isArray(g.coordinates?.[0])) {
+            interiorRings.push(g.coordinates[0]);
+          } else if (g.type === "MultiPolygon" && Array.isArray(g.coordinates)) {
+            for (const poly of g.coordinates) {
+              if (Array.isArray(poly?.[0])) interiorRings.push(poly[0]);
+            }
+          }
+        }
+        if (interiorRings.length === 0) return null;
+        return {
+          type: "Feature",
+          properties: { isMask: true },
+          geometry: {
+            type: "Polygon",
+            coordinates: [worldRing, ...interiorRings],
+          },
+        };
+      } catch (e2) {
+        return null;
+      }
+    }
+  }, [geoJsonData, isolateCountry]);
 
   const tenantMock: TenantLike = { countryCode };
   const mapDefaults = useMemo(() => getTenantMapDefaults(tenantMock), [countryCode]);
@@ -479,7 +535,7 @@ export function RiskChoroplethMap({
             </CardDescription>
           </div>
 
-          {/* Metric Selector & Search */}
+            {/* Metric Selector & Search */}
           <div className="flex flex-wrap items-center gap-2">
             <Select value={metric} onValueChange={(val: ChoroplethMetric) => setMetric(val)}>
               <SelectTrigger className="h-8 text-xs w-[220px] bg-background">
@@ -492,6 +548,17 @@ export function RiskChoroplethMap({
                 <SelectItem value="dropout">Penta1 to MCV1 Dropout (%)</SelectItem>
               </SelectContent>
             </Select>
+
+            <Button
+              size="sm"
+              variant={isolateCountry ? "secondary" : "outline"}
+              className={`h-8 text-xs gap-1.5 ${isolateCountry ? "bg-primary/10 border-primary/40 text-primary font-medium" : "text-muted-foreground"}`}
+              onClick={() => setIsolateCountry(!isolateCountry)}
+              title={isolateCountry ? "Currently showing country only (masking neighboring nations). Click to reveal neighboring nations." : "Showing regional basemap. Click to isolate country map only."}
+            >
+              <ShieldCheck className="w-3.5 h-3.5 text-primary" />
+              <span>{isolateCountry ? "Country Only (Active)" : "Show Neighboring Nations"}</span>
+            </Button>
 
             {selectedCategoryFilter && selectedCategoryFilter !== "ALL" && (
               <Button
@@ -582,9 +649,25 @@ export function RiskChoroplethMap({
 
             {geoJsonData && (
               <>
+                {isolateCountry && countryMaskGeoJson && (
+                  <GeoJSON
+                    key={`mask-${effectiveBoundaryId}`}
+                    data={countryMaskGeoJson}
+                    style={{
+                      fillColor: "#f8fafc",
+                      fillOpacity: 1,
+                      stroke: true,
+                      color: "#64748b",
+                      weight: 1.5,
+                      className: "dark:fill-slate-900 fill-slate-50",
+                      interactive: false,
+                    }}
+                    interactive={false}
+                  />
+                )}
                 <GeoJSON
                   ref={geoJsonRef}
-                  key={`${effectiveBoundaryId}-${metric}-${selectedDistrictId}-${selectedCategoryFilter}`}
+                  key={`${effectiveBoundaryId}-${metric}-${selectedDistrictId}-${selectedCategoryFilter}-${isolateCountry}`}
                   data={geoJsonData}
                   style={styleFeature}
                   onEachFeature={onEachFeature}
