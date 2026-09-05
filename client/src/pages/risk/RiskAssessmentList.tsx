@@ -38,6 +38,8 @@ import {
   Sparkles,
   Maximize2,
   Minimize2,
+  LayoutGrid,
+  List,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -336,6 +338,7 @@ export default function RiskAssessmentList() {
 
   // Column Width Management & Resizing (Rule 24 Enterprise Tables)
   const DEFAULT_PERF_COL_WIDTHS = {
+    index: 44,
     district: 180,
     province: 150,
     mcv1: 120,
@@ -363,7 +366,7 @@ export default function RiskAssessmentList() {
     if (!resizingPerfCol) return;
     const handleMouseMove = (e: MouseEvent) => {
       const diff = e.clientX - resizePerfStartX.current;
-      const newWidth = Math.max(50, resizePerfStartWidth.current + diff);
+      const newWidth = Math.max(40, resizePerfStartWidth.current + diff);
       setPerfColWidths((prev) => ({ ...prev, [resizingPerfCol]: newWidth }));
     };
     const handleMouseUp = () => {
@@ -379,6 +382,7 @@ export default function RiskAssessmentList() {
 
   const handleStretchWidePerf = () => {
     setPerfColWidths({
+      index: 52,
       district: 240,
       province: 190,
       mcv1: 150,
@@ -392,6 +396,7 @@ export default function RiskAssessmentList() {
 
   const handleCompactPerf = () => {
     setPerfColWidths({
+      index: 40,
       district: 140,
       province: 110,
       mcv1: 90,
@@ -418,6 +423,69 @@ export default function RiskAssessmentList() {
     }
     return { total: performanceRows.length, low, med, high, veryHigh };
   }, [performanceRows]);
+
+  // Assessment Rounds Table State & Controls (Rule 24 Enterprise Tables)
+  const [roundsViewMode, setRoundsViewMode] = useState<"table" | "cards">("table");
+  const [roundsSearchTerm, setRoundsSearchTerm] = useState("");
+  const [roundsSortCol, setRoundsSortCol] = useState<"index" | "title" | "year" | "status" | "createdAt">("createdAt");
+  const [roundsSortDir, setRoundsSortDir] = useState<"asc" | "desc">("desc");
+  const [roundsPage, setRoundsPage] = useState(1);
+  const [roundsPageSize, setRoundsPageSize] = useState(10);
+
+  const filteredRounds = useMemo(() => {
+    return effectiveAssessments.filter((a) => {
+      if (!roundsSearchTerm.trim()) return true;
+      const term = roundsSearchTerm.toLowerCase();
+      return (
+        a.title.toLowerCase().includes(term) ||
+        (a.notes || "").toLowerCase().includes(term) ||
+        String(a.assessmentYear).includes(term) ||
+        (a.status || "").toLowerCase().includes(term) ||
+        (a.countryCode || "").toLowerCase().includes(term)
+      );
+    });
+  }, [effectiveAssessments, roundsSearchTerm]);
+
+  const sortedRounds = useMemo(() => {
+    return [...filteredRounds].sort((a, b) => {
+      if (roundsSortCol === "title") {
+        return roundsSortDir === "asc" ? a.title.localeCompare(b.title) : b.title.localeCompare(a.title);
+      }
+      if (roundsSortCol === "year") {
+        return roundsSortDir === "asc" ? a.assessmentYear - b.assessmentYear : b.assessmentYear - a.assessmentYear;
+      }
+      if (roundsSortCol === "status") {
+        return roundsSortDir === "asc" ? a.status.localeCompare(b.status) : b.status.localeCompare(a.status);
+      }
+      if (roundsSortCol === "createdAt") {
+        return roundsSortDir === "asc"
+          ? new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+          : new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+      }
+      return 0;
+    });
+  }, [filteredRounds, roundsSortCol, roundsSortDir]);
+
+  const paginatedRounds = useMemo(() => {
+    const start = (roundsPage - 1) * roundsPageSize;
+    return sortedRounds.slice(start, start + roundsPageSize);
+  }, [sortedRounds, roundsPage, roundsPageSize]);
+
+  const totalRoundsPages = Math.max(1, Math.ceil(sortedRounds.length / roundsPageSize));
+
+  const handleRoundsSort = (col: "index" | "title" | "year" | "status" | "createdAt") => {
+    if (roundsSortCol === col) {
+      setRoundsSortDir(roundsSortDir === "asc" ? "desc" : "asc");
+    } else {
+      setRoundsSortCol(col);
+      setRoundsSortDir("asc");
+    }
+  };
+
+  const getRoundsSortIcon = (col: "index" | "title" | "year" | "status" | "createdAt") => {
+    if (roundsSortCol !== col) return <ChevronsUpDown className="w-3 h-3 ml-1 opacity-50 inline" />;
+    return roundsSortDir === "asc" ? <ChevronUp className="w-3 h-3 ml-1 inline text-primary" /> : <ChevronDown className="w-3 h-3 ml-1 inline text-primary" />;
+  };
 
   // Create Mutation with robust error handling
   const createMutation = useMutation({
@@ -1129,13 +1197,27 @@ export default function RiskAssessmentList() {
                 <table className="w-full text-left text-xs border-collapse">
                   <thead className="bg-muted/90 border-b font-medium text-muted-foreground sticky top-0 z-30">
                     <tr>
+                      {/* FROZEN 1: INDEX (#) */}
                       <th
-                        className={`p-3 cursor-pointer select-none sticky left-0 z-40 bg-muted border-b ${
+                        className="p-3 text-center border-b border-r sticky left-0 z-40 bg-muted select-none"
+                        style={{
+                          width: `${perfColWidths.index}px`,
+                          minWidth: `${perfColWidths.index}px`,
+                          maxWidth: `${perfColWidths.index}px`,
+                        }}
+                      >
+                        #
+                      </th>
+
+                      {/* FROZEN 2: DISTRICT NAME */}
+                      <th
+                        className={`p-3 cursor-pointer select-none sticky z-40 bg-muted border-b ${
                           !visibleColumns.province
                             ? "border-r-2 border-slate-300 dark:border-slate-700 shadow-[4px_0_8px_-2px_rgba(0,0,0,0.15)]"
-                            : ""
+                            : "border-r"
                         }`}
                         style={{
+                          left: `${perfColWidths.index}px`,
                           width: `${perfColWidths.district}px`,
                           minWidth: `${perfColWidths.district}px`,
                           maxWidth: `${perfColWidths.district}px`,
@@ -1152,11 +1234,13 @@ export default function RiskAssessmentList() {
                           />
                         </div>
                       </th>
+
+                      {/* FROZEN 3: PROVINCE (WITH RIGHT DIVIDER SHADOW) */}
                       {visibleColumns.province && (
                         <th
                           className="p-3 cursor-pointer select-none sticky z-40 bg-muted border-b border-r-2 border-slate-300 dark:border-slate-700 shadow-[4px_0_8px_-2px_rgba(0,0,0,0.15)]"
                           style={{
-                            left: `${perfColWidths.district}px`,
+                            left: `${perfColWidths.index + perfColWidths.district}px`,
                             width: `${perfColWidths.province}px`,
                             minWidth: `${perfColWidths.province}px`,
                             maxWidth: `${perfColWidths.province}px`,
@@ -1299,51 +1383,69 @@ export default function RiskAssessmentList() {
                   <tbody className="divide-y">
                     {paginatedRows.length === 0 ? (
                       <tr>
-                        <td colSpan={8} className="p-8 text-center text-muted-foreground">
+                        <td colSpan={9} className="p-8 text-center text-muted-foreground">
                           No {adminLevelPlural.toLowerCase()} match your filter criteria.
                         </td>
                       </tr>
                     ) : (
-                      paginatedRows.map((d) => (
-                        <tr
-                          key={d.districtId}
-                          onClick={() => setSelectedDistrict(d)}
-                          className={`group hover:bg-muted/30 transition-colors cursor-pointer ${
-                            selectedDistrict?.districtId === d.districtId ? "bg-primary/5 font-medium" : ""
-                          }`}
-                        >
-                          <td
-                            className={`p-3 font-semibold text-foreground sticky left-0 z-20 bg-background group-hover:bg-slate-50 dark:group-hover:bg-slate-900 truncate ${
-                              !visibleColumns.province
-                                ? "border-r-2 border-slate-300 dark:border-slate-700 shadow-[4px_0_8px_-2px_rgba(0,0,0,0.15)]"
-                                : ""
+                      paginatedRows.map((d, idx) => {
+                        const globalIdx = (page - 1) * pageSize + idx + 1;
+                        return (
+                          <tr
+                            key={d.districtId}
+                            onClick={() => setSelectedDistrict(d)}
+                            className={`group hover:bg-muted/30 transition-colors cursor-pointer ${
+                              selectedDistrict?.districtId === d.districtId ? "bg-primary/5 font-medium" : ""
                             }`}
-                            style={{
-                              width: `${perfColWidths.district}px`,
-                              minWidth: `${perfColWidths.district}px`,
-                              maxWidth: `${perfColWidths.district}px`,
-                            }}
-                            title={d.districtName}
                           >
-                            <div className="flex items-center gap-1.5">
-                              <MapPin className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-                              <span className="truncate">{d.districtName}</span>
-                            </div>
-                          </td>
-                          {visibleColumns.province && (
+                            {/* FROZEN 1: INDEX */}
                             <td
-                              className="p-3 text-muted-foreground sticky z-20 bg-background group-hover:bg-slate-50 dark:group-hover:bg-slate-900 border-r-2 border-slate-300 dark:border-slate-700 shadow-[4px_0_8px_-2px_rgba(0,0,0,0.15)] truncate"
+                              className="p-3 text-center text-muted-foreground border-r sticky left-0 z-20 bg-background group-hover:bg-slate-50 dark:group-hover:bg-slate-900"
                               style={{
-                                left: `${perfColWidths.district}px`,
-                                width: `${perfColWidths.province}px`,
-                                minWidth: `${perfColWidths.province}px`,
-                                maxWidth: `${perfColWidths.province}px`,
+                                width: `${perfColWidths.index}px`,
+                                minWidth: `${perfColWidths.index}px`,
+                                maxWidth: `${perfColWidths.index}px`,
                               }}
-                              title={d.provinceName}
                             >
-                              {d.provinceName}
+                              {globalIdx}
                             </td>
-                          )}
+
+                            {/* FROZEN 2: DISTRICT */}
+                            <td
+                              className={`p-3 font-semibold text-foreground sticky z-20 bg-background group-hover:bg-slate-50 dark:group-hover:bg-slate-900 truncate ${
+                                !visibleColumns.province
+                                  ? "border-r-2 border-slate-300 dark:border-slate-700 shadow-[4px_0_8px_-2px_rgba(0,0,0,0.15)]"
+                                  : "border-r"
+                              }`}
+                              style={{
+                                left: `${perfColWidths.index}px`,
+                                width: `${perfColWidths.district}px`,
+                                minWidth: `${perfColWidths.district}px`,
+                                maxWidth: `${perfColWidths.district}px`,
+                              }}
+                              title={d.districtName}
+                            >
+                              <div className="flex items-center gap-1.5">
+                                <MapPin className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                                <span className="truncate">{d.districtName}</span>
+                              </div>
+                            </td>
+
+                            {/* FROZEN 3: PROVINCE */}
+                            {visibleColumns.province && (
+                              <td
+                                className="p-3 text-muted-foreground sticky z-20 bg-background group-hover:bg-slate-50 dark:group-hover:bg-slate-900 border-r-2 border-slate-300 dark:border-slate-700 shadow-[4px_0_8px_-2px_rgba(0,0,0,0.15)] truncate"
+                                style={{
+                                  left: `${perfColWidths.index + perfColWidths.district}px`,
+                                  width: `${perfColWidths.province}px`,
+                                  minWidth: `${perfColWidths.province}px`,
+                                  maxWidth: `${perfColWidths.province}px`,
+                                }}
+                                title={d.provinceName}
+                              >
+                                {d.provinceName}
+                              </td>
+                            )}
                           {visibleColumns.mcv1 && (
                             <td
                               className="p-3"
@@ -1402,8 +1504,8 @@ export default function RiskAssessmentList() {
                             </td>
                           )}
                         </tr>
-                      ))
-                    )}
+                      );
+                    }))}
                   </tbody>
                 </table>
               </div>
@@ -1466,7 +1568,7 @@ export default function RiskAssessmentList() {
         {/* TAB 3: ASSESSMENT ROUNDS REGISTER (FULL CRUD AS PER PERMISSIONS) */}
         <TabsContent value="rounds" className="space-y-4">
           <Card>
-            <CardHeader className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <CardHeader className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-3">
               <div>
                 <CardTitle className="text-lg font-semibold flex items-center gap-2">
                   <Layers className="w-5 h-5 text-primary" />
@@ -1476,11 +1578,52 @@ export default function RiskAssessmentList() {
                   Official programmatic risk assessments created under {activeCountryName}. Edit, calculate, or review assessment rounds.
                 </CardDescription>
               </div>
-              <Button size="sm" onClick={() => setIsCreateOpen(true)} className="gap-1.5 shrink-0">
-                <Plus className="w-4 h-4" /> New Assessment Round
-              </Button>
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="relative w-48 sm:w-60">
+                  <Search className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-muted-foreground" />
+                  <Input
+                    type="text"
+                    placeholder="Search rounds..."
+                    value={roundsSearchTerm}
+                    onChange={(e) => {
+                      setRoundsSearchTerm(e.target.value);
+                      setRoundsPage(1);
+                    }}
+                    className="h-8 pl-8 text-xs"
+                  />
+                </div>
+
+                <div className="flex items-center border rounded-md p-0.5 bg-muted/30">
+                  <Button
+                    type="button"
+                    variant={roundsViewMode === "table" ? "secondary" : "ghost"}
+                    size="sm"
+                    className="h-7 px-2 text-xs gap-1"
+                    onClick={() => setRoundsViewMode("table")}
+                    title="Table View (Enterprise Grid)"
+                  >
+                    <List className="w-3.5 h-3.5" />
+                    <span>Table</span>
+                  </Button>
+                  <Button
+                    type="button"
+                    variant={roundsViewMode === "cards" ? "secondary" : "ghost"}
+                    size="sm"
+                    className="h-7 px-2 text-xs gap-1"
+                    onClick={() => setRoundsViewMode("cards")}
+                    title="Cards View"
+                  >
+                    <LayoutGrid className="w-3.5 h-3.5" />
+                    <span>Cards</span>
+                  </Button>
+                </div>
+
+                <Button size="sm" onClick={() => setIsCreateOpen(true)} className="gap-1.5 h-8 text-xs shrink-0">
+                  <Plus className="w-4 h-4" /> New Assessment Round
+                </Button>
+              </div>
             </CardHeader>
-            <CardContent>
+            <CardContent className={roundsViewMode === "table" ? "p-0" : "pt-2"}>
               {isAssessmentsLoading ? (
                 <div className="py-12 text-center text-muted-foreground text-sm">
                   Loading risk assessment rounds...
@@ -1492,6 +1635,213 @@ export default function RiskAssessmentList() {
                   <Button size="sm" onClick={() => setIsCreateOpen(true)}>
                     <Plus className="w-4 h-4 mr-1" /> Create Initial Round
                   </Button>
+                </div>
+              ) : roundsViewMode === "table" ? (
+                <div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs border-collapse">
+                      <thead className="bg-muted/90 border-b font-medium text-muted-foreground sticky top-0 z-30">
+                        <tr>
+                          <th className="p-3 text-center border-r sticky left-0 z-40 bg-muted select-none w-11 min-w-[44px]">
+                            #
+                          </th>
+                          <th
+                            className="p-3 cursor-pointer select-none sticky z-40 bg-muted border-b border-r-2 border-slate-300 dark:border-slate-700 shadow-[4px_0_8px_-2px_rgba(0,0,0,0.15)] min-w-[220px]"
+                            style={{ left: "44px" }}
+                            onClick={() => handleRoundsSort("title")}
+                          >
+                            <div className="flex items-center justify-between">
+                              <span className="font-bold text-foreground">Assessment Title</span>
+                              {getRoundsSortIcon("title")}
+                            </div>
+                          </th>
+                          <th
+                            className="p-3 cursor-pointer select-none border-b border-r min-w-[90px]"
+                            onClick={() => handleRoundsSort("year")}
+                          >
+                            <div className="flex items-center justify-between">
+                              <span>Year</span>
+                              {getRoundsSortIcon("year")}
+                            </div>
+                          </th>
+                          <th className="p-3 select-none border-b border-r min-w-[150px]">
+                            Country & Administrative Scope
+                          </th>
+                          <th
+                            className="p-3 cursor-pointer select-none border-b border-r min-w-[110px]"
+                            onClick={() => handleRoundsSort("status")}
+                          >
+                            <div className="flex items-center justify-between">
+                              <span>Status</span>
+                              {getRoundsSortIcon("status")}
+                            </div>
+                          </th>
+                          <th
+                            className="p-3 cursor-pointer select-none border-b border-r min-w-[120px]"
+                            onClick={() => handleRoundsSort("createdAt")}
+                          >
+                            <div className="flex items-center justify-between">
+                              <span>Created</span>
+                              {getRoundsSortIcon("createdAt")}
+                            </div>
+                          </th>
+                          <th className="p-3 text-right min-w-[190px]">
+                            Actions
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y text-foreground">
+                        {paginatedRounds.length === 0 ? (
+                          <tr>
+                            <td colSpan={7} className="p-8 text-center text-muted-foreground">
+                              No assessment rounds matched your search query.
+                            </td>
+                          </tr>
+                        ) : (
+                          paginatedRounds.map((a, idx) => {
+                            const globalIdx = (roundsPage - 1) * roundsPageSize + idx + 1;
+                            return (
+                              <tr key={a.id} className="hover:bg-muted/40 transition-colors group">
+                                <td className="p-3 text-center text-muted-foreground border-r sticky left-0 z-20 bg-background group-hover:bg-slate-50 dark:group-hover:bg-slate-900 w-11 min-w-[44px]">
+                                  {globalIdx}
+                                </td>
+                                <td
+                                  className="p-3 border-r-2 border-slate-300 dark:border-slate-700 shadow-[4px_0_8px_-2px_rgba(0,0,0,0.15)] sticky z-20 bg-background group-hover:bg-slate-50 dark:group-hover:bg-slate-900 min-w-[220px]"
+                                  style={{ left: "44px" }}
+                                >
+                                  <div>
+                                    <span
+                                      className="font-semibold text-sm hover:underline cursor-pointer text-foreground block"
+                                      onClick={() => setLocation(`/risk-assessments/${a.id}`)}
+                                    >
+                                      {a.title}
+                                    </span>
+                                    {a.notes && (
+                                      <span className="text-[11px] text-muted-foreground line-clamp-1 mt-0.5">
+                                        {a.notes}
+                                      </span>
+                                    )}
+                                  </div>
+                                </td>
+                                <td className="p-3 border-r font-semibold">
+                                  {a.assessmentYear}
+                                </td>
+                                <td className="p-3 border-r text-muted-foreground">
+                                  <div className="flex items-center gap-1">
+                                    <MapPin className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                                    <span>{a.countryCode} ({a.administrativeLevelName || "District"})</span>
+                                  </div>
+                                </td>
+                                <td className="p-3 border-r">
+                                  {getStatusBadge(a.status)}
+                                </td>
+                                <td className="p-3 border-r text-muted-foreground">
+                                  {new Date(a.createdAt).toLocaleDateString()}
+                                </td>
+                                <td className="p-3 text-right space-x-1 whitespace-nowrap">
+                                  <Button
+                                    variant="default"
+                                    size="sm"
+                                    className="h-7 text-xs gap-1"
+                                    onClick={() => setLocation(`/risk-assessments/${a.id}`)}
+                                  >
+                                    Workspace <ChevronRight className="w-3 h-3" />
+                                  </Button>
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="h-7 text-xs gap-1"
+                                    onClick={() => calculateMutation.mutate(a.id)}
+                                    disabled={calculateMutation.isPending}
+                                  >
+                                    <Play className="w-3 h-3 text-blue-600" />
+                                    Calculate
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
+                                    title="Edit Assessment Details"
+                                    onClick={() => {
+                                      setEditingAssessment(a);
+                                      setEditTitle(a.title);
+                                      setEditNotes(a.notes || "");
+                                      setIsEditOpen(true);
+                                    }}
+                                  >
+                                    <Pencil className="w-3.5 h-3.5" />
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-7 w-7 p-0 text-rose-600 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/30"
+                                    title="Delete Assessment"
+                                    onClick={() => {
+                                      setDeletingAssessment(a);
+                                      setIsDeleteOpen(true);
+                                    }}
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </Button>
+                                </td>
+                              </tr>
+                            );
+                          })
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* Rounds Table Pagination */}
+                  <div className="p-4 border-t flex flex-col md:flex-row items-center justify-between gap-4 text-xs">
+                    <div className="flex items-center gap-2">
+                      <span className="text-muted-foreground">Rows per page:</span>
+                      <Select
+                        value={String(roundsPageSize)}
+                        onValueChange={(val) => {
+                          setRoundsPageSize(Number(val));
+                          setRoundsPage(1);
+                        }}
+                      >
+                        <SelectTrigger className="h-8 w-18 text-xs">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="10">10</SelectItem>
+                          <SelectItem value="25">25</SelectItem>
+                          <SelectItem value="50">50</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <span className="text-muted-foreground ml-2">
+                        Showing {sortedRounds.length > 0 ? (roundsPage - 1) * roundsPageSize + 1 : 0} to{" "}
+                        {Math.min(roundsPage * roundsPageSize, sortedRounds.length)} of {sortedRounds.length} rounds
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-1">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-8 px-3 text-xs"
+                        onClick={() => setRoundsPage((p) => Math.max(1, p - 1))}
+                        disabled={roundsPage <= 1}
+                      >
+                        Previous
+                      </Button>
+                      <span className="px-3 py-1 bg-muted rounded font-medium text-xs">
+                        Page {roundsPage} of {totalRoundsPages}
+                      </span>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-8 px-3 text-xs"
+                        onClick={() => setRoundsPage((p) => Math.min(totalRoundsPages, p + 1))}
+                        disabled={roundsPage >= totalRoundsPages}
+                      >
+                        Next
+                      </Button>
+                    </div>
+                  </div>
                 </div>
               ) : (
                 <div className="divide-y border rounded-md">

@@ -22,6 +22,8 @@ import {
   ChevronDown,
   ChevronUp,
   ChevronsUpDown,
+  ChevronLeft,
+  ChevronRight,
   ExternalLink,
   Plus,
   RefreshCw,
@@ -192,6 +194,85 @@ export default function RiskResultsWorkspace() {
   const handleResetWidths = () => {
     setColWidths(DEFAULT_COL_WIDTHS);
   };
+
+  // Linked Actions Enterprise Table States (Rule 24)
+  const [actionSearchTerm, setActionSearchTerm] = useState("");
+  const [actionTypeFilter, setActionTypeFilter] = useState("ALL");
+  const [actionStatusFilter, setActionStatusFilter] = useState("ALL");
+  const [actionSortCol, setActionSortCol] = useState<string>("createdAt");
+  const [actionSortDir, setActionSortDir] = useState<"asc" | "desc">("desc");
+  const [actionPage, setActionPage] = useState(1);
+  const [actionPageSize, setActionPageSize] = useState(10);
+
+  const DEFAULT_ACTION_COL_WIDTHS = {
+    index: 48,
+    area: 170,
+    title: 250,
+    type: 150,
+    budget: 130,
+    status: 120,
+    created: 130,
+  };
+  const [actionColWidths, setActionColWidths] = useState(DEFAULT_ACTION_COL_WIDTHS);
+  const [actionResizingCol, setActionResizingCol] = useState<keyof typeof DEFAULT_ACTION_COL_WIDTHS | null>(null);
+  const actionResizeStartX = useRef(0);
+  const actionResizeStartWidth = useRef(0);
+
+  const startActionResize = (colKey: keyof typeof DEFAULT_ACTION_COL_WIDTHS, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setActionResizingCol(colKey);
+    actionResizeStartX.current = e.clientX;
+    actionResizeStartWidth.current = actionColWidths[colKey];
+  };
+
+  useEffect(() => {
+    if (!actionResizingCol) return;
+    const handleMouseMove = (e: MouseEvent) => {
+      const diff = e.clientX - actionResizeStartX.current;
+      const newWidth = Math.max(48, actionResizeStartWidth.current + diff);
+      setActionColWidths((prev) => ({ ...prev, [actionResizingCol]: newWidth }));
+    };
+    const handleMouseUp = () => setActionResizingCol(null);
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, [actionResizingCol]);
+
+  const handleStretchWideActions = () => {
+    setActionColWidths({
+      index: 54,
+      area: 220,
+      title: 340,
+      type: 180,
+      budget: 160,
+      status: 140,
+      created: 160,
+    });
+  };
+
+  const handleCompactActions = () => {
+    setActionColWidths({
+      index: 44,
+      area: 130,
+      title: 180,
+      type: 120,
+      budget: 100,
+      status: 95,
+      created: 105,
+    });
+  };
+
+  const handleResetActionWidths = () => {
+    setActionColWidths(DEFAULT_ACTION_COL_WIDTHS);
+  };
+
+  // Explain Drawer Indicator Filter States
+  const [indicatorDomainFilter, setIndicatorDomainFilter] = useState("ALL");
+  const [indicatorSearchTerm, setIndicatorSearchTerm] = useState("");
 
   // Drawer states
   const [selectedAreaForExplanation, setSelectedAreaForExplanation] = useState<AreaResult | null>(null);
@@ -520,6 +601,100 @@ export default function RiskResultsWorkspace() {
   };
 
   const totalPages = Math.ceil((resultsData?.totalCount || 0) / pageSize);
+
+  // Linked Actions Sorting, Filtering, and Pagination
+  const filteredLinkedActions = useMemo(() => {
+    return (linkedActions || []).filter((act: any) => {
+      const matchType = actionTypeFilter === "ALL" || act.actionType === actionTypeFilter;
+      const matchStatus = actionStatusFilter === "ALL" || act.status === actionStatusFilter;
+      const term = actionSearchTerm.toLowerCase();
+      const matchSearch =
+        !term ||
+        (act.actionTitle || "").toLowerCase().includes(term) ||
+        (act.administrativeAreaId || "").toLowerCase().includes(term) ||
+        (act.budgetCode || "").toLowerCase().includes(term) ||
+        (act.responsiblePerson || "").toLowerCase().includes(term);
+      return matchType && matchStatus && matchSearch;
+    });
+  }, [linkedActions, actionTypeFilter, actionStatusFilter, actionSearchTerm]);
+
+  const sortedLinkedActions = useMemo(() => {
+    return [...filteredLinkedActions].sort((a: any, b: any) => {
+      if (actionSortCol === "index") return 0;
+      let valA = a[actionSortCol];
+      let valB = b[actionSortCol];
+      if (valA === null || valA === undefined) return actionSortDir === "asc" ? 1 : -1;
+      if (valB === null || valB === undefined) return actionSortDir === "asc" ? -1 : 1;
+      return actionSortDir === "asc"
+        ? String(valA).localeCompare(String(valB))
+        : String(valB).localeCompare(String(valA));
+    });
+  }, [filteredLinkedActions, actionSortCol, actionSortDir]);
+
+  const paginatedLinkedActions = useMemo(() => {
+    if (actionPageSize >= 9999) return sortedLinkedActions;
+    const start = (actionPage - 1) * actionPageSize;
+    return sortedLinkedActions.slice(start, start + actionPageSize);
+  }, [sortedLinkedActions, actionPage, actionPageSize]);
+
+  const totalActionPages = Math.max(1, Math.ceil(sortedLinkedActions.length / actionPageSize));
+
+  const handleActionSort = (column: string) => {
+    if (actionSortCol === column) {
+      setActionSortDir(actionSortDir === "asc" ? "desc" : "asc");
+    } else {
+      setActionSortCol(column);
+      setActionSortDir("asc");
+    }
+  };
+
+  const getActionSortIcon = (column: string) => {
+    if (actionSortCol !== column) return <ChevronsUpDown className="w-3.5 h-3.5 ml-1 opacity-50 inline" />;
+    return actionSortDir === "asc" ? <ChevronUp className="w-3.5 h-3.5 ml-1 inline text-primary" /> : <ChevronDown className="w-3.5 h-3.5 ml-1 inline text-primary" />;
+  };
+
+  const exportActionsCsv = () => {
+    const rows = [
+      ["#", "Target Area", "Action Title", "Action Category", "Budget Reference", "Status", "Responsible Officer", "Created At"],
+      ...sortedLinkedActions.map((act: any, idx: number) => [
+        idx + 1,
+        act.administrativeAreaId || "",
+        act.actionTitle || "",
+        act.actionType || "",
+        act.budgetCode || "",
+        act.status || "",
+        act.responsiblePerson || "",
+        act.createdAt ? new Date(act.createdAt).toLocaleDateString() : "",
+      ]),
+    ];
+    const csvContent =
+      "data:text/csv;charset=utf-8," +
+      rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", `Linked_Actions_${assessment?.title?.replace(/\s+/g, "_") || "Assessment"}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  // Explain Drawer Filtered Indicators
+  const filteredIndicators = useMemo(() => {
+    const list = explanationData?.indicators || [];
+    return list.filter((ind) => {
+      const matchDomain =
+        indicatorDomainFilter === "ALL" ||
+        ind.domainCode.toUpperCase().startsWith(indicatorDomainFilter.toUpperCase());
+      const term = indicatorSearchTerm.toLowerCase();
+      const matchSearch =
+        !term ||
+        ind.indicatorCode.toLowerCase().includes(term) ||
+        ind.explanationText.toLowerCase().includes(term) ||
+        ind.domainCode.toLowerCase().includes(term);
+      return matchDomain && matchSearch;
+    });
+  }, [explanationData?.indicators, indicatorDomainFilter, indicatorSearchTerm]);
 
   return (
     <div className="p-6 max-w-7xl mx-auto space-y-6">
@@ -1274,39 +1449,418 @@ export default function RiskResultsWorkspace() {
         {/* ==================================================================== */}
         <TabsContent value="actions" className="space-y-4">
           <Card>
-            <CardHeader className="flex flex-row items-center justify-between pb-3">
+            <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 gap-3">
               <div>
-                <CardTitle className="text-base font-semibold">Programme Strengthening Action Links</CardTitle>
+                <CardTitle className="text-base font-semibold flex items-center gap-2">
+                  <CheckCircle className="w-4 h-4 text-primary" />
+                  Programme Strengthening Action Links ({linkedActions.length})
+                </CardTitle>
                 <CardDescription className="text-xs">
                   Connect identified district epidemiological vulnerabilities directly to routine microplans, supervision visits, and budgets.
                 </CardDescription>
               </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={exportActionsCsv}
+                  disabled={sortedLinkedActions.length === 0}
+                  className="h-8 text-xs gap-1.5"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Export Actions CSV</span>
+                </Button>
+              </div>
             </CardHeader>
-            <CardContent>
-              {linkedActions.length === 0 ? (
-                <div className="py-12 text-center text-muted-foreground text-xs space-y-2">
-                  <CheckCircle className="w-8 h-8 mx-auto text-muted-foreground/50" />
-                  <p>No programme actions linked to this assessment round yet.</p>
-                  <p className="text-[11px]">Click "Link Action" on any district row in the results table to create an activity.</p>
+            <CardContent className="space-y-3">
+              {/* Actions Filter & Stretch Toolbar */}
+              <div className="flex flex-wrap items-center justify-between gap-2 p-2.5 bg-muted/40 rounded-lg border text-xs">
+                <div className="flex flex-wrap items-center gap-2 flex-1 min-w-[280px]">
+                  <div className="relative flex-1 min-w-[160px] max-w-xs">
+                    <Search className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-muted-foreground" />
+                    <Input
+                      placeholder="Search title, district, or budget..."
+                      value={actionSearchTerm}
+                      onChange={(e) => {
+                        setActionSearchTerm(e.target.value);
+                        setActionPage(1);
+                      }}
+                      className="h-8 text-xs pl-8"
+                    />
+                  </div>
+
+                  <Select
+                    value={actionTypeFilter}
+                    onValueChange={(val) => {
+                      setActionTypeFilter(val);
+                      setActionPage(1);
+                    }}
+                  >
+                    <SelectTrigger className="h-8 text-xs w-[150px]">
+                      <SelectValue placeholder="All Categories" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="ALL">All Categories</SelectItem>
+                      <SelectItem value="SUPERVISION_VISIT">Supervision Visit</SelectItem>
+                      <SelectItem value="PIRI_CAMPAIGN">PIRI / Catch-up</SelectItem>
+                      <SelectItem value="COLD_CHAIN_REPAIR">Cold Chain Repair</SelectItem>
+                      <SelectItem value="ACTIVE_SURVEILLANCE">Active Surveillance</SelectItem>
+                      <SelectItem value="MICROPLAN_UPDATE">Microplan Update</SelectItem>
+                    </SelectContent>
+                  </Select>
+
+                  <Select
+                    value={actionStatusFilter}
+                    onValueChange={(val) => {
+                      setActionStatusFilter(val);
+                      setActionPage(1);
+                    }}
+                  >
+                    <SelectTrigger className="h-8 text-xs w-[130px]">
+                      <SelectValue placeholder="All Statuses" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="ALL">All Statuses</SelectItem>
+                      <SelectItem value="PLANNED">Planned</SelectItem>
+                      <SelectItem value="IN_PROGRESS">In Progress</SelectItem>
+                      <SelectItem value="COMPLETED">Completed</SelectItem>
+                    </SelectContent>
+                  </Select>
+
+                  {(actionSearchTerm || actionTypeFilter !== "ALL" || actionStatusFilter !== "ALL") && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setActionSearchTerm("");
+                        setActionTypeFilter("ALL");
+                        setActionStatusFilter("ALL");
+                        setActionPage(1);
+                      }}
+                      className="h-8 text-xs text-muted-foreground hover:text-foreground"
+                    >
+                      Reset Filters
+                    </Button>
+                  )}
                 </div>
-              ) : (
-                <div className="divide-y border rounded-md text-xs">
-                  {linkedActions.map((act: any) => (
-                    <div key={act.id} className="p-3 flex flex-col md:flex-row md:items-center justify-between gap-3">
-                      <div>
-                        <p className="font-semibold text-sm">{act.actionTitle}</p>
-                        <p className="text-muted-foreground mt-0.5">
-                          Type: <span className="font-medium text-foreground">{act.actionType}</span> • Area: <span className="font-medium text-foreground">{act.administrativeAreaId}</span>
-                        </p>
-                        {act.budgetCode && (
-                          <p className="text-muted-foreground text-[11px] mt-0.5">
-                            Budget Reference: <span className="font-mono">{act.budgetCode}</span>
-                          </p>
-                        )}
-                      </div>
-                      <Badge variant="outline">{act.status}</Badge>
-                    </div>
-                  ))}
+
+                <div className="flex items-center gap-1.5">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={handleStretchWideActions}
+                    className="h-7 text-xs gap-1 text-slate-700 dark:text-slate-200"
+                    title="Stretch columns wider"
+                  >
+                    <Maximize2 className="w-3 h-3 text-primary" />
+                    <span>Stretch</span>
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={handleCompactActions}
+                    className="h-7 text-xs gap-1 text-slate-700 dark:text-slate-200"
+                    title="Compact columns"
+                  >
+                    <Minimize2 className="w-3 h-3 text-muted-foreground" />
+                    <span>Compact</span>
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleResetActionWidths}
+                    className="h-7 text-xs gap-1 text-muted-foreground hover:text-foreground"
+                    title="Reset column widths"
+                  >
+                    <RotateCcw className="w-3 h-3" />
+                  </Button>
+                  <Select
+                    value={String(actionPageSize)}
+                    onValueChange={(val) => {
+                      setActionPageSize(Number(val));
+                      setActionPage(1);
+                    }}
+                  >
+                    <SelectTrigger className="h-7 text-xs w-[90px] ml-1">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="10">10 / page</SelectItem>
+                      <SelectItem value="25">25 / page</SelectItem>
+                      <SelectItem value="50">50 / page</SelectItem>
+                      <SelectItem value="100">100 / page</SelectItem>
+                      <SelectItem value="9999">All rows</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              {/* Actions Enterprise Table */}
+              <div className="border rounded-md overflow-x-auto shadow-sm">
+                <table className="w-full text-xs text-left border-collapse">
+                  <thead className="bg-slate-800 text-white font-semibold sticky top-0 z-30">
+                    <tr>
+                      {/* FROZEN 1: INDEX */}
+                      <th
+                        className="p-2.5 text-center font-semibold border-r border-slate-700 sticky top-0 left-0 z-40 bg-slate-800 select-none cursor-pointer"
+                        style={{ width: `${actionColWidths.index}px`, minWidth: `${actionColWidths.index}px`, maxWidth: `${actionColWidths.index}px` }}
+                        onClick={() => handleActionSort("index")}
+                      >
+                        # {getActionSortIcon("index")}
+                      </th>
+
+                      {/* FROZEN 2: TARGET DISTRICT (WITH SHADOW DIVIDER) */}
+                      <th
+                        className="p-2.5 font-semibold border-r-2 border-slate-400 dark:border-slate-600 shadow-[4px_0_8px_-2px_rgba(0,0,0,0.2)] sticky top-0 z-40 bg-slate-800 select-none cursor-pointer group/th"
+                        style={{
+                          left: `${actionColWidths.index}px`,
+                          width: `${actionColWidths.area}px`,
+                          minWidth: `${actionColWidths.area}px`,
+                          maxWidth: `${actionColWidths.area}px`,
+                        }}
+                        onClick={() => handleActionSort("administrativeAreaId")}
+                      >
+                        <div className="flex items-center justify-between pr-2">
+                          <span className="truncate font-bold">Target Area</span>
+                          {getActionSortIcon("administrativeAreaId")}
+                        </div>
+                        <div
+                          className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-white/50 active:bg-white z-50 select-none transition-colors"
+                          onMouseDown={(e) => startActionResize("area", e)}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      </th>
+
+                      {/* ACTION TITLE */}
+                      <th
+                        className="p-2.5 font-semibold border-r border-slate-700 select-none cursor-pointer relative group/th"
+                        style={{ width: `${actionColWidths.title}px`, minWidth: `${actionColWidths.title}px` }}
+                        onClick={() => handleActionSort("actionTitle")}
+                      >
+                        <div className="flex items-center justify-between pr-2">
+                          <span>Action Title</span>
+                          {getActionSortIcon("actionTitle")}
+                        </div>
+                        <div
+                          className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-white/50 active:bg-white z-50 select-none transition-colors"
+                          onMouseDown={(e) => startActionResize("title", e)}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      </th>
+
+                      {/* CATEGORY */}
+                      <th
+                        className="p-2.5 font-semibold border-r border-slate-700 select-none cursor-pointer relative group/th"
+                        style={{ width: `${actionColWidths.type}px`, minWidth: `${actionColWidths.type}px` }}
+                        onClick={() => handleActionSort("actionType")}
+                      >
+                        <div className="flex items-center justify-between pr-2">
+                          <span>Category</span>
+                          {getActionSortIcon("actionType")}
+                        </div>
+                        <div
+                          className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-white/50 active:bg-white z-50 select-none transition-colors"
+                          onMouseDown={(e) => startActionResize("type", e)}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      </th>
+
+                      {/* BUDGET REFERENCE */}
+                      <th
+                        className="p-2.5 font-semibold border-r border-slate-700 select-none cursor-pointer relative group/th"
+                        style={{ width: `${actionColWidths.budget}px`, minWidth: `${actionColWidths.budget}px` }}
+                        onClick={() => handleActionSort("budgetCode")}
+                      >
+                        <div className="flex items-center justify-between pr-2">
+                          <span>Budget Ref</span>
+                          {getActionSortIcon("budgetCode")}
+                        </div>
+                        <div
+                          className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-white/50 active:bg-white z-50 select-none transition-colors"
+                          onMouseDown={(e) => startActionResize("budget", e)}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      </th>
+
+                      {/* STATUS */}
+                      <th
+                        className="p-2.5 text-center font-semibold border-r border-slate-700 select-none cursor-pointer relative group/th"
+                        style={{ width: `${actionColWidths.status}px`, minWidth: `${actionColWidths.status}px` }}
+                        onClick={() => handleActionSort("status")}
+                      >
+                        <div className="flex items-center justify-center pr-2">
+                          <span>Status</span>
+                          {getActionSortIcon("status")}
+                        </div>
+                        <div
+                          className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-white/50 active:bg-white z-50 select-none transition-colors"
+                          onMouseDown={(e) => startActionResize("status", e)}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      </th>
+
+                      {/* CREATED */}
+                      <th
+                        className="p-2.5 font-semibold relative group/th select-none cursor-pointer"
+                        style={{ width: `${actionColWidths.created}px`, minWidth: `${actionColWidths.created}px` }}
+                        onClick={() => handleActionSort("createdAt")}
+                      >
+                        <div className="flex items-center justify-between pr-2">
+                          <span>Created Date</span>
+                          {getActionSortIcon("createdAt")}
+                        </div>
+                        <div
+                          className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-white/50 active:bg-white z-50 select-none transition-colors"
+                          onMouseDown={(e) => startActionResize("created", e)}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y text-foreground">
+                    {paginatedLinkedActions.length === 0 ? (
+                      <tr>
+                        <td colSpan={7} className="p-8 text-center text-muted-foreground">
+                          {linkedActions.length === 0 ? (
+                            <div className="space-y-1">
+                              <p className="font-semibold">No programme actions linked yet.</p>
+                              <p className="text-[11px]">Click "Link Action" on any district row in the results table to create an activity.</p>
+                            </div>
+                          ) : (
+                            "No linked actions match the search filter."
+                          )}
+                        </td>
+                      </tr>
+                    ) : (
+                      paginatedLinkedActions.map((act: any, idx: number) => {
+                        const globalIdx = (actionPage - 1) * actionPageSize + idx + 1;
+                        const statusBadgeClass =
+                          act.status === "COMPLETED"
+                            ? "bg-emerald-50 text-emerald-700 border-emerald-300 dark:bg-emerald-950/40 dark:text-emerald-400"
+                            : act.status === "IN_PROGRESS"
+                            ? "bg-blue-50 text-blue-700 border-blue-300 dark:bg-blue-950/40 dark:text-blue-400"
+                            : "bg-amber-50 text-amber-700 border-amber-300 dark:bg-amber-950/40 dark:text-amber-400";
+
+                        return (
+                          <tr key={act.id || idx} className="hover:bg-slate-50/70 dark:hover:bg-slate-900/50 transition-colors group">
+                            {/* FROZEN 1: INDEX */}
+                            <td
+                              className="p-2.5 text-center text-muted-foreground border-r sticky left-0 z-20 bg-background group-hover:bg-slate-50/70 dark:group-hover:bg-slate-900/50 font-mono"
+                              style={{ width: `${actionColWidths.index}px`, minWidth: `${actionColWidths.index}px`, maxWidth: `${actionColWidths.index}px` }}
+                            >
+                              {globalIdx}
+                            </td>
+
+                            {/* FROZEN 2: TARGET AREA */}
+                            <td
+                              className="p-2.5 font-bold border-r-2 border-slate-300 dark:border-slate-700 shadow-[4px_0_8px_-2px_rgba(0,0,0,0.15)] whitespace-nowrap sticky z-20 bg-background group-hover:bg-slate-50/70 dark:group-hover:bg-slate-900/50 text-foreground"
+                              style={{
+                                left: `${actionColWidths.index}px`,
+                                width: `${actionColWidths.area}px`,
+                                minWidth: `${actionColWidths.area}px`,
+                                maxWidth: `${actionColWidths.area}px`,
+                              }}
+                            >
+                              <span className="truncate block" title={act.administrativeAreaId}>
+                                {act.administrativeAreaId}
+                              </span>
+                            </td>
+
+                            <td className="p-2.5 border-r font-medium">
+                              <span className="truncate block font-semibold" title={act.actionTitle}>
+                                {act.actionTitle}
+                              </span>
+                              {act.responsiblePerson && (
+                                <span className="text-[10px] text-muted-foreground block truncate">
+                                  Resp: {act.responsiblePerson}
+                                </span>
+                              )}
+                            </td>
+
+                            <td className="p-2.5 border-r whitespace-nowrap">
+                              <Badge variant="outline" className="text-[10px]">
+                                {act.actionType?.replace(/_/g, " ")}
+                              </Badge>
+                            </td>
+
+                            <td className="p-2.5 border-r font-mono text-[11px] whitespace-nowrap">
+                              {act.budgetCode ? (
+                                <span className="px-1.5 py-0.5 rounded bg-muted/60 text-muted-foreground border">
+                                  {act.budgetCode}
+                                </span>
+                              ) : (
+                                <span className="text-muted-foreground italic">—</span>
+                              )}
+                            </td>
+
+                            <td className="p-2.5 text-center border-r whitespace-nowrap">
+                              <Badge variant="outline" className={`text-[10px] font-semibold ${statusBadgeClass}`}>
+                                {act.status || "PLANNED"}
+                              </Badge>
+                            </td>
+
+                            <td className="p-2.5 text-muted-foreground text-[11px] whitespace-nowrap">
+                              {act.createdAt ? new Date(act.createdAt).toLocaleDateString() : "—"}
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Action Pagination Controls (Rule 24) */}
+              {sortedLinkedActions.length > actionPageSize && actionPageSize < 9999 && (
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-2 text-xs text-muted-foreground">
+                  <div>
+                    Showing {(actionPage - 1) * actionPageSize + 1} to{" "}
+                    {Math.min(actionPage * actionPageSize, sortedLinkedActions.length)} of {sortedLinkedActions.length} actions
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setActionPage(1)}
+                      disabled={actionPage === 1}
+                      className="h-7 px-2 text-xs"
+                    >
+                      First
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setActionPage((p) => Math.max(1, p - 1))}
+                      disabled={actionPage === 1}
+                      className="h-7 w-7 p-0"
+                    >
+                      <ChevronLeft className="w-3.5 h-3.5" />
+                    </Button>
+                    <span className="px-2 font-medium text-foreground">
+                      Page {actionPage} of {totalActionPages}
+                    </span>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setActionPage((p) => Math.min(totalActionPages, p + 1))}
+                      disabled={actionPage === totalActionPages}
+                      className="h-7 w-7 p-0"
+                    >
+                      <ChevronRight className="w-3.5 h-3.5" />
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setActionPage(totalActionPages)}
+                      disabled={actionPage === totalActionPages}
+                      className="h-7 px-2 text-xs"
+                    >
+                      Last
+                    </Button>
+                  </div>
                 </div>
               )}
             </CardContent>
@@ -1358,15 +1912,18 @@ export default function RiskResultsWorkspace() {
       {/* ==================================================================== */}
       {/* EXPLAIN THIS SCORE SLIDING DRAWER */}
       {/* ==================================================================== */}
+      {/* ==================================================================== */}
+      {/* EXPLAIN THIS SCORE SLIDING DRAWER (ENTERPRISE INDICATOR TABLE - RULE 24) */}
+      {/* ==================================================================== */}
       <Sheet open={Boolean(selectedAreaForExplanation)} onOpenChange={(open) => !open && setSelectedAreaForExplanation(null)}>
-        <SheetContent className="sm:max-w-[620px] overflow-y-auto">
+        <SheetContent className="w-full sm:max-w-[800px] lg:max-w-[880px] overflow-y-auto">
           <SheetHeader className="pb-3 border-b">
-            <SheetTitle className="text-lg font-bold flex items-center gap-2">
+            <SheetTitle className="text-base font-bold flex items-center gap-2">
               <ShieldAlert className="w-5 h-5 text-primary" />
               Explain Risk Score: {selectedAreaForExplanation?.areaName}
             </SheetTitle>
             <SheetDescription className="text-xs">
-              Mathematical lineage, applied thresholds, and indicator breakdown for this district.
+              Mathematical lineage, applied thresholds, and indicator breakdown across all 21 WHO indicators for this district.
             </SheetDescription>
           </SheetHeader>
 
@@ -1374,51 +1931,142 @@ export default function RiskResultsWorkspace() {
             {/* Score Summary Box */}
             <div className="p-3 bg-muted/50 rounded-lg border space-y-1 text-xs">
               <div className="flex items-center justify-between">
-                <span className="font-semibold text-sm">Total Score:</span>
-                <span className="font-bold text-base">
-                  {selectedAreaForExplanation?.totalRiskScore ?? `${selectedAreaForExplanation?.minPossibleScore}–${selectedAreaForExplanation?.maxPossibleScore}`}/100
-                </span>
+                <span className="font-semibold text-sm">Overall Programmatic Risk:</span>
+                <div className="flex items-center gap-2">
+                  <Badge variant="outline" className="font-bold">
+                    {selectedAreaForExplanation?.riskCategory}
+                  </Badge>
+                  <span className="font-bold text-base text-primary">
+                    {selectedAreaForExplanation?.totalRiskScore ?? `${selectedAreaForExplanation?.minPossibleScore}–${selectedAreaForExplanation?.maxPossibleScore}`}/100
+                  </span>
+                </div>
               </div>
               <p className="text-muted-foreground leading-relaxed">
                 {selectedAreaForExplanation?.summaryExplanation}
               </p>
             </div>
 
-            {/* Indicator Details */}
+            {/* Indicator Toolbar (Domain Filters & Search) */}
             <div className="space-y-3">
-              <h4 className="font-semibold text-xs text-foreground uppercase tracking-wider">Indicator Lineage (21 WHO Indicators)</h4>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <h4 className="font-semibold text-xs text-foreground uppercase tracking-wider flex items-center gap-1.5">
+                  <FileSpreadsheet className="w-3.5 h-3.5 text-primary" />
+                  WHO Indicator Lineage ({filteredIndicators.length} of {explanationData?.indicators?.length || 21})
+                </h4>
+                <div className="relative w-full sm:w-60">
+                  <Search className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-muted-foreground" />
+                  <Input
+                    placeholder="Search code or formula..."
+                    value={indicatorSearchTerm}
+                    onChange={(e) => setIndicatorSearchTerm(e.target.value)}
+                    className="h-8 text-xs pl-8"
+                  />
+                </div>
+              </div>
+
+              {/* Domain Filter Pills */}
+              <div className="flex flex-wrap items-center gap-1.5">
+                {[
+                  { key: "ALL", label: "All Indicators" },
+                  { key: "PI", label: "Population Immunity (40 pts)" },
+                  { key: "SQ", label: "Surveillance Quality (20 pts)" },
+                  { key: "PD", label: "Programme Delivery (16 pts)" },
+                  { key: "TA", label: "Threat Assessment (24 pts)" },
+                ].map((item) => (
+                  <Button
+                    key={item.key}
+                    type="button"
+                    size="sm"
+                    variant={indicatorDomainFilter === item.key ? "default" : "outline"}
+                    onClick={() => setIndicatorDomainFilter(item.key)}
+                    className="h-7 text-xs px-2.5"
+                  >
+                    {item.label}
+                  </Button>
+                ))}
+              </div>
 
               {isExplanationLoading ? (
-                <div className="py-8 text-center text-xs text-muted-foreground">Loading indicator lineage...</div>
+                <div className="py-12 text-center text-xs text-muted-foreground">Loading indicator lineage...</div>
               ) : (
-                <div className="space-y-2">
-                  {(explanationData?.indicators || []).map((ind) => (
-                    <div key={ind.id} className="p-2.5 rounded border bg-card text-xs space-y-1">
-                      <div className="flex items-center justify-between">
-                        <span className="font-bold text-foreground">
-                          {ind.indicatorCode} ({ind.domainCode.replace("_", " ")})
-                        </span>
-                        <Badge variant="outline" className="font-mono">
-                          {ind.pointsAwarded ?? "—"} / {ind.maxPoints} pts
-                        </Badge>
-                      </div>
+                <div className="border rounded-md overflow-x-auto shadow-sm">
+                  <table className="w-full text-xs text-left border-collapse">
+                    <thead className="bg-slate-800 text-white font-semibold sticky top-0 z-30">
+                      <tr>
+                        <th className="p-2.5 border-r border-slate-700 w-24 min-w-24">Indicator</th>
+                        <th className="p-2.5 border-r border-slate-700 w-24 min-w-24">Domain</th>
+                        <th className="p-2.5 border-r border-slate-700 w-24 min-w-24 text-right">Observed</th>
+                        <th className="p-2.5 border-r border-slate-700 w-28 min-w-28 text-right">Threshold</th>
+                        <th className="p-2.5 border-r border-slate-700 w-24 min-w-24 text-center">Score</th>
+                        <th className="p-2.5">Lineage & Policy Rationale</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y text-foreground">
+                      {filteredIndicators.length === 0 ? (
+                        <tr>
+                          <td colSpan={6} className="p-6 text-center text-muted-foreground">
+                            No indicators match the selected filter.
+                          </td>
+                        </tr>
+                      ) : (
+                        filteredIndicators.map((ind, idx) => {
+                          const pts = Number(ind.pointsAwarded);
+                          const max = ind.maxPoints || 1;
+                          const ratio = isNaN(pts) ? 0 : pts / max;
 
-                      <div className="flex items-center justify-between text-[11px] text-muted-foreground">
-                        <span>Observed: <strong className="text-foreground">{ind.displayedValue}</strong></span>
-                        <span>Threshold: <strong className="text-foreground">{ind.thresholdApplied}</strong></span>
-                      </div>
+                          const scoreBadgeClass =
+                            pts === 0
+                              ? "bg-emerald-50 text-emerald-700 border-emerald-300 dark:bg-emerald-950/40 dark:text-emerald-400"
+                              : ratio >= 0.75
+                              ? "bg-red-50 text-red-700 border-red-300 dark:bg-red-950/40 dark:text-red-400"
+                              : "bg-amber-50 text-amber-700 border-amber-300 dark:bg-amber-950/40 dark:text-amber-400";
 
-                      <p className="text-[11px] text-muted-foreground leading-snug">
-                        {ind.explanationText}
-                      </p>
+                          const domainLabel =
+                            ind.domainCode.toUpperCase().startsWith("PI") ? "Immunity"
+                            : ind.domainCode.toUpperCase().startsWith("SQ") ? "Surveillance"
+                            : ind.domainCode.toUpperCase().startsWith("PD") ? "Delivery"
+                            : "Threats";
 
-                      {ind.validationWarnings && ind.validationWarnings.length > 0 && (
-                        <div className="text-[10px] text-amber-600 dark:text-amber-400">
-                          Warning: {ind.validationWarnings.join(", ")}
-                        </div>
+                          return (
+                            <tr key={ind.id || idx} className="hover:bg-slate-50/70 dark:hover:bg-slate-900/50 transition-colors">
+                              <td className="p-2.5 font-bold font-mono border-r whitespace-nowrap">
+                                {ind.indicatorCode}
+                              </td>
+
+                              <td className="p-2.5 border-r whitespace-nowrap">
+                                <Badge variant="outline" className="text-[10px]">
+                                  {domainLabel}
+                                </Badge>
+                              </td>
+
+                              <td className="p-2.5 text-right font-mono font-semibold border-r whitespace-nowrap">
+                                {ind.displayedValue || "—"}
+                              </td>
+
+                              <td className="p-2.5 text-right font-mono text-[11px] text-muted-foreground border-r whitespace-nowrap">
+                                {ind.thresholdApplied || "—"}
+                              </td>
+
+                              <td className="p-2.5 text-center border-r whitespace-nowrap">
+                                <Badge variant="outline" className={`text-[10px] font-mono font-bold ${scoreBadgeClass}`}>
+                                  {ind.pointsAwarded ?? "—"} / {ind.maxPoints}
+                                </Badge>
+                              </td>
+
+                              <td className="p-2.5 text-[11px] text-muted-foreground leading-relaxed">
+                                <p>{ind.explanationText}</p>
+                                {ind.validationWarnings && ind.validationWarnings.length > 0 && (
+                                  <p className="text-[10px] text-amber-600 dark:text-amber-400 font-medium mt-1">
+                                    Warning: {ind.validationWarnings.join(", ")}
+                                  </p>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })
                       )}
-                    </div>
-                  ))}
+                    </tbody>
+                  </table>
                 </div>
               )}
             </div>
