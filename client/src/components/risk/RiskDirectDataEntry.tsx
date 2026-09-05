@@ -42,6 +42,10 @@ import {
   Sparkles,
   Check,
   Globe,
+  Pencil,
+  SlidersHorizontal,
+  Save,
+  Database,
 } from "lucide-react";
 import { RiskChoroplethMap } from "./RiskChoroplethMap";
 
@@ -340,6 +344,27 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
   const [bulkProvinceId, setBulkProvinceId] = useState<string>("ALL");
   const [bulkValue, setBulkValue] = useState<string>("");
 
+  // Population Hub query
+  const { data: populationHubData = [], isLoading: isLoadingPopHub } = useQuery<any[]>({
+    queryKey: ["/api/population"],
+  });
+
+  // Timeframe configuration state
+  const [targetYear, setTargetYear] = useState<number>(2025);
+  const [baselineYear1, setBaselineYear1] = useState<number>(2022);
+  const [baselineYear2, setBaselineYear2] = useState<number>(2023);
+  const [baselineYear3, setBaselineYear3] = useState<number>(2024);
+  const [autoSyncBaselines, setAutoSyncBaselines] = useState<boolean>(true);
+  const [timeframeModified, setTimeframeModified] = useState<boolean>(false);
+
+  // Population configuration & manual modal state
+  const [isManualPopDialogOpen, setIsManualPopDialogOpen] = useState<boolean>(false);
+  const [manualNationalPopInput, setManualNationalPopInput] = useState<string>("");
+  const [popDistributionMethod, setPopDistributionMethod] = useState<"proportional" | "equal">("proportional");
+  const [popSearchTerm, setPopSearchTerm] = useState<string>("");
+  const [popPage, setPopPage] = useState<number>(1);
+  const [popPageSize, setPopPageSize] = useState<number>(10);
+
   // Column width management
   const [colWidths, setColWidths] = useState<Record<string, number>>(DEFAULT_COL_WIDTHS);
 
@@ -378,11 +403,160 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
     }
   }, [data?.entries]);
 
+  // Sync assessment timeframe to local state
+  useEffect(() => {
+    if (data?.assessment) {
+      const yr = Number(data.assessment.assessmentYear) || 2025;
+      setTargetYear(yr);
+      const bl = Array.isArray(data.assessment.baselineYears) && data.assessment.baselineYears.length >= 3
+        ? data.assessment.baselineYears
+        : [yr - 3, yr - 2, yr - 1];
+      setBaselineYear1(Number(bl[0]) || yr - 3);
+      setBaselineYear2(Number(bl[1]) || yr - 2);
+      setBaselineYear3(Number(bl[2]) || yr - 1);
+      setTimeframeModified(false);
+    }
+  }, [data?.assessment]);
+
   const assessment = data?.assessment;
-  const assessmentYear = assessment?.assessmentYear || 2023;
-  const dataFirstYear = assessmentYear - 3;
-  const dataLastYear = assessmentYear - 1;
+  const assessmentYear = targetYear;
+  const dataFirstYear = baselineYear1;
+  const dataSecondYear = baselineYear2;
+  const dataLastYear = baselineYear3;
   const assessmentCountry = assessment?.countryName || context?.countryName || "National";
+
+  // Timeframe change handler
+  const handleTargetYearChange = (newYear: number) => {
+    setTargetYear(newYear);
+    setTimeframeModified(true);
+    if (autoSyncBaselines) {
+      setBaselineYear1(newYear - 3);
+      setBaselineYear2(newYear - 2);
+      setBaselineYear3(newYear - 1);
+    }
+  };
+
+  // Timeframe save mutation
+  const updateTimeframeMutation = useMutation({
+    mutationFn: async ({ yr, b1, b2, b3 }: { yr: number; b1: number; b2: number; b3: number }) => {
+      const body: any = {
+        assessmentYear: yr,
+        baselineYears: [b1, b2, b3],
+      };
+      const currentTitle = assessment?.title;
+      const oldYear = assessment?.assessmentYear;
+      if (currentTitle && oldYear && currentTitle.includes(String(oldYear))) {
+        body.title = currentTitle.replace(String(oldYear), String(yr));
+      }
+      return await apiRequest<any>("PATCH", `/api/risk/assessments/${assessmentId}`, body);
+    },
+    onSuccess: (updated) => {
+      setTimeframeModified(false);
+      queryClient.invalidateQueries({ queryKey: [`/api/risk/assessments/${assessmentId}`] });
+      queryClient.invalidateQueries({ queryKey: [`/api/risk/assessments/${assessmentId}/direct-entry`] });
+      queryClient.invalidateQueries({ queryKey: [`/api/risk/assessments/${assessmentId}/results`] });
+      toast({
+        title: "Assessment Timeframe Saved",
+        description: `Target Assessment Year: ${updated.assessmentYear} • Baseline Years: ${updated.baselineYears?.join(", ")}`,
+      });
+    },
+    onError: (err: any) => {
+      toast({
+        title: "Failed to Update Timeframe",
+        description: err.message || "An error occurred while saving assessment timeframe.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  // Pull population from Population Hub / verified coverage registry
+  const handlePullPopulationFromHub = () => {
+    const popByDistrict = new Map<number, number>();
+
+    if (Array.isArray(populationHubData) && populationHubData.length > 0) {
+      populationHubData.forEach((item) => {
+        if (item.districtId && item.totalPopulation) {
+          const existing = popByDistrict.get(item.districtId) || 0;
+          popByDistrict.set(item.districtId, existing + Number(item.totalPopulation));
+        }
+      });
+    }
+
+    if (Array.isArray(coveragePerformance) && coveragePerformance.length > 0) {
+      coveragePerformance.forEach((cp) => {
+        if (cp.districtId && cp.population && !popByDistrict.has(cp.districtId)) {
+          popByDistrict.set(cp.districtId, Number(cp.population));
+        }
+      });
+    }
+
+    if (popByDistrict.size === 0) {
+      toast({
+        title: "No Population Data Available",
+        description: "Could not retrieve population data from the Population Hub or Coverage Registry.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    let updatedCount = 0;
+    let newNationalTotal = 0;
+
+    setLocalRows((prev) =>
+      prev.map((row) => {
+        const p = popByDistrict.get(row.districtId);
+        if (p !== undefined && p > 0) {
+          updatedCount++;
+          newNationalTotal += p;
+          return { ...row, population: p };
+        }
+        newNationalTotal += Number(row.population) || 0;
+        return row;
+      })
+    );
+
+    setIsDirty(true);
+    toast({
+      title: "Population Pulled from Population Hub",
+      description: `Loaded verified population for ${updatedCount} districts. Total National Population: ${newNationalTotal.toLocaleString()}. Click 'Save Draft' or 'Recalculate All' to commit.`,
+    });
+  };
+
+  // Manual National Population distribution handler
+  const handleApplyManualNationalPop = () => {
+    const targetTotal = Number(manualNationalPopInput.replace(/,/g, "").trim());
+    if (isNaN(targetTotal) || targetTotal <= 0) {
+      toast({
+        title: "Invalid Population Value",
+        description: "Please enter a valid positive number for national population.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const currentTotal = localRows.reduce((acc, r) => acc + (Number(r.population) || 0), 0);
+    const count = localRows.length;
+
+    if (popDistributionMethod === "equal" || currentTotal <= 0) {
+      const perDistrict = Math.round(targetTotal / (count || 1));
+      setLocalRows((prev) => prev.map((r) => ({ ...r, population: perDistrict })));
+    } else {
+      const ratio = targetTotal / currentTotal;
+      setLocalRows((prev) =>
+        prev.map((r) => {
+          const cur = Number(r.population) || 0;
+          return { ...r, population: Math.round(cur * ratio) };
+        })
+      );
+    }
+
+    setIsDirty(true);
+    setIsManualPopDialogOpen(false);
+    toast({
+      title: "National Population Updated",
+      description: `Distributed ${targetTotal.toLocaleString()} across ${count} districts using ${popDistributionMethod === "equal" ? "equal" : "proportional"} allocation.`,
+    });
+  };
 
   // Save mutation
   const saveMutation = useMutation({
@@ -648,6 +822,23 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
     return localRows.reduce((acc, r) => acc + (Number(r.population) || 0), 0);
   }, [localRows]);
 
+  // District Population breakdown search and pagination
+  const filteredPopRows = useMemo(() => {
+    if (!popSearchTerm.trim()) return localRows;
+    const q = popSearchTerm.toLowerCase();
+    return localRows.filter(
+      (r) =>
+        (r.districtName && r.districtName.toLowerCase().includes(q)) ||
+        (r.provinceName && r.provinceName.toLowerCase().includes(q))
+    );
+  }, [localRows, popSearchTerm]);
+
+  const totalPopPages = Math.max(1, Math.ceil(filteredPopRows.length / popPageSize));
+  const paginatedPopRows = useMemo(() => {
+    const start = (popPage - 1) * popPageSize;
+    return filteredPopRows.slice(start, start + popPageSize);
+  }, [filteredPopRows, popPage, popPageSize]);
+
   return (
     <div className="space-y-3 font-sans select-none">
       {/* ==================================================================== */}
@@ -866,6 +1057,7 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
           </CardHeader>
           <CardContent className="p-6 space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+              {/* 1. Country & Jurisdiction */}
               <div className="p-4 border rounded-lg bg-card space-y-3">
                 <h4 className="font-bold text-xs text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
                   <Globe className="w-3.5 h-3.5 text-primary" />
@@ -888,13 +1080,46 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                     <span className="text-muted-foreground">Total Evaluated Areas:</span>
                     <span className="font-bold font-mono text-primary">{localRows.length} {context?.adminLevelLabelPlural || "Districts"}</span>
                   </div>
-                  <div className="flex justify-between py-1">
-                    <span className="text-muted-foreground">National Population:</span>
-                    <span className="font-bold font-mono text-foreground">{totalNationalPopulation.toLocaleString()}</span>
+                  <div className="pt-2 border-t flex items-center justify-between">
+                    <div>
+                      <span className="text-muted-foreground block text-[11px]">National Population:</span>
+                      <span className="font-bold font-mono text-sm text-foreground">
+                        {totalNationalPopulation.toLocaleString()}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          setManualNationalPopInput(String(totalNationalPopulation));
+                          setIsManualPopDialogOpen(true);
+                        }}
+                        className="h-7 px-2 text-[11px] gap-1 font-semibold"
+                        title="Manually set national population and distribute across districts"
+                      >
+                        <Pencil className="w-3 h-3 text-primary" />
+                        Manual Edit
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="secondary"
+                        onClick={handlePullPopulationFromHub}
+                        disabled={isLoadingPopHub}
+                        className="h-7 px-2 text-[11px] gap-1 font-semibold"
+                        title="Pull verified district population from Population Hub"
+                      >
+                        <RefreshCw className={`w-3 h-3 ${isLoadingPopHub ? "animate-spin" : ""}`} />
+                        Pull from Hub
+                      </Button>
+                    </div>
                   </div>
                 </div>
               </div>
 
+              {/* 2. GIS Shapefile & Boundary Link */}
               <div className="p-4 border rounded-lg bg-card space-y-3">
                 <h4 className="font-bold text-xs text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
                   <Layers className="w-3.5 h-3.5 text-emerald-600" />
@@ -922,28 +1147,315 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                 </div>
               </div>
 
+              {/* 3. Configurable Assessment Timeframe */}
               <div className="p-4 border rounded-lg bg-card space-y-3">
-                <h4 className="font-bold text-xs text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
-                  <Activity className="w-3.5 h-3.5 text-purple-600" />
-                  Assessment Timeframe
-                </h4>
-                <div className="space-y-2 text-xs">
-                  <div className="flex justify-between py-1 border-b">
-                    <span className="text-muted-foreground">Assessment Target Year:</span>
-                    <span className="font-bold font-mono text-foreground">{assessmentYear}</span>
+                <div className="flex items-center justify-between">
+                  <h4 className="font-bold text-xs text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+                    <Activity className="w-3.5 h-3.5 text-purple-600" />
+                    Assessment Timeframe
+                  </h4>
+                  {timeframeModified && (
+                    <Badge variant="secondary" className="text-[10px] bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 font-semibold">
+                      Unsaved Changes
+                    </Badge>
+                  )}
+                </div>
+
+                <div className="space-y-2.5 text-xs">
+                  <div className="flex items-center justify-between gap-2 py-1 border-b">
+                    <span className="text-muted-foreground font-medium">Target Assessment Year:</span>
+                    <Select
+                      value={String(targetYear)}
+                      onValueChange={(v) => handleTargetYearChange(Number(v))}
+                    >
+                      <SelectTrigger className="h-7 w-[100px] text-xs font-mono font-bold">
+                        <SelectValue placeholder="Year" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {[2020, 2021, 2022, 2023, 2024, 2025, 2026, 2027, 2028, 2029, 2030].map((y) => (
+                          <SelectItem key={y} value={String(y)} className="font-mono text-xs">
+                            {y}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
-                  <div className="flex justify-between py-1 border-b">
-                    <span className="text-muted-foreground">Baseline Year 1 (Year -3):</span>
-                    <span className="font-mono text-foreground">{dataFirstYear}</span>
+
+                  <div className="flex items-center justify-between pt-0.5">
+                    <label className="flex items-center gap-1.5 text-[11px] text-muted-foreground cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={autoSyncBaselines}
+                        onChange={(e) => {
+                          const next = e.target.checked;
+                          setAutoSyncBaselines(next);
+                          if (next) {
+                            setBaselineYear1(targetYear - 3);
+                            setBaselineYear2(targetYear - 2);
+                            setBaselineYear3(targetYear - 1);
+                            setTimeframeModified(true);
+                          }
+                        }}
+                        className="rounded border-slate-300 text-primary focus:ring-primary h-3.5 w-3.5"
+                      />
+                      Auto-align 3-yr baseline (T-3, T-2, T-1)
+                    </label>
                   </div>
-                  <div className="flex justify-between py-1 border-b">
-                    <span className="text-muted-foreground">Baseline Year 2 (Year -2):</span>
-                    <span className="font-mono text-foreground">{dataFirstYear + 1}</span>
+
+                  <div className="grid grid-cols-3 gap-2 pt-1 border-t">
+                    <div>
+                      <span className="text-[10px] text-muted-foreground block truncate" title="Baseline Year 1 (Year -3)">Year -3</span>
+                      <Select
+                        value={String(baselineYear1)}
+                        disabled={autoSyncBaselines}
+                        onValueChange={(v) => {
+                          setBaselineYear1(Number(v));
+                          setTimeframeModified(true);
+                        }}
+                      >
+                        <SelectTrigger className="h-7 w-full text-xs font-mono">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {[2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025, 2026, 2027].map((y) => (
+                            <SelectItem key={y} value={String(y)} className="font-mono text-xs">{y}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div>
+                      <span className="text-[10px] text-muted-foreground block truncate" title="Baseline Year 2 (Year -2)">Year -2</span>
+                      <Select
+                        value={String(baselineYear2)}
+                        disabled={autoSyncBaselines}
+                        onValueChange={(v) => {
+                          setBaselineYear2(Number(v));
+                          setTimeframeModified(true);
+                        }}
+                      >
+                        <SelectTrigger className="h-7 w-full text-xs font-mono">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {[2019, 2020, 2021, 2022, 2023, 2024, 2025, 2026, 2027, 2028].map((y) => (
+                            <SelectItem key={y} value={String(y)} className="font-mono text-xs">{y}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div>
+                      <span className="text-[10px] text-muted-foreground block truncate" title="Baseline Year 3 (Year -1)">Year -1</span>
+                      <Select
+                        value={String(baselineYear3)}
+                        disabled={autoSyncBaselines}
+                        onValueChange={(v) => {
+                          setBaselineYear3(Number(v));
+                          setTimeframeModified(true);
+                        }}
+                      >
+                        <SelectTrigger className="h-7 w-full text-xs font-mono">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {[2020, 2021, 2022, 2023, 2024, 2025, 2026, 2027, 2028, 2029].map((y) => (
+                            <SelectItem key={y} value={String(y)} className="font-mono text-xs">{y}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
                   </div>
-                  <div className="flex justify-between py-1">
-                    <span className="text-muted-foreground">Baseline Year 3 (Year -1):</span>
-                    <span className="font-mono text-foreground">{dataLastYear}</span>
+
+                  <div className="pt-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={() => updateTimeframeMutation.mutate({ yr: targetYear, b1: baselineYear1, b2: baselineYear2, b3: baselineYear3 })}
+                      disabled={updateTimeframeMutation.isPending || (!timeframeModified && targetYear === (assessment?.assessmentYear || 2025))}
+                      className="w-full h-7 text-xs gap-1.5 font-semibold"
+                    >
+                      <Check className="w-3.5 h-3.5" />
+                      {updateTimeframeMutation.isPending ? "Saving Timeframe..." : "Save Assessment Timeframe"}
+                    </Button>
                   </div>
+                </div>
+              </div>
+            </div>
+
+            {/* 4. DISTRICT POPULATION BREAKDOWN & MANUAL OVERRIDES (ENTERPRISE TABLE PER RULE 24) */}
+            <div className="p-4 border rounded-lg bg-card space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b">
+                <div>
+                  <h4 className="font-bold text-sm text-foreground flex items-center gap-2">
+                    <Users className="w-4 h-4 text-primary" />
+                    District Population Breakdown &amp; Manual Overrides
+                  </h4>
+                  <p className="text-xs text-muted-foreground">
+                    Inspect, adjust, or manually override individual district populations. All population adjustments automatically update national metrics and WHO surveillance rates.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="relative w-48">
+                    <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      placeholder="Filter districts..."
+                      value={popSearchTerm}
+                      onChange={(e) => {
+                        setPopSearchTerm(e.target.value);
+                        setPopPage(1);
+                      }}
+                      className="h-7 text-xs pl-8 font-sans"
+                    />
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={handlePullPopulationFromHub}
+                    disabled={isLoadingPopHub}
+                    className="h-7 text-xs gap-1 font-semibold"
+                  >
+                    <RefreshCw className={`w-3 h-3 ${isLoadingPopHub ? "animate-spin" : ""}`} />
+                    Pull from Hub
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      setManualNationalPopInput(String(totalNationalPopulation));
+                      setIsManualPopDialogOpen(true);
+                    }}
+                    className="h-7 text-xs gap-1 font-semibold"
+                  >
+                    <Pencil className="w-3 h-3 text-primary" />
+                    National Override
+                  </Button>
+                </div>
+              </div>
+
+              {/* Table conforming to Rule 24: Enterprise Table */}
+              <div className="border rounded-md overflow-hidden">
+                <table className="w-full text-xs text-left border-collapse">
+                  <thead className="bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 font-semibold border-b">
+                    <tr>
+                      <th className="p-2 border-r text-center w-12">#</th>
+                      <th className="p-2 border-r">District / Administrative Area</th>
+                      <th className="p-2 border-r">Province / Region</th>
+                      <th className="p-2 border-r text-right w-40">Population (Editable)</th>
+                      <th className="p-2 border-r text-right w-32">% of National Total</th>
+                      <th className="p-2 text-right w-36">Est. Under 1 Pop (3.5%)</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
+                    {paginatedPopRows.length === 0 ? (
+                      <tr>
+                        <td colSpan={6} className="p-4 text-center text-muted-foreground text-xs">
+                          No matching districts found.
+                        </td>
+                      </tr>
+                    ) : (
+                      paginatedPopRows.map((r, idx) => {
+                        const globalIdx = (popPage - 1) * popPageSize + idx + 1;
+                        const popNum = Number(r.population) || 0;
+                        const pctOfTotal = totalNationalPopulation > 0 ? ((popNum / totalNationalPopulation) * 100).toFixed(2) : "0.00";
+                        const under1Est = Math.round(popNum * 0.035);
+
+                        return (
+                          <tr key={r.districtId} className="hover:bg-muted/30 transition-colors">
+                            <td className="p-2 text-center font-mono text-muted-foreground">{globalIdx}</td>
+                            <td className="p-2 font-semibold text-foreground">{r.districtName || `District ${r.districtId}`}</td>
+                            <td className="p-2 text-muted-foreground">{r.provinceName || "National"}</td>
+                            <td className="p-1.5 border-r text-right">
+                              <Input
+                                type="number"
+                                min={0}
+                                value={r.population}
+                                onChange={(e) => {
+                                  handleCellChange(r.districtId, "population", Math.max(0, Number(e.target.value) || 0));
+                                }}
+                                className="h-7 text-xs font-mono text-right font-bold w-36 ml-auto"
+                              />
+                            </td>
+                            <td className="p-2 border-r text-right font-mono text-muted-foreground">{pctOfTotal}%</td>
+                            <td className="p-2 text-right font-mono text-muted-foreground">{under1Est.toLocaleString()}</td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Pagination controls */}
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-2 pt-2 text-xs text-muted-foreground">
+                <div className="flex items-center gap-2">
+                  <span>
+                    Showing {paginatedPopRows.length > 0 ? (popPage - 1) * popPageSize + 1 : 0} to{" "}
+                    {Math.min(popPage * popPageSize, filteredPopRows.length)} of {filteredPopRows.length} districts
+                  </span>
+                  <span className="text-muted-foreground">•</span>
+                  <div className="flex items-center gap-1">
+                    <span>Rows per page:</span>
+                    <Select
+                      value={String(popPageSize)}
+                      onValueChange={(v) => {
+                        setPopPageSize(Number(v));
+                        setPopPage(1);
+                      }}
+                    >
+                      <SelectTrigger className="h-6 w-16 text-xs font-mono">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="10">10</SelectItem>
+                        <SelectItem value="25">25</SelectItem>
+                        <SelectItem value="52">52</SelectItem>
+                        <SelectItem value="100">100</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-1">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setPopPage(1)}
+                    disabled={popPage <= 1}
+                    className="h-6 px-2 text-xs"
+                  >
+                    First
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setPopPage((p) => Math.max(1, p - 1))}
+                    disabled={popPage <= 1}
+                    className="h-6 px-2 text-xs"
+                  >
+                    Prev
+                  </Button>
+                  <span className="px-2 font-mono text-xs">
+                    Page {popPage} of {totalPopPages}
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setPopPage((p) => Math.min(totalPopPages, p + 1))}
+                    disabled={popPage >= totalPopPages}
+                    className="h-6 px-2 text-xs"
+                  >
+                    Next
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setPopPage(totalPopPages)}
+                    disabled={popPage >= totalPopPages}
+                    className="h-6 px-2 text-xs"
+                  >
+                    Last
+                  </Button>
                 </div>
               </div>
             </div>
@@ -1262,14 +1774,14 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                     {activeTab === "population-immunity" && (
                       <>
                         <th className="p-1 border-r border-slate-200 dark:border-slate-700 w-[74px]">{dataFirstYear}</th>
-                        <th className="p-1 border-r border-slate-200 dark:border-slate-700 w-[74px]">{dataFirstYear + 1}</th>
+                        <th className="p-1 border-r border-slate-200 dark:border-slate-700 w-[74px]">{dataSecondYear}</th>
                         <th className="p-1 border-r border-slate-200 dark:border-slate-700 w-[74px]">{dataLastYear}</th>
                         <th className="p-1 border-r border-slate-200 dark:border-slate-700 w-[78px] bg-slate-100/50">Avg</th>
                         <th className="p-1 border-r border-slate-200 dark:border-slate-700 w-[52px] font-bold">RP</th>
                         <th className="p-1 border-r border-slate-200 dark:border-slate-700 w-[82px]">% &lt;80%</th>
                         <th className="p-1 border-r border-slate-200 dark:border-slate-700 w-[52px] font-bold">RP</th>
                         <th className="p-1 border-r border-slate-200 dark:border-slate-700 w-[74px]">{dataFirstYear}</th>
-                        <th className="p-1 border-r border-slate-200 dark:border-slate-700 w-[74px]">{dataFirstYear + 1}</th>
+                        <th className="p-1 border-r border-slate-200 dark:border-slate-700 w-[74px]">{dataSecondYear}</th>
                         <th className="p-1 border-r border-slate-200 dark:border-slate-700 w-[74px]">{dataLastYear}</th>
                         <th className="p-1 border-r border-slate-200 dark:border-slate-700 w-[78px] bg-slate-100/50">Avg</th>
                         <th className="p-1 border-r border-slate-200 dark:border-slate-700 w-[52px] font-bold">RP</th>
@@ -1923,7 +2435,7 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                     <th className="p-2 border-r">Province</th>
                     <th className="p-2 border-r text-right">Population</th>
                     <th className="p-2 border-r text-right">Cases ({dataFirstYear})</th>
-                    <th className="p-2 border-r text-right">Cases ({dataFirstYear + 1})</th>
+                    <th className="p-2 border-r text-right">Cases ({dataSecondYear})</th>
                     <th className="p-2 border-r text-right">Cases ({dataLastYear})</th>
                     <th className="p-2 text-right">Incidence / 100k ({dataLastYear})</th>
                   </tr>
@@ -2172,6 +2684,85 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
             </Button>
             <Button size="sm" onClick={applyBulkValue} className="h-8 text-xs font-bold">
               Apply Across Districts
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Manual National Population Configuration Modal */}
+      <Dialog open={isManualPopDialogOpen} onOpenChange={setIsManualPopDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-sm font-bold flex items-center gap-2">
+              <Pencil className="w-4 h-4 text-primary" />
+              Manual National Population Configuration
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              Configure the total national population for {assessmentCountry} and select the allocation method across all {localRows.length} evaluated districts.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-2 space-y-4 text-xs">
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold">Total National Population:</Label>
+              <Input
+                value={manualNationalPopInput}
+                onChange={(e) => setManualNationalPopInput(e.target.value)}
+                placeholder="e.g. 60,000,000"
+                className="font-mono text-sm font-bold h-9"
+              />
+              <span className="text-[11px] text-muted-foreground block">
+                Current National Total: <span className="font-mono font-semibold">{totalNationalPopulation.toLocaleString()}</span>
+              </span>
+            </div>
+
+            <div className="space-y-2">
+              <Label className="text-xs font-semibold">Allocation Method across {localRows.length} Districts:</Label>
+              <div className="space-y-2">
+                <label className="flex items-start gap-2 p-2.5 border rounded-md cursor-pointer hover:bg-muted/40 transition-colors">
+                  <input
+                    type="radio"
+                    name="popDistributionMethod"
+                    checked={popDistributionMethod === "proportional"}
+                    onChange={() => setPopDistributionMethod("proportional")}
+                    className="mt-0.5"
+                  />
+                  <div>
+                    <span className="font-semibold block text-foreground">Proportional Distribution (Recommended)</span>
+                    <span className="text-muted-foreground text-[11px] block leading-relaxed">
+                      Preserves existing regional population ratios, scaling each district's population proportionally.
+                    </span>
+                  </div>
+                </label>
+
+                <label className="flex items-start gap-2 p-2.5 border rounded-md cursor-pointer hover:bg-muted/40 transition-colors">
+                  <input
+                    type="radio"
+                    name="popDistributionMethod"
+                    checked={popDistributionMethod === "equal"}
+                    onChange={() => setPopDistributionMethod("equal")}
+                    className="mt-0.5"
+                  />
+                  <div>
+                    <span className="font-semibold block text-foreground">Equal Distribution</span>
+                    <span className="text-muted-foreground text-[11px] block leading-relaxed">
+                      Distributes the national total equally across all {localRows.length} districts (~
+                      {Math.round(
+                        (Number(manualNationalPopInput.replace(/,/g, "")) || totalNationalPopulation) /
+                          Math.max(1, localRows.length)
+                      ).toLocaleString()}{" "}
+                      per district).
+                    </span>
+                  </div>
+                </label>
+              </div>
+            </div>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" size="sm" onClick={() => setIsManualPopDialogOpen(false)} className="h-8 text-xs">
+              Cancel
+            </Button>
+            <Button size="sm" onClick={handleApplyManualNationalPop} className="h-8 text-xs font-bold gap-1.5">
+              <Check className="w-3.5 h-3.5" /> Apply Population
             </Button>
           </DialogFooter>
         </DialogContent>
