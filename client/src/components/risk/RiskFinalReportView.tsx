@@ -136,7 +136,7 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
         let pd = (mcv1 - mcv2) > 10 ? 12 : 4;
         let ta = (Number(entry.threatCasesUnder5) || 0) > 0 ? 18 : 6;
         const total = pi + sq + pd + ta;
-        const cat = total >= 61 ? "VERY_HIGH" : total >= 55 ? "HIGH" : total >= 48 ? "MEDIUM" : "LOW";
+        const cat = total >= 57 ? "VERY_HIGH" : total >= 45 ? "HIGH" : total >= 32 ? "MEDIUM" : "LOW";
 
         return {
           id: entry.id || String(entry.districtId),
@@ -283,10 +283,10 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
 
   const summaryRows = useMemo(() => {
     const rows = [
-      { key: "VERY_HIGH", label: "Very High Risk (Score ≥ 61)", num: stats.counts.VERY_HIGH, pct: totalDistricts ? ((stats.counts.VERY_HIGH / totalDistricts) * 100) : 0, pop: stats.pops.VERY_HIGH, popPct: totalPopulation ? ((stats.pops.VERY_HIGH / totalPopulation) * 100) : 0, bg: "bg-red-50/60 dark:bg-red-950/30", text: "text-red-600 dark:text-red-400" },
-      { key: "HIGH", label: "High Risk (Score 55–60)", num: stats.counts.HIGH, pct: totalDistricts ? ((stats.counts.HIGH / totalDistricts) * 100) : 0, pop: stats.pops.HIGH, popPct: totalPopulation ? ((stats.pops.HIGH / totalPopulation) * 100) : 0, bg: "bg-orange-50/60 dark:bg-orange-950/30", text: "text-orange-600 dark:text-orange-400" },
-      { key: "MEDIUM", label: "Medium Risk (Score 48–54)", num: stats.counts.MEDIUM, pct: totalDistricts ? ((stats.counts.MEDIUM / totalDistricts) * 100) : 0, pop: stats.pops.MEDIUM, popPct: totalPopulation ? ((stats.pops.MEDIUM / totalPopulation) * 100) : 0, bg: "bg-amber-50/60 dark:bg-amber-950/30", text: "text-amber-600 dark:text-amber-400" },
-      { key: "LOW", label: "Low Risk (Score ≤ 47)", num: stats.counts.LOW, pct: totalDistricts ? ((stats.counts.LOW / totalDistricts) * 100) : 0, pop: stats.pops.LOW, popPct: totalPopulation ? ((stats.pops.LOW / totalPopulation) * 100) : 0, bg: "bg-emerald-50/60 dark:bg-emerald-950/30", text: "text-emerald-600 dark:text-emerald-400" },
+      { key: "VERY_HIGH", label: "Very High Risk (Score ≥ 57)", num: stats.counts.VERY_HIGH, pct: totalDistricts ? ((stats.counts.VERY_HIGH / totalDistricts) * 100) : 0, pop: stats.pops.VERY_HIGH, popPct: totalPopulation ? ((stats.pops.VERY_HIGH / totalPopulation) * 100) : 0, bg: "bg-red-50/60 dark:bg-red-950/30", text: "text-red-600 dark:text-red-400" },
+      { key: "HIGH", label: "High Risk (Score 45–56)", num: stats.counts.HIGH, pct: totalDistricts ? ((stats.counts.HIGH / totalDistricts) * 100) : 0, pop: stats.pops.HIGH, popPct: totalPopulation ? ((stats.pops.HIGH / totalPopulation) * 100) : 0, bg: "bg-orange-50/60 dark:bg-orange-950/30", text: "text-orange-600 dark:text-orange-400" },
+      { key: "MEDIUM", label: "Medium Risk (Score 32–44)", num: stats.counts.MEDIUM, pct: totalDistricts ? ((stats.counts.MEDIUM / totalDistricts) * 100) : 0, pop: stats.pops.MEDIUM, popPct: totalPopulation ? ((stats.pops.MEDIUM / totalPopulation) * 100) : 0, bg: "bg-amber-50/60 dark:bg-amber-950/30", text: "text-amber-600 dark:text-amber-400" },
+      { key: "LOW", label: "Low Risk (Score < 32)", num: stats.counts.LOW, pct: totalDistricts ? ((stats.counts.LOW / totalDistricts) * 100) : 0, pop: stats.pops.LOW, popPct: totalPopulation ? ((stats.pops.LOW / totalPopulation) * 100) : 0, bg: "bg-emerald-50/60 dark:bg-emerald-950/30", text: "text-emerald-600 dark:text-emerald-400" },
     ];
     return rows.sort((a, b) => {
       if (sortCol1 === "category") return sortDir1 === "asc" ? a.label.localeCompare(b.label) : b.label.localeCompare(a.label);
@@ -1223,7 +1223,7 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <h4 className="text-xs font-bold text-red-600 dark:text-red-400 uppercase tracking-wider">
-                  Table 1b: Risk Scores & Recommended Interventions for Very High Risk Districts (Score &ge; 61)
+                  Table 1b: Risk Scores & Recommended Interventions for Very High Risk Districts (Score &ge; 57)
                 </h4>
                 <div className="flex items-center gap-2 print:hidden">
                   <span className="text-[11px] text-muted-foreground italic hidden sm:inline">Columns stretchable & sortable</span>
@@ -1466,7 +1466,7 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
             <div className="space-y-2 pt-3">
               <div className="flex items-center justify-between">
                 <h4 className="text-xs font-bold text-orange-600 dark:text-orange-400 uppercase tracking-wider">
-                  Table 1c: Risk Scores & Recommended Interventions for High Risk Districts (Score 55–60)
+                  Table 1c: Risk Scores & Recommended Interventions for High Risk Districts (Score 45–56)
                 </h4>
                 <div className="flex items-center gap-2 print:hidden">
                   <span className="text-[11px] text-muted-foreground italic hidden sm:inline">Columns stretchable & sortable</span>
@@ -1709,7 +1709,7 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
             <div className="space-y-2 pt-3">
               <div className="flex items-center justify-between">
                 <h4 className="text-xs font-bold text-amber-600 dark:text-amber-400 uppercase tracking-wider">
-                  Table 1d: Risk Scores & Recommended Interventions for Medium Risk Districts (Score 48–54)
+                  Table 1d: Risk Scores & Recommended Interventions for Medium Risk Districts (Score 32–44)
                 </h4>
                 <div className="flex items-center gap-2 print:hidden">
                   <span className="text-[11px] text-muted-foreground italic hidden sm:inline">Columns stretchable & sortable</span>
@@ -1952,7 +1952,7 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
             <div className="space-y-2 pt-3">
               <div className="flex items-center justify-between">
                 <h4 className="text-xs font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider">
-                  Table 1e: Risk Scores & Maintenance Interventions for Low Risk Districts (Score &le; 47)
+                  Table 1e: Risk Scores & Maintenance Interventions for Low Risk Districts (Score &lt; 32)
                 </h4>
                 <div className="flex items-center gap-2 print:hidden">
                   <span className="text-[11px] text-muted-foreground italic hidden sm:inline">Columns stretchable & sortable</span>
