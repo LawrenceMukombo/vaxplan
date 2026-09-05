@@ -44,6 +44,8 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Progress } from "@/components/ui/progress";
 import { apiRequest } from "@/lib/queryClient";
 import { RiskChoroplethMap, type DistrictCoveragePerformance } from "@/components/risk/RiskChoroplethMap";
+import { RiskDirectDataEntry } from "@/components/risk/RiskDirectDataEntry";
+import { RiskFinalReportView } from "@/components/risk/RiskFinalReportView";
 
 interface AreaResult {
   id: string;
@@ -482,6 +484,16 @@ export default function RiskResultsWorkspace() {
             <Upload className="w-3.5 h-3.5 mr-0.5" /> Import Data
           </Button>
 
+          <a
+            href={`/api/risk/assessments/${effectiveId}/export-report-docx`}
+            download
+            className="inline-flex items-center"
+          >
+            <Button variant="outline" size="sm" className="h-8 text-xs gap-1 text-primary hover:text-primary/90">
+              <Download className="w-3.5 h-3.5 mr-0.5" /> Export Word Report (.docx)
+            </Button>
+          </a>
+
           <Button
             size="sm"
             onClick={() => calculateMutation.mutate()}
@@ -568,12 +580,18 @@ export default function RiskResultsWorkspace() {
 
       {/* Workspace Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-        <TabsList className="grid grid-cols-4 w-full md:w-[600px]">
+        <TabsList className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 w-full">
           <TabsTrigger value="results" className="text-xs gap-1.5">
             <FileSpreadsheet className="w-3.5 h-3.5" /> District Results
           </TabsTrigger>
+          <TabsTrigger value="direct-entry" className="text-xs gap-1.5">
+            <Edit3 className="w-3.5 h-3.5" /> Direct Data Entry
+          </TabsTrigger>
           <TabsTrigger value="map" className="text-xs gap-1.5">
             <MapIcon className="w-3.5 h-3.5" /> Risk Map
+          </TabsTrigger>
+          <TabsTrigger value="report" className="text-xs gap-1.5">
+            <FileDown className="w-3.5 h-3.5" /> Final Country Report
           </TabsTrigger>
           <TabsTrigger value="actions" className="text-xs gap-1.5">
             <CheckCircle className="w-3.5 h-3.5" /> Linked Actions ({linkedActions.length})
@@ -890,6 +908,18 @@ export default function RiskResultsWorkspace() {
         </TabsContent>
 
         {/* ==================================================================== */}
+        {/* TAB: DIRECT DATA ENTRY SPREADSHEET (WHO EXCEL TOOL WORKSPACE) */}
+        {/* ==================================================================== */}
+        <TabsContent value="direct-entry" className="space-y-4">
+          <RiskDirectDataEntry
+            assessmentId={effectiveId}
+            onCalculationSuccess={() => {
+              setActiveTab("results");
+            }}
+          />
+        </TabsContent>
+
+        {/* ==================================================================== */}
         {/* TAB 2: INTERACTIVE CHOROPLETH MAP (RULE 25) */}
         {/* ==================================================================== */}
         <TabsContent value="map" className="space-y-4">
@@ -914,6 +944,16 @@ export default function RiskResultsWorkspace() {
               }
             }}
             isLoading={isResultsLoading}
+          />
+        </TabsContent>
+
+        {/* ==================================================================== */}
+        {/* TAB: STANDARDIZED FINAL REPORT (WHO TEMPLATE) */}
+        {/* ==================================================================== */}
+        <TabsContent value="report" className="space-y-4">
+          <RiskFinalReportView
+            assessment={assessment}
+            districtResults={effectiveChoroplethData as any}
           />
         </TabsContent>
 

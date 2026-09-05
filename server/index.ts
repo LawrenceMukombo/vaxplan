@@ -43,6 +43,7 @@ import { applyMicroplanVersionControlMigration } from "./migrations/030-micropla
 import { upsertMicroplanVersionPermissionsForAllTenants } from "./migrations/031-microplan-version-permissions";
 import { applyRiskAssessmentSchema } from "./migrations/032-risk-assessment-schema";
 import { applyRiskPermissionsAndSeed } from "./migrations/033-risk-permissions-and-seed";
+import { applyRiskDirectEntrySchema } from "./migrations/034-risk-direct-entry";
 import { realignIdentitySequences } from "./services/identitySequences";
 import { applySupervisionTemplatesSeed } from "./migrations/028-supervision-templates-seed";
 const app = express();
@@ -378,6 +379,7 @@ async function backfillClientIds() {
     await applySupervisionTemplatesSeed();
     await applyRiskAssessmentSchema(db as any);
     await applyRiskPermissionsAndSeed(db as any);
+    await applyRiskDirectEntrySchema(db as any);
     log("identity sequences, templates, and all-tenant lifecycle permissions ready", "db");
   }).catch((err) => log("identity sequence and lifecycle permission warning: " + String(err?.message ?? err), "db"));
   // Stock ledger columns upgrade (migration 027)

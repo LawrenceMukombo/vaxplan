@@ -159,6 +159,7 @@ __export(schema_exports, {
   insertRiskAssessmentRunSchema: () => insertRiskAssessmentRunSchema,
   insertRiskAssessmentSchema: () => insertRiskAssessmentSchema,
   insertRiskCaseRawSchema: () => insertRiskCaseRawSchema,
+  insertRiskDistrictDataEntrySchema: () => insertRiskDistrictDataEntrySchema,
   insertRiskDomainResultSchema: () => insertRiskDomainResultSchema,
   insertRiskIndicatorResultSchema: () => insertRiskIndicatorResultSchema,
   insertRiskMethodologyProfileSchema: () => insertRiskMethodologyProfileSchema,
@@ -237,6 +238,7 @@ __export(schema_exports, {
   riskAssessmentRuns: () => riskAssessmentRuns,
   riskAssessments: () => riskAssessments,
   riskCaseRaw: () => riskCaseRaw,
+  riskDistrictDataEntry: () => riskDistrictDataEntry,
   riskDomainResults: () => riskDomainResults,
   riskIndicatorResults: () => riskIndicatorResults,
   riskMethodologies: () => riskMethodologies,
@@ -260,6 +262,7 @@ __export(schema_exports, {
   selectRiskAssessmentRunSchema: () => selectRiskAssessmentRunSchema,
   selectRiskAssessmentSchema: () => selectRiskAssessmentSchema,
   selectRiskCaseRawSchema: () => selectRiskCaseRawSchema,
+  selectRiskDistrictDataEntrySchema: () => selectRiskDistrictDataEntrySchema,
   selectRiskDomainResultSchema: () => selectRiskDomainResultSchema,
   selectRiskIndicatorResultSchema: () => selectRiskIndicatorResultSchema,
   selectRiskMethodologyProfileSchema: () => selectRiskMethodologyProfileSchema,
@@ -595,6 +598,51 @@ var riskActionLinks = (0, import_pg_core.pgTable)("risk_action_links", {
   assessmentActionIdx: (0, import_pg_core.index)("idx_risk_action_assessment").on(table.assessmentId),
   tenantActionIdx: (0, import_pg_core.index)("idx_risk_action_tenant").on(table.tenantId)
 }));
+var riskDistrictDataEntry = (0, import_pg_core.pgTable)("risk_district_data_entry", {
+  id: (0, import_pg_core.varchar)("id").primaryKey().default(import_drizzle_orm.sql`gen_random_uuid()`),
+  tenantId: (0, import_pg_core.varchar)("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  assessmentId: (0, import_pg_core.varchar)("assessment_id").notNull().references(() => riskAssessments.id, { onDelete: "cascade" }),
+  districtId: (0, import_pg_core.integer)("district_id").notNull().references(() => districts.id, { onDelete: "cascade" }),
+  provinceId: (0, import_pg_core.integer)("province_id").references(() => provinces.id, { onDelete: "set null" }),
+  population: (0, import_pg_core.decimal)("population", { precision: 12, scale: 2 }).default("100000"),
+  areaKm2: (0, import_pg_core.decimal)("area_km2", { precision: 12, scale: 2 }).default("2500"),
+  mcv1YearMinus3: (0, import_pg_core.decimal)("mcv1_year_minus3", { precision: 5, scale: 2 }).default("80.00"),
+  mcv1YearMinus2: (0, import_pg_core.decimal)("mcv1_year_minus2", { precision: 5, scale: 2 }).default("82.00"),
+  mcv1YearMinus1: (0, import_pg_core.decimal)("mcv1_year_minus1", { precision: 5, scale: 2 }).default("85.00"),
+  mcv2YearMinus3: (0, import_pg_core.decimal)("mcv2_year_minus3", { precision: 5, scale: 2 }).default("70.00"),
+  mcv2YearMinus2: (0, import_pg_core.decimal)("mcv2_year_minus2", { precision: 5, scale: 2 }).default("72.00"),
+  mcv2YearMinus1: (0, import_pg_core.decimal)("mcv2_year_minus1", { precision: 5, scale: 2 }).default("75.00"),
+  penta1YearMinus1: (0, import_pg_core.decimal)("penta1_year_minus1", { precision: 5, scale: 2 }).default("90.00"),
+  siaCoveragePct: (0, import_pg_core.decimal)("sia_coverage_pct", { precision: 5, scale: 2 }).default("92.00"),
+  siaTargetAgeGroup: (0, import_pg_core.varchar)("sia_target_age_group", { length: 20 }).default("WIDE"),
+  siaYearsSince: (0, import_pg_core.integer)("sia_years_since").default(2),
+  unvaccinatedCasesPct: (0, import_pg_core.decimal)("unvaccinated_cases_pct", { precision: 5, scale: 2 }).default("15.00"),
+  suspectedCases: (0, import_pg_core.integer)("suspected_cases").default(12),
+  discardedCases: (0, import_pg_core.integer)("discarded_cases").default(3),
+  adequateInvestigationPct: (0, import_pg_core.decimal)("adequate_investigation_pct", { precision: 5, scale: 2 }).default("85.00"),
+  adequateSpecimenPct: (0, import_pg_core.decimal)("adequate_specimen_pct", { precision: 5, scale: 2 }).default("85.00"),
+  timelyLabResultsPct: (0, import_pg_core.decimal)("timely_lab_results_pct", { precision: 5, scale: 2 }).default("85.00"),
+  threatCasesUnder5: (0, import_pg_core.integer)("threat_cases_under5").default(0),
+  threatCases5To14: (0, import_pg_core.integer)("threat_cases_5_to_14").default(0),
+  threatCases15Plus: (0, import_pg_core.integer)("threat_cases_15_plus").default(0),
+  borderCaseInPastYear: (0, import_pg_core.boolean)("border_case_in_past_year").default(false),
+  vulnerabilities: (0, import_pg_core.jsonb)("vulnerabilities").default({
+    migrantOrUnderserved: false,
+    vaccineHesitancyOrRefusal: false,
+    securityOrConflictConcerns: false,
+    recurrentNaturalDisasters: false,
+    poorAccessOrTerrain: false,
+    inadequatePoliticalSupport: false,
+    highTransitHubOrBorder: false,
+    massGatheringsOrEvents: false
+  }),
+  createdAt: (0, import_pg_core.timestamp)("created_at").defaultNow().notNull(),
+  updatedAt: (0, import_pg_core.timestamp)("updated_at").defaultNow().notNull()
+}, (table) => ({
+  assessmentDistrictEntryIdx: (0, import_pg_core.uniqueIndex)("idx_risk_dist_entry_unique").on(table.assessmentId, table.districtId),
+  tenantDistEntryIdx: (0, import_pg_core.index)("idx_risk_dist_entry_tenant").on(table.tenantId),
+  assessmentEntryIdx: (0, import_pg_core.index)("idx_risk_dist_entry_assessment").on(table.assessmentId)
+}));
 var insertRiskMethodologySchema = (0, import_drizzle_zod.createInsertSchema)(riskMethodologies);
 var selectRiskMethodologySchema = (0, import_drizzle_zod.createSelectSchema)(riskMethodologies);
 var insertRiskMethodologyVersionSchema = (0, import_drizzle_zod.createInsertSchema)(riskMethodologyVersions);
@@ -619,6 +667,8 @@ var insertRiskVulnerabilityResponseSchema = (0, import_drizzle_zod.createInsertS
 var selectRiskVulnerabilityResponseSchema = (0, import_drizzle_zod.createSelectSchema)(riskVulnerabilityResponses);
 var insertRiskActionLinkSchema = (0, import_drizzle_zod.createInsertSchema)(riskActionLinks);
 var selectRiskActionLinkSchema = (0, import_drizzle_zod.createSelectSchema)(riskActionLinks);
+var insertRiskDistrictDataEntrySchema = (0, import_drizzle_zod.createInsertSchema)(riskDistrictDataEntry);
+var selectRiskDistrictDataEntrySchema = (0, import_drizzle_zod.createSelectSchema)(riskDistrictDataEntry);
 
 // shared/schema.ts
 var tenantStatusEnum = (0, import_pg_core2.pgEnum)("tenant_status", [

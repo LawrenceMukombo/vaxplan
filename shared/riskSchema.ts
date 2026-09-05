@@ -258,6 +258,56 @@ export const riskActionLinks = pgTable("risk_action_links", {
 }));
 
 // ============================================================================
+// 8. DIRECT DISTRICT DATA ENTRY (MATCHING WHO EXCEL TEMPLATE)
+// ============================================================================
+
+export const riskDistrictDataEntry = pgTable("risk_district_data_entry", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  assessmentId: varchar("assessment_id").notNull().references(() => riskAssessments.id, { onDelete: "cascade" }),
+  districtId: integer("district_id").notNull().references(() => districts.id, { onDelete: "cascade" }),
+  provinceId: integer("province_id").references(() => provinces.id, { onDelete: "set null" }),
+  population: decimal("population", { precision: 12, scale: 2 }).default("100000"),
+  areaKm2: decimal("area_km2", { precision: 12, scale: 2 }).default("2500"),
+  mcv1YearMinus3: decimal("mcv1_year_minus3", { precision: 5, scale: 2 }).default("80.00"),
+  mcv1YearMinus2: decimal("mcv1_year_minus2", { precision: 5, scale: 2 }).default("82.00"),
+  mcv1YearMinus1: decimal("mcv1_year_minus1", { precision: 5, scale: 2 }).default("85.00"),
+  mcv2YearMinus3: decimal("mcv2_year_minus3", { precision: 5, scale: 2 }).default("70.00"),
+  mcv2YearMinus2: decimal("mcv2_year_minus2", { precision: 5, scale: 2 }).default("72.00"),
+  mcv2YearMinus1: decimal("mcv2_year_minus1", { precision: 5, scale: 2 }).default("75.00"),
+  penta1YearMinus1: decimal("penta1_year_minus1", { precision: 5, scale: 2 }).default("90.00"),
+  siaCoveragePct: decimal("sia_coverage_pct", { precision: 5, scale: 2 }).default("92.00"),
+  siaTargetAgeGroup: varchar("sia_target_age_group", { length: 20 }).default("WIDE"),
+  siaYearsSince: integer("sia_years_since").default(2),
+  unvaccinatedCasesPct: decimal("unvaccinated_cases_pct", { precision: 5, scale: 2 }).default("15.00"),
+  suspectedCases: integer("suspected_cases").default(12),
+  discardedCases: integer("discarded_cases").default(3),
+  adequateInvestigationPct: decimal("adequate_investigation_pct", { precision: 5, scale: 2 }).default("85.00"),
+  adequateSpecimenPct: decimal("adequate_specimen_pct", { precision: 5, scale: 2 }).default("85.00"),
+  timelyLabResultsPct: decimal("timely_lab_results_pct", { precision: 5, scale: 2 }).default("85.00"),
+  threatCasesUnder5: integer("threat_cases_under5").default(0),
+  threatCases5To14: integer("threat_cases_5_to_14").default(0),
+  threatCases15Plus: integer("threat_cases_15_plus").default(0),
+  borderCaseInPastYear: boolean("border_case_in_past_year").default(false),
+  vulnerabilities: jsonb("vulnerabilities").default({
+    migrantOrUnderserved: false,
+    vaccineHesitancyOrRefusal: false,
+    securityOrConflictConcerns: false,
+    recurrentNaturalDisasters: false,
+    poorAccessOrTerrain: false,
+    inadequatePoliticalSupport: false,
+    highTransitHubOrBorder: false,
+    massGatheringsOrEvents: false,
+  }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => ({
+  assessmentDistrictEntryIdx: uniqueIndex("idx_risk_dist_entry_unique").on(table.assessmentId, table.districtId),
+  tenantDistEntryIdx: index("idx_risk_dist_entry_tenant").on(table.tenantId),
+  assessmentEntryIdx: index("idx_risk_dist_entry_assessment").on(table.assessmentId),
+}));
+
+// ============================================================================
 // SCHEMAS & TYPES
 // ============================================================================
 
@@ -320,4 +370,10 @@ export const insertRiskActionLinkSchema = createInsertSchema(riskActionLinks);
 export const selectRiskActionLinkSchema = createSelectSchema(riskActionLinks);
 export type RiskActionLink = typeof riskActionLinks.$inferSelect;
 export type InsertRiskActionLink = typeof riskActionLinks.$inferInsert;
+
+export const insertRiskDistrictDataEntrySchema = createInsertSchema(riskDistrictDataEntry);
+export const selectRiskDistrictDataEntrySchema = createSelectSchema(riskDistrictDataEntry);
+export type RiskDistrictDataEntry = typeof riskDistrictDataEntry.$inferSelect;
+export type InsertRiskDistrictDataEntry = typeof riskDistrictDataEntry.$inferInsert;
+
 

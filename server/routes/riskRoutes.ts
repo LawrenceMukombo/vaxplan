@@ -1,4 +1,8 @@
 import { Router } from "express";
+import fs from "fs";
+import path from "path";
+import os from "os";
+import { spawn } from "child_process";
 import { db } from "../db";
 import {
   riskMethodologies,
@@ -13,11 +17,12 @@ import {
   riskAreaEdges,
   riskVulnerabilityResponses,
   riskActionLinks,
+  riskDistrictDataEntry,
   insertRiskAssessmentSchema,
   insertRiskActionLinkSchema,
 } from "@shared/riskSchema";
 import { districts, provinces, tenants, adminBoundaries } from "@shared/schema";
-import { eq, and, desc, sql } from "drizzle-orm";
+import { eq, and, desc, sql, inArray } from "drizzle-orm";
 import { isAuthenticated } from "../replitAuth";
 import { requireTenant } from "../auth/tenantResolver";
 import { requireDbUser } from "../auth/loadDbUser";
@@ -1116,3 +1121,662 @@ riskRouter.get("/assessments/:id/actions", async (req: any, res) => {
     res.status(500).json({ message: err.message });
   }
 });
+
+// ============================================================================
+// OFFICIAL WHO RESOURCE REFERENCE FILES DOWNLOAD
+// ============================================================================
+
+riskRouter.get("/resources/:filename", async (req: any, res) => {
+  try {
+    const rawFilename = req.params.filename;
+    const allowedFiles = [
+      "Measles_Risk_Assessment_Tool_setup_guide_V1.5_EN.pdf",
+      "Technical_Appendix_Risk_Assessment_Tool.pdf",
+      "Measles_Risk_Assessment_Tool_v1.8.xlsm",
+      "Measles Risk Assessment Final Report.docx",
+    ];
+
+    if (!allowedFiles.includes(rawFilename)) {
+      return res.status(404).json({ message: "Requested resource file not found" });
+    }
+
+    const filePath = path.join(process.cwd(), "RA", rawFilename);
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ message: "Resource file does not exist on disk" });
+    }
+
+    let contentType = "application/octet-stream";
+    if (rawFilename.endsWith(".pdf")) contentType = "application/pdf";
+    else if (rawFilename.endsWith(".xlsm") || rawFilename.endsWith(".xlsx")) contentType = "application/vnd.ms-excel.sheet.macroEnabled.12";
+    else if (rawFilename.endsWith(".docx")) contentType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+
+    res.setHeader("Content-Type", contentType);
+    res.setHeader("Content-Disposition", `attachment; filename="${rawFilename}"`);
+    const stream = fs.createReadStream(filePath);
+    stream.pipe(res);
+  } catch (err: any) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// ============================================================================
+// DIRECT DATA ENTRY (SPREADSHEET / FORM MATCHING WHO EXCEL TOOL)
+// ============================================================================
+
+riskRouter.get("/assessments/:id/direct-entry", async (req: any, res) => {
+  try {
+    const requestedId = req.params.id;
+
+    let [assessment] = await db
+      .select()
+      .from(riskAssessments)
+      .where(and(eq(riskAssessments.id, requestedId), eq(riskAssessments.tenantId, req.tenantId)));
+
+    if (!assessment) {
+      const [byUuid] = await db.select().from(riskAssessments).where(eq(riskAssessments.id, requestedId));
+      assessment = byUuid;
+    }
+
+    if (!assessment) {
+      return res.status(404).json({ message: "Assessment not found" });
+    }
+
+    const effectiveTenantId = assessment.tenantId || req.tenantId;
+
+    // Check existing rows in riskDistrictDataEntry
+    const existingEntries = await db
+      .select({
+        id: riskDistrictDataEntry.id,
+        tenantId: riskDistrictDataEntry.tenantId,
+        assessmentId: riskDistrictDataEntry.assessmentId,
+        districtId: riskDistrictDataEntry.districtId,
+        districtName: districts.name,
+        provinceId: riskDistrictDataEntry.provinceId,
+        provinceName: provinces.name,
+        population: riskDistrictDataEntry.population,
+        areaKm2: riskDistrictDataEntry.areaKm2,
+        mcv1YearMinus3: riskDistrictDataEntry.mcv1YearMinus3,
+        mcv1YearMinus2: riskDistrictDataEntry.mcv1YearMinus2,
+        mcv1YearMinus1: riskDistrictDataEntry.mcv1YearMinus1,
+        mcv2YearMinus3: riskDistrictDataEntry.mcv2YearMinus3,
+        mcv2YearMinus2: riskDistrictDataEntry.mcv2YearMinus2,
+        mcv2YearMinus1: riskDistrictDataEntry.mcv2YearMinus1,
+        penta1YearMinus1: riskDistrictDataEntry.penta1YearMinus1,
+        siaCoveragePct: riskDistrictDataEntry.siaCoveragePct,
+        siaTargetAgeGroup: riskDistrictDataEntry.siaTargetAgeGroup,
+        siaYearsSince: riskDistrictDataEntry.siaYearsSince,
+        unvaccinatedCasesPct: riskDistrictDataEntry.unvaccinatedCasesPct,
+        suspectedCases: riskDistrictDataEntry.suspectedCases,
+        discardedCases: riskDistrictDataEntry.discardedCases,
+        adequateInvestigationPct: riskDistrictDataEntry.adequateInvestigationPct,
+        adequateSpecimenPct: riskDistrictDataEntry.adequateSpecimenPct,
+        timelyLabResultsPct: riskDistrictDataEntry.timelyLabResultsPct,
+        threatCasesUnder5: riskDistrictDataEntry.threatCasesUnder5,
+        threatCases5To14: riskDistrictDataEntry.threatCases5To14,
+        threatCases15Plus: riskDistrictDataEntry.threatCases15Plus,
+        borderCaseInPastYear: riskDistrictDataEntry.borderCaseInPastYear,
+        vulnerabilities: riskDistrictDataEntry.vulnerabilities,
+        updatedAt: riskDistrictDataEntry.updatedAt,
+      })
+      .from(riskDistrictDataEntry)
+      .leftJoin(districts, eq(riskDistrictDataEntry.districtId, districts.id))
+      .leftJoin(provinces, eq(riskDistrictDataEntry.provinceId, provinces.id))
+      .where(eq(riskDistrictDataEntry.assessmentId, assessment.id))
+      .orderBy(districts.name);
+
+    if (existingEntries.length > 0) {
+      return res.json({ assessment, entries: existingEntries });
+    }
+
+    // Auto-seed initial district entries if empty
+    const tenantDistricts = await db
+      .select({
+        id: districts.id,
+        name: districts.name,
+        provinceId: districts.provinceId,
+        provinceName: provinces.name,
+      })
+      .from(districts)
+      .leftJoin(provinces, eq(districts.provinceId, provinces.id))
+      .where(eq(districts.tenantId, effectiveTenantId))
+      .orderBy(districts.name);
+
+    if (tenantDistricts.length === 0) {
+      return res.json({ assessment, entries: [] });
+    }
+
+    // Default seed values mirroring realistic WHO country baseline
+    const seedRows = tenantDistricts.map((d, idx) => ({
+      tenantId: effectiveTenantId,
+      assessmentId: assessment.id,
+      districtId: d.id,
+      provinceId: d.provinceId,
+      population: String(120000 + (idx % 8) * 45000),
+      areaKm2: String(2200 + (idx % 5) * 800),
+      mcv1YearMinus3: String(80 + (idx % 15)),
+      mcv1YearMinus2: String(82 + (idx % 14)),
+      mcv1YearMinus1: String(85 + (idx % 12)),
+      mcv2YearMinus3: String(68 + (idx % 15)),
+      mcv2YearMinus2: String(71 + (idx % 14)),
+      mcv2YearMinus1: String(74 + (idx % 12)),
+      penta1YearMinus1: String(88 + (idx % 10)),
+      siaCoveragePct: String(92 + (idx % 6)),
+      siaTargetAgeGroup: "WIDE",
+      siaYearsSince: 2,
+      unvaccinatedCasesPct: String(12 + (idx % 15)),
+      suspectedCases: 10 + (idx % 8),
+      discardedCases: 2 + (idx % 4),
+      adequateInvestigationPct: String(80 + (idx % 18)),
+      adequateSpecimenPct: String(80 + (idx % 18)),
+      timelyLabResultsPct: String(80 + (idx % 18)),
+      threatCasesUnder5: idx % 4 === 0 ? 2 : 0,
+      threatCases5To14: idx % 6 === 0 ? 1 : 0,
+      threatCases15Plus: idx % 8 === 0 ? 1 : 0,
+      borderCaseInPastYear: idx % 3 === 0,
+      vulnerabilities: {
+        migrantOrUnderserved: idx % 2 === 0,
+        vaccineHesitancyOrRefusal: idx % 4 === 0,
+        securityOrConflictConcerns: idx % 7 === 0,
+        recurrentNaturalDisasters: idx % 5 === 0,
+        poorAccessOrTerrain: idx % 3 === 0,
+        inadequatePoliticalSupport: idx % 6 === 0,
+        highTransitHubOrBorder: idx % 3 === 0,
+        massGatheringsOrEvents: idx % 4 === 0,
+      },
+    }));
+
+    await db.insert(riskDistrictDataEntry).values(seedRows).onConflictDoNothing();
+
+    // Re-fetch populated
+    const seeded = await db
+      .select({
+        id: riskDistrictDataEntry.id,
+        tenantId: riskDistrictDataEntry.tenantId,
+        assessmentId: riskDistrictDataEntry.assessmentId,
+        districtId: riskDistrictDataEntry.districtId,
+        districtName: districts.name,
+        provinceId: riskDistrictDataEntry.provinceId,
+        provinceName: provinces.name,
+        population: riskDistrictDataEntry.population,
+        areaKm2: riskDistrictDataEntry.areaKm2,
+        mcv1YearMinus3: riskDistrictDataEntry.mcv1YearMinus3,
+        mcv1YearMinus2: riskDistrictDataEntry.mcv1YearMinus2,
+        mcv1YearMinus1: riskDistrictDataEntry.mcv1YearMinus1,
+        mcv2YearMinus3: riskDistrictDataEntry.mcv2YearMinus3,
+        mcv2YearMinus2: riskDistrictDataEntry.mcv2YearMinus2,
+        mcv2YearMinus1: riskDistrictDataEntry.mcv2YearMinus1,
+        penta1YearMinus1: riskDistrictDataEntry.penta1YearMinus1,
+        siaCoveragePct: riskDistrictDataEntry.siaCoveragePct,
+        siaTargetAgeGroup: riskDistrictDataEntry.siaTargetAgeGroup,
+        siaYearsSince: riskDistrictDataEntry.siaYearsSince,
+        unvaccinatedCasesPct: riskDistrictDataEntry.unvaccinatedCasesPct,
+        suspectedCases: riskDistrictDataEntry.suspectedCases,
+        discardedCases: riskDistrictDataEntry.discardedCases,
+        adequateInvestigationPct: riskDistrictDataEntry.adequateInvestigationPct,
+        adequateSpecimenPct: riskDistrictDataEntry.adequateSpecimenPct,
+        timelyLabResultsPct: riskDistrictDataEntry.timelyLabResultsPct,
+        threatCasesUnder5: riskDistrictDataEntry.threatCasesUnder5,
+        threatCases5To14: riskDistrictDataEntry.threatCases5To14,
+        threatCases15Plus: riskDistrictDataEntry.threatCases15Plus,
+        borderCaseInPastYear: riskDistrictDataEntry.borderCaseInPastYear,
+        vulnerabilities: riskDistrictDataEntry.vulnerabilities,
+        updatedAt: riskDistrictDataEntry.updatedAt,
+      })
+      .from(riskDistrictDataEntry)
+      .leftJoin(districts, eq(riskDistrictDataEntry.districtId, districts.id))
+      .leftJoin(provinces, eq(riskDistrictDataEntry.provinceId, provinces.id))
+      .where(eq(riskDistrictDataEntry.assessmentId, assessment.id))
+      .orderBy(districts.name);
+
+    res.json({ assessment, entries: seeded });
+  } catch (err: any) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+riskRouter.post("/assessments/:id/direct-entry", async (req: any, res) => {
+  try {
+    const requestedId = req.params.id;
+    const { entries, recalculate = true } = req.body || {};
+
+    let [assessment] = await db
+      .select()
+      .from(riskAssessments)
+      .where(and(eq(riskAssessments.id, requestedId), eq(riskAssessments.tenantId, req.tenantId)));
+
+    if (!assessment) {
+      const [byUuid] = await db.select().from(riskAssessments).where(eq(riskAssessments.id, requestedId));
+      assessment = byUuid;
+    }
+
+    if (!assessment) {
+      return res.status(404).json({ message: "Assessment not found" });
+    }
+
+    const effectiveTenantId = assessment.tenantId || req.tenantId;
+
+    if (!Array.isArray(entries) || entries.length === 0) {
+      return res.status(400).json({ message: "No entries provided for save" });
+    }
+
+    // Upsert entries safely
+    for (const e of entries) {
+      if (!e.districtId) continue;
+      await db
+        .insert(riskDistrictDataEntry)
+        .values({
+          tenantId: effectiveTenantId,
+          assessmentId: assessment.id,
+          districtId: Number(e.districtId),
+          provinceId: e.provinceId ? Number(e.provinceId) : null,
+          population: e.population !== undefined ? String(e.population) : "100000",
+          areaKm2: e.areaKm2 !== undefined ? String(e.areaKm2) : "2500",
+          mcv1YearMinus3: e.mcv1YearMinus3 !== undefined ? String(e.mcv1YearMinus3) : "80.00",
+          mcv1YearMinus2: e.mcv1YearMinus2 !== undefined ? String(e.mcv1YearMinus2) : "82.00",
+          mcv1YearMinus1: e.mcv1YearMinus1 !== undefined ? String(e.mcv1YearMinus1) : "85.00",
+          mcv2YearMinus3: e.mcv2YearMinus3 !== undefined ? String(e.mcv2YearMinus3) : "70.00",
+          mcv2YearMinus2: e.mcv2YearMinus2 !== undefined ? String(e.mcv2YearMinus2) : "72.00",
+          mcv2YearMinus1: e.mcv2YearMinus1 !== undefined ? String(e.mcv2YearMinus1) : "75.00",
+          penta1YearMinus1: e.penta1YearMinus1 !== undefined ? String(e.penta1YearMinus1) : "90.00",
+          siaCoveragePct: e.siaCoveragePct !== undefined ? String(e.siaCoveragePct) : "92.00",
+          siaTargetAgeGroup: e.siaTargetAgeGroup || "WIDE",
+          siaYearsSince: e.siaYearsSince !== undefined ? Number(e.siaYearsSince) : 2,
+          unvaccinatedCasesPct: e.unvaccinatedCasesPct !== undefined ? String(e.unvaccinatedCasesPct) : "15.00",
+          suspectedCases: e.suspectedCases !== undefined ? Number(e.suspectedCases) : 12,
+          discardedCases: e.discardedCases !== undefined ? Number(e.discardedCases) : 3,
+          adequateInvestigationPct: e.adequateInvestigationPct !== undefined ? String(e.adequateInvestigationPct) : "85.00",
+          adequateSpecimenPct: e.adequateSpecimenPct !== undefined ? String(e.adequateSpecimenPct) : "85.00",
+          timelyLabResultsPct: e.timelyLabResultsPct !== undefined ? String(e.timelyLabResultsPct) : "85.00",
+          threatCasesUnder5: e.threatCasesUnder5 !== undefined ? Number(e.threatCasesUnder5) : 0,
+          threatCases5To14: e.threatCases5To14 !== undefined ? Number(e.threatCases5To14) : 0,
+          threatCases15Plus: e.threatCases15Plus !== undefined ? Number(e.threatCases15Plus) : 0,
+          borderCaseInPastYear: Boolean(e.borderCaseInPastYear),
+          vulnerabilities: e.vulnerabilities || {},
+          updatedAt: new Date(),
+        })
+        .onConflictDoUpdate({
+          target: [riskDistrictDataEntry.assessmentId, riskDistrictDataEntry.districtId],
+          set: {
+            population: e.population !== undefined ? String(e.population) : sql`excluded.population`,
+            areaKm2: e.areaKm2 !== undefined ? String(e.areaKm2) : sql`excluded.area_km2`,
+            mcv1YearMinus3: e.mcv1YearMinus3 !== undefined ? String(e.mcv1YearMinus3) : sql`excluded.mcv1_year_minus3`,
+            mcv1YearMinus2: e.mcv1YearMinus2 !== undefined ? String(e.mcv1YearMinus2) : sql`excluded.mcv1_year_minus2`,
+            mcv1YearMinus1: e.mcv1YearMinus1 !== undefined ? String(e.mcv1YearMinus1) : sql`excluded.mcv1_year_minus1`,
+            mcv2YearMinus3: e.mcv2YearMinus3 !== undefined ? String(e.mcv2YearMinus3) : sql`excluded.mcv2_year_minus3`,
+            mcv2YearMinus2: e.mcv2YearMinus2 !== undefined ? String(e.mcv2YearMinus2) : sql`excluded.mcv2_year_minus2`,
+            mcv2YearMinus1: e.mcv2YearMinus1 !== undefined ? String(e.mcv2YearMinus1) : sql`excluded.mcv2_year_minus1`,
+            penta1YearMinus1: e.penta1YearMinus1 !== undefined ? String(e.penta1YearMinus1) : sql`excluded.penta1_year_minus1`,
+            siaCoveragePct: e.siaCoveragePct !== undefined ? String(e.siaCoveragePct) : sql`excluded.sia_coverage_pct`,
+            siaTargetAgeGroup: e.siaTargetAgeGroup || sql`excluded.sia_target_age_group`,
+            siaYearsSince: e.siaYearsSince !== undefined ? Number(e.siaYearsSince) : sql`excluded.sia_years_since`,
+            unvaccinatedCasesPct: e.unvaccinatedCasesPct !== undefined ? String(e.unvaccinatedCasesPct) : sql`excluded.unvaccinated_cases_pct`,
+            suspectedCases: e.suspectedCases !== undefined ? Number(e.suspectedCases) : sql`excluded.suspected_cases`,
+            discardedCases: e.discardedCases !== undefined ? Number(e.discardedCases) : sql`excluded.discarded_cases`,
+            adequateInvestigationPct: e.adequateInvestigationPct !== undefined ? String(e.adequateInvestigationPct) : sql`excluded.adequate_investigation_pct`,
+            adequateSpecimenPct: e.adequateSpecimenPct !== undefined ? String(e.adequateSpecimenPct) : sql`excluded.adequate_specimen_pct`,
+            timelyLabResultsPct: e.timelyLabResultsPct !== undefined ? String(e.timelyLabResultsPct) : sql`excluded.timely_lab_results_pct`,
+            threatCasesUnder5: e.threatCasesUnder5 !== undefined ? Number(e.threatCasesUnder5) : sql`excluded.threat_cases_under5`,
+            threatCases5To14: e.threatCases5To14 !== undefined ? Number(e.threatCases5To14) : sql`excluded.threat_cases_5_to_14`,
+            threatCases15Plus: e.threatCases15Plus !== undefined ? Number(e.threatCases15Plus) : sql`excluded.threat_cases_15_plus`,
+            borderCaseInPastYear: e.borderCaseInPastYear !== undefined ? Boolean(e.borderCaseInPastYear) : sql`excluded.border_case_in_past_year`,
+            vulnerabilities: e.vulnerabilities || sql`excluded.vulnerabilities`,
+            updatedAt: new Date(),
+          },
+        });
+    }
+
+    if (!recalculate) {
+      return res.json({ message: "Direct data entry saved successfully", count: entries.length });
+    }
+
+    // Run Calculation Engine
+    const [lastRun] = await db
+      .select({ runNumber: riskAssessmentRuns.runNumber })
+      .from(riskAssessmentRuns)
+      .where(eq(riskAssessmentRuns.assessmentId, assessment.id))
+      .orderBy(desc(riskAssessmentRuns.runNumber))
+      .limit(1);
+
+    const nextRunNumber = (lastRun?.runNumber || 0) + 1;
+
+    const [createdRun] = await db
+      .insert(riskAssessmentRuns)
+      .values({
+        tenantId: effectiveTenantId,
+        assessmentId: assessment.id,
+        runNumber: nextRunNumber,
+        calculatedByUserId: req.user?.id,
+        summaryStats: { status: "RUNNING", source: "DIRECT_DATA_ENTRY" },
+      })
+      .returning();
+
+    // Fetch all current entries
+    const allEntries = await db
+      .select({
+        entry: riskDistrictDataEntry,
+        districtName: districts.name,
+      })
+      .from(riskDistrictDataEntry)
+      .leftJoin(districts, eq(riskDistrictDataEntry.districtId, districts.id))
+      .where(eq(riskDistrictDataEntry.assessmentId, assessment.id));
+
+    let lowCount = 0;
+    let medCount = 0;
+    let highCount = 0;
+    let veryHighCount = 0;
+    let incCount = 0;
+
+    for (const item of allEntries) {
+      const e = item.entry;
+      const dName = item.districtName || `District ${e.districtId}`;
+      const vuln = (e.vulnerabilities as any) || {};
+
+      const scoreInput: AreaAssessmentInput = {
+        areaId: String(e.districtId),
+        areaName: dName,
+        assessmentYear: assessment.assessmentYear,
+        population: Number(e.population) || 100000,
+        areaKm2: Number(e.areaKm2) || 2500,
+        coverage: {
+          mcv1: [
+            { year: assessment.assessmentYear - 3, coveragePct: Number(e.mcv1YearMinus3) },
+            { year: assessment.assessmentYear - 2, coveragePct: Number(e.mcv1YearMinus2) },
+            { year: assessment.assessmentYear - 1, coveragePct: Number(e.mcv1YearMinus1) },
+          ],
+          mcv2: [
+            { year: assessment.assessmentYear - 3, coveragePct: Number(e.mcv2YearMinus3) },
+            { year: assessment.assessmentYear - 2, coveragePct: Number(e.mcv2YearMinus2) },
+            { year: assessment.assessmentYear - 1, coveragePct: Number(e.mcv2YearMinus1) },
+          ],
+          penta1: [
+            { year: assessment.assessmentYear - 1, coveragePct: Number(e.penta1YearMinus1) },
+          ],
+        },
+        sia: {
+          hasQualifyingCampaignInWindow: Number(e.siaYearsSince) <= 3,
+          campaignYear: assessment.assessmentYear - Number(e.siaYearsSince),
+          coveragePct: Number(e.siaCoveragePct),
+          targetAgeGroup: (e.siaTargetAgeGroup as any) || "WIDE",
+        },
+        surveillanceYearMinus1: {
+          suspectedCases: Number(e.suspectedCases) || 0,
+          discardedCases: Number(e.discardedCases) || 0,
+          adequatelyInvestigatedCases: Math.round(((Number(e.adequateInvestigationPct) || 0) / 100) * (Number(e.suspectedCases) || 1)),
+          epiLinkedCases: 0,
+          adequateSpecimensNonEpiLinked: Math.round(((Number(e.adequateSpecimenPct) || 0) / 100) * (Number(e.suspectedCases) || 1)),
+          casesWithSpecimensCollected: Math.round(((Number(e.adequateSpecimenPct) || 0) / 100) * (Number(e.suspectedCases) || 1)),
+          timelyLaboratoryResults: Math.round(((Number(e.timelyLabResultsPct) || 0) / 100) * Math.max(1, Math.round(((Number(e.adequateSpecimenPct) || 0) / 100) * (Number(e.suspectedCases) || 1)))),
+          threatCasesUnder5: Number(e.threatCasesUnder5) || 0,
+          threatCasesAge5To14: Number(e.threatCases5To14) || 0,
+          threatCasesAge15Plus: Number(e.threatCases15Plus) || 0,
+          threatCasesUnknownAge: 0,
+          totalThreatCases: (Number(e.threatCasesUnder5) || 0) + (Number(e.threatCases5To14) || 0) + (Number(e.threatCases15Plus) || 0),
+        },
+        surveillance3YearPooled: {
+          eligibleSuspectedCases: (Number(e.suspectedCases) || 0) * 2,
+          eligibleUnvaccinatedOrUnknown: Math.round(((Number(e.unvaccinatedCasesPct) || 0) / 100) * (Number(e.suspectedCases) || 1) * 2),
+          hasVerifiedZeroSuspectedCases: Number(e.suspectedCases) === 0,
+        },
+        neighbours: [],
+        vulnerabilityFactors: {
+          migrantOrUnderserved: Boolean(vuln.migrantOrUnderserved),
+          vaccineHesitancyOrRefusal: Boolean(vuln.vaccineHesitancyOrRefusal),
+          securityOrConflictConcerns: Boolean(vuln.securityOrConflictConcerns),
+          recurrentNaturalDisasters: Boolean(vuln.recurrentNaturalDisasters),
+          poorAccessOrTerrain: Boolean(vuln.poorAccessOrTerrain),
+          inadequatePoliticalSupport: Boolean(vuln.inadequatePoliticalSupport),
+          highTransitHubOrBorder: Boolean(vuln.highTransitHubOrBorder),
+          massGatheringsOrEvents: Boolean(vuln.massGatheringsOrEvents),
+        },
+      };
+
+      const result = calculateAreaRiskScore(scoreInput);
+
+      if (result.riskCategory === "LOW") lowCount++;
+      else if (result.riskCategory === "MEDIUM") medCount++;
+      else if (result.riskCategory === "HIGH") highCount++;
+      else if (result.riskCategory === "VERY_HIGH") veryHighCount++;
+      else incCount++;
+
+      await db.insert(riskAreaResults).values({
+        tenantId: effectiveTenantId,
+        runId: createdRun.id,
+        districtId: e.districtId,
+        provinceId: e.provinceId,
+        totalScore: result.totalScore !== null ? String(result.totalScore) : null,
+        riskCategory: result.riskCategory,
+        completenessRate: String(result.isIncomplete ? 60.0 : 100.0),
+        population: String(scoreInput.population),
+        areaKm2: String(scoreInput.areaKm2),
+        populationDensity: String(Math.round(scoreInput.population / Math.max(1, scoreInput.areaKm2))),
+        domainScoresJson: {
+          PI: result.domains.POPULATION_IMMUNITY.points,
+          SQ: result.domains.SURVEILLANCE_QUALITY.points,
+          PD: result.domains.PROGRAMME_DELIVERY.points,
+          TA: result.domains.THREAT_ASSESSMENT.points,
+        },
+        summaryExplanation: result.summaryExplanation,
+      });
+
+      const indRows = Object.values(result.allIndicators).map((ind) => ({
+        tenantId: effectiveTenantId,
+        runId: createdRun.id,
+        districtId: e.districtId,
+        domainCode: ind.domainId,
+        indicatorCode: ind.indicatorId,
+        valueRaw: ind.displayedValue,
+        valueAnalytical: ind.rawNumericValue !== null ? String(ind.rawNumericValue) : null,
+        numerator: ind.numerator !== null ? String(ind.numerator) : null,
+        denominator: ind.denominator !== null ? String(ind.denominator) : null,
+        pointsAwarded: String(ind.points ?? 0),
+        maxPoints: String(ind.maxPoints),
+        thresholdApplied: ind.thresholdApplied,
+        formulaUsed: null,
+        valueState: ind.valueState,
+        explanation: ind.explanation,
+        neighboursBreakdownJson: null,
+      }));
+
+      await db.insert(riskIndicatorResults).values(indRows);
+    }
+
+    await db
+      .update(riskAssessmentRuns)
+      .set({
+        summaryStats: {
+          status: "COMPLETED",
+          totalAreasAssessed: allEntries.length,
+          lowRiskCount: lowCount,
+          mediumRiskCount: medCount,
+          highRiskCount: highCount,
+          veryHighRiskCount: veryHighCount,
+          incompleteCount: incCount,
+          completedAt: new Date().toISOString(),
+          source: "DIRECT_DATA_ENTRY",
+        },
+      })
+      .where(eq(riskAssessmentRuns.id, createdRun.id));
+
+    await db
+      .update(riskAssessments)
+      .set({ status: "CALCULATED", updatedAt: new Date() })
+      .where(eq(riskAssessments.id, assessment.id));
+
+    res.json({
+      message: "Direct data entry saved and risk scores calculated successfully",
+      runId: createdRun.id,
+      runNumber: nextRunNumber,
+      totalAreasAssessed: allEntries.length,
+      distribution: {
+        low: lowCount,
+        medium: medCount,
+        high: highCount,
+        veryHigh: veryHighCount,
+        incomplete: incCount,
+      },
+    });
+  } catch (err: any) {
+    console.error("Direct data entry error:", err);
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// ============================================================================
+// STANDARDIZED REPORT GENERATION (DOCX CONFORMING TO WHO TEMPLATE)
+// ============================================================================
+
+riskRouter.get("/assessments/:id/export-report-docx", async (req: any, res) => {
+  try {
+    const requestedId = req.params.id;
+
+    let [assessment] = await db
+      .select()
+      .from(riskAssessments)
+      .where(and(eq(riskAssessments.id, requestedId), eq(riskAssessments.tenantId, req.tenantId)));
+
+    if (!assessment) {
+      const [byUuid] = await db.select().from(riskAssessments).where(eq(riskAssessments.id, requestedId));
+      assessment = byUuid;
+    }
+
+    if (!assessment) {
+      return res.status(404).json({ message: "Assessment not found" });
+    }
+
+    const effectiveTenantId = assessment.tenantId || req.tenantId;
+
+    const [tenant] = await db
+      .select()
+      .from(tenants)
+      .where(eq(tenants.id, effectiveTenantId))
+      .limit(1);
+
+    const countryName = tenant?.name || "South Africa";
+
+    // Get latest run
+    const [latestRun] = await db
+      .select()
+      .from(riskAssessmentRuns)
+      .where(eq(riskAssessmentRuns.assessmentId, assessment.id))
+      .orderBy(desc(riskAssessmentRuns.runNumber))
+      .limit(1);
+
+    let districtResults: any[] = [];
+    if (latestRun) {
+      const rawRows = await db
+        .select({
+          id: riskAreaResults.id,
+          districtId: riskAreaResults.districtId,
+          districtName: districts.name,
+          provinceId: riskAreaResults.provinceId,
+          provinceName: provinces.name,
+          totalScore: riskAreaResults.totalScore,
+          riskCategory: riskAreaResults.riskCategory,
+          completenessRate: riskAreaResults.completenessRate,
+          population: riskAreaResults.population,
+          areaKm2: riskAreaResults.areaKm2,
+          domainScoresJson: riskAreaResults.domainScoresJson,
+          summaryExplanation: riskAreaResults.summaryExplanation,
+        })
+        .from(riskAreaResults)
+        .leftJoin(districts, eq(riskAreaResults.districtId, districts.id))
+        .leftJoin(provinces, eq(riskAreaResults.provinceId, provinces.id))
+        .where(eq(riskAreaResults.runId, latestRun.id));
+
+      districtResults = rawRows.map((r) => {
+        const domains = (r.domainScoresJson as any) || {};
+        return {
+          ...r,
+          areaName: r.districtName || `District ${r.districtId}`,
+          population: r.population !== null ? Number(r.population) : 100000,
+          populationImmunityScore: domains.PI !== undefined ? String(domains.PI) : null,
+          surveillanceQualityScore: domains.SQ !== undefined ? String(domains.SQ) : null,
+          programmeDeliveryScore: domains.PD !== undefined ? String(domains.PD) : null,
+          threatAssessmentScore: domains.TA !== undefined ? String(domains.TA) : null,
+          totalRiskScore: r.totalScore,
+        };
+      });
+    }
+
+    const reportData = {
+      countryName,
+      assessmentYear: assessment.assessmentYear,
+      admin1Label: "Province",
+      admin2Label: "District",
+      admin2LabelPlural: "Districts",
+      districtResults,
+    };
+
+    const tempJsonPath = path.join(os.tmpdir(), `risk_report_${assessment.id}_${Date.now()}.json`);
+    const tempDocxPath = path.join(os.tmpdir(), `risk_report_${assessment.id}_${Date.now()}.docx`);
+
+    fs.writeFileSync(tempJsonPath, JSON.stringify(reportData), "utf-8");
+
+    const pythonScript = path.join(process.cwd(), "scripts", "generate_risk_report.py");
+
+    const pythonProcess = spawn("python", [pythonScript, "--json", tempJsonPath, "--output", tempDocxPath]);
+
+    pythonProcess.on("close", (code) => {
+      try {
+        if (fs.existsSync(tempJsonPath)) fs.unlinkSync(tempJsonPath);
+      } catch (e) {}
+
+      if (code !== 0 || !fs.existsSync(tempDocxPath)) {
+        return res.status(500).json({ message: `Report generation process failed with exit code ${code}` });
+      }
+
+      const safeCountry = countryName.replace(/[^a-zA-Z0-9_-]/g, "_");
+      const filename = `${safeCountry}_Measles_Risk_Assessment_Final_Report_${assessment.assessmentYear}.docx`;
+
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+
+      const fileStream = fs.createReadStream(tempDocxPath);
+      fileStream.pipe(res);
+
+      fileStream.on("end", () => {
+        try {
+          if (fs.existsSync(tempDocxPath)) fs.unlinkSync(tempDocxPath);
+        } catch (e) {}
+      });
+    });
+
+    pythonProcess.on("error", (err) => {
+      try {
+        if (fs.existsSync(tempJsonPath)) fs.unlinkSync(tempJsonPath);
+      } catch (e) {}
+      res.status(500).json({ message: `Failed to spawn Python process: ${err.message}` });
+    });
+  } catch (err: any) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// ============================================================================
+// SERVE OFFICIAL WHO REFERENCE DOCUMENTS & TEMPLATES
+// ============================================================================
+
+riskRouter.get("/resources/:filename", (req: any, res) => {
+  const allowedFiles: Record<string, string> = {
+    "Measles_Risk_Assessment_Tool_setup_guide_V1.5_EN.pdf": "application/pdf",
+    "Technical_Appendix_Risk_Assessment_Tool.pdf": "application/pdf",
+    "Measles_Risk_Assessment_Tool_v1.8.xlsm": "application/vnd.ms-excel.sheet.macroEnabled.12",
+    "Measles Risk Assessment Final Report.docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "MRAT_Country_Report_ENG.dotx": "application/vnd.openxmlformats-officedocument.wordprocessingml.template",
+  };
+
+  const filename = req.params.filename;
+  if (!allowedFiles[filename]) {
+    return res.status(404).json({ message: "Requested resource document not found or access restricted" });
+  }
+
+  const filePath = path.join(process.cwd(), "RA", filename);
+  if (!fs.existsSync(filePath)) {
+    return res.status(404).json({ message: "Resource file not found on server" });
+  }
+
+  res.setHeader("Content-Type", allowedFiles[filename]);
+  res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+  res.sendFile(filePath);
+});
+

@@ -159,7 +159,7 @@ var init_vaccineSchedule = __esm({
 });
 
 // shared/riskSchema.ts
-var import_drizzle_orm, import_pg_core, import_drizzle_zod, riskMethodologies, riskMethodologyVersions, riskMethodologyProfiles, riskAssessments, riskAssessmentRuns, riskAreaResults, riskDomainResults, riskIndicatorResults, riskCaseRaw, riskAreaEdges, riskVulnerabilityResponses, riskActionLinks, insertRiskMethodologySchema, selectRiskMethodologySchema, insertRiskMethodologyVersionSchema, selectRiskMethodologyVersionSchema, insertRiskMethodologyProfileSchema, selectRiskMethodologyProfileSchema, insertRiskAssessmentSchema, selectRiskAssessmentSchema, insertRiskAssessmentRunSchema, selectRiskAssessmentRunSchema, insertRiskAreaResultSchema, selectRiskAreaResultSchema, insertRiskDomainResultSchema, selectRiskDomainResultSchema, insertRiskIndicatorResultSchema, selectRiskIndicatorResultSchema, insertRiskCaseRawSchema, selectRiskCaseRawSchema, insertRiskAreaEdgeSchema, selectRiskAreaEdgeSchema, insertRiskVulnerabilityResponseSchema, selectRiskVulnerabilityResponseSchema, insertRiskActionLinkSchema, selectRiskActionLinkSchema;
+var import_drizzle_orm, import_pg_core, import_drizzle_zod, riskMethodologies, riskMethodologyVersions, riskMethodologyProfiles, riskAssessments, riskAssessmentRuns, riskAreaResults, riskDomainResults, riskIndicatorResults, riskCaseRaw, riskAreaEdges, riskVulnerabilityResponses, riskActionLinks, riskDistrictDataEntry, insertRiskMethodologySchema, selectRiskMethodologySchema, insertRiskMethodologyVersionSchema, selectRiskMethodologyVersionSchema, insertRiskMethodologyProfileSchema, selectRiskMethodologyProfileSchema, insertRiskAssessmentSchema, selectRiskAssessmentSchema, insertRiskAssessmentRunSchema, selectRiskAssessmentRunSchema, insertRiskAreaResultSchema, selectRiskAreaResultSchema, insertRiskDomainResultSchema, selectRiskDomainResultSchema, insertRiskIndicatorResultSchema, selectRiskIndicatorResultSchema, insertRiskCaseRawSchema, selectRiskCaseRawSchema, insertRiskAreaEdgeSchema, selectRiskAreaEdgeSchema, insertRiskVulnerabilityResponseSchema, selectRiskVulnerabilityResponseSchema, insertRiskActionLinkSchema, selectRiskActionLinkSchema, insertRiskDistrictDataEntrySchema, selectRiskDistrictDataEntrySchema;
 var init_riskSchema = __esm({
   "shared/riskSchema.ts"() {
     "use strict";
@@ -385,6 +385,51 @@ var init_riskSchema = __esm({
       assessmentActionIdx: (0, import_pg_core.index)("idx_risk_action_assessment").on(table.assessmentId),
       tenantActionIdx: (0, import_pg_core.index)("idx_risk_action_tenant").on(table.tenantId)
     }));
+    riskDistrictDataEntry = (0, import_pg_core.pgTable)("risk_district_data_entry", {
+      id: (0, import_pg_core.varchar)("id").primaryKey().default(import_drizzle_orm.sql`gen_random_uuid()`),
+      tenantId: (0, import_pg_core.varchar)("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+      assessmentId: (0, import_pg_core.varchar)("assessment_id").notNull().references(() => riskAssessments.id, { onDelete: "cascade" }),
+      districtId: (0, import_pg_core.integer)("district_id").notNull().references(() => districts.id, { onDelete: "cascade" }),
+      provinceId: (0, import_pg_core.integer)("province_id").references(() => provinces.id, { onDelete: "set null" }),
+      population: (0, import_pg_core.decimal)("population", { precision: 12, scale: 2 }).default("100000"),
+      areaKm2: (0, import_pg_core.decimal)("area_km2", { precision: 12, scale: 2 }).default("2500"),
+      mcv1YearMinus3: (0, import_pg_core.decimal)("mcv1_year_minus3", { precision: 5, scale: 2 }).default("80.00"),
+      mcv1YearMinus2: (0, import_pg_core.decimal)("mcv1_year_minus2", { precision: 5, scale: 2 }).default("82.00"),
+      mcv1YearMinus1: (0, import_pg_core.decimal)("mcv1_year_minus1", { precision: 5, scale: 2 }).default("85.00"),
+      mcv2YearMinus3: (0, import_pg_core.decimal)("mcv2_year_minus3", { precision: 5, scale: 2 }).default("70.00"),
+      mcv2YearMinus2: (0, import_pg_core.decimal)("mcv2_year_minus2", { precision: 5, scale: 2 }).default("72.00"),
+      mcv2YearMinus1: (0, import_pg_core.decimal)("mcv2_year_minus1", { precision: 5, scale: 2 }).default("75.00"),
+      penta1YearMinus1: (0, import_pg_core.decimal)("penta1_year_minus1", { precision: 5, scale: 2 }).default("90.00"),
+      siaCoveragePct: (0, import_pg_core.decimal)("sia_coverage_pct", { precision: 5, scale: 2 }).default("92.00"),
+      siaTargetAgeGroup: (0, import_pg_core.varchar)("sia_target_age_group", { length: 20 }).default("WIDE"),
+      siaYearsSince: (0, import_pg_core.integer)("sia_years_since").default(2),
+      unvaccinatedCasesPct: (0, import_pg_core.decimal)("unvaccinated_cases_pct", { precision: 5, scale: 2 }).default("15.00"),
+      suspectedCases: (0, import_pg_core.integer)("suspected_cases").default(12),
+      discardedCases: (0, import_pg_core.integer)("discarded_cases").default(3),
+      adequateInvestigationPct: (0, import_pg_core.decimal)("adequate_investigation_pct", { precision: 5, scale: 2 }).default("85.00"),
+      adequateSpecimenPct: (0, import_pg_core.decimal)("adequate_specimen_pct", { precision: 5, scale: 2 }).default("85.00"),
+      timelyLabResultsPct: (0, import_pg_core.decimal)("timely_lab_results_pct", { precision: 5, scale: 2 }).default("85.00"),
+      threatCasesUnder5: (0, import_pg_core.integer)("threat_cases_under5").default(0),
+      threatCases5To14: (0, import_pg_core.integer)("threat_cases_5_to_14").default(0),
+      threatCases15Plus: (0, import_pg_core.integer)("threat_cases_15_plus").default(0),
+      borderCaseInPastYear: (0, import_pg_core.boolean)("border_case_in_past_year").default(false),
+      vulnerabilities: (0, import_pg_core.jsonb)("vulnerabilities").default({
+        migrantOrUnderserved: false,
+        vaccineHesitancyOrRefusal: false,
+        securityOrConflictConcerns: false,
+        recurrentNaturalDisasters: false,
+        poorAccessOrTerrain: false,
+        inadequatePoliticalSupport: false,
+        highTransitHubOrBorder: false,
+        massGatheringsOrEvents: false
+      }),
+      createdAt: (0, import_pg_core.timestamp)("created_at").defaultNow().notNull(),
+      updatedAt: (0, import_pg_core.timestamp)("updated_at").defaultNow().notNull()
+    }, (table) => ({
+      assessmentDistrictEntryIdx: (0, import_pg_core.uniqueIndex)("idx_risk_dist_entry_unique").on(table.assessmentId, table.districtId),
+      tenantDistEntryIdx: (0, import_pg_core.index)("idx_risk_dist_entry_tenant").on(table.tenantId),
+      assessmentEntryIdx: (0, import_pg_core.index)("idx_risk_dist_entry_assessment").on(table.assessmentId)
+    }));
     insertRiskMethodologySchema = (0, import_drizzle_zod.createInsertSchema)(riskMethodologies);
     selectRiskMethodologySchema = (0, import_drizzle_zod.createSelectSchema)(riskMethodologies);
     insertRiskMethodologyVersionSchema = (0, import_drizzle_zod.createInsertSchema)(riskMethodologyVersions);
@@ -409,6 +454,8 @@ var init_riskSchema = __esm({
     selectRiskVulnerabilityResponseSchema = (0, import_drizzle_zod.createSelectSchema)(riskVulnerabilityResponses);
     insertRiskActionLinkSchema = (0, import_drizzle_zod.createInsertSchema)(riskActionLinks);
     selectRiskActionLinkSchema = (0, import_drizzle_zod.createSelectSchema)(riskActionLinks);
+    insertRiskDistrictDataEntrySchema = (0, import_drizzle_zod.createInsertSchema)(riskDistrictDataEntry);
+    selectRiskDistrictDataEntrySchema = (0, import_drizzle_zod.createSelectSchema)(riskDistrictDataEntry);
   }
 });
 
@@ -541,6 +588,7 @@ __export(schema_exports, {
   insertRiskAssessmentRunSchema: () => insertRiskAssessmentRunSchema,
   insertRiskAssessmentSchema: () => insertRiskAssessmentSchema,
   insertRiskCaseRawSchema: () => insertRiskCaseRawSchema,
+  insertRiskDistrictDataEntrySchema: () => insertRiskDistrictDataEntrySchema,
   insertRiskDomainResultSchema: () => insertRiskDomainResultSchema,
   insertRiskIndicatorResultSchema: () => insertRiskIndicatorResultSchema,
   insertRiskMethodologyProfileSchema: () => insertRiskMethodologyProfileSchema,
@@ -619,6 +667,7 @@ __export(schema_exports, {
   riskAssessmentRuns: () => riskAssessmentRuns,
   riskAssessments: () => riskAssessments,
   riskCaseRaw: () => riskCaseRaw,
+  riskDistrictDataEntry: () => riskDistrictDataEntry,
   riskDomainResults: () => riskDomainResults,
   riskIndicatorResults: () => riskIndicatorResults,
   riskMethodologies: () => riskMethodologies,
@@ -642,6 +691,7 @@ __export(schema_exports, {
   selectRiskAssessmentRunSchema: () => selectRiskAssessmentRunSchema,
   selectRiskAssessmentSchema: () => selectRiskAssessmentSchema,
   selectRiskCaseRawSchema: () => selectRiskCaseRawSchema,
+  selectRiskDistrictDataEntrySchema: () => selectRiskDistrictDataEntrySchema,
   selectRiskDomainResultSchema: () => selectRiskDomainResultSchema,
   selectRiskIndicatorResultSchema: () => selectRiskIndicatorResultSchema,
   selectRiskMethodologyProfileSchema: () => selectRiskMethodologyProfileSchema,
@@ -12980,11 +13030,15 @@ var riskRoutes_exports = {};
 __export(riskRoutes_exports, {
   riskRouter: () => riskRouter
 });
-var import_express4, import_drizzle_orm16, riskRouter;
+var import_express4, import_fs, import_path, import_os, import_child_process, import_drizzle_orm16, riskRouter;
 var init_riskRoutes = __esm({
   "server/routes/riskRoutes.ts"() {
     "use strict";
     import_express4 = require("express");
+    import_fs = __toESM(require("fs"), 1);
+    import_path = __toESM(require("path"), 1);
+    import_os = __toESM(require("os"), 1);
+    import_child_process = require("child_process");
     init_db();
     init_riskSchema();
     init_schema();
@@ -13766,6 +13820,515 @@ var init_riskRoutes = __esm({
       } catch (err) {
         res.status(500).json({ message: err.message });
       }
+    });
+    riskRouter.get("/resources/:filename", async (req, res) => {
+      try {
+        const rawFilename = req.params.filename;
+        const allowedFiles = [
+          "Measles_Risk_Assessment_Tool_setup_guide_V1.5_EN.pdf",
+          "Technical_Appendix_Risk_Assessment_Tool.pdf",
+          "Measles_Risk_Assessment_Tool_v1.8.xlsm",
+          "Measles Risk Assessment Final Report.docx"
+        ];
+        if (!allowedFiles.includes(rawFilename)) {
+          return res.status(404).json({ message: "Requested resource file not found" });
+        }
+        const filePath = import_path.default.join(process.cwd(), "RA", rawFilename);
+        if (!import_fs.default.existsSync(filePath)) {
+          return res.status(404).json({ message: "Resource file does not exist on disk" });
+        }
+        let contentType = "application/octet-stream";
+        if (rawFilename.endsWith(".pdf")) contentType = "application/pdf";
+        else if (rawFilename.endsWith(".xlsm") || rawFilename.endsWith(".xlsx")) contentType = "application/vnd.ms-excel.sheet.macroEnabled.12";
+        else if (rawFilename.endsWith(".docx")) contentType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+        res.setHeader("Content-Type", contentType);
+        res.setHeader("Content-Disposition", `attachment; filename="${rawFilename}"`);
+        const stream = import_fs.default.createReadStream(filePath);
+        stream.pipe(res);
+      } catch (err) {
+        res.status(500).json({ message: err.message });
+      }
+    });
+    riskRouter.get("/assessments/:id/direct-entry", async (req, res) => {
+      try {
+        const requestedId = req.params.id;
+        let [assessment] = await db.select().from(riskAssessments).where((0, import_drizzle_orm16.and)((0, import_drizzle_orm16.eq)(riskAssessments.id, requestedId), (0, import_drizzle_orm16.eq)(riskAssessments.tenantId, req.tenantId)));
+        if (!assessment) {
+          const [byUuid] = await db.select().from(riskAssessments).where((0, import_drizzle_orm16.eq)(riskAssessments.id, requestedId));
+          assessment = byUuid;
+        }
+        if (!assessment) {
+          return res.status(404).json({ message: "Assessment not found" });
+        }
+        const effectiveTenantId = assessment.tenantId || req.tenantId;
+        const existingEntries = await db.select({
+          id: riskDistrictDataEntry.id,
+          tenantId: riskDistrictDataEntry.tenantId,
+          assessmentId: riskDistrictDataEntry.assessmentId,
+          districtId: riskDistrictDataEntry.districtId,
+          districtName: districts.name,
+          provinceId: riskDistrictDataEntry.provinceId,
+          provinceName: provinces.name,
+          population: riskDistrictDataEntry.population,
+          areaKm2: riskDistrictDataEntry.areaKm2,
+          mcv1YearMinus3: riskDistrictDataEntry.mcv1YearMinus3,
+          mcv1YearMinus2: riskDistrictDataEntry.mcv1YearMinus2,
+          mcv1YearMinus1: riskDistrictDataEntry.mcv1YearMinus1,
+          mcv2YearMinus3: riskDistrictDataEntry.mcv2YearMinus3,
+          mcv2YearMinus2: riskDistrictDataEntry.mcv2YearMinus2,
+          mcv2YearMinus1: riskDistrictDataEntry.mcv2YearMinus1,
+          penta1YearMinus1: riskDistrictDataEntry.penta1YearMinus1,
+          siaCoveragePct: riskDistrictDataEntry.siaCoveragePct,
+          siaTargetAgeGroup: riskDistrictDataEntry.siaTargetAgeGroup,
+          siaYearsSince: riskDistrictDataEntry.siaYearsSince,
+          unvaccinatedCasesPct: riskDistrictDataEntry.unvaccinatedCasesPct,
+          suspectedCases: riskDistrictDataEntry.suspectedCases,
+          discardedCases: riskDistrictDataEntry.discardedCases,
+          adequateInvestigationPct: riskDistrictDataEntry.adequateInvestigationPct,
+          adequateSpecimenPct: riskDistrictDataEntry.adequateSpecimenPct,
+          timelyLabResultsPct: riskDistrictDataEntry.timelyLabResultsPct,
+          threatCasesUnder5: riskDistrictDataEntry.threatCasesUnder5,
+          threatCases5To14: riskDistrictDataEntry.threatCases5To14,
+          threatCases15Plus: riskDistrictDataEntry.threatCases15Plus,
+          borderCaseInPastYear: riskDistrictDataEntry.borderCaseInPastYear,
+          vulnerabilities: riskDistrictDataEntry.vulnerabilities,
+          updatedAt: riskDistrictDataEntry.updatedAt
+        }).from(riskDistrictDataEntry).leftJoin(districts, (0, import_drizzle_orm16.eq)(riskDistrictDataEntry.districtId, districts.id)).leftJoin(provinces, (0, import_drizzle_orm16.eq)(riskDistrictDataEntry.provinceId, provinces.id)).where((0, import_drizzle_orm16.eq)(riskDistrictDataEntry.assessmentId, assessment.id)).orderBy(districts.name);
+        if (existingEntries.length > 0) {
+          return res.json({ assessment, entries: existingEntries });
+        }
+        const tenantDistricts = await db.select({
+          id: districts.id,
+          name: districts.name,
+          provinceId: districts.provinceId,
+          provinceName: provinces.name
+        }).from(districts).leftJoin(provinces, (0, import_drizzle_orm16.eq)(districts.provinceId, provinces.id)).where((0, import_drizzle_orm16.eq)(districts.tenantId, effectiveTenantId)).orderBy(districts.name);
+        if (tenantDistricts.length === 0) {
+          return res.json({ assessment, entries: [] });
+        }
+        const seedRows = tenantDistricts.map((d, idx) => ({
+          tenantId: effectiveTenantId,
+          assessmentId: assessment.id,
+          districtId: d.id,
+          provinceId: d.provinceId,
+          population: String(12e4 + idx % 8 * 45e3),
+          areaKm2: String(2200 + idx % 5 * 800),
+          mcv1YearMinus3: String(80 + idx % 15),
+          mcv1YearMinus2: String(82 + idx % 14),
+          mcv1YearMinus1: String(85 + idx % 12),
+          mcv2YearMinus3: String(68 + idx % 15),
+          mcv2YearMinus2: String(71 + idx % 14),
+          mcv2YearMinus1: String(74 + idx % 12),
+          penta1YearMinus1: String(88 + idx % 10),
+          siaCoveragePct: String(92 + idx % 6),
+          siaTargetAgeGroup: "WIDE",
+          siaYearsSince: 2,
+          unvaccinatedCasesPct: String(12 + idx % 15),
+          suspectedCases: 10 + idx % 8,
+          discardedCases: 2 + idx % 4,
+          adequateInvestigationPct: String(80 + idx % 18),
+          adequateSpecimenPct: String(80 + idx % 18),
+          timelyLabResultsPct: String(80 + idx % 18),
+          threatCasesUnder5: idx % 4 === 0 ? 2 : 0,
+          threatCases5To14: idx % 6 === 0 ? 1 : 0,
+          threatCases15Plus: idx % 8 === 0 ? 1 : 0,
+          borderCaseInPastYear: idx % 3 === 0,
+          vulnerabilities: {
+            migrantOrUnderserved: idx % 2 === 0,
+            vaccineHesitancyOrRefusal: idx % 4 === 0,
+            securityOrConflictConcerns: idx % 7 === 0,
+            recurrentNaturalDisasters: idx % 5 === 0,
+            poorAccessOrTerrain: idx % 3 === 0,
+            inadequatePoliticalSupport: idx % 6 === 0,
+            highTransitHubOrBorder: idx % 3 === 0,
+            massGatheringsOrEvents: idx % 4 === 0
+          }
+        }));
+        await db.insert(riskDistrictDataEntry).values(seedRows).onConflictDoNothing();
+        const seeded = await db.select({
+          id: riskDistrictDataEntry.id,
+          tenantId: riskDistrictDataEntry.tenantId,
+          assessmentId: riskDistrictDataEntry.assessmentId,
+          districtId: riskDistrictDataEntry.districtId,
+          districtName: districts.name,
+          provinceId: riskDistrictDataEntry.provinceId,
+          provinceName: provinces.name,
+          population: riskDistrictDataEntry.population,
+          areaKm2: riskDistrictDataEntry.areaKm2,
+          mcv1YearMinus3: riskDistrictDataEntry.mcv1YearMinus3,
+          mcv1YearMinus2: riskDistrictDataEntry.mcv1YearMinus2,
+          mcv1YearMinus1: riskDistrictDataEntry.mcv1YearMinus1,
+          mcv2YearMinus3: riskDistrictDataEntry.mcv2YearMinus3,
+          mcv2YearMinus2: riskDistrictDataEntry.mcv2YearMinus2,
+          mcv2YearMinus1: riskDistrictDataEntry.mcv2YearMinus1,
+          penta1YearMinus1: riskDistrictDataEntry.penta1YearMinus1,
+          siaCoveragePct: riskDistrictDataEntry.siaCoveragePct,
+          siaTargetAgeGroup: riskDistrictDataEntry.siaTargetAgeGroup,
+          siaYearsSince: riskDistrictDataEntry.siaYearsSince,
+          unvaccinatedCasesPct: riskDistrictDataEntry.unvaccinatedCasesPct,
+          suspectedCases: riskDistrictDataEntry.suspectedCases,
+          discardedCases: riskDistrictDataEntry.discardedCases,
+          adequateInvestigationPct: riskDistrictDataEntry.adequateInvestigationPct,
+          adequateSpecimenPct: riskDistrictDataEntry.adequateSpecimenPct,
+          timelyLabResultsPct: riskDistrictDataEntry.timelyLabResultsPct,
+          threatCasesUnder5: riskDistrictDataEntry.threatCasesUnder5,
+          threatCases5To14: riskDistrictDataEntry.threatCases5To14,
+          threatCases15Plus: riskDistrictDataEntry.threatCases15Plus,
+          borderCaseInPastYear: riskDistrictDataEntry.borderCaseInPastYear,
+          vulnerabilities: riskDistrictDataEntry.vulnerabilities,
+          updatedAt: riskDistrictDataEntry.updatedAt
+        }).from(riskDistrictDataEntry).leftJoin(districts, (0, import_drizzle_orm16.eq)(riskDistrictDataEntry.districtId, districts.id)).leftJoin(provinces, (0, import_drizzle_orm16.eq)(riskDistrictDataEntry.provinceId, provinces.id)).where((0, import_drizzle_orm16.eq)(riskDistrictDataEntry.assessmentId, assessment.id)).orderBy(districts.name);
+        res.json({ assessment, entries: seeded });
+      } catch (err) {
+        res.status(500).json({ message: err.message });
+      }
+    });
+    riskRouter.post("/assessments/:id/direct-entry", async (req, res) => {
+      try {
+        const requestedId = req.params.id;
+        const { entries, recalculate = true } = req.body || {};
+        let [assessment] = await db.select().from(riskAssessments).where((0, import_drizzle_orm16.and)((0, import_drizzle_orm16.eq)(riskAssessments.id, requestedId), (0, import_drizzle_orm16.eq)(riskAssessments.tenantId, req.tenantId)));
+        if (!assessment) {
+          const [byUuid] = await db.select().from(riskAssessments).where((0, import_drizzle_orm16.eq)(riskAssessments.id, requestedId));
+          assessment = byUuid;
+        }
+        if (!assessment) {
+          return res.status(404).json({ message: "Assessment not found" });
+        }
+        const effectiveTenantId = assessment.tenantId || req.tenantId;
+        if (!Array.isArray(entries) || entries.length === 0) {
+          return res.status(400).json({ message: "No entries provided for save" });
+        }
+        for (const e of entries) {
+          if (!e.districtId) continue;
+          await db.insert(riskDistrictDataEntry).values({
+            tenantId: effectiveTenantId,
+            assessmentId: assessment.id,
+            districtId: Number(e.districtId),
+            provinceId: e.provinceId ? Number(e.provinceId) : null,
+            population: e.population !== void 0 ? String(e.population) : "100000",
+            areaKm2: e.areaKm2 !== void 0 ? String(e.areaKm2) : "2500",
+            mcv1YearMinus3: e.mcv1YearMinus3 !== void 0 ? String(e.mcv1YearMinus3) : "80.00",
+            mcv1YearMinus2: e.mcv1YearMinus2 !== void 0 ? String(e.mcv1YearMinus2) : "82.00",
+            mcv1YearMinus1: e.mcv1YearMinus1 !== void 0 ? String(e.mcv1YearMinus1) : "85.00",
+            mcv2YearMinus3: e.mcv2YearMinus3 !== void 0 ? String(e.mcv2YearMinus3) : "70.00",
+            mcv2YearMinus2: e.mcv2YearMinus2 !== void 0 ? String(e.mcv2YearMinus2) : "72.00",
+            mcv2YearMinus1: e.mcv2YearMinus1 !== void 0 ? String(e.mcv2YearMinus1) : "75.00",
+            penta1YearMinus1: e.penta1YearMinus1 !== void 0 ? String(e.penta1YearMinus1) : "90.00",
+            siaCoveragePct: e.siaCoveragePct !== void 0 ? String(e.siaCoveragePct) : "92.00",
+            siaTargetAgeGroup: e.siaTargetAgeGroup || "WIDE",
+            siaYearsSince: e.siaYearsSince !== void 0 ? Number(e.siaYearsSince) : 2,
+            unvaccinatedCasesPct: e.unvaccinatedCasesPct !== void 0 ? String(e.unvaccinatedCasesPct) : "15.00",
+            suspectedCases: e.suspectedCases !== void 0 ? Number(e.suspectedCases) : 12,
+            discardedCases: e.discardedCases !== void 0 ? Number(e.discardedCases) : 3,
+            adequateInvestigationPct: e.adequateInvestigationPct !== void 0 ? String(e.adequateInvestigationPct) : "85.00",
+            adequateSpecimenPct: e.adequateSpecimenPct !== void 0 ? String(e.adequateSpecimenPct) : "85.00",
+            timelyLabResultsPct: e.timelyLabResultsPct !== void 0 ? String(e.timelyLabResultsPct) : "85.00",
+            threatCasesUnder5: e.threatCasesUnder5 !== void 0 ? Number(e.threatCasesUnder5) : 0,
+            threatCases5To14: e.threatCases5To14 !== void 0 ? Number(e.threatCases5To14) : 0,
+            threatCases15Plus: e.threatCases15Plus !== void 0 ? Number(e.threatCases15Plus) : 0,
+            borderCaseInPastYear: Boolean(e.borderCaseInPastYear),
+            vulnerabilities: e.vulnerabilities || {},
+            updatedAt: /* @__PURE__ */ new Date()
+          }).onConflictDoUpdate({
+            target: [riskDistrictDataEntry.assessmentId, riskDistrictDataEntry.districtId],
+            set: {
+              population: e.population !== void 0 ? String(e.population) : import_drizzle_orm16.sql`excluded.population`,
+              areaKm2: e.areaKm2 !== void 0 ? String(e.areaKm2) : import_drizzle_orm16.sql`excluded.area_km2`,
+              mcv1YearMinus3: e.mcv1YearMinus3 !== void 0 ? String(e.mcv1YearMinus3) : import_drizzle_orm16.sql`excluded.mcv1_year_minus3`,
+              mcv1YearMinus2: e.mcv1YearMinus2 !== void 0 ? String(e.mcv1YearMinus2) : import_drizzle_orm16.sql`excluded.mcv1_year_minus2`,
+              mcv1YearMinus1: e.mcv1YearMinus1 !== void 0 ? String(e.mcv1YearMinus1) : import_drizzle_orm16.sql`excluded.mcv1_year_minus1`,
+              mcv2YearMinus3: e.mcv2YearMinus3 !== void 0 ? String(e.mcv2YearMinus3) : import_drizzle_orm16.sql`excluded.mcv2_year_minus3`,
+              mcv2YearMinus2: e.mcv2YearMinus2 !== void 0 ? String(e.mcv2YearMinus2) : import_drizzle_orm16.sql`excluded.mcv2_year_minus2`,
+              mcv2YearMinus1: e.mcv2YearMinus1 !== void 0 ? String(e.mcv2YearMinus1) : import_drizzle_orm16.sql`excluded.mcv2_year_minus1`,
+              penta1YearMinus1: e.penta1YearMinus1 !== void 0 ? String(e.penta1YearMinus1) : import_drizzle_orm16.sql`excluded.penta1_year_minus1`,
+              siaCoveragePct: e.siaCoveragePct !== void 0 ? String(e.siaCoveragePct) : import_drizzle_orm16.sql`excluded.sia_coverage_pct`,
+              siaTargetAgeGroup: e.siaTargetAgeGroup || import_drizzle_orm16.sql`excluded.sia_target_age_group`,
+              siaYearsSince: e.siaYearsSince !== void 0 ? Number(e.siaYearsSince) : import_drizzle_orm16.sql`excluded.sia_years_since`,
+              unvaccinatedCasesPct: e.unvaccinatedCasesPct !== void 0 ? String(e.unvaccinatedCasesPct) : import_drizzle_orm16.sql`excluded.unvaccinated_cases_pct`,
+              suspectedCases: e.suspectedCases !== void 0 ? Number(e.suspectedCases) : import_drizzle_orm16.sql`excluded.suspected_cases`,
+              discardedCases: e.discardedCases !== void 0 ? Number(e.discardedCases) : import_drizzle_orm16.sql`excluded.discarded_cases`,
+              adequateInvestigationPct: e.adequateInvestigationPct !== void 0 ? String(e.adequateInvestigationPct) : import_drizzle_orm16.sql`excluded.adequate_investigation_pct`,
+              adequateSpecimenPct: e.adequateSpecimenPct !== void 0 ? String(e.adequateSpecimenPct) : import_drizzle_orm16.sql`excluded.adequate_specimen_pct`,
+              timelyLabResultsPct: e.timelyLabResultsPct !== void 0 ? String(e.timelyLabResultsPct) : import_drizzle_orm16.sql`excluded.timely_lab_results_pct`,
+              threatCasesUnder5: e.threatCasesUnder5 !== void 0 ? Number(e.threatCasesUnder5) : import_drizzle_orm16.sql`excluded.threat_cases_under5`,
+              threatCases5To14: e.threatCases5To14 !== void 0 ? Number(e.threatCases5To14) : import_drizzle_orm16.sql`excluded.threat_cases_5_to_14`,
+              threatCases15Plus: e.threatCases15Plus !== void 0 ? Number(e.threatCases15Plus) : import_drizzle_orm16.sql`excluded.threat_cases_15_plus`,
+              borderCaseInPastYear: e.borderCaseInPastYear !== void 0 ? Boolean(e.borderCaseInPastYear) : import_drizzle_orm16.sql`excluded.border_case_in_past_year`,
+              vulnerabilities: e.vulnerabilities || import_drizzle_orm16.sql`excluded.vulnerabilities`,
+              updatedAt: /* @__PURE__ */ new Date()
+            }
+          });
+        }
+        if (!recalculate) {
+          return res.json({ message: "Direct data entry saved successfully", count: entries.length });
+        }
+        const [lastRun] = await db.select({ runNumber: riskAssessmentRuns.runNumber }).from(riskAssessmentRuns).where((0, import_drizzle_orm16.eq)(riskAssessmentRuns.assessmentId, assessment.id)).orderBy((0, import_drizzle_orm16.desc)(riskAssessmentRuns.runNumber)).limit(1);
+        const nextRunNumber = (lastRun?.runNumber || 0) + 1;
+        const [createdRun] = await db.insert(riskAssessmentRuns).values({
+          tenantId: effectiveTenantId,
+          assessmentId: assessment.id,
+          runNumber: nextRunNumber,
+          calculatedByUserId: req.user?.id,
+          summaryStats: { status: "RUNNING", source: "DIRECT_DATA_ENTRY" }
+        }).returning();
+        const allEntries = await db.select({
+          entry: riskDistrictDataEntry,
+          districtName: districts.name
+        }).from(riskDistrictDataEntry).leftJoin(districts, (0, import_drizzle_orm16.eq)(riskDistrictDataEntry.districtId, districts.id)).where((0, import_drizzle_orm16.eq)(riskDistrictDataEntry.assessmentId, assessment.id));
+        let lowCount = 0;
+        let medCount = 0;
+        let highCount = 0;
+        let veryHighCount = 0;
+        let incCount = 0;
+        for (const item of allEntries) {
+          const e = item.entry;
+          const dName = item.districtName || `District ${e.districtId}`;
+          const vuln = e.vulnerabilities || {};
+          const scoreInput = {
+            areaId: String(e.districtId),
+            areaName: dName,
+            assessmentYear: assessment.assessmentYear,
+            population: Number(e.population) || 1e5,
+            areaKm2: Number(e.areaKm2) || 2500,
+            coverage: {
+              mcv1: [
+                { year: assessment.assessmentYear - 3, coveragePct: Number(e.mcv1YearMinus3) },
+                { year: assessment.assessmentYear - 2, coveragePct: Number(e.mcv1YearMinus2) },
+                { year: assessment.assessmentYear - 1, coveragePct: Number(e.mcv1YearMinus1) }
+              ],
+              mcv2: [
+                { year: assessment.assessmentYear - 3, coveragePct: Number(e.mcv2YearMinus3) },
+                { year: assessment.assessmentYear - 2, coveragePct: Number(e.mcv2YearMinus2) },
+                { year: assessment.assessmentYear - 1, coveragePct: Number(e.mcv2YearMinus1) }
+              ],
+              penta1: [
+                { year: assessment.assessmentYear - 1, coveragePct: Number(e.penta1YearMinus1) }
+              ]
+            },
+            sia: {
+              hasQualifyingCampaignInWindow: Number(e.siaYearsSince) <= 3,
+              campaignYear: assessment.assessmentYear - Number(e.siaYearsSince),
+              coveragePct: Number(e.siaCoveragePct),
+              targetAgeGroup: e.siaTargetAgeGroup || "WIDE"
+            },
+            surveillanceYearMinus1: {
+              suspectedCases: Number(e.suspectedCases) || 0,
+              discardedCases: Number(e.discardedCases) || 0,
+              adequatelyInvestigatedCases: Math.round((Number(e.adequateInvestigationPct) || 0) / 100 * (Number(e.suspectedCases) || 1)),
+              epiLinkedCases: 0,
+              adequateSpecimensNonEpiLinked: Math.round((Number(e.adequateSpecimenPct) || 0) / 100 * (Number(e.suspectedCases) || 1)),
+              casesWithSpecimensCollected: Math.round((Number(e.adequateSpecimenPct) || 0) / 100 * (Number(e.suspectedCases) || 1)),
+              timelyLaboratoryResults: Math.round((Number(e.timelyLabResultsPct) || 0) / 100 * Math.max(1, Math.round((Number(e.adequateSpecimenPct) || 0) / 100 * (Number(e.suspectedCases) || 1)))),
+              threatCasesUnder5: Number(e.threatCasesUnder5) || 0,
+              threatCasesAge5To14: Number(e.threatCases5To14) || 0,
+              threatCasesAge15Plus: Number(e.threatCases15Plus) || 0,
+              threatCasesUnknownAge: 0,
+              totalThreatCases: (Number(e.threatCasesUnder5) || 0) + (Number(e.threatCases5To14) || 0) + (Number(e.threatCases15Plus) || 0)
+            },
+            surveillance3YearPooled: {
+              eligibleSuspectedCases: (Number(e.suspectedCases) || 0) * 2,
+              eligibleUnvaccinatedOrUnknown: Math.round((Number(e.unvaccinatedCasesPct) || 0) / 100 * (Number(e.suspectedCases) || 1) * 2),
+              hasVerifiedZeroSuspectedCases: Number(e.suspectedCases) === 0
+            },
+            neighbours: [],
+            vulnerabilityFactors: {
+              migrantOrUnderserved: Boolean(vuln.migrantOrUnderserved),
+              vaccineHesitancyOrRefusal: Boolean(vuln.vaccineHesitancyOrRefusal),
+              securityOrConflictConcerns: Boolean(vuln.securityOrConflictConcerns),
+              recurrentNaturalDisasters: Boolean(vuln.recurrentNaturalDisasters),
+              poorAccessOrTerrain: Boolean(vuln.poorAccessOrTerrain),
+              inadequatePoliticalSupport: Boolean(vuln.inadequatePoliticalSupport),
+              highTransitHubOrBorder: Boolean(vuln.highTransitHubOrBorder),
+              massGatheringsOrEvents: Boolean(vuln.massGatheringsOrEvents)
+            }
+          };
+          const result = calculateAreaRiskScore(scoreInput);
+          if (result.riskCategory === "LOW") lowCount++;
+          else if (result.riskCategory === "MEDIUM") medCount++;
+          else if (result.riskCategory === "HIGH") highCount++;
+          else if (result.riskCategory === "VERY_HIGH") veryHighCount++;
+          else incCount++;
+          await db.insert(riskAreaResults).values({
+            tenantId: effectiveTenantId,
+            runId: createdRun.id,
+            districtId: e.districtId,
+            provinceId: e.provinceId,
+            totalScore: result.totalScore !== null ? String(result.totalScore) : null,
+            riskCategory: result.riskCategory,
+            completenessRate: String(result.isIncomplete ? 60 : 100),
+            population: String(scoreInput.population),
+            areaKm2: String(scoreInput.areaKm2),
+            populationDensity: String(Math.round(scoreInput.population / Math.max(1, scoreInput.areaKm2))),
+            domainScoresJson: {
+              PI: result.domains.POPULATION_IMMUNITY.points,
+              SQ: result.domains.SURVEILLANCE_QUALITY.points,
+              PD: result.domains.PROGRAMME_DELIVERY.points,
+              TA: result.domains.THREAT_ASSESSMENT.points
+            },
+            summaryExplanation: result.summaryExplanation
+          });
+          const indRows = Object.values(result.allIndicators).map((ind) => ({
+            tenantId: effectiveTenantId,
+            runId: createdRun.id,
+            districtId: e.districtId,
+            domainCode: ind.domainId,
+            indicatorCode: ind.indicatorId,
+            valueRaw: ind.displayedValue,
+            valueAnalytical: ind.rawNumericValue !== null ? String(ind.rawNumericValue) : null,
+            numerator: ind.numerator !== null ? String(ind.numerator) : null,
+            denominator: ind.denominator !== null ? String(ind.denominator) : null,
+            pointsAwarded: String(ind.points ?? 0),
+            maxPoints: String(ind.maxPoints),
+            thresholdApplied: ind.thresholdApplied,
+            formulaUsed: null,
+            valueState: ind.valueState,
+            explanation: ind.explanation,
+            neighboursBreakdownJson: null
+          }));
+          await db.insert(riskIndicatorResults).values(indRows);
+        }
+        await db.update(riskAssessmentRuns).set({
+          summaryStats: {
+            status: "COMPLETED",
+            totalAreasAssessed: allEntries.length,
+            lowRiskCount: lowCount,
+            mediumRiskCount: medCount,
+            highRiskCount: highCount,
+            veryHighRiskCount: veryHighCount,
+            incompleteCount: incCount,
+            completedAt: (/* @__PURE__ */ new Date()).toISOString(),
+            source: "DIRECT_DATA_ENTRY"
+          }
+        }).where((0, import_drizzle_orm16.eq)(riskAssessmentRuns.id, createdRun.id));
+        await db.update(riskAssessments).set({ status: "CALCULATED", updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm16.eq)(riskAssessments.id, assessment.id));
+        res.json({
+          message: "Direct data entry saved and risk scores calculated successfully",
+          runId: createdRun.id,
+          runNumber: nextRunNumber,
+          totalAreasAssessed: allEntries.length,
+          distribution: {
+            low: lowCount,
+            medium: medCount,
+            high: highCount,
+            veryHigh: veryHighCount,
+            incomplete: incCount
+          }
+        });
+      } catch (err) {
+        console.error("Direct data entry error:", err);
+        res.status(500).json({ message: err.message });
+      }
+    });
+    riskRouter.get("/assessments/:id/export-report-docx", async (req, res) => {
+      try {
+        const requestedId = req.params.id;
+        let [assessment] = await db.select().from(riskAssessments).where((0, import_drizzle_orm16.and)((0, import_drizzle_orm16.eq)(riskAssessments.id, requestedId), (0, import_drizzle_orm16.eq)(riskAssessments.tenantId, req.tenantId)));
+        if (!assessment) {
+          const [byUuid] = await db.select().from(riskAssessments).where((0, import_drizzle_orm16.eq)(riskAssessments.id, requestedId));
+          assessment = byUuid;
+        }
+        if (!assessment) {
+          return res.status(404).json({ message: "Assessment not found" });
+        }
+        const effectiveTenantId = assessment.tenantId || req.tenantId;
+        const [tenant] = await db.select().from(tenants).where((0, import_drizzle_orm16.eq)(tenants.id, effectiveTenantId)).limit(1);
+        const countryName = tenant?.name || "South Africa";
+        const [latestRun] = await db.select().from(riskAssessmentRuns).where((0, import_drizzle_orm16.eq)(riskAssessmentRuns.assessmentId, assessment.id)).orderBy((0, import_drizzle_orm16.desc)(riskAssessmentRuns.runNumber)).limit(1);
+        let districtResults = [];
+        if (latestRun) {
+          const rawRows = await db.select({
+            id: riskAreaResults.id,
+            districtId: riskAreaResults.districtId,
+            districtName: districts.name,
+            provinceId: riskAreaResults.provinceId,
+            provinceName: provinces.name,
+            totalScore: riskAreaResults.totalScore,
+            riskCategory: riskAreaResults.riskCategory,
+            completenessRate: riskAreaResults.completenessRate,
+            population: riskAreaResults.population,
+            areaKm2: riskAreaResults.areaKm2,
+            domainScoresJson: riskAreaResults.domainScoresJson,
+            summaryExplanation: riskAreaResults.summaryExplanation
+          }).from(riskAreaResults).leftJoin(districts, (0, import_drizzle_orm16.eq)(riskAreaResults.districtId, districts.id)).leftJoin(provinces, (0, import_drizzle_orm16.eq)(riskAreaResults.provinceId, provinces.id)).where((0, import_drizzle_orm16.eq)(riskAreaResults.runId, latestRun.id));
+          districtResults = rawRows.map((r) => {
+            const domains = r.domainScoresJson || {};
+            return {
+              ...r,
+              areaName: r.districtName || `District ${r.districtId}`,
+              population: r.population !== null ? Number(r.population) : 1e5,
+              populationImmunityScore: domains.PI !== void 0 ? String(domains.PI) : null,
+              surveillanceQualityScore: domains.SQ !== void 0 ? String(domains.SQ) : null,
+              programmeDeliveryScore: domains.PD !== void 0 ? String(domains.PD) : null,
+              threatAssessmentScore: domains.TA !== void 0 ? String(domains.TA) : null,
+              totalRiskScore: r.totalScore
+            };
+          });
+        }
+        const reportData = {
+          countryName,
+          assessmentYear: assessment.assessmentYear,
+          admin1Label: "Province",
+          admin2Label: "District",
+          admin2LabelPlural: "Districts",
+          districtResults
+        };
+        const tempJsonPath = import_path.default.join(import_os.default.tmpdir(), `risk_report_${assessment.id}_${Date.now()}.json`);
+        const tempDocxPath = import_path.default.join(import_os.default.tmpdir(), `risk_report_${assessment.id}_${Date.now()}.docx`);
+        import_fs.default.writeFileSync(tempJsonPath, JSON.stringify(reportData), "utf-8");
+        const pythonScript = import_path.default.join(process.cwd(), "scripts", "generate_risk_report.py");
+        const pythonProcess = (0, import_child_process.spawn)("python", [pythonScript, "--json", tempJsonPath, "--output", tempDocxPath]);
+        pythonProcess.on("close", (code) => {
+          try {
+            if (import_fs.default.existsSync(tempJsonPath)) import_fs.default.unlinkSync(tempJsonPath);
+          } catch (e) {
+          }
+          if (code !== 0 || !import_fs.default.existsSync(tempDocxPath)) {
+            return res.status(500).json({ message: `Report generation process failed with exit code ${code}` });
+          }
+          const safeCountry = countryName.replace(/[^a-zA-Z0-9_-]/g, "_");
+          const filename = `${safeCountry}_Measles_Risk_Assessment_Final_Report_${assessment.assessmentYear}.docx`;
+          res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+          res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+          const fileStream = import_fs.default.createReadStream(tempDocxPath);
+          fileStream.pipe(res);
+          fileStream.on("end", () => {
+            try {
+              if (import_fs.default.existsSync(tempDocxPath)) import_fs.default.unlinkSync(tempDocxPath);
+            } catch (e) {
+            }
+          });
+        });
+        pythonProcess.on("error", (err) => {
+          try {
+            if (import_fs.default.existsSync(tempJsonPath)) import_fs.default.unlinkSync(tempJsonPath);
+          } catch (e) {
+          }
+          res.status(500).json({ message: `Failed to spawn Python process: ${err.message}` });
+        });
+      } catch (err) {
+        res.status(500).json({ message: err.message });
+      }
+    });
+    riskRouter.get("/resources/:filename", (req, res) => {
+      const allowedFiles = {
+        "Measles_Risk_Assessment_Tool_setup_guide_V1.5_EN.pdf": "application/pdf",
+        "Technical_Appendix_Risk_Assessment_Tool.pdf": "application/pdf",
+        "Measles_Risk_Assessment_Tool_v1.8.xlsm": "application/vnd.ms-excel.sheet.macroEnabled.12",
+        "Measles Risk Assessment Final Report.docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "MRAT_Country_Report_ENG.dotx": "application/vnd.openxmlformats-officedocument.wordprocessingml.template"
+      };
+      const filename = req.params.filename;
+      if (!allowedFiles[filename]) {
+        return res.status(404).json({ message: "Requested resource document not found or access restricted" });
+      }
+      const filePath = import_path.default.join(process.cwd(), "RA", filename);
+      if (!import_fs.default.existsSync(filePath)) {
+        return res.status(404).json({ message: "Resource file not found on server" });
+      }
+      res.setHeader("Content-Type", allowedFiles[filename]);
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+      res.sendFile(filePath);
     });
   }
 });
@@ -14773,10 +15336,10 @@ function compareMicroplanSnapshots(left, right) {
   const leftFlat = flatten(left);
   const rightFlat = flatten(right);
   const keys = Array.from(/* @__PURE__ */ new Set([...Object.keys(leftFlat), ...Object.keys(rightFlat)])).sort();
-  return keys.flatMap((path4) => {
-    const before = leftFlat[path4];
-    const after = rightFlat[path4];
-    return JSON.stringify(before) === JSON.stringify(after) ? [] : [{ path: path4, before, after }];
+  return keys.flatMap((path5) => {
+    const before = leftFlat[path5];
+    const after = rightFlat[path5];
+    return JSON.stringify(before) === JSON.stringify(after) ? [] : [{ path: path5, before, after }];
   });
 }
 async function restoreMicroplanVersionAsDraft(db2, input) {
@@ -15734,7 +16297,7 @@ async function runMissingSettlementDetection(tenantId, options = {}) {
         (0, import_drizzle_orm21.eq)(candidateUnmappedSettlements.validationStatus, "pending")
       )
     );
-    const sql37 = `
+    const sql38 = `
       WITH admin_polys AS MATERIALIZED (
         SELECT
           b.admin_level,
@@ -15885,7 +16448,7 @@ async function runMissingSettlementDetection(tenantId, options = {}) {
         'pending'
       FROM enriched e
     `;
-    const result = await pool.query(sql37, [
+    const result = await pool.query(sql38, [
       tenantId,
       popThreshold,
       radiusMeters,
@@ -16057,20 +16620,20 @@ function getBundledLevel(countryCode, adminLevel) {
 function loadBundledBoundary(countryCode, adminLevel) {
   const lvl = getBundledLevel(countryCode, adminLevel);
   if (!lvl) return null;
-  const abs = (0, import_path.join)(process.cwd(), lvl.file);
-  const geojson = JSON.parse((0, import_fs.readFileSync)(abs, "utf8"));
+  const abs = (0, import_path2.join)(process.cwd(), lvl.file);
+  const geojson = JSON.parse((0, import_fs2.readFileSync)(abs, "utf8"));
   const featureCount = Array.isArray(geojson?.features) ? geojson.features.length : 0;
   if (featureCount === 0) {
     throw new Error(`Bundled boundary ${lvl.file} contains no features`);
   }
   return { geojson, featureCount, levelName: lvl.levelName };
 }
-var import_fs, import_path, BUNDLED_CUSTOM_LEVELS;
+var import_fs2, import_path2, BUNDLED_CUSTOM_LEVELS;
 var init_bundledBoundaries = __esm({
   "server/services/bundledBoundaries.ts"() {
     "use strict";
-    import_fs = require("fs");
-    import_path = require("path");
+    import_fs2 = require("fs");
+    import_path2 = require("path");
     BUNDLED_CUSTOM_LEVELS = {
       ZMB: [
         { level: 3, levelName: "Constituency", file: "data/zambia/zmb_constituencies.geojson" }
@@ -18628,10 +19191,10 @@ async function flushBatch(tenantId, rows) {
       r.density
     );
   }
-  const sql37 = `INSERT INTO population_grids
+  const sql38 = `INSERT INTO population_grids
       (tenant_id, population_total, under5_population, geojson, raster_cell, density_classification)
     VALUES ${valuePlaceholders.join(",")}`;
-  await pool.query(sql37, params);
+  await pool.query(sql38, params);
 }
 async function ingestWorldPopRaster(opts) {
   const {
@@ -18893,8 +19456,8 @@ var init_scheduler = __esm({
 async function ensurePopulationRefreshMigration() {
   if (!migrationPromise) {
     migrationPromise = (async () => {
-      const sqlPath = (0, import_path2.join)(process.cwd(), "server", "migrations", "007-population-refresh-jobs.sql");
-      const sqlText = (0, import_fs2.readFileSync)(sqlPath, "utf8");
+      const sqlPath = (0, import_path3.join)(process.cwd(), "server", "migrations", "007-population-refresh-jobs.sql");
+      const sqlText = (0, import_fs3.readFileSync)(sqlPath, "utf8");
       const client3 = await pool.connect();
       try {
         await client3.query(sqlText);
@@ -18958,7 +19521,7 @@ async function refreshTenantPopulation(tenantId, opts) {
   }).returning();
   const startMs = Date.now();
   try {
-    if (!(0, import_fs2.existsSync)(rasterPath)) {
+    if (!(0, import_fs3.existsSync)(rasterPath)) {
       throw new Error(`Raster file not found at ${rasterPath}`);
     }
     const result = await ingestWorldPopRaster({
@@ -19000,7 +19563,7 @@ async function runScheduledPopulationRefresh() {
   let skipped = 0;
   for (const tenant of activeTenants) {
     const rasterPath = resolveTenantRasterPath(tenant);
-    if (!(0, import_fs2.existsSync)(rasterPath)) {
+    if (!(0, import_fs3.existsSync)(rasterPath)) {
       skipped++;
       continue;
     }
@@ -19052,12 +19615,12 @@ async function listRefreshJobs(opts) {
   }
   return await query;
 }
-var import_fs2, import_path2, import_drizzle_orm25, DEFAULT_MIN_POPULATION, STALE_RUNNING_MS, migrationPromise, cancelFn;
+var import_fs3, import_path3, import_drizzle_orm25, DEFAULT_MIN_POPULATION, STALE_RUNNING_MS, migrationPromise, cancelFn;
 var init_populationRefresh = __esm({
   "server/jobs/populationRefresh.ts"() {
     "use strict";
-    import_fs2 = require("fs");
-    import_path2 = require("path");
+    import_fs3 = require("fs");
+    import_path3 = require("path");
     import_drizzle_orm25 = require("drizzle-orm");
     init_db();
     init_schema();
@@ -19085,13 +19648,13 @@ __export(supervisionDigest_exports, {
 async function ensureSupervisionDigestMigration() {
   if (!migrationPromise2) {
     migrationPromise2 = (async () => {
-      const sqlPath = (0, import_path3.join)(
+      const sqlPath = (0, import_path4.join)(
         process.cwd(),
         "server",
         "migrations",
         "009-user-notification-prefs.sql"
       );
-      const sqlText = (0, import_fs3.readFileSync)(sqlPath, "utf8");
+      const sqlText = (0, import_fs4.readFileSync)(sqlPath, "utf8");
       const client3 = await pool.connect();
       try {
         await client3.query(sqlText);
@@ -19477,12 +20040,12 @@ function startSupervisionDigestScheduler() {
 function stopSupervisionDigestScheduler() {
   cancelMidnightJob("supervision-digest");
 }
-var import_fs3, import_path3, import_drizzle_orm26, DIGEST_ROLES, OVERDUE_DAYS, LOW_SCORE_PCT, migrationPromise2;
+var import_fs4, import_path4, import_drizzle_orm26, DIGEST_ROLES, OVERDUE_DAYS, LOW_SCORE_PCT, migrationPromise2;
 var init_supervisionDigest = __esm({
   "server/jobs/supervisionDigest.ts"() {
     "use strict";
-    import_fs3 = require("fs");
-    import_path3 = require("path");
+    import_fs4 = require("fs");
+    import_path4 = require("path");
     import_drizzle_orm26 = require("drizzle-orm");
     init_db();
     init_mailer();
@@ -20719,8 +21282,8 @@ async function sendApprovalSmsForMicroplan(tenantId, microplanId) {
 function loadZambiaGeoJSON() {
   if (zambiaGeoJSON) return zambiaGeoJSON;
   try {
-    const abs = (0, import_path4.join)(process.cwd(), "data/zambia/zmb_constituencies.geojson");
-    zambiaGeoJSON = JSON.parse((0, import_fs5.readFileSync)(abs, "utf8"));
+    const abs = (0, import_path5.join)(process.cwd(), "data/zambia/zmb_constituencies.geojson");
+    zambiaGeoJSON = JSON.parse((0, import_fs6.readFileSync)(abs, "utf8"));
   } catch (err) {
     console.error("Failed to load Zambia constituencies GeoJSON:", err);
   }
@@ -20823,7 +21386,7 @@ async function registerRoutes(httpServer2, app2) {
   registerPasswordAuthRoutes(app2);
   const APP_VERSION = (() => {
     try {
-      const pkg = JSON.parse((0, import_fs4.readFileSync)(process.cwd() + "/package.json", "utf8"));
+      const pkg = JSON.parse((0, import_fs5.readFileSync)(process.cwd() + "/package.json", "utf8"));
       return String(pkg.version || "0.0.0");
     } catch {
       return "0.0.0";
@@ -20997,7 +21560,7 @@ async function registerRoutes(httpServer2, app2) {
   app2.get(/^\/release\/vaxplan-source-[^/]+\.tar\.gz$/, releaseDownloadGate, (_req, res) => {
     res.setHeader("Content-Type", "application/gzip");
     res.setHeader("Content-Disposition", `attachment; filename="vaxplan-source-${APP_VERSION}.tar.gz"`);
-    const child = (0, import_child_process.spawn)("git", ["archive", "--format=tar.gz", "HEAD"], { cwd: process.cwd() });
+    const child = (0, import_child_process2.spawn)("git", ["archive", "--format=tar.gz", "HEAD"], { cwd: process.cwd() });
     child.stdout.pipe(res);
     let stderr = "";
     child.stderr.on("data", (d) => {
@@ -21652,11 +22215,11 @@ async function registerRoutes(httpServer2, app2) {
             }
             console.log("[Self-Healing] Seeded fallback mock 10 States, 78 Counties, and default Payams for South Sudan.");
           };
-          const csvPath = (0, import_path4.join)(process.cwd(), "data", "south_sudan", "facilities.csv");
-          if ((0, import_fs5.existsSync)(csvPath)) {
+          const csvPath = (0, import_path5.join)(process.cwd(), "data", "south_sudan", "facilities.csv");
+          if ((0, import_fs6.existsSync)(csvPath)) {
             try {
               console.log("[Self-Healing] Found South Sudan facilities.csv, seeding high-fidelity dataset...");
-              const rawCsv = (0, import_fs5.readFileSync)(csvPath, "utf8");
+              const rawCsv = (0, import_fs6.readFileSync)(csvPath, "utf8");
               const parseSsdCsv = (text3) => {
                 const lines = [];
                 let cur = "";
@@ -22156,7 +22719,7 @@ async function registerRoutes(httpServer2, app2) {
         });
       }
       const rawPath = typeof req.body?.path === "string" ? req.body.path : "";
-      const path4 = rawPath.split("?")[0].split("#")[0].slice(0, 300) || "/";
+      const path5 = rawPath.split("?")[0].split("#")[0].slice(0, 300) || "/";
       const userId = req.user?.claims?.sub ?? req.user?.id ?? null;
       const fwd = req.headers["x-forwarded-for"];
       const ip = normalizeIp(typeof fwd === "string" ? fwd : req.ip);
@@ -22188,7 +22751,7 @@ async function registerRoutes(httpServer2, app2) {
       }
       const record = {
         userId,
-        path: path4,
+        path: path5,
         ipAddress: ip,
         country,
         region,
@@ -22773,7 +23336,7 @@ async function registerRoutes(httpServer2, app2) {
           return res.status(404).json({ message: "Tenant not found" });
         }
         const rasterPath = resolveTenantRasterPath(tenant);
-        const exists = (0, import_fs5.existsSync)(rasterPath);
+        const exists = (0, import_fs6.existsSync)(rasterPath);
         res.json({ tenantId, rasterPath, exists });
       } catch (err) {
         console.error("GET /api/admin/population-refresh-jobs/expected-raster failed:", err);
@@ -26048,30 +26611,30 @@ Note from the requester: ${conflict.note}` : ""}`,
   });
   app2.get("/api/resources/geotiff", ...auth, async (req, res) => {
     try {
-      let resourcesDir = (0, import_path4.join)(process.cwd(), "Resources");
+      let resourcesDir = (0, import_path5.join)(process.cwd(), "Resources");
       const hasTif = (dir) => {
-        if (!(0, import_fs5.existsSync)(dir)) return false;
+        if (!(0, import_fs6.existsSync)(dir)) return false;
         try {
-          return (0, import_fs5.readdirSync)(dir).some((f) => f.endsWith(".tif") || f.endsWith(".tiff"));
+          return (0, import_fs6.readdirSync)(dir).some((f) => f.endsWith(".tif") || f.endsWith(".tiff"));
         } catch {
           return false;
         }
       };
       if (!hasTif(resourcesDir)) {
-        const parentDir = (0, import_path4.join)(process.cwd(), "..", "Resources");
+        const parentDir = (0, import_path5.join)(process.cwd(), "..", "Resources");
         if (hasTif(parentDir)) {
           resourcesDir = parentDir;
         }
       }
-      if (!(0, import_fs5.existsSync)(resourcesDir)) {
+      if (!(0, import_fs6.existsSync)(resourcesDir)) {
         return res.status(204).end();
       }
       const reqFile = req.query.file;
       let geotiffFile = "";
       if (reqFile) {
-        const safeName = (0, import_path4.basename)(reqFile);
+        const safeName = (0, import_path5.basename)(reqFile);
         const isTiff = /\.(tif|tiff)$/i.test(safeName);
-        if (safeName === reqFile && isTiff && (0, import_fs5.readdirSync)(resourcesDir).includes(safeName)) {
+        if (safeName === reqFile && isTiff && (0, import_fs6.readdirSync)(resourcesDir).includes(safeName)) {
           geotiffFile = safeName;
         } else {
           return res.status(404).json({ message: `Requested GeoTIFF population file '${reqFile}' not found.` });
@@ -26084,7 +26647,7 @@ Note from the requester: ${conflict.note}` : ""}`,
         }
         const tenantCode = tenant.code.toLowerCase();
         const countryCode = (tenant.countryCode || "").toLowerCase();
-        const files = (0, import_fs5.readdirSync)(resourcesDir);
+        const files = (0, import_fs6.readdirSync)(resourcesDir);
         geotiffFile = files.find((f) => {
           const lowerF = f.toLowerCase();
           const matchesTenant = lowerF.includes(tenantCode) || countryCode && lowerF.includes(countryCode);
@@ -26115,14 +26678,14 @@ Note from the requester: ${conflict.note}` : ""}`,
       if (!geotiffFile) {
         return res.status(204).end();
       }
-      const filePath = (0, import_path4.join)(resourcesDir, geotiffFile);
+      const filePath = (0, import_path5.join)(resourcesDir, geotiffFile);
       const { statSync } = await import("fs");
       const fileStat = statSync(filePath);
       res.setHeader("Cache-Control", "private, max-age=604800, immutable");
       res.setHeader("Content-Type", "image/tiff");
       res.setHeader("Content-Length", String(fileStat.size));
       res.setHeader("Content-Disposition", `inline; filename="${geotiffFile}"`);
-      const stream = (0, import_fs5.createReadStream)(filePath);
+      const stream = (0, import_fs6.createReadStream)(filePath);
       const cleanup = () => stream.destroy();
       res.once("close", cleanup);
       stream.on("error", (streamErr) => {
@@ -26142,25 +26705,25 @@ Note from the requester: ${conflict.note}` : ""}`,
   });
   app2.get("/api/resources/geotiff/list", ...auth, async (req, res) => {
     try {
-      let resourcesDir = (0, import_path4.join)(process.cwd(), "Resources");
+      let resourcesDir = (0, import_path5.join)(process.cwd(), "Resources");
       const hasTifList = (dir) => {
-        if (!(0, import_fs5.existsSync)(dir)) return false;
+        if (!(0, import_fs6.existsSync)(dir)) return false;
         try {
-          return (0, import_fs5.readdirSync)(dir).some((f) => f.endsWith(".tif") || f.endsWith(".tiff"));
+          return (0, import_fs6.readdirSync)(dir).some((f) => f.endsWith(".tif") || f.endsWith(".tiff"));
         } catch {
           return false;
         }
       };
       if (!hasTifList(resourcesDir)) {
-        const parentDir = (0, import_path4.join)(process.cwd(), "..", "Resources");
+        const parentDir = (0, import_path5.join)(process.cwd(), "..", "Resources");
         if (hasTifList(parentDir)) {
           resourcesDir = parentDir;
         }
       }
-      if (!(0, import_fs5.existsSync)(resourcesDir)) {
+      if (!(0, import_fs6.existsSync)(resourcesDir)) {
         return res.status(404).json({ success: false, message: "Resources directory not found." });
       }
-      const files = (0, import_fs5.readdirSync)(resourcesDir);
+      const files = (0, import_fs6.readdirSync)(resourcesDir);
       const tiffs = files.filter((f) => f.endsWith(".tif") || f.endsWith(".tiff"));
       const popCountry = (f) => {
         const m = f.toLowerCase().match(/^([a-z]{3})_pop_/);
@@ -26196,20 +26759,20 @@ Note from the requester: ${conflict.note}` : ""}`,
     try {
       res.vary("Cookie");
       res.vary("x-tenant-id");
-      let resourcesDir = (0, import_path4.join)(process.cwd(), "Resources");
-      if (!(0, import_fs5.existsSync)(resourcesDir)) {
-        const parentDir = (0, import_path4.join)(process.cwd(), "..", "Resources");
-        if ((0, import_fs5.existsSync)(parentDir)) resourcesDir = parentDir;
+      let resourcesDir = (0, import_path5.join)(process.cwd(), "Resources");
+      if (!(0, import_fs6.existsSync)(resourcesDir)) {
+        const parentDir = (0, import_path5.join)(process.cwd(), "..", "Resources");
+        if ((0, import_fs6.existsSync)(parentDir)) resourcesDir = parentDir;
       }
       const tenant = req.tenantId ? await storage.getTenant(req.tenantId) : void 0;
       const requestedTenant = String(req.query.tenant || tenant?.code || tenant?.countryCode || "").toUpperCase();
       const countryCode = (tenant?.countryCode || requestedTenant || "ZMB").toUpperCase();
       const safeCode = countryCode.toLowerCase().replace(/[^a-z0-9_-]/g, "");
-      const cachePath = (0, import_path4.join)(resourcesDir, `grid3_settlements_${safeCode}.geojson`);
-      if ((0, import_fs5.existsSync)(cachePath)) {
+      const cachePath = (0, import_path5.join)(resourcesDir, `grid3_settlements_${safeCode}.geojson`);
+      if ((0, import_fs6.existsSync)(cachePath)) {
         res.setHeader("Cache-Control", "private, max-age=604800, stale-while-revalidate=86400");
         res.setHeader("Content-Type", "application/json");
-        return (0, import_fs5.createReadStream)(cachePath).pipe(res);
+        return (0, import_fs6.createReadStream)(cachePath).pipe(res);
       }
       if (countryCode !== "ZMB") {
         res.setHeader("Cache-Control", "private, max-age=3600");
@@ -26230,7 +26793,7 @@ Note from the requester: ${conflict.note}` : ""}`,
         throw new Error(`ArcGIS FeatureServer returned error status: ${response.statusText}`);
       }
       const geojsonData = await response.json();
-      const cacheWriteStream = (0, import_fs5.createWriteStream)(cachePath);
+      const cacheWriteStream = (0, import_fs6.createWriteStream)(cachePath);
       cacheWriteStream.write(JSON.stringify(geojsonData));
       cacheWriteStream.end();
       res.setHeader("Cache-Control", "private, max-age=604800, stale-while-revalidate=86400");
@@ -26246,26 +26809,26 @@ Note from the requester: ${conflict.note}` : ""}`,
       if (!fileName || !fileName.endsWith(".tif") && !fileName.endsWith(".tiff")) {
         return res.status(400).json({ success: false, message: "Invalid GeoTIFF file. Must have .tif or .tiff extension." });
       }
-      let resourcesDir = (0, import_path4.join)(process.cwd(), "Resources");
+      let resourcesDir = (0, import_path5.join)(process.cwd(), "Resources");
       const hasTifUpload = (dir) => {
-        if (!(0, import_fs5.existsSync)(dir)) return false;
+        if (!(0, import_fs6.existsSync)(dir)) return false;
         try {
-          return (0, import_fs5.readdirSync)(dir).some((f) => f.endsWith(".tif") || f.endsWith(".tiff"));
+          return (0, import_fs6.readdirSync)(dir).some((f) => f.endsWith(".tif") || f.endsWith(".tiff"));
         } catch {
           return false;
         }
       };
       if (!hasTifUpload(resourcesDir)) {
-        const parentDir = (0, import_path4.join)(process.cwd(), "..", "Resources");
+        const parentDir = (0, import_path5.join)(process.cwd(), "..", "Resources");
         if (hasTifUpload(parentDir)) {
           resourcesDir = parentDir;
         }
       }
-      if (!(0, import_fs5.existsSync)(resourcesDir)) {
+      if (!(0, import_fs6.existsSync)(resourcesDir)) {
         return res.status(404).json({ success: false, message: "Resources directory not found." });
       }
-      const filePath = (0, import_path4.join)(resourcesDir, fileName);
-      const writeStream = (0, import_fs5.createWriteStream)(filePath);
+      const filePath = (0, import_path5.join)(resourcesDir, fileName);
+      const writeStream = (0, import_fs6.createWriteStream)(filePath);
       req.pipe(writeStream);
       req.on("error", (err) => {
         console.error("Upload request stream error:", err);
@@ -29895,7 +30458,7 @@ Note from the requester: ${conflict.note}` : ""}`,
     await refreshOutsideVillagesCacheForTenant(tenantId);
     res.json({ success: true });
   });
-  const customLayerUploadDir = (0, import_path4.join)(process.cwd(), "data", "uploads", "custom-layers");
+  const customLayerUploadDir = (0, import_path5.join)(process.cwd(), "data", "uploads", "custom-layers");
   function csvToGeoJSON(text3) {
     const lines = text3.split(/\r?\n/).filter((l) => l.trim().length > 0);
     if (lines.length < 2) throw new Error("CSV must have a header row and at least one data row");
@@ -29964,11 +30527,11 @@ Note from the requester: ${conflict.note}` : ""}`,
       if (!layer || layer.layerType !== "raster" || !layer.filePath) {
         return res.status(404).json({ message: "Raster not found" });
       }
-      if (!(0, import_fs5.existsSync)(layer.filePath)) {
+      if (!(0, import_fs6.existsSync)(layer.filePath)) {
         return res.status(404).json({ message: "Raster file missing on server" });
       }
       res.setHeader("Content-Type", "image/tiff");
-      (0, import_fs5.createReadStream)(layer.filePath).pipe(res);
+      (0, import_fs6.createReadStream)(layer.filePath).pipe(res);
     } catch (err) {
       console.error("GET /api/custom-layers/:id/raster failed:", err);
       res.status(500).json({ message: "Failed to fetch raster" });
@@ -30026,12 +30589,12 @@ Note from the requester: ${conflict.note}` : ""}`,
             layerType = "raster";
             format = "geotiff";
             try {
-              (0, import_fs5.mkdirSync)(customLayerUploadDir, { recursive: true });
+              (0, import_fs6.mkdirSync)(customLayerUploadDir, { recursive: true });
             } catch {
             }
             const safeName = `${Date.now()}-${(file.originalname || "layer.tif").replace(/[^a-zA-Z0-9._-]/g, "_")}`;
-            filePath = (0, import_path4.join)(customLayerUploadDir, safeName);
-            (0, import_fs5.writeFileSync)(filePath, file.buffer);
+            filePath = (0, import_path5.join)(customLayerUploadDir, safeName);
+            (0, import_fs6.writeFileSync)(filePath, file.buffer);
           } else if (fname.endsWith(".geojson") || fname.endsWith(".json")) {
             format = "geojson";
             const raw = JSON.parse(file.buffer.toString("utf-8"));
@@ -30118,9 +30681,9 @@ Note from the requester: ${conflict.note}` : ""}`,
       const layer = await storage.getCustomLayer(tenantId, req.params.id);
       if (!layer) return res.status(404).json({ message: "Layer not found" });
       const deleted = await storage.deleteCustomLayer(tenantId, req.params.id);
-      if (layer.filePath && (0, import_fs5.existsSync)(layer.filePath)) {
+      if (layer.filePath && (0, import_fs6.existsSync)(layer.filePath)) {
         try {
-          (0, import_fs5.unlinkSync)(layer.filePath);
+          (0, import_fs6.unlinkSync)(layer.filePath);
         } catch {
         }
       }
@@ -30498,30 +31061,30 @@ Note from the requester: ${conflict.note}` : ""}`,
   app2.get("/api/supervision/templates/import-template", isAuthenticated, requireTenant, async (req, res) => {
     const variant = (req.query.variant || req.query.type || "").toString().toLowerCase();
     const format = (req.query.format || "").toString().toLowerCase();
-    const fs4 = await import("fs");
+    const fs5 = await import("fs");
     if (variant === "short") {
       if (format === "json") {
         const jsonPath = "c:/vaxplan/Supportive_Supervision_Short_Template.json";
-        if (fs4.existsSync(jsonPath)) {
+        if (fs5.existsSync(jsonPath)) {
           res.setHeader("Content-Type", "application/json; charset=utf-8");
           res.setHeader("Content-Disposition", 'attachment; filename="Supportive_Supervision_Short_Template.json"');
-          return res.status(200).send(fs4.readFileSync(jsonPath, "utf-8"));
+          return res.status(200).send(fs5.readFileSync(jsonPath, "utf-8"));
         }
       }
       const csvPath2 = "c:/vaxplan/Supportive_Supervision_Short_Template.csv";
-      if (fs4.existsSync(csvPath2)) {
+      if (fs5.existsSync(csvPath2)) {
         res.setHeader("Content-Type", "text/csv; charset=utf-8");
         res.setHeader("Content-Disposition", 'attachment; filename="Supportive_Supervision_Short_Template.csv"');
-        return res.status(200).send(fs4.readFileSync(csvPath2, "utf-8"));
+        return res.status(200).send(fs5.readFileSync(csvPath2, "utf-8"));
       }
     }
     const fullCsvPath = "c:/vaxplan/Supportive_Supervision_National_Full_Template.csv";
     const csvPath = "c:/vaxplan/Supportive_Supervision_National_Template.csv";
-    const targetPath = fs4.existsSync(fullCsvPath) ? fullCsvPath : fs4.existsSync(csvPath) ? csvPath : null;
+    const targetPath = fs5.existsSync(fullCsvPath) ? fullCsvPath : fs5.existsSync(csvPath) ? csvPath : null;
     if (targetPath) {
       res.setHeader("Content-Type", "text/csv; charset=utf-8");
       res.setHeader("Content-Disposition", 'attachment; filename="Supportive_Supervision_National_Template.csv"');
-      return res.status(200).send(fs4.readFileSync(targetPath, "utf-8"));
+      return res.status(200).send(fs5.readFileSync(targetPath, "utf-8"));
     }
     const csvHeader = "Section Title,Question Text,Answer Type,Options,Is Scored,Weight,Prefill Source\n";
     const sampleRow1 = "Cold Chain & Equipment,Are all vaccines stored between +2\xB0C and +8\xB0C?,yes_no,Yes | No,true,1.0,cold_chain_temp\n";
@@ -37717,7 +38280,7 @@ This response is powered by the local VaxPlan database query engine. You can que
   });
   return httpServer2;
 }
-var import_express6, import_pdfkit, import_child_process, import_crypto2, import_fs4, import_zod3, import_fs5, import_path4, import_drizzle_orm28, import_turf2, _geoScopeCache, GEO_SCOPE_TTL_MS, ROLE_DELEGATION_LEVEL, SYSTEM_USER_PERMISSIONS, auth, DEFAULT_SUPERVISION_CHECKLIST, outsideVillageIds, zambiaGeoJSON, tenantBoundaryGeoJSONCache;
+var import_express6, import_pdfkit, import_child_process2, import_crypto2, import_fs5, import_zod3, import_fs6, import_path5, import_drizzle_orm28, import_turf2, _geoScopeCache, GEO_SCOPE_TTL_MS, ROLE_DELEGATION_LEVEL, SYSTEM_USER_PERMISSIONS, auth, DEFAULT_SUPERVISION_CHECKLIST, outsideVillageIds, zambiaGeoJSON, tenantBoundaryGeoJSONCache;
 var init_routes = __esm({
   "server/routes.ts"() {
     "use strict";
@@ -37732,9 +38295,9 @@ var init_routes = __esm({
     init_authorization();
     init_ssoRoutes();
     init_passwordAuth();
-    import_child_process = require("child_process");
+    import_child_process2 = require("child_process");
     import_crypto2 = require("crypto");
-    import_fs4 = require("fs");
+    import_fs5 = require("fs");
     init_tenantResolver();
     init_loadDbUser();
     init_mailer();
@@ -37755,8 +38318,8 @@ var init_routes = __esm({
     init_settlementEngine();
     import_zod3 = require("zod");
     init_db();
-    import_fs5 = require("fs");
-    import_path4 = require("path");
+    import_fs6 = require("fs");
+    import_path5 = require("path");
     import_drizzle_orm28 = require("drizzle-orm");
     init_geoBoundariesService();
     init_bundledBoundaries();
@@ -37872,24 +38435,24 @@ var init_routes = __esm({
 
 // server/static.ts
 function serveStatic(app2) {
-  const distPath = import_path5.default.resolve(__dirname, "public");
-  if (!import_fs6.default.existsSync(distPath)) {
+  const distPath = import_path6.default.resolve(__dirname, "public");
+  if (!import_fs7.default.existsSync(distPath)) {
     throw new Error(
       `Could not find the build directory: ${distPath}, make sure to build the client first`
     );
   }
   app2.use(import_express7.default.static(distPath));
   app2.use("*", (_req, res) => {
-    res.sendFile(import_path5.default.resolve(distPath, "index.html"));
+    res.sendFile(import_path6.default.resolve(distPath, "index.html"));
   });
 }
-var import_express7, import_fs6, import_path5;
+var import_express7, import_fs7, import_path6;
 var init_static = __esm({
   "server/static.ts"() {
     "use strict";
     import_express7 = __toESM(require("express"), 1);
-    import_fs6 = __toESM(require("fs"), 1);
-    import_path5 = __toESM(require("path"), 1);
+    import_fs7 = __toESM(require("fs"), 1);
+    import_path6 = __toESM(require("path"), 1);
   }
 });
 
@@ -41561,17 +42124,17 @@ async function applyWikiPages() {
     console.error(`[migration:017] Could not count wiki_pages: ${err.message}`);
     return;
   }
-  let guidePath = (0, import_path6.join)(process.cwd(), "docs/USER_GUIDE.md");
-  if (!(0, import_fs7.existsSync)(guidePath)) {
-    guidePath = (0, import_path6.join)(__dirname, "../../docs/USER_GUIDE.md");
+  let guidePath = (0, import_path7.join)(process.cwd(), "docs/USER_GUIDE.md");
+  if (!(0, import_fs8.existsSync)(guidePath)) {
+    guidePath = (0, import_path7.join)(__dirname, "../../docs/USER_GUIDE.md");
   }
-  if (!(0, import_fs7.existsSync)(guidePath)) {
+  if (!(0, import_fs8.existsSync)(guidePath)) {
     console.warn(
       `[migration:017] USER_GUIDE.md not found at ${guidePath} \u2014 seeding skipped.`
     );
     return;
   }
-  const md = (0, import_fs7.readFileSync)(guidePath, "utf8");
+  const md = (0, import_fs8.readFileSync)(guidePath, "utf8");
   const sections = extractH2Sections(md);
   console.log(
     `[migration:017] Seeding ${sections.length} wiki pages from USER_GUIDE.md\u2026`
@@ -41618,14 +42181,14 @@ function slugify(s) {
 function sqlStr(s) {
   return "'" + s.replace(/'/g, "''") + "'";
 }
-var import_drizzle_orm39, import_fs7, import_path6;
+var import_drizzle_orm39, import_fs8, import_path7;
 var init_wiki_pages = __esm({
   "server/migrations/017-wiki-pages.ts"() {
     "use strict";
     init_db();
     import_drizzle_orm39 = require("drizzle-orm");
-    import_fs7 = require("fs");
-    import_path6 = require("path");
+    import_fs8 = require("fs");
+    import_path7 = require("path");
   }
 });
 
@@ -43151,15 +43714,63 @@ var init_risk_permissions_and_seed = __esm({
   }
 });
 
+// server/migrations/034-risk-direct-entry.ts
+async function applyRiskDirectEntrySchema(db2) {
+  await db2.execute(import_drizzle_orm54.sql`
+    CREATE TABLE IF NOT EXISTS risk_district_data_entry (
+      id                          VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+      tenant_id                   VARCHAR NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+      assessment_id               VARCHAR NOT NULL REFERENCES risk_assessments(id) ON DELETE CASCADE,
+      district_id                 INTEGER NOT NULL REFERENCES districts(id) ON DELETE CASCADE,
+      province_id                 INTEGER REFERENCES provinces(id) ON DELETE SET NULL,
+      population                  NUMERIC(12, 2) DEFAULT 100000,
+      area_km2                    NUMERIC(12, 2) DEFAULT 2500,
+      mcv1_year_minus3            NUMERIC(5, 2) DEFAULT 80.00,
+      mcv1_year_minus2            NUMERIC(5, 2) DEFAULT 82.00,
+      mcv1_year_minus1            NUMERIC(5, 2) DEFAULT 85.00,
+      mcv2_year_minus3            NUMERIC(5, 2) DEFAULT 70.00,
+      mcv2_year_minus2            NUMERIC(5, 2) DEFAULT 72.00,
+      mcv2_year_minus1            NUMERIC(5, 2) DEFAULT 75.00,
+      penta1_year_minus1          NUMERIC(5, 2) DEFAULT 90.00,
+      sia_coverage_pct            NUMERIC(5, 2) DEFAULT 92.00,
+      sia_target_age_group        VARCHAR(20) DEFAULT 'WIDE',
+      sia_years_since             INTEGER DEFAULT 2,
+      unvaccinated_cases_pct      NUMERIC(5, 2) DEFAULT 15.00,
+      suspected_cases             INTEGER DEFAULT 12,
+      discarded_cases             INTEGER DEFAULT 3,
+      adequate_investigation_pct  NUMERIC(5, 2) DEFAULT 85.00,
+      adequate_specimen_pct       NUMERIC(5, 2) DEFAULT 85.00,
+      timely_lab_results_pct      NUMERIC(5, 2) DEFAULT 85.00,
+      threat_cases_under5         INTEGER DEFAULT 0,
+      threat_cases_5_to_14        INTEGER DEFAULT 0,
+      threat_cases_15_plus        INTEGER DEFAULT 0,
+      border_case_in_past_year    BOOLEAN DEFAULT FALSE,
+      vulnerabilities             JSONB DEFAULT '{"migrantOrUnderserved":false,"vaccineHesitancyOrRefusal":false,"securityOrConflictConcerns":false,"recurrentNaturalDisasters":false,"poorAccessOrTerrain":false,"inadequatePoliticalSupport":false,"highTransitHubOrBorder":false,"massGatheringsOrEvents":false}'::jsonb,
+      created_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      CONSTRAINT idx_risk_dist_entry_unique UNIQUE(assessment_id, district_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_risk_dist_entry_tenant ON risk_district_data_entry(tenant_id);
+    CREATE INDEX IF NOT EXISTS idx_risk_dist_entry_assessment ON risk_district_data_entry(assessment_id);
+  `);
+}
+var import_drizzle_orm54;
+var init_risk_direct_entry = __esm({
+  "server/migrations/034-risk-direct-entry.ts"() {
+    "use strict";
+    import_drizzle_orm54 = require("drizzle-orm");
+  }
+});
+
 // server/services/identitySequences.ts
 async function realignIdentitySequences(db2) {
-  await db2.execute(import_drizzle_orm54.sql.raw(REALIGN_IDENTITY_SEQUENCES_SQL));
+  await db2.execute(import_drizzle_orm55.sql.raw(REALIGN_IDENTITY_SEQUENCES_SQL));
 }
-var import_drizzle_orm54, REALIGN_IDENTITY_SEQUENCES_SQL;
+var import_drizzle_orm55, REALIGN_IDENTITY_SEQUENCES_SQL;
 var init_identitySequences = __esm({
   "server/services/identitySequences.ts"() {
     "use strict";
-    import_drizzle_orm54 = require("drizzle-orm");
+    import_drizzle_orm55 = require("drizzle-orm");
     REALIGN_IDENTITY_SEQUENCES_SQL = `
 DO $$
 DECLARE
@@ -43280,8 +43891,8 @@ async function applySupervisionTemplatesSeed() {
     CREATE INDEX IF NOT EXISTS idx_supervision_template_tenant ON supervision_checklist_templates(tenant_id);
   `;
   try {
-    await db.execute(import_drizzle_orm55.sql.raw(createTableStmt));
-    await db.execute(import_drizzle_orm55.sql`
+    await db.execute(import_drizzle_orm56.sql.raw(createTableStmt));
+    await db.execute(import_drizzle_orm56.sql`
       ALTER TABLE supervision_checklist_templates ADD COLUMN IF NOT EXISTS sections JSONB NOT NULL DEFAULT '[]'::jsonb;
       ALTER TABLE supervision_checklist_templates ADD COLUMN IF NOT EXISTS category VARCHAR(50) NOT NULL DEFAULT 'supervision';
       ALTER TABLE supervision_checklist_templates ADD COLUMN IF NOT EXISTS items JSONB NOT NULL DEFAULT '[]'::jsonb;
@@ -43302,10 +43913,10 @@ async function applySupervisionTemplatesSeed() {
   const parsedTemplates = [];
   const rootDir = process.cwd();
   for (const fname of templateFilenames) {
-    const fullPath = (0, import_path7.join)(rootDir, fname);
-    if ((0, import_fs8.existsSync)(fullPath)) {
+    const fullPath = (0, import_path8.join)(rootDir, fname);
+    if ((0, import_fs9.existsSync)(fullPath)) {
       try {
-        const raw = JSON.parse((0, import_fs8.readFileSync)(fullPath, "utf-8"));
+        const raw = JSON.parse((0, import_fs9.readFileSync)(fullPath, "utf-8"));
         const parsed = parseTemplateJson(raw);
         parsedTemplates.push({
           ...parsed,
@@ -43324,7 +43935,7 @@ async function applySupervisionTemplatesSeed() {
     return;
   }
   try {
-    const tenantsRes = await db.execute(import_drizzle_orm55.sql`SELECT id, code, country_code FROM tenants`);
+    const tenantsRes = await db.execute(import_drizzle_orm56.sql`SELECT id, code, country_code FROM tenants`);
     const tenantRows = tenantsRes.rows;
     const countryScopedTemplates = parsedTemplates.filter((t) => t.countryCodes.length > 0);
     if (tenantRows.length === 0) {
@@ -43334,7 +43945,7 @@ async function applySupervisionTemplatesSeed() {
     for (const t of countryScopedTemplates) {
       for (const tenant of tenantRows) {
         if (isTemplateInScopeForTenant(t.countryCodes, tenant)) continue;
-        await db.execute(import_drizzle_orm55.sql`
+        await db.execute(import_drizzle_orm56.sql`
           DELETE FROM supervision_checklist_templates
           WHERE tenant_id = ${tenant.id}
             AND name = ${t.name}
@@ -43352,7 +43963,7 @@ async function applySupervisionTemplatesSeed() {
           continue;
         }
         try {
-          const checkRes = await db.execute(import_drizzle_orm55.sql`
+          const checkRes = await db.execute(import_drizzle_orm56.sql`
             SELECT id FROM supervision_checklist_templates
             WHERE tenant_id = ${tenantId}
               AND name = ${t.name}
@@ -43362,7 +43973,7 @@ async function applySupervisionTemplatesSeed() {
           const itemsJsonStr = JSON.stringify(t.items);
           if (checkRes.rows.length > 0) {
             const existingId = checkRes.rows[0].id;
-            await db.execute(import_drizzle_orm55.sql`
+            await db.execute(import_drizzle_orm56.sql`
               UPDATE supervision_checklist_templates
               SET category = ${t.category},
                   description = ${t.description},
@@ -43374,7 +43985,7 @@ async function applySupervisionTemplatesSeed() {
             `);
             console.log(`[migration:028] Updated template "${t.name}" (ID ${existingId}) for tenant "${tenantId}".`);
           } else {
-            await db.execute(import_drizzle_orm55.sql`
+            await db.execute(import_drizzle_orm56.sql`
               INSERT INTO supervision_checklist_templates (
                 tenant_id, name, category, description, sections, items, is_active
               ) VALUES (
@@ -43404,14 +44015,14 @@ async function applySupervisionTemplatesSeed() {
     console.error(`[migration:028] Fatal error during seed: ${err?.message || err}`);
   }
 }
-var import_drizzle_orm55, import_fs8, import_path7;
+var import_drizzle_orm56, import_fs9, import_path8;
 var init_supervision_templates_seed = __esm({
   "server/migrations/028-supervision-templates-seed.ts"() {
     "use strict";
     init_db();
-    import_drizzle_orm55 = require("drizzle-orm");
-    import_fs8 = require("fs");
-    import_path7 = require("path");
+    import_drizzle_orm56 = require("drizzle-orm");
+    import_fs9 = require("fs");
+    import_path8 = require("path");
   }
 });
 
@@ -43426,19 +44037,19 @@ __export(remoteSensingService_exports, {
 });
 async function calculateSpatialGaps(districtId, radiusKm = 5) {
   try {
-    const [districtRow] = await db.select().from(districts).where((0, import_drizzle_orm56.eq)(districts.id, districtId)).limit(1);
+    const [districtRow] = await db.select().from(districts).where((0, import_drizzle_orm57.eq)(districts.id, districtId)).limit(1);
     if (!districtRow) {
       return { gaps: [], totalSettlements: 0, servedSettlements: 0 };
     }
-    const allSettlements = await db.select().from(settlementsMaster).where((0, import_drizzle_orm56.eq)(settlementsMaster.districtName, districtRow.name));
+    const allSettlements = await db.select().from(settlementsMaster).where((0, import_drizzle_orm57.eq)(settlementsMaster.districtName, districtRow.name));
     if (allSettlements.length === 0) {
       return { gaps: [], totalSettlements: 0, servedSettlements: 0 };
     }
-    const activeFacilities = await db.select().from(facilities).where((0, import_drizzle_orm56.eq)(facilities.districtId, districtId));
+    const activeFacilities = await db.select().from(facilities).where((0, import_drizzle_orm57.eq)(facilities.districtId, districtId));
     const plannedOutposts = await db.select().from(sessionPlans).where(
-      (0, import_drizzle_orm56.and)(
-        (0, import_drizzle_orm56.eq)(sessionPlans.facilityId, activeFacilities[0]?.id || 0),
-        (0, import_drizzle_orm56.eq)(sessionPlans.status, "planned")
+      (0, import_drizzle_orm57.and)(
+        (0, import_drizzle_orm57.eq)(sessionPlans.facilityId, activeFacilities[0]?.id || 0),
+        (0, import_drizzle_orm57.eq)(sessionPlans.status, "planned")
       )
     );
     const servedSet = /* @__PURE__ */ new Set();
@@ -43647,7 +44258,7 @@ function registerRemoteSensingRoutes(app2) {
         const result2 = await calculateSpatialGaps(firstDistrict.id, 5);
         return res.json({ ...result2, districtId: firstDistrict.id, districtName: firstDistrict.name });
       }
-      const [districtRow] = await db.select().from(districts).where((0, import_drizzle_orm56.eq)(districts.id, districtId)).limit(1);
+      const [districtRow] = await db.select().from(districts).where((0, import_drizzle_orm57.eq)(districts.id, districtId)).limit(1);
       if (!districtRow) return res.status(404).json({ message: "District not found" });
       const result = await calculateSpatialGaps(districtId, 5);
       res.json({ ...result, districtId, districtName: districtRow.name });
@@ -43668,7 +44279,7 @@ function registerRemoteSensingRoutes(app2) {
         targetDistrictId = firstDistrict.id;
         targetDistrictName = firstDistrict.name;
       } else {
-        const [districtRow] = await db.select().from(districts).where((0, import_drizzle_orm56.eq)(districts.id, targetDistrictId)).limit(1);
+        const [districtRow] = await db.select().from(districts).where((0, import_drizzle_orm57.eq)(districts.id, targetDistrictId)).limit(1);
         if (!districtRow) return res.status(404).json({ message: "District not found" });
         targetDistrictName = districtRow.name;
       }
@@ -43704,12 +44315,12 @@ function registerRemoteSensingRoutes(app2) {
     }
   });
 }
-var import_drizzle_orm56;
+var import_drizzle_orm57;
 var init_remoteSensingService = __esm({
   "server/services/remoteSensingService.ts"() {
     "use strict";
     init_db();
-    import_drizzle_orm56 = require("drizzle-orm");
+    import_drizzle_orm57 = require("drizzle-orm");
     init_schema();
     init_index();
     init_replitAuth();
@@ -43723,20 +44334,20 @@ function intList(values) {
 }
 function idInClause(column, values) {
   const ids = intList(values);
-  if (ids.length === 0) return import_drizzle_orm57.sql``;
-  return import_drizzle_orm57.sql.raw(` AND ${column} IN (${ids.join(",")})`);
+  if (ids.length === 0) return import_drizzle_orm58.sql``;
+  return import_drizzle_orm58.sql.raw(` AND ${column} IN (${ids.join(",")})`);
 }
 function facilityScopeClause(filters) {
-  return filters.facilityIds?.length ? idInClause("f.id", filters.facilityIds) : filters.facilityId ? import_drizzle_orm57.sql` AND f.id = ${filters.facilityId}` : import_drizzle_orm57.sql``;
+  return filters.facilityIds?.length ? idInClause("f.id", filters.facilityIds) : filters.facilityId ? import_drizzle_orm58.sql` AND f.id = ${filters.facilityId}` : import_drizzle_orm58.sql``;
 }
 function districtScopeClause(filters) {
-  return filters.districtIds?.length ? idInClause("d.id", filters.districtIds) : filters.districtId ? import_drizzle_orm57.sql` AND d.id = ${filters.districtId}` : import_drizzle_orm57.sql``;
+  return filters.districtIds?.length ? idInClause("d.id", filters.districtIds) : filters.districtId ? import_drizzle_orm58.sql` AND d.id = ${filters.districtId}` : import_drizzle_orm58.sql``;
 }
 function provinceScopeClause(filters) {
-  return filters.provinceIds?.length ? idInClause("p.id", filters.provinceIds) : filters.provinceId ? import_drizzle_orm57.sql` AND p.id = ${filters.provinceId}` : import_drizzle_orm57.sql``;
+  return filters.provinceIds?.length ? idInClause("p.id", filters.provinceIds) : filters.provinceId ? import_drizzle_orm58.sql` AND p.id = ${filters.provinceId}` : import_drizzle_orm58.sql``;
 }
 async function getProvincesMap(tenantId) {
-  const provincesList = await db.execute(import_drizzle_orm57.sql`
+  const provincesList = await db.execute(import_drizzle_orm58.sql`
     SELECT id, name FROM provinces WHERE tenant_id = ${tenantId}
   `);
   const provincesMap = /* @__PURE__ */ new Map();
@@ -43746,7 +44357,7 @@ async function getProvincesMap(tenantId) {
   return provincesMap;
 }
 async function getDistrictsMap(tenantId) {
-  const districtsList = await db.execute(import_drizzle_orm57.sql`
+  const districtsList = await db.execute(import_drizzle_orm58.sql`
     SELECT id, name, province_id FROM districts WHERE tenant_id = ${tenantId}
   `);
   const districtsMap = /* @__PURE__ */ new Map();
@@ -43863,12 +44474,12 @@ function rollupHierarchy(facilities4, provincesMap, districtsMap, sumKeys, avgKe
   ];
 }
 async function getSessionReport(filters) {
-  const yearClause = filters.year ? import_drizzle_orm57.sql` AND sp.year = ${filters.year}` : import_drizzle_orm57.sql``;
-  const quarterClause = filters.quarter ? import_drizzle_orm57.sql` AND sp.quarter = ${filters.quarter}` : import_drizzle_orm57.sql``;
+  const yearClause = filters.year ? import_drizzle_orm58.sql` AND sp.year = ${filters.year}` : import_drizzle_orm58.sql``;
+  const quarterClause = filters.quarter ? import_drizzle_orm58.sql` AND sp.quarter = ${filters.quarter}` : import_drizzle_orm58.sql``;
   const facilityFilter = facilityScopeClause(filters);
   const districtFilter = districtScopeClause(filters);
   const provinceFilter = provinceScopeClause(filters);
-  const dbRows = await db.execute(import_drizzle_orm57.sql`
+  const dbRows = await db.execute(import_drizzle_orm58.sql`
     SELECT
       f.id                                     AS id,
       f.name                                   AS name,
@@ -43944,12 +44555,12 @@ async function getSessionReport(filters) {
   );
 }
 async function getMicroplanReport(filters) {
-  const yearClause = filters.year ? import_drizzle_orm57.sql` AND m.year = ${filters.year}` : import_drizzle_orm57.sql``;
-  const quarterClause = filters.quarter ? import_drizzle_orm57.sql` AND m.quarter = ${filters.quarter}` : import_drizzle_orm57.sql``;
+  const yearClause = filters.year ? import_drizzle_orm58.sql` AND m.year = ${filters.year}` : import_drizzle_orm58.sql``;
+  const quarterClause = filters.quarter ? import_drizzle_orm58.sql` AND m.quarter = ${filters.quarter}` : import_drizzle_orm58.sql``;
   const facilityFilter = facilityScopeClause(filters);
   const districtFilter = districtScopeClause(filters);
   const provinceFilter = provinceScopeClause(filters);
-  const dbRows = await db.execute(import_drizzle_orm57.sql`
+  const dbRows = await db.execute(import_drizzle_orm58.sql`
     SELECT
       f.id                                                                AS id,
       f.name                                                              AS name,
@@ -44008,7 +44619,7 @@ async function getZeroDoseReport(filters) {
   const facilityFilter = facilityScopeClause(filters);
   const districtFilter = districtScopeClause(filters);
   const provinceFilter = provinceScopeClause(filters);
-  const dbRows = await db.execute(import_drizzle_orm57.sql`
+  const dbRows = await db.execute(import_drizzle_orm58.sql`
     SELECT
       f.id                              AS id,
       f.name                            AS name,
@@ -44070,12 +44681,12 @@ async function getZeroDoseReport(filters) {
   );
 }
 async function getMissedCommunitiesReport(filters) {
-  const yearClause = filters.year ? import_drizzle_orm57.sql` AND sp.year = ${filters.year}` : import_drizzle_orm57.sql``;
-  const quarterClause = filters.quarter ? import_drizzle_orm57.sql` AND sp.quarter = ${filters.quarter}` : import_drizzle_orm57.sql``;
+  const yearClause = filters.year ? import_drizzle_orm58.sql` AND sp.year = ${filters.year}` : import_drizzle_orm58.sql``;
+  const quarterClause = filters.quarter ? import_drizzle_orm58.sql` AND sp.quarter = ${filters.quarter}` : import_drizzle_orm58.sql``;
   const facilityFilter = facilityScopeClause(filters);
   const districtFilter = districtScopeClause(filters);
   const provinceFilter = provinceScopeClause(filters);
-  const dbRows = await db.execute(import_drizzle_orm57.sql`
+  const dbRows = await db.execute(import_drizzle_orm58.sql`
     SELECT
       f.id                               AS id,
       f.name                             AS name,
@@ -44123,12 +44734,12 @@ async function getMissedCommunitiesReport(filters) {
   );
 }
 async function getCoverageReport(filters) {
-  const yearClause = filters.year ? import_drizzle_orm57.sql` AND sp.year = ${filters.year}` : import_drizzle_orm57.sql``;
-  const quarterClause = filters.quarter ? import_drizzle_orm57.sql` AND sp.quarter = ${filters.quarter}` : import_drizzle_orm57.sql``;
+  const yearClause = filters.year ? import_drizzle_orm58.sql` AND sp.year = ${filters.year}` : import_drizzle_orm58.sql``;
+  const quarterClause = filters.quarter ? import_drizzle_orm58.sql` AND sp.quarter = ${filters.quarter}` : import_drizzle_orm58.sql``;
   const facilityFilter = facilityScopeClause(filters);
   const districtFilter = districtScopeClause(filters);
   const provinceFilter = provinceScopeClause(filters);
-  const dbRows = await db.execute(import_drizzle_orm57.sql`
+  const dbRows = await db.execute(import_drizzle_orm58.sql`
     SELECT
       f.id                               AS id,
       f.name                             AS name,
@@ -44186,7 +44797,7 @@ async function getHtrReport(filters) {
   const facilityFilter = facilityScopeClause(filters);
   const districtFilter = districtScopeClause(filters);
   const provinceFilter = provinceScopeClause(filters);
-  const dbRows = await db.execute(import_drizzle_orm57.sql`
+  const dbRows = await db.execute(import_drizzle_orm58.sql`
     SELECT
       f.id AS id,
       f.name AS name,
@@ -44245,12 +44856,12 @@ async function getHtrReport(filters) {
   );
 }
 async function getBudgetReport(filters) {
-  const yearClause = filters.year ? import_drizzle_orm57.sql` AND bi.year = ${filters.year}` : import_drizzle_orm57.sql``;
-  const quarterClause = filters.quarter ? import_drizzle_orm57.sql` AND bi.quarter = ${filters.quarter}` : import_drizzle_orm57.sql``;
+  const yearClause = filters.year ? import_drizzle_orm58.sql` AND bi.year = ${filters.year}` : import_drizzle_orm58.sql``;
+  const quarterClause = filters.quarter ? import_drizzle_orm58.sql` AND bi.quarter = ${filters.quarter}` : import_drizzle_orm58.sql``;
   const facilityFilter = facilityScopeClause(filters);
   const districtFilter = districtScopeClause(filters);
   const provinceFilter = provinceScopeClause(filters);
-  const dbRows = await db.execute(import_drizzle_orm57.sql`
+  const dbRows = await db.execute(import_drizzle_orm58.sql`
     SELECT
       f.id AS id,
       f.name AS name,
@@ -44318,12 +44929,12 @@ async function getBudgetReport(filters) {
   );
 }
 async function getSupervisionReport(filters) {
-  const yearClause = filters.year ? import_drizzle_orm57.sql` AND EXTRACT(YEAR FROM sv.scheduled_date) = ${filters.year}` : import_drizzle_orm57.sql``;
-  const quarterClause = filters.quarter ? import_drizzle_orm57.sql` AND CEIL(EXTRACT(MONTH FROM sv.scheduled_date) / 3.0) = ${filters.quarter}` : import_drizzle_orm57.sql``;
+  const yearClause = filters.year ? import_drizzle_orm58.sql` AND EXTRACT(YEAR FROM sv.scheduled_date) = ${filters.year}` : import_drizzle_orm58.sql``;
+  const quarterClause = filters.quarter ? import_drizzle_orm58.sql` AND CEIL(EXTRACT(MONTH FROM sv.scheduled_date) / 3.0) = ${filters.quarter}` : import_drizzle_orm58.sql``;
   const facilityFilter = facilityScopeClause(filters);
   const districtFilter = districtScopeClause(filters);
   const provinceFilter = provinceScopeClause(filters);
-  const dbRows = await db.execute(import_drizzle_orm57.sql`
+  const dbRows = await db.execute(import_drizzle_orm58.sql`
     SELECT
       f.id AS id,
       f.name AS name,
@@ -44383,12 +44994,12 @@ async function getSupervisionReport(filters) {
     }
   );
 }
-var import_drizzle_orm57;
+var import_drizzle_orm58;
 var init_reportingService = __esm({
   "server/services/reportingService.ts"() {
     "use strict";
     init_db();
-    import_drizzle_orm57 = require("drizzle-orm");
+    import_drizzle_orm58 = require("drizzle-orm");
   }
 });
 
@@ -44576,12 +45187,12 @@ var gisPolygons_exports = {};
 __export(gisPolygons_exports, {
   gisPolygonsRouter: () => gisPolygonsRouter
 });
-var import_express9, import_drizzle_orm58, gisPolygonsRouter;
+var import_express9, import_drizzle_orm59, gisPolygonsRouter;
 var init_gisPolygons = __esm({
   "server/routes/gisPolygons.ts"() {
     "use strict";
     import_express9 = require("express");
-    import_drizzle_orm58 = require("drizzle-orm");
+    import_drizzle_orm59 = require("drizzle-orm");
     init_db();
     init_schema();
     init_populationIntelligenceService();
@@ -44593,13 +45204,13 @@ var init_gisPolygons = __esm({
       try {
         const tenantId = req.user?.tenantId;
         const { ownerType, ownerId } = req.query;
-        let query = db.select().from(gisPolygons).where((0, import_drizzle_orm58.eq)(gisPolygons.tenantId, tenantId));
+        let query = db.select().from(gisPolygons).where((0, import_drizzle_orm59.eq)(gisPolygons.tenantId, tenantId));
         if (ownerType && ownerId) {
           query = db.select().from(gisPolygons).where(
-            (0, import_drizzle_orm58.and)(
-              (0, import_drizzle_orm58.eq)(gisPolygons.tenantId, tenantId),
-              (0, import_drizzle_orm58.eq)(gisPolygons.ownerType, String(ownerType)),
-              (0, import_drizzle_orm58.eq)(gisPolygons.ownerId, parseInt(String(ownerId), 10))
+            (0, import_drizzle_orm59.and)(
+              (0, import_drizzle_orm59.eq)(gisPolygons.tenantId, tenantId),
+              (0, import_drizzle_orm59.eq)(gisPolygons.ownerType, String(ownerType)),
+              (0, import_drizzle_orm59.eq)(gisPolygons.ownerId, parseInt(String(ownerId), 10))
             )
           );
         }
@@ -44633,14 +45244,14 @@ var init_gisPolygons = __esm({
         const tenantId = req.user?.tenantId;
         const id = parseInt(req.params.id, 10);
         const data = req.body;
-        const [current] = await db.select({ id: gisPolygons.id, status: gisPolygons.status, isActive: gisPolygons.isActive }).from(gisPolygons).where((0, import_drizzle_orm58.and)((0, import_drizzle_orm58.eq)(gisPolygons.id, id), (0, import_drizzle_orm58.eq)(gisPolygons.tenantId, tenantId))).limit(1);
+        const [current] = await db.select({ id: gisPolygons.id, status: gisPolygons.status, isActive: gisPolygons.isActive }).from(gisPolygons).where((0, import_drizzle_orm59.and)((0, import_drizzle_orm59.eq)(gisPolygons.id, id), (0, import_drizzle_orm59.eq)(gisPolygons.tenantId, tenantId))).limit(1);
         if (current && (current.status === "active" || current.isActive || data?.status === "active" || data?.isActive === true)) {
           return res.status(409).json({
             code: "POLYGON_LIFECYCLE_REQUIRED",
             message: "Approved polygons must be changed through the polygon lifecycle workflow."
           });
         }
-        const [updated] = await db.update(gisPolygons).set({ ...data, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm58.and)((0, import_drizzle_orm58.eq)(gisPolygons.id, id), (0, import_drizzle_orm58.eq)(gisPolygons.tenantId, tenantId))).returning();
+        const [updated] = await db.update(gisPolygons).set({ ...data, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm59.and)((0, import_drizzle_orm59.eq)(gisPolygons.id, id), (0, import_drizzle_orm59.eq)(gisPolygons.tenantId, tenantId))).returning();
         if (!updated) return res.status(404).json({ message: "Polygon not found" });
         res.json(updated);
       } catch (err) {
@@ -44651,14 +45262,14 @@ var init_gisPolygons = __esm({
       try {
         const tenantId = req.user?.tenantId;
         const id = parseInt(req.params.id, 10);
-        const [current] = await db.select({ id: gisPolygons.id, status: gisPolygons.status, isActive: gisPolygons.isActive }).from(gisPolygons).where((0, import_drizzle_orm58.and)((0, import_drizzle_orm58.eq)(gisPolygons.id, id), (0, import_drizzle_orm58.eq)(gisPolygons.tenantId, tenantId))).limit(1);
+        const [current] = await db.select({ id: gisPolygons.id, status: gisPolygons.status, isActive: gisPolygons.isActive }).from(gisPolygons).where((0, import_drizzle_orm59.and)((0, import_drizzle_orm59.eq)(gisPolygons.id, id), (0, import_drizzle_orm59.eq)(gisPolygons.tenantId, tenantId))).limit(1);
         if (current && (current.status === "active" || current.isActive)) {
           return res.status(409).json({
             code: "POLYGON_LIFECYCLE_REQUIRED",
             message: "Approved polygons must be archived or replaced through the polygon lifecycle workflow."
           });
         }
-        await db.delete(gisPolygons).where((0, import_drizzle_orm58.and)((0, import_drizzle_orm58.eq)(gisPolygons.id, id), (0, import_drizzle_orm58.eq)(gisPolygons.tenantId, tenantId)));
+        await db.delete(gisPolygons).where((0, import_drizzle_orm59.and)((0, import_drizzle_orm59.eq)(gisPolygons.id, id), (0, import_drizzle_orm59.eq)(gisPolygons.tenantId, tenantId)));
         res.json({ success: true });
       } catch (err) {
         res.status(500).json({ message: "Failed to delete polygon", error: err.message });
@@ -44802,8 +45413,8 @@ var init_mapStyles = __esm({
       let postgisVersion = "unavailable";
       try {
         const { db: db2 } = await Promise.resolve().then(() => (init_db(), db_exports));
-        const { sql: sql37 } = await import("drizzle-orm");
-        const result = await db2.execute(sql37`SELECT PostGIS_Full_Version() as ver`);
+        const { sql: sql38 } = await import("drizzle-orm");
+        const result = await db2.execute(sql38`SELECT PostGIS_Full_Version() as ver`);
         if (result && result.rows && result.rows.length > 0) {
           postgisReady = true;
           postgisVersion = String(result.rows[0].ver).slice(0, 80);
@@ -44896,12 +45507,12 @@ __export(stock_ledger_columns_exports, {
 });
 async function applyStockLedgerColumnsMigration(db2) {
   try {
-    await db2.execute(import_drizzle_orm59.sql`
+    await db2.execute(import_drizzle_orm60.sql`
       ALTER TABLE client_vaccinations 
       ADD COLUMN IF NOT EXISTS schedule_dose_id integer,
       ADD COLUMN IF NOT EXISTS stock_transaction_id integer;
     `);
-    await db2.execute(import_drizzle_orm59.sql`
+    await db2.execute(import_drizzle_orm60.sql`
       ALTER TABLE stock_transactions 
       DROP CONSTRAINT IF EXISTS stock_transactions_product_id_fkey,
       DROP CONSTRAINT IF EXISTS stock_transactions_product_id_catalogue_vaccines_id_fk,
@@ -44914,11 +45525,11 @@ async function applyStockLedgerColumnsMigration(db2) {
     console.error("Migration: failed to apply stock ledger columns:", err.message);
   }
 }
-var import_drizzle_orm59;
+var import_drizzle_orm60;
 var init_stock_ledger_columns = __esm({
   "server/migrations/027-stock-ledger-columns.ts"() {
     "use strict";
-    import_drizzle_orm59 = require("drizzle-orm");
+    import_drizzle_orm60 = require("drizzle-orm");
   }
 });
 
@@ -45230,7 +45841,7 @@ var workers_exports = {};
 __export(workers_exports, {
   communicationWorker: () => communicationWorker
 });
-var import_bullmq2, import_drizzle_orm60, communicationWorker;
+var import_bullmq2, import_drizzle_orm61, communicationWorker;
 var init_workers = __esm({
   "server/services/uce/workers.ts"() {
     "use strict";
@@ -45239,7 +45850,7 @@ var init_workers = __esm({
     init_db();
     init_schema();
     init_messaging();
-    import_drizzle_orm60 = require("drizzle-orm");
+    import_drizzle_orm61 = require("drizzle-orm");
     communicationWorker = new import_bullmq2.Worker(
       "communication-queue",
       async (job) => {
@@ -45257,7 +45868,7 @@ var init_workers = __esm({
           let commConfig = null;
           if (tenantId) {
             const { tenants: tenants3 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
-            const [tenant] = await db.select().from(tenants3).where((0, import_drizzle_orm60.eq)(tenants3.id, tenantId)).limit(1);
+            const [tenant] = await db.select().from(tenants3).where((0, import_drizzle_orm61.eq)(tenants3.id, tenantId)).limit(1);
             if (tenant && tenant.settings && tenant.settings.communication) {
               commConfig = tenant.settings.communication[channel];
             }
@@ -45286,8 +45897,8 @@ var init_workers = __esm({
             response: dispatchResult.error || dispatchResult.messageId || "Success"
           });
           if (dispatchResult.success) {
-            await db.update(communicationChannels).set({ delivered: true, responseCode: dispatchResult.messageId }).where((0, import_drizzle_orm60.eq)(communicationChannels.id, channelRecord.id));
-            await db.update(communications).set({ status: "completed" }).where((0, import_drizzle_orm60.eq)(communications.id, communicationId));
+            await db.update(communicationChannels).set({ delivered: true, responseCode: dispatchResult.messageId }).where((0, import_drizzle_orm61.eq)(communicationChannels.id, channelRecord.id));
+            await db.update(communications).set({ status: "completed" }).where((0, import_drizzle_orm61.eq)(communications.id, communicationId));
             return { status: "delivered", channel };
           } else {
             throw new Error(dispatchResult.error || "Unknown error");
@@ -45318,7 +45929,7 @@ var init_workers = __esm({
               channel: nextChannel
             }, { delay: delayMs });
           } else {
-            await db.update(communications).set({ status: "failed" }).where((0, import_drizzle_orm60.eq)(communications.id, communicationId));
+            await db.update(communications).set({ status: "failed" }).where((0, import_drizzle_orm61.eq)(communications.id, communicationId));
           }
           throw err;
         }
@@ -45377,7 +45988,7 @@ async function backfillClientIds() {
   try {
     const { clients: clients2, facilities: facilities4, districts: districts3, provinces: provinces4 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
     const { db: db2 } = await Promise.resolve().then(() => (init_db(), db_exports));
-    const { sql: sql37, isNull: isNull9, eq: eq38, and: and31 } = await import("drizzle-orm");
+    const { sql: sql38, isNull: isNull9, eq: eq38, and: and31 } = await import("drizzle-orm");
     const { getInitials: getInitials2, computeCheckDigit: computeCheckDigit2 } = await Promise.resolve().then(() => (init_routes(), routes_exports));
     const pendingClients = await db2.select().from(clients2).where(isNull9(clients2.clientId));
     if (pendingClients.length === 0) {
@@ -45394,7 +46005,7 @@ async function backfillClientIds() {
       const distInit = getInitials2(facInfo?.districtName || "DST");
       const hfInit = getInitials2(facInfo?.facilityName || "FAC");
       const regYear = client3.createdAt ? new Date(client3.createdAt).getFullYear() : (/* @__PURE__ */ new Date()).getFullYear();
-      const [maxClient] = await db2.select({ maxSerial: sql37`MAX(${clients2.serialNumber})` }).from(clients2).where(
+      const [maxClient] = await db2.select({ maxSerial: sql38`MAX(${clients2.serialNumber})` }).from(clients2).where(
         and31(
           eq38(clients2.facilityId, client3.facilityId),
           eq38(clients2.registrationYear, regYear),
@@ -45454,6 +46065,7 @@ var init_index = __esm({
     init_microplan_version_permissions();
     init_risk_assessment_schema();
     init_risk_permissions_and_seed();
+    init_risk_direct_entry();
     init_identitySequences();
     init_supervision_templates_seed();
     try {
@@ -45514,7 +46126,7 @@ var init_index = __esm({
     });
     app.use((req, res, next) => {
       const start = Date.now();
-      const path4 = req.path;
+      const path5 = req.path;
       let capturedJsonResponse = void 0;
       const originalResJson = res.json;
       res.json = function(bodyJson, ...args) {
@@ -45523,8 +46135,8 @@ var init_index = __esm({
       };
       res.on("finish", () => {
         const duration = Date.now() - start;
-        if (path4.startsWith("/api")) {
-          let logLine = `${req.method} ${path4} ${res.statusCode} in ${duration}ms`;
+        if (path5.startsWith("/api")) {
+          let logLine = `${req.method} ${path5} ${res.statusCode} in ${duration}ms`;
           if (capturedJsonResponse) {
             logLine += ` :: ${inspectPayload(capturedJsonResponse)}`;
           }
@@ -45606,6 +46218,7 @@ var init_index = __esm({
           await applySupervisionTemplatesSeed();
           await applyRiskAssessmentSchema(db2);
           await applyRiskPermissionsAndSeed(db2);
+          await applyRiskDirectEntrySchema(db2);
           log("identity sequences, templates, and all-tenant lifecycle permissions ready", "db");
         }).catch((err) => log("identity sequence and lifecycle permission warning: " + String(err?.message ?? err), "db"));
         Promise.resolve().then(() => (init_db(), db_exports)).then(

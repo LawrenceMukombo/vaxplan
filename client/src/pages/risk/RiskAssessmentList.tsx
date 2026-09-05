@@ -1479,82 +1479,456 @@ export default function RiskAssessmentList() {
         </TabsContent>
 
         {/* TAB 5: WHO GUIDANCE & DOCUMENTATION */}
-        <TabsContent value="guidance" className="space-y-4">
+        <TabsContent value="guidance" className="space-y-6">
+          {/* Resource Download Packages */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <Card className="border-blue-200 dark:border-blue-900 bg-blue-50/40 dark:bg-blue-950/20">
+              <CardHeader className="p-4 pb-2">
+                <div className="flex items-center justify-between">
+                  <Badge variant="outline" className="bg-blue-100 text-blue-800 border-blue-300 dark:bg-blue-900/60 dark:text-blue-300 text-[10px]">PDF Guide</Badge>
+                  <FileText className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                </div>
+                <CardTitle className="text-sm font-semibold mt-2">MRAT Setup Guide v1.5</CardTitle>
+                <CardDescription className="text-[11px]">Official WHO implementation & step-by-step setup manual (EN).</CardDescription>
+              </CardHeader>
+              <CardContent className="p-4 pt-2">
+                <a href="/api/risk/resources/Measles_Risk_Assessment_Tool_setup_guide_V1.5_EN.pdf" download>
+                  <Button size="sm" variant="outline" className="w-full h-8 text-xs gap-1.5 border-blue-300 hover:bg-blue-100 dark:border-blue-800">
+                    <Download className="w-3.5 h-3.5" /> Download Guide (PDF)
+                  </Button>
+                </a>
+              </CardContent>
+            </Card>
+
+            <Card className="border-amber-200 dark:border-amber-900 bg-amber-50/40 dark:bg-amber-950/20">
+              <CardHeader className="p-4 pb-2">
+                <div className="flex items-center justify-between">
+                  <Badge variant="outline" className="bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-900/60 dark:text-amber-300 text-[10px]">Methodology</Badge>
+                  <BookOpen className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                </div>
+                <CardTitle className="text-sm font-semibold mt-2">Technical Appendix</CardTitle>
+                <CardDescription className="text-[11px]">Authoritative reference for all 21 indicator formulas & cutoffs.</CardDescription>
+              </CardHeader>
+              <CardContent className="p-4 pt-2">
+                <a href="/api/risk/resources/Technical_Appendix_Risk_Assessment_Tool.pdf" download>
+                  <Button size="sm" variant="outline" className="w-full h-8 text-xs gap-1.5 border-amber-300 hover:bg-amber-100 dark:border-amber-800">
+                    <Download className="w-3.5 h-3.5" /> Download Appendix (PDF)
+                  </Button>
+                </a>
+              </CardContent>
+            </Card>
+
+            <Card className="border-emerald-200 dark:border-emerald-900 bg-emerald-50/40 dark:bg-emerald-950/20">
+              <CardHeader className="p-4 pb-2">
+                <div className="flex items-center justify-between">
+                  <Badge variant="outline" className="bg-emerald-100 text-emerald-800 border-emerald-300 dark:bg-emerald-900/60 dark:text-emerald-300 text-[10px]">Excel Tool</Badge>
+                  <FileSpreadsheet className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                </div>
+                <CardTitle className="text-sm font-semibold mt-2">Original Excel Tool v1.8</CardTitle>
+                <CardDescription className="text-[11px]">WHO macro-enabled spreadsheet tool (.xlsm) with 4 sheets.</CardDescription>
+              </CardHeader>
+              <CardContent className="p-4 pt-2">
+                <a href="/api/risk/resources/Measles_Risk_Assessment_Tool_v1.8.xlsm" download>
+                  <Button size="sm" variant="outline" className="w-full h-8 text-xs gap-1.5 border-emerald-300 hover:bg-emerald-100 dark:border-emerald-800">
+                    <Download className="w-3.5 h-3.5" /> Download Tool (.xlsm)
+                  </Button>
+                </a>
+              </CardContent>
+            </Card>
+
+            <Card className="border-purple-200 dark:border-purple-900 bg-purple-50/40 dark:bg-purple-950/20">
+              <CardHeader className="p-4 pb-2">
+                <div className="flex items-center justify-between">
+                  <Badge variant="outline" className="bg-purple-100 text-purple-800 border-purple-300 dark:bg-purple-900/60 dark:text-purple-300 text-[10px]">Report Template</Badge>
+                  <FileText className="w-4 h-4 text-purple-600 dark:text-purple-400" />
+                </div>
+                <CardTitle className="text-sm font-semibold mt-2">Final Report Template</CardTitle>
+                <CardDescription className="text-[11px]">Official standard national country report document (.docx).</CardDescription>
+              </CardHeader>
+              <CardContent className="p-4 pt-2">
+                <a href="/api/risk/resources/Measles%20Risk%20Assessment%20Final%20Report.docx" download>
+                  <Button size="sm" variant="outline" className="w-full h-8 text-xs gap-1.5 border-purple-300 hover:bg-purple-100 dark:border-purple-800">
+                    <Download className="w-3.5 h-3.5" /> Download Template (.docx)
+                  </Button>
+                </a>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Risk Classification & Scoring Overview */}
+          <Card>
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="text-base font-semibold flex items-center gap-2">
+                    <ShieldAlert className="w-5 h-5 text-primary" />
+                    WHO Risk Classification Cutoff Benchmarks
+                  </CardTitle>
+                  <CardDescription className="text-xs">
+                    Standard risk category cutoffs based on total score (sum of 4 domains, 0 to 100 points)
+                  </CardDescription>
+                </div>
+                <Badge variant="secondary" className="font-mono text-xs">Total Max: 100 Points</Badge>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div className="p-3 rounded-lg border border-red-200 dark:border-red-900/50 bg-red-50/70 dark:bg-red-950/30">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-xs font-bold text-red-700 dark:text-red-400">VERY HIGH RISK</span>
+                    <Badge className="bg-red-600 text-white hover:bg-red-600 text-[10px] px-1.5 py-0">&ge; 61 pts</Badge>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground">Severe outbreak risk requiring urgent sub-national catch-up campaigns and rapid response readiness.</p>
+                </div>
+
+                <div className="p-3 rounded-lg border border-amber-200 dark:border-amber-900/50 bg-amber-50/70 dark:bg-amber-950/30">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-xs font-bold text-amber-700 dark:text-amber-400">HIGH RISK</span>
+                    <Badge className="bg-amber-600 text-white hover:bg-amber-600 text-[10px] px-1.5 py-0">55 – 60 pts</Badge>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground">High vulnerability; immediate targeted outreach, intensified surveillance, and dropout reduction needed.</p>
+                </div>
+
+                <div className="p-3 rounded-lg border border-yellow-200 dark:border-yellow-900/50 bg-yellow-50/70 dark:bg-yellow-950/30">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-xs font-bold text-yellow-800 dark:text-yellow-400">MEDIUM RISK</span>
+                    <Badge className="bg-yellow-600 text-white hover:bg-yellow-600 text-[10px] px-1.5 py-0">48 – 54 pts</Badge>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground">Moderate susceptibility; strengthen routine immunization delivery and close periodic tracking gaps.</p>
+                </div>
+
+                <div className="p-3 rounded-lg border border-emerald-200 dark:border-emerald-900/50 bg-emerald-50/70 dark:bg-emerald-950/30">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-xs font-bold text-emerald-700 dark:text-emerald-400">LOW RISK</span>
+                    <Badge className="bg-emerald-600 text-white hover:bg-emerald-600 text-[10px] px-1.5 py-0">&le; 47 pts</Badge>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground">Programmatic targets largely achieved; maintain high coverage (&ge;95%) and robust surveillance quality.</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Detailed Domain Formulas & Criteria (Technical Appendix) */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* DOMAIN 1: POPULATION IMMUNITY */}
             <Card>
-              <CardHeader>
-                <CardTitle className="text-base font-semibold flex items-center gap-2">
-                  <BookOpen className="w-5 h-5 text-primary" />
-                  WHO Measles Programmatic Risk Assessment Tool
-                </CardTitle>
-                <CardDescription className="text-xs">
-                  Reference: Measles Risk Assessment Tool v1.8 & Setup Guide v1.5
+              <CardHeader className="pb-3 border-b bg-muted/20">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-sm font-semibold flex items-center gap-2">
+                    <Layers className="w-4 h-4 text-blue-600" />
+                    Domain 1: Population Immunity (PI)
+                  </CardTitle>
+                  <Badge className="bg-blue-600 text-white text-[10px]">Max 40 Points (40%)</Badge>
+                </div>
+                <CardDescription className="text-xs mt-1">
+                  Evaluates historical cohort susceptibility using routine vaccines, SIAs, and linelist dosed status.
                 </CardDescription>
               </CardHeader>
-              <CardContent className="space-y-3 text-xs leading-relaxed text-muted-foreground">
-                <p>
-                  The World Health Organization (WHO) measles programmatic risk assessment tool helps national programmes identify areas not meeting measles programmatic targets, and based on the findings, guide and strengthen measles elimination programme activities and reduce outbreak risks.
-                </p>
-                <div className="space-y-2 border-t pt-3">
-                  <h5 className="font-bold text-foreground">The Four Assessment Domains:</h5>
-                  <ul className="list-disc pl-5 space-y-1">
-                    <li><strong>Population Immunity (Max 40 pts):</strong> Assesses susceptibility using routine MCV1, MCV2, recent SIAs (within 3 years), and proportion of suspected cases with unknown or zero vaccination.</li>
-                    <li><strong>Surveillance Quality (Max 20 pts):</strong> Evaluates non-measles discarded rate, adequate investigation within 48h, specimen collection within 28 days, and timely lab results.</li>
-                    <li><strong>Programme Delivery Performance (Max 16 pts):</strong> Assesses 3-year MCV1/MCV2 trend slopes and dropouts from DPT1/Penta1 to MCV1 and MCV1 to MCV2.</li>
-                    <li><strong>Threat Assessment (Max 24 pts):</strong> Accounts for cases in key age groups (&lt;5y, 5-14y, 15+y), cases in contiguous neighbouring districts, population density, and 8 vulnerable population factors.</li>
-                  </ul>
+              <CardContent className="p-4 space-y-3 text-xs">
+                <div className="space-y-2">
+                  <div className="border rounded p-2.5 bg-card">
+                    <div className="flex justify-between items-center font-medium">
+                      <span>1.1 MCV1 Coverage (3-Yr Weighted)</span>
+                      <span className="text-muted-foreground font-mono">Max 12 pts</span>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">Formula: 50% &times; Year 0 + 30% &times; Year -1 + 20% &times; Year -2</p>
+                    <div className="grid grid-cols-3 gap-1 mt-1 text-[10px] font-mono text-muted-foreground">
+                      <span>&ge;95%: 0 pts</span>
+                      <span>90–94%: 1 pt</span>
+                      <span>80–89%: 3 pts</span>
+                      <span>70–79%: 6 pts</span>
+                      <span>50–69%: 9 pts</span>
+                      <span>&lt;50%: 12 pts</span>
+                    </div>
+                  </div>
+
+                  <div className="border rounded p-2.5 bg-card">
+                    <div className="flex justify-between items-center font-medium">
+                      <span>1.2 MCV2 Coverage (3-Yr Weighted)</span>
+                      <span className="text-muted-foreground font-mono">Max 6 pts</span>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">Formula: Same 3-year weighting. If MCV2 is not introduced, 0 points assigned.</p>
+                    <div className="grid grid-cols-3 gap-1 mt-1 text-[10px] font-mono text-muted-foreground">
+                      <span>&ge;95%: 0 pts</span>
+                      <span>90–94%: 1 pt</span>
+                      <span>80–89%: 2 pts</span>
+                      <span>70–79%: 3 pts</span>
+                      <span>50–69%: 4 pts</span>
+                      <span>&lt;50%: 6 pts</span>
+                    </div>
+                  </div>
+
+                  <div className="border rounded p-2.5 bg-card">
+                    <div className="flex justify-between items-center font-medium">
+                      <span>1.3 MCV1 Coverage 3-Year Trend</span>
+                      <span className="text-muted-foreground font-mono">Max 4 pts</span>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">Ordinary Least Squares (OLS) linear slope over 3 consecutive years.</p>
+                    <div className="grid grid-cols-2 gap-1 mt-1 text-[10px] font-mono text-muted-foreground">
+                      <span>Increasing (&gt;0%): 0 pts</span>
+                      <span>Stable (&plusmn;0%): 1 pt</span>
+                      <span>Decline (-1 to -4%): 2 pts</span>
+                      <span>Sharp Decline (&le;-5%): 4 pts</span>
+                    </div>
+                  </div>
+
+                  <div className="border rounded p-2.5 bg-card">
+                    <div className="flex justify-between items-center font-medium">
+                      <span>1.4 Most Recent SIA Performance</span>
+                      <span className="text-muted-foreground font-mono">Max 8 pts</span>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">Evaluates administrative or post-campaign survey coverage within 3 years.</p>
+                    <div className="grid grid-cols-2 gap-1 mt-1 text-[10px] font-mono text-muted-foreground">
+                      <span>&ge;95%: 0 pts</span>
+                      <span>90–94%: 2 pts</span>
+                      <span>80–89%: 5 pts</span>
+                      <span>&lt;80% or No SIA: 8 pts</span>
+                    </div>
+                  </div>
+
+                  <div className="border rounded p-2.5 bg-card">
+                    <div className="flex justify-between items-center font-medium">
+                      <span>1.5–1.7 SIA Timeliness &amp; Unvaccinated Proportion</span>
+                      <span className="text-muted-foreground font-mono">Max 10 pts</span>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">
+                      Interval since last SIA (&gt;4y: 4 pts, 3-4y: 2 pts, &le;2y: 0 pts). Suspected cases zero/unknown doses (&ge;50%: 3 pts, 20-49%: 2 pts, &lt;10%: 0 pts). Cumulative susceptible cohorts (&gt;1 cohort: 3 pts).
+                    </p>
+                  </div>
                 </div>
               </CardContent>
             </Card>
 
+            {/* DOMAIN 2: SURVEILLANCE QUALITY */}
             <Card>
-              <CardHeader>
-                <CardTitle className="text-base font-semibold flex items-center gap-2">
-                  <FileSpreadsheet className="w-5 h-5 text-primary" />
-                  Documentation & Guidelines Package
-                </CardTitle>
-                <CardDescription className="text-xs">
-                  Standard WHO references embedded in VaxPlan
+              <CardHeader className="pb-3 border-b bg-muted/20">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-sm font-semibold flex items-center gap-2">
+                    <Activity className="w-4 h-4 text-amber-600" />
+                    Domain 2: Surveillance Quality (SQ)
+                  </CardTitle>
+                  <Badge className="bg-amber-600 text-white text-[10px]">Max 20 Points (20%)</Badge>
+                </div>
+                <CardDescription className="text-xs mt-1">
+                  Assesses sensitivity, timeliness of investigation, specimen collection adequacy, and lab turnaround.
                 </CardDescription>
               </CardHeader>
-              <CardContent className="space-y-3 text-xs">
-                <div className="divide-y border rounded-md">
-                  <div className="p-3 flex items-center justify-between">
-                    <div>
-                      <p className="font-semibold text-foreground">WHO VPD Surveillance Standards</p>
-                      <p className="text-muted-foreground text-[11px]">Surveillance standards for measles, rubella, and VPDs.</p>
+              <CardContent className="p-4 space-y-3 text-xs">
+                <div className="space-y-2">
+                  <div className="border rounded p-2.5 bg-card">
+                    <div className="flex justify-between items-center font-medium">
+                      <span>2.1 Non-Measles Discarded Rate</span>
+                      <span className="text-muted-foreground font-mono">Max 6 pts</span>
                     </div>
-                    <a
-                      href="https://www.who.int/teams/immunization-vaccines-and-biologicals/immunization-analysis-and-insights/surveillance/surveillance-for-vpds/vpd-surveillance-standards"
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      <Button size="sm" variant="outline" className="h-7 text-xs gap-1">
-                        WHO Standards <ExternalLink className="w-3 h-3" />
-                      </Button>
-                    </a>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">
+                      Annualized discarded rate per 100,000 population. For districts with population &lt;100k, a 3-year aggregated window or adjusted numerator is utilized.
+                    </p>
+                    <div className="grid grid-cols-2 gap-1 mt-1 text-[10px] font-mono text-muted-foreground">
+                      <span>&ge;2.0 / 100k: 0 pts</span>
+                      <span>1.5 – 1.99 / 100k: 2 pts</span>
+                      <span>1.0 – 1.49 / 100k: 4 pts</span>
+                      <span>&lt;1.0 / 100k: 6 pts</span>
+                    </div>
                   </div>
 
-                  <div className="p-3 flex items-center justify-between">
-                    <div>
-                      <p className="font-semibold text-foreground">Technical Appendix</p>
-                      <p className="text-muted-foreground text-[11px]">Detailed indicator formulas, threshold criteria, and scoring rationales.</p>
+                  <div className="border rounded p-2.5 bg-card">
+                    <div className="flex justify-between items-center font-medium">
+                      <span>2.2 Timely &amp; Adequate Investigation</span>
+                      <span className="text-muted-foreground font-mono">Max 5 pts</span>
                     </div>
-                    <Badge variant="outline">Included in RA/docs</Badge>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">
+                      Percent of suspected cases investigated within 48 hours of notification with a complete core investigation form.
+                    </p>
+                    <div className="grid grid-cols-3 gap-1 mt-1 text-[10px] font-mono text-muted-foreground">
+                      <span>&ge;80%: 0 pts</span>
+                      <span>50–79%: 3 pts</span>
+                      <span>&lt;50%: 5 pts</span>
+                    </div>
                   </div>
 
-                  <div className="p-3 flex items-center justify-between">
-                    <div>
-                      <p className="font-semibold text-foreground">MRAT Country Report Template</p>
-                      <p className="text-muted-foreground text-[11px]">Word/PDF standardized report template for national presentations.</p>
+                  <div className="border rounded p-2.5 bg-card">
+                    <div className="flex justify-between items-center font-medium">
+                      <span>2.3 Adequate Specimen Collection</span>
+                      <span className="text-muted-foreground font-mono">Max 5 pts</span>
                     </div>
-                    <Badge variant="outline">Included in RA/docs</Badge>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">
+                      Percent of suspected cases with blood specimen collected within 28 days of rash onset and adequate cold-chain transport.
+                    </p>
+                    <div className="grid grid-cols-3 gap-1 mt-1 text-[10px] font-mono text-muted-foreground">
+                      <span>&ge;80%: 0 pts</span>
+                      <span>50–79%: 3 pts</span>
+                      <span>&lt;50%: 5 pts</span>
+                    </div>
+                  </div>
+
+                  <div className="border rounded p-2.5 bg-card">
+                    <div className="flex justify-between items-center font-medium">
+                      <span>2.4 Timely Laboratory Feedback</span>
+                      <span className="text-muted-foreground font-mono">Max 4 pts</span>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">
+                      Percent of serological specimens with IgM results received within 7 days of laboratory arrival.
+                    </p>
+                    <div className="grid grid-cols-3 gap-1 mt-1 text-[10px] font-mono text-muted-foreground">
+                      <span>&ge;80%: 0 pts</span>
+                      <span>50–79%: 2 pts</span>
+                      <span>&lt;50%: 4 pts</span>
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* DOMAIN 3: PROGRAM DELIVERY */}
+            <Card>
+              <CardHeader className="pb-3 border-b bg-muted/20">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-sm font-semibold flex items-center gap-2">
+                    <Workflow className="w-4 h-4 text-emerald-600" />
+                    Domain 3: Program Delivery Performance (PD)
+                  </CardTitle>
+                  <Badge className="bg-emerald-600 text-white text-[10px]">Max 16 Points (16%)</Badge>
+                </div>
+                <CardDescription className="text-xs mt-1">
+                  Assesses immunization system efficiency, retention across doses, and cold chain continuity.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="p-4 space-y-3 text-xs">
+                <div className="space-y-2">
+                  <div className="border rounded p-2.5 bg-card">
+                    <div className="flex justify-between items-center font-medium">
+                      <span>3.1 DPT1/Penta1 to MCV1 Dropout Rate</span>
+                      <span className="text-muted-foreground font-mono">Max 5 pts</span>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">
+                      Formula: (DPT1 Doses &minus; MCV1 Doses) / DPT1 Doses &times; 100%. Measures health system access versus dropouts.
+                    </p>
+                    <div className="grid grid-cols-3 gap-1 mt-1 text-[10px] font-mono text-muted-foreground">
+                      <span>&le;5%: 0 pts</span>
+                      <span>5–10%: 3 pts</span>
+                      <span>&gt;10%: 5 pts</span>
+                    </div>
+                  </div>
+
+                  <div className="border rounded p-2.5 bg-card">
+                    <div className="flex justify-between items-center font-medium">
+                      <span>3.2 MCV1 to MCV2 Dropout Rate</span>
+                      <span className="text-muted-foreground font-mono">Max 4 pts</span>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">
+                      Formula: (MCV1 Doses &minus; MCV2 Doses) / MCV1 Doses &times; 100%. Measures 2nd year of life service retention.
+                    </p>
+                    <div className="grid grid-cols-3 gap-1 mt-1 text-[10px] font-mono text-muted-foreground">
+                      <span>&le;10%: 0 pts</span>
+                      <span>10–15%: 2 pts</span>
+                      <span>&gt;15%: 4 pts</span>
+                    </div>
+                  </div>
+
+                  <div className="border rounded p-2.5 bg-card">
+                    <div className="flex justify-between items-center font-medium">
+                      <span>3.3 Vaccine Stockouts &amp; Cold Chain</span>
+                      <span className="text-muted-foreground font-mono">Max 4 pts</span>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">
+                      Number of weeks in the reporting year with stockouts of measles-containing vaccines at health facility or district level.
+                    </p>
+                    <div className="grid grid-cols-3 gap-1 mt-1 text-[10px] font-mono text-muted-foreground">
+                      <span>0 weeks: 0 pts</span>
+                      <span>1–3 weeks: 2 pts</span>
+                      <span>&ge;4 weeks: 4 pts</span>
+                    </div>
+                  </div>
+
+                  <div className="border rounded p-2.5 bg-card">
+                    <div className="flex justify-between items-center font-medium">
+                      <span>3.4 Supportive Supervision Completion</span>
+                      <span className="text-muted-foreground font-mono">Max 3 pts</span>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">
+                      Percent of planned integrated supportive supervision visits actually completed to peripheral health facilities.
+                    </p>
+                    <div className="grid grid-cols-3 gap-1 mt-1 text-[10px] font-mono text-muted-foreground">
+                      <span>&ge;80%: 0 pts</span>
+                      <span>50–79%: 1 pt</span>
+                      <span>&lt;50%: 3 pts</span>
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* DOMAIN 4: THREAT ASSESSMENT */}
+            <Card>
+              <CardHeader className="pb-3 border-b bg-muted/20">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-sm font-semibold flex items-center gap-2">
+                    <AlertTriangle className="w-4 h-4 text-purple-600" />
+                    Domain 4: Threat Assessment &amp; Vulnerability (TA)
+                  </CardTitle>
+                  <Badge className="bg-purple-600 text-white text-[10px]">Max 24 Points (24%)</Badge>
+                </div>
+                <CardDescription className="text-xs mt-1">
+                  Evaluates outbreak exposure, high-risk age demographics, cross-border transmission, and 8 vulnerable populations.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="p-4 space-y-3 text-xs">
+                <div className="space-y-2">
+                  <div className="border rounded p-2.5 bg-card">
+                    <div className="flex justify-between items-center font-medium">
+                      <span>4.1 Measles Incidence in Key Age Groups</span>
+                      <span className="text-muted-foreground font-mono">Max 6 pts</span>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">
+                      Laboratory confirmed or epidemiologically linked measles cases in &lt;5y, 5–14y, and 15+y age categories over the past 12 months.
+                    </p>
+                  </div>
+
+                  <div className="border rounded p-2.5 bg-card">
+                    <div className="flex justify-between items-center font-medium">
+                      <span>4.2 Contiguous District Risk &amp; Cross-Border</span>
+                      <span className="text-muted-foreground font-mono">Max 4 pts</span>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">
+                      Spatial contagion risk: bordering districts with active measles outbreaks or classified as Very High Risk (&ge;2 districts: 4 pts, 1 district: 2 pts).
+                    </p>
+                  </div>
+
+                  <div className="border rounded p-2.5 bg-card">
+                    <div className="flex justify-between items-center font-medium">
+                      <span>4.3 Population Density &amp; Urban Congestion</span>
+                      <span className="text-muted-foreground font-mono">Max 3 pts</span>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">
+                      High population density (&gt;500 persons/km&sup2; or large peri-urban informal settlements accelerating airborne transmission).
+                    </p>
+                  </div>
+
+                  <div className="border rounded p-2.5 bg-card">
+                    <div className="flex justify-between items-center font-medium">
+                      <span>4.4 Vulnerable Population Groups (8 WHO Categories)</span>
+                      <span className="text-muted-foreground font-mono">Max 5 pts</span>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">
+                      Presence of 8 WHO vulnerable groups: Refugees/IDPs, Nomadic/migrant populations, Hard-to-reach/remote communities, Religious/vaccine-hesitant clusters, Conflict-affected populations, Urban informal settlements/slums, Cross-border transit communities, Closed institutions/prisons. (&ge;4 groups: 5 pts, 2-3: 3 pts, 1: 1 pt).
+                    </p>
+                  </div>
+
+                  <div className="border rounded p-2.5 bg-card">
+                    <div className="flex justify-between items-center font-medium">
+                      <span>4.5–4.6 Outbreak Containment &amp; Transit Corridors</span>
+                      <span className="text-muted-foreground font-mono">Max 6 pts</span>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">
+                      Prior uncontained outbreak response history (3 pts) and presence of major international or regional transport transit nodes (3 pts).
+                    </p>
                   </div>
                 </div>
               </CardContent>
             </Card>
           </div>
         </TabsContent>
+
       </Tabs>
 
       {/* Edit Assessment Dialog (Full CRUD) */}
