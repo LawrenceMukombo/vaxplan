@@ -697,7 +697,7 @@ export default function RiskResultsWorkspace() {
   }, [explanationData?.indicators, indicatorDomainFilter, indicatorSearchTerm]);
 
   return (
-    <div className="p-6 max-w-7xl mx-auto space-y-6">
+    <div className="p-3 sm:p-6 w-full max-w-none space-y-6">
       {/* Top Navigation & Status */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b pb-5">
         <div className="space-y-1">
