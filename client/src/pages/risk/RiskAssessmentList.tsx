@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation } from "wouter";
 import {
@@ -36,6 +36,8 @@ import {
   Check,
   RotateCcw,
   Sparkles,
+  Maximize2,
+  Minimize2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -331,6 +333,79 @@ export default function RiskAssessmentList() {
     riskScore: true,
     riskCategory: true,
   });
+
+  // Column Width Management & Resizing (Rule 24 Enterprise Tables)
+  const DEFAULT_PERF_COL_WIDTHS = {
+    district: 180,
+    province: 150,
+    mcv1: 120,
+    mcv2: 120,
+    dropout: 150,
+    suspectedCases: 130,
+    riskScore: 110,
+    riskCategory: 120,
+  };
+
+  const [perfColWidths, setPerfColWidths] = useState(DEFAULT_PERF_COL_WIDTHS);
+  const [resizingPerfCol, setResizingPerfCol] = useState<keyof typeof DEFAULT_PERF_COL_WIDTHS | null>(null);
+  const resizePerfStartX = useRef(0);
+  const resizePerfStartWidth = useRef(0);
+
+  const startPerfResize = (colKey: keyof typeof DEFAULT_PERF_COL_WIDTHS, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setResizingPerfCol(colKey);
+    resizePerfStartX.current = e.clientX;
+    resizePerfStartWidth.current = perfColWidths[colKey];
+  };
+
+  useEffect(() => {
+    if (!resizingPerfCol) return;
+    const handleMouseMove = (e: MouseEvent) => {
+      const diff = e.clientX - resizePerfStartX.current;
+      const newWidth = Math.max(50, resizePerfStartWidth.current + diff);
+      setPerfColWidths((prev) => ({ ...prev, [resizingPerfCol]: newWidth }));
+    };
+    const handleMouseUp = () => {
+      setResizingPerfCol(null);
+    };
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, [resizingPerfCol]);
+
+  const handleStretchWidePerf = () => {
+    setPerfColWidths({
+      district: 240,
+      province: 190,
+      mcv1: 150,
+      mcv2: 150,
+      dropout: 180,
+      suspectedCases: 160,
+      riskScore: 130,
+      riskCategory: 150,
+    });
+  };
+
+  const handleCompactPerf = () => {
+    setPerfColWidths({
+      district: 140,
+      province: 110,
+      mcv1: 90,
+      mcv2: 90,
+      dropout: 110,
+      suspectedCases: 95,
+      riskScore: 80,
+      riskCategory: 95,
+    });
+  };
+
+  const handleResetPerfWidths = () => {
+    setPerfColWidths(DEFAULT_PERF_COL_WIDTHS);
+  };
 
   // Risk Strata Counts for Interactive Cross-Filtering (Rule 25)
   const riskCounts = useMemo(() => {
@@ -1009,6 +1084,38 @@ export default function RiskAssessmentList() {
                     </SelectContent>
                   </Select>
 
+                  <div className="flex items-center gap-1 border-r pr-2 mr-1">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleStretchWidePerf}
+                      className="h-8 text-xs gap-1"
+                      title="Stretch columns wider for full visibility"
+                    >
+                      <Maximize2 className="w-3 h-3 text-primary" />
+                      Stretch (Wide)
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleCompactPerf}
+                      className="h-8 text-xs gap-1"
+                      title="Compact column widths to see more at once"
+                    >
+                      <Minimize2 className="w-3 h-3 text-muted-foreground" />
+                      Compact
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={handleResetPerfWidths}
+                      className="h-8 text-xs px-2 text-muted-foreground"
+                      title="Reset column widths to default"
+                    >
+                      <RotateCcw className="w-3 h-3" />
+                    </Button>
+                  </div>
+
                   <Button size="sm" variant="outline" className="h-8 text-xs gap-1" onClick={exportTableCSV}>
                     <Download className="w-3 h-3" />
                     Export CSV
@@ -1020,59 +1127,170 @@ export default function RiskAssessmentList() {
             <CardContent className="p-0">
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-xs border-collapse">
-                  <thead className="bg-muted/50 border-b font-medium text-muted-foreground">
+                  <thead className="bg-muted/90 border-b font-medium text-muted-foreground sticky top-0 z-30">
                     <tr>
-                      <th className="p-3 cursor-pointer select-none" onClick={() => handleSort("districtName")}>
-                        <div className="flex items-center">
-                          {adminLevel} Name {getSortIcon("districtName")}
+                      <th
+                        className={`p-3 cursor-pointer select-none sticky left-0 z-40 bg-muted border-b ${
+                          !visibleColumns.province
+                            ? "border-r-2 border-slate-300 dark:border-slate-700 shadow-[4px_0_8px_-2px_rgba(0,0,0,0.15)]"
+                            : ""
+                        }`}
+                        style={{
+                          width: `${perfColWidths.district}px`,
+                          minWidth: `${perfColWidths.district}px`,
+                          maxWidth: `${perfColWidths.district}px`,
+                        }}
+                        onClick={() => handleSort("districtName")}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center truncate font-bold text-foreground">
+                            {adminLevel} Name {getSortIcon("districtName")}
+                          </div>
+                          <div
+                            className="w-1.5 h-4 cursor-col-resize hover:bg-primary/50 ml-1 rounded shrink-0"
+                            onMouseDown={(e) => startPerfResize("district", e)}
+                          />
                         </div>
                       </th>
                       {visibleColumns.province && (
-                        <th className="p-3 cursor-pointer select-none" onClick={() => handleSort("provinceName")}>
-                          <div className="flex items-center">
-                            Province {getSortIcon("provinceName")}
+                        <th
+                          className="p-3 cursor-pointer select-none sticky z-40 bg-muted border-b border-r-2 border-slate-300 dark:border-slate-700 shadow-[4px_0_8px_-2px_rgba(0,0,0,0.15)]"
+                          style={{
+                            left: `${perfColWidths.district}px`,
+                            width: `${perfColWidths.province}px`,
+                            minWidth: `${perfColWidths.province}px`,
+                            maxWidth: `${perfColWidths.province}px`,
+                          }}
+                          onClick={() => handleSort("provinceName")}
+                        >
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center truncate font-bold text-foreground">
+                              Province {getSortIcon("provinceName")}
+                            </div>
+                            <div
+                              className="w-1.5 h-4 cursor-col-resize hover:bg-primary/50 ml-1 rounded shrink-0"
+                              onMouseDown={(e) => startPerfResize("province", e)}
+                            />
                           </div>
                         </th>
                       )}
                       {visibleColumns.mcv1 && (
-                        <th className="p-3 cursor-pointer select-none" onClick={() => handleSort("mcv1Coverage")}>
-                          <div className="flex items-center">
-                            MCV1 Coverage {getSortIcon("mcv1Coverage")}
+                        <th
+                          className="p-3 cursor-pointer select-none border-b"
+                          style={{
+                            width: `${perfColWidths.mcv1}px`,
+                            minWidth: `${perfColWidths.mcv1}px`,
+                          }}
+                          onClick={() => handleSort("mcv1Coverage")}
+                        >
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center truncate">
+                              MCV1 Coverage {getSortIcon("mcv1Coverage")}
+                            </div>
+                            <div
+                              className="w-1.5 h-4 cursor-col-resize hover:bg-primary/50 ml-1 rounded shrink-0"
+                              onMouseDown={(e) => startPerfResize("mcv1", e)}
+                            />
                           </div>
                         </th>
                       )}
                       {visibleColumns.mcv2 && (
-                        <th className="p-3 cursor-pointer select-none" onClick={() => handleSort("mcv2Coverage")}>
-                          <div className="flex items-center">
-                            MCV2 Coverage {getSortIcon("mcv2Coverage")}
+                        <th
+                          className="p-3 cursor-pointer select-none border-b"
+                          style={{
+                            width: `${perfColWidths.mcv2}px`,
+                            minWidth: `${perfColWidths.mcv2}px`,
+                          }}
+                          onClick={() => handleSort("mcv2Coverage")}
+                        >
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center truncate">
+                              MCV2 Coverage {getSortIcon("mcv2Coverage")}
+                            </div>
+                            <div
+                              className="w-1.5 h-4 cursor-col-resize hover:bg-primary/50 ml-1 rounded shrink-0"
+                              onMouseDown={(e) => startPerfResize("mcv2", e)}
+                            />
                           </div>
                         </th>
                       )}
                       {visibleColumns.dropout && (
-                        <th className="p-3 cursor-pointer select-none" onClick={() => handleSort("dropoutRate")}>
-                          <div className="flex items-center">
-                            Penta1-MCV1 Dropout {getSortIcon("dropoutRate")}
+                        <th
+                          className="p-3 cursor-pointer select-none border-b"
+                          style={{
+                            width: `${perfColWidths.dropout}px`,
+                            minWidth: `${perfColWidths.dropout}px`,
+                          }}
+                          onClick={() => handleSort("dropoutRate")}
+                        >
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center truncate">
+                              Penta1-MCV1 Dropout {getSortIcon("dropoutRate")}
+                            </div>
+                            <div
+                              className="w-1.5 h-4 cursor-col-resize hover:bg-primary/50 ml-1 rounded shrink-0"
+                              onMouseDown={(e) => startPerfResize("dropout", e)}
+                            />
                           </div>
                         </th>
                       )}
                       {visibleColumns.suspectedCases && (
-                        <th className="p-3 cursor-pointer select-none" onClick={() => handleSort("suspectedCases")}>
-                          <div className="flex items-center">
-                            Suspected Cases {getSortIcon("suspectedCases")}
+                        <th
+                          className="p-3 cursor-pointer select-none border-b"
+                          style={{
+                            width: `${perfColWidths.suspectedCases}px`,
+                            minWidth: `${perfColWidths.suspectedCases}px`,
+                          }}
+                          onClick={() => handleSort("suspectedCases")}
+                        >
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center truncate">
+                              Suspected Cases {getSortIcon("suspectedCases")}
+                            </div>
+                            <div
+                              className="w-1.5 h-4 cursor-col-resize hover:bg-primary/50 ml-1 rounded shrink-0"
+                              onMouseDown={(e) => startPerfResize("suspectedCases", e)}
+                            />
                           </div>
                         </th>
                       )}
                       {visibleColumns.riskScore && (
-                        <th className="p-3 cursor-pointer select-none" onClick={() => handleSort("riskScore")}>
-                          <div className="flex items-center">
-                            Risk Score {getSortIcon("riskScore")}
+                        <th
+                          className="p-3 cursor-pointer select-none border-b"
+                          style={{
+                            width: `${perfColWidths.riskScore}px`,
+                            minWidth: `${perfColWidths.riskScore}px`,
+                          }}
+                          onClick={() => handleSort("riskScore")}
+                        >
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center truncate">
+                              Risk Score {getSortIcon("riskScore")}
+                            </div>
+                            <div
+                              className="w-1.5 h-4 cursor-col-resize hover:bg-primary/50 ml-1 rounded shrink-0"
+                              onMouseDown={(e) => startPerfResize("riskScore", e)}
+                            />
                           </div>
                         </th>
                       )}
                       {visibleColumns.riskCategory && (
-                        <th className="p-3 cursor-pointer select-none" onClick={() => handleSort("riskCategory")}>
-                          <div className="flex items-center">
-                            Category {getSortIcon("riskCategory")}
+                        <th
+                          className="p-3 cursor-pointer select-none border-b"
+                          style={{
+                            width: `${perfColWidths.riskCategory}px`,
+                            minWidth: `${perfColWidths.riskCategory}px`,
+                          }}
+                          onClick={() => handleSort("riskCategory")}
+                        >
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center truncate">
+                              Category {getSortIcon("riskCategory")}
+                            </div>
+                            <div
+                              className="w-1.5 h-4 cursor-col-resize hover:bg-primary/50 ml-1 rounded shrink-0"
+                              onMouseDown={(e) => startPerfResize("riskCategory", e)}
+                            />
                           </div>
                         </th>
                       )}
@@ -1090,44 +1308,93 @@ export default function RiskAssessmentList() {
                         <tr
                           key={d.districtId}
                           onClick={() => setSelectedDistrict(d)}
-                          className={`hover:bg-muted/30 transition-colors cursor-pointer ${
+                          className={`group hover:bg-muted/30 transition-colors cursor-pointer ${
                             selectedDistrict?.districtId === d.districtId ? "bg-primary/5 font-medium" : ""
                           }`}
                         >
-                          <td className="p-3 font-semibold text-foreground flex items-center gap-1.5">
-                            <MapPin className="w-3.5 h-3.5 text-muted-foreground" />
-                            {d.districtName}
+                          <td
+                            className={`p-3 font-semibold text-foreground sticky left-0 z-20 bg-background group-hover:bg-slate-50 dark:group-hover:bg-slate-900 truncate ${
+                              !visibleColumns.province
+                                ? "border-r-2 border-slate-300 dark:border-slate-700 shadow-[4px_0_8px_-2px_rgba(0,0,0,0.15)]"
+                                : ""
+                            }`}
+                            style={{
+                              width: `${perfColWidths.district}px`,
+                              minWidth: `${perfColWidths.district}px`,
+                              maxWidth: `${perfColWidths.district}px`,
+                            }}
+                            title={d.districtName}
+                          >
+                            <div className="flex items-center gap-1.5">
+                              <MapPin className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                              <span className="truncate">{d.districtName}</span>
+                            </div>
                           </td>
-                          {visibleColumns.province && <td className="p-3 text-muted-foreground">{d.provinceName}</td>}
+                          {visibleColumns.province && (
+                            <td
+                              className="p-3 text-muted-foreground sticky z-20 bg-background group-hover:bg-slate-50 dark:group-hover:bg-slate-900 border-r-2 border-slate-300 dark:border-slate-700 shadow-[4px_0_8px_-2px_rgba(0,0,0,0.15)] truncate"
+                              style={{
+                                left: `${perfColWidths.district}px`,
+                                width: `${perfColWidths.province}px`,
+                                minWidth: `${perfColWidths.province}px`,
+                                maxWidth: `${perfColWidths.province}px`,
+                              }}
+                              title={d.provinceName}
+                            >
+                              {d.provinceName}
+                            </td>
+                          )}
                           {visibleColumns.mcv1 && (
-                            <td className="p-3">
+                            <td
+                              className="p-3"
+                              style={{ width: `${perfColWidths.mcv1}px`, minWidth: `${perfColWidths.mcv1}px` }}
+                            >
                               <span className={`font-semibold ${d.mcv1Coverage >= 90 ? 'text-emerald-600' : d.mcv1Coverage >= 80 ? 'text-lime-600' : 'text-rose-600'}`}>
                                 {d.mcv1Coverage}%
                               </span>
                             </td>
                           )}
                           {visibleColumns.mcv2 && (
-                            <td className="p-3">
+                            <td
+                              className="p-3"
+                              style={{ width: `${perfColWidths.mcv2}px`, minWidth: `${perfColWidths.mcv2}px` }}
+                            >
                               <span className={`font-semibold ${d.mcv2Coverage >= 80 ? 'text-emerald-600' : 'text-amber-600'}`}>
                                 {d.mcv2Coverage}%
                               </span>
                             </td>
                           )}
                           {visibleColumns.dropout && (
-                            <td className="p-3">
+                            <td
+                              className="p-3"
+                              style={{ width: `${perfColWidths.dropout}px`, minWidth: `${perfColWidths.dropout}px` }}
+                            >
                               <span className={`font-semibold ${d.dropoutRate <= 10 ? 'text-emerald-600' : 'text-rose-600'}`}>
                                 {d.dropoutRate}%
                               </span>
                             </td>
                           )}
                           {visibleColumns.suspectedCases && (
-                            <td className="p-3 text-muted-foreground font-mono">{d.suspectedCases}</td>
+                            <td
+                              className="p-3 text-muted-foreground font-mono"
+                              style={{ width: `${perfColWidths.suspectedCases}px`, minWidth: `${perfColWidths.suspectedCases}px` }}
+                            >
+                              {d.suspectedCases}
+                            </td>
                           )}
                           {visibleColumns.riskScore && (
-                            <td className="p-3 font-bold font-mono text-foreground">{d.riskScore}</td>
+                            <td
+                              className="p-3 font-bold font-mono text-foreground"
+                              style={{ width: `${perfColWidths.riskScore}px`, minWidth: `${perfColWidths.riskScore}px` }}
+                            >
+                              {d.riskScore}
+                            </td>
                           )}
                           {visibleColumns.riskCategory && (
-                            <td className="p-3">
+                            <td
+                              className="p-3"
+                              style={{ width: `${perfColWidths.riskCategory}px`, minWidth: `${perfColWidths.riskCategory}px` }}
+                            >
                               {d.riskCategory === "LOW" && <Badge className="bg-emerald-600 text-white hover:bg-emerald-700">Low</Badge>}
                               {d.riskCategory === "MEDIUM" && <Badge className="bg-amber-600 text-white hover:bg-amber-700">Medium</Badge>}
                               {d.riskCategory === "HIGH" && <Badge className="bg-orange-600 text-white hover:bg-orange-700">High</Badge>}

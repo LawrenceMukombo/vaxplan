@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -30,6 +30,11 @@ import {
   RotateCcw,
   Save,
   Check,
+  ChevronDown,
+  ChevronUp,
+  ChevronsUpDown,
+  Maximize2,
+  Minimize2,
 } from "lucide-react";
 
 interface AreaResult {
@@ -231,18 +236,202 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
     return Array.from(map.entries()).sort((a, b) => a[0].localeCompare(b[0]));
   }, [effectiveDistrictResults]);
 
+  // Table 1a Sorting State
+  type SortCol1a = "province" | "VERY_HIGH" | "HIGH" | "MEDIUM" | "LOW" | "total";
+  const [sortCol1a, setSortCol1a] = useState<SortCol1a>("province");
+  const [sortDir1a, setSortDir1a] = useState<"asc" | "desc">("asc");
+
+  const handleSort1a = (col: SortCol1a) => {
+    if (sortCol1a === col) {
+      setSortDir1a(sortDir1a === "asc" ? "desc" : "asc");
+    } else {
+      setSortCol1a(col);
+      setSortDir1a("desc");
+    }
+  };
+
+  const getSortIcon1a = (col: SortCol1a) => {
+    if (sortCol1a !== col) return <ChevronsUpDown className="w-3 h-3 ml-1 opacity-50 inline" />;
+    return sortDir1a === "asc" ? <ChevronUp className="w-3 h-3 ml-1 inline text-primary" /> : <ChevronDown className="w-3 h-3 ml-1 inline text-primary" />;
+  };
+
+  const sortedProvinceBreakdown = useMemo(() => {
+    return [...provinceBreakdown].sort((a, b) => {
+      if (sortCol1a === "province") {
+        return sortDir1a === "asc" ? a[0].localeCompare(b[0]) : b[0].localeCompare(a[0]);
+      }
+      const valA = a[1][sortCol1a] ?? 0;
+      const valB = b[1][sortCol1a] ?? 0;
+      return sortDir1a === "asc" ? valA - valB : valB - valA;
+    });
+  }, [provinceBreakdown, sortCol1a, sortDir1a]);
+
+  // Report Tables Column Widths & Resizing Controls (Tables 1b & 1c)
+  const DEFAULT_REPORT_COL_WIDTHS = {
+    index: 44,
+    province: 130,
+    district: 180,
+    population: 105,
+    pi: 95,
+    sq: 95,
+    pd: 95,
+    ta: 95,
+    total: 100,
+    rec: 320,
+  };
+  const [reportColWidths, setReportColWidths] = useState(DEFAULT_REPORT_COL_WIDTHS);
+  const [reportResizingCol, setReportResizingCol] = useState<keyof typeof DEFAULT_REPORT_COL_WIDTHS | null>(null);
+  const reportResizeStartX = useRef(0);
+  const reportResizeStartWidth = useRef(0);
+
+  const startReportResize = (colKey: keyof typeof DEFAULT_REPORT_COL_WIDTHS, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setReportResizingCol(colKey);
+    reportResizeStartX.current = e.clientX;
+    reportResizeStartWidth.current = reportColWidths[colKey];
+  };
+
+  useEffect(() => {
+    if (!reportResizingCol) return;
+    const handleMouseMove = (e: MouseEvent) => {
+      const diff = e.clientX - reportResizeStartX.current;
+      const newWidth = Math.max(40, reportResizeStartWidth.current + diff);
+      setReportColWidths((prev) => ({ ...prev, [reportResizingCol]: newWidth }));
+    };
+    const handleMouseUp = () => setReportResizingCol(null);
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, [reportResizingCol]);
+
+  const handleStretchWideReport = () => {
+    setReportColWidths({
+      index: 52,
+      province: 160,
+      district: 220,
+      population: 125,
+      pi: 110,
+      sq: 110,
+      pd: 110,
+      ta: 110,
+      total: 120,
+      rec: 420,
+    });
+  };
+
+  const handleCompactReport = () => {
+    setReportColWidths({
+      index: 40,
+      province: 110,
+      district: 140,
+      population: 85,
+      pi: 75,
+      sq: 75,
+      pd: 75,
+      ta: 75,
+      total: 85,
+      rec: 260,
+    });
+  };
+
+  const handleResetReportWidths = () => {
+    setReportColWidths(DEFAULT_REPORT_COL_WIDTHS);
+  };
+
   // Very High & High Risk Districts
   const vhrDistricts = useMemo(() => {
-    return effectiveDistrictResults
-      .filter((d) => d.riskCategory === "VERY_HIGH")
-      .sort((a, b) => Number(b.totalRiskScore || b.totalScore || b.riskScore || 0) - Number(a.totalRiskScore || a.totalScore || a.riskScore || 0));
+    return effectiveDistrictResults.filter((d) => d.riskCategory === "VERY_HIGH");
   }, [effectiveDistrictResults]);
 
   const hrDistricts = useMemo(() => {
-    return effectiveDistrictResults
-      .filter((d) => d.riskCategory === "HIGH")
-      .sort((a, b) => Number(b.totalRiskScore || b.totalScore || b.riskScore || 0) - Number(a.totalRiskScore || a.totalScore || a.riskScore || 0));
+    return effectiveDistrictResults.filter((d) => d.riskCategory === "HIGH");
   }, [effectiveDistrictResults]);
+
+  type SortColDist = "index" | "province" | "district" | "population" | "pi" | "sq" | "pd" | "ta" | "total";
+  const [sortCol1b, setSortCol1b] = useState<SortColDist>("total");
+  const [sortDir1b, setSortDir1b] = useState<"asc" | "desc">("desc");
+  const [sortCol1c, setSortCol1c] = useState<SortColDist>("total");
+  const [sortDir1c, setSortDir1c] = useState<"asc" | "desc">("desc");
+
+  const sortDistList = (list: AreaResult[], sortCol: SortColDist, sortDir: "asc" | "desc") => {
+    return [...list].sort((a, b) => {
+      if (sortCol === "index") return 0;
+      if (sortCol === "province") {
+        const valA = a.provinceName || "";
+        const valB = b.provinceName || "";
+        return sortDir === "asc" ? valA.localeCompare(valB) : valB.localeCompare(valA);
+      }
+      if (sortCol === "district") {
+        const valA = a.areaName || a.districtName || "";
+        const valB = b.areaName || b.districtName || "";
+        return sortDir === "asc" ? valA.localeCompare(valB) : valB.localeCompare(valA);
+      }
+      if (sortCol === "population") {
+        const valA = Number(a.population) || 0;
+        const valB = Number(b.population) || 0;
+        return sortDir === "asc" ? valA - valB : valB - valA;
+      }
+      if (sortCol === "pi") {
+        const valA = Number(a.populationImmunityScore || (a as any).domainScoresJson?.PI || 0);
+        const valB = Number(b.populationImmunityScore || (b as any).domainScoresJson?.PI || 0);
+        return sortDir === "asc" ? valA - valB : valB - valA;
+      }
+      if (sortCol === "sq") {
+        const valA = Number(a.surveillanceQualityScore || (a as any).domainScoresJson?.SQ || 0);
+        const valB = Number(b.surveillanceQualityScore || (b as any).domainScoresJson?.SQ || 0);
+        return sortDir === "asc" ? valA - valB : valB - valA;
+      }
+      if (sortCol === "pd") {
+        const valA = Number(a.programmeDeliveryScore || (a as any).domainScoresJson?.PD || 0);
+        const valB = Number(b.programmeDeliveryScore || (b as any).domainScoresJson?.PD || 0);
+        return sortDir === "asc" ? valA - valB : valB - valA;
+      }
+      if (sortCol === "ta") {
+        const valA = Number(a.threatAssessmentScore || (a as any).domainScoresJson?.TA || 0);
+        const valB = Number(b.threatAssessmentScore || (b as any).domainScoresJson?.TA || 0);
+        return sortDir === "asc" ? valA - valB : valB - valA;
+      }
+      // total
+      const valA = Number(a.totalRiskScore || a.totalScore || a.riskScore || 0);
+      const valB = Number(b.totalRiskScore || b.totalScore || b.riskScore || 0);
+      return sortDir === "asc" ? valA - valB : valB - valA;
+    });
+  };
+
+  const sortedVhrDistricts = useMemo(() => sortDistList(vhrDistricts, sortCol1b, sortDir1b), [vhrDistricts, sortCol1b, sortDir1b]);
+  const sortedHrDistricts = useMemo(() => sortDistList(hrDistricts, sortCol1c, sortDir1c), [hrDistricts, sortCol1c, sortDir1c]);
+
+  const handleSort1b = (col: SortColDist) => {
+    if (sortCol1b === col) {
+      setSortDir1b(sortDir1b === "asc" ? "desc" : "asc");
+    } else {
+      setSortCol1b(col);
+      setSortDir1b("desc");
+    }
+  };
+
+  const getSortIcon1b = (col: SortColDist) => {
+    if (sortCol1b !== col) return <ChevronsUpDown className="w-3 h-3 ml-1 opacity-50 inline" />;
+    return sortDir1b === "asc" ? <ChevronUp className="w-3 h-3 ml-1 inline text-primary" /> : <ChevronDown className="w-3 h-3 ml-1 inline text-primary" />;
+  };
+
+  const handleSort1c = (col: SortColDist) => {
+    if (sortCol1c === col) {
+      setSortDir1c(sortDir1c === "asc" ? "desc" : "asc");
+    } else {
+      setSortCol1c(col);
+      setSortDir1c("desc");
+    }
+  };
+
+  const getSortIcon1c = (col: SortColDist) => {
+    if (sortCol1c !== col) return <ChevronsUpDown className="w-3 h-3 ml-1 opacity-50 inline" />;
+    return sortDir1c === "asc" ? <ChevronUp className="w-3 h-3 ml-1 inline text-primary" /> : <ChevronDown className="w-3 h-3 ml-1 inline text-primary" />;
+  };
 
   const handlePrint = () => {
     window.print();
@@ -427,30 +616,66 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
 
           {/* Table 1a: Province Breakdown */}
           <div className="pt-4 space-y-2">
-            <h4 className="text-xs font-bold text-foreground uppercase tracking-wider">
-              Table 1a: Risk Profile — Number of Districts by Province
-            </h4>
-            <div className="border rounded-md overflow-hidden">
-              <table className="w-full text-xs text-left">
+            <div className="flex items-center justify-between">
+              <h4 className="text-xs font-bold text-foreground uppercase tracking-wider">
+                Table 1a: Risk Profile — Number of Districts by Province
+              </h4>
+              <span className="text-[11px] text-muted-foreground italic">Click header to sort</span>
+            </div>
+            <div className="border rounded-md overflow-x-auto">
+              <table className="w-full text-xs text-left border-collapse">
                 <thead className="bg-slate-800 text-white font-semibold">
                   <tr>
-                    <th className="p-2">Province</th>
-                    <th className="p-2 text-right text-red-300">Very High Risk</th>
-                    <th className="p-2 text-right text-orange-300">High Risk</th>
-                    <th className="p-2 text-right text-amber-300">Medium Risk</th>
-                    <th className="p-2 text-right text-emerald-300">Low Risk</th>
-                    <th className="p-2 text-right">Total Districts</th>
+                    <th
+                      className="p-2.5 cursor-pointer hover:bg-slate-700 select-none sticky left-0 z-20 bg-slate-800 border-r border-slate-700"
+                      onClick={() => handleSort1a("province")}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span>Province</span>
+                        {getSortIcon1a("province")}
+                      </div>
+                    </th>
+                    <th
+                      className="p-2.5 text-right text-red-300 cursor-pointer hover:bg-slate-700 select-none border-r border-slate-700"
+                      onClick={() => handleSort1a("VERY_HIGH")}
+                    >
+                      Very High Risk {getSortIcon1a("VERY_HIGH")}
+                    </th>
+                    <th
+                      className="p-2.5 text-right text-orange-300 cursor-pointer hover:bg-slate-700 select-none border-r border-slate-700"
+                      onClick={() => handleSort1a("HIGH")}
+                    >
+                      High Risk {getSortIcon1a("HIGH")}
+                    </th>
+                    <th
+                      className="p-2.5 text-right text-amber-300 cursor-pointer hover:bg-slate-700 select-none border-r border-slate-700"
+                      onClick={() => handleSort1a("MEDIUM")}
+                    >
+                      Medium Risk {getSortIcon1a("MEDIUM")}
+                    </th>
+                    <th
+                      className="p-2.5 text-right text-emerald-300 cursor-pointer hover:bg-slate-700 select-none border-r border-slate-700"
+                      onClick={() => handleSort1a("LOW")}
+                    >
+                      Low Risk {getSortIcon1a("LOW")}
+                    </th>
+                    <th
+                      className="p-2.5 text-right cursor-pointer hover:bg-slate-700 select-none"
+                      onClick={() => handleSort1a("total")}
+                    >
+                      Total Districts {getSortIcon1a("total")}
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="divide-y text-foreground">
-                  {provinceBreakdown.map(([prov, c], idx) => (
-                    <tr key={prov} className={idx % 2 === 1 ? "bg-slate-50/60 dark:bg-slate-900/40" : ""}>
-                      <td className="p-2 font-medium">{prov}</td>
-                      <td className={`p-2 text-right ${c.VERY_HIGH > 0 ? "font-bold text-red-600" : "text-muted-foreground"}`}>{c.VERY_HIGH}</td>
-                      <td className={`p-2 text-right ${c.HIGH > 0 ? "font-bold text-orange-600" : "text-muted-foreground"}`}>{c.HIGH}</td>
-                      <td className={`p-2 text-right ${c.MEDIUM > 0 ? "font-bold text-amber-600" : "text-muted-foreground"}`}>{c.MEDIUM}</td>
-                      <td className={`p-2 text-right ${c.LOW > 0 ? "font-bold text-emerald-600" : "text-muted-foreground"}`}>{c.LOW}</td>
-                      <td className="p-2 text-right font-bold">{c.total}</td>
+                  {sortedProvinceBreakdown.map(([prov, c], idx) => (
+                    <tr key={prov} className={idx % 2 === 1 ? "bg-slate-50/60 dark:bg-slate-900/40 hover:bg-slate-100/60 dark:hover:bg-slate-800/60" : "hover:bg-slate-50 dark:hover:bg-slate-900/50"}>
+                      <td className="p-2.5 font-medium sticky left-0 z-10 bg-background border-r border-slate-200 dark:border-slate-800">{prov}</td>
+                      <td className={`p-2.5 text-right border-r border-slate-200 dark:border-slate-800 ${c.VERY_HIGH > 0 ? "font-bold text-red-600 dark:text-red-400" : "text-muted-foreground"}`}>{c.VERY_HIGH}</td>
+                      <td className={`p-2.5 text-right border-r border-slate-200 dark:border-slate-800 ${c.HIGH > 0 ? "font-bold text-orange-600 dark:text-orange-400" : "text-muted-foreground"}`}>{c.HIGH}</td>
+                      <td className={`p-2.5 text-right border-r border-slate-200 dark:border-slate-800 ${c.MEDIUM > 0 ? "font-bold text-amber-600 dark:text-amber-400" : "text-muted-foreground"}`}>{c.MEDIUM}</td>
+                      <td className={`p-2.5 text-right border-r border-slate-200 dark:border-slate-800 ${c.LOW > 0 ? "font-bold text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"}`}>{c.LOW}</td>
+                      <td className="p-2.5 text-right font-bold">{c.total}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -458,44 +683,273 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
             </div>
           </div>
 
+          {/* Quick Stretch Controls for District Tables */}
+          {(vhrDistricts.length > 0 || hrDistricts.length > 0) && (
+            <div className="flex items-center justify-between pt-4 pb-1 border-t text-xs text-muted-foreground print:hidden">
+              <span className="font-semibold text-foreground flex items-center gap-1">
+                District Tables View Controls (Sticky Left Columns & Stretch)
+              </span>
+              <div className="flex items-center gap-1.5">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleStretchWideReport}
+                  className="h-7 text-xs gap-1 text-slate-700 dark:text-slate-200"
+                  title="Expand columns generously so long action text is easily readable"
+                >
+                  <Maximize2 className="w-3 h-3 text-primary" />
+                  <span>Stretch (Wide)</span>
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleCompactReport}
+                  className="h-7 text-xs gap-1 text-slate-700 dark:text-slate-200"
+                  title="Compact columns for dense preview"
+                >
+                  <Minimize2 className="w-3 h-3 text-muted-foreground" />
+                  <span>Compact</span>
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleResetReportWidths}
+                  className="h-7 text-xs gap-1 text-muted-foreground hover:text-foreground"
+                  title="Reset column widths"
+                >
+                  <RotateCcw className="w-3 h-3" />
+                  <span>Reset</span>
+                </Button>
+              </div>
+            </div>
+          )}
+
           {/* Table 1b: Very High Risk Districts */}
           {vhrDistricts.length > 0 && (
-            <div className="pt-4 space-y-2">
-              <h4 className="text-xs font-bold text-red-600 uppercase tracking-wider">
-                Table 1b: Risk Scores & Recommended Interventions for Very High Risk Districts (Score &ge; 61)
-              </h4>
-              <div className="border rounded-md overflow-hidden">
-                <table className="w-full text-xs text-left">
-                  <thead className="bg-red-800 text-white font-semibold">
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <h4 className="text-xs font-bold text-red-600 dark:text-red-400 uppercase tracking-wider">
+                  Table 1b: Risk Scores & Recommended Interventions for Very High Risk Districts (Score &ge; 61)
+                </h4>
+                <span className="text-[11px] text-muted-foreground italic">Columns stretchable & sortable</span>
+              </div>
+              <div className="border rounded-md overflow-x-auto shadow-sm">
+                <table className="w-full text-xs text-left border-collapse">
+                  <thead className="bg-red-800 text-white font-semibold sticky top-0 z-30">
                     <tr>
-                      <th className="p-2">Province</th>
-                      <th className="p-2">District</th>
-                      <th className="p-2 text-right">Population</th>
-                      <th className="p-2 text-right">Pop. Immunity (40)</th>
-                      <th className="p-2 text-right">Surv. Quality (20)</th>
-                      <th className="p-2 text-right">Prog. Delivery (16)</th>
-                      <th className="p-2 text-right">Threat Assess. (24)</th>
-                      <th className="p-2 text-right font-bold">Total Score</th>
-                      <th className="p-2">Recommended Interventions</th>
+                      {/* FROZEN 1: INDEX */}
+                      <th
+                        className="p-2.5 text-center font-semibold border-r border-red-700 sticky top-0 left-0 z-40 bg-red-800 select-none cursor-pointer"
+                        style={{ width: `${reportColWidths.index}px`, minWidth: `${reportColWidths.index}px`, maxWidth: `${reportColWidths.index}px` }}
+                        onClick={() => handleSort1b("index")}
+                      >
+                        # {getSortIcon1b("index")}
+                      </th>
+
+                      {/* FROZEN 2: PROVINCE */}
+                      <th
+                        className="p-2.5 font-semibold border-r border-red-700 sticky top-0 z-40 bg-red-800 select-none cursor-pointer group/th"
+                        style={{
+                          left: `${reportColWidths.index}px`,
+                          width: `${reportColWidths.province}px`,
+                          minWidth: `${reportColWidths.province}px`,
+                          maxWidth: `${reportColWidths.province}px`,
+                        }}
+                        onClick={() => handleSort1b("province")}
+                      >
+                        <div className="flex items-center justify-between pr-2">
+                          <span className="truncate">Province</span>
+                          {getSortIcon1b("province")}
+                        </div>
+                        <div
+                          className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-white/50 active:bg-white z-50 select-none transition-colors"
+                          onMouseDown={(e) => startReportResize("province", e)}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      </th>
+
+                      {/* FROZEN 3: DISTRICT (WITH SHADOW DIVIDER) */}
+                      <th
+                        className="p-2.5 font-semibold border-r-2 border-slate-400 dark:border-slate-600 shadow-[4px_0_8px_-2px_rgba(0,0,0,0.2)] sticky top-0 z-40 bg-red-800 select-none cursor-pointer group/th"
+                        style={{
+                          left: `${reportColWidths.index + reportColWidths.province}px`,
+                          width: `${reportColWidths.district}px`,
+                          minWidth: `${reportColWidths.district}px`,
+                          maxWidth: `${reportColWidths.district}px`,
+                        }}
+                        onClick={() => handleSort1b("district")}
+                      >
+                        <div className="flex items-center justify-between pr-2">
+                          <span className="truncate font-bold">District</span>
+                          {getSortIcon1b("district")}
+                        </div>
+                        <div
+                          className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-white/50 active:bg-white z-50 select-none transition-colors"
+                          onMouseDown={(e) => startReportResize("district", e)}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      </th>
+
+                      <th
+                        className="p-2.5 text-right font-semibold border-r border-red-700 select-none cursor-pointer relative group/th"
+                        style={{ width: `${reportColWidths.population}px`, minWidth: `${reportColWidths.population}px` }}
+                        onClick={() => handleSort1b("population")}
+                      >
+                        <div className="flex items-center justify-end pr-2">
+                          <span>Population</span>
+                          {getSortIcon1b("population")}
+                        </div>
+                        <div
+                          className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-white/50 active:bg-white z-50 select-none transition-colors"
+                          onMouseDown={(e) => startReportResize("population", e)}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      </th>
+
+                      <th
+                        className="p-2.5 text-right font-semibold border-r border-red-700 select-none cursor-pointer relative group/th"
+                        style={{ width: `${reportColWidths.pi}px`, minWidth: `${reportColWidths.pi}px` }}
+                        onClick={() => handleSort1b("pi")}
+                      >
+                        <div className="flex items-center justify-end pr-2">
+                          <span>Immunity (40)</span>
+                          {getSortIcon1b("pi")}
+                        </div>
+                        <div
+                          className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-white/50 active:bg-white z-50 select-none transition-colors"
+                          onMouseDown={(e) => startReportResize("pi", e)}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      </th>
+
+                      <th
+                        className="p-2.5 text-right font-semibold border-r border-red-700 select-none cursor-pointer relative group/th"
+                        style={{ width: `${reportColWidths.sq}px`, minWidth: `${reportColWidths.sq}px` }}
+                        onClick={() => handleSort1b("sq")}
+                      >
+                        <div className="flex items-center justify-end pr-2">
+                          <span>Surv. (20)</span>
+                          {getSortIcon1b("sq")}
+                        </div>
+                        <div
+                          className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-white/50 active:bg-white z-50 select-none transition-colors"
+                          onMouseDown={(e) => startReportResize("sq", e)}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      </th>
+
+                      <th
+                        className="p-2.5 text-right font-semibold border-r border-red-700 select-none cursor-pointer relative group/th"
+                        style={{ width: `${reportColWidths.pd}px`, minWidth: `${reportColWidths.pd}px` }}
+                        onClick={() => handleSort1b("pd")}
+                      >
+                        <div className="flex items-center justify-end pr-2">
+                          <span>Delivery (16)</span>
+                          {getSortIcon1b("pd")}
+                        </div>
+                        <div
+                          className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-white/50 active:bg-white z-50 select-none transition-colors"
+                          onMouseDown={(e) => startReportResize("pd", e)}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      </th>
+
+                      <th
+                        className="p-2.5 text-right font-semibold border-r border-red-700 select-none cursor-pointer relative group/th"
+                        style={{ width: `${reportColWidths.ta}px`, minWidth: `${reportColWidths.ta}px` }}
+                        onClick={() => handleSort1b("ta")}
+                      >
+                        <div className="flex items-center justify-end pr-2">
+                          <span>Threats (24)</span>
+                          {getSortIcon1b("ta")}
+                        </div>
+                        <div
+                          className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-white/50 active:bg-white z-50 select-none transition-colors"
+                          onMouseDown={(e) => startReportResize("ta", e)}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      </th>
+
+                      <th
+                        className="p-2.5 text-right font-bold border-r border-red-700 select-none cursor-pointer relative group/th"
+                        style={{ width: `${reportColWidths.total}px`, minWidth: `${reportColWidths.total}px` }}
+                        onClick={() => handleSort1b("total")}
+                      >
+                        <div className="flex items-center justify-end pr-2">
+                          <span>Total Score</span>
+                          {getSortIcon1b("total")}
+                        </div>
+                        <div
+                          className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-white/50 active:bg-white z-50 select-none transition-colors"
+                          onMouseDown={(e) => startReportResize("total", e)}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      </th>
+
+                      <th
+                        className="p-2.5 font-semibold"
+                        style={{ width: `${reportColWidths.rec}px`, minWidth: `${reportColWidths.rec}px` }}
+                      >
+                        Recommended Interventions
+                      </th>
                     </tr>
                   </thead>
                   <tbody className="divide-y text-foreground">
-                    {vhrDistricts.map((d, idx) => {
+                    {sortedVhrDistricts.map((d, idx) => {
                       const domains = d.domainScoresJson || {};
                       const rec = getDistrictRecommendation(d);
                       return (
-                        <tr key={d.id} className={idx % 2 === 1 ? "bg-red-50/40 dark:bg-red-950/20" : ""}>
-                          <td className="p-2 text-muted-foreground">{d.provinceName || "-"}</td>
-                          <td className="p-2 font-bold">{d.areaName || d.districtName}</td>
-                          <td className="p-2 text-right">{(Number(d.population) || 0).toLocaleString()}</td>
-                          <td className="p-2 text-right">{d.populationImmunityScore || domains.PI || "-"}</td>
-                          <td className="p-2 text-right">{d.surveillanceQualityScore || domains.SQ || "-"}</td>
-                          <td className="p-2 text-right">{d.programmeDeliveryScore || domains.PD || "-"}</td>
-                          <td className="p-2 text-right">{d.threatAssessmentScore || domains.TA || "-"}</td>
-                          <td className="p-2 text-right font-bold text-red-600 dark:text-red-400">
+                        <tr key={d.id} className="hover:bg-red-50/50 dark:hover:bg-red-950/30 transition-colors group">
+                          {/* FROZEN 1: INDEX */}
+                          <td
+                            className="p-2.5 text-center text-muted-foreground border-r sticky left-0 z-20 bg-background group-hover:bg-red-50/50 dark:group-hover:bg-red-950/30"
+                            style={{ width: `${reportColWidths.index}px`, minWidth: `${reportColWidths.index}px`, maxWidth: `${reportColWidths.index}px` }}
+                          >
+                            {idx + 1}
+                          </td>
+
+                          {/* FROZEN 2: PROVINCE */}
+                          <td
+                            className="p-2.5 text-muted-foreground border-r whitespace-nowrap sticky z-20 bg-background group-hover:bg-red-50/50 dark:group-hover:bg-red-950/30 font-medium"
+                            style={{
+                              left: `${reportColWidths.index}px`,
+                              width: `${reportColWidths.province}px`,
+                              minWidth: `${reportColWidths.province}px`,
+                              maxWidth: `${reportColWidths.province}px`,
+                            }}
+                          >
+                            <span className="truncate block" title={d.provinceName || "National"}>
+                              {d.provinceName || "National"}
+                            </span>
+                          </td>
+
+                          {/* FROZEN 3: DISTRICT (WITH SHADOW DIVIDER) */}
+                          <td
+                            className="p-2.5 font-bold border-r-2 border-slate-300 dark:border-slate-700 shadow-[4px_0_8px_-2px_rgba(0,0,0,0.15)] whitespace-nowrap sticky z-20 bg-background group-hover:bg-red-50/50 dark:group-hover:bg-red-950/30 text-foreground"
+                            style={{
+                              left: `${reportColWidths.index + reportColWidths.province}px`,
+                              width: `${reportColWidths.district}px`,
+                              minWidth: `${reportColWidths.district}px`,
+                              maxWidth: `${reportColWidths.district}px`,
+                            }}
+                          >
+                            <span className="truncate block" title={d.areaName || d.districtName}>
+                              {d.areaName || d.districtName}
+                            </span>
+                          </td>
+
+                          <td className="p-2.5 text-right text-muted-foreground border-r">{(Number(d.population) || 0).toLocaleString()}</td>
+                          <td className="p-2.5 text-right border-r font-mono">{d.populationImmunityScore || domains.PI || "-"}</td>
+                          <td className="p-2.5 text-right border-r font-mono">{d.surveillanceQualityScore || domains.SQ || "-"}</td>
+                          <td className="p-2.5 text-right border-r font-mono">{d.programmeDeliveryScore || domains.PD || "-"}</td>
+                          <td className="p-2.5 text-right border-r font-mono">{d.threatAssessmentScore || domains.TA || "-"}</td>
+                          <td className="p-2.5 text-right font-bold text-red-600 dark:text-red-400 border-r font-mono">
                             {d.totalRiskScore || d.totalScore || d.riskScore}
                           </td>
-                          <td className="p-2 text-muted-foreground text-[11px] leading-snug">{rec}</td>
+                          <td className="p-2.5 text-muted-foreground text-xs leading-relaxed">{rec}</td>
                         </tr>
                       );
                     })}
@@ -507,42 +961,227 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
 
           {/* Table 1c: High Risk Districts */}
           {hrDistricts.length > 0 && (
-            <div className="pt-4 space-y-2">
-              <h4 className="text-xs font-bold text-orange-600 uppercase tracking-wider">
-                Table 1c: Risk Scores & Recommended Interventions for High Risk Districts (Score 55–60)
-              </h4>
-              <div className="border rounded-md overflow-hidden">
-                <table className="w-full text-xs text-left">
-                  <thead className="bg-orange-800 text-white font-semibold">
+            <div className="space-y-2 pt-3">
+              <div className="flex items-center justify-between">
+                <h4 className="text-xs font-bold text-orange-600 dark:text-orange-400 uppercase tracking-wider">
+                  Table 1c: Risk Scores & Recommended Interventions for High Risk Districts (Score 55–60)
+                </h4>
+                <span className="text-[11px] text-muted-foreground italic">Columns stretchable & sortable</span>
+              </div>
+              <div className="border rounded-md overflow-x-auto shadow-sm">
+                <table className="w-full text-xs text-left border-collapse">
+                  <thead className="bg-orange-800 text-white font-semibold sticky top-0 z-30">
                     <tr>
-                      <th className="p-2">Province</th>
-                      <th className="p-2">District</th>
-                      <th className="p-2 text-right">Population</th>
-                      <th className="p-2 text-right">Pop. Immunity (40)</th>
-                      <th className="p-2 text-right">Surv. Quality (20)</th>
-                      <th className="p-2 text-right">Prog. Delivery (16)</th>
-                      <th className="p-2 text-right">Threat Assess. (24)</th>
-                      <th className="p-2 text-right font-bold">Total Score</th>
-                      <th className="p-2">Recommended Interventions</th>
+                      {/* FROZEN 1: INDEX */}
+                      <th
+                        className="p-2.5 text-center font-semibold border-r border-orange-700 sticky top-0 left-0 z-40 bg-orange-800 select-none cursor-pointer"
+                        style={{ width: `${reportColWidths.index}px`, minWidth: `${reportColWidths.index}px`, maxWidth: `${reportColWidths.index}px` }}
+                        onClick={() => handleSort1c("index")}
+                      >
+                        # {getSortIcon1c("index")}
+                      </th>
+
+                      {/* FROZEN 2: PROVINCE */}
+                      <th
+                        className="p-2.5 font-semibold border-r border-orange-700 sticky top-0 z-40 bg-orange-800 select-none cursor-pointer group/th"
+                        style={{
+                          left: `${reportColWidths.index}px`,
+                          width: `${reportColWidths.province}px`,
+                          minWidth: `${reportColWidths.province}px`,
+                          maxWidth: `${reportColWidths.province}px`,
+                        }}
+                        onClick={() => handleSort1c("province")}
+                      >
+                        <div className="flex items-center justify-between pr-2">
+                          <span className="truncate">Province</span>
+                          {getSortIcon1c("province")}
+                        </div>
+                        <div
+                          className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-white/50 active:bg-white z-50 select-none transition-colors"
+                          onMouseDown={(e) => startReportResize("province", e)}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      </th>
+
+                      {/* FROZEN 3: DISTRICT (WITH SHADOW DIVIDER) */}
+                      <th
+                        className="p-2.5 font-semibold border-r-2 border-slate-400 dark:border-slate-600 shadow-[4px_0_8px_-2px_rgba(0,0,0,0.2)] sticky top-0 z-40 bg-orange-800 select-none cursor-pointer group/th"
+                        style={{
+                          left: `${reportColWidths.index + reportColWidths.province}px`,
+                          width: `${reportColWidths.district}px`,
+                          minWidth: `${reportColWidths.district}px`,
+                          maxWidth: `${reportColWidths.district}px`,
+                        }}
+                        onClick={() => handleSort1c("district")}
+                      >
+                        <div className="flex items-center justify-between pr-2">
+                          <span className="truncate font-bold">District</span>
+                          {getSortIcon1c("district")}
+                        </div>
+                        <div
+                          className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-white/50 active:bg-white z-50 select-none transition-colors"
+                          onMouseDown={(e) => startReportResize("district", e)}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      </th>
+
+                      <th
+                        className="p-2.5 text-right font-semibold border-r border-orange-700 select-none cursor-pointer relative group/th"
+                        style={{ width: `${reportColWidths.population}px`, minWidth: `${reportColWidths.population}px` }}
+                        onClick={() => handleSort1c("population")}
+                      >
+                        <div className="flex items-center justify-end pr-2">
+                          <span>Population</span>
+                          {getSortIcon1c("population")}
+                        </div>
+                        <div
+                          className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-white/50 active:bg-white z-50 select-none transition-colors"
+                          onMouseDown={(e) => startReportResize("population", e)}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      </th>
+
+                      <th
+                        className="p-2.5 text-right font-semibold border-r border-orange-700 select-none cursor-pointer relative group/th"
+                        style={{ width: `${reportColWidths.pi}px`, minWidth: `${reportColWidths.pi}px` }}
+                        onClick={() => handleSort1c("pi")}
+                      >
+                        <div className="flex items-center justify-end pr-2">
+                          <span>Immunity (40)</span>
+                          {getSortIcon1c("pi")}
+                        </div>
+                        <div
+                          className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-white/50 active:bg-white z-50 select-none transition-colors"
+                          onMouseDown={(e) => startReportResize("pi", e)}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      </th>
+
+                      <th
+                        className="p-2.5 text-right font-semibold border-r border-orange-700 select-none cursor-pointer relative group/th"
+                        style={{ width: `${reportColWidths.sq}px`, minWidth: `${reportColWidths.sq}px` }}
+                        onClick={() => handleSort1c("sq")}
+                      >
+                        <div className="flex items-center justify-end pr-2">
+                          <span>Surv. (20)</span>
+                          {getSortIcon1c("sq")}
+                        </div>
+                        <div
+                          className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-white/50 active:bg-white z-50 select-none transition-colors"
+                          onMouseDown={(e) => startReportResize("sq", e)}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      </th>
+
+                      <th
+                        className="p-2.5 text-right font-semibold border-r border-orange-700 select-none cursor-pointer relative group/th"
+                        style={{ width: `${reportColWidths.pd}px`, minWidth: `${reportColWidths.pd}px` }}
+                        onClick={() => handleSort1c("pd")}
+                      >
+                        <div className="flex items-center justify-end pr-2">
+                          <span>Delivery (16)</span>
+                          {getSortIcon1c("pd")}
+                        </div>
+                        <div
+                          className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-white/50 active:bg-white z-50 select-none transition-colors"
+                          onMouseDown={(e) => startReportResize("pd", e)}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      </th>
+
+                      <th
+                        className="p-2.5 text-right font-semibold border-r border-orange-700 select-none cursor-pointer relative group/th"
+                        style={{ width: `${reportColWidths.ta}px`, minWidth: `${reportColWidths.ta}px` }}
+                        onClick={() => handleSort1c("ta")}
+                      >
+                        <div className="flex items-center justify-end pr-2">
+                          <span>Threats (24)</span>
+                          {getSortIcon1c("ta")}
+                        </div>
+                        <div
+                          className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-white/50 active:bg-white z-50 select-none transition-colors"
+                          onMouseDown={(e) => startReportResize("ta", e)}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      </th>
+
+                      <th
+                        className="p-2.5 text-right font-bold border-r border-orange-700 select-none cursor-pointer relative group/th"
+                        style={{ width: `${reportColWidths.total}px`, minWidth: `${reportColWidths.total}px` }}
+                        onClick={() => handleSort1c("total")}
+                      >
+                        <div className="flex items-center justify-end pr-2">
+                          <span>Total Score</span>
+                          {getSortIcon1c("total")}
+                        </div>
+                        <div
+                          className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-white/50 active:bg-white z-50 select-none transition-colors"
+                          onMouseDown={(e) => startReportResize("total", e)}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      </th>
+
+                      <th
+                        className="p-2.5 font-semibold"
+                        style={{ width: `${reportColWidths.rec}px`, minWidth: `${reportColWidths.rec}px` }}
+                      >
+                        Recommended Interventions
+                      </th>
                     </tr>
                   </thead>
                   <tbody className="divide-y text-foreground">
-                    {hrDistricts.map((d, idx) => {
+                    {sortedHrDistricts.map((d, idx) => {
                       const domains = d.domainScoresJson || {};
                       const rec = getDistrictRecommendation(d);
                       return (
-                        <tr key={d.id} className={idx % 2 === 1 ? "bg-orange-50/40 dark:bg-orange-950/20" : ""}>
-                          <td className="p-2 text-muted-foreground">{d.provinceName || "-"}</td>
-                          <td className="p-2 font-bold">{d.areaName || d.districtName}</td>
-                          <td className="p-2 text-right">{(Number(d.population) || 0).toLocaleString()}</td>
-                          <td className="p-2 text-right">{d.populationImmunityScore || domains.PI || "-"}</td>
-                          <td className="p-2 text-right">{d.surveillanceQualityScore || domains.SQ || "-"}</td>
-                          <td className="p-2 text-right">{d.programmeDeliveryScore || domains.PD || "-"}</td>
-                          <td className="p-2 text-right">{d.threatAssessmentScore || domains.TA || "-"}</td>
-                          <td className="p-2 text-right font-bold text-orange-600 dark:text-orange-400">
+                        <tr key={d.id} className="hover:bg-orange-50/50 dark:hover:bg-orange-950/30 transition-colors group">
+                          {/* FROZEN 1: INDEX */}
+                          <td
+                            className="p-2.5 text-center text-muted-foreground border-r sticky left-0 z-20 bg-background group-hover:bg-orange-50/50 dark:group-hover:bg-orange-950/30"
+                            style={{ width: `${reportColWidths.index}px`, minWidth: `${reportColWidths.index}px`, maxWidth: `${reportColWidths.index}px` }}
+                          >
+                            {idx + 1}
+                          </td>
+
+                          {/* FROZEN 2: PROVINCE */}
+                          <td
+                            className="p-2.5 text-muted-foreground border-r whitespace-nowrap sticky z-20 bg-background group-hover:bg-orange-50/50 dark:group-hover:bg-orange-950/30 font-medium"
+                            style={{
+                              left: `${reportColWidths.index}px`,
+                              width: `${reportColWidths.province}px`,
+                              minWidth: `${reportColWidths.province}px`,
+                              maxWidth: `${reportColWidths.province}px`,
+                            }}
+                          >
+                            <span className="truncate block" title={d.provinceName || "National"}>
+                              {d.provinceName || "National"}
+                            </span>
+                          </td>
+
+                          {/* FROZEN 3: DISTRICT (WITH SHADOW DIVIDER) */}
+                          <td
+                            className="p-2.5 font-bold border-r-2 border-slate-300 dark:border-slate-700 shadow-[4px_0_8px_-2px_rgba(0,0,0,0.15)] whitespace-nowrap sticky z-20 bg-background group-hover:bg-orange-50/50 dark:group-hover:bg-orange-950/30 text-foreground"
+                            style={{
+                              left: `${reportColWidths.index + reportColWidths.province}px`,
+                              width: `${reportColWidths.district}px`,
+                              minWidth: `${reportColWidths.district}px`,
+                              maxWidth: `${reportColWidths.district}px`,
+                            }}
+                          >
+                            <span className="truncate block" title={d.areaName || d.districtName}>
+                              {d.areaName || d.districtName}
+                            </span>
+                          </td>
+
+                          <td className="p-2.5 text-right text-muted-foreground border-r">{(Number(d.population) || 0).toLocaleString()}</td>
+                          <td className="p-2.5 text-right border-r font-mono">{d.populationImmunityScore || domains.PI || "-"}</td>
+                          <td className="p-2.5 text-right border-r font-mono">{d.surveillanceQualityScore || domains.SQ || "-"}</td>
+                          <td className="p-2.5 text-right border-r font-mono">{d.programmeDeliveryScore || domains.PD || "-"}</td>
+                          <td className="p-2.5 text-right border-r font-mono">{d.threatAssessmentScore || domains.TA || "-"}</td>
+                          <td className="p-2.5 text-right font-bold text-orange-600 dark:text-orange-400 border-r font-mono">
                             {d.totalRiskScore || d.totalScore || d.riskScore}
                           </td>
-                          <td className="p-2 text-muted-foreground text-[11px] leading-snug">{rec}</td>
+                          <td className="p-2.5 text-muted-foreground text-xs leading-relaxed">{rec}</td>
                         </tr>
                       );
                     })}

@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useParams, Link, useLocation } from "wouter";
 import {
@@ -29,6 +29,9 @@ import {
   Edit3,
   FileDown,
   BookOpen,
+  Maximize2,
+  Minimize2,
+  RotateCcw,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -50,7 +53,9 @@ import { RiskFinalReportView } from "@/components/risk/RiskFinalReportView";
 interface AreaResult {
   id: string;
   administrativeAreaId: string;
+  districtId?: number | string;
   areaName: string;
+  provinceName?: string | null;
   population: number;
   areaKm2: string;
   populationImmunityScore: string | null;
@@ -90,13 +95,14 @@ export default function RiskResultsWorkspace() {
   // Enterprise Table State (Rule 24)
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("ALL");
-  const [sortColumn, setSortColumn] = useState<keyof AreaResult>("totalRiskScore");
+  const [sortColumn, setSortColumn] = useState<keyof AreaResult | "index">("totalRiskScore");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
 
   // Column Visibility Controls (Rule 24)
   const [visibleColumns, setVisibleColumns] = useState<Record<string, boolean>>({
+    province: true,
     population: true,
     pi: true,
     sq: true,
@@ -105,6 +111,87 @@ export default function RiskResultsWorkspace() {
     total: true,
     category: true,
   });
+
+  // Column Widths & Resizing Controls
+  const DEFAULT_COL_WIDTHS = {
+    index: 48,
+    district: 180,
+    province: 140,
+    population: 110,
+    pi: 115,
+    sq: 115,
+    pd: 115,
+    ta: 115,
+    total: 130,
+    category: 140,
+    actions: 180,
+  };
+  const [colWidths, setColWidths] = useState(DEFAULT_COL_WIDTHS);
+  const [resizingCol, setResizingCol] = useState<keyof typeof DEFAULT_COL_WIDTHS | null>(null);
+  const resizeStartX = useRef(0);
+  const resizeStartWidth = useRef(0);
+
+  const startResize = (colKey: keyof typeof DEFAULT_COL_WIDTHS, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setResizingCol(colKey);
+    resizeStartX.current = e.clientX;
+    resizeStartWidth.current = colWidths[colKey];
+  };
+
+  useEffect(() => {
+    if (!resizingCol) return;
+    const handleMouseMove = (e: MouseEvent) => {
+      const diff = e.clientX - resizeStartX.current;
+      const newWidth = Math.max(48, resizeStartWidth.current + diff);
+      setColWidths((prev) => ({ ...prev, [resizingCol]: newWidth }));
+    };
+    const handleMouseUp = () => {
+      setResizingCol(null);
+    };
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, [resizingCol]);
+
+  const handleStretchWide = () => {
+    setColWidths({
+      index: 54,
+      district: 240,
+      province: 180,
+      population: 130,
+      pi: 140,
+      sq: 140,
+      pd: 140,
+      ta: 140,
+      total: 160,
+      category: 170,
+      actions: 210,
+    });
+  };
+
+  const handleCompact = () => {
+    setColWidths({
+      index: 44,
+      district: 140,
+      province: 110,
+      population: 90,
+      pi: 90,
+      sq: 90,
+      pd: 90,
+      ta: 90,
+      total: 100,
+      category: 120,
+      actions: 150,
+    });
+  };
+
+  const handleResetWidths = () => {
+    setColWidths(DEFAULT_COL_WIDTHS);
+  };
 
   // Drawer states
   const [selectedAreaForExplanation, setSelectedAreaForExplanation] = useState<AreaResult | null>(null);
@@ -381,9 +468,12 @@ export default function RiskResultsWorkspace() {
   // Client-side sorting on current page
   const sortedRows = useMemo(() => {
     if (!resultsData?.rows) return [];
+    if (sortColumn === "index") {
+      return sortDirection === "asc" ? [...resultsData.rows] : [...resultsData.rows].reverse();
+    }
     return [...resultsData.rows].sort((a, b) => {
-      let valA: any = a[sortColumn];
-      let valB: any = b[sortColumn];
+      let valA: any = a[sortColumn as keyof AreaResult];
+      let valB: any = b[sortColumn as keyof AreaResult];
 
       if (valA === null || valA === undefined) return sortDirection === "asc" ? 1 : -1;
       if (valB === null || valB === undefined) return sortDirection === "asc" ? -1 : 1;
@@ -400,7 +490,7 @@ export default function RiskResultsWorkspace() {
     });
   }, [resultsData?.rows, sortColumn, sortDirection]);
 
-  const handleSort = (column: keyof AreaResult) => {
+  const handleSort = (column: keyof AreaResult | "index") => {
     if (sortColumn === column) {
       setSortDirection(sortDirection === "asc" ? "desc" : "asc");
     } else {
@@ -409,9 +499,9 @@ export default function RiskResultsWorkspace() {
     }
   };
 
-  const getSortIcon = (column: keyof AreaResult) => {
-    if (sortColumn !== column) return <ChevronsUpDown className="w-3.5 h-3.5 ml-1 opacity-50" />;
-    return sortDirection === "asc" ? <ChevronUp className="w-3.5 h-3.5 ml-1" /> : <ChevronDown className="w-3.5 h-3.5 ml-1" />;
+  const getSortIcon = (column: keyof AreaResult | "index") => {
+    if (sortColumn !== column) return <ChevronsUpDown className="w-3.5 h-3.5 ml-1 opacity-50 inline" />;
+    return sortDirection === "asc" ? <ChevronUp className="w-3.5 h-3.5 ml-1 inline text-primary" /> : <ChevronDown className="w-3.5 h-3.5 ml-1 inline text-primary" />;
   };
 
   const getCategoryBadge = (category: string) => {
@@ -642,51 +732,98 @@ export default function RiskResultsWorkspace() {
                 </div>
               </div>
 
-              {/* Column Visibility Checkboxes */}
-              <div className="flex flex-wrap items-center gap-4 pt-2 border-t text-xs text-muted-foreground">
-                <span className="font-semibold text-foreground flex items-center gap-1">
-                  <Eye className="w-3.5 h-3.5" /> Columns:
-                </span>
-                <label className="flex items-center gap-1.5 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={visibleColumns.population}
-                    onChange={(e) => setVisibleColumns({ ...visibleColumns, population: e.target.checked })}
-                  />
-                  Population
-                </label>
-                <label className="flex items-center gap-1.5 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={visibleColumns.pi}
-                    onChange={(e) => setVisibleColumns({ ...visibleColumns, pi: e.target.checked })}
-                  />
-                  Population Immunity (40)
-                </label>
-                <label className="flex items-center gap-1.5 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={visibleColumns.sq}
-                    onChange={(e) => setVisibleColumns({ ...visibleColumns, sq: e.target.checked })}
-                  />
-                  Surveillance Quality (20)
-                </label>
-                <label className="flex items-center gap-1.5 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={visibleColumns.pd}
-                    onChange={(e) => setVisibleColumns({ ...visibleColumns, pd: e.target.checked })}
-                  />
-                  Delivery Trend (16)
-                </label>
-                <label className="flex items-center gap-1.5 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={visibleColumns.ta}
-                    onChange={(e) => setVisibleColumns({ ...visibleColumns, ta: e.target.checked })}
-                  />
-                  Threats (24)
-                </label>
+              {/* Column Visibility & Width Controls */}
+              <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t text-xs text-muted-foreground">
+                <div className="flex flex-wrap items-center gap-3">
+                  <span className="font-semibold text-foreground flex items-center gap-1">
+                    <Eye className="w-3.5 h-3.5" /> Columns:
+                  </span>
+                  <label className="flex items-center gap-1.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={visibleColumns.province}
+                      onChange={(e) => setVisibleColumns({ ...visibleColumns, province: e.target.checked })}
+                    />
+                    Province
+                  </label>
+                  <label className="flex items-center gap-1.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={visibleColumns.population}
+                      onChange={(e) => setVisibleColumns({ ...visibleColumns, population: e.target.checked })}
+                    />
+                    Population
+                  </label>
+                  <label className="flex items-center gap-1.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={visibleColumns.pi}
+                      onChange={(e) => setVisibleColumns({ ...visibleColumns, pi: e.target.checked })}
+                    />
+                    Pop. Immunity (40)
+                  </label>
+                  <label className="flex items-center gap-1.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={visibleColumns.sq}
+                      onChange={(e) => setVisibleColumns({ ...visibleColumns, sq: e.target.checked })}
+                    />
+                    Surveillance (20)
+                  </label>
+                  <label className="flex items-center gap-1.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={visibleColumns.pd}
+                      onChange={(e) => setVisibleColumns({ ...visibleColumns, pd: e.target.checked })}
+                    />
+                    Delivery (16)
+                  </label>
+                  <label className="flex items-center gap-1.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={visibleColumns.ta}
+                      onChange={(e) => setVisibleColumns({ ...visibleColumns, ta: e.target.checked })}
+                    />
+                    Threats (24)
+                  </label>
+                </div>
+
+                {/* Quick Column Width Stretch Actions */}
+                <div className="flex items-center gap-1.5">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={handleStretchWide}
+                    className="h-7 text-xs gap-1 text-slate-700 dark:text-slate-200"
+                    title="Expand columns generously for comfortable viewing"
+                  >
+                    <Maximize2 className="w-3 h-3 text-primary" />
+                    <span>Stretch (Wide)</span>
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={handleCompact}
+                    className="h-7 text-xs gap-1 text-slate-700 dark:text-slate-200"
+                    title="Compact column widths for dense screens"
+                  >
+                    <Minimize2 className="w-3 h-3 text-muted-foreground" />
+                    <span>Compact</span>
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleResetWidths}
+                    className="h-7 text-xs gap-1 text-muted-foreground hover:text-foreground"
+                    title="Reset column widths to default"
+                  >
+                    <RotateCcw className="w-3 h-3" />
+                    <span>Reset</span>
+                  </Button>
+                </div>
               </div>
             </CardContent>
           </Card>
@@ -695,159 +832,334 @@ export default function RiskResultsWorkspace() {
           <Card>
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs border-collapse">
-                <thead className="bg-muted/50 border-b">
+                <thead className="bg-slate-100 dark:bg-slate-800 border-b">
                   <tr>
+                    {/* FROZEN 1: INDEX */}
                     <th
-                      className="p-3 font-semibold cursor-pointer hover:bg-muted"
+                      className="p-2.5 font-semibold text-center cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700 border-r sticky top-0 left-0 z-40 bg-slate-100 dark:bg-slate-800 select-none"
+                      style={{
+                        width: `${colWidths.index}px`,
+                        minWidth: `${colWidths.index}px`,
+                        maxWidth: `${colWidths.index}px`,
+                      }}
+                      onClick={() => handleSort("index")}
+                    >
+                      <div className="flex items-center justify-center">
+                        # {getSortIcon("index")}
+                      </div>
+                    </th>
+
+                    {/* FROZEN 2: DISTRICT / COUNTY */}
+                    <th
+                      className="p-2.5 font-semibold cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700 border-r sticky top-0 z-40 bg-slate-100 dark:bg-slate-800 select-none group/th"
+                      style={{
+                        left: `${colWidths.index}px`,
+                        width: `${colWidths.district}px`,
+                        minWidth: `${colWidths.district}px`,
+                        maxWidth: `${colWidths.district}px`,
+                      }}
                       onClick={() => handleSort("areaName")}
                     >
-                      <div className="flex items-center">
-                        District / County {getSortIcon("areaName")}
+                      <div className="flex items-center justify-between pr-2">
+                        <span className="truncate font-bold">District / County</span>
+                        {getSortIcon("areaName")}
                       </div>
+                      <div
+                        className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-primary/70 active:bg-primary z-50 select-none transition-colors"
+                        onMouseDown={(e) => startResize("district", e)}
+                        onClick={(e) => e.stopPropagation()}
+                        title="Drag to resize District column"
+                      />
                     </th>
+
+                    {/* FROZEN 3: PROVINCE (WITH RIGHT DIVIDER SHADOW) */}
+                    {visibleColumns.province && (
+                      <th
+                        className="p-2.5 font-semibold cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700 border-r-2 border-slate-300 dark:border-slate-700 shadow-[4px_0_8px_-2px_rgba(0,0,0,0.15)] sticky top-0 z-40 bg-slate-100 dark:bg-slate-800 select-none group/th"
+                        style={{
+                          left: `${colWidths.index + colWidths.district}px`,
+                          width: `${colWidths.province}px`,
+                          minWidth: `${colWidths.province}px`,
+                          maxWidth: `${colWidths.province}px`,
+                        }}
+                        onClick={() => handleSort("provinceName")}
+                      >
+                        <div className="flex items-center justify-between pr-2">
+                          <span className="truncate font-bold">Province</span>
+                          {getSortIcon("provinceName")}
+                        </div>
+                        <div
+                          className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-primary/70 active:bg-primary z-50 select-none transition-colors"
+                          onMouseDown={(e) => startResize("province", e)}
+                          onClick={(e) => e.stopPropagation()}
+                          title="Drag to resize Province column"
+                        />
+                      </th>
+                    )}
+
                     {visibleColumns.population && (
                       <th
-                        className="p-3 font-semibold cursor-pointer hover:bg-muted"
+                        className="p-2.5 font-semibold cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700 border-r select-none relative group/th"
+                        style={{ width: `${colWidths.population}px`, minWidth: `${colWidths.population}px` }}
                         onClick={() => handleSort("population")}
                       >
-                        <div className="flex items-center">
-                          Population {getSortIcon("population")}
+                        <div className="flex items-center justify-between pr-2">
+                          <span>Population</span>
+                          {getSortIcon("population")}
                         </div>
+                        <div
+                          className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-primary/70 active:bg-primary z-50 select-none transition-colors"
+                          onMouseDown={(e) => startResize("population", e)}
+                          onClick={(e) => e.stopPropagation()}
+                        />
                       </th>
                     )}
+
                     {visibleColumns.pi && (
                       <th
-                        className="p-3 font-semibold cursor-pointer hover:bg-muted"
+                        className="p-2.5 font-semibold cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700 border-r select-none relative group/th"
+                        style={{ width: `${colWidths.pi}px`, minWidth: `${colWidths.pi}px` }}
                         onClick={() => handleSort("populationImmunityScore")}
                       >
-                        <div className="flex items-center">
-                          Immunity (Max 40) {getSortIcon("populationImmunityScore")}
+                        <div className="flex items-center justify-between pr-2">
+                          <span>Immunity (40)</span>
+                          {getSortIcon("populationImmunityScore")}
                         </div>
+                        <div
+                          className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-primary/70 active:bg-primary z-50 select-none transition-colors"
+                          onMouseDown={(e) => startResize("pi", e)}
+                          onClick={(e) => e.stopPropagation()}
+                        />
                       </th>
                     )}
+
                     {visibleColumns.sq && (
                       <th
-                        className="p-3 font-semibold cursor-pointer hover:bg-muted"
+                        className="p-2.5 font-semibold cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700 border-r select-none relative group/th"
+                        style={{ width: `${colWidths.sq}px`, minWidth: `${colWidths.sq}px` }}
                         onClick={() => handleSort("surveillanceQualityScore")}
                       >
-                        <div className="flex items-center">
-                          Surveillance (Max 20) {getSortIcon("surveillanceQualityScore")}
+                        <div className="flex items-center justify-between pr-2">
+                          <span>Surveillance (20)</span>
+                          {getSortIcon("surveillanceQualityScore")}
                         </div>
+                        <div
+                          className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-primary/70 active:bg-primary z-50 select-none transition-colors"
+                          onMouseDown={(e) => startResize("sq", e)}
+                          onClick={(e) => e.stopPropagation()}
+                        />
                       </th>
                     )}
+
                     {visibleColumns.pd && (
                       <th
-                        className="p-3 font-semibold cursor-pointer hover:bg-muted"
+                        className="p-2.5 font-semibold cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700 border-r select-none relative group/th"
+                        style={{ width: `${colWidths.pd}px`, minWidth: `${colWidths.pd}px` }}
                         onClick={() => handleSort("programmeDeliveryScore")}
                       >
-                        <div className="flex items-center">
-                          Delivery (Max 16) {getSortIcon("programmeDeliveryScore")}
+                        <div className="flex items-center justify-between pr-2">
+                          <span>Delivery (16)</span>
+                          {getSortIcon("programmeDeliveryScore")}
                         </div>
+                        <div
+                          className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-primary/70 active:bg-primary z-50 select-none transition-colors"
+                          onMouseDown={(e) => startResize("pd", e)}
+                          onClick={(e) => e.stopPropagation()}
+                        />
                       </th>
                     )}
+
                     {visibleColumns.ta && (
                       <th
-                        className="p-3 font-semibold cursor-pointer hover:bg-muted"
+                        className="p-2.5 font-semibold cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700 border-r select-none relative group/th"
+                        style={{ width: `${colWidths.ta}px`, minWidth: `${colWidths.ta}px` }}
                         onClick={() => handleSort("threatAssessmentScore")}
                       >
-                        <div className="flex items-center">
-                          Threats (Max 24) {getSortIcon("threatAssessmentScore")}
+                        <div className="flex items-center justify-between pr-2">
+                          <span>Threats (24)</span>
+                          {getSortIcon("threatAssessmentScore")}
                         </div>
+                        <div
+                          className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-primary/70 active:bg-primary z-50 select-none transition-colors"
+                          onMouseDown={(e) => startResize("ta", e)}
+                          onClick={(e) => e.stopPropagation()}
+                        />
                       </th>
                     )}
+
                     <th
-                      className="p-3 font-semibold cursor-pointer hover:bg-muted"
+                      className="p-2.5 font-semibold cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700 border-r select-none relative group/th"
+                      style={{ width: `${colWidths.total}px`, minWidth: `${colWidths.total}px` }}
                       onClick={() => handleSort("totalRiskScore")}
                     >
-                      <div className="flex items-center">
-                        Total Risk Score (100) {getSortIcon("totalRiskScore")}
+                      <div className="flex items-center justify-between pr-2">
+                        <span>Total Score (100)</span>
+                        {getSortIcon("totalRiskScore")}
                       </div>
+                      <div
+                        className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-primary/70 active:bg-primary z-50 select-none transition-colors"
+                        onMouseDown={(e) => startResize("total", e)}
+                        onClick={(e) => e.stopPropagation()}
+                      />
                     </th>
-                    <th className="p-3 font-semibold">Classification</th>
-                    <th className="p-3 font-semibold text-right">Actions</th>
+
+                    <th
+                      className="p-2.5 font-semibold select-none border-r relative group/th"
+                      style={{ width: `${colWidths.category}px`, minWidth: `${colWidths.category}px` }}
+                    >
+                      <div className="flex items-center justify-between pr-2">
+                        <span>Classification</span>
+                        {getSortIcon("riskCategory")}
+                      </div>
+                      <div
+                        className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-primary/70 active:bg-primary z-50 select-none transition-colors"
+                        onMouseDown={(e) => startResize("category", e)}
+                        onClick={(e) => e.stopPropagation()}
+                      />
+                    </th>
+
+                    <th
+                      className="p-2.5 font-semibold text-right"
+                      style={{ width: `${colWidths.actions}px`, minWidth: `${colWidths.actions}px` }}
+                    >
+                      Actions
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="divide-y">
                   {isResultsLoading ? (
                     <tr>
-                      <td colSpan={9} className="p-8 text-center text-muted-foreground">
+                      <td colSpan={11} className="p-8 text-center text-muted-foreground">
                         Loading district risk results...
                       </td>
                     </tr>
                   ) : sortedRows.length === 0 ? (
                     <tr>
-                      <td colSpan={9} className="p-8 text-center text-muted-foreground">
+                      <td colSpan={11} className="p-8 text-center text-muted-foreground">
                         No district results found. Run calculation or adjust search filters.
                       </td>
                     </tr>
                   ) : (
-                    sortedRows.map((row) => (
-                      <tr key={row.id} className="hover:bg-muted/40 transition-colors">
-                        <td className="p-3 font-medium text-foreground">
-                          {row.areaName}
-                        </td>
-                        {visibleColumns.population && (
-                          <td className="p-3 text-muted-foreground">
-                            {row.population ? row.population.toLocaleString() : "N/A"}
-                          </td>
-                        )}
-                        {visibleColumns.pi && (
-                          <td className="p-3">
-                            <span className="font-semibold">{row.populationImmunityScore ?? "—"}</span>
-                            <span className="text-muted-foreground">/40</span>
-                          </td>
-                        )}
-                        {visibleColumns.sq && (
-                          <td className="p-3">
-                            <span className="font-semibold">{row.surveillanceQualityScore ?? "—"}</span>
-                            <span className="text-muted-foreground">/20</span>
-                          </td>
-                        )}
-                        {visibleColumns.pd && (
-                          <td className="p-3">
-                            <span className="font-semibold">{row.programmeDeliveryScore ?? "—"}</span>
-                            <span className="text-muted-foreground">/16</span>
-                          </td>
-                        )}
-                        {visibleColumns.ta && (
-                          <td className="p-3">
-                            <span className="font-semibold">{row.threatAssessmentScore ?? "—"}</span>
-                            <span className="text-muted-foreground">/24</span>
-                          </td>
-                        )}
-                        <td className="p-3">
-                          <span className="font-bold text-sm">
-                            {row.totalRiskScore ?? `${row.minPossibleScore}–${row.maxPossibleScore}`}
-                          </span>
-                          <span className="text-muted-foreground">/100</span>
-                        </td>
-                        <td className="p-3">
-                          {getCategoryBadge(row.riskCategory)}
-                        </td>
-                        <td className="p-3 text-right space-x-1 whitespace-nowrap">
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            className="h-7 text-xs"
-                            onClick={() => setSelectedAreaForExplanation(row)}
-                          >
-                            Explain Score
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="h-7 text-xs"
-                            onClick={() => {
-                              setSelectedAreaForAction(row);
-                              setActionTitle(`Strengthen routine coverage in ${row.areaName}`);
-                              setIsActionModalOpen(true);
+                    sortedRows.map((row, idx) => {
+                      const globalIdx = (page - 1) * pageSize + idx + 1;
+                      const hasProvince = visibleColumns.province;
+
+                      return (
+                        <tr key={row.id} className="hover:bg-slate-50 dark:hover:bg-slate-900 transition-colors group">
+                          {/* FROZEN 1: INDEX */}
+                          <td
+                            className="p-2.5 text-center text-muted-foreground border-r sticky left-0 z-20 bg-background group-hover:bg-slate-50 dark:group-hover:bg-slate-900"
+                            style={{
+                              width: `${colWidths.index}px`,
+                              minWidth: `${colWidths.index}px`,
+                              maxWidth: `${colWidths.index}px`,
                             }}
                           >
-                            Link Action
-                          </Button>
-                        </td>
-                      </tr>
-                    ))
+                            {globalIdx}
+                          </td>
+
+                          {/* FROZEN 2: DISTRICT / COUNTY */}
+                          <td
+                            className="p-2.5 font-medium border-r whitespace-nowrap sticky z-20 bg-background group-hover:bg-slate-50 dark:group-hover:bg-slate-900"
+                            style={{
+                              left: `${colWidths.index}px`,
+                              width: `${colWidths.district}px`,
+                              minWidth: `${colWidths.district}px`,
+                              maxWidth: `${colWidths.district}px`,
+                            }}
+                          >
+                            <span className="truncate block font-semibold text-foreground" title={row.areaName}>
+                              {row.areaName}
+                            </span>
+                          </td>
+
+                          {/* FROZEN 3: PROVINCE (WITH RIGHT DIVIDER SHADOW) */}
+                          {hasProvince && (
+                            <td
+                              className="p-2.5 text-muted-foreground border-r-2 border-slate-300 dark:border-slate-700 shadow-[4px_0_8px_-2px_rgba(0,0,0,0.15)] whitespace-nowrap sticky z-20 bg-background group-hover:bg-slate-50 dark:group-hover:bg-slate-900"
+                              style={{
+                                left: `${colWidths.index + colWidths.district}px`,
+                                width: `${colWidths.province}px`,
+                                minWidth: `${colWidths.province}px`,
+                                maxWidth: `${colWidths.province}px`,
+                              }}
+                            >
+                              <span className="truncate block font-medium" title={row.provinceName || "National"}>
+                                {row.provinceName || "National"}
+                              </span>
+                            </td>
+                          )}
+
+                          {visibleColumns.population && (
+                            <td className="p-2.5 text-muted-foreground border-r">
+                              {row.population ? row.population.toLocaleString() : "N/A"}
+                            </td>
+                          )}
+
+                          {visibleColumns.pi && (
+                            <td className="p-2.5 border-r">
+                              <span className="font-semibold">{row.populationImmunityScore ?? "—"}</span>
+                              <span className="text-muted-foreground">/40</span>
+                            </td>
+                          )}
+
+                          {visibleColumns.sq && (
+                            <td className="p-2.5 border-r">
+                              <span className="font-semibold">{row.surveillanceQualityScore ?? "—"}</span>
+                              <span className="text-muted-foreground">/20</span>
+                            </td>
+                          )}
+
+                          {visibleColumns.pd && (
+                            <td className="p-2.5 border-r">
+                              <span className="font-semibold">{row.programmeDeliveryScore ?? "—"}</span>
+                              <span className="text-muted-foreground">/16</span>
+                            </td>
+                          )}
+
+                          {visibleColumns.ta && (
+                            <td className="p-2.5 border-r">
+                              <span className="font-semibold">{row.threatAssessmentScore ?? "—"}</span>
+                              <span className="text-muted-foreground">/24</span>
+                            </td>
+                          )}
+
+                          <td className="p-2.5 border-r">
+                            <span className="font-bold text-sm">
+                              {row.totalRiskScore ?? `${row.minPossibleScore}–${row.maxPossibleScore}`}
+                            </span>
+                            <span className="text-muted-foreground">/100</span>
+                          </td>
+
+                          <td className="p-2.5 border-r">
+                            {getCategoryBadge(row.riskCategory)}
+                          </td>
+
+                          <td className="p-2.5 text-right space-x-1 whitespace-nowrap">
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-7 text-xs"
+                              onClick={() => setSelectedAreaForExplanation(row)}
+                            >
+                              Explain Score
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-7 text-xs"
+                              onClick={() => {
+                                setSelectedAreaForAction(row);
+                                setActionTitle(`Strengthen routine coverage in ${row.areaName}`);
+                                setIsActionModalOpen(true);
+                              }}
+                            >
+                              Link Action
+                            </Button>
+                          </td>
+                        </tr>
+                      );
+                    })
                   )}
                 </tbody>
               </table>

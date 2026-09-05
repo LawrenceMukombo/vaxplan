@@ -972,6 +972,7 @@ riskRouter.get("/assessments/:id/results", async (req: any, res) => {
         districtId: riskAreaResults.districtId,
         districtName: districts.name,
         provinceId: riskAreaResults.provinceId,
+        provinceName: provinces.name,
         totalScore: riskAreaResults.totalScore,
         riskCategory: riskAreaResults.riskCategory,
         completenessRate: riskAreaResults.completenessRate,
@@ -984,6 +985,7 @@ riskRouter.get("/assessments/:id/results", async (req: any, res) => {
       })
       .from(riskAreaResults)
       .leftJoin(districts, eq(riskAreaResults.districtId, districts.id))
+      .leftJoin(provinces, eq(riskAreaResults.provinceId, provinces.id))
       .where(eq(riskAreaResults.runId, latestRun.id));
 
     // Enrich rows so both legacy and modern component schemas resolve seamlessly
@@ -994,6 +996,7 @@ riskRouter.get("/assessments/:id/results", async (req: any, res) => {
         ...r,
         administrativeAreaId: String(r.districtId),
         areaName: r.districtName || `District ${r.districtId}`,
+        provinceName: r.provinceName || "National",
         population: r.population !== null ? Number(r.population) : 100000,
         populationImmunityScore: domains.PI !== undefined ? String(domains.PI) : null,
         surveillanceQualityScore: domains.SQ !== undefined ? String(domains.SQ) : null,
