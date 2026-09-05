@@ -323,6 +323,270 @@ export function getRiskCategory(score: number): "LOW" | "MEDIUM" | "HIGH" | "VER
   return "VERY_HIGH";
 }
 
+// Extractor and calculator for sorting any column (raw or computed)
+export function getSortValue(row: DirectEntryRow, field: string): number | string {
+  switch (field) {
+    case "districtName":
+      return (row.districtName || "").toLowerCase();
+    case "provinceName":
+      return (row.provinceName || "").toLowerCase();
+    case "population":
+      return Number(row.population) || 0;
+
+    // PI: MCV1
+    case "mcv1YearMinus3":
+      return Number(row.mcv1YearMinus3) || 0;
+    case "mcv1YearMinus2":
+      return Number(row.mcv1YearMinus2) || 0;
+    case "mcv1YearMinus1":
+      return Number(row.mcv1YearMinus1) || 0;
+    case "mcv1Avg": {
+      const v3 = Number(row.mcv1YearMinus3) || 0;
+      const v2 = Number(row.mcv1YearMinus2) || 0;
+      const v1 = Number(row.mcv1YearMinus1) || 0;
+      return (v3 + v2 + v1) / 3;
+    }
+    case "mcv1Rp": {
+      const v3 = Number(row.mcv1YearMinus3) || 0;
+      const v2 = Number(row.mcv1YearMinus2) || 0;
+      const v1 = Number(row.mcv1YearMinus1) || 0;
+      return calcMcv1Rp((v3 + v2 + v1) / 3);
+    }
+
+    // PI: Neighboring
+    case "neighborPct":
+      return 75.0; // Baseline
+    case "neighborRp":
+      return calcNeighborRp(75.0);
+
+    // PI: MCV2
+    case "mcv2YearMinus3":
+      return Number(row.mcv2YearMinus3) || 0;
+    case "mcv2YearMinus2":
+      return Number(row.mcv2YearMinus2) || 0;
+    case "mcv2YearMinus1":
+      return Number(row.mcv2YearMinus1) || 0;
+    case "mcv2Avg": {
+      const v3 = Number(row.mcv2YearMinus3) || 0;
+      const v2 = Number(row.mcv2YearMinus2) || 0;
+      const v1 = Number(row.mcv2YearMinus1) || 0;
+      return (v3 + v2 + v1) / 3;
+    }
+    case "mcv2Rp": {
+      const v3 = Number(row.mcv2YearMinus3) || 0;
+      const v2 = Number(row.mcv2YearMinus2) || 0;
+      const v1 = Number(row.mcv2YearMinus1) || 0;
+      return calcMcv2Rp((v3 + v2 + v1) / 3);
+    }
+
+    // PI: SIA & Unvaccinated
+    case "siaCoveragePct":
+      return Number(row.siaCoveragePct) || 0;
+    case "siaCovRp":
+      return calcSiaCovRp(Number(row.siaCoveragePct) || 0);
+    case "siaTargetAgeGroup":
+      return row.siaTargetAgeGroup || "WIDE";
+    case "siaAgeGroupRp":
+      return calcSiaAgeRp(row.siaTargetAgeGroup);
+    case "siaYearsSince":
+      return Number(row.siaYearsSince) || 0;
+    case "siaYearsRp":
+      return calcSiaYearsRp(Number(row.siaYearsSince) || 0);
+    case "unvaccinatedCasesPct":
+      return Number(row.unvaccinatedCasesPct) || 0;
+    case "unvacRp":
+      return calcUnvacRp(Number(row.unvaccinatedCasesPct) || 0);
+    case "piTotalRp": {
+      const m1Avg = ((Number(row.mcv1YearMinus3) || 0) + (Number(row.mcv1YearMinus2) || 0) + (Number(row.mcv1YearMinus1) || 0)) / 3;
+      const m2Avg = ((Number(row.mcv2YearMinus3) || 0) + (Number(row.mcv2YearMinus2) || 0) + (Number(row.mcv2YearMinus1) || 0)) / 3;
+      return Math.min(
+        40,
+        calcMcv1Rp(m1Avg) +
+        calcNeighborRp(75.0) +
+        calcMcv2Rp(m2Avg) +
+        calcSiaCovRp(Number(row.siaCoveragePct) || 0) +
+        calcSiaAgeRp(row.siaTargetAgeGroup) +
+        calcSiaYearsRp(Number(row.siaYearsSince) || 0) +
+        calcUnvacRp(Number(row.unvaccinatedCasesPct) || 0)
+      );
+    }
+
+    // SQ
+    case "sqDiscardedRate": {
+      const pop = Number(row.population) || 100000;
+      const discCases = Number(row.discardedCases) || 0;
+      return (discCases / pop) * 100000;
+    }
+    case "sqRateRp": {
+      const pop = Number(row.population) || 100000;
+      const discCases = Number(row.discardedCases) || 0;
+      return calcDiscardedRateRp((discCases / pop) * 100000);
+    }
+    case "adequateInvestigationPct":
+      return Number(row.adequateInvestigationPct) || 0;
+    case "sqInvestRp":
+      return calcQualityRp(Number(row.adequateInvestigationPct) || 0);
+    case "adequateSpecimenPct":
+      return Number(row.adequateSpecimenPct) || 0;
+    case "sqSpecimenRp":
+      return calcQualityRp(Number(row.adequateSpecimenPct) || 0);
+    case "timelyLabResultsPct":
+      return Number(row.timelyLabResultsPct) || 0;
+    case "sqLabRp":
+      return calcQualityRp(Number(row.timelyLabResultsPct) || 0);
+    case "sqTotalRp": {
+      const pop = Number(row.population) || 100000;
+      const discRate = ((Number(row.discardedCases) || 0) / pop) * 100000;
+      return Math.min(
+        20,
+        calcDiscardedRateRp(discRate) +
+        calcQualityRp(Number(row.adequateInvestigationPct) || 0) +
+        calcQualityRp(Number(row.adequateSpecimenPct) || 0) +
+        calcQualityRp(Number(row.timelyLabResultsPct) || 0)
+      );
+    }
+
+    // PD
+    case "pdMcv1Trend": {
+      const m1_3 = Number(row.mcv1YearMinus3) || 0;
+      const m1_1 = Number(row.mcv1YearMinus1) || 0;
+      return m1_1 - m1_3;
+    }
+    case "pdMcv1TrendRp": {
+      const m1_3 = Number(row.mcv1YearMinus3) || 0;
+      const m1_1 = Number(row.mcv1YearMinus1) || 0;
+      return calcTrendRp(m1_1 - m1_3);
+    }
+    case "pdMcv2Trend": {
+      const m2_3 = Number(row.mcv2YearMinus3) || 0;
+      const m2_1 = Number(row.mcv2YearMinus1) || 0;
+      return m2_1 - m2_3;
+    }
+    case "pdMcv2TrendRp": {
+      const m2_3 = Number(row.mcv2YearMinus3) || 0;
+      const m2_1 = Number(row.mcv2YearMinus1) || 0;
+      return calcTrendRp(m2_1 - m2_3);
+    }
+    case "pdMcvDropout": {
+      const m1_1 = Number(row.mcv1YearMinus1) || 0;
+      const m2_1 = Number(row.mcv2YearMinus1) || 0;
+      return m1_1 > 0 ? ((m1_1 - m2_1) / m1_1) * 100 : 0;
+    }
+    case "pdMcvDropoutRp": {
+      const m1_1 = Number(row.mcv1YearMinus1) || 0;
+      const m2_1 = Number(row.mcv2YearMinus1) || 0;
+      const dr = m1_1 > 0 ? ((m1_1 - m2_1) / m1_1) * 100 : 0;
+      return calcDropoutRp(dr);
+    }
+    case "penta1YearMinus1":
+      return Number(row.penta1YearMinus1) || 0;
+    case "pdPentaDropout": {
+      const penta = Number(row.penta1YearMinus1) || 0;
+      const m1_1 = Number(row.mcv1YearMinus1) || 0;
+      return penta > 0 ? ((penta - m1_1) / penta) * 100 : 0;
+    }
+    case "pdPentaDropoutRp": {
+      const penta = Number(row.penta1YearMinus1) || 0;
+      const m1_1 = Number(row.mcv1YearMinus1) || 0;
+      const pdr = penta > 0 ? ((penta - m1_1) / penta) * 100 : 0;
+      return calcDropoutRp(pdr);
+    }
+    case "pdTotalRp": {
+      const m1_3 = Number(row.mcv1YearMinus3) || 0;
+      const m1_1 = Number(row.mcv1YearMinus1) || 0;
+      const m2_3 = Number(row.mcv2YearMinus3) || 0;
+      const m2_1 = Number(row.mcv2YearMinus1) || 0;
+      const mcvDr = m1_1 > 0 ? ((m1_1 - m2_1) / m1_1) * 100 : 0;
+      const penta = Number(row.penta1YearMinus1) || 0;
+      const pentaDr = penta > 0 ? ((penta - m1_1) / penta) * 100 : 0;
+      return Math.min(
+        16,
+        calcTrendRp(m1_1 - m1_3) +
+        calcTrendRp(m2_1 - m2_3) +
+        calcDropoutRp(mcvDr) +
+        calcDropoutRp(pentaDr)
+      );
+    }
+
+    // VG
+    case "vg_migrant":
+      return row.vulnerabilities?.migrantOrUnderserved ? 1 : 0;
+    case "vg_hesitancy":
+      return row.vulnerabilities?.vaccineHesitancyOrRefusal ? 1 : 0;
+    case "vg_security":
+      return row.vulnerabilities?.securityOrConflictConcerns ? 1 : 0;
+    case "vg_calamities":
+      return row.vulnerabilities?.recurrentNaturalDisasters ? 1 : 0;
+    case "vg_terrain":
+      return row.vulnerabilities?.poorAccessOrTerrain ? 1 : 0;
+    case "vg_political":
+      return row.vulnerabilities?.inadequatePoliticalSupport ? 1 : 0;
+    case "vg_transit":
+      return row.vulnerabilities?.highTransitHubOrBorder ? 1 : 0;
+    case "vg_gatherings":
+      return row.vulnerabilities?.massGatheringsOrEvents ? 1 : 0;
+    case "vgTotalRp":
+      return Math.min(8, Object.values(row.vulnerabilities || {}).filter(Boolean).length);
+
+    // TA
+    case "threatCasesUnder5":
+      return Number(row.threatCasesUnder5) || 0;
+    case "threatCasesUnder5Rp":
+      return (Number(row.threatCasesUnder5) || 0) > 0 ? 6 : 0;
+    case "threatCases5To14":
+    case "threatCases5to14":
+      return Number(row.threatCases5To14) || 0;
+    case "threatCases5to14Rp":
+    case "threatCases5To14Rp":
+      return (Number(row.threatCases5To14) || 0) > 0 ? 2 : 0;
+    case "threatCases15Plus":
+    case "threatCases15plus":
+      return Number(row.threatCases15Plus) || 0;
+    case "threatCases15plusRp":
+    case "threatCases15PlusRp":
+      return (Number(row.threatCases15Plus) || 0) > 0 ? 1 : 0;
+    case "threatDensity": {
+      const pop = Number(row.population) || 100000;
+      const area = Number(row.areaKm2) || 1000;
+      return pop / area;
+    }
+    case "threatDensityRp": {
+      const pop = Number(row.population) || 100000;
+      const area = Number(row.areaKm2) || 1000;
+      return calcDensityRp(pop / area);
+    }
+    case "threatBorderCase":
+    case "borderCaseInPastYear":
+      return row.borderCaseInPastYear ? 1 : 0;
+    case "threatBorderRp":
+      return row.borderCaseInPastYear ? 4 : 0;
+    case "threatVulnPts":
+      return Object.values(row.vulnerabilities || {}).filter(Boolean).length;
+    case "threatVulnRp":
+      return Math.min(8, Object.values(row.vulnerabilities || {}).filter(Boolean).length);
+    case "taTotalRp": {
+      const pop = Number(row.population) || 100000;
+      const area = Number(row.areaKm2) || 1000;
+      const vCount = Object.values(row.vulnerabilities || {}).filter(Boolean).length;
+      return calcThreatPoints(
+        Number(row.threatCasesUnder5) || 0,
+        Number(row.threatCases5To14) || 0,
+        Number(row.threatCases15Plus) || 0,
+        pop / area,
+        Boolean(row.borderCaseInPastYear),
+        vCount
+      );
+    }
+
+    default: {
+      const raw = (row as any)[field];
+      if (raw === undefined || raw === null) return 0;
+      const num = Number(raw);
+      return !isNaN(num) ? num : String(raw).toLowerCase();
+    }
+  }
+}
+
 export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Props) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -335,6 +599,7 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
   const [pageSize, setPageSize] = useState(50);
   const [sortField, setSortField] = useState<string>("districtName");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
+  const [isStretched, setIsStretched] = useState<boolean>(false);
 
   // Local working copy for inline editing
   const [localRows, setLocalRows] = useState<DirectEntryRow[]>([]);
@@ -764,21 +1029,19 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
   }, [localRows, searchTerm, provinceFilter]);
 
   const sortedRows = useMemo(() => {
-    return [...filteredRows].sort((a: any, b: any) => {
+    return [...filteredRows].sort((a: DirectEntryRow, b: DirectEntryRow) => {
       if (sortField === "provinceName") {
         const pComp = (a.provinceName || "").localeCompare(b.provinceName || "");
         if (pComp !== 0) return sortDirection === "asc" ? pComp : -pComp;
       }
-      let valA = a[sortField];
-      let valB = b[sortField];
+      const valA = getSortValue(a, sortField);
+      const valB = getSortValue(b, sortField);
 
       if (valA === undefined || valA === null) return sortDirection === "asc" ? 1 : -1;
       if (valB === undefined || valB === null) return sortDirection === "asc" ? -1 : 1;
 
-      const numA = Number(valA);
-      const numB = Number(valB);
-      if (!isNaN(numA) && !isNaN(numB)) {
-        return sortDirection === "asc" ? numA - numB : numB - numA;
+      if (typeof valA === "number" && typeof valB === "number") {
+        return sortDirection === "asc" ? valA - valB : valB - valA;
       }
       return sortDirection === "asc"
         ? String(valA).localeCompare(String(valB))
@@ -821,12 +1084,12 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
 
   const getSortIcon = (field: string) => {
     if (sortField !== field) {
-      return <ChevronsUpDown className="w-3 h-3 ml-1 opacity-40 shrink-0 inline text-slate-500" />;
+      return <ChevronsUpDown className="w-3 h-3 ml-0.5 opacity-30 shrink-0 inline text-slate-400 group-hover/th:opacity-80 transition-opacity" />;
     }
     return sortDirection === "asc" ? (
-      <ChevronUp className="w-3 h-3 ml-1 text-primary shrink-0 inline font-bold" />
+      <ChevronUp className="w-3 h-3 ml-0.5 text-primary shrink-0 inline font-bold" />
     ) : (
-      <ChevronDown className="w-3 h-3 ml-1 text-primary shrink-0 inline font-bold" />
+      <ChevronDown className="w-3 h-3 ml-0.5 text-primary shrink-0 inline font-bold" />
     );
   };
 
@@ -1611,19 +1874,25 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
 
               <div className="flex items-center border rounded p-0.5 bg-background text-xs">
                 <Button
-                  variant="ghost"
+                  variant={isStretched ? "secondary" : "ghost"}
                   size="sm"
-                  onClick={() => setColWidths(STRETCH_COL_WIDTHS)}
-                  className="h-6 px-2 text-[11px] gap-1 font-medium"
-                  title="Wide columns"
+                  onClick={() => {
+                    setIsStretched(true);
+                    setColWidths(STRETCH_COL_WIDTHS);
+                  }}
+                  className={`h-6 px-2 text-[11px] gap-1 font-medium ${isStretched ? "bg-primary/10 text-primary font-semibold" : ""}`}
+                  title="Stretch columns across full width"
                 >
                   <Maximize2 className="w-3 h-3 text-primary" /> Stretch
                 </Button>
                 <Button
-                  variant="ghost"
+                  variant={!isStretched ? "secondary" : "ghost"}
                   size="sm"
-                  onClick={() => setColWidths(DEFAULT_COL_WIDTHS)}
-                  className="h-6 px-2 text-[11px] gap-1 font-medium"
+                  onClick={() => {
+                    setIsStretched(false);
+                    setColWidths(DEFAULT_COL_WIDTHS);
+                  }}
+                  className={`h-6 px-2 text-[11px] gap-1 font-medium ${!isStretched ? "bg-muted font-semibold" : ""}`}
                   title="Compact columns"
                 >
                   <Minimize2 className="w-3 h-3 text-muted-foreground" /> Compact
@@ -1631,7 +1900,10 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={() => setColWidths(DEFAULT_COL_WIDTHS)}
+                  onClick={() => {
+                    setIsStretched(false);
+                    setColWidths(DEFAULT_COL_WIDTHS);
+                  }}
                   className="h-6 px-1.5 text-[11px]"
                   title="Reset column widths"
                 >
@@ -1675,28 +1947,28 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                     {activeTab === "population-immunity" && (
                       <>
                         <th colSpan={5} className="p-2 border-r border-slate-200 dark:border-slate-700 bg-sky-50 dark:bg-sky-950/40 text-sky-900 dark:text-sky-200">
-                          Administrative MCV1 Coverage (30 pts)
+                          Administrative MCV1 Coverage Report
                         </th>
                         <th colSpan={2} className="p-2 border-r border-slate-200 dark:border-slate-700 bg-sky-50 dark:bg-sky-950/40 text-sky-900 dark:text-sky-200">
-                          Neighboring MCV1 &lt;80% (3 pts)
+                          % of neighboring districts with MCV1 &lt;80%
                         </th>
                         <th colSpan={5} className="p-2 border-r border-slate-200 dark:border-slate-700 bg-sky-50 dark:bg-sky-950/40 text-sky-900 dark:text-sky-200">
-                          Administrative MCV2 Coverage (3 pts)
+                          Administrative MCV2 Coverage Report
                         </th>
                         <th colSpan={2} className="p-2 border-r border-slate-200 dark:border-slate-700 bg-sky-50 dark:bg-sky-950/40 text-sky-900 dark:text-sky-200">
-                          Measles SIA Coverage (4 pts)
+                          Subnational coverage of measles SIA
                         </th>
                         <th colSpan={2} className="p-2 border-r border-slate-200 dark:border-slate-700 bg-sky-50 dark:bg-sky-950/40 text-sky-900 dark:text-sky-200">
-                          SIA Target Age Group
+                          Measles SIA target age group
                         </th>
                         <th colSpan={2} className="p-2 border-r border-slate-200 dark:border-slate-700 bg-sky-50 dark:bg-sky-950/40 text-sky-900 dark:text-sky-200">
-                          Years Since Last SIA
+                          Years since last measles SIA
                         </th>
                         <th colSpan={2} className="p-2 border-r border-slate-200 dark:border-slate-700 bg-sky-50 dark:bg-sky-950/40 text-sky-900 dark:text-sky-200">
-                          % Cases Unvaccinated
+                          % suspected measles cases unvaccinated
                         </th>
                         <th colSpan={1} className="p-2 border-r border-slate-200 dark:border-slate-700 bg-indigo-50/70 dark:bg-indigo-950/40 text-indigo-900 dark:text-indigo-200 font-black text-center">
-                          Total RP (Max 40)
+                          SUBTOTAL RISK POINTS
                         </th>
                       </>
                     )}
@@ -1705,19 +1977,19 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                     {activeTab === "surveillance-quality" && (
                       <>
                         <th colSpan={2} className="p-2 border-r border-slate-200 dark:border-slate-700 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-900 dark:text-indigo-200">
-                          Non-measles Discarded Rate (8 pts)
+                          Non-measles discarded rate
                         </th>
                         <th colSpan={2} className="p-2 border-r border-slate-200 dark:border-slate-700 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-900 dark:text-indigo-200">
-                          Adequate Investigation % (4 pts)
+                          % with adequate investigation
                         </th>
                         <th colSpan={2} className="p-2 border-r border-slate-200 dark:border-slate-700 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-900 dark:text-indigo-200">
-                          Adequate Specimen % (4 pts)
+                          % adequate blood specimen collection
                         </th>
                         <th colSpan={2} className="p-2 border-r border-slate-200 dark:border-slate-700 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-900 dark:text-indigo-200">
-                          Timely Lab Results % (4 pts)
+                          % with timely availability of laboratory results
                         </th>
                         <th colSpan={1} className="p-2 border-r border-slate-200 dark:border-slate-700 bg-indigo-50/70 dark:bg-indigo-950/40 text-indigo-900 dark:text-indigo-200 font-black text-center">
-                          Total RP (Max 20)
+                          SUBTOTAL RISK POINTS
                         </th>
                       </>
                     )}
@@ -1726,22 +1998,22 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                     {activeTab === "program-delivery" && (
                       <>
                         <th colSpan={2} className="p-2 border-r border-slate-200 dark:border-slate-700 bg-amber-50 dark:bg-amber-950/40 text-amber-900 dark:text-amber-200">
-                          MCV1 Trend (4 pts)
+                          MCV1 Trend
                         </th>
                         <th colSpan={2} className="p-2 border-r border-slate-200 dark:border-slate-700 bg-amber-50 dark:bg-amber-950/40 text-amber-900 dark:text-amber-200">
-                          MCV2 Trend (4 pts)
+                          MCV2 Trend
                         </th>
                         <th colSpan={2} className="p-2 border-r border-slate-200 dark:border-slate-700 bg-amber-50 dark:bg-amber-950/40 text-amber-900 dark:text-amber-200">
-                          MCV1-MCV2 Dropout Rate (4 pts)
+                          Drop-out Rate MCV1-MCV2
                         </th>
                         <th colSpan={1} className="p-2 border-r border-slate-200 dark:border-slate-700 bg-amber-50 dark:bg-amber-950/40 text-amber-900 dark:text-amber-200">
                           DPT1 / Penta1
                         </th>
                         <th colSpan={2} className="p-2 border-r border-slate-200 dark:border-slate-700 bg-amber-50 dark:bg-amber-950/40 text-amber-900 dark:text-amber-200">
-                          DPT1-MCV1 Dropout Rate (4 pts)
+                          Drop-out Rate DPT1-MCV1
                         </th>
                         <th colSpan={1} className="p-2 border-r border-slate-200 dark:border-slate-700 bg-indigo-50/70 dark:bg-indigo-950/40 text-indigo-900 dark:text-indigo-200 font-black text-center">
-                          Total RP (Max 16)
+                          SUBTOTAL RISK POINTS
                         </th>
                       </>
                     )}
@@ -1749,16 +2021,32 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                     {/* VULNERABLE GROUPS HEADERS */}
                     {activeTab === "vulnerable-groups" && (
                       <>
-                        <th colSpan={1} className="p-2 border-r border-slate-200 dark:border-slate-700 bg-rose-50 dark:bg-rose-950/40 text-rose-900 dark:text-rose-200">Displaced / IDP</th>
-                        <th colSpan={1} className="p-2 border-r border-slate-200 dark:border-slate-700 bg-rose-50 dark:bg-rose-950/40 text-rose-900 dark:text-rose-200">Hesitancy</th>
-                        <th colSpan={1} className="p-2 border-r border-slate-200 dark:border-slate-700 bg-rose-50 dark:bg-rose-950/40 text-rose-900 dark:text-rose-200">Conflict / Security</th>
-                        <th colSpan={1} className="p-2 border-r border-slate-200 dark:border-slate-700 bg-rose-50 dark:bg-rose-950/40 text-rose-900 dark:text-rose-200">Disasters</th>
-                        <th colSpan={1} className="p-2 border-r border-slate-200 dark:border-slate-700 bg-rose-50 dark:bg-rose-950/40 text-rose-900 dark:text-rose-200">Terrain / Access</th>
-                        <th colSpan={1} className="p-2 border-r border-slate-200 dark:border-slate-700 bg-rose-50 dark:bg-rose-950/40 text-rose-900 dark:text-rose-200">Political Support</th>
-                        <th colSpan={1} className="p-2 border-r border-slate-200 dark:border-slate-700 bg-rose-50 dark:bg-rose-950/40 text-rose-900 dark:text-rose-200">Transit Hubs</th>
-                        <th colSpan={1} className="p-2 border-r border-slate-200 dark:border-slate-700 bg-rose-50 dark:bg-rose-950/40 text-rose-900 dark:text-rose-200">Mass Gatherings</th>
+                        <th colSpan={1} className="p-2 border-r border-slate-200 dark:border-slate-700 bg-rose-50 dark:bg-rose-950/40 text-rose-900 dark:text-rose-200">
+                          Presence of migrant population / internally displaced population/ slums / tribal communities
+                        </th>
+                        <th colSpan={1} className="p-2 border-r border-slate-200 dark:border-slate-700 bg-rose-50 dark:bg-rose-950/40 text-rose-900 dark:text-rose-200">
+                          Resistant to vaccination (ie. religious, cultural issues, etc.)
+                        </th>
+                        <th colSpan={1} className="p-2 border-r border-slate-200 dark:border-slate-700 bg-rose-50 dark:bg-rose-950/40 text-rose-900 dark:text-rose-200">
+                          Security and safety concerns
+                        </th>
+                        <th colSpan={1} className="p-2 border-r border-slate-200 dark:border-slate-700 bg-rose-50 dark:bg-rose-950/40 text-rose-900 dark:text-rose-200">
+                          Frequented by calamities / disasters
+                        </th>
+                        <th colSpan={1} className="p-2 border-r border-slate-200 dark:border-slate-700 bg-rose-50 dark:bg-rose-950/40 text-rose-900 dark:text-rose-200">
+                          Poor access to health services due to terrain / transportation issues
+                        </th>
+                        <th colSpan={1} className="p-2 border-r border-slate-200 dark:border-slate-700 bg-rose-50 dark:bg-rose-950/40 text-rose-900 dark:text-rose-200">
+                          Lack of local political support
+                        </th>
+                        <th colSpan={1} className="p-2 border-r border-slate-200 dark:border-slate-700 bg-rose-50 dark:bg-rose-950/40 text-rose-900 dark:text-rose-200">
+                          Presence of high-traffic transportation hubs/major roads or bordering large urban areas
+                        </th>
+                        <th colSpan={1} className="p-2 border-r border-slate-200 dark:border-slate-700 bg-rose-50 dark:bg-rose-950/40 text-rose-900 dark:text-rose-200">
+                          Presence of areas with mass gatherings
+                        </th>
                         <th colSpan={1} className="p-2 border-r border-slate-200 dark:border-slate-700 bg-indigo-50/70 dark:bg-indigo-950/40 text-indigo-900 dark:text-indigo-200 font-black text-center">
-                          Total Pts (Max 8)
+                          SUBTOTAL RISK POINTS
                         </th>
                       </>
                     )}
@@ -1767,116 +2055,758 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                     {activeTab === "threat-assessment" && (
                       <>
                         <th colSpan={2} className="p-2 border-r border-slate-200 dark:border-slate-700 bg-purple-50 dark:bg-purple-950/40 text-purple-900 dark:text-purple-200">
-                          Cases &lt;5 Years (6 pts)
+                          Evidence of recent measles cases among &lt;5 years
                         </th>
                         <th colSpan={2} className="p-2 border-r border-slate-200 dark:border-slate-700 bg-purple-50 dark:bg-purple-950/40 text-purple-900 dark:text-purple-200">
-                          Cases 5–14 Years (2 pts)
+                          Evidence of recent measles cases among 5-15 years
                         </th>
                         <th colSpan={2} className="p-2 border-r border-slate-200 dark:border-slate-700 bg-purple-50 dark:bg-purple-950/40 text-purple-900 dark:text-purple-200">
-                          Cases &gt;=15 Years (1 pt)
+                          Evidence of recent measles cases among &gt;15 years
                         </th>
                         <th colSpan={2} className="p-2 border-r border-slate-200 dark:border-slate-700 bg-purple-50 dark:bg-purple-950/40 text-purple-900 dark:text-purple-200">
-                          Pop Density / km² (3 pts)
+                          Population density (Pers./Km2)
                         </th>
                         <th colSpan={2} className="p-2 border-r border-slate-200 dark:border-slate-700 bg-purple-50 dark:bg-purple-950/40 text-purple-900 dark:text-purple-200">
-                          Border Case in 12m (4 pts)
+                          Bordering areas with measles case in the past 12 months
                         </th>
                         <th colSpan={2} className="p-2 border-r border-slate-200 dark:border-slate-700 bg-purple-50 dark:bg-purple-950/40 text-purple-900 dark:text-purple-200">
-                          Vulnerabilities (8 pts)
+                          Presence of vulnerable population
                         </th>
                         <th colSpan={1} className="p-2 border-r border-slate-200 dark:border-slate-700 bg-indigo-50/70 dark:bg-indigo-950/40 text-indigo-900 dark:text-indigo-200 font-black text-center">
-                          Total RP (Max 24)
+                          SUBTOTAL RISK POINTS
                         </th>
                       </>
                     )}
                   </tr>
 
-                  {/* LEVEL 2: SUBHEADERS (FRIENDLY LABELS) */}
+                  {/* LEVEL 2: SUBHEADERS (FRIENDLY LABELS & SORTABLE) */}
                   <tr className="bg-slate-50 dark:bg-slate-900/60 text-slate-600 dark:text-slate-400 text-center border-b border-slate-200 dark:border-slate-700 text-[10px]">
                     {activeTab === "population-immunity" && (
                       <>
-                        <th className="p-1 border-r border-slate-200 dark:border-slate-700" style={{ width: `${colWidths.mcv1Minus3}px`, minWidth: `${colWidths.mcv1Minus3}px` }}>{dataFirstYear}</th>
-                        <th className="p-1 border-r border-slate-200 dark:border-slate-700" style={{ width: `${colWidths.mcv1Minus2}px`, minWidth: `${colWidths.mcv1Minus2}px` }}>{dataSecondYear}</th>
-                        <th className="p-1 border-r border-slate-200 dark:border-slate-700" style={{ width: `${colWidths.mcv1Minus1}px`, minWidth: `${colWidths.mcv1Minus1}px` }}>{dataLastYear}</th>
-                        <th className="p-1 border-r border-slate-200 dark:border-slate-700 bg-slate-100/50" style={{ width: `${colWidths.mcv1Avg}px`, minWidth: `${colWidths.mcv1Avg}px` }}>Avg</th>
-                        <th className="p-1 border-r border-slate-200 dark:border-slate-700 font-bold" style={{ width: `${colWidths.mcv1Rp}px`, minWidth: `${colWidths.mcv1Rp}px` }}>RP</th>
-                        <th className="p-1 border-r border-slate-200 dark:border-slate-700" style={{ width: `${colWidths.neighborPct}px`, minWidth: `${colWidths.neighborPct}px` }}>% &lt;80%</th>
-                        <th className="p-1 border-r border-slate-200 dark:border-slate-700 font-bold" style={{ width: `${colWidths.neighborRp}px`, minWidth: `${colWidths.neighborRp}px` }}>RP</th>
-                        <th className="p-1 border-r border-slate-200 dark:border-slate-700" style={{ width: `${colWidths.mcv2Minus3}px`, minWidth: `${colWidths.mcv2Minus3}px` }}>{dataFirstYear}</th>
-                        <th className="p-1 border-r border-slate-200 dark:border-slate-700" style={{ width: `${colWidths.mcv2Minus2}px`, minWidth: `${colWidths.mcv2Minus2}px` }}>{dataSecondYear}</th>
-                        <th className="p-1 border-r border-slate-200 dark:border-slate-700" style={{ width: `${colWidths.mcv2Minus1}px`, minWidth: `${colWidths.mcv2Minus1}px` }}>{dataLastYear}</th>
-                        <th className="p-1 border-r border-slate-200 dark:border-slate-700 bg-slate-100/50" style={{ width: `${colWidths.mcv2Avg}px`, minWidth: `${colWidths.mcv2Avg}px` }}>Avg</th>
-                        <th className="p-1 border-r border-slate-200 dark:border-slate-700 font-bold" style={{ width: `${colWidths.mcv2Rp}px`, minWidth: `${colWidths.mcv2Rp}px` }}>RP</th>
-                        <th className="p-1 border-r border-slate-200 dark:border-slate-700" style={{ width: `${colWidths.siaCovMinus1}px`, minWidth: `${colWidths.siaCovMinus1}px` }}>Coverage %</th>
-                        <th className="p-1 border-r border-slate-200 dark:border-slate-700 font-bold" style={{ width: `${colWidths.siaCovRp}px`, minWidth: `${colWidths.siaCovRp}px` }}>RP</th>
-                        <th className="p-1 border-r border-slate-200 dark:border-slate-700" style={{ width: `${colWidths.siaAgeGroupMinus1}px`, minWidth: `${colWidths.siaAgeGroupMinus1}px` }}>Target Group</th>
-                        <th className="p-1 border-r border-slate-200 dark:border-slate-700 font-bold" style={{ width: `${colWidths.siaAgeGroupRp}px`, minWidth: `${colWidths.siaAgeGroupRp}px` }}>RP</th>
-                        <th className="p-1 border-r border-slate-200 dark:border-slate-700" style={{ width: `${colWidths.siaYearsMinus1}px`, minWidth: `${colWidths.siaYearsMinus1}px` }}>Years</th>
-                        <th className="p-1 border-r border-slate-200 dark:border-slate-700 font-bold" style={{ width: `${colWidths.siaYearsRp}px`, minWidth: `${colWidths.siaYearsRp}px` }}>RP</th>
-                        <th className="p-1 border-r border-slate-200 dark:border-slate-700" style={{ width: `${colWidths.unvacMinus3Minus1}px`, minWidth: `${colWidths.unvacMinus3Minus1}px` }}>% Unvac</th>
-                        <th className="p-1 border-r border-slate-200 dark:border-slate-700 font-bold" style={{ width: `${colWidths.unvacRp}px`, minWidth: `${colWidths.unvacRp}px` }}>RP</th>
-                        <th className="p-1 border-r border-slate-200 dark:border-slate-700 font-black bg-indigo-50/50 dark:bg-indigo-950/20 text-indigo-700 dark:text-indigo-300" style={{ width: `${colWidths.piTotalRp}px`, minWidth: `${colWidths.piTotalRp}px` }}>Subtotal</th>
+                        <th
+                          className="p-1 border-r border-slate-200 dark:border-slate-700 cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
+                          style={{ width: `${colWidths.mcv1Minus3}px`, minWidth: `${colWidths.mcv1Minus3}px` }}
+                          onClick={() => handleSort("mcv1YearMinus3")}
+                          title={`Sort by ${dataFirstYear} MCV1 Coverage`}
+                        >
+                          <div className="flex items-center justify-center gap-0.5">
+                            <span>{dataFirstYear}</span>
+                            {getSortIcon("mcv1YearMinus3")}
+                          </div>
+                        </th>
+                        <th
+                          className="p-1 border-r border-slate-200 dark:border-slate-700 cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
+                          style={{ width: `${colWidths.mcv1Minus2}px`, minWidth: `${colWidths.mcv1Minus2}px` }}
+                          onClick={() => handleSort("mcv1YearMinus2")}
+                          title={`Sort by ${dataSecondYear} MCV1 Coverage`}
+                        >
+                          <div className="flex items-center justify-center gap-0.5">
+                            <span>{dataSecondYear}</span>
+                            {getSortIcon("mcv1YearMinus2")}
+                          </div>
+                        </th>
+                        <th
+                          className="p-1 border-r border-slate-200 dark:border-slate-700 cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
+                          style={{ width: `${colWidths.mcv1Minus1}px`, minWidth: `${colWidths.mcv1Minus1}px` }}
+                          onClick={() => handleSort("mcv1YearMinus1")}
+                          title={`Sort by ${dataLastYear} MCV1 Coverage`}
+                        >
+                          <div className="flex items-center justify-center gap-0.5">
+                            <span>{dataLastYear}</span>
+                            {getSortIcon("mcv1YearMinus1")}
+                          </div>
+                        </th>
+                        <th
+                          className="p-1 border-r border-slate-200 dark:border-slate-700 bg-slate-100/50 cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
+                          style={{ width: `${colWidths.mcv1Avg}px`, minWidth: `${colWidths.mcv1Avg}px` }}
+                          onClick={() => handleSort("mcv1Avg")}
+                          title="Sort by MCV1 3-Year Average"
+                        >
+                          <div className="flex items-center justify-center gap-0.5">
+                            <span>Avg</span>
+                            {getSortIcon("mcv1Avg")}
+                          </div>
+                        </th>
+                        <th
+                          className="p-1 border-r border-slate-200 dark:border-slate-700 font-bold cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
+                          style={{ width: `${colWidths.mcv1Rp}px`, minWidth: `${colWidths.mcv1Rp}px` }}
+                          onClick={() => handleSort("mcv1Rp")}
+                          title="Sort by MCV1 Risk Points"
+                        >
+                          <div className="flex items-center justify-center gap-0.5">
+                            <span>RP</span>
+                            {getSortIcon("mcv1Rp")}
+                          </div>
+                        </th>
+
+                        <th
+                          className="p-1 border-r border-slate-200 dark:border-slate-700 cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
+                          style={{ width: `${colWidths.neighborPct}px`, minWidth: `${colWidths.neighborPct}px` }}
+                          onClick={() => handleSort("neighborPct")}
+                          title="Sort by % Neighboring Districts with MCV1 <80%"
+                        >
+                          <div className="flex items-center justify-center gap-0.5">
+                            <span>% &lt;80%</span>
+                            {getSortIcon("neighborPct")}
+                          </div>
+                        </th>
+                        <th
+                          className="p-1 border-r border-slate-200 dark:border-slate-700 font-bold cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
+                          style={{ width: `${colWidths.neighborRp}px`, minWidth: `${colWidths.neighborRp}px` }}
+                          onClick={() => handleSort("neighborRp")}
+                          title="Sort by Neighbor Risk Points"
+                        >
+                          <div className="flex items-center justify-center gap-0.5">
+                            <span>RP</span>
+                            {getSortIcon("neighborRp")}
+                          </div>
+                        </th>
+
+                        <th
+                          className="p-1 border-r border-slate-200 dark:border-slate-700 cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
+                          style={{ width: `${colWidths.mcv2Minus3}px`, minWidth: `${colWidths.mcv2Minus3}px` }}
+                          onClick={() => handleSort("mcv2YearMinus3")}
+                          title={`Sort by ${dataFirstYear} MCV2 Coverage`}
+                        >
+                          <div className="flex items-center justify-center gap-0.5">
+                            <span>{dataFirstYear}</span>
+                            {getSortIcon("mcv2YearMinus3")}
+                          </div>
+                        </th>
+                        <th
+                          className="p-1 border-r border-slate-200 dark:border-slate-700 cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
+                          style={{ width: `${colWidths.mcv2Minus2}px`, minWidth: `${colWidths.mcv2Minus2}px` }}
+                          onClick={() => handleSort("mcv2YearMinus2")}
+                          title={`Sort by ${dataSecondYear} MCV2 Coverage`}
+                        >
+                          <div className="flex items-center justify-center gap-0.5">
+                            <span>{dataSecondYear}</span>
+                            {getSortIcon("mcv2YearMinus2")}
+                          </div>
+                        </th>
+                        <th
+                          className="p-1 border-r border-slate-200 dark:border-slate-700 cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
+                          style={{ width: `${colWidths.mcv2Minus1}px`, minWidth: `${colWidths.mcv2Minus1}px` }}
+                          onClick={() => handleSort("mcv2YearMinus1")}
+                          title={`Sort by ${dataLastYear} MCV2 Coverage`}
+                        >
+                          <div className="flex items-center justify-center gap-0.5">
+                            <span>{dataLastYear}</span>
+                            {getSortIcon("mcv2YearMinus1")}
+                          </div>
+                        </th>
+                        <th
+                          className="p-1 border-r border-slate-200 dark:border-slate-700 bg-slate-100/50 cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
+                          style={{ width: `${colWidths.mcv2Avg}px`, minWidth: `${colWidths.mcv2Avg}px` }}
+                          onClick={() => handleSort("mcv2Avg")}
+                          title="Sort by MCV2 3-Year Average"
+                        >
+                          <div className="flex items-center justify-center gap-0.5">
+                            <span>Avg</span>
+                            {getSortIcon("mcv2Avg")}
+                          </div>
+                        </th>
+                        <th
+                          className="p-1 border-r border-slate-200 dark:border-slate-700 font-bold cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
+                          style={{ width: `${colWidths.mcv2Rp}px`, minWidth: `${colWidths.mcv2Rp}px` }}
+                          onClick={() => handleSort("mcv2Rp")}
+                          title="Sort by MCV2 Risk Points"
+                        >
+                          <div className="flex items-center justify-center gap-0.5">
+                            <span>RP</span>
+                            {getSortIcon("mcv2Rp")}
+                          </div>
+                        </th>
+
+                        <th
+                          className="p-1 border-r border-slate-200 dark:border-slate-700 cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
+                          style={{ width: `${colWidths.siaCovMinus1}px`, minWidth: `${colWidths.siaCovMinus1}px` }}
+                          onClick={() => handleSort("siaCoveragePct")}
+                          title="Sort by Measles SIA Coverage %"
+                        >
+                          <div className="flex items-center justify-center gap-0.5">
+                            <span>Coverage %</span>
+                            {getSortIcon("siaCoveragePct")}
+                          </div>
+                        </th>
+                        <th
+                          className="p-1 border-r border-slate-200 dark:border-slate-700 font-bold cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
+                          style={{ width: `${colWidths.siaCovRp}px`, minWidth: `${colWidths.siaCovRp}px` }}
+                          onClick={() => handleSort("siaCovRp")}
+                          title="Sort by SIA Coverage Risk Points"
+                        >
+                          <div className="flex items-center justify-center gap-0.5">
+                            <span>RP</span>
+                            {getSortIcon("siaCovRp")}
+                          </div>
+                        </th>
+
+                        <th
+                          className="p-1 border-r border-slate-200 dark:border-slate-700 cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
+                          style={{ width: `${colWidths.siaAgeGroupMinus1}px`, minWidth: `${colWidths.siaAgeGroupMinus1}px` }}
+                          onClick={() => handleSort("siaTargetAgeGroup")}
+                          title="Sort by SIA Target Age Group"
+                        >
+                          <div className="flex items-center justify-center gap-0.5">
+                            <span>Target Group</span>
+                            {getSortIcon("siaTargetAgeGroup")}
+                          </div>
+                        </th>
+                        <th
+                          className="p-1 border-r border-slate-200 dark:border-slate-700 font-bold cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
+                          style={{ width: `${colWidths.siaAgeGroupRp}px`, minWidth: `${colWidths.siaAgeGroupRp}px` }}
+                          onClick={() => handleSort("siaAgeGroupRp")}
+                          title="Sort by SIA Target Age Group Risk Points"
+                        >
+                          <div className="flex items-center justify-center gap-0.5">
+                            <span>RP</span>
+                            {getSortIcon("siaAgeGroupRp")}
+                          </div>
+                        </th>
+
+                        <th
+                          className="p-1 border-r border-slate-200 dark:border-slate-700 cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
+                          style={{ width: `${colWidths.siaYearsMinus1}px`, minWidth: `${colWidths.siaYearsMinus1}px` }}
+                          onClick={() => handleSort("siaYearsSince")}
+                          title="Sort by Years Since Last Measles SIA"
+                        >
+                          <div className="flex items-center justify-center gap-0.5">
+                            <span>Years</span>
+                            {getSortIcon("siaYearsSince")}
+                          </div>
+                        </th>
+                        <th
+                          className="p-1 border-r border-slate-200 dark:border-slate-700 font-bold cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
+                          style={{ width: `${colWidths.siaYearsRp}px`, minWidth: `${colWidths.siaYearsRp}px` }}
+                          onClick={() => handleSort("siaYearsRp")}
+                          title="Sort by Years Since Last SIA Risk Points"
+                        >
+                          <div className="flex items-center justify-center gap-0.5">
+                            <span>RP</span>
+                            {getSortIcon("siaYearsRp")}
+                          </div>
+                        </th>
+
+                        <th
+                          className="p-1 border-r border-slate-200 dark:border-slate-700 cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
+                          style={{ width: `${colWidths.unvacMinus3Minus1}px`, minWidth: `${colWidths.unvacMinus3Minus1}px` }}
+                          onClick={() => handleSort("unvaccinatedCasesPct")}
+                          title="Sort by % Suspected Cases Unvaccinated"
+                        >
+                          <div className="flex items-center justify-center gap-0.5">
+                            <span>% Unvac</span>
+                            {getSortIcon("unvaccinatedCasesPct")}
+                          </div>
+                        </th>
+                        <th
+                          className="p-1 border-r border-slate-200 dark:border-slate-700 font-bold cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
+                          style={{ width: `${colWidths.unvacRp}px`, minWidth: `${colWidths.unvacRp}px` }}
+                          onClick={() => handleSort("unvacRp")}
+                          title="Sort by % Unvaccinated Risk Points"
+                        >
+                          <div className="flex items-center justify-center gap-0.5">
+                            <span>RP</span>
+                            {getSortIcon("unvacRp")}
+                          </div>
+                        </th>
+
+                        <th
+                          className="p-1 border-r border-slate-200 dark:border-slate-700 font-black bg-indigo-50/50 dark:bg-indigo-950/20 text-indigo-700 dark:text-indigo-300 cursor-pointer hover:bg-indigo-100/70 dark:hover:bg-indigo-900/40 transition-colors select-none group/th"
+                          style={{ width: `${colWidths.piTotalRp}px`, minWidth: `${colWidths.piTotalRp}px` }}
+                          onClick={() => handleSort("piTotalRp")}
+                          title="Sort by Population Immunity Subtotal Risk Points"
+                        >
+                          <div className="flex items-center justify-center gap-0.5">
+                            <span>Total RP</span>
+                            {getSortIcon("piTotalRp")}
+                          </div>
+                        </th>
                       </>
                     )}
 
                     {activeTab === "surveillance-quality" && (
                       <>
-                        <th className="p-1 border-r border-slate-200 dark:border-slate-700" style={{ width: `${colWidths.sqRateVal}px`, minWidth: `${colWidths.sqRateVal}px` }}>Rate / 100k</th>
-                        <th className="p-1 border-r border-slate-200 dark:border-slate-700 font-bold" style={{ width: `${colWidths.sqRateRp}px`, minWidth: `${colWidths.sqRateRp}px` }}>RP</th>
-                        <th className="p-1 border-r border-slate-200 dark:border-slate-700" style={{ width: `${colWidths.sqInvestVal}px`, minWidth: `${colWidths.sqInvestVal}px` }}>Investigated %</th>
-                        <th className="p-1 border-r border-slate-200 dark:border-slate-700 font-bold" style={{ width: `${colWidths.sqInvestRp}px`, minWidth: `${colWidths.sqInvestRp}px` }}>RP</th>
-                        <th className="p-1 border-r border-slate-200 dark:border-slate-700" style={{ width: `${colWidths.sqSpecimenVal}px`, minWidth: `${colWidths.sqSpecimenVal}px` }}>Specimen %</th>
-                        <th className="p-1 border-r border-slate-200 dark:border-slate-700 font-bold" style={{ width: `${colWidths.sqSpecimenRp}px`, minWidth: `${colWidths.sqSpecimenRp}px` }}>RP</th>
-                        <th className="p-1 border-r border-slate-200 dark:border-slate-700" style={{ width: `${colWidths.sqLabVal}px`, minWidth: `${colWidths.sqLabVal}px` }}>Timely Lab %</th>
-                        <th className="p-1 border-r border-slate-200 dark:border-slate-700 font-bold" style={{ width: `${colWidths.sqLabRp}px`, minWidth: `${colWidths.sqLabRp}px` }}>RP</th>
-                        <th className="p-1 border-r border-slate-200 dark:border-slate-700 font-black bg-indigo-50/50 dark:bg-indigo-950/20 text-indigo-700 dark:text-indigo-300" style={{ width: `${colWidths.sqTotalRp}px`, minWidth: `${colWidths.sqTotalRp}px` }}>Subtotal</th>
+                        <th
+                          className="p-1 border-r border-slate-200 dark:border-slate-700 cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
+                          style={{ width: `${colWidths.sqRateVal}px`, minWidth: `${colWidths.sqRateVal}px` }}
+                          onClick={() => handleSort("sqDiscardedRate")}
+                          title="Sort by Non-measles Discarded Rate per 100k"
+                        >
+                          <div className="flex items-center justify-center gap-0.5">
+                            <span>Rate / 100k</span>
+                            {getSortIcon("sqDiscardedRate")}
+                          </div>
+                        </th>
+                        <th
+                          className="p-1 border-r border-slate-200 dark:border-slate-700 font-bold cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
+                          style={{ width: `${colWidths.sqRateRp}px`, minWidth: `${colWidths.sqRateRp}px` }}
+                          onClick={() => handleSort("sqRateRp")}
+                          title="Sort by Discarded Rate Risk Points"
+                        >
+                          <div className="flex items-center justify-center gap-0.5">
+                            <span>RP</span>
+                            {getSortIcon("sqRateRp")}
+                          </div>
+                        </th>
+
+                        <th
+                          className="p-1 border-r border-slate-200 dark:border-slate-700 cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
+                          style={{ width: `${colWidths.sqInvestVal}px`, minWidth: `${colWidths.sqInvestVal}px` }}
+                          onClick={() => handleSort("adequateInvestigationPct")}
+                          title="Sort by % with Adequate Investigation"
+                        >
+                          <div className="flex items-center justify-center gap-0.5">
+                            <span>Investigated %</span>
+                            {getSortIcon("adequateInvestigationPct")}
+                          </div>
+                        </th>
+                        <th
+                          className="p-1 border-r border-slate-200 dark:border-slate-700 font-bold cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
+                          style={{ width: `${colWidths.sqInvestRp}px`, minWidth: `${colWidths.sqInvestRp}px` }}
+                          onClick={() => handleSort("sqInvestRp")}
+                          title="Sort by Adequate Investigation Risk Points"
+                        >
+                          <div className="flex items-center justify-center gap-0.5">
+                            <span>RP</span>
+                            {getSortIcon("sqInvestRp")}
+                          </div>
+                        </th>
+
+                        <th
+                          className="p-1 border-r border-slate-200 dark:border-slate-700 cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
+                          style={{ width: `${colWidths.sqSpecimenVal}px`, minWidth: `${colWidths.sqSpecimenVal}px` }}
+                          onClick={() => handleSort("adequateSpecimenPct")}
+                          title="Sort by % Adequate Blood Specimen Collection"
+                        >
+                          <div className="flex items-center justify-center gap-0.5">
+                            <span>Specimen %</span>
+                            {getSortIcon("adequateSpecimenPct")}
+                          </div>
+                        </th>
+                        <th
+                          className="p-1 border-r border-slate-200 dark:border-slate-700 font-bold cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
+                          style={{ width: `${colWidths.sqSpecimenRp}px`, minWidth: `${colWidths.sqSpecimenRp}px` }}
+                          onClick={() => handleSort("sqSpecimenRp")}
+                          title="Sort by Specimen Collection Risk Points"
+                        >
+                          <div className="flex items-center justify-center gap-0.5">
+                            <span>RP</span>
+                            {getSortIcon("sqSpecimenRp")}
+                          </div>
+                        </th>
+
+                        <th
+                          className="p-1 border-r border-slate-200 dark:border-slate-700 cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
+                          style={{ width: `${colWidths.sqLabVal}px`, minWidth: `${colWidths.sqLabVal}px` }}
+                          onClick={() => handleSort("timelyLabResultsPct")}
+                          title="Sort by % Timely Lab Results"
+                        >
+                          <div className="flex items-center justify-center gap-0.5">
+                            <span>Timely Lab %</span>
+                            {getSortIcon("timelyLabResultsPct")}
+                          </div>
+                        </th>
+                        <th
+                          className="p-1 border-r border-slate-200 dark:border-slate-700 font-bold cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
+                          style={{ width: `${colWidths.sqLabRp}px`, minWidth: `${colWidths.sqLabRp}px` }}
+                          onClick={() => handleSort("sqLabRp")}
+                          title="Sort by Timely Lab Results Risk Points"
+                        >
+                          <div className="flex items-center justify-center gap-0.5">
+                            <span>RP</span>
+                            {getSortIcon("sqLabRp")}
+                          </div>
+                        </th>
+
+                        <th
+                          className="p-1 border-r border-slate-200 dark:border-slate-700 font-black bg-indigo-50/50 dark:bg-indigo-950/20 text-indigo-700 dark:text-indigo-300 cursor-pointer hover:bg-indigo-100/70 dark:hover:bg-indigo-900/40 transition-colors select-none group/th"
+                          style={{ width: `${colWidths.sqTotalRp}px`, minWidth: `${colWidths.sqTotalRp}px` }}
+                          onClick={() => handleSort("sqTotalRp")}
+                          title="Sort by Surveillance Quality Subtotal Risk Points"
+                        >
+                          <div className="flex items-center justify-center gap-0.5">
+                            <span>Total RP</span>
+                            {getSortIcon("sqTotalRp")}
+                          </div>
+                        </th>
                       </>
                     )}
 
                     {activeTab === "program-delivery" && (
                       <>
-                        <th className="p-1 border-r border-slate-200 dark:border-slate-700" style={{ width: `${colWidths.pdMcv1TrendVal}px`, minWidth: `${colWidths.pdMcv1TrendVal}px` }}>Slope Trend</th>
-                        <th className="p-1 border-r border-slate-200 dark:border-slate-700 font-bold" style={{ width: `${colWidths.pdMcv1TrendRp}px`, minWidth: `${colWidths.pdMcv1TrendRp}px` }}>RP</th>
-                        <th className="p-1 border-r border-slate-200 dark:border-slate-700" style={{ width: `${colWidths.pdMcv2TrendVal}px`, minWidth: `${colWidths.pdMcv2TrendVal}px` }}>Slope Trend</th>
-                        <th className="p-1 border-r border-slate-200 dark:border-slate-700 font-bold" style={{ width: `${colWidths.pdMcv2TrendRp}px`, minWidth: `${colWidths.pdMcv2TrendRp}px` }}>RP</th>
-                        <th className="p-1 border-r border-slate-200 dark:border-slate-700" style={{ width: `${colWidths.pdMcvDropoutVal}px`, minWidth: `${colWidths.pdMcvDropoutVal}px` }}>Dropout %</th>
-                        <th className="p-1 border-r border-slate-200 dark:border-slate-700 font-bold" style={{ width: `${colWidths.pdMcvDropoutRp}px`, minWidth: `${colWidths.pdMcvDropoutRp}px` }}>RP</th>
-                        <th className="p-1 border-r border-slate-200 dark:border-slate-700" style={{ width: `${colWidths.pdPentaDoses}px`, minWidth: `${colWidths.pdPentaDoses}px` }}>Coverage %</th>
-                        <th className="p-1 border-r border-slate-200 dark:border-slate-700" style={{ width: `${colWidths.pdPentaDropoutVal}px`, minWidth: `${colWidths.pdPentaDropoutVal}px` }}>Dropout %</th>
-                        <th className="p-1 border-r border-slate-200 dark:border-slate-700 font-bold" style={{ width: `${colWidths.pdPentaDropoutRp}px`, minWidth: `${colWidths.pdPentaDropoutRp}px` }}>RP</th>
-                        <th className="p-1 border-r border-slate-200 dark:border-slate-700 font-black bg-indigo-50/50 dark:bg-indigo-950/20 text-indigo-700 dark:text-indigo-300" style={{ width: `${colWidths.pdTotalRp}px`, minWidth: `${colWidths.pdTotalRp}px` }}>Subtotal</th>
+                        <th
+                          className="p-1 border-r border-slate-200 dark:border-slate-700 cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
+                          style={{ width: `${colWidths.pdMcv1TrendVal}px`, minWidth: `${colWidths.pdMcv1TrendVal}px` }}
+                          onClick={() => handleSort("pdMcv1Trend")}
+                          title="Sort by MCV1 Trend Slope"
+                        >
+                          <div className="flex items-center justify-center gap-0.5">
+                            <span>Slope Trend</span>
+                            {getSortIcon("pdMcv1Trend")}
+                          </div>
+                        </th>
+                        <th
+                          className="p-1 border-r border-slate-200 dark:border-slate-700 font-bold cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
+                          style={{ width: `${colWidths.pdMcv1TrendRp}px`, minWidth: `${colWidths.pdMcv1TrendRp}px` }}
+                          onClick={() => handleSort("pdMcv1TrendRp")}
+                          title="Sort by MCV1 Trend Risk Points"
+                        >
+                          <div className="flex items-center justify-center gap-0.5">
+                            <span>RP</span>
+                            {getSortIcon("pdMcv1TrendRp")}
+                          </div>
+                        </th>
+
+                        <th
+                          className="p-1 border-r border-slate-200 dark:border-slate-700 cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
+                          style={{ width: `${colWidths.pdMcv2TrendVal}px`, minWidth: `${colWidths.pdMcv2TrendVal}px` }}
+                          onClick={() => handleSort("pdMcv2Trend")}
+                          title="Sort by MCV2 Trend Slope"
+                        >
+                          <div className="flex items-center justify-center gap-0.5">
+                            <span>Slope Trend</span>
+                            {getSortIcon("pdMcv2Trend")}
+                          </div>
+                        </th>
+                        <th
+                          className="p-1 border-r border-slate-200 dark:border-slate-700 font-bold cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
+                          style={{ width: `${colWidths.pdMcv2TrendRp}px`, minWidth: `${colWidths.pdMcv2TrendRp}px` }}
+                          onClick={() => handleSort("pdMcv2TrendRp")}
+                          title="Sort by MCV2 Trend Risk Points"
+                        >
+                          <div className="flex items-center justify-center gap-0.5">
+                            <span>RP</span>
+                            {getSortIcon("pdMcv2TrendRp")}
+                          </div>
+                        </th>
+
+                        <th
+                          className="p-1 border-r border-slate-200 dark:border-slate-700 cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
+                          style={{ width: `${colWidths.pdMcvDropoutVal}px`, minWidth: `${colWidths.pdMcvDropoutVal}px` }}
+                          onClick={() => handleSort("pdMcvDropout")}
+                          title="Sort by MCV1-MCV2 Dropout %"
+                        >
+                          <div className="flex items-center justify-center gap-0.5">
+                            <span>Dropout %</span>
+                            {getSortIcon("pdMcvDropout")}
+                          </div>
+                        </th>
+                        <th
+                          className="p-1 border-r border-slate-200 dark:border-slate-700 font-bold cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
+                          style={{ width: `${colWidths.pdMcvDropoutRp}px`, minWidth: `${colWidths.pdMcvDropoutRp}px` }}
+                          onClick={() => handleSort("pdMcvDropoutRp")}
+                          title="Sort by MCV1-MCV2 Dropout Risk Points"
+                        >
+                          <div className="flex items-center justify-center gap-0.5">
+                            <span>RP</span>
+                            {getSortIcon("pdMcvDropoutRp")}
+                          </div>
+                        </th>
+
+                        <th
+                          className="p-1 border-r border-slate-200 dark:border-slate-700 cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
+                          style={{ width: `${colWidths.pdPentaDoses}px`, minWidth: `${colWidths.pdPentaDoses}px` }}
+                          onClick={() => handleSort("penta1YearMinus1")}
+                          title="Sort by DPT1 / Penta1 Coverage"
+                        >
+                          <div className="flex items-center justify-center gap-0.5">
+                            <span>Coverage %</span>
+                            {getSortIcon("penta1YearMinus1")}
+                          </div>
+                        </th>
+
+                        <th
+                          className="p-1 border-r border-slate-200 dark:border-slate-700 cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
+                          style={{ width: `${colWidths.pdPentaDropoutVal}px`, minWidth: `${colWidths.pdPentaDropoutVal}px` }}
+                          onClick={() => handleSort("pdPentaDropout")}
+                          title="Sort by DPT1-MCV1 Dropout %"
+                        >
+                          <div className="flex items-center justify-center gap-0.5">
+                            <span>Dropout %</span>
+                            {getSortIcon("pdPentaDropout")}
+                          </div>
+                        </th>
+                        <th
+                          className="p-1 border-r border-slate-200 dark:border-slate-700 font-bold cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
+                          style={{ width: `${colWidths.pdPentaDropoutRp}px`, minWidth: `${colWidths.pdPentaDropoutRp}px` }}
+                          onClick={() => handleSort("pdPentaDropoutRp")}
+                          title="Sort by DPT1-MCV1 Dropout Risk Points"
+                        >
+                          <div className="flex items-center justify-center gap-0.5">
+                            <span>RP</span>
+                            {getSortIcon("pdPentaDropoutRp")}
+                          </div>
+                        </th>
+
+                        <th
+                          className="p-1 border-r border-slate-200 dark:border-slate-700 font-black bg-indigo-50/50 dark:bg-indigo-950/20 text-indigo-700 dark:text-indigo-300 cursor-pointer hover:bg-indigo-100/70 dark:hover:bg-indigo-900/40 transition-colors select-none group/th"
+                          style={{ width: `${colWidths.pdTotalRp}px`, minWidth: `${colWidths.pdTotalRp}px` }}
+                          onClick={() => handleSort("pdTotalRp")}
+                          title="Sort by Program Delivery Subtotal Risk Points"
+                        >
+                          <div className="flex items-center justify-center gap-0.5">
+                            <span>Total RP</span>
+                            {getSortIcon("pdTotalRp")}
+                          </div>
+                        </th>
                       </>
                     )}
 
                     {activeTab === "vulnerable-groups" && (
                       <>
-                        <th className="p-1 border-r border-slate-200 dark:border-slate-700" style={{ width: `${colWidths.vgItem}px`, minWidth: `${colWidths.vgItem}px` }}>Displaced / IDP</th>
-                        <th className="p-1 border-r border-slate-200 dark:border-slate-700" style={{ width: `${colWidths.vgItem}px`, minWidth: `${colWidths.vgItem}px` }}>Hesitancy</th>
-                        <th className="p-1 border-r border-slate-200 dark:border-slate-700" style={{ width: `${colWidths.vgItem}px`, minWidth: `${colWidths.vgItem}px` }}>Conflict / Security</th>
-                        <th className="p-1 border-r border-slate-200 dark:border-slate-700" style={{ width: `${colWidths.vgItem}px`, minWidth: `${colWidths.vgItem}px` }}>Disasters</th>
-                        <th className="p-1 border-r border-slate-200 dark:border-slate-700" style={{ width: `${colWidths.vgItem}px`, minWidth: `${colWidths.vgItem}px` }}>Terrain / Access</th>
-                        <th className="p-1 border-r border-slate-200 dark:border-slate-700" style={{ width: `${colWidths.vgItem}px`, minWidth: `${colWidths.vgItem}px` }}>Political Support</th>
-                        <th className="p-1 border-r border-slate-200 dark:border-slate-700" style={{ width: `${colWidths.vgItem}px`, minWidth: `${colWidths.vgItem}px` }}>Transit Hubs</th>
-                        <th className="p-1 border-r border-slate-200 dark:border-slate-700" style={{ width: `${colWidths.vgItem}px`, minWidth: `${colWidths.vgItem}px` }}>Mass Gatherings</th>
-                        <th className="p-1 border-r border-slate-200 dark:border-slate-700 font-black bg-indigo-50/50 dark:bg-indigo-950/20 text-indigo-700 dark:text-indigo-300" style={{ width: `${colWidths.vgTotalRp}px`, minWidth: `${colWidths.vgTotalRp}px` }}>Subtotal</th>
+                        <th
+                          className="p-1 border-r border-slate-200 dark:border-slate-700 cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
+                          style={{ width: `${colWidths.vgItem}px`, minWidth: `${colWidths.vgItem}px` }}
+                          onClick={() => handleSort("vg_migrant")}
+                          title="Sort by Migrant / IDP / Slums presence"
+                        >
+                          <div className="flex items-center justify-center gap-0.5">
+                            <span>Displaced / IDP</span>
+                            {getSortIcon("vg_migrant")}
+                          </div>
+                        </th>
+                        <th
+                          className="p-1 border-r border-slate-200 dark:border-slate-700 cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
+                          style={{ width: `${colWidths.vgItem}px`, minWidth: `${colWidths.vgItem}px` }}
+                          onClick={() => handleSort("vg_hesitancy")}
+                          title="Sort by Vaccine Hesitancy"
+                        >
+                          <div className="flex items-center justify-center gap-0.5">
+                            <span>Hesitancy</span>
+                            {getSortIcon("vg_hesitancy")}
+                          </div>
+                        </th>
+                        <th
+                          className="p-1 border-r border-slate-200 dark:border-slate-700 cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
+                          style={{ width: `${colWidths.vgItem}px`, minWidth: `${colWidths.vgItem}px` }}
+                          onClick={() => handleSort("vg_security")}
+                          title="Sort by Security & Safety Concerns"
+                        >
+                          <div className="flex items-center justify-center gap-0.5">
+                            <span>Conflict / Security</span>
+                            {getSortIcon("vg_security")}
+                          </div>
+                        </th>
+                        <th
+                          className="p-1 border-r border-slate-200 dark:border-slate-700 cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
+                          style={{ width: `${colWidths.vgItem}px`, minWidth: `${colWidths.vgItem}px` }}
+                          onClick={() => handleSort("vg_calamities")}
+                          title="Sort by Calamities / Disasters"
+                        >
+                          <div className="flex items-center justify-center gap-0.5">
+                            <span>Disasters</span>
+                            {getSortIcon("vg_calamities")}
+                          </div>
+                        </th>
+                        <th
+                          className="p-1 border-r border-slate-200 dark:border-slate-700 cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
+                          style={{ width: `${colWidths.vgItem}px`, minWidth: `${colWidths.vgItem}px` }}
+                          onClick={() => handleSort("vg_terrain")}
+                          title="Sort by Terrain / Poor Access"
+                        >
+                          <div className="flex items-center justify-center gap-0.5">
+                            <span>Terrain / Access</span>
+                            {getSortIcon("vg_terrain")}
+                          </div>
+                        </th>
+                        <th
+                          className="p-1 border-r border-slate-200 dark:border-slate-700 cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
+                          style={{ width: `${colWidths.vgItem}px`, minWidth: `${colWidths.vgItem}px` }}
+                          onClick={() => handleSort("vg_political")}
+                          title="Sort by Lack of Local Political Support"
+                        >
+                          <div className="flex items-center justify-center gap-0.5">
+                            <span>Political Support</span>
+                            {getSortIcon("vg_political")}
+                          </div>
+                        </th>
+                        <th
+                          className="p-1 border-r border-slate-200 dark:border-slate-700 cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
+                          style={{ width: `${colWidths.vgItem}px`, minWidth: `${colWidths.vgItem}px` }}
+                          onClick={() => handleSort("vg_transit")}
+                          title="Sort by Transit Hubs / Major Roads"
+                        >
+                          <div className="flex items-center justify-center gap-0.5">
+                            <span>Transit Hubs</span>
+                            {getSortIcon("vg_transit")}
+                          </div>
+                        </th>
+                        <th
+                          className="p-1 border-r border-slate-200 dark:border-slate-700 cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
+                          style={{ width: `${colWidths.vgItem}px`, minWidth: `${colWidths.vgItem}px` }}
+                          onClick={() => handleSort("vg_gatherings")}
+                          title="Sort by Mass Gatherings"
+                        >
+                          <div className="flex items-center justify-center gap-0.5">
+                            <span>Mass Gatherings</span>
+                            {getSortIcon("vg_gatherings")}
+                          </div>
+                        </th>
+                        <th
+                          className="p-1 border-r border-slate-200 dark:border-slate-700 font-black bg-indigo-50/50 dark:bg-indigo-950/20 text-indigo-700 dark:text-indigo-300 cursor-pointer hover:bg-indigo-100/70 dark:hover:bg-indigo-900/40 transition-colors select-none group/th"
+                          style={{ width: `${colWidths.vgTotalRp}px`, minWidth: `${colWidths.vgTotalRp}px` }}
+                          onClick={() => handleSort("vgTotalRp")}
+                          title="Sort by Vulnerable Groups Subtotal Points"
+                        >
+                          <div className="flex items-center justify-center gap-0.5">
+                            <span>Total RP</span>
+                            {getSortIcon("vgTotalRp")}
+                          </div>
+                        </th>
                       </>
                     )}
 
                     {activeTab === "threat-assessment" && (
                       <>
-                        <th className="p-1 border-r border-slate-200 dark:border-slate-700" style={{ width: `${colWidths.taCasesUnder5Val}px`, minWidth: `${colWidths.taCasesUnder5Val}px` }}>Cases</th>
-                        <th className="p-1 border-r border-slate-200 dark:border-slate-700 font-bold" style={{ width: `${colWidths.taCasesUnder5Rp}px`, minWidth: `${colWidths.taCasesUnder5Rp}px` }}>RP</th>
-                        <th className="p-1 border-r border-slate-200 dark:border-slate-700" style={{ width: `${colWidths.taCases5to14Val}px`, minWidth: `${colWidths.taCases5to14Val}px` }}>Cases</th>
-                        <th className="p-1 border-r border-slate-200 dark:border-slate-700 font-bold" style={{ width: `${colWidths.taCases5to14Rp}px`, minWidth: `${colWidths.taCases5to14Rp}px` }}>RP</th>
-                        <th className="p-1 border-r border-slate-200 dark:border-slate-700" style={{ width: `${colWidths.taCases15plusVal}px`, minWidth: `${colWidths.taCases15plusVal}px` }}>Cases</th>
-                        <th className="p-1 border-r border-slate-200 dark:border-slate-700 font-bold" style={{ width: `${colWidths.taCases15plusRp}px`, minWidth: `${colWidths.taCases15plusRp}px` }}>RP</th>
-                        <th className="p-1 border-r border-slate-200 dark:border-slate-700" style={{ width: `${colWidths.taDensityVal}px`, minWidth: `${colWidths.taDensityVal}px` }}>Density</th>
-                        <th className="p-1 border-r border-slate-200 dark:border-slate-700 font-bold" style={{ width: `${colWidths.taDensityRp}px`, minWidth: `${colWidths.taDensityRp}px` }}>RP</th>
-                        <th className="p-1 border-r border-slate-200 dark:border-slate-700" style={{ width: `${colWidths.taBorderVal}px`, minWidth: `${colWidths.taBorderVal}px` }}>Border?</th>
-                        <th className="p-1 border-r border-slate-200 dark:border-slate-700 font-bold" style={{ width: `${colWidths.taBorderRp}px`, minWidth: `${colWidths.taBorderRp}px` }}>RP</th>
-                        <th className="p-1 border-r border-slate-200 dark:border-slate-700" style={{ width: `${colWidths.taVulnVal}px`, minWidth: `${colWidths.taVulnVal}px` }}>Vuln Pts</th>
-                        <th className="p-1 border-r border-slate-200 dark:border-slate-700 font-bold" style={{ width: `${colWidths.taVulnRp}px`, minWidth: `${colWidths.taVulnRp}px` }}>RP</th>
-                        <th className="p-1 border-r border-slate-200 dark:border-slate-700 font-black bg-indigo-50/50 dark:bg-indigo-950/20 text-indigo-700 dark:text-indigo-300" style={{ width: `${colWidths.taTotalRp}px`, minWidth: `${colWidths.taTotalRp}px` }}>Subtotal</th>
+                        <th
+                          className="p-1 border-r border-slate-200 dark:border-slate-700 cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
+                          style={{ width: `${colWidths.taCasesUnder5Val}px`, minWidth: `${colWidths.taCasesUnder5Val}px` }}
+                          onClick={() => handleSort("threatCasesUnder5")}
+                          title="Sort by Cases <5 Years"
+                        >
+                          <div className="flex items-center justify-center gap-0.5">
+                            <span>Cases</span>
+                            {getSortIcon("threatCasesUnder5")}
+                          </div>
+                        </th>
+                        <th
+                          className="p-1 border-r border-slate-200 dark:border-slate-700 font-bold cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
+                          style={{ width: `${colWidths.taCasesUnder5Rp}px`, minWidth: `${colWidths.taCasesUnder5Rp}px` }}
+                          onClick={() => handleSort("threatCasesUnder5Rp")}
+                          title="Sort by Cases <5 Years Risk Points"
+                        >
+                          <div className="flex items-center justify-center gap-0.5">
+                            <span>RP</span>
+                            {getSortIcon("threatCasesUnder5Rp")}
+                          </div>
+                        </th>
+
+                        <th
+                          className="p-1 border-r border-slate-200 dark:border-slate-700 cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
+                          style={{ width: `${colWidths.taCases5to14Val}px`, minWidth: `${colWidths.taCases5to14Val}px` }}
+                          onClick={() => handleSort("threatCases5to14")}
+                          title="Sort by Cases 5-14 Years"
+                        >
+                          <div className="flex items-center justify-center gap-0.5">
+                            <span>Cases</span>
+                            {getSortIcon("threatCases5to14")}
+                          </div>
+                        </th>
+                        <th
+                          className="p-1 border-r border-slate-200 dark:border-slate-700 font-bold cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
+                          style={{ width: `${colWidths.taCases5to14Rp}px`, minWidth: `${colWidths.taCases5to14Rp}px` }}
+                          onClick={() => handleSort("threatCases5to14Rp")}
+                          title="Sort by Cases 5-14 Years Risk Points"
+                        >
+                          <div className="flex items-center justify-center gap-0.5">
+                            <span>RP</span>
+                            {getSortIcon("threatCases5to14Rp")}
+                          </div>
+                        </th>
+
+                        <th
+                          className="p-1 border-r border-slate-200 dark:border-slate-700 cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
+                          style={{ width: `${colWidths.taCases15plusVal}px`, minWidth: `${colWidths.taCases15plusVal}px` }}
+                          onClick={() => handleSort("threatCases15plus")}
+                          title="Sort by Cases >=15 Years"
+                        >
+                          <div className="flex items-center justify-center gap-0.5">
+                            <span>Cases</span>
+                            {getSortIcon("threatCases15plus")}
+                          </div>
+                        </th>
+                        <th
+                          className="p-1 border-r border-slate-200 dark:border-slate-700 font-bold cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
+                          style={{ width: `${colWidths.taCases15plusRp}px`, minWidth: `${colWidths.taCases15plusRp}px` }}
+                          onClick={() => handleSort("threatCases15plusRp")}
+                          title="Sort by Cases >=15 Years Risk Points"
+                        >
+                          <div className="flex items-center justify-center gap-0.5">
+                            <span>RP</span>
+                            {getSortIcon("threatCases15plusRp")}
+                          </div>
+                        </th>
+
+                        <th
+                          className="p-1 border-r border-slate-200 dark:border-slate-700 cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
+                          style={{ width: `${colWidths.taDensityVal}px`, minWidth: `${colWidths.taDensityVal}px` }}
+                          onClick={() => handleSort("threatDensity")}
+                          title="Sort by Population Density"
+                        >
+                          <div className="flex items-center justify-center gap-0.5">
+                            <span>Density</span>
+                            {getSortIcon("threatDensity")}
+                          </div>
+                        </th>
+                        <th
+                          className="p-1 border-r border-slate-200 dark:border-slate-700 font-bold cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
+                          style={{ width: `${colWidths.taDensityRp}px`, minWidth: `${colWidths.taDensityRp}px` }}
+                          onClick={() => handleSort("threatDensityRp")}
+                          title="Sort by Population Density Risk Points"
+                        >
+                          <div className="flex items-center justify-center gap-0.5">
+                            <span>RP</span>
+                            {getSortIcon("threatDensityRp")}
+                          </div>
+                        </th>
+
+                        <th
+                          className="p-1 border-r border-slate-200 dark:border-slate-700 cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
+                          style={{ width: `${colWidths.taBorderVal}px`, minWidth: `${colWidths.taBorderVal}px` }}
+                          onClick={() => handleSort("threatBorderCase")}
+                          title="Sort by Bordering Area Cases"
+                        >
+                          <div className="flex items-center justify-center gap-0.5">
+                            <span>Border?</span>
+                            {getSortIcon("threatBorderCase")}
+                          </div>
+                        </th>
+                        <th
+                          className="p-1 border-r border-slate-200 dark:border-slate-700 font-bold cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
+                          style={{ width: `${colWidths.taBorderRp}px`, minWidth: `${colWidths.taBorderRp}px` }}
+                          onClick={() => handleSort("threatBorderRp")}
+                          title="Sort by Border Case Risk Points"
+                        >
+                          <div className="flex items-center justify-center gap-0.5">
+                            <span>RP</span>
+                            {getSortIcon("threatBorderRp")}
+                          </div>
+                        </th>
+
+                        <th
+                          className="p-1 border-r border-slate-200 dark:border-slate-700 cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
+                          style={{ width: `${colWidths.taVulnVal}px`, minWidth: `${colWidths.taVulnVal}px` }}
+                          onClick={() => handleSort("threatVulnPts")}
+                          title="Sort by Vulnerability Points"
+                        >
+                          <div className="flex items-center justify-center gap-0.5">
+                            <span>Vuln Pts</span>
+                            {getSortIcon("threatVulnPts")}
+                          </div>
+                        </th>
+                        <th
+                          className="p-1 border-r border-slate-200 dark:border-slate-700 font-bold cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
+                          style={{ width: `${colWidths.taVulnRp}px`, minWidth: `${colWidths.taVulnRp}px` }}
+                          onClick={() => handleSort("threatVulnRp")}
+                          title="Sort by Vulnerability Risk Points"
+                        >
+                          <div className="flex items-center justify-center gap-0.5">
+                            <span>RP</span>
+                            {getSortIcon("threatVulnRp")}
+                          </div>
+                        </th>
+
+                        <th
+                          className="p-1 border-r border-slate-200 dark:border-slate-700 font-black bg-indigo-50/50 dark:bg-indigo-950/20 text-indigo-700 dark:text-indigo-300 cursor-pointer hover:bg-indigo-100/70 dark:hover:bg-indigo-900/40 transition-colors select-none group/th"
+                          style={{ width: `${colWidths.taTotalRp}px`, minWidth: `${colWidths.taTotalRp}px` }}
+                          onClick={() => handleSort("taTotalRp")}
+                          title="Sort by Threat Assessment Subtotal Risk Points"
+                        >
+                          <div className="flex items-center justify-center gap-0.5">
+                            <span>Total RP</span>
+                            {getSortIcon("taTotalRp")}
+                          </div>
+                        </th>
                       </>
                     )}
                   </tr>
