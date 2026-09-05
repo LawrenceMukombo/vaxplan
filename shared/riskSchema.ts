@@ -70,6 +70,7 @@ export const riskAssessments = pgTable("risk_assessments", {
   status: varchar("status", { length: 50 }).notNull().default("draft"), // draft, importing, validation_required, ready_to_calculate, calculating, calculated, under_review, approved, superseded
   activeRunId: varchar("active_run_id"),
   notes: text("notes"),
+  reportConfigJson: jsonb("report_config_json").default({}),
   createdByUserId: varchar("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
   approvedByUserId: varchar("approved_by_user_id").references(() => users.id, { onDelete: "set null" }),
   approvedAt: timestamp("approved_at"),

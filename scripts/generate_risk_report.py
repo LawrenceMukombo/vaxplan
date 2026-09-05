@@ -195,7 +195,7 @@ def build_priority_districts_table(doc, placeholder_p, data, category_filter, ta
         placeholder_p._element.addnext(p._element)
         return
 
-    table = doc.add_table(rows=len(districts) + 1, cols=8)
+    table = doc.add_table(rows=len(districts) + 1, cols=9)
     placeholder_p._element.addnext(table._element)
     table.alignment = WD_TABLE_ALIGNMENT.CENTER
 
@@ -207,10 +207,13 @@ def build_priority_districts_table(doc, placeholder_p, data, category_filter, ta
         "Surv. Quality\n(Max 20)",
         "Prog. Delivery\n(Max 16)",
         "Threat Assess.\n(Max 24)",
-        "Overall Score\n(Max 100)"
+        "Overall Score\n(Max 100)",
+        "Recommended Interventions"
     ]
     header_color = "991B1B" if category_filter == "VERY_HIGH" else "C2410C"
     style_table_header(table.rows[0], headers, bg_hex=header_color)
+
+    custom_recs = data.get("reportConfig", {}).get("districtRecommendations", {})
 
     for idx, dist in enumerate(districts, start=1):
         row = table.rows[idx]
@@ -222,15 +225,29 @@ def build_priority_districts_table(doc, placeholder_p, data, category_filter, ta
         pd_val = dist.get("programmeDeliveryScore") or domains.get("PD", "-")
         ta_val = dist.get("threatAssessmentScore") or domains.get("TA", "-")
         total_val = dist.get("totalRiskScore") or dist.get("totalScore", "-")
+        dist_name = dist.get("areaName") or dist.get("districtName") or f"District {dist.get('districtId')}"
+
+        # Determine recommendation (custom or automated based on primary risk driver)
+        rec_action = custom_recs.get(dist_name) or custom_recs.get(str(dist.get("districtId")))
+        if not rec_action:
+            scores = [
+                (float(pi_val) if pi_val != "-" else 0, "Conduct targeted catch-up mop-up; track unimmunized cohorts."),
+                (float(sq_val) if sq_val != "-" else 0, "Intensify active surveillance; retrain focal staff on 48h case investigation."),
+                (float(pd_val) if pd_val != "-" else 0, "Audit defaulter tracking; eliminate vaccine stockouts at facility level."),
+                (float(ta_val) if ta_val != "-" else 0, "Establish rapid response team; cross-border synchronization with neighbours.")
+            ]
+            scores.sort(key=lambda s: s[0], reverse=True)
+            rec_action = scores[0][1]
 
         format_data_cell(row.cells[0], dist.get("provinceName") or "ZAF", align=WD_ALIGN_PARAGRAPH.LEFT, bg_color=bg)
-        format_data_cell(row.cells[1], dist.get("areaName") or dist.get("districtName"), align=WD_ALIGN_PARAGRAPH.LEFT, bold=True, bg_color=bg)
+        format_data_cell(row.cells[1], dist_name, align=WD_ALIGN_PARAGRAPH.LEFT, bold=True, bg_color=bg)
         format_data_cell(row.cells[2], f"{pop_val:,}", align=WD_ALIGN_PARAGRAPH.RIGHT, bg_color=bg)
         format_data_cell(row.cells[3], str(pi_val), align=WD_ALIGN_PARAGRAPH.RIGHT, bg_color=bg)
         format_data_cell(row.cells[4], str(sq_val), align=WD_ALIGN_PARAGRAPH.RIGHT, bg_color=bg)
         format_data_cell(row.cells[5], str(pd_val), align=WD_ALIGN_PARAGRAPH.RIGHT, bg_color=bg)
         format_data_cell(row.cells[6], str(ta_val), align=WD_ALIGN_PARAGRAPH.RIGHT, bg_color=bg)
         format_data_cell(row.cells[7], str(total_val), align=WD_ALIGN_PARAGRAPH.RIGHT, bold=True, color=COLOR_VHR if category_filter=="VERY_HIGH" else COLOR_HR, bg_color=bg)
+        format_data_cell(row.cells[8], rec_action, align=WD_ALIGN_PARAGRAPH.LEFT, font_size=8.5, bg_color=bg)
 
 def build_coverage_distribution_table(doc, placeholder_p, data, vaccine_label):
     # Standard WHO cutoffs
@@ -406,9 +423,15 @@ def generate_report(data, output_path):
     }
 
     # 2. Iterate and process all paragraphs
+    report_cfg = data.get("reportConfig", {})
     paragraphs = list(doc.paragraphs)
     for p in paragraphs:
         text = p.text
+
+        # Custom Background replacement
+        if report_cfg.get("backgroundNarrative") and text.startswith("The World Health Organization (WHO) measles programmatic risk assessment tool identifies"):
+            p.text = report_cfg["backgroundNarrative"]
+            continue
 
         # Text Replacements
         for key, val in value_map.items():
@@ -451,6 +474,33 @@ def generate_report(data, output_path):
         # Shape Replacements (Replace shape placeholders with figure callouts)
         elif "{#Shape" in text or "{#RegionShapes" in text:
             p.text = ""
+
+    # Append Section 6: Strategic Interventions & Official Sign-off if configured
+    if report_cfg.get("strategicPriorities") or report_cfg.get("leadAssessor") or report_cfg.get("epiManager"):
+        p_sec = doc.add_paragraph()
+        p_sec.paragraph_format.space_before = Pt(18)
+        run_sec = p_sec.add_run("Section 6: Strategic Recommendations & National Endorsement")
+        run_sec.bold = True
+        run_sec.font.name = "Calibri"
+        run_sec.font.size = Pt(14)
+        run_sec.font.color.rgb = RGBColor.from_string(COLOR_PRIMARY)
+
+        if report_cfg.get("strategicPriorities"):
+            p_priorities = doc.add_paragraph()
+            p_priorities.paragraph_format.space_before = Pt(6)
+            p_priorities.paragraph_format.space_after = Pt(12)
+            p_priorities.add_run("Strategic Policy Priorities:\n").bold = True
+            p_priorities.add_run(report_cfg["strategicPriorities"])
+
+        # Endorsement Table
+        sign_table = doc.add_table(rows=3, cols=2)
+        sign_table.alignment = WD_TABLE_ALIGNMENT.CENTER
+        format_data_cell(sign_table.rows[0].cells[0], "Lead Assessment Officer:", bold=True, bg_color="F8FAFC")
+        format_data_cell(sign_table.rows[0].cells[1], report_cfg.get("leadAssessor") or "National VPD Epidemiologist")
+        format_data_cell(sign_table.rows[1].cells[0], "National EPI Programme Manager:", bold=True, bg_color="F8FAFC")
+        format_data_cell(sign_table.rows[1].cells[1], report_cfg.get("epiManager") or "Ministry of Health EPI Director")
+        format_data_cell(sign_table.rows[2].cells[0], "Report Endorsement Date:", bold=True, bg_color="F8FAFC")
+        format_data_cell(sign_table.rows[2].cells[1], report_cfg.get("signOffDate") or date_completed)
 
     doc.save(output_path)
     print(f"Report successfully written to {output_path}")
