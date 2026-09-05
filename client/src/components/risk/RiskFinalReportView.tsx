@@ -409,14 +409,14 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
   // Report Tables Column Widths & Resizing Controls (Tables 1b & 1c)
   const DEFAULT_REPORT_COL_WIDTHS = {
     index: 44,
-    province: 130,
-    district: 180,
-    population: 105,
-    pi: 95,
-    sq: 95,
-    pd: 95,
-    ta: 95,
-    total: 100,
+    province: 140,
+    district: 190,
+    population: 110,
+    pi: 185,
+    sq: 185,
+    pd: 220,
+    ta: 180,
+    total: 175,
     rec: 320,
   };
   const [reportColWidths, setReportColWidths] = useState(DEFAULT_REPORT_COL_WIDTHS);
@@ -451,14 +451,14 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
   const handleStretchWideReport = () => {
     setReportColWidths({
       index: 52,
-      province: 160,
-      district: 220,
-      population: 125,
-      pi: 110,
-      sq: 110,
-      pd: 110,
-      ta: 110,
-      total: 120,
+      province: 170,
+      district: 240,
+      population: 130,
+      pi: 220,
+      sq: 220,
+      pd: 260,
+      ta: 220,
+      total: 210,
       rec: 420,
     });
   };
@@ -468,12 +468,12 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
       index: 40,
       province: 110,
       district: 140,
-      population: 85,
-      pi: 75,
-      sq: 75,
-      pd: 75,
-      ta: 75,
-      total: 85,
+      population: 95,
+      pi: 140,
+      sq: 140,
+      pd: 160,
+      ta: 140,
+      total: 130,
       rec: 260,
     });
   };
@@ -902,11 +902,11 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
               </div>
             </div>
             <div className="border rounded-md overflow-hidden shadow-sm">
-              <table className="w-full text-xs text-left border-collapse">
+              <table className="table-auto min-w-full w-full text-xs text-left border-collapse">
                 <thead className="bg-slate-900 text-white font-semibold sticky top-0 z-30">
                   <tr>
                     <th
-                      className="p-2.5 cursor-pointer hover:bg-slate-800 select-none border-r border-slate-700"
+                      className="p-2.5 cursor-pointer hover:bg-slate-800 select-none border-r-2 border-slate-700"
                       onClick={() => handleSort1("category")}
                     >
                       <div className="flex items-center justify-between">
@@ -915,7 +915,7 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
                       </div>
                     </th>
                     <th
-                      className="p-2.5 text-right cursor-pointer hover:bg-slate-800 select-none border-r border-slate-700"
+                      className="p-2.5 text-right cursor-pointer hover:bg-slate-800 select-none border-r-2 border-slate-700"
                       onClick={() => handleSort1("numDistricts")}
                     >
                       <div className="flex items-center justify-end">
@@ -924,7 +924,7 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
                       </div>
                     </th>
                     <th
-                      className="p-2.5 text-right cursor-pointer hover:bg-slate-800 select-none border-r border-slate-700"
+                      className="p-2.5 text-right cursor-pointer hover:bg-slate-800 select-none border-r-2 border-slate-700"
                       onClick={() => handleSort1("pctDistricts")}
                     >
                       <div className="flex items-center justify-end">
@@ -933,7 +933,7 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
                       </div>
                     </th>
                     <th
-                      className="p-2.5 text-right cursor-pointer hover:bg-slate-800 select-none border-r border-slate-700"
+                      className="p-2.5 text-right cursor-pointer hover:bg-slate-800 select-none border-r-2 border-slate-700"
                       onClick={() => handleSort1("population")}
                     >
                       <div className="flex items-center justify-end">
@@ -955,16 +955,16 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
                 <tbody className="divide-y text-foreground">
                   {summaryRows.map((r) => (
                     <tr key={r.key} className={`${r.bg} hover:brightness-95 transition-all`}>
-                      <td className={`p-2.5 font-semibold border-r border-slate-200 dark:border-slate-800 ${r.text}`}>
+                      <td className={`p-2.5 font-semibold border-r-2 border-slate-300 dark:border-slate-800 ${r.text}`}>
                         {r.label}
                       </td>
-                      <td className="p-2.5 text-right font-medium border-r border-slate-200 dark:border-slate-800">
+                      <td className="p-2.5 text-right font-medium border-r-2 border-slate-300 dark:border-slate-800">
                         {r.num}
                       </td>
-                      <td className="p-2.5 text-right font-medium border-r border-slate-200 dark:border-slate-800">
+                      <td className="p-2.5 text-right font-medium border-r-2 border-slate-300 dark:border-slate-800">
                         {r.pct.toFixed(1)}%
                       </td>
-                      <td className="p-2.5 text-right border-r border-slate-200 dark:border-slate-800">
+                      <td className="p-2.5 text-right border-r-2 border-slate-300 dark:border-slate-800">
                         {r.pop.toLocaleString()}
                       </td>
                       <td className="p-2.5 text-right font-medium">
@@ -973,10 +973,10 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
                     </tr>
                   ))}
                   <tr className="bg-slate-100 dark:bg-slate-800 font-bold border-t-2 border-slate-300 dark:border-slate-700">
-                    <td className="p-2.5 border-r border-slate-300 dark:border-slate-700">National Total</td>
-                    <td className="p-2.5 text-right border-r border-slate-300 dark:border-slate-700">{totalDistricts}</td>
-                    <td className="p-2.5 text-right border-r border-slate-300 dark:border-slate-700">100.0%</td>
-                    <td className="p-2.5 text-right border-r border-slate-300 dark:border-slate-700">{totalPopulation.toLocaleString()}</td>
+                    <td className="p-2.5 border-r-2 border-slate-300 dark:border-slate-700">National Total</td>
+                    <td className="p-2.5 text-right border-r-2 border-slate-300 dark:border-slate-700">{totalDistricts}</td>
+                    <td className="p-2.5 text-right border-r-2 border-slate-300 dark:border-slate-700">100.0%</td>
+                    <td className="p-2.5 text-right border-r-2 border-slate-300 dark:border-slate-700">{totalPopulation.toLocaleString()}</td>
                     <td className="p-2.5 text-right">100.0%</td>
                   </tr>
                 </tbody>
@@ -1036,11 +1036,11 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
               </div>
             </div>
             <div className="border rounded-md overflow-x-auto shadow-sm">
-              <table className="w-full text-xs text-left border-collapse">
+              <table className="table-auto min-w-full w-full text-xs text-left border-collapse">
                 <thead className="bg-slate-800 text-white font-semibold sticky top-0 z-30">
                   <tr>
                     <th
-                      className="p-2.5 cursor-pointer hover:bg-slate-700 select-none sticky left-0 z-40 bg-slate-800 border-r border-slate-700 group/th"
+                      className="p-2.5 cursor-pointer hover:bg-slate-700 select-none sticky left-0 z-40 bg-slate-800 border-r-2 border-slate-600 shadow-[4px_0_8px_-2px_rgba(0,0,0,0.15)] group/th"
                       style={{
                         width: `${provColWidths.province}px`,
                         minWidth: `${provColWidths.province}px`,
@@ -1058,7 +1058,7 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
                       />
                     </th>
                     <th
-                      className="p-2.5 text-right text-red-300 cursor-pointer hover:bg-slate-700 select-none border-r border-slate-700 relative group/th"
+                      className="p-2.5 text-right text-red-300 cursor-pointer hover:bg-slate-700 select-none border-r-2 border-slate-600 relative group/th"
                       style={{
                         width: `${provColWidths.veryHigh}px`,
                         minWidth: `${provColWidths.veryHigh}px`,
@@ -1076,7 +1076,7 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
                       />
                     </th>
                     <th
-                      className="p-2.5 text-right text-orange-300 cursor-pointer hover:bg-slate-700 select-none border-r border-slate-700 relative group/th"
+                      className="p-2.5 text-right text-orange-300 cursor-pointer hover:bg-slate-700 select-none border-r-2 border-slate-600 relative group/th"
                       style={{
                         width: `${provColWidths.high}px`,
                         minWidth: `${provColWidths.high}px`,
@@ -1094,7 +1094,7 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
                       />
                     </th>
                     <th
-                      className="p-2.5 text-right text-amber-300 cursor-pointer hover:bg-slate-700 select-none border-r border-slate-700 relative group/th"
+                      className="p-2.5 text-right text-amber-300 cursor-pointer hover:bg-slate-700 select-none border-r-2 border-slate-600 relative group/th"
                       style={{
                         width: `${provColWidths.medium}px`,
                         minWidth: `${provColWidths.medium}px`,
@@ -1112,7 +1112,7 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
                       />
                     </th>
                     <th
-                      className="p-2.5 text-right text-emerald-300 cursor-pointer hover:bg-slate-700 select-none border-r border-slate-700 relative group/th"
+                      className="p-2.5 text-right text-emerald-300 cursor-pointer hover:bg-slate-700 select-none border-r-2 border-slate-600 relative group/th"
                       style={{
                         width: `${provColWidths.low}px`,
                         minWidth: `${provColWidths.low}px`,
@@ -1153,7 +1153,7 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
                   {sortedProvinceBreakdown.map(([prov, c], idx) => (
                     <tr key={prov} className={idx % 2 === 1 ? "bg-slate-50/60 dark:bg-slate-900/40 hover:bg-slate-100/60 dark:hover:bg-slate-800/60" : "hover:bg-slate-50 dark:hover:bg-slate-900/50"}>
                       <td
-                        className="p-2.5 font-medium sticky left-0 z-20 bg-background group-hover:bg-slate-50 dark:group-hover:bg-slate-900 border-r border-slate-200 dark:border-slate-800 truncate"
+                        className="p-2.5 font-medium sticky left-0 z-20 bg-background group-hover:bg-slate-50 dark:group-hover:bg-slate-900 border-r-2 border-slate-300 dark:border-slate-700 shadow-[4px_0_8px_-2px_rgba(0,0,0,0.12)] truncate"
                         style={{
                           width: `${provColWidths.province}px`,
                           minWidth: `${provColWidths.province}px`,
@@ -1162,10 +1162,10 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
                       >
                         {prov}
                       </td>
-                      <td className={`p-2.5 text-right border-r border-slate-200 dark:border-slate-800 ${c.VERY_HIGH > 0 ? "font-bold text-red-600 dark:text-red-400" : "text-muted-foreground"}`}>{c.VERY_HIGH}</td>
-                      <td className={`p-2.5 text-right border-r border-slate-200 dark:border-slate-800 ${c.HIGH > 0 ? "font-bold text-orange-600 dark:text-orange-400" : "text-muted-foreground"}`}>{c.HIGH}</td>
-                      <td className={`p-2.5 text-right border-r border-slate-200 dark:border-slate-800 ${c.MEDIUM > 0 ? "font-bold text-amber-600 dark:text-amber-400" : "text-muted-foreground"}`}>{c.MEDIUM}</td>
-                      <td className={`p-2.5 text-right border-r border-slate-200 dark:border-slate-800 ${c.LOW > 0 ? "font-bold text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"}`}>{c.LOW}</td>
+                      <td className={`p-2.5 text-right border-r-2 border-slate-300 dark:border-slate-700 ${c.VERY_HIGH > 0 ? "font-bold text-red-600 dark:text-red-400" : "text-muted-foreground"}`}>{c.VERY_HIGH}</td>
+                      <td className={`p-2.5 text-right border-r-2 border-slate-300 dark:border-slate-700 ${c.HIGH > 0 ? "font-bold text-orange-600 dark:text-orange-400" : "text-muted-foreground"}`}>{c.HIGH}</td>
+                      <td className={`p-2.5 text-right border-r-2 border-slate-300 dark:border-slate-700 ${c.MEDIUM > 0 ? "font-bold text-amber-600 dark:text-amber-400" : "text-muted-foreground"}`}>{c.MEDIUM}</td>
+                      <td className={`p-2.5 text-right border-r-2 border-slate-300 dark:border-slate-700 ${c.LOW > 0 ? "font-bold text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"}`}>{c.LOW}</td>
                       <td className="p-2.5 text-right font-bold">{c.total}</td>
                     </tr>
                   ))}
@@ -1239,12 +1239,12 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
                 </div>
               </div>
               <div className="border rounded-md overflow-x-auto shadow-sm">
-                <table className="w-full text-xs text-left border-collapse">
+                <table className="table-auto min-w-full w-full text-xs text-left border-collapse">
                   <thead className="bg-red-800 text-white font-semibold sticky top-0 z-30">
                     <tr>
                       {/* FROZEN 1: INDEX */}
                       <th
-                        className="p-2.5 text-center font-semibold border-r border-red-700 sticky top-0 left-0 z-40 bg-red-800 select-none cursor-pointer"
+                        className="p-2.5 text-center font-semibold border-r-2 border-red-700 sticky top-0 left-0 z-40 bg-red-800 select-none cursor-pointer"
                         style={{ width: `${reportColWidths.index}px`, minWidth: `${reportColWidths.index}px`, maxWidth: `${reportColWidths.index}px` }}
                         onClick={() => handleSort1b("index")}
                       >
@@ -1253,7 +1253,7 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
 
                       {/* FROZEN 2: PROVINCE */}
                       <th
-                        className="p-2.5 font-semibold border-r border-red-700 sticky top-0 z-40 bg-red-800 select-none cursor-pointer group/th"
+                        className="p-2.5 font-semibold border-r-2 border-red-700 sticky top-0 z-40 bg-red-800 select-none cursor-pointer group/th"
                         style={{
                           left: `${reportColWidths.index}px`,
                           width: `${reportColWidths.province}px`,
@@ -1296,7 +1296,7 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
                       </th>
 
                       <th
-                        className="p-2.5 text-right font-semibold border-r border-red-700 select-none cursor-pointer relative group/th"
+                        className="p-2.5 text-right font-semibold border-r-2 border-red-700 select-none cursor-pointer relative group/th"
                         style={{ width: `${reportColWidths.population}px`, minWidth: `${reportColWidths.population}px` }}
                         onClick={() => handleSort1b("population")}
                       >
@@ -1312,12 +1312,12 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
                       </th>
 
                       <th
-                        className="p-2.5 text-right font-semibold border-r border-red-700 select-none cursor-pointer relative group/th"
+                        className="p-2.5 text-right font-semibold border-r-2 border-red-700 select-none cursor-pointer relative group/th"
                         style={{ width: `${reportColWidths.pi}px`, minWidth: `${reportColWidths.pi}px` }}
                         onClick={() => handleSort1b("pi")}
                       >
                         <div className="flex items-center justify-end pr-2">
-                          <span>Immunity (40)</span>
+                          <span>Population Immunity (Max 40)</span>
                           {getSortIcon1b("pi")}
                         </div>
                         <div
@@ -1328,12 +1328,12 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
                       </th>
 
                       <th
-                        className="p-2.5 text-right font-semibold border-r border-red-700 select-none cursor-pointer relative group/th"
+                        className="p-2.5 text-right font-semibold border-r-2 border-red-700 select-none cursor-pointer relative group/th"
                         style={{ width: `${reportColWidths.sq}px`, minWidth: `${reportColWidths.sq}px` }}
                         onClick={() => handleSort1b("sq")}
                       >
                         <div className="flex items-center justify-end pr-2">
-                          <span>Surv. (20)</span>
+                          <span>Surveillance Quality (Max 20)</span>
                           {getSortIcon1b("sq")}
                         </div>
                         <div
@@ -1344,12 +1344,12 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
                       </th>
 
                       <th
-                        className="p-2.5 text-right font-semibold border-r border-red-700 select-none cursor-pointer relative group/th"
+                        className="p-2.5 text-right font-semibold border-r-2 border-red-700 select-none cursor-pointer relative group/th"
                         style={{ width: `${reportColWidths.pd}px`, minWidth: `${reportColWidths.pd}px` }}
                         onClick={() => handleSort1b("pd")}
                       >
                         <div className="flex items-center justify-end pr-2">
-                          <span>Delivery (16)</span>
+                          <span>Program Delivery Performance (Max 16)</span>
                           {getSortIcon1b("pd")}
                         </div>
                         <div
@@ -1360,12 +1360,12 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
                       </th>
 
                       <th
-                        className="p-2.5 text-right font-semibold border-r border-red-700 select-none cursor-pointer relative group/th"
+                        className="p-2.5 text-right font-semibold border-r-2 border-red-700 select-none cursor-pointer relative group/th"
                         style={{ width: `${reportColWidths.ta}px`, minWidth: `${reportColWidths.ta}px` }}
                         onClick={() => handleSort1b("ta")}
                       >
                         <div className="flex items-center justify-end pr-2">
-                          <span>Threats (24)</span>
+                          <span>Threat Assessment (Max 24)</span>
                           {getSortIcon1b("ta")}
                         </div>
                         <div
@@ -1376,12 +1376,12 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
                       </th>
 
                       <th
-                        className="p-2.5 text-right font-bold border-r border-red-700 select-none cursor-pointer relative group/th"
+                        className="p-2.5 text-right font-bold border-r-2 border-red-700 select-none cursor-pointer relative group/th"
                         style={{ width: `${reportColWidths.total}px`, minWidth: `${reportColWidths.total}px` }}
                         onClick={() => handleSort1b("total")}
                       >
                         <div className="flex items-center justify-end pr-2">
-                          <span>Total Score</span>
+                          <span>Overall Risk Score (Max 100)</span>
                           {getSortIcon1b("total")}
                         </div>
                         <div
@@ -1407,7 +1407,7 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
                         <tr key={d.id} className="hover:bg-red-50/50 dark:hover:bg-red-950/30 transition-colors group">
                           {/* FROZEN 1: INDEX */}
                           <td
-                            className="p-2.5 text-center text-muted-foreground border-r sticky left-0 z-20 bg-background group-hover:bg-red-50/50 dark:group-hover:bg-red-950/30"
+                            className="p-2.5 text-center text-muted-foreground border-r-2 border-slate-300 dark:border-slate-700 sticky left-0 z-20 bg-background group-hover:bg-red-50/50 dark:group-hover:bg-red-950/30"
                             style={{ width: `${reportColWidths.index}px`, minWidth: `${reportColWidths.index}px`, maxWidth: `${reportColWidths.index}px` }}
                           >
                             {idx + 1}
@@ -1415,7 +1415,7 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
 
                           {/* FROZEN 2: PROVINCE */}
                           <td
-                            className="p-2.5 text-muted-foreground border-r whitespace-nowrap sticky z-20 bg-background group-hover:bg-red-50/50 dark:group-hover:bg-red-950/30 font-medium"
+                            className="p-2.5 text-muted-foreground border-r-2 border-slate-300 dark:border-slate-700 whitespace-nowrap sticky z-20 bg-background group-hover:bg-red-50/50 dark:group-hover:bg-red-950/30 font-medium"
                             style={{
                               left: `${reportColWidths.index}px`,
                               width: `${reportColWidths.province}px`,
@@ -1430,7 +1430,7 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
 
                           {/* FROZEN 3: DISTRICT (WITH SHADOW DIVIDER) */}
                           <td
-                            className="p-2.5 font-bold border-r-2 border-slate-300 dark:border-slate-700 shadow-[4px_0_8px_-2px_rgba(0,0,0,0.15)] whitespace-nowrap sticky z-20 bg-background group-hover:bg-red-50/50 dark:group-hover:bg-red-950/30 text-foreground"
+                            className="p-2.5 font-bold border-r-2 border-slate-400 dark:border-slate-600 shadow-[4px_0_8px_-2px_rgba(0,0,0,0.15)] whitespace-nowrap sticky z-20 bg-background group-hover:bg-red-50/50 dark:group-hover:bg-red-950/30 text-foreground"
                             style={{
                               left: `${reportColWidths.index + reportColWidths.province}px`,
                               width: `${reportColWidths.district}px`,
@@ -1443,12 +1443,12 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
                             </span>
                           </td>
 
-                          <td className="p-2.5 text-right text-muted-foreground border-r">{(Number(d.population) || 0).toLocaleString()}</td>
-                          <td className="p-2.5 text-right border-r font-mono">{d.populationImmunityScore || domains.PI || "-"}</td>
-                          <td className="p-2.5 text-right border-r font-mono">{d.surveillanceQualityScore || domains.SQ || "-"}</td>
-                          <td className="p-2.5 text-right border-r font-mono">{d.programmeDeliveryScore || domains.PD || "-"}</td>
-                          <td className="p-2.5 text-right border-r font-mono">{d.threatAssessmentScore || domains.TA || "-"}</td>
-                          <td className="p-2.5 text-right font-bold text-red-600 dark:text-red-400 border-r font-mono">
+                          <td className="p-2.5 text-right text-muted-foreground border-r-2 border-slate-300 dark:border-slate-700">{(Number(d.population) || 0).toLocaleString()}</td>
+                          <td className="p-2.5 text-right border-r-2 border-slate-300 dark:border-slate-700 font-mono">{d.populationImmunityScore || domains.PI || "-"}</td>
+                          <td className="p-2.5 text-right border-r-2 border-slate-300 dark:border-slate-700 font-mono">{d.surveillanceQualityScore || domains.SQ || "-"}</td>
+                          <td className="p-2.5 text-right border-r-2 border-slate-300 dark:border-slate-700 font-mono">{d.programmeDeliveryScore || domains.PD || "-"}</td>
+                          <td className="p-2.5 text-right border-r-2 border-slate-300 dark:border-slate-700 font-mono">{d.threatAssessmentScore || domains.TA || "-"}</td>
+                          <td className="p-2.5 text-right font-bold text-red-600 dark:text-red-400 border-r-2 border-slate-300 dark:border-slate-700 font-mono">
                             {d.totalRiskScore || d.totalScore || d.riskScore}
                           </td>
                           <td className="p-2.5 text-muted-foreground text-xs leading-relaxed">{rec}</td>
@@ -1482,12 +1482,12 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
                 </div>
               </div>
               <div className="border rounded-md overflow-x-auto shadow-sm">
-                <table className="w-full text-xs text-left border-collapse">
+                <table className="table-auto min-w-full w-full text-xs text-left border-collapse">
                   <thead className="bg-orange-800 text-white font-semibold sticky top-0 z-30">
                     <tr>
                       {/* FROZEN 1: INDEX */}
                       <th
-                        className="p-2.5 text-center font-semibold border-r border-orange-700 sticky top-0 left-0 z-40 bg-orange-800 select-none cursor-pointer"
+                        className="p-2.5 text-center font-semibold border-r-2 border-orange-700 sticky top-0 left-0 z-40 bg-orange-800 select-none cursor-pointer"
                         style={{ width: `${reportColWidths.index}px`, minWidth: `${reportColWidths.index}px`, maxWidth: `${reportColWidths.index}px` }}
                         onClick={() => handleSort1c("index")}
                       >
@@ -1496,7 +1496,7 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
 
                       {/* FROZEN 2: PROVINCE */}
                       <th
-                        className="p-2.5 font-semibold border-r border-orange-700 sticky top-0 z-40 bg-orange-800 select-none cursor-pointer group/th"
+                        className="p-2.5 font-semibold border-r-2 border-orange-700 sticky top-0 z-40 bg-orange-800 select-none cursor-pointer group/th"
                         style={{
                           left: `${reportColWidths.index}px`,
                           width: `${reportColWidths.province}px`,
@@ -1539,7 +1539,7 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
                       </th>
 
                       <th
-                        className="p-2.5 text-right font-semibold border-r border-orange-700 select-none cursor-pointer relative group/th"
+                        className="p-2.5 text-right font-semibold border-r-2 border-orange-700 select-none cursor-pointer relative group/th"
                         style={{ width: `${reportColWidths.population}px`, minWidth: `${reportColWidths.population}px` }}
                         onClick={() => handleSort1c("population")}
                       >
@@ -1555,12 +1555,12 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
                       </th>
 
                       <th
-                        className="p-2.5 text-right font-semibold border-r border-orange-700 select-none cursor-pointer relative group/th"
+                        className="p-2.5 text-right font-semibold border-r-2 border-orange-700 select-none cursor-pointer relative group/th"
                         style={{ width: `${reportColWidths.pi}px`, minWidth: `${reportColWidths.pi}px` }}
                         onClick={() => handleSort1c("pi")}
                       >
                         <div className="flex items-center justify-end pr-2">
-                          <span>Immunity (40)</span>
+                          <span>Population Immunity (Max 40)</span>
                           {getSortIcon1c("pi")}
                         </div>
                         <div
@@ -1571,12 +1571,12 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
                       </th>
 
                       <th
-                        className="p-2.5 text-right font-semibold border-r border-orange-700 select-none cursor-pointer relative group/th"
+                        className="p-2.5 text-right font-semibold border-r-2 border-orange-700 select-none cursor-pointer relative group/th"
                         style={{ width: `${reportColWidths.sq}px`, minWidth: `${reportColWidths.sq}px` }}
                         onClick={() => handleSort1c("sq")}
                       >
                         <div className="flex items-center justify-end pr-2">
-                          <span>Surv. (20)</span>
+                          <span>Surveillance Quality (Max 20)</span>
                           {getSortIcon1c("sq")}
                         </div>
                         <div
@@ -1587,12 +1587,12 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
                       </th>
 
                       <th
-                        className="p-2.5 text-right font-semibold border-r border-orange-700 select-none cursor-pointer relative group/th"
+                        className="p-2.5 text-right font-semibold border-r-2 border-orange-700 select-none cursor-pointer relative group/th"
                         style={{ width: `${reportColWidths.pd}px`, minWidth: `${reportColWidths.pd}px` }}
                         onClick={() => handleSort1c("pd")}
                       >
                         <div className="flex items-center justify-end pr-2">
-                          <span>Delivery (16)</span>
+                          <span>Program Delivery Performance (Max 16)</span>
                           {getSortIcon1c("pd")}
                         </div>
                         <div
@@ -1603,13 +1603,13 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
                       </th>
 
                       <th
-                        className="p-2.5 text-right font-semibold border-r border-orange-700 select-none cursor-pointer relative group/th"
+                        className="p-2.5 text-right font-semibold border-r-2 border-orange-700 select-none cursor-pointer relative group/th"
                         style={{ width: `${reportColWidths.ta}px`, minWidth: `${reportColWidths.ta}px` }}
                         onClick={() => handleSort1c("ta")}
                       >
                         <div className="flex items-center justify-end pr-2">
-                          <span>Threats (24)</span>
-                          {getSortIcon1c("ta")}
+                          <span>Threat Assessment (Max 24)</span>
+                          {getSortIcon1b("ta") /* wait, handleSort1c */}
                         </div>
                         <div
                           className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-white/50 active:bg-white z-50 select-none transition-colors"
@@ -1619,12 +1619,12 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
                       </th>
 
                       <th
-                        className="p-2.5 text-right font-bold border-r border-orange-700 select-none cursor-pointer relative group/th"
+                        className="p-2.5 text-right font-bold border-r-2 border-orange-700 select-none cursor-pointer relative group/th"
                         style={{ width: `${reportColWidths.total}px`, minWidth: `${reportColWidths.total}px` }}
                         onClick={() => handleSort1c("total")}
                       >
                         <div className="flex items-center justify-end pr-2">
-                          <span>Total Score</span>
+                          <span>Overall Risk Score (Max 100)</span>
                           {getSortIcon1c("total")}
                         </div>
                         <div
@@ -1650,7 +1650,7 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
                         <tr key={d.id} className="hover:bg-orange-50/50 dark:hover:bg-orange-950/30 transition-colors group">
                           {/* FROZEN 1: INDEX */}
                           <td
-                            className="p-2.5 text-center text-muted-foreground border-r sticky left-0 z-20 bg-background group-hover:bg-orange-50/50 dark:group-hover:bg-orange-950/30"
+                            className="p-2.5 text-center text-muted-foreground border-r-2 border-slate-300 dark:border-slate-700 sticky left-0 z-20 bg-background group-hover:bg-orange-50/50 dark:group-hover:bg-orange-950/30"
                             style={{ width: `${reportColWidths.index}px`, minWidth: `${reportColWidths.index}px`, maxWidth: `${reportColWidths.index}px` }}
                           >
                             {idx + 1}
@@ -1658,7 +1658,7 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
 
                           {/* FROZEN 2: PROVINCE */}
                           <td
-                            className="p-2.5 text-muted-foreground border-r whitespace-nowrap sticky z-20 bg-background group-hover:bg-orange-50/50 dark:group-hover:bg-orange-950/30 font-medium"
+                            className="p-2.5 text-muted-foreground border-r-2 border-slate-300 dark:border-slate-700 whitespace-nowrap sticky z-20 bg-background group-hover:bg-orange-50/50 dark:group-hover:bg-orange-950/30 font-medium"
                             style={{
                               left: `${reportColWidths.index}px`,
                               width: `${reportColWidths.province}px`,
@@ -1673,7 +1673,7 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
 
                           {/* FROZEN 3: DISTRICT (WITH SHADOW DIVIDER) */}
                           <td
-                            className="p-2.5 font-bold border-r-2 border-slate-300 dark:border-slate-700 shadow-[4px_0_8px_-2px_rgba(0,0,0,0.15)] whitespace-nowrap sticky z-20 bg-background group-hover:bg-orange-50/50 dark:group-hover:bg-orange-950/30 text-foreground"
+                            className="p-2.5 font-bold border-r-2 border-slate-400 dark:border-slate-600 shadow-[4px_0_8px_-2px_rgba(0,0,0,0.15)] whitespace-nowrap sticky z-20 bg-background group-hover:bg-orange-50/50 dark:group-hover:bg-orange-950/30 text-foreground"
                             style={{
                               left: `${reportColWidths.index + reportColWidths.province}px`,
                               width: `${reportColWidths.district}px`,
@@ -1686,12 +1686,12 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
                             </span>
                           </td>
 
-                          <td className="p-2.5 text-right text-muted-foreground border-r">{(Number(d.population) || 0).toLocaleString()}</td>
-                          <td className="p-2.5 text-right border-r font-mono">{d.populationImmunityScore || domains.PI || "-"}</td>
-                          <td className="p-2.5 text-right border-r font-mono">{d.surveillanceQualityScore || domains.SQ || "-"}</td>
-                          <td className="p-2.5 text-right border-r font-mono">{d.programmeDeliveryScore || domains.PD || "-"}</td>
-                          <td className="p-2.5 text-right border-r font-mono">{d.threatAssessmentScore || domains.TA || "-"}</td>
-                          <td className="p-2.5 text-right font-bold text-orange-600 dark:text-orange-400 border-r font-mono">
+                          <td className="p-2.5 text-right text-muted-foreground border-r-2 border-slate-300 dark:border-slate-700">{(Number(d.population) || 0).toLocaleString()}</td>
+                          <td className="p-2.5 text-right border-r-2 border-slate-300 dark:border-slate-700 font-mono">{d.populationImmunityScore || domains.PI || "-"}</td>
+                          <td className="p-2.5 text-right border-r-2 border-slate-300 dark:border-slate-700 font-mono">{d.surveillanceQualityScore || domains.SQ || "-"}</td>
+                          <td className="p-2.5 text-right border-r-2 border-slate-300 dark:border-slate-700 font-mono">{d.programmeDeliveryScore || domains.PD || "-"}</td>
+                          <td className="p-2.5 text-right border-r-2 border-slate-300 dark:border-slate-700 font-mono">{d.threatAssessmentScore || domains.TA || "-"}</td>
+                          <td className="p-2.5 text-right font-bold text-orange-600 dark:text-orange-400 border-r-2 border-slate-300 dark:border-slate-700 font-mono">
                             {d.totalRiskScore || d.totalScore || d.riskScore}
                           </td>
                           <td className="p-2.5 text-muted-foreground text-xs leading-relaxed">{rec}</td>
@@ -1725,12 +1725,12 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
                 </div>
               </div>
               <div className="border rounded-md overflow-x-auto shadow-sm">
-                <table className="w-full text-xs text-left border-collapse">
+                <table className="table-auto min-w-full w-full text-xs text-left border-collapse">
                   <thead className="bg-amber-800 text-white font-semibold sticky top-0 z-30">
                     <tr>
                       {/* FROZEN 1: INDEX */}
                       <th
-                        className="p-2.5 text-center font-semibold border-r border-amber-700 sticky top-0 left-0 z-40 bg-amber-800 select-none cursor-pointer"
+                        className="p-2.5 text-center font-semibold border-r-2 border-amber-700 sticky top-0 left-0 z-40 bg-amber-800 select-none cursor-pointer"
                         style={{ width: `${reportColWidths.index}px`, minWidth: `${reportColWidths.index}px`, maxWidth: `${reportColWidths.index}px` }}
                         onClick={() => handleSort1d("index")}
                       >
@@ -1739,7 +1739,7 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
 
                       {/* FROZEN 2: PROVINCE */}
                       <th
-                        className="p-2.5 font-semibold border-r border-amber-700 sticky top-0 z-40 bg-amber-800 select-none cursor-pointer group/th"
+                        className="p-2.5 font-semibold border-r-2 border-amber-700 sticky top-0 z-40 bg-amber-800 select-none cursor-pointer group/th"
                         style={{
                           left: `${reportColWidths.index}px`,
                           width: `${reportColWidths.province}px`,
@@ -1782,7 +1782,7 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
                       </th>
 
                       <th
-                        className="p-2.5 text-right font-semibold border-r border-amber-700 select-none cursor-pointer relative group/th"
+                        className="p-2.5 text-right font-semibold border-r-2 border-amber-700 select-none cursor-pointer relative group/th"
                         style={{ width: `${reportColWidths.population}px`, minWidth: `${reportColWidths.population}px` }}
                         onClick={() => handleSort1d("population")}
                       >
@@ -1798,12 +1798,12 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
                       </th>
 
                       <th
-                        className="p-2.5 text-right font-semibold border-r border-amber-700 select-none cursor-pointer relative group/th"
+                        className="p-2.5 text-right font-semibold border-r-2 border-amber-700 select-none cursor-pointer relative group/th"
                         style={{ width: `${reportColWidths.pi}px`, minWidth: `${reportColWidths.pi}px` }}
                         onClick={() => handleSort1d("pi")}
                       >
                         <div className="flex items-center justify-end pr-2">
-                          <span>Immunity (40)</span>
+                          <span>Population Immunity (Max 40)</span>
                           {getSortIcon1d("pi")}
                         </div>
                         <div
@@ -1814,12 +1814,12 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
                       </th>
 
                       <th
-                        className="p-2.5 text-right font-semibold border-r border-amber-700 select-none cursor-pointer relative group/th"
+                        className="p-2.5 text-right font-semibold border-r-2 border-amber-700 select-none cursor-pointer relative group/th"
                         style={{ width: `${reportColWidths.sq}px`, minWidth: `${reportColWidths.sq}px` }}
                         onClick={() => handleSort1d("sq")}
                       >
                         <div className="flex items-center justify-end pr-2">
-                          <span>Surv. (20)</span>
+                          <span>Surveillance Quality (Max 20)</span>
                           {getSortIcon1d("sq")}
                         </div>
                         <div
@@ -1830,12 +1830,12 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
                       </th>
 
                       <th
-                        className="p-2.5 text-right font-semibold border-r border-amber-700 select-none cursor-pointer relative group/th"
+                        className="p-2.5 text-right font-semibold border-r-2 border-amber-700 select-none cursor-pointer relative group/th"
                         style={{ width: `${reportColWidths.pd}px`, minWidth: `${reportColWidths.pd}px` }}
                         onClick={() => handleSort1d("pd")}
                       >
                         <div className="flex items-center justify-end pr-2">
-                          <span>Delivery (16)</span>
+                          <span>Program Delivery Performance (Max 16)</span>
                           {getSortIcon1d("pd")}
                         </div>
                         <div
@@ -1846,12 +1846,12 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
                       </th>
 
                       <th
-                        className="p-2.5 text-right font-semibold border-r border-amber-700 select-none cursor-pointer relative group/th"
+                        className="p-2.5 text-right font-semibold border-r-2 border-amber-700 select-none cursor-pointer relative group/th"
                         style={{ width: `${reportColWidths.ta}px`, minWidth: `${reportColWidths.ta}px` }}
                         onClick={() => handleSort1d("ta")}
                       >
                         <div className="flex items-center justify-end pr-2">
-                          <span>Threats (24)</span>
+                          <span>Threat Assessment (Max 24)</span>
                           {getSortIcon1d("ta")}
                         </div>
                         <div
@@ -1862,12 +1862,12 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
                       </th>
 
                       <th
-                        className="p-2.5 text-right font-bold border-r border-amber-700 select-none cursor-pointer relative group/th"
+                        className="p-2.5 text-right font-bold border-r-2 border-amber-700 select-none cursor-pointer relative group/th"
                         style={{ width: `${reportColWidths.total}px`, minWidth: `${reportColWidths.total}px` }}
                         onClick={() => handleSort1d("total")}
                       >
                         <div className="flex items-center justify-end pr-2">
-                          <span>Total Score</span>
+                          <span>Overall Risk Score (Max 100)</span>
                           {getSortIcon1d("total")}
                         </div>
                         <div
@@ -1893,7 +1893,7 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
                         <tr key={d.id} className="hover:bg-amber-50/50 dark:hover:bg-amber-950/30 transition-colors group">
                           {/* FROZEN 1: INDEX */}
                           <td
-                            className="p-2.5 text-center text-muted-foreground border-r sticky left-0 z-20 bg-background group-hover:bg-amber-50/50 dark:group-hover:bg-amber-950/30"
+                            className="p-2.5 text-center text-muted-foreground border-r-2 border-slate-300 dark:border-slate-700 sticky left-0 z-20 bg-background group-hover:bg-amber-50/50 dark:group-hover:bg-amber-950/30"
                             style={{ width: `${reportColWidths.index}px`, minWidth: `${reportColWidths.index}px`, maxWidth: `${reportColWidths.index}px` }}
                           >
                             {idx + 1}
@@ -1901,7 +1901,7 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
 
                           {/* FROZEN 2: PROVINCE */}
                           <td
-                            className="p-2.5 text-muted-foreground border-r whitespace-nowrap sticky z-20 bg-background group-hover:bg-amber-50/50 dark:group-hover:bg-amber-950/30 font-medium"
+                            className="p-2.5 text-muted-foreground border-r-2 border-slate-300 dark:border-slate-700 whitespace-nowrap sticky z-20 bg-background group-hover:bg-amber-50/50 dark:group-hover:bg-amber-950/30 font-medium"
                             style={{
                               left: `${reportColWidths.index}px`,
                               width: `${reportColWidths.province}px`,
@@ -1916,7 +1916,7 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
 
                           {/* FROZEN 3: DISTRICT (WITH SHADOW DIVIDER) */}
                           <td
-                            className="p-2.5 font-bold border-r-2 border-slate-300 dark:border-slate-700 shadow-[4px_0_8px_-2px_rgba(0,0,0,0.15)] whitespace-nowrap sticky z-20 bg-background group-hover:bg-amber-50/50 dark:group-hover:bg-amber-950/30 text-foreground"
+                            className="p-2.5 font-bold border-r-2 border-slate-400 dark:border-slate-600 shadow-[4px_0_8px_-2px_rgba(0,0,0,0.15)] whitespace-nowrap sticky z-20 bg-background group-hover:bg-amber-50/50 dark:group-hover:bg-amber-950/30 text-foreground"
                             style={{
                               left: `${reportColWidths.index + reportColWidths.province}px`,
                               width: `${reportColWidths.district}px`,
@@ -1929,12 +1929,12 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
                             </span>
                           </td>
 
-                          <td className="p-2.5 text-right text-muted-foreground border-r">{(Number(d.population) || 0).toLocaleString()}</td>
-                          <td className="p-2.5 text-right border-r font-mono">{d.populationImmunityScore || domains.PI || "-"}</td>
-                          <td className="p-2.5 text-right border-r font-mono">{d.surveillanceQualityScore || domains.SQ || "-"}</td>
-                          <td className="p-2.5 text-right border-r font-mono">{d.programmeDeliveryScore || domains.PD || "-"}</td>
-                          <td className="p-2.5 text-right border-r font-mono">{d.threatAssessmentScore || domains.TA || "-"}</td>
-                          <td className="p-2.5 text-right font-bold text-amber-600 dark:text-amber-400 border-r font-mono">
+                          <td className="p-2.5 text-right text-muted-foreground border-r-2 border-slate-300 dark:border-slate-700">{(Number(d.population) || 0).toLocaleString()}</td>
+                          <td className="p-2.5 text-right border-r-2 border-slate-300 dark:border-slate-700 font-mono">{d.populationImmunityScore || domains.PI || "-"}</td>
+                          <td className="p-2.5 text-right border-r-2 border-slate-300 dark:border-slate-700 font-mono">{d.surveillanceQualityScore || domains.SQ || "-"}</td>
+                          <td className="p-2.5 text-right border-r-2 border-slate-300 dark:border-slate-700 font-mono">{d.programmeDeliveryScore || domains.PD || "-"}</td>
+                          <td className="p-2.5 text-right border-r-2 border-slate-300 dark:border-slate-700 font-mono">{d.threatAssessmentScore || domains.TA || "-"}</td>
+                          <td className="p-2.5 text-right font-bold text-amber-600 dark:text-amber-400 border-r-2 border-slate-300 dark:border-slate-700 font-mono">
                             {d.totalRiskScore || d.totalScore || d.riskScore}
                           </td>
                           <td className="p-2.5 text-muted-foreground text-xs leading-relaxed">{rec}</td>
@@ -1968,12 +1968,12 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
                 </div>
               </div>
               <div className="border rounded-md overflow-x-auto shadow-sm">
-                <table className="w-full text-xs text-left border-collapse">
+                <table className="table-auto min-w-full w-full text-xs text-left border-collapse">
                   <thead className="bg-emerald-800 text-white font-semibold sticky top-0 z-30">
                     <tr>
                       {/* FROZEN 1: INDEX */}
                       <th
-                        className="p-2.5 text-center font-semibold border-r border-emerald-700 sticky top-0 left-0 z-40 bg-emerald-800 select-none cursor-pointer"
+                        className="p-2.5 text-center font-semibold border-r-2 border-emerald-700 sticky top-0 left-0 z-40 bg-emerald-800 select-none cursor-pointer"
                         style={{ width: `${reportColWidths.index}px`, minWidth: `${reportColWidths.index}px`, maxWidth: `${reportColWidths.index}px` }}
                         onClick={() => handleSort1e("index")}
                       >
@@ -1982,7 +1982,7 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
 
                       {/* FROZEN 2: PROVINCE */}
                       <th
-                        className="p-2.5 font-semibold border-r border-emerald-700 sticky top-0 z-40 bg-emerald-800 select-none cursor-pointer group/th"
+                        className="p-2.5 font-semibold border-r-2 border-emerald-700 sticky top-0 z-40 bg-emerald-800 select-none cursor-pointer group/th"
                         style={{
                           left: `${reportColWidths.index}px`,
                           width: `${reportColWidths.province}px`,
@@ -2004,7 +2004,7 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
 
                       {/* FROZEN 3: DISTRICT (WITH SHADOW DIVIDER) */}
                       <th
-                        className="p-2.5 font-semibold border-r-2 border-slate-400 dark:border-slate-600 shadow-[4px_0_8px_-2px_rgba(0,0,0,0.2)] sticky top-0 z-40 bg-emerald-800 select-none cursor-pointer group/th"
+                        className="p-2.5 font-bold border-r-2 border-emerald-700 shadow-[4px_0_8px_-2px_rgba(0,0,0,0.2)] sticky top-0 z-40 bg-emerald-800 select-none cursor-pointer group/th"
                         style={{
                           left: `${reportColWidths.index + reportColWidths.province}px`,
                           width: `${reportColWidths.district}px`,
@@ -2025,7 +2025,7 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
                       </th>
 
                       <th
-                        className="p-2.5 text-right font-semibold border-r border-emerald-700 select-none cursor-pointer relative group/th"
+                        className="p-2.5 text-right font-semibold border-r-2 border-emerald-700 select-none cursor-pointer relative group/th"
                         style={{ width: `${reportColWidths.population}px`, minWidth: `${reportColWidths.population}px` }}
                         onClick={() => handleSort1e("population")}
                       >
@@ -2041,12 +2041,12 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
                       </th>
 
                       <th
-                        className="p-2.5 text-right font-semibold border-r border-emerald-700 select-none cursor-pointer relative group/th"
+                        className="p-2.5 text-right font-semibold border-r-2 border-emerald-700 select-none cursor-pointer relative group/th"
                         style={{ width: `${reportColWidths.pi}px`, minWidth: `${reportColWidths.pi}px` }}
                         onClick={() => handleSort1e("pi")}
                       >
                         <div className="flex items-center justify-end pr-2">
-                          <span>Immunity (40)</span>
+                          <span>Population Immunity (Max 40)</span>
                           {getSortIcon1e("pi")}
                         </div>
                         <div
@@ -2057,12 +2057,12 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
                       </th>
 
                       <th
-                        className="p-2.5 text-right font-semibold border-r border-emerald-700 select-none cursor-pointer relative group/th"
+                        className="p-2.5 text-right font-semibold border-r-2 border-emerald-700 select-none cursor-pointer relative group/th"
                         style={{ width: `${reportColWidths.sq}px`, minWidth: `${reportColWidths.sq}px` }}
                         onClick={() => handleSort1e("sq")}
                       >
                         <div className="flex items-center justify-end pr-2">
-                          <span>Surv. (20)</span>
+                          <span>Surveillance Quality (Max 20)</span>
                           {getSortIcon1e("sq")}
                         </div>
                         <div
@@ -2073,12 +2073,12 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
                       </th>
 
                       <th
-                        className="p-2.5 text-right font-semibold border-r border-emerald-700 select-none cursor-pointer relative group/th"
+                        className="p-2.5 text-right font-semibold border-r-2 border-emerald-700 select-none cursor-pointer relative group/th"
                         style={{ width: `${reportColWidths.pd}px`, minWidth: `${reportColWidths.pd}px` }}
                         onClick={() => handleSort1e("pd")}
                       >
                         <div className="flex items-center justify-end pr-2">
-                          <span>Delivery (16)</span>
+                          <span>Program Delivery Performance (Max 16)</span>
                           {getSortIcon1e("pd")}
                         </div>
                         <div
@@ -2089,12 +2089,12 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
                       </th>
 
                       <th
-                        className="p-2.5 text-right font-semibold border-r border-emerald-700 select-none cursor-pointer relative group/th"
+                        className="p-2.5 text-right font-semibold border-r-2 border-emerald-700 select-none cursor-pointer relative group/th"
                         style={{ width: `${reportColWidths.ta}px`, minWidth: `${reportColWidths.ta}px` }}
                         onClick={() => handleSort1e("ta")}
                       >
                         <div className="flex items-center justify-end pr-2">
-                          <span>Threats (24)</span>
+                          <span>Threat Assessment (Max 24)</span>
                           {getSortIcon1e("ta")}
                         </div>
                         <div
@@ -2105,12 +2105,12 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
                       </th>
 
                       <th
-                        className="p-2.5 text-right font-bold border-r border-emerald-700 select-none cursor-pointer relative group/th"
+                        className="p-2.5 text-right font-bold border-r-2 border-emerald-700 select-none cursor-pointer relative group/th"
                         style={{ width: `${reportColWidths.total}px`, minWidth: `${reportColWidths.total}px` }}
                         onClick={() => handleSort1e("total")}
                       >
                         <div className="flex items-center justify-end pr-2">
-                          <span>Total Score</span>
+                          <span>Overall Risk Score (Max 100)</span>
                           {getSortIcon1e("total")}
                         </div>
                         <div
@@ -2124,7 +2124,7 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
                         className="p-2.5 font-semibold"
                         style={{ width: `${reportColWidths.rec}px`, minWidth: `${reportColWidths.rec}px` }}
                       >
-                        Recommended Maintenance & Monitoring
+                        Recommended Interventions
                       </th>
                     </tr>
                   </thead>
@@ -2136,7 +2136,7 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
                         <tr key={d.id} className="hover:bg-emerald-50/50 dark:hover:bg-emerald-950/30 transition-colors group">
                           {/* FROZEN 1: INDEX */}
                           <td
-                            className="p-2.5 text-center text-muted-foreground border-r sticky left-0 z-20 bg-background group-hover:bg-emerald-50/50 dark:group-hover:bg-emerald-950/30"
+                            className="p-2.5 text-center text-muted-foreground border-r-2 border-slate-300 dark:border-slate-700 sticky left-0 z-20 bg-background group-hover:bg-emerald-50/50 dark:group-hover:bg-emerald-950/30"
                             style={{ width: `${reportColWidths.index}px`, minWidth: `${reportColWidths.index}px`, maxWidth: `${reportColWidths.index}px` }}
                           >
                             {idx + 1}
@@ -2144,7 +2144,7 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
 
                           {/* FROZEN 2: PROVINCE */}
                           <td
-                            className="p-2.5 text-muted-foreground border-r whitespace-nowrap sticky z-20 bg-background group-hover:bg-emerald-50/50 dark:group-hover:bg-emerald-950/30 font-medium"
+                            className="p-2.5 text-muted-foreground border-r-2 border-slate-300 dark:border-slate-700 whitespace-nowrap sticky z-20 bg-background group-hover:bg-emerald-50/50 dark:group-hover:bg-emerald-950/30 font-medium"
                             style={{
                               left: `${reportColWidths.index}px`,
                               width: `${reportColWidths.province}px`,
@@ -2159,7 +2159,7 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
 
                           {/* FROZEN 3: DISTRICT (WITH SHADOW DIVIDER) */}
                           <td
-                            className="p-2.5 font-bold border-r-2 border-slate-300 dark:border-slate-700 shadow-[4px_0_8px_-2px_rgba(0,0,0,0.15)] whitespace-nowrap sticky z-20 bg-background group-hover:bg-emerald-50/50 dark:group-hover:bg-emerald-950/30 text-foreground"
+                            className="p-2.5 font-bold border-r-2 border-slate-400 dark:border-slate-600 shadow-[4px_0_8px_-2px_rgba(0,0,0,0.15)] whitespace-nowrap sticky z-20 bg-background group-hover:bg-emerald-50/50 dark:group-hover:bg-emerald-950/30 text-foreground"
                             style={{
                               left: `${reportColWidths.index + reportColWidths.province}px`,
                               width: `${reportColWidths.district}px`,
@@ -2172,12 +2172,12 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
                             </span>
                           </td>
 
-                          <td className="p-2.5 text-right text-muted-foreground border-r">{(Number(d.population) || 0).toLocaleString()}</td>
-                          <td className="p-2.5 text-right border-r font-mono">{d.populationImmunityScore || domains.PI || "-"}</td>
-                          <td className="p-2.5 text-right border-r font-mono">{d.surveillanceQualityScore || domains.SQ || "-"}</td>
-                          <td className="p-2.5 text-right border-r font-mono">{d.programmeDeliveryScore || domains.PD || "-"}</td>
-                          <td className="p-2.5 text-right border-r font-mono">{d.threatAssessmentScore || domains.TA || "-"}</td>
-                          <td className="p-2.5 text-right font-bold text-emerald-600 dark:text-emerald-400 border-r font-mono">
+                          <td className="p-2.5 text-right text-muted-foreground border-r-2 border-slate-300 dark:border-slate-700">{(Number(d.population) || 0).toLocaleString()}</td>
+                          <td className="p-2.5 text-right border-r-2 border-slate-300 dark:border-slate-700 font-mono">{d.populationImmunityScore || domains.PI || "-"}</td>
+                          <td className="p-2.5 text-right border-r-2 border-slate-300 dark:border-slate-700 font-mono">{d.surveillanceQualityScore || domains.SQ || "-"}</td>
+                          <td className="p-2.5 text-right border-r-2 border-slate-300 dark:border-slate-700 font-mono">{d.programmeDeliveryScore || domains.PD || "-"}</td>
+                          <td className="p-2.5 text-right border-r-2 border-slate-300 dark:border-slate-700 font-mono">{d.threatAssessmentScore || domains.TA || "-"}</td>
+                          <td className="p-2.5 text-right font-bold text-emerald-600 dark:text-emerald-400 border-r-2 border-slate-300 dark:border-slate-700 font-mono">
                             {d.totalRiskScore || d.totalScore || d.riskScore}
                           </td>
                           <td className="p-2.5 text-muted-foreground text-xs leading-relaxed">{rec}</td>

@@ -117,15 +117,15 @@ export default function RiskResultsWorkspace() {
   // Column Widths & Resizing Controls
   const DEFAULT_COL_WIDTHS = {
     index: 48,
-    district: 180,
-    province: 140,
-    population: 110,
-    pi: 115,
-    sq: 115,
-    pd: 115,
-    ta: 115,
-    total: 130,
-    category: 140,
+    district: 190,
+    province: 150,
+    population: 120,
+    pi: 185,
+    sq: 185,
+    pd: 220,
+    ta: 180,
+    total: 175,
+    category: 145,
     actions: 180,
   };
   const [colWidths, setColWidths] = useState(DEFAULT_COL_WIDTHS);
@@ -164,12 +164,12 @@ export default function RiskResultsWorkspace() {
       index: 54,
       district: 240,
       province: 180,
-      population: 130,
-      pi: 140,
-      sq: 140,
-      pd: 140,
-      ta: 140,
-      total: 160,
+      population: 140,
+      pi: 220,
+      sq: 220,
+      pd: 260,
+      ta: 220,
+      total: 210,
       category: 170,
       actions: 210,
     });
@@ -180,12 +180,12 @@ export default function RiskResultsWorkspace() {
       index: 44,
       district: 140,
       province: 110,
-      population: 90,
-      pi: 90,
-      sq: 90,
-      pd: 90,
-      ta: 90,
-      total: 100,
+      population: 95,
+      pi: 140,
+      sq: 140,
+      pd: 160,
+      ta: 140,
+      total: 130,
       category: 120,
       actions: 150,
     });
@@ -935,7 +935,7 @@ export default function RiskResultsWorkspace() {
                       checked={visibleColumns.pi}
                       onChange={(e) => setVisibleColumns({ ...visibleColumns, pi: e.target.checked })}
                     />
-                    Pop. Immunity (40)
+                    Population Immunity (40)
                   </label>
                   <label className="flex items-center gap-1.5 cursor-pointer">
                     <input
@@ -943,7 +943,7 @@ export default function RiskResultsWorkspace() {
                       checked={visibleColumns.sq}
                       onChange={(e) => setVisibleColumns({ ...visibleColumns, sq: e.target.checked })}
                     />
-                    Surveillance (20)
+                    Surveillance Quality (20)
                   </label>
                   <label className="flex items-center gap-1.5 cursor-pointer">
                     <input
@@ -951,7 +951,7 @@ export default function RiskResultsWorkspace() {
                       checked={visibleColumns.pd}
                       onChange={(e) => setVisibleColumns({ ...visibleColumns, pd: e.target.checked })}
                     />
-                    Delivery (16)
+                    Program Delivery Performance (16)
                   </label>
                   <label className="flex items-center gap-1.5 cursor-pointer">
                     <input
@@ -959,7 +959,7 @@ export default function RiskResultsWorkspace() {
                       checked={visibleColumns.ta}
                       onChange={(e) => setVisibleColumns({ ...visibleColumns, ta: e.target.checked })}
                     />
-                    Threats (24)
+                    Threat Assessment (24)
                   </label>
                 </div>
 
@@ -1006,12 +1006,12 @@ export default function RiskResultsWorkspace() {
           {/* Table Container */}
           <Card>
             <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs border-collapse">
+              <table className="w-full min-w-full text-left text-xs border-collapse table-auto">
                 <thead className="bg-slate-100 dark:bg-slate-800 border-b">
                   <tr>
                     {/* FROZEN 1: INDEX */}
                     <th
-                      className="p-2.5 font-semibold text-center cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700 border-r sticky top-0 left-0 z-40 bg-slate-100 dark:bg-slate-800 select-none"
+                      className="p-2.5 font-semibold text-center cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700 border-r border-slate-300 dark:border-slate-700 sticky top-0 left-0 z-40 bg-slate-100 dark:bg-slate-800 select-none"
                       style={{
                         width: `${colWidths.index}px`,
                         minWidth: `${colWidths.index}px`,
@@ -1026,7 +1026,7 @@ export default function RiskResultsWorkspace() {
 
                     {/* FROZEN 2: DISTRICT / COUNTY */}
                     <th
-                      className="p-2.5 font-semibold cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700 border-r sticky top-0 z-40 bg-slate-100 dark:bg-slate-800 select-none group/th"
+                      className="p-2.5 font-semibold cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700 border-r border-slate-300 dark:border-slate-700 sticky top-0 z-40 bg-slate-100 dark:bg-slate-800 select-none group/th"
                       style={{
                         left: `${colWidths.index}px`,
                         width: `${colWidths.district}px`,
@@ -1050,7 +1050,7 @@ export default function RiskResultsWorkspace() {
                     {/* FROZEN 3: PROVINCE (WITH RIGHT DIVIDER SHADOW) */}
                     {visibleColumns.province && (
                       <th
-                        className="p-2.5 font-semibold cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700 border-r-2 border-slate-300 dark:border-slate-700 shadow-[4px_0_8px_-2px_rgba(0,0,0,0.15)] sticky top-0 z-40 bg-slate-100 dark:bg-slate-800 select-none group/th"
+                        className="p-2.5 font-semibold cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700 border-r-2 border-slate-400 dark:border-slate-500 shadow-[4px_0_8px_-2px_rgba(0,0,0,0.15)] sticky top-0 z-40 bg-slate-100 dark:bg-slate-800 select-none group/th"
                         style={{
                           left: `${colWidths.index + colWidths.district}px`,
                           width: `${colWidths.province}px`,
@@ -1074,7 +1074,7 @@ export default function RiskResultsWorkspace() {
 
                     {visibleColumns.population && (
                       <th
-                        className="p-2.5 font-semibold cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700 border-r select-none relative group/th"
+                        className="p-2.5 font-semibold cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700 border-r-2 border-slate-300 dark:border-slate-600 select-none relative group/th"
                         style={{ width: `${colWidths.population}px`, minWidth: `${colWidths.population}px` }}
                         onClick={() => handleSort("population")}
                       >
@@ -1092,12 +1092,12 @@ export default function RiskResultsWorkspace() {
 
                     {visibleColumns.pi && (
                       <th
-                        className="p-2.5 font-semibold cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700 border-r select-none relative group/th"
+                        className="p-2.5 font-semibold cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700 border-r-2 border-slate-300 dark:border-slate-600 select-none relative group/th"
                         style={{ width: `${colWidths.pi}px`, minWidth: `${colWidths.pi}px` }}
                         onClick={() => handleSort("populationImmunityScore")}
                       >
                         <div className="flex items-center justify-between pr-2">
-                          <span>Immunity (40)</span>
+                          <span className="font-bold">Population Immunity (Max 40)</span>
                           {getSortIcon("populationImmunityScore")}
                         </div>
                         <div
@@ -1110,12 +1110,12 @@ export default function RiskResultsWorkspace() {
 
                     {visibleColumns.sq && (
                       <th
-                        className="p-2.5 font-semibold cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700 border-r select-none relative group/th"
+                        className="p-2.5 font-semibold cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700 border-r-2 border-slate-300 dark:border-slate-600 select-none relative group/th"
                         style={{ width: `${colWidths.sq}px`, minWidth: `${colWidths.sq}px` }}
                         onClick={() => handleSort("surveillanceQualityScore")}
                       >
                         <div className="flex items-center justify-between pr-2">
-                          <span>Surveillance (20)</span>
+                          <span className="font-bold">Surveillance Quality (Max 20)</span>
                           {getSortIcon("surveillanceQualityScore")}
                         </div>
                         <div
@@ -1128,12 +1128,12 @@ export default function RiskResultsWorkspace() {
 
                     {visibleColumns.pd && (
                       <th
-                        className="p-2.5 font-semibold cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700 border-r select-none relative group/th"
+                        className="p-2.5 font-semibold cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700 border-r-2 border-slate-300 dark:border-slate-600 select-none relative group/th"
                         style={{ width: `${colWidths.pd}px`, minWidth: `${colWidths.pd}px` }}
                         onClick={() => handleSort("programmeDeliveryScore")}
                       >
                         <div className="flex items-center justify-between pr-2">
-                          <span>Delivery (16)</span>
+                          <span className="font-bold">Program Delivery Performance (Max 16)</span>
                           {getSortIcon("programmeDeliveryScore")}
                         </div>
                         <div
@@ -1146,12 +1146,12 @@ export default function RiskResultsWorkspace() {
 
                     {visibleColumns.ta && (
                       <th
-                        className="p-2.5 font-semibold cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700 border-r select-none relative group/th"
+                        className="p-2.5 font-semibold cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700 border-r-2 border-slate-400 dark:border-slate-500 select-none relative group/th"
                         style={{ width: `${colWidths.ta}px`, minWidth: `${colWidths.ta}px` }}
                         onClick={() => handleSort("threatAssessmentScore")}
                       >
                         <div className="flex items-center justify-between pr-2">
-                          <span>Threats (24)</span>
+                          <span className="font-bold">Threat Assessment (Max 24)</span>
                           {getSortIcon("threatAssessmentScore")}
                         </div>
                         <div
@@ -1163,12 +1163,12 @@ export default function RiskResultsWorkspace() {
                     )}
 
                     <th
-                      className="p-2.5 font-semibold cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700 border-r select-none relative group/th"
+                      className="p-2.5 font-semibold cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700 border-r-2 border-slate-400 dark:border-slate-500 select-none relative group/th"
                       style={{ width: `${colWidths.total}px`, minWidth: `${colWidths.total}px` }}
                       onClick={() => handleSort("totalRiskScore")}
                     >
                       <div className="flex items-center justify-between pr-2">
-                        <span>Total Score (100)</span>
+                        <span className="font-bold">Overall Risk Score (Max 100)</span>
                         {getSortIcon("totalRiskScore")}
                       </div>
                       <div
@@ -1179,11 +1179,12 @@ export default function RiskResultsWorkspace() {
                     </th>
 
                     <th
-                      className="p-2.5 font-semibold select-none border-r relative group/th"
+                      className="p-2.5 font-semibold cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700 select-none border-r-2 border-slate-400 dark:border-slate-500 relative group/th"
                       style={{ width: `${colWidths.category}px`, minWidth: `${colWidths.category}px` }}
+                      onClick={() => handleSort("riskCategory")}
                     >
                       <div className="flex items-center justify-between pr-2">
-                        <span>Classification</span>
+                        <span className="font-bold">Risk Category</span>
                         {getSortIcon("riskCategory")}
                       </div>
                       <div
@@ -1223,7 +1224,7 @@ export default function RiskResultsWorkspace() {
                         <tr key={row.id} className="hover:bg-slate-50 dark:hover:bg-slate-900 transition-colors group">
                           {/* FROZEN 1: INDEX */}
                           <td
-                            className="p-2.5 text-center text-muted-foreground border-r sticky left-0 z-20 bg-background group-hover:bg-slate-50 dark:group-hover:bg-slate-900"
+                            className="p-2.5 text-center text-muted-foreground border-r border-slate-300 dark:border-slate-700 sticky left-0 z-20 bg-background group-hover:bg-slate-50 dark:group-hover:bg-slate-900"
                             style={{
                               width: `${colWidths.index}px`,
                               minWidth: `${colWidths.index}px`,
@@ -1235,7 +1236,7 @@ export default function RiskResultsWorkspace() {
 
                           {/* FROZEN 2: DISTRICT / COUNTY */}
                           <td
-                            className="p-2.5 font-medium border-r whitespace-nowrap sticky z-20 bg-background group-hover:bg-slate-50 dark:group-hover:bg-slate-900"
+                            className="p-2.5 font-medium border-r border-slate-300 dark:border-slate-700 whitespace-nowrap sticky z-20 bg-background group-hover:bg-slate-50 dark:group-hover:bg-slate-900"
                             style={{
                               left: `${colWidths.index}px`,
                               width: `${colWidths.district}px`,
@@ -1251,7 +1252,7 @@ export default function RiskResultsWorkspace() {
                           {/* FROZEN 3: PROVINCE (WITH RIGHT DIVIDER SHADOW) */}
                           {hasProvince && (
                             <td
-                              className="p-2.5 text-muted-foreground border-r-2 border-slate-300 dark:border-slate-700 shadow-[4px_0_8px_-2px_rgba(0,0,0,0.15)] whitespace-nowrap sticky z-20 bg-background group-hover:bg-slate-50 dark:group-hover:bg-slate-900"
+                              className="p-2.5 text-muted-foreground border-r-2 border-slate-400 dark:border-slate-600 shadow-[4px_0_8px_-2px_rgba(0,0,0,0.15)] whitespace-nowrap sticky z-20 bg-background group-hover:bg-slate-50 dark:group-hover:bg-slate-900"
                               style={{
                                 left: `${colWidths.index + colWidths.district}px`,
                                 width: `${colWidths.province}px`,
@@ -1266,47 +1267,47 @@ export default function RiskResultsWorkspace() {
                           )}
 
                           {visibleColumns.population && (
-                            <td className="p-2.5 text-muted-foreground border-r">
+                            <td className="p-2.5 text-muted-foreground border-r-2 border-slate-300 dark:border-slate-600">
                               {row.population ? row.population.toLocaleString() : "N/A"}
                             </td>
                           )}
 
                           {visibleColumns.pi && (
-                            <td className="p-2.5 border-r">
+                            <td className="p-2.5 border-r-2 border-slate-300 dark:border-slate-600">
                               <span className="font-semibold">{row.populationImmunityScore ?? "—"}</span>
                               <span className="text-muted-foreground">/40</span>
                             </td>
                           )}
 
                           {visibleColumns.sq && (
-                            <td className="p-2.5 border-r">
+                            <td className="p-2.5 border-r-2 border-slate-300 dark:border-slate-600">
                               <span className="font-semibold">{row.surveillanceQualityScore ?? "—"}</span>
                               <span className="text-muted-foreground">/20</span>
                             </td>
                           )}
 
                           {visibleColumns.pd && (
-                            <td className="p-2.5 border-r">
+                            <td className="p-2.5 border-r-2 border-slate-300 dark:border-slate-600">
                               <span className="font-semibold">{row.programmeDeliveryScore ?? "—"}</span>
                               <span className="text-muted-foreground">/16</span>
                             </td>
                           )}
 
                           {visibleColumns.ta && (
-                            <td className="p-2.5 border-r">
+                            <td className="p-2.5 border-r-2 border-slate-400 dark:border-slate-600">
                               <span className="font-semibold">{row.threatAssessmentScore ?? "—"}</span>
                               <span className="text-muted-foreground">/24</span>
                             </td>
                           )}
 
-                          <td className="p-2.5 border-r">
+                          <td className="p-2.5 border-r-2 border-slate-400 dark:border-slate-600">
                             <span className="font-bold text-sm">
                               {row.totalRiskScore ?? `${row.minPossibleScore}–${row.maxPossibleScore}`}
                             </span>
                             <span className="text-muted-foreground">/100</span>
                           </td>
 
-                          <td className="p-2.5 border-r">
+                          <td className="p-2.5 border-r-2 border-slate-400 dark:border-slate-600">
                             {getCategoryBadge(row.riskCategory)}
                           </td>
 
@@ -1600,12 +1601,12 @@ export default function RiskResultsWorkspace() {
 
               {/* Actions Enterprise Table */}
               <div className="border rounded-md overflow-x-auto shadow-sm">
-                <table className="w-full text-xs text-left border-collapse">
+                <table className="w-full min-w-full text-xs text-left border-collapse table-auto">
                   <thead className="bg-slate-800 text-white font-semibold sticky top-0 z-30">
                     <tr>
                       {/* FROZEN 1: INDEX */}
                       <th
-                        className="p-2.5 text-center font-semibold border-r border-slate-700 sticky top-0 left-0 z-40 bg-slate-800 select-none cursor-pointer"
+                        className="p-2.5 text-center font-semibold border-r-2 border-slate-600 sticky top-0 left-0 z-40 bg-slate-800 select-none cursor-pointer"
                         style={{ width: `${actionColWidths.index}px`, minWidth: `${actionColWidths.index}px`, maxWidth: `${actionColWidths.index}px` }}
                         onClick={() => handleActionSort("index")}
                       >
@@ -1636,7 +1637,7 @@ export default function RiskResultsWorkspace() {
 
                       {/* ACTION TITLE */}
                       <th
-                        className="p-2.5 font-semibold border-r border-slate-700 select-none cursor-pointer relative group/th"
+                        className="p-2.5 font-semibold border-r-2 border-slate-600 select-none cursor-pointer relative group/th"
                         style={{ width: `${actionColWidths.title}px`, minWidth: `${actionColWidths.title}px` }}
                         onClick={() => handleActionSort("actionTitle")}
                       >
@@ -1653,7 +1654,7 @@ export default function RiskResultsWorkspace() {
 
                       {/* CATEGORY */}
                       <th
-                        className="p-2.5 font-semibold border-r border-slate-700 select-none cursor-pointer relative group/th"
+                        className="p-2.5 font-semibold border-r-2 border-slate-600 select-none cursor-pointer relative group/th"
                         style={{ width: `${actionColWidths.type}px`, minWidth: `${actionColWidths.type}px` }}
                         onClick={() => handleActionSort("actionType")}
                       >
@@ -1670,7 +1671,7 @@ export default function RiskResultsWorkspace() {
 
                       {/* BUDGET REFERENCE */}
                       <th
-                        className="p-2.5 font-semibold border-r border-slate-700 select-none cursor-pointer relative group/th"
+                        className="p-2.5 font-semibold border-r-2 border-slate-600 select-none cursor-pointer relative group/th"
                         style={{ width: `${actionColWidths.budget}px`, minWidth: `${actionColWidths.budget}px` }}
                         onClick={() => handleActionSort("budgetCode")}
                       >
@@ -1687,7 +1688,7 @@ export default function RiskResultsWorkspace() {
 
                       {/* STATUS */}
                       <th
-                        className="p-2.5 text-center font-semibold border-r border-slate-700 select-none cursor-pointer relative group/th"
+                        className="p-2.5 text-center font-semibold border-r-2 border-slate-600 select-none cursor-pointer relative group/th"
                         style={{ width: `${actionColWidths.status}px`, minWidth: `${actionColWidths.status}px` }}
                         onClick={() => handleActionSort("status")}
                       >
@@ -1990,14 +1991,14 @@ export default function RiskResultsWorkspace() {
                 <div className="py-12 text-center text-xs text-muted-foreground">Loading indicator lineage...</div>
               ) : (
                 <div className="border rounded-md overflow-x-auto shadow-sm">
-                  <table className="w-full text-xs text-left border-collapse">
+                  <table className="w-full min-w-full text-xs text-left border-collapse table-auto">
                     <thead className="bg-slate-800 text-white font-semibold sticky top-0 z-30">
                       <tr>
-                        <th className="p-2.5 border-r border-slate-700 w-24 min-w-24">Indicator</th>
-                        <th className="p-2.5 border-r border-slate-700 w-24 min-w-24">Domain</th>
-                        <th className="p-2.5 border-r border-slate-700 w-24 min-w-24 text-right">Observed</th>
-                        <th className="p-2.5 border-r border-slate-700 w-28 min-w-28 text-right">Threshold</th>
-                        <th className="p-2.5 border-r border-slate-700 w-24 min-w-24 text-center">Score</th>
+                        <th className="p-2.5 border-r-2 border-slate-600 w-24 min-w-24">Indicator</th>
+                        <th className="p-2.5 border-r-2 border-slate-600 w-24 min-w-24">Domain</th>
+                        <th className="p-2.5 border-r-2 border-slate-600 w-24 min-w-24 text-right">Observed</th>
+                        <th className="p-2.5 border-r-2 border-slate-600 w-28 min-w-28 text-right">Threshold</th>
+                        <th className="p-2.5 border-r-2 border-slate-600 w-24 min-w-24 text-center">Score</th>
                         <th className="p-2.5">Lineage & Policy Rationale</th>
                       </tr>
                     </thead>

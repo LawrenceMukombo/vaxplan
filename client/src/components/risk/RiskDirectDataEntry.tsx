@@ -1620,14 +1620,14 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
 
               {/* Table conforming to Rule 24: Enterprise Table */}
               <div className="border rounded-md overflow-hidden">
-                <table className="w-full text-xs text-left border-collapse">
+                <table className="w-full min-w-full text-xs text-left border-collapse table-auto">
                   <thead className="bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 font-semibold border-b">
                     <tr>
-                      <th className="p-2 border-r text-center w-12">#</th>
-                      <th className="p-2 border-r">District / Administrative Area</th>
-                      <th className="p-2 border-r">Province / Region</th>
-                      <th className="p-2 border-r text-right w-40">Population (Editable)</th>
-                      <th className="p-2 border-r text-right w-32">% of National Total</th>
+                      <th className="p-2 border-r-2 border-slate-300 dark:border-slate-600 text-center w-12">#</th>
+                      <th className="p-2 border-r-2 border-slate-300 dark:border-slate-600">District / Administrative Area</th>
+                      <th className="p-2 border-r-2 border-slate-400 dark:border-slate-500">Province / Region</th>
+                      <th className="p-2 border-r-2 border-slate-300 dark:border-slate-600 text-right w-40">Population (Editable)</th>
+                      <th className="p-2 border-r-2 border-slate-300 dark:border-slate-600 text-right w-32">% of National Total</th>
                       <th className="p-2 text-right w-36">Est. Under 1 Pop (3.5%)</th>
                     </tr>
                   </thead>
@@ -1647,10 +1647,10 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
 
                         return (
                           <tr key={r.districtId} className="hover:bg-muted/30 transition-colors">
-                            <td className="p-2 text-center font-mono text-muted-foreground">{globalIdx}</td>
-                            <td className="p-2 font-semibold text-foreground">{r.districtName || `District ${r.districtId}`}</td>
-                            <td className="p-2 text-muted-foreground">{r.provinceName || "National"}</td>
-                            <td className="p-1.5 border-r text-right">
+                            <td className="p-2 border-r border-slate-200 dark:border-slate-700 text-center font-mono text-muted-foreground">{globalIdx}</td>
+                            <td className="p-2 border-r border-slate-200 dark:border-slate-700 font-semibold text-foreground">{r.districtName || `District ${r.districtId}`}</td>
+                            <td className="p-2 border-r-2 border-slate-300 dark:border-slate-600 text-muted-foreground">{r.provinceName || "National"}</td>
+                            <td className="p-1.5 border-r border-slate-200 dark:border-slate-700 text-right">
                               <Input
                                 type="number"
                                 min={0}
@@ -1661,7 +1661,7 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                                 className="h-7 text-xs font-mono text-right font-bold w-36 ml-auto"
                               />
                             </td>
-                            <td className="p-2 border-r text-right font-mono text-muted-foreground">{pctOfTotal}%</td>
+                            <td className="p-2 border-r border-slate-200 dark:border-slate-700 text-right font-mono text-muted-foreground">{pctOfTotal}%</td>
                             <td className="p-2 text-right font-mono text-muted-foreground">{under1Est.toLocaleString()}</td>
                           </tr>
                         );
@@ -1923,7 +1923,7 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
               <table className="table-auto min-w-full w-full text-xs text-left border-collapse">
                 <thead className="sticky top-0 z-30 bg-slate-100/95 dark:bg-slate-800/95 text-slate-700 dark:text-slate-200 border-b shadow-sm font-semibold select-none text-[11px]">
                   {/* LEVEL 1: DOMAIN GROUP HEADERS */}
-                  <tr className="border-b border-slate-200 dark:border-slate-700 text-center">
+                  <tr className="border-b-2 border-b-slate-300 dark:border-b-slate-600 text-center">
                     <th
                       rowSpan={2}
                       className="p-2 border-r border-slate-200 dark:border-slate-700 sticky top-0 left-0 z-40 bg-slate-100 dark:bg-slate-800 text-center"
@@ -1933,7 +1933,7 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                     </th>
                     <th
                       rowSpan={2}
-                      className="p-2 border-r-2 border-slate-300 dark:border-slate-600 shadow-[4px_0_8px_-2px_rgba(0,0,0,0.1)] sticky top-0 z-40 bg-slate-100 dark:bg-slate-800 text-left cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 group/th"
+                      className="p-2 border-r-2 border-slate-400 dark:border-slate-500 shadow-[4px_0_8px_-2px_rgba(0,0,0,0.15)] sticky top-0 z-40 bg-slate-100 dark:bg-slate-800 text-left cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 group/th"
                       style={{ left: `${indexWidth}px`, width: `${districtWidth}px`, minWidth: `${districtWidth}px`, maxWidth: `${districtWidth}px` }}
                       onClick={() => handleSort("districtName")}
                     >
@@ -1946,28 +1946,28 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                     {/* POPULATION IMMUNITY HEADERS */}
                     {activeTab === "population-immunity" && (
                       <>
-                        <th colSpan={5} className="p-2 border-r border-slate-200 dark:border-slate-700 bg-sky-50 dark:bg-sky-950/40 text-sky-900 dark:text-sky-200">
+                        <th colSpan={5} className="p-2 border-r-2 border-slate-400 dark:border-slate-500 bg-sky-50 dark:bg-sky-950/40 text-sky-900 dark:text-sky-200 font-bold">
                           Administrative MCV1 Coverage Report
                         </th>
-                        <th colSpan={2} className="p-2 border-r border-slate-200 dark:border-slate-700 bg-sky-50 dark:bg-sky-950/40 text-sky-900 dark:text-sky-200">
+                        <th colSpan={2} className="p-2 border-r-2 border-slate-400 dark:border-slate-500 bg-sky-50 dark:bg-sky-950/40 text-sky-900 dark:text-sky-200 font-bold">
                           % of neighboring districts with MCV1 &lt;80%
                         </th>
-                        <th colSpan={5} className="p-2 border-r border-slate-200 dark:border-slate-700 bg-sky-50 dark:bg-sky-950/40 text-sky-900 dark:text-sky-200">
+                        <th colSpan={5} className="p-2 border-r-2 border-slate-400 dark:border-slate-500 bg-sky-50 dark:bg-sky-950/40 text-sky-900 dark:text-sky-200 font-bold">
                           Administrative MCV2 Coverage Report
                         </th>
-                        <th colSpan={2} className="p-2 border-r border-slate-200 dark:border-slate-700 bg-sky-50 dark:bg-sky-950/40 text-sky-900 dark:text-sky-200">
+                        <th colSpan={2} className="p-2 border-r-2 border-slate-400 dark:border-slate-500 bg-sky-50 dark:bg-sky-950/40 text-sky-900 dark:text-sky-200 font-bold">
                           Subnational coverage of measles SIA
                         </th>
-                        <th colSpan={2} className="p-2 border-r border-slate-200 dark:border-slate-700 bg-sky-50 dark:bg-sky-950/40 text-sky-900 dark:text-sky-200">
+                        <th colSpan={2} className="p-2 border-r-2 border-slate-400 dark:border-slate-500 bg-sky-50 dark:bg-sky-950/40 text-sky-900 dark:text-sky-200 font-bold">
                           Measles SIA target age group
                         </th>
-                        <th colSpan={2} className="p-2 border-r border-slate-200 dark:border-slate-700 bg-sky-50 dark:bg-sky-950/40 text-sky-900 dark:text-sky-200">
+                        <th colSpan={2} className="p-2 border-r-2 border-slate-400 dark:border-slate-500 bg-sky-50 dark:bg-sky-950/40 text-sky-900 dark:text-sky-200 font-bold">
                           Years since last measles SIA
                         </th>
-                        <th colSpan={2} className="p-2 border-r border-slate-200 dark:border-slate-700 bg-sky-50 dark:bg-sky-950/40 text-sky-900 dark:text-sky-200">
+                        <th colSpan={2} className="p-2 border-r-2 border-slate-400 dark:border-slate-500 bg-sky-50 dark:bg-sky-950/40 text-sky-900 dark:text-sky-200 font-bold">
                           % suspected measles cases unvaccinated
                         </th>
-                        <th colSpan={1} className="p-2 border-r border-slate-200 dark:border-slate-700 bg-indigo-50/70 dark:bg-indigo-950/40 text-indigo-900 dark:text-indigo-200 font-black text-center">
+                        <th colSpan={1} className="p-2 border-r-2 border-slate-400 dark:border-slate-500 bg-indigo-50/70 dark:bg-indigo-950/40 text-indigo-900 dark:text-indigo-200 font-black text-center">
                           SUBTOTAL RISK POINTS
                         </th>
                       </>
@@ -1976,19 +1976,19 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                     {/* SURVEILLANCE QUALITY HEADERS */}
                     {activeTab === "surveillance-quality" && (
                       <>
-                        <th colSpan={2} className="p-2 border-r border-slate-200 dark:border-slate-700 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-900 dark:text-indigo-200">
+                        <th colSpan={2} className="p-2 border-r-2 border-slate-400 dark:border-slate-500 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-900 dark:text-indigo-200 font-bold">
                           Non-measles discarded rate
                         </th>
-                        <th colSpan={2} className="p-2 border-r border-slate-200 dark:border-slate-700 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-900 dark:text-indigo-200">
+                        <th colSpan={2} className="p-2 border-r-2 border-slate-400 dark:border-slate-500 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-900 dark:text-indigo-200 font-bold">
                           % with adequate investigation
                         </th>
-                        <th colSpan={2} className="p-2 border-r border-slate-200 dark:border-slate-700 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-900 dark:text-indigo-200">
+                        <th colSpan={2} className="p-2 border-r-2 border-slate-400 dark:border-slate-500 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-900 dark:text-indigo-200 font-bold">
                           % adequate blood specimen collection
                         </th>
-                        <th colSpan={2} className="p-2 border-r border-slate-200 dark:border-slate-700 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-900 dark:text-indigo-200">
+                        <th colSpan={2} className="p-2 border-r-2 border-slate-400 dark:border-slate-500 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-900 dark:text-indigo-200 font-bold">
                           % with timely availability of laboratory results
                         </th>
-                        <th colSpan={1} className="p-2 border-r border-slate-200 dark:border-slate-700 bg-indigo-50/70 dark:bg-indigo-950/40 text-indigo-900 dark:text-indigo-200 font-black text-center">
+                        <th colSpan={1} className="p-2 border-r-2 border-slate-400 dark:border-slate-500 bg-indigo-50/70 dark:bg-indigo-950/40 text-indigo-900 dark:text-indigo-200 font-black text-center">
                           SUBTOTAL RISK POINTS
                         </th>
                       </>
@@ -1997,22 +1997,22 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                     {/* PROGRAM DELIVERY HEADERS */}
                     {activeTab === "program-delivery" && (
                       <>
-                        <th colSpan={2} className="p-2 border-r border-slate-200 dark:border-slate-700 bg-amber-50 dark:bg-amber-950/40 text-amber-900 dark:text-amber-200">
+                        <th colSpan={2} className="p-2 border-r-2 border-slate-400 dark:border-slate-500 bg-amber-50 dark:bg-amber-950/40 text-amber-900 dark:text-amber-200 font-bold">
                           MCV1 Trend
                         </th>
-                        <th colSpan={2} className="p-2 border-r border-slate-200 dark:border-slate-700 bg-amber-50 dark:bg-amber-950/40 text-amber-900 dark:text-amber-200">
+                        <th colSpan={2} className="p-2 border-r-2 border-slate-400 dark:border-slate-500 bg-amber-50 dark:bg-amber-950/40 text-amber-900 dark:text-amber-200 font-bold">
                           MCV2 Trend
                         </th>
-                        <th colSpan={2} className="p-2 border-r border-slate-200 dark:border-slate-700 bg-amber-50 dark:bg-amber-950/40 text-amber-900 dark:text-amber-200">
+                        <th colSpan={2} className="p-2 border-r-2 border-slate-400 dark:border-slate-500 bg-amber-50 dark:bg-amber-950/40 text-amber-900 dark:text-amber-200 font-bold">
                           Drop-out Rate MCV1-MCV2
                         </th>
-                        <th colSpan={1} className="p-2 border-r border-slate-200 dark:border-slate-700 bg-amber-50 dark:bg-amber-950/40 text-amber-900 dark:text-amber-200">
+                        <th colSpan={1} className="p-2 border-r-2 border-slate-400 dark:border-slate-500 bg-amber-50 dark:bg-amber-950/40 text-amber-900 dark:text-amber-200 font-bold">
                           DPT1 / Penta1
                         </th>
-                        <th colSpan={2} className="p-2 border-r border-slate-200 dark:border-slate-700 bg-amber-50 dark:bg-amber-950/40 text-amber-900 dark:text-amber-200">
+                        <th colSpan={2} className="p-2 border-r-2 border-slate-400 dark:border-slate-500 bg-amber-50 dark:bg-amber-950/40 text-amber-900 dark:text-amber-200 font-bold">
                           Drop-out Rate DPT1-MCV1
                         </th>
-                        <th colSpan={1} className="p-2 border-r border-slate-200 dark:border-slate-700 bg-indigo-50/70 dark:bg-indigo-950/40 text-indigo-900 dark:text-indigo-200 font-black text-center">
+                        <th colSpan={1} className="p-2 border-r-2 border-slate-400 dark:border-slate-500 bg-indigo-50/70 dark:bg-indigo-950/40 text-indigo-900 dark:text-indigo-200 font-black text-center">
                           SUBTOTAL RISK POINTS
                         </th>
                       </>
@@ -2021,31 +2021,31 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                     {/* VULNERABLE GROUPS HEADERS */}
                     {activeTab === "vulnerable-groups" && (
                       <>
-                        <th colSpan={1} className="p-2 border-r border-slate-200 dark:border-slate-700 bg-rose-50 dark:bg-rose-950/40 text-rose-900 dark:text-rose-200">
+                        <th colSpan={1} className="p-2 border-r-2 border-slate-400 dark:border-slate-500 bg-rose-50 dark:bg-rose-950/40 text-rose-900 dark:text-rose-200 font-semibold">
                           Presence of migrant population / internally displaced population/ slums / tribal communities
                         </th>
-                        <th colSpan={1} className="p-2 border-r border-slate-200 dark:border-slate-700 bg-rose-50 dark:bg-rose-950/40 text-rose-900 dark:text-rose-200">
+                        <th colSpan={1} className="p-2 border-r-2 border-slate-400 dark:border-slate-500 bg-rose-50 dark:bg-rose-950/40 text-rose-900 dark:text-rose-200 font-semibold">
                           Resistant to vaccination (ie. religious, cultural issues, etc.)
                         </th>
-                        <th colSpan={1} className="p-2 border-r border-slate-200 dark:border-slate-700 bg-rose-50 dark:bg-rose-950/40 text-rose-900 dark:text-rose-200">
+                        <th colSpan={1} className="p-2 border-r-2 border-slate-400 dark:border-slate-500 bg-rose-50 dark:bg-rose-950/40 text-rose-900 dark:text-rose-200 font-semibold">
                           Security and safety concerns
                         </th>
-                        <th colSpan={1} className="p-2 border-r border-slate-200 dark:border-slate-700 bg-rose-50 dark:bg-rose-950/40 text-rose-900 dark:text-rose-200">
+                        <th colSpan={1} className="p-2 border-r-2 border-slate-400 dark:border-slate-500 bg-rose-50 dark:bg-rose-950/40 text-rose-900 dark:text-rose-200 font-semibold">
                           Frequented by calamities / disasters
                         </th>
-                        <th colSpan={1} className="p-2 border-r border-slate-200 dark:border-slate-700 bg-rose-50 dark:bg-rose-950/40 text-rose-900 dark:text-rose-200">
+                        <th colSpan={1} className="p-2 border-r-2 border-slate-400 dark:border-slate-500 bg-rose-50 dark:bg-rose-950/40 text-rose-900 dark:text-rose-200 font-semibold">
                           Poor access to health services due to terrain / transportation issues
                         </th>
-                        <th colSpan={1} className="p-2 border-r border-slate-200 dark:border-slate-700 bg-rose-50 dark:bg-rose-950/40 text-rose-900 dark:text-rose-200">
+                        <th colSpan={1} className="p-2 border-r-2 border-slate-400 dark:border-slate-500 bg-rose-50 dark:bg-rose-950/40 text-rose-900 dark:text-rose-200 font-semibold">
                           Lack of local political support
                         </th>
-                        <th colSpan={1} className="p-2 border-r border-slate-200 dark:border-slate-700 bg-rose-50 dark:bg-rose-950/40 text-rose-900 dark:text-rose-200">
+                        <th colSpan={1} className="p-2 border-r-2 border-slate-400 dark:border-slate-500 bg-rose-50 dark:bg-rose-950/40 text-rose-900 dark:text-rose-200 font-semibold">
                           Presence of high-traffic transportation hubs/major roads or bordering large urban areas
                         </th>
-                        <th colSpan={1} className="p-2 border-r border-slate-200 dark:border-slate-700 bg-rose-50 dark:bg-rose-950/40 text-rose-900 dark:text-rose-200">
+                        <th colSpan={1} className="p-2 border-r-2 border-slate-400 dark:border-slate-500 bg-rose-50 dark:bg-rose-950/40 text-rose-900 dark:text-rose-200 font-semibold">
                           Presence of areas with mass gatherings
                         </th>
-                        <th colSpan={1} className="p-2 border-r border-slate-200 dark:border-slate-700 bg-indigo-50/70 dark:bg-indigo-950/40 text-indigo-900 dark:text-indigo-200 font-black text-center">
+                        <th colSpan={1} className="p-2 border-r-2 border-slate-400 dark:border-slate-500 bg-indigo-50/70 dark:bg-indigo-950/40 text-indigo-900 dark:text-indigo-200 font-black text-center">
                           SUBTOTAL RISK POINTS
                         </th>
                       </>
@@ -2054,25 +2054,25 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                     {/* THREAT ASSESSMENT HEADERS */}
                     {activeTab === "threat-assessment" && (
                       <>
-                        <th colSpan={2} className="p-2 border-r border-slate-200 dark:border-slate-700 bg-purple-50 dark:bg-purple-950/40 text-purple-900 dark:text-purple-200">
+                        <th colSpan={2} className="p-2 border-r-2 border-slate-400 dark:border-slate-500 bg-purple-50 dark:bg-purple-950/40 text-purple-900 dark:text-purple-200 font-bold">
                           Evidence of recent measles cases among &lt;5 years
                         </th>
-                        <th colSpan={2} className="p-2 border-r border-slate-200 dark:border-slate-700 bg-purple-50 dark:bg-purple-950/40 text-purple-900 dark:text-purple-200">
+                        <th colSpan={2} className="p-2 border-r-2 border-slate-400 dark:border-slate-500 bg-purple-50 dark:bg-purple-950/40 text-purple-900 dark:text-purple-200 font-bold">
                           Evidence of recent measles cases among 5-15 years
                         </th>
-                        <th colSpan={2} className="p-2 border-r border-slate-200 dark:border-slate-700 bg-purple-50 dark:bg-purple-950/40 text-purple-900 dark:text-purple-200">
+                        <th colSpan={2} className="p-2 border-r-2 border-slate-400 dark:border-slate-500 bg-purple-50 dark:bg-purple-950/40 text-purple-900 dark:text-purple-200 font-bold">
                           Evidence of recent measles cases among &gt;15 years
                         </th>
-                        <th colSpan={2} className="p-2 border-r border-slate-200 dark:border-slate-700 bg-purple-50 dark:bg-purple-950/40 text-purple-900 dark:text-purple-200">
+                        <th colSpan={2} className="p-2 border-r-2 border-slate-400 dark:border-slate-500 bg-purple-50 dark:bg-purple-950/40 text-purple-900 dark:text-purple-200 font-bold">
                           Population density (Pers./Km2)
                         </th>
-                        <th colSpan={2} className="p-2 border-r border-slate-200 dark:border-slate-700 bg-purple-50 dark:bg-purple-950/40 text-purple-900 dark:text-purple-200">
+                        <th colSpan={2} className="p-2 border-r-2 border-slate-400 dark:border-slate-500 bg-purple-50 dark:bg-purple-950/40 text-purple-900 dark:text-purple-200 font-bold">
                           Bordering areas with measles case in the past 12 months
                         </th>
-                        <th colSpan={2} className="p-2 border-r border-slate-200 dark:border-slate-700 bg-purple-50 dark:bg-purple-950/40 text-purple-900 dark:text-purple-200">
+                        <th colSpan={2} className="p-2 border-r-2 border-slate-400 dark:border-slate-500 bg-purple-50 dark:bg-purple-950/40 text-purple-900 dark:text-purple-200 font-bold">
                           Presence of vulnerable population
                         </th>
-                        <th colSpan={1} className="p-2 border-r border-slate-200 dark:border-slate-700 bg-indigo-50/70 dark:bg-indigo-950/40 text-indigo-900 dark:text-indigo-200 font-black text-center">
+                        <th colSpan={1} className="p-2 border-r-2 border-slate-400 dark:border-slate-500 bg-indigo-50/70 dark:bg-indigo-950/40 text-indigo-900 dark:text-indigo-200 font-black text-center">
                           SUBTOTAL RISK POINTS
                         </th>
                       </>
@@ -2128,7 +2128,7 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                           </div>
                         </th>
                         <th
-                          className="p-1 border-r border-slate-200 dark:border-slate-700 font-bold cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
+                          className="p-1 border-r-2 border-slate-400 dark:border-slate-500 font-bold cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
                           style={{ width: `${colWidths.mcv1Rp}px`, minWidth: `${colWidths.mcv1Rp}px` }}
                           onClick={() => handleSort("mcv1Rp")}
                           title="Sort by MCV1 Risk Points"
@@ -2151,7 +2151,7 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                           </div>
                         </th>
                         <th
-                          className="p-1 border-r border-slate-200 dark:border-slate-700 font-bold cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
+                          className="p-1 border-r-2 border-slate-400 dark:border-slate-500 font-bold cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
                           style={{ width: `${colWidths.neighborRp}px`, minWidth: `${colWidths.neighborRp}px` }}
                           onClick={() => handleSort("neighborRp")}
                           title="Sort by Neighbor Risk Points"
@@ -2207,7 +2207,7 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                           </div>
                         </th>
                         <th
-                          className="p-1 border-r border-slate-200 dark:border-slate-700 font-bold cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
+                          className="p-1 border-r-2 border-slate-400 dark:border-slate-500 font-bold cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
                           style={{ width: `${colWidths.mcv2Rp}px`, minWidth: `${colWidths.mcv2Rp}px` }}
                           onClick={() => handleSort("mcv2Rp")}
                           title="Sort by MCV2 Risk Points"
@@ -2230,7 +2230,7 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                           </div>
                         </th>
                         <th
-                          className="p-1 border-r border-slate-200 dark:border-slate-700 font-bold cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
+                          className="p-1 border-r-2 border-slate-400 dark:border-slate-500 font-bold cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
                           style={{ width: `${colWidths.siaCovRp}px`, minWidth: `${colWidths.siaCovRp}px` }}
                           onClick={() => handleSort("siaCovRp")}
                           title="Sort by SIA Coverage Risk Points"
@@ -2253,7 +2253,7 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                           </div>
                         </th>
                         <th
-                          className="p-1 border-r border-slate-200 dark:border-slate-700 font-bold cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
+                          className="p-1 border-r-2 border-slate-400 dark:border-slate-500 font-bold cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
                           style={{ width: `${colWidths.siaAgeGroupRp}px`, minWidth: `${colWidths.siaAgeGroupRp}px` }}
                           onClick={() => handleSort("siaAgeGroupRp")}
                           title="Sort by SIA Target Age Group Risk Points"
@@ -2276,7 +2276,7 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                           </div>
                         </th>
                         <th
-                          className="p-1 border-r border-slate-200 dark:border-slate-700 font-bold cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
+                          className="p-1 border-r-2 border-slate-400 dark:border-slate-500 font-bold cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
                           style={{ width: `${colWidths.siaYearsRp}px`, minWidth: `${colWidths.siaYearsRp}px` }}
                           onClick={() => handleSort("siaYearsRp")}
                           title="Sort by Years Since Last SIA Risk Points"
@@ -2299,7 +2299,7 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                           </div>
                         </th>
                         <th
-                          className="p-1 border-r border-slate-200 dark:border-slate-700 font-bold cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
+                          className="p-1 border-r-2 border-slate-400 dark:border-slate-500 font-bold cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
                           style={{ width: `${colWidths.unvacRp}px`, minWidth: `${colWidths.unvacRp}px` }}
                           onClick={() => handleSort("unvacRp")}
                           title="Sort by % Unvaccinated Risk Points"
@@ -2311,7 +2311,7 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                         </th>
 
                         <th
-                          className="p-1 border-r border-slate-200 dark:border-slate-700 font-black bg-indigo-50/50 dark:bg-indigo-950/20 text-indigo-700 dark:text-indigo-300 cursor-pointer hover:bg-indigo-100/70 dark:hover:bg-indigo-900/40 transition-colors select-none group/th"
+                          className="p-1 border-r-2 border-slate-400 dark:border-slate-500 font-black bg-indigo-50/50 dark:bg-indigo-950/20 text-indigo-700 dark:text-indigo-300 cursor-pointer hover:bg-indigo-100/70 dark:hover:bg-indigo-900/40 transition-colors select-none group/th"
                           style={{ width: `${colWidths.piTotalRp}px`, minWidth: `${colWidths.piTotalRp}px` }}
                           onClick={() => handleSort("piTotalRp")}
                           title="Sort by Population Immunity Subtotal Risk Points"
@@ -2338,7 +2338,7 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                           </div>
                         </th>
                         <th
-                          className="p-1 border-r border-slate-200 dark:border-slate-700 font-bold cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
+                          className="p-1 border-r-2 border-slate-400 dark:border-slate-500 font-bold cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
                           style={{ width: `${colWidths.sqRateRp}px`, minWidth: `${colWidths.sqRateRp}px` }}
                           onClick={() => handleSort("sqRateRp")}
                           title="Sort by Discarded Rate Risk Points"
@@ -2361,7 +2361,7 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                           </div>
                         </th>
                         <th
-                          className="p-1 border-r border-slate-200 dark:border-slate-700 font-bold cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
+                          className="p-1 border-r-2 border-slate-400 dark:border-slate-500 font-bold cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
                           style={{ width: `${colWidths.sqInvestRp}px`, minWidth: `${colWidths.sqInvestRp}px` }}
                           onClick={() => handleSort("sqInvestRp")}
                           title="Sort by Adequate Investigation Risk Points"
@@ -2384,7 +2384,7 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                           </div>
                         </th>
                         <th
-                          className="p-1 border-r border-slate-200 dark:border-slate-700 font-bold cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
+                          className="p-1 border-r-2 border-slate-400 dark:border-slate-500 font-bold cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
                           style={{ width: `${colWidths.sqSpecimenRp}px`, minWidth: `${colWidths.sqSpecimenRp}px` }}
                           onClick={() => handleSort("sqSpecimenRp")}
                           title="Sort by Specimen Collection Risk Points"
@@ -2407,7 +2407,7 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                           </div>
                         </th>
                         <th
-                          className="p-1 border-r border-slate-200 dark:border-slate-700 font-bold cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
+                          className="p-1 border-r-2 border-slate-400 dark:border-slate-500 font-bold cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
                           style={{ width: `${colWidths.sqLabRp}px`, minWidth: `${colWidths.sqLabRp}px` }}
                           onClick={() => handleSort("sqLabRp")}
                           title="Sort by Timely Lab Results Risk Points"
@@ -2419,7 +2419,7 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                         </th>
 
                         <th
-                          className="p-1 border-r border-slate-200 dark:border-slate-700 font-black bg-indigo-50/50 dark:bg-indigo-950/20 text-indigo-700 dark:text-indigo-300 cursor-pointer hover:bg-indigo-100/70 dark:hover:bg-indigo-900/40 transition-colors select-none group/th"
+                          className="p-1 border-r-2 border-slate-400 dark:border-slate-500 font-black bg-indigo-50/50 dark:bg-indigo-950/20 text-indigo-700 dark:text-indigo-300 cursor-pointer hover:bg-indigo-100/70 dark:hover:bg-indigo-900/40 transition-colors select-none group/th"
                           style={{ width: `${colWidths.sqTotalRp}px`, minWidth: `${colWidths.sqTotalRp}px` }}
                           onClick={() => handleSort("sqTotalRp")}
                           title="Sort by Surveillance Quality Subtotal Risk Points"
@@ -2446,7 +2446,7 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                           </div>
                         </th>
                         <th
-                          className="p-1 border-r border-slate-200 dark:border-slate-700 font-bold cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
+                          className="p-1 border-r-2 border-slate-400 dark:border-slate-500 font-bold cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
                           style={{ width: `${colWidths.pdMcv1TrendRp}px`, minWidth: `${colWidths.pdMcv1TrendRp}px` }}
                           onClick={() => handleSort("pdMcv1TrendRp")}
                           title="Sort by MCV1 Trend Risk Points"
@@ -2469,7 +2469,7 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                           </div>
                         </th>
                         <th
-                          className="p-1 border-r border-slate-200 dark:border-slate-700 font-bold cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
+                          className="p-1 border-r-2 border-slate-400 dark:border-slate-500 font-bold cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
                           style={{ width: `${colWidths.pdMcv2TrendRp}px`, minWidth: `${colWidths.pdMcv2TrendRp}px` }}
                           onClick={() => handleSort("pdMcv2TrendRp")}
                           title="Sort by MCV2 Trend Risk Points"
@@ -2492,7 +2492,7 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                           </div>
                         </th>
                         <th
-                          className="p-1 border-r border-slate-200 dark:border-slate-700 font-bold cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
+                          className="p-1 border-r-2 border-slate-400 dark:border-slate-500 font-bold cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
                           style={{ width: `${colWidths.pdMcvDropoutRp}px`, minWidth: `${colWidths.pdMcvDropoutRp}px` }}
                           onClick={() => handleSort("pdMcvDropoutRp")}
                           title="Sort by MCV1-MCV2 Dropout Risk Points"
@@ -2504,7 +2504,7 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                         </th>
 
                         <th
-                          className="p-1 border-r border-slate-200 dark:border-slate-700 cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
+                          className="p-1 border-r-2 border-slate-400 dark:border-slate-500 cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
                           style={{ width: `${colWidths.pdPentaDoses}px`, minWidth: `${colWidths.pdPentaDoses}px` }}
                           onClick={() => handleSort("penta1YearMinus1")}
                           title="Sort by DPT1 / Penta1 Coverage"
@@ -2527,7 +2527,7 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                           </div>
                         </th>
                         <th
-                          className="p-1 border-r border-slate-200 dark:border-slate-700 font-bold cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
+                          className="p-1 border-r-2 border-slate-400 dark:border-slate-500 font-bold cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
                           style={{ width: `${colWidths.pdPentaDropoutRp}px`, minWidth: `${colWidths.pdPentaDropoutRp}px` }}
                           onClick={() => handleSort("pdPentaDropoutRp")}
                           title="Sort by DPT1-MCV1 Dropout Risk Points"
@@ -2539,7 +2539,7 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                         </th>
 
                         <th
-                          className="p-1 border-r border-slate-200 dark:border-slate-700 font-black bg-indigo-50/50 dark:bg-indigo-950/20 text-indigo-700 dark:text-indigo-300 cursor-pointer hover:bg-indigo-100/70 dark:hover:bg-indigo-900/40 transition-colors select-none group/th"
+                          className="p-1 border-r-2 border-slate-400 dark:border-slate-500 font-black bg-indigo-50/50 dark:bg-indigo-950/20 text-indigo-700 dark:text-indigo-300 cursor-pointer hover:bg-indigo-100/70 dark:hover:bg-indigo-900/40 transition-colors select-none group/th"
                           style={{ width: `${colWidths.pdTotalRp}px`, minWidth: `${colWidths.pdTotalRp}px` }}
                           onClick={() => handleSort("pdTotalRp")}
                           title="Sort by Program Delivery Subtotal Risk Points"
@@ -2555,7 +2555,7 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                     {activeTab === "vulnerable-groups" && (
                       <>
                         <th
-                          className="p-1 border-r border-slate-200 dark:border-slate-700 cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
+                          className="p-1 border-r-2 border-slate-400 dark:border-slate-500 cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
                           style={{ width: `${colWidths.vgItem}px`, minWidth: `${colWidths.vgItem}px` }}
                           onClick={() => handleSort("vg_migrant")}
                           title="Sort by Migrant / IDP / Slums presence"
@@ -2566,7 +2566,7 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                           </div>
                         </th>
                         <th
-                          className="p-1 border-r border-slate-200 dark:border-slate-700 cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
+                          className="p-1 border-r-2 border-slate-400 dark:border-slate-500 cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
                           style={{ width: `${colWidths.vgItem}px`, minWidth: `${colWidths.vgItem}px` }}
                           onClick={() => handleSort("vg_hesitancy")}
                           title="Sort by Vaccine Hesitancy"
@@ -2577,7 +2577,7 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                           </div>
                         </th>
                         <th
-                          className="p-1 border-r border-slate-200 dark:border-slate-700 cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
+                          className="p-1 border-r-2 border-slate-400 dark:border-slate-500 cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
                           style={{ width: `${colWidths.vgItem}px`, minWidth: `${colWidths.vgItem}px` }}
                           onClick={() => handleSort("vg_security")}
                           title="Sort by Security & Safety Concerns"
@@ -2588,7 +2588,7 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                           </div>
                         </th>
                         <th
-                          className="p-1 border-r border-slate-200 dark:border-slate-700 cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
+                          className="p-1 border-r-2 border-slate-400 dark:border-slate-500 cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
                           style={{ width: `${colWidths.vgItem}px`, minWidth: `${colWidths.vgItem}px` }}
                           onClick={() => handleSort("vg_calamities")}
                           title="Sort by Calamities / Disasters"
@@ -2599,7 +2599,7 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                           </div>
                         </th>
                         <th
-                          className="p-1 border-r border-slate-200 dark:border-slate-700 cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
+                          className="p-1 border-r-2 border-slate-400 dark:border-slate-500 cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
                           style={{ width: `${colWidths.vgItem}px`, minWidth: `${colWidths.vgItem}px` }}
                           onClick={() => handleSort("vg_terrain")}
                           title="Sort by Terrain / Poor Access"
@@ -2610,7 +2610,7 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                           </div>
                         </th>
                         <th
-                          className="p-1 border-r border-slate-200 dark:border-slate-700 cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
+                          className="p-1 border-r-2 border-slate-400 dark:border-slate-500 cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
                           style={{ width: `${colWidths.vgItem}px`, minWidth: `${colWidths.vgItem}px` }}
                           onClick={() => handleSort("vg_political")}
                           title="Sort by Lack of Local Political Support"
@@ -2621,7 +2621,7 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                           </div>
                         </th>
                         <th
-                          className="p-1 border-r border-slate-200 dark:border-slate-700 cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
+                          className="p-1 border-r-2 border-slate-400 dark:border-slate-500 cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
                           style={{ width: `${colWidths.vgItem}px`, minWidth: `${colWidths.vgItem}px` }}
                           onClick={() => handleSort("vg_transit")}
                           title="Sort by Transit Hubs / Major Roads"
@@ -2632,7 +2632,7 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                           </div>
                         </th>
                         <th
-                          className="p-1 border-r border-slate-200 dark:border-slate-700 cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
+                          className="p-1 border-r-2 border-slate-400 dark:border-slate-500 cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
                           style={{ width: `${colWidths.vgItem}px`, minWidth: `${colWidths.vgItem}px` }}
                           onClick={() => handleSort("vg_gatherings")}
                           title="Sort by Mass Gatherings"
@@ -2643,7 +2643,7 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                           </div>
                         </th>
                         <th
-                          className="p-1 border-r border-slate-200 dark:border-slate-700 font-black bg-indigo-50/50 dark:bg-indigo-950/20 text-indigo-700 dark:text-indigo-300 cursor-pointer hover:bg-indigo-100/70 dark:hover:bg-indigo-900/40 transition-colors select-none group/th"
+                          className="p-1 border-r-2 border-slate-400 dark:border-slate-500 font-black bg-indigo-50/50 dark:bg-indigo-950/20 text-indigo-700 dark:text-indigo-300 cursor-pointer hover:bg-indigo-100/70 dark:hover:bg-indigo-900/40 transition-colors select-none group/th"
                           style={{ width: `${colWidths.vgTotalRp}px`, minWidth: `${colWidths.vgTotalRp}px` }}
                           onClick={() => handleSort("vgTotalRp")}
                           title="Sort by Vulnerable Groups Subtotal Points"
@@ -2670,7 +2670,7 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                           </div>
                         </th>
                         <th
-                          className="p-1 border-r border-slate-200 dark:border-slate-700 font-bold cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
+                          className="p-1 border-r-2 border-slate-400 dark:border-slate-500 font-bold cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
                           style={{ width: `${colWidths.taCasesUnder5Rp}px`, minWidth: `${colWidths.taCasesUnder5Rp}px` }}
                           onClick={() => handleSort("threatCasesUnder5Rp")}
                           title="Sort by Cases <5 Years Risk Points"
@@ -2693,7 +2693,7 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                           </div>
                         </th>
                         <th
-                          className="p-1 border-r border-slate-200 dark:border-slate-700 font-bold cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
+                          className="p-1 border-r-2 border-slate-400 dark:border-slate-500 font-bold cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
                           style={{ width: `${colWidths.taCases5to14Rp}px`, minWidth: `${colWidths.taCases5to14Rp}px` }}
                           onClick={() => handleSort("threatCases5to14Rp")}
                           title="Sort by Cases 5-14 Years Risk Points"
@@ -2716,7 +2716,7 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                           </div>
                         </th>
                         <th
-                          className="p-1 border-r border-slate-200 dark:border-slate-700 font-bold cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
+                          className="p-1 border-r-2 border-slate-400 dark:border-slate-500 font-bold cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
                           style={{ width: `${colWidths.taCases15plusRp}px`, minWidth: `${colWidths.taCases15plusRp}px` }}
                           onClick={() => handleSort("threatCases15plusRp")}
                           title="Sort by Cases >=15 Years Risk Points"
@@ -2739,7 +2739,7 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                           </div>
                         </th>
                         <th
-                          className="p-1 border-r border-slate-200 dark:border-slate-700 font-bold cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
+                          className="p-1 border-r-2 border-slate-400 dark:border-slate-500 font-bold cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
                           style={{ width: `${colWidths.taDensityRp}px`, minWidth: `${colWidths.taDensityRp}px` }}
                           onClick={() => handleSort("threatDensityRp")}
                           title="Sort by Population Density Risk Points"
@@ -2762,7 +2762,7 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                           </div>
                         </th>
                         <th
-                          className="p-1 border-r border-slate-200 dark:border-slate-700 font-bold cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
+                          className="p-1 border-r-2 border-slate-400 dark:border-slate-500 font-bold cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
                           style={{ width: `${colWidths.taBorderRp}px`, minWidth: `${colWidths.taBorderRp}px` }}
                           onClick={() => handleSort("threatBorderRp")}
                           title="Sort by Border Case Risk Points"
@@ -2785,7 +2785,7 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                           </div>
                         </th>
                         <th
-                          className="p-1 border-r border-slate-200 dark:border-slate-700 font-bold cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
+                          className="p-1 border-r-2 border-slate-400 dark:border-slate-500 font-bold cursor-pointer hover:bg-slate-200/80 dark:hover:bg-slate-700/80 transition-colors select-none group/th"
                           style={{ width: `${colWidths.taVulnRp}px`, minWidth: `${colWidths.taVulnRp}px` }}
                           onClick={() => handleSort("threatVulnRp")}
                           title="Sort by Vulnerability Risk Points"
@@ -2797,7 +2797,7 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                         </th>
 
                         <th
-                          className="p-1 border-r border-slate-200 dark:border-slate-700 font-black bg-indigo-50/50 dark:bg-indigo-950/20 text-indigo-700 dark:text-indigo-300 cursor-pointer hover:bg-indigo-100/70 dark:hover:bg-indigo-900/40 transition-colors select-none group/th"
+                          className="p-1 border-r-2 border-slate-400 dark:border-slate-500 font-black bg-indigo-50/50 dark:bg-indigo-950/20 text-indigo-700 dark:text-indigo-300 cursor-pointer hover:bg-indigo-100/70 dark:hover:bg-indigo-900/40 transition-colors select-none group/th"
                           style={{ width: `${colWidths.taTotalRp}px`, minWidth: `${colWidths.taTotalRp}px` }}
                           onClick={() => handleSort("taTotalRp")}
                           title="Sort by Threat Assessment Subtotal Risk Points"
@@ -2948,7 +2948,7 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
 
                               {/* Pinned District Name */}
                               <td
-                                className="p-1.5 sticky z-10 bg-background border-r-2 border-slate-200 dark:border-slate-800 shadow-[4px_0_8px_-2px_rgba(0,0,0,0.06)] font-semibold text-foreground group/district"
+                                className="p-1.5 sticky z-10 bg-background border-r-2 border-slate-400 dark:border-slate-600 shadow-[4px_0_8px_-2px_rgba(0,0,0,0.12)] font-semibold text-foreground group/district"
                                 style={{ left: `${indexWidth}px`, width: `${districtWidth}px`, minWidth: `${districtWidth}px`, maxWidth: `${districtWidth}px` }}
                               >
                                 <div className="flex items-center justify-between gap-1">
@@ -2999,7 +2999,7 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                                   <td className="p-1 border-r border-slate-200 dark:border-slate-800 text-center font-mono text-xs bg-slate-50 dark:bg-slate-900/40" style={{ width: `${colWidths.mcv1Avg}px`, minWidth: `${colWidths.mcv1Avg}px` }}>
                                     {mcv1Avg}%
                                   </td>
-                                  <td className="p-1 border-r border-slate-200 dark:border-slate-800 text-center font-bold" style={{ width: `${colWidths.mcv1Rp}px`, minWidth: `${colWidths.mcv1Rp}px` }}>
+                                  <td className="p-1 border-r-2 border-slate-300 dark:border-slate-600 text-center font-bold" style={{ width: `${colWidths.mcv1Rp}px`, minWidth: `${colWidths.mcv1Rp}px` }}>
                                     <span className="inline-flex items-center justify-center min-w-[24px] h-5 px-1.5 text-[11px] font-bold rounded bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
                                       {mcv1Rp}
                                     </span>
@@ -3008,7 +3008,7 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                                   <td className="p-1 border-r border-slate-200 dark:border-slate-800 text-center font-mono text-xs" style={{ width: `${colWidths.neighborPct}px`, minWidth: `${colWidths.neighborPct}px` }}>
                                     {neighborPct}%
                                   </td>
-                                  <td className="p-1 border-r border-slate-200 dark:border-slate-800 text-center font-bold" style={{ width: `${colWidths.neighborRp}px`, minWidth: `${colWidths.neighborRp}px` }}>
+                                  <td className="p-1 border-r-2 border-slate-300 dark:border-slate-600 text-center font-bold" style={{ width: `${colWidths.neighborRp}px`, minWidth: `${colWidths.neighborRp}px` }}>
                                     <span className="inline-flex items-center justify-center min-w-[24px] h-5 px-1.5 text-[11px] font-bold rounded bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
                                       {neighborRp}
                                     </span>
@@ -3041,7 +3041,7 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                                   <td className="p-1 border-r border-slate-200 dark:border-slate-800 text-center font-mono text-xs bg-slate-50 dark:bg-slate-900/40" style={{ width: `${colWidths.mcv2Avg}px`, minWidth: `${colWidths.mcv2Avg}px` }}>
                                     {mcv2Avg}%
                                   </td>
-                                  <td className="p-1 border-r border-slate-200 dark:border-slate-800 text-center font-bold" style={{ width: `${colWidths.mcv2Rp}px`, minWidth: `${colWidths.mcv2Rp}px` }}>
+                                  <td className="p-1 border-r-2 border-slate-300 dark:border-slate-600 text-center font-bold" style={{ width: `${colWidths.mcv2Rp}px`, minWidth: `${colWidths.mcv2Rp}px` }}>
                                     <span className="inline-flex items-center justify-center min-w-[24px] h-5 px-1.5 text-[11px] font-bold rounded bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
                                       {mcv2Rp}
                                     </span>
@@ -3055,7 +3055,7 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                                       className="h-7 text-xs text-center font-mono font-bold px-1.5 py-0.5 w-full [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                                     />
                                   </td>
-                                  <td className="p-1 border-r border-slate-200 dark:border-slate-800 text-center font-bold" style={{ width: `${colWidths.siaCovRp}px`, minWidth: `${colWidths.siaCovRp}px` }}>
+                                  <td className="p-1 border-r-2 border-slate-300 dark:border-slate-600 text-center font-bold" style={{ width: `${colWidths.siaCovRp}px`, minWidth: `${colWidths.siaCovRp}px` }}>
                                     <span className="inline-flex items-center justify-center min-w-[24px] h-5 px-1.5 text-[11px] font-bold rounded bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
                                       {siaCovRp}
                                     </span>
@@ -3075,7 +3075,7 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                                       </SelectContent>
                                     </Select>
                                   </td>
-                                  <td className="p-1 border-r border-slate-200 dark:border-slate-800 text-center font-bold" style={{ width: `${colWidths.siaAgeGroupRp}px`, minWidth: `${colWidths.siaAgeGroupRp}px` }}>
+                                  <td className="p-1 border-r-2 border-slate-300 dark:border-slate-600 text-center font-bold" style={{ width: `${colWidths.siaAgeGroupRp}px`, minWidth: `${colWidths.siaAgeGroupRp}px` }}>
                                     <span className="inline-flex items-center justify-center min-w-[24px] h-5 px-1.5 text-[11px] font-bold rounded bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
                                       {siaAgeRp}
                                     </span>
@@ -3089,7 +3089,7 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                                       className="h-7 text-xs text-center font-mono font-bold px-1.5 py-0.5 w-full [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                                     />
                                   </td>
-                                  <td className="p-1 border-r border-slate-200 dark:border-slate-800 text-center font-bold" style={{ width: `${colWidths.siaYearsRp}px`, minWidth: `${colWidths.siaYearsRp}px` }}>
+                                  <td className="p-1 border-r-2 border-slate-300 dark:border-slate-600 text-center font-bold" style={{ width: `${colWidths.siaYearsRp}px`, minWidth: `${colWidths.siaYearsRp}px` }}>
                                     <span className="inline-flex items-center justify-center min-w-[24px] h-5 px-1.5 text-[11px] font-bold rounded bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
                                       {siaYearsRp}
                                     </span>
@@ -3103,13 +3103,13 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                                       className="h-7 text-xs text-center font-mono font-bold px-1.5 py-0.5 w-full [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                                     />
                                   </td>
-                                  <td className="p-1 border-r border-slate-200 dark:border-slate-800 text-center font-bold" style={{ width: `${colWidths.unvacRp}px`, minWidth: `${colWidths.unvacRp}px` }}>
+                                  <td className="p-1 border-r-2 border-slate-300 dark:border-slate-600 text-center font-bold" style={{ width: `${colWidths.unvacRp}px`, minWidth: `${colWidths.unvacRp}px` }}>
                                     <span className="inline-flex items-center justify-center min-w-[24px] h-5 px-1.5 text-[11px] font-bold rounded bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
                                       {unvacRp}
                                     </span>
                                   </td>
 
-                                  <td className="p-1 border-r border-slate-200 dark:border-slate-800 text-center font-mono font-black bg-indigo-50/50 dark:bg-indigo-950/20 text-indigo-700 dark:text-indigo-300" style={{ width: `${colWidths.piTotalRp}px`, minWidth: `${colWidths.piTotalRp}px` }}>
+                                  <td className="p-1 border-r-2 border-slate-300 dark:border-slate-600 text-center font-mono font-black bg-indigo-50/50 dark:bg-indigo-950/20 text-indigo-700 dark:text-indigo-300" style={{ width: `${colWidths.piTotalRp}px`, minWidth: `${colWidths.piTotalRp}px` }}>
                                     <span className="inline-flex items-center justify-center min-w-[28px] h-6 px-2 text-xs font-black rounded-full bg-primary/15 text-primary border border-primary/30">
                                       {piSubtotal}
                                     </span>
@@ -3123,7 +3123,7 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                                   <td className="p-1 border-r border-slate-200 dark:border-slate-800 text-center font-mono text-xs" style={{ width: `${colWidths.sqRateVal}px`, minWidth: `${colWidths.sqRateVal}px` }}>
                                     {discardedRate}
                                   </td>
-                                  <td className="p-1 border-r border-slate-200 dark:border-slate-800 text-center font-bold" style={{ width: `${colWidths.sqRateRp}px`, minWidth: `${colWidths.sqRateRp}px` }}>
+                                  <td className="p-1 border-r-2 border-slate-300 dark:border-slate-600 text-center font-bold" style={{ width: `${colWidths.sqRateRp}px`, minWidth: `${colWidths.sqRateRp}px` }}>
                                     <span className="inline-flex items-center justify-center min-w-[24px] h-5 px-1.5 text-[11px] font-bold rounded bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
                                       {discardedRp}
                                     </span>
@@ -3137,7 +3137,7 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                                       className="h-7 text-xs text-center font-mono font-bold px-1.5 py-0.5 w-full [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                                     />
                                   </td>
-                                  <td className="p-1 border-r border-slate-200 dark:border-slate-800 text-center font-bold" style={{ width: `${colWidths.sqInvestRp}px`, minWidth: `${colWidths.sqInvestRp}px` }}>
+                                  <td className="p-1 border-r-2 border-slate-300 dark:border-slate-600 text-center font-bold" style={{ width: `${colWidths.sqInvestRp}px`, minWidth: `${colWidths.sqInvestRp}px` }}>
                                     <span className="inline-flex items-center justify-center min-w-[24px] h-5 px-1.5 text-[11px] font-bold rounded bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
                                       {investRp}
                                     </span>
@@ -3151,7 +3151,7 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                                       className="h-7 text-xs text-center font-mono font-bold px-1.5 py-0.5 w-full [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                                     />
                                   </td>
-                                  <td className="p-1 border-r border-slate-200 dark:border-slate-800 text-center font-bold" style={{ width: `${colWidths.sqSpecimenRp}px`, minWidth: `${colWidths.sqSpecimenRp}px` }}>
+                                  <td className="p-1 border-r-2 border-slate-300 dark:border-slate-600 text-center font-bold" style={{ width: `${colWidths.sqSpecimenRp}px`, minWidth: `${colWidths.sqSpecimenRp}px` }}>
                                     <span className="inline-flex items-center justify-center min-w-[24px] h-5 px-1.5 text-[11px] font-bold rounded bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
                                       {specimenRp}
                                     </span>
@@ -3165,13 +3165,13 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                                       className="h-7 text-xs text-center font-mono font-bold px-1.5 py-0.5 w-full [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                                     />
                                   </td>
-                                  <td className="p-1 border-r border-slate-200 dark:border-slate-800 text-center font-bold" style={{ width: `${colWidths.sqLabRp}px`, minWidth: `${colWidths.sqLabRp}px` }}>
+                                  <td className="p-1 border-r-2 border-slate-300 dark:border-slate-600 text-center font-bold" style={{ width: `${colWidths.sqLabRp}px`, minWidth: `${colWidths.sqLabRp}px` }}>
                                     <span className="inline-flex items-center justify-center min-w-[24px] h-5 px-1.5 text-[11px] font-bold rounded bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
                                       {labRp}
                                     </span>
                                   </td>
 
-                                  <td className="p-1 border-r border-slate-200 dark:border-slate-800 text-center font-mono font-black bg-indigo-50/50 dark:bg-indigo-950/20 text-indigo-700 dark:text-indigo-300" style={{ width: `${colWidths.sqTotalRp}px`, minWidth: `${colWidths.sqTotalRp}px` }}>
+                                  <td className="p-1 border-r-2 border-slate-300 dark:border-slate-600 text-center font-mono font-black bg-indigo-50/50 dark:bg-indigo-950/20 text-indigo-700 dark:text-indigo-300" style={{ width: `${colWidths.sqTotalRp}px`, minWidth: `${colWidths.sqTotalRp}px` }}>
                                     <span className="inline-flex items-center justify-center min-w-[28px] h-6 px-2 text-xs font-black rounded-full bg-primary/15 text-primary border border-primary/30">
                                       {sqSubtotal}
                                     </span>
@@ -3185,7 +3185,7 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                                   <td className="p-1 border-r border-slate-200 dark:border-slate-800 text-center font-mono text-xs" style={{ width: `${colWidths.pdMcv1TrendVal}px`, minWidth: `${colWidths.pdMcv1TrendVal}px` }}>
                                     {pdMcv1Trend > 0 ? `+${pdMcv1Trend}` : pdMcv1Trend}
                                   </td>
-                                  <td className="p-1 border-r border-slate-200 dark:border-slate-800 text-center font-bold" style={{ width: `${colWidths.pdMcv1TrendRp}px`, minWidth: `${colWidths.pdMcv1TrendRp}px` }}>
+                                  <td className="p-1 border-r-2 border-slate-300 dark:border-slate-600 text-center font-bold" style={{ width: `${colWidths.pdMcv1TrendRp}px`, minWidth: `${colWidths.pdMcv1TrendRp}px` }}>
                                     <span className="inline-flex items-center justify-center min-w-[24px] h-5 px-1.5 text-[11px] font-bold rounded bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
                                       {pdMcv1TrendRp}
                                     </span>
@@ -3194,7 +3194,7 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                                   <td className="p-1 border-r border-slate-200 dark:border-slate-800 text-center font-mono text-xs" style={{ width: `${colWidths.pdMcv2TrendVal}px`, minWidth: `${colWidths.pdMcv2TrendVal}px` }}>
                                     {pdMcv2Trend > 0 ? `+${pdMcv2Trend}` : pdMcv2Trend}
                                   </td>
-                                  <td className="p-1 border-r border-slate-200 dark:border-slate-800 text-center font-bold" style={{ width: `${colWidths.pdMcv2TrendRp}px`, minWidth: `${colWidths.pdMcv2TrendRp}px` }}>
+                                  <td className="p-1 border-r-2 border-slate-300 dark:border-slate-600 text-center font-bold" style={{ width: `${colWidths.pdMcv2TrendRp}px`, minWidth: `${colWidths.pdMcv2TrendRp}px` }}>
                                     <span className="inline-flex items-center justify-center min-w-[24px] h-5 px-1.5 text-[11px] font-bold rounded bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
                                       {pdMcv2TrendRp}
                                     </span>
@@ -3203,13 +3203,13 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                                   <td className="p-1 border-r border-slate-200 dark:border-slate-800 text-center font-mono text-xs" style={{ width: `${colWidths.pdMcvDropoutVal}px`, minWidth: `${colWidths.pdMcvDropoutVal}px` }}>
                                     {mcvDropout}%
                                   </td>
-                                  <td className="p-1 border-r border-slate-200 dark:border-slate-800 text-center font-bold" style={{ width: `${colWidths.pdMcvDropoutRp}px`, minWidth: `${colWidths.pdMcvDropoutRp}px` }}>
+                                  <td className="p-1 border-r-2 border-slate-300 dark:border-slate-600 text-center font-bold" style={{ width: `${colWidths.pdMcvDropoutRp}px`, minWidth: `${colWidths.pdMcvDropoutRp}px` }}>
                                     <span className="inline-flex items-center justify-center min-w-[24px] h-5 px-1.5 text-[11px] font-bold rounded bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
                                       {mcvDropoutRp}
                                     </span>
                                   </td>
 
-                                  <td className="p-1 border-r border-slate-200 dark:border-slate-800" style={{ width: `${colWidths.pdPentaDoses}px`, minWidth: `${colWidths.pdPentaDoses}px` }}>
+                                  <td className="p-1 border-r-2 border-slate-300 dark:border-slate-600" style={{ width: `${colWidths.pdPentaDoses}px`, minWidth: `${colWidths.pdPentaDoses}px` }}>
                                     <Input
                                       type="number"
                                       value={row.penta1YearMinus1}
@@ -3221,13 +3221,13 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                                   <td className="p-1 border-r border-slate-200 dark:border-slate-800 text-center font-mono text-xs" style={{ width: `${colWidths.pdPentaDropoutVal}px`, minWidth: `${colWidths.pdPentaDropoutVal}px` }}>
                                     {pentaDropout}%
                                   </td>
-                                  <td className="p-1 border-r border-slate-200 dark:border-slate-800 text-center font-bold" style={{ width: `${colWidths.pdPentaDropoutRp}px`, minWidth: `${colWidths.pdPentaDropoutRp}px` }}>
+                                  <td className="p-1 border-r-2 border-slate-300 dark:border-slate-600 text-center font-bold" style={{ width: `${colWidths.pdPentaDropoutRp}px`, minWidth: `${colWidths.pdPentaDropoutRp}px` }}>
                                     <span className="inline-flex items-center justify-center min-w-[24px] h-5 px-1.5 text-[11px] font-bold rounded bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
                                       {pentaDropoutRp}
                                     </span>
                                   </td>
 
-                                  <td className="p-1 border-r border-slate-200 dark:border-slate-800 text-center font-mono font-black bg-indigo-50/50 dark:bg-indigo-950/20 text-indigo-700 dark:text-indigo-300" style={{ width: `${colWidths.pdTotalRp}px`, minWidth: `${colWidths.pdTotalRp}px` }}>
+                                  <td className="p-1 border-r-2 border-slate-300 dark:border-slate-600 text-center font-mono font-black bg-indigo-50/50 dark:bg-indigo-950/20 text-indigo-700 dark:text-indigo-300" style={{ width: `${colWidths.pdTotalRp}px`, minWidth: `${colWidths.pdTotalRp}px` }}>
                                     <span className="inline-flex items-center justify-center min-w-[28px] h-6 px-2 text-xs font-black rounded-full bg-primary/15 text-primary border border-primary/30">
                                       {pdSubtotal}
                                     </span>
@@ -3250,7 +3250,7 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                                   ].map((vulnKey) => {
                                     const isYes = Boolean((vulns as any)[vulnKey]);
                                     return (
-                                      <td key={vulnKey} className="p-1 border-r border-slate-200 dark:border-slate-800 text-center" style={{ width: `${colWidths.vgItem}px`, minWidth: `${colWidths.vgItem}px` }}>
+                                      <td key={vulnKey} className="p-1 border-r-2 border-slate-300 dark:border-slate-600 text-center" style={{ width: `${colWidths.vgItem}px`, minWidth: `${colWidths.vgItem}px` }}>
                                         <button
                                           type="button"
                                           onClick={() => handleCellChange(row.districtId, `vuln_${vulnKey}`, !isYes)}
@@ -3266,7 +3266,7 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                                     );
                                   })}
 
-                                  <td className="p-1 border-r border-slate-200 dark:border-slate-800 text-center font-mono font-black bg-indigo-50/50 dark:bg-indigo-950/20 text-indigo-700 dark:text-indigo-300" style={{ width: `${colWidths.vgTotalRp}px`, minWidth: `${colWidths.vgTotalRp}px` }}>
+                                  <td className="p-1 border-r-2 border-slate-300 dark:border-slate-600 text-center font-mono font-black bg-indigo-50/50 dark:bg-indigo-950/20 text-indigo-700 dark:text-indigo-300" style={{ width: `${colWidths.vgTotalRp}px`, minWidth: `${colWidths.vgTotalRp}px` }}>
                                     <span className="inline-flex items-center justify-center min-w-[28px] h-6 px-2 text-xs font-black rounded-full bg-primary/15 text-primary border border-primary/30">
                                       {vgSubtotal}
                                     </span>
@@ -3285,7 +3285,7 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                                       className="h-7 text-xs text-center font-mono font-bold px-1.5 py-0.5 w-full [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                                     />
                                   </td>
-                                  <td className="p-1 border-r border-slate-200 dark:border-slate-800 text-center font-bold" style={{ width: `${colWidths.taCasesUnder5Rp}px`, minWidth: `${colWidths.taCasesUnder5Rp}px` }}>
+                                  <td className="p-1 border-r-2 border-slate-300 dark:border-slate-600 text-center font-bold" style={{ width: `${colWidths.taCasesUnder5Rp}px`, minWidth: `${colWidths.taCasesUnder5Rp}px` }}>
                                     <span className="inline-flex items-center justify-center min-w-[24px] h-5 px-1.5 text-[11px] font-bold rounded bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
                                       {cUnder5Rp}
                                     </span>
@@ -3299,7 +3299,7 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                                       className="h-7 text-xs text-center font-mono font-bold px-1.5 py-0.5 w-full [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                                     />
                                   </td>
-                                  <td className="p-1 border-r border-slate-200 dark:border-slate-800 text-center font-bold" style={{ width: `${colWidths.taCases5to14Rp}px`, minWidth: `${colWidths.taCases5to14Rp}px` }}>
+                                  <td className="p-1 border-r-2 border-slate-300 dark:border-slate-600 text-center font-bold" style={{ width: `${colWidths.taCases5to14Rp}px`, minWidth: `${colWidths.taCases5to14Rp}px` }}>
                                     <span className="inline-flex items-center justify-center min-w-[24px] h-5 px-1.5 text-[11px] font-bold rounded bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
                                       {c5to14Rp}
                                     </span>
@@ -3313,7 +3313,7 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                                       className="h-7 text-xs text-center font-mono font-bold px-1.5 py-0.5 w-full [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                                     />
                                   </td>
-                                  <td className="p-1 border-r border-slate-200 dark:border-slate-800 text-center font-bold" style={{ width: `${colWidths.taCases15plusRp}px`, minWidth: `${colWidths.taCases15plusRp}px` }}>
+                                  <td className="p-1 border-r-2 border-slate-300 dark:border-slate-600 text-center font-bold" style={{ width: `${colWidths.taCases15plusRp}px`, minWidth: `${colWidths.taCases15plusRp}px` }}>
                                     <span className="inline-flex items-center justify-center min-w-[24px] h-5 px-1.5 text-[11px] font-bold rounded bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
                                       {c15plusRp}
                                     </span>
@@ -3322,7 +3322,7 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                                   <td className="p-1 border-r border-slate-200 dark:border-slate-800 text-center font-mono text-xs" style={{ width: `${colWidths.taDensityVal}px`, minWidth: `${colWidths.taDensityVal}px` }}>
                                     {density}
                                   </td>
-                                  <td className="p-1 border-r border-slate-200 dark:border-slate-800 text-center font-bold" style={{ width: `${colWidths.taDensityRp}px`, minWidth: `${colWidths.taDensityRp}px` }}>
+                                  <td className="p-1 border-r-2 border-slate-300 dark:border-slate-600 text-center font-bold" style={{ width: `${colWidths.taDensityRp}px`, minWidth: `${colWidths.taDensityRp}px` }}>
                                     <span className="inline-flex items-center justify-center min-w-[24px] h-5 px-1.5 text-[11px] font-bold rounded bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
                                       {densityRp}
                                     </span>
@@ -3341,7 +3341,7 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                                       {row.borderCaseInPastYear ? "YES" : "NO"}
                                     </button>
                                   </td>
-                                  <td className="p-1 border-r border-slate-200 dark:border-slate-800 text-center font-bold" style={{ width: `${colWidths.taBorderRp}px`, minWidth: `${colWidths.taBorderRp}px` }}>
+                                  <td className="p-1 border-r-2 border-slate-300 dark:border-slate-600 text-center font-bold" style={{ width: `${colWidths.taBorderRp}px`, minWidth: `${colWidths.taBorderRp}px` }}>
                                     <span className="inline-flex items-center justify-center min-w-[24px] h-5 px-1.5 text-[11px] font-bold rounded bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
                                       {borderRp}
                                     </span>
@@ -3350,13 +3350,13 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                                   <td className="p-1 border-r border-slate-200 dark:border-slate-800 text-center font-mono text-xs" style={{ width: `${colWidths.taVulnVal}px`, minWidth: `${colWidths.taVulnVal}px` }}>
                                     {vgSubtotal} pts
                                   </td>
-                                  <td className="p-1 border-r border-slate-200 dark:border-slate-800 text-center font-bold" style={{ width: `${colWidths.taVulnRp}px`, minWidth: `${colWidths.taVulnRp}px` }}>
+                                  <td className="p-1 border-r-2 border-slate-300 dark:border-slate-600 text-center font-bold" style={{ width: `${colWidths.taVulnRp}px`, minWidth: `${colWidths.taVulnRp}px` }}>
                                     <span className="inline-flex items-center justify-center min-w-[24px] h-5 px-1.5 text-[11px] font-bold rounded bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
                                       {vgSubtotal}
                                     </span>
                                   </td>
 
-                                  <td className="p-1 border-r border-slate-200 dark:border-slate-800 text-center font-mono font-black bg-indigo-50/50 dark:bg-indigo-950/20 text-indigo-700 dark:text-indigo-300" style={{ width: `${colWidths.taTotalRp}px`, minWidth: `${colWidths.taTotalRp}px` }}>
+                                  <td className="p-1 border-r-2 border-slate-300 dark:border-slate-600 text-center font-mono font-black bg-indigo-50/50 dark:bg-indigo-950/20 text-indigo-700 dark:text-indigo-300" style={{ width: `${colWidths.taTotalRp}px`, minWidth: `${colWidths.taTotalRp}px` }}>
                                     <span className="inline-flex items-center justify-center min-w-[28px] h-6 px-2 text-xs font-black rounded-full bg-primary/15 text-primary border border-primary/30">
                                       {taSubtotal}
                                     </span>
@@ -3392,16 +3392,16 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
           </CardHeader>
           <CardContent className="p-4 space-y-3">
             <div className="border rounded-lg overflow-hidden">
-              <table className="w-full text-xs text-left border-collapse">
+              <table className="w-full min-w-full text-xs text-left border-collapse table-auto">
                 <thead className="bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 font-semibold border-b">
                   <tr>
-                    <th className="p-2 border-r text-center w-12">#</th>
-                    <th className="p-2 border-r">District / Area</th>
-                    <th className="p-2 border-r">Province</th>
-                    <th className="p-2 border-r text-right">Population</th>
-                    <th className="p-2 border-r text-right">Cases ({dataFirstYear})</th>
-                    <th className="p-2 border-r text-right">Cases ({dataSecondYear})</th>
-                    <th className="p-2 border-r text-right">Cases ({dataLastYear})</th>
+                    <th className="p-2 border-r-2 border-slate-300 dark:border-slate-600 text-center w-12">#</th>
+                    <th className="p-2 border-r-2 border-slate-300 dark:border-slate-600">District / Area</th>
+                    <th className="p-2 border-r-2 border-slate-400 dark:border-slate-500">Province</th>
+                    <th className="p-2 border-r-2 border-slate-300 dark:border-slate-600 text-right">Population</th>
+                    <th className="p-2 border-r-2 border-slate-300 dark:border-slate-600 text-right">Cases ({dataFirstYear})</th>
+                    <th className="p-2 border-r-2 border-slate-300 dark:border-slate-600 text-right">Cases ({dataSecondYear})</th>
+                    <th className="p-2 border-r-2 border-slate-300 dark:border-slate-600 text-right">Cases ({dataLastYear})</th>
                     <th className="p-2 text-right">Incidence / 100k ({dataLastYear})</th>
                   </tr>
                 </thead>
@@ -3415,13 +3415,13 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
 
                     return (
                       <tr key={r.districtId} className="hover:bg-muted/40">
-                        <td className="p-1.5 text-center font-mono text-muted-foreground">{i + 1}</td>
-                        <td className="p-1.5 font-semibold text-foreground">{r.districtName}</td>
-                        <td className="p-1.5 text-muted-foreground">{r.provinceName}</td>
-                        <td className="p-1.5 text-right font-mono">{pop.toLocaleString()}</td>
-                        <td className="p-1.5 text-right font-mono">{c3}</td>
-                        <td className="p-1.5 text-right font-mono">{c2}</td>
-                        <td className="p-1.5 text-right font-mono font-bold text-foreground">{c1}</td>
+                        <td className="p-1.5 border-r border-slate-200 dark:border-slate-700 text-center font-mono text-muted-foreground">{i + 1}</td>
+                        <td className="p-1.5 border-r border-slate-200 dark:border-slate-700 font-semibold text-foreground">{r.districtName}</td>
+                        <td className="p-1.5 border-r-2 border-slate-300 dark:border-slate-600 text-muted-foreground">{r.provinceName}</td>
+                        <td className="p-1.5 border-r border-slate-200 dark:border-slate-700 text-right font-mono">{pop.toLocaleString()}</td>
+                        <td className="p-1.5 border-r border-slate-200 dark:border-slate-700 text-right font-mono">{c3}</td>
+                        <td className="p-1.5 border-r border-slate-200 dark:border-slate-700 text-right font-mono">{c2}</td>
+                        <td className="p-1.5 border-r-2 border-slate-300 dark:border-slate-600 text-right font-mono font-bold text-foreground">{c1}</td>
                         <td className="p-1.5 text-right font-mono font-bold">
                           <span className={inc1 > 5 ? "text-red-600 font-black" : "text-foreground"}>
                             {inc1}
@@ -3453,37 +3453,37 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
           </CardHeader>
           <CardContent className="p-4 space-y-3">
             <div className="border rounded-lg overflow-hidden">
-              <table className="w-full text-xs text-left border-collapse">
+              <table className="w-full min-w-full text-xs text-left border-collapse table-auto">
                 <thead className="bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 font-semibold border-b">
                   <tr>
-                    <th className="p-2 border-r text-center w-12">#</th>
-                    <th className="p-2 border-r">Case ID</th>
-                    <th className="p-2 border-r">District / Area</th>
-                    <th className="p-2 border-r">Province</th>
-                    <th className="p-2 border-r text-center">Age</th>
-                    <th className="p-2 border-r text-center">Sex</th>
-                    <th className="p-2 border-r">Date of Onset</th>
-                    <th className="p-2 border-r text-center">Vaccinated</th>
-                    <th className="p-2 border-r text-center">Specimen</th>
+                    <th className="p-2 border-r-2 border-slate-300 dark:border-slate-600 text-center w-12">#</th>
+                    <th className="p-2 border-r-2 border-slate-300 dark:border-slate-600">Case ID</th>
+                    <th className="p-2 border-r-2 border-slate-300 dark:border-slate-600">District / Area</th>
+                    <th className="p-2 border-r-2 border-slate-400 dark:border-slate-500">Province</th>
+                    <th className="p-2 border-r-2 border-slate-300 dark:border-slate-600 text-center">Age</th>
+                    <th className="p-2 border-r-2 border-slate-300 dark:border-slate-600 text-center">Sex</th>
+                    <th className="p-2 border-r-2 border-slate-300 dark:border-slate-600">Date of Onset</th>
+                    <th className="p-2 border-r-2 border-slate-300 dark:border-slate-600 text-center">Vaccinated</th>
+                    <th className="p-2 border-r-2 border-slate-300 dark:border-slate-600 text-center">Specimen</th>
                     <th className="p-2 text-center">Final Classification</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
                   {localRows.slice(0, 15).map((r, i) => (
                     <tr key={r.districtId} className="hover:bg-muted/40">
-                      <td className="p-1.5 text-center font-mono text-muted-foreground">{i + 1}</td>
-                      <td className="p-1.5 font-mono text-[11px] font-bold text-primary">MEA-{r.districtId}-2023-{101 + i}</td>
-                      <td className="p-1.5 font-medium">{r.districtName}</td>
-                      <td className="p-1.5 text-muted-foreground">{r.provinceName}</td>
-                      <td className="p-1.5 text-center font-mono">{2 + (i % 8)}y</td>
-                      <td className="p-1.5 text-center">{i % 2 === 0 ? "F" : "M"}</td>
-                      <td className="p-1.5 font-mono text-muted-foreground">2023-{(i % 12) + 1}-14</td>
-                      <td className="p-1.5 text-center">
+                      <td className="p-1.5 border-r border-slate-200 dark:border-slate-700 text-center font-mono text-muted-foreground">{i + 1}</td>
+                      <td className="p-1.5 border-r border-slate-200 dark:border-slate-700 font-mono text-[11px] font-bold text-primary">MEA-{r.districtId}-2023-{101 + i}</td>
+                      <td className="p-1.5 border-r border-slate-200 dark:border-slate-700 font-medium">{r.districtName}</td>
+                      <td className="p-1.5 border-r-2 border-slate-300 dark:border-slate-600 text-muted-foreground">{r.provinceName}</td>
+                      <td className="p-1.5 border-r border-slate-200 dark:border-slate-700 text-center font-mono">{2 + (i % 8)}y</td>
+                      <td className="p-1.5 border-r border-slate-200 dark:border-slate-700 text-center">{i % 2 === 0 ? "F" : "M"}</td>
+                      <td className="p-1.5 border-r border-slate-200 dark:border-slate-700 font-mono text-muted-foreground">2023-{(i % 12) + 1}-14</td>
+                      <td className="p-1.5 border-r border-slate-200 dark:border-slate-700 text-center">
                         <Badge variant="outline" className={`text-[10px] ${i % 3 === 0 ? "text-amber-600 bg-amber-50" : "text-emerald-600 bg-emerald-50"}`}>
                           {i % 3 === 0 ? "Zero-Dose" : "1 Dose"}
                         </Badge>
                       </td>
-                      <td className="p-1.5 text-center">
+                      <td className="p-1.5 border-r border-slate-200 dark:border-slate-700 text-center">
                         <Badge variant="outline" className="text-[10px] text-sky-600 bg-sky-50">Collected</Badge>
                       </td>
                       <td className="p-1.5 text-center">
@@ -3522,14 +3522,14 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                 Table 1: Overall Measles Risk Profile ({assessmentCountry})
               </h4>
               <div className="border rounded-lg overflow-hidden">
-                <table className="w-full text-xs text-center border-collapse">
+                <table className="w-full min-w-full text-xs text-center border-collapse table-auto">
                   <thead className="bg-slate-100 dark:bg-slate-800 font-semibold border-b">
                     <tr>
-                      <th className="p-2 border-r text-left">Classification Tier</th>
-                      <th className="p-2 border-r bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300">Low Risk (&lt;32)</th>
-                      <th className="p-2 border-r bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300">Medium Risk (32–44)</th>
-                      <th className="p-2 border-r bg-orange-50 dark:bg-orange-950/40 text-orange-800 dark:text-orange-300">High Risk (45–56)</th>
-                      <th className="p-2 border-r bg-red-50 dark:bg-red-950/40 text-red-800 dark:text-red-300">Very High Risk (&gt;=57)</th>
+                      <th className="p-2 border-r-2 border-slate-300 dark:border-slate-600 text-left">Classification Tier</th>
+                      <th className="p-2 border-r-2 border-slate-300 dark:border-slate-600 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300">Low Risk (&lt;32)</th>
+                      <th className="p-2 border-r-2 border-slate-300 dark:border-slate-600 bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300">Medium Risk (32–44)</th>
+                      <th className="p-2 border-r-2 border-slate-300 dark:border-slate-600 bg-orange-50 dark:bg-orange-950/40 text-orange-800 dark:text-orange-300">High Risk (45–56)</th>
+                      <th className="p-2 border-r-2 border-slate-400 dark:border-slate-500 bg-red-50 dark:bg-red-950/40 text-red-800 dark:text-red-300">Very High Risk (&gt;=57)</th>
                       <th className="p-2 font-bold">Total Evaluated</th>
                     </tr>
                   </thead>
@@ -3569,14 +3569,14 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                 Table 1a: Risk Profile — Number of Districts by Province
               </h4>
               <div className="border rounded-lg overflow-hidden">
-                <table className="w-full text-xs text-left border-collapse">
+                <table className="w-full min-w-full text-xs text-left border-collapse table-auto">
                   <thead className="bg-slate-100 dark:bg-slate-800 font-semibold border-b">
                     <tr>
-                      <th className="p-2 border-r">Province (Admin1)</th>
-                      <th className="p-2 border-r text-center text-emerald-700">Low</th>
-                      <th className="p-2 border-r text-center text-amber-700">Medium</th>
-                      <th className="p-2 border-r text-center text-orange-700">High</th>
-                      <th className="p-2 border-r text-center text-red-700">Very High</th>
+                      <th className="p-2 border-r-2 border-slate-400 dark:border-slate-500">Province (Admin1)</th>
+                      <th className="p-2 border-r-2 border-slate-300 dark:border-slate-600 text-center text-emerald-700">Low</th>
+                      <th className="p-2 border-r-2 border-slate-300 dark:border-slate-600 text-center text-amber-700">Medium</th>
+                      <th className="p-2 border-r-2 border-slate-300 dark:border-slate-600 text-center text-orange-700">High</th>
+                      <th className="p-2 border-r-2 border-slate-400 dark:border-slate-500 text-center text-red-700">Very High</th>
                       <th className="p-2 text-center font-bold">Total Districts</th>
                     </tr>
                   </thead>
@@ -3591,11 +3591,11 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
 
                       return (
                         <tr key={p.name} className="hover:bg-muted/30">
-                          <td className="p-2 border-r font-semibold">{p.name}</td>
-                          <td className="p-2 border-r text-center font-mono text-emerald-700">{low > 0 ? low : "-"}</td>
-                          <td className="p-2 border-r text-center font-mono text-amber-700">{medium > 0 ? medium : "-"}</td>
-                          <td className="p-2 border-r text-center font-mono font-bold text-orange-700">{high > 0 ? high : "-"}</td>
-                          <td className="p-2 border-r text-center font-mono font-bold text-red-700">{veryHigh > 0 ? veryHigh : "-"}</td>
+                          <td className="p-2 border-r-2 border-slate-300 dark:border-slate-600 font-semibold">{p.name}</td>
+                          <td className="p-2 border-r-2 border-slate-200 dark:border-slate-700 text-center font-mono text-emerald-700">{low > 0 ? low : "-"}</td>
+                          <td className="p-2 border-r-2 border-slate-200 dark:border-slate-700 text-center font-mono text-amber-700">{medium > 0 ? medium : "-"}</td>
+                          <td className="p-2 border-r-2 border-slate-200 dark:border-slate-700 text-center font-mono font-bold text-orange-700">{high > 0 ? high : "-"}</td>
+                          <td className="p-2 border-r-2 border-slate-300 dark:border-slate-600 text-center font-mono font-bold text-red-700">{veryHigh > 0 ? veryHigh : "-"}</td>
                           <td className="p-2 text-center font-mono font-bold">{totalCount}</td>
                         </tr>
                       );

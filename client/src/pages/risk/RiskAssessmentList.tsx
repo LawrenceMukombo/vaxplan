@@ -1194,12 +1194,12 @@ export default function RiskAssessmentList() {
 
             <CardContent className="p-0">
               <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs border-collapse">
+                <table className="w-full min-w-full text-left text-xs border-collapse table-auto">
                   <thead className="bg-muted/90 border-b font-medium text-muted-foreground sticky top-0 z-30">
                     <tr>
                       {/* FROZEN 1: INDEX (#) */}
                       <th
-                        className="p-3 text-center border-b border-r sticky left-0 z-40 bg-muted select-none"
+                        className="p-3 text-center border-b border-r border-slate-300 dark:border-slate-700 sticky left-0 z-40 bg-muted select-none"
                         style={{
                           width: `${perfColWidths.index}px`,
                           minWidth: `${perfColWidths.index}px`,
@@ -1213,8 +1213,8 @@ export default function RiskAssessmentList() {
                       <th
                         className={`p-3 cursor-pointer select-none sticky z-40 bg-muted border-b ${
                           !visibleColumns.province
-                            ? "border-r-2 border-slate-300 dark:border-slate-700 shadow-[4px_0_8px_-2px_rgba(0,0,0,0.15)]"
-                            : "border-r"
+                            ? "border-r-2 border-slate-400 dark:border-slate-600 shadow-[4px_0_8px_-2px_rgba(0,0,0,0.15)]"
+                            : "border-r border-slate-300 dark:border-slate-700"
                         }`}
                         style={{
                           left: `${perfColWidths.index}px`,
@@ -1238,7 +1238,7 @@ export default function RiskAssessmentList() {
                       {/* FROZEN 3: PROVINCE (WITH RIGHT DIVIDER SHADOW) */}
                       {visibleColumns.province && (
                         <th
-                          className="p-3 cursor-pointer select-none sticky z-40 bg-muted border-b border-r-2 border-slate-300 dark:border-slate-700 shadow-[4px_0_8px_-2px_rgba(0,0,0,0.15)]"
+                          className="p-3 cursor-pointer select-none sticky z-40 bg-muted border-b border-r-2 border-slate-400 dark:border-slate-600 shadow-[4px_0_8px_-2px_rgba(0,0,0,0.15)]"
                           style={{
                             left: `${perfColWidths.index + perfColWidths.district}px`,
                             width: `${perfColWidths.province}px`,
@@ -1260,7 +1260,7 @@ export default function RiskAssessmentList() {
                       )}
                       {visibleColumns.mcv1 && (
                         <th
-                          className="p-3 cursor-pointer select-none border-b"
+                          className="p-3 cursor-pointer select-none border-b border-r-2 border-slate-300 dark:border-slate-700"
                           style={{
                             width: `${perfColWidths.mcv1}px`,
                             minWidth: `${perfColWidths.mcv1}px`,
@@ -1268,7 +1268,7 @@ export default function RiskAssessmentList() {
                           onClick={() => handleSort("mcv1Coverage")}
                         >
                           <div className="flex items-center justify-between">
-                            <div className="flex items-center truncate">
+                            <div className="flex items-center truncate font-semibold">
                               MCV1 Coverage {getSortIcon("mcv1Coverage")}
                             </div>
                             <div
@@ -1280,7 +1280,7 @@ export default function RiskAssessmentList() {
                       )}
                       {visibleColumns.mcv2 && (
                         <th
-                          className="p-3 cursor-pointer select-none border-b"
+                          className="p-3 cursor-pointer select-none border-b border-r-2 border-slate-300 dark:border-slate-700"
                           style={{
                             width: `${perfColWidths.mcv2}px`,
                             minWidth: `${perfColWidths.mcv2}px`,
@@ -1288,7 +1288,7 @@ export default function RiskAssessmentList() {
                           onClick={() => handleSort("mcv2Coverage")}
                         >
                           <div className="flex items-center justify-between">
-                            <div className="flex items-center truncate">
+                            <div className="flex items-center truncate font-semibold">
                               MCV2 Coverage {getSortIcon("mcv2Coverage")}
                             </div>
                             <div
@@ -1300,7 +1300,7 @@ export default function RiskAssessmentList() {
                       )}
                       {visibleColumns.dropout && (
                         <th
-                          className="p-3 cursor-pointer select-none border-b"
+                          className="p-3 cursor-pointer select-none border-b border-r-2 border-slate-300 dark:border-slate-700"
                           style={{
                             width: `${perfColWidths.dropout}px`,
                             minWidth: `${perfColWidths.dropout}px`,
@@ -1308,7 +1308,7 @@ export default function RiskAssessmentList() {
                           onClick={() => handleSort("dropoutRate")}
                         >
                           <div className="flex items-center justify-between">
-                            <div className="flex items-center truncate">
+                            <div className="flex items-center truncate font-semibold">
                               Penta1-MCV1 Dropout {getSortIcon("dropoutRate")}
                             </div>
                             <div
@@ -1320,7 +1320,7 @@ export default function RiskAssessmentList() {
                       )}
                       {visibleColumns.suspectedCases && (
                         <th
-                          className="p-3 cursor-pointer select-none border-b"
+                          className="p-3 cursor-pointer select-none border-b border-r-2 border-slate-300 dark:border-slate-700"
                           style={{
                             width: `${perfColWidths.suspectedCases}px`,
                             minWidth: `${perfColWidths.suspectedCases}px`,
@@ -1328,7 +1328,7 @@ export default function RiskAssessmentList() {
                           onClick={() => handleSort("suspectedCases")}
                         >
                           <div className="flex items-center justify-between">
-                            <div className="flex items-center truncate">
+                            <div className="flex items-center truncate font-semibold">
                               Suspected Cases {getSortIcon("suspectedCases")}
                             </div>
                             <div
@@ -1340,7 +1340,7 @@ export default function RiskAssessmentList() {
                       )}
                       {visibleColumns.riskScore && (
                         <th
-                          className="p-3 cursor-pointer select-none border-b"
+                          className="p-3 cursor-pointer select-none border-b border-r-2 border-slate-300 dark:border-slate-700"
                           style={{
                             width: `${perfColWidths.riskScore}px`,
                             minWidth: `${perfColWidths.riskScore}px`,
@@ -1348,8 +1348,8 @@ export default function RiskAssessmentList() {
                           onClick={() => handleSort("riskScore")}
                         >
                           <div className="flex items-center justify-between">
-                            <div className="flex items-center truncate">
-                              Risk Score {getSortIcon("riskScore")}
+                            <div className="flex items-center truncate font-bold text-foreground">
+                              Overall Risk Score {getSortIcon("riskScore")}
                             </div>
                             <div
                               className="w-1.5 h-4 cursor-col-resize hover:bg-primary/50 ml-1 rounded shrink-0"
@@ -1360,7 +1360,7 @@ export default function RiskAssessmentList() {
                       )}
                       {visibleColumns.riskCategory && (
                         <th
-                          className="p-3 cursor-pointer select-none border-b"
+                          className="p-3 cursor-pointer select-none border-b border-r-2 border-slate-300 dark:border-slate-700"
                           style={{
                             width: `${perfColWidths.riskCategory}px`,
                             minWidth: `${perfColWidths.riskCategory}px`,
@@ -1368,8 +1368,8 @@ export default function RiskAssessmentList() {
                           onClick={() => handleSort("riskCategory")}
                         >
                           <div className="flex items-center justify-between">
-                            <div className="flex items-center truncate">
-                              Category {getSortIcon("riskCategory")}
+                            <div className="flex items-center truncate font-bold text-foreground">
+                              Risk Category {getSortIcon("riskCategory")}
                             </div>
                             <div
                               className="w-1.5 h-4 cursor-col-resize hover:bg-primary/50 ml-1 rounded shrink-0"
@@ -1400,7 +1400,7 @@ export default function RiskAssessmentList() {
                           >
                             {/* FROZEN 1: INDEX */}
                             <td
-                              className="p-3 text-center text-muted-foreground border-r sticky left-0 z-20 bg-background group-hover:bg-slate-50 dark:group-hover:bg-slate-900"
+                              className="p-3 text-center text-muted-foreground border-r border-slate-300 dark:border-slate-700 sticky left-0 z-20 bg-background group-hover:bg-slate-50 dark:group-hover:bg-slate-900"
                               style={{
                                 width: `${perfColWidths.index}px`,
                                 minWidth: `${perfColWidths.index}px`,
@@ -1414,8 +1414,8 @@ export default function RiskAssessmentList() {
                             <td
                               className={`p-3 font-semibold text-foreground sticky z-20 bg-background group-hover:bg-slate-50 dark:group-hover:bg-slate-900 truncate ${
                                 !visibleColumns.province
-                                  ? "border-r-2 border-slate-300 dark:border-slate-700 shadow-[4px_0_8px_-2px_rgba(0,0,0,0.15)]"
-                                  : "border-r"
+                                  ? "border-r-2 border-slate-400 dark:border-slate-600 shadow-[4px_0_8px_-2px_rgba(0,0,0,0.15)]"
+                                  : "border-r border-slate-300 dark:border-slate-700"
                               }`}
                               style={{
                                 left: `${perfColWidths.index}px`,
@@ -1434,7 +1434,7 @@ export default function RiskAssessmentList() {
                             {/* FROZEN 3: PROVINCE */}
                             {visibleColumns.province && (
                               <td
-                                className="p-3 text-muted-foreground sticky z-20 bg-background group-hover:bg-slate-50 dark:group-hover:bg-slate-900 border-r-2 border-slate-300 dark:border-slate-700 shadow-[4px_0_8px_-2px_rgba(0,0,0,0.15)] truncate"
+                                className="p-3 text-muted-foreground sticky z-20 bg-background group-hover:bg-slate-50 dark:group-hover:bg-slate-900 border-r-2 border-slate-400 dark:border-slate-600 shadow-[4px_0_8px_-2px_rgba(0,0,0,0.15)] truncate"
                                 style={{
                                   left: `${perfColWidths.index + perfColWidths.district}px`,
                                   width: `${perfColWidths.province}px`,
@@ -1448,7 +1448,7 @@ export default function RiskAssessmentList() {
                             )}
                           {visibleColumns.mcv1 && (
                             <td
-                              className="p-3"
+                              className="p-3 border-r-2 border-slate-200 dark:border-slate-800"
                               style={{ width: `${perfColWidths.mcv1}px`, minWidth: `${perfColWidths.mcv1}px` }}
                             >
                               <span className={`font-semibold ${d.mcv1Coverage >= 90 ? 'text-emerald-600' : d.mcv1Coverage >= 80 ? 'text-lime-600' : 'text-rose-600'}`}>
@@ -1458,7 +1458,7 @@ export default function RiskAssessmentList() {
                           )}
                           {visibleColumns.mcv2 && (
                             <td
-                              className="p-3"
+                              className="p-3 border-r-2 border-slate-200 dark:border-slate-800"
                               style={{ width: `${perfColWidths.mcv2}px`, minWidth: `${perfColWidths.mcv2}px` }}
                             >
                               <span className={`font-semibold ${d.mcv2Coverage >= 80 ? 'text-emerald-600' : 'text-amber-600'}`}>
@@ -1468,7 +1468,7 @@ export default function RiskAssessmentList() {
                           )}
                           {visibleColumns.dropout && (
                             <td
-                              className="p-3"
+                              className="p-3 border-r-2 border-slate-200 dark:border-slate-800"
                               style={{ width: `${perfColWidths.dropout}px`, minWidth: `${perfColWidths.dropout}px` }}
                             >
                               <span className={`font-semibold ${d.dropoutRate <= 10 ? 'text-emerald-600' : 'text-rose-600'}`}>
@@ -1478,7 +1478,7 @@ export default function RiskAssessmentList() {
                           )}
                           {visibleColumns.suspectedCases && (
                             <td
-                              className="p-3 text-muted-foreground font-mono"
+                              className="p-3 text-muted-foreground font-mono border-r-2 border-slate-200 dark:border-slate-800"
                               style={{ width: `${perfColWidths.suspectedCases}px`, minWidth: `${perfColWidths.suspectedCases}px` }}
                             >
                               {d.suspectedCases}
@@ -1486,7 +1486,7 @@ export default function RiskAssessmentList() {
                           )}
                           {visibleColumns.riskScore && (
                             <td
-                              className="p-3 font-bold font-mono text-foreground"
+                              className="p-3 font-bold font-mono text-foreground border-r-2 border-slate-300 dark:border-slate-700"
                               style={{ width: `${perfColWidths.riskScore}px`, minWidth: `${perfColWidths.riskScore}px` }}
                             >
                               {d.riskScore}
@@ -1494,7 +1494,7 @@ export default function RiskAssessmentList() {
                           )}
                           {visibleColumns.riskCategory && (
                             <td
-                              className="p-3"
+                              className="p-3 border-r-2 border-slate-300 dark:border-slate-700"
                               style={{ width: `${perfColWidths.riskCategory}px`, minWidth: `${perfColWidths.riskCategory}px` }}
                             >
                               {d.riskCategory === "LOW" && <Badge className="bg-emerald-600 text-white hover:bg-emerald-700">Low</Badge>}
@@ -1639,14 +1639,14 @@ export default function RiskAssessmentList() {
               ) : roundsViewMode === "table" ? (
                 <div>
                   <div className="overflow-x-auto">
-                    <table className="w-full text-left text-xs border-collapse">
+                    <table className="w-full min-w-full text-left text-xs border-collapse table-auto">
                       <thead className="bg-muted/90 border-b font-medium text-muted-foreground sticky top-0 z-30">
                         <tr>
-                          <th className="p-3 text-center border-r sticky left-0 z-40 bg-muted select-none w-11 min-w-[44px]">
+                          <th className="p-3 text-center border-r-2 border-slate-300 dark:border-slate-700 sticky left-0 z-40 bg-muted select-none w-11 min-w-[44px]">
                             #
                           </th>
                           <th
-                            className="p-3 cursor-pointer select-none sticky z-40 bg-muted border-b border-r-2 border-slate-300 dark:border-slate-700 shadow-[4px_0_8px_-2px_rgba(0,0,0,0.15)] min-w-[220px]"
+                            className="p-3 cursor-pointer select-none sticky z-40 bg-muted border-b border-r-2 border-slate-400 dark:border-slate-600 shadow-[4px_0_8px_-2px_rgba(0,0,0,0.15)] min-w-[220px]"
                             style={{ left: "44px" }}
                             onClick={() => handleRoundsSort("title")}
                           >
@@ -1656,7 +1656,7 @@ export default function RiskAssessmentList() {
                             </div>
                           </th>
                           <th
-                            className="p-3 cursor-pointer select-none border-b border-r min-w-[90px]"
+                            className="p-3 cursor-pointer select-none border-b border-r-2 border-slate-300 dark:border-slate-700 min-w-[90px]"
                             onClick={() => handleRoundsSort("year")}
                           >
                             <div className="flex items-center justify-between">
@@ -1664,11 +1664,11 @@ export default function RiskAssessmentList() {
                               {getRoundsSortIcon("year")}
                             </div>
                           </th>
-                          <th className="p-3 select-none border-b border-r min-w-[150px]">
+                          <th className="p-3 select-none border-b border-r-2 border-slate-300 dark:border-slate-700 min-w-[150px]">
                             Country & Administrative Scope
                           </th>
                           <th
-                            className="p-3 cursor-pointer select-none border-b border-r min-w-[110px]"
+                            className="p-3 cursor-pointer select-none border-b border-r-2 border-slate-300 dark:border-slate-700 min-w-[110px]"
                             onClick={() => handleRoundsSort("status")}
                           >
                             <div className="flex items-center justify-between">
@@ -1677,7 +1677,7 @@ export default function RiskAssessmentList() {
                             </div>
                           </th>
                           <th
-                            className="p-3 cursor-pointer select-none border-b border-r min-w-[120px]"
+                            className="p-3 cursor-pointer select-none border-b border-r-2 border-slate-300 dark:border-slate-700 min-w-[120px]"
                             onClick={() => handleRoundsSort("createdAt")}
                           >
                             <div className="flex items-center justify-between">
