@@ -34,7 +34,6 @@ import {
   Maximize2,
   Minimize2,
   RotateCcw,
-  Settings2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -52,7 +51,6 @@ import { apiRequest } from "@/lib/queryClient";
 import { RiskChoroplethMap, type DistrictCoveragePerformance } from "@/components/risk/RiskChoroplethMap";
 import { RiskDirectDataEntry } from "@/components/risk/RiskDirectDataEntry";
 import { RiskFinalReportView } from "@/components/risk/RiskFinalReportView";
-import { RiskSetupConfiguration } from "@/components/risk/RiskSetupConfiguration";
 
 interface AreaResult {
   id: string;
@@ -94,7 +92,7 @@ export default function RiskResultsWorkspace() {
   const { toast } = useToast();
 
   // Active view tab
-  const [activeTab, setActiveTab] = useState("setup");
+  const [activeTab, setActiveTab] = useState("results");
 
   // Enterprise Table State (Rule 24)
   const [searchTerm, setSearchTerm] = useState("");
@@ -847,10 +845,7 @@ export default function RiskResultsWorkspace() {
 
       {/* Workspace Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-        <TabsList className="grid h-auto grid-cols-2 sm:grid-cols-4 xl:grid-cols-7 w-full">
-          <TabsTrigger value="setup" className="min-h-9 text-xs gap-1.5">
-            <Settings2 className="w-3.5 h-3.5" /> Setup &amp; Configuration
-          </TabsTrigger>
+        <TabsList className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 w-full">
           <TabsTrigger value="results" className="text-xs gap-1.5">
             <FileSpreadsheet className="w-3.5 h-3.5" /> District Results
           </TabsTrigger>
@@ -869,8 +864,10 @@ export default function RiskResultsWorkspace() {
           <TabsTrigger value="review" className="text-xs gap-1.5">
             <Clock className="w-3.5 h-3.5" /> Review & Approval
           </TabsTrigger>
-        </TabsList>`n`n        {/* TAB 1: SETUP & CONFIGURATION */}`n        <TabsContent value="setup" className="space-y-4">`n          <RiskSetupConfiguration assessmentId={effectiveId} assessment={assessment} context={context} onContinue={() => setActiveTab("direct-entry")} />`n        </TabsContent>`n`n        {/* ==================================================================== */}
-        {/* TAB 2: DISTRICT RESULTS (ENTERPRISE TABLE RULE 24) */}
+        </TabsList>
+
+        {/* ==================================================================== */}
+        {/* TAB 1: DISTRICT RESULTS (ENTERPRISE TABLE RULE 24) */}
         {/* ==================================================================== */}
         <TabsContent value="results" className="space-y-4">
           {/* Filter, Search & Column Visibility Toolbar */}
