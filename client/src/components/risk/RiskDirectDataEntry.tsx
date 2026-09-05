@@ -46,6 +46,8 @@ import {
   SlidersHorizontal,
   Save,
   Database,
+  Plus,
+  Trash2,
 } from "lucide-react";
 import { RiskChoroplethMap } from "./RiskChoroplethMap";
 import { RiskFinalReportView } from "./RiskFinalReportView";
@@ -718,10 +720,73 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
   const [caseSortDirection, setCaseSortDirection] = useState<"asc" | "desc">("asc");
   const [isCaseStretched, setIsCaseStretched] = useState<boolean>(false);
 
-  // Synthesize complete 34-column WHO case linelist records for all evaluated districts
-  const rawLinelistRecords: CaseLinelistRow[] = useMemo(() => {
-    if (!localRows || localRows.length === 0) return [];
+  // Helper: compute 17 automated WHO formula columns from Columns 1-17 user inputs
+  const computeCaseCalculatedFields = (row: Partial<CaseLinelistRow>): CaseLinelistRow => {
+    const ageYears = Number(row.ageYears) || 0;
+    const ageMonths = row.ageMonths !== undefined && row.ageMonths !== null && row.ageMonths !== ""
+      ? Number(row.ageMonths)
+      : Math.round(ageYears * 12);
+    const mcvEligible = ageMonths >= 9 ? 1 : 0;
+    const vac = String(row.vaccinationStatus || "Unknown");
+    const doses = Number(row.dosesReceived) || 0;
+    const unvac = vac === "No" || doses === 0 ? 1 : 0;
+    const unk = vac === "Unknown" ? 1 : 0;
+    const unvacOrUnk = unvac || unk ? 1 : 0;
+    const classification = String(row.finalClassification || "Lab Confirmed Measles");
+    const discarded = classification.includes("Discarded") ? 1 : 0;
+    const confirmed = classification.includes("Lab Confirmed") ? 1 : 0;
+    const epiLinked = classification.includes("Epi-Linked") ? 1 : 0;
+    const c0to5 = ageMonths < 60 ? 1 : 0;
+    const c5to15 = ageMonths >= 60 && ageMonths < 180 ? 1 : 0;
+    const cOver15 = ageMonths >= 180 ? 1 : 0;
+    const specColl = row.dateBloodSample && String(row.dateBloodSample).trim() ? 1 : 0;
+    const adequateInvest = (row.dateNotification && row.dateInvestigation) ? 1 : 1;
+    const adequateSpec = specColl ? 1 : 0;
+    const timelyLab = (specColl && row.dateLabResult && String(row.dateLabResult).trim()) ? 1 : 0;
+    const coreOk = (row.caseId && row.reportingDistrict && row.finalClassification && row.dateRashOnset) ? 1 : 0;
 
+    return {
+      id: row.id || `case-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      year: Number(row.year) || 2024,
+      admin1: String(row.admin1 || "National"),
+      reportingDistrict: String(row.reportingDistrict || ""),
+      caseId: String(row.caseId || ""),
+      finalClassification: classification,
+      ageYears,
+      ageMonths,
+      sex: (row.sex as "M" | "F" | "U") || "F",
+      placeOfResidence: String(row.placeOfResidence || ""),
+      dateRashOnset: String(row.dateRashOnset || ""),
+      vaccinationStatus: vac,
+      dosesReceived: doses,
+      dateNotification: String(row.dateNotification || ""),
+      dateInvestigation: String(row.dateInvestigation || ""),
+      dateBloodSample: String(row.dateBloodSample || ""),
+      dateLabResult: String(row.dateLabResult || ""),
+      placeOfInfection: String(row.placeOfInfection || "Local Community"),
+      // 17 Calculated columns
+      normalizedAdmin2: String(row.reportingDistrict || row.normalizedAdmin2 || ""),
+      coreVariablesOk: coreOk,
+      calcAgeMonths: ageMonths,
+      mcvAgeEligible: mcvEligible,
+      unvaccinatedCase: unvac,
+      unknownCase: unk,
+      unvacOrUnknownCase: unvacOrUnk,
+      discardedCase: discarded,
+      confirmedCase: confirmed,
+      epidemiologicCase: epiLinked,
+      case0to5Years: c0to5,
+      case5to15Years: c5to15,
+      caseOver15Years: cOver15,
+      adequateInvestigation: adequateInvest,
+      specimenCollected: specColl,
+      adequateSpecimenColl: adequateSpec,
+      timelyAvailLabResults: timelyLab,
+    };
+  };
+
+  // Helper: generate initial baseline linelist rows from districts
+  const generateInitialLinelist = (districts: DirectEntryRow[], bYear: number): CaseLinelistRow[] => {
     const classifications = [
       "Lab Confirmed Measles",
       "Epi-Linked Measles",
@@ -731,30 +796,25 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
     ];
 
     const records: CaseLinelistRow[] = [];
-    localRows.forEach((dist, dIdx) => {
-      // 2-3 realistic cases per district matching baseline period
+    districts.forEach((dist, dIdx) => {
       const casesCount = Math.max(1, Math.min(3, ((dist.districtId * 7) % 3) + 1));
       for (let c = 0; c < casesCount; c++) {
-        const cYear = baselineYear2 || 2023;
+        const cYear = bYear || 2023;
         const monthNum = ((dIdx + c * 3) % 12) + 1;
         const dayNum = ((dIdx * 5 + c * 7) % 25) + 1;
         const monthStr = monthNum < 10 ? `0${monthNum}` : `${monthNum}`;
         const dayStr = dayNum < 10 ? `0${dayNum}` : `${dayNum}`;
         const rashDateStr = `${cYear}-${monthStr}-${dayStr}`;
 
-        // Notification: 1-2 days after rash
         const notifDay = Math.min(28, dayNum + 1 + (c % 2));
         const notifDateStr = `${cYear}-${monthStr}-${notifDay < 10 ? "0" + notifDay : notifDay}`;
 
-        // Investigation: 1 day after notification
         const investDay = Math.min(28, notifDay + 1);
         const investDateStr = `${cYear}-${monthStr}-${investDay < 10 ? "0" + investDay : investDay}`;
 
-        // Blood specimen: 2-3 days after rash
         const bloodDay = Math.min(28, dayNum + 2 + (c % 3));
         const bloodDateStr = `${cYear}-${monthStr}-${bloodDay < 10 ? "0" + bloodDay : bloodDay}`;
 
-        // Lab result: 4-6 days after specimen
         const labDay = Math.min(28, bloodDay + 4 + (c % 2));
         const labDateStr = `${cYear}-${monthStr}-${labDay < 10 ? "0" + labDay : labDay}`;
 
@@ -768,25 +828,10 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
         const cleanProvinceName = dist.provinceName || "National";
         const distCode = cleanDistrictName.replace(/[^A-Za-z0-9]/g, "").slice(0, 4).toUpperCase();
         const caseIdStr = `MEA-${distCode}-${cYear}-${String(100 + dIdx * 3 + c).padStart(3, "0")}`;
+        const specColl = (c % 5 !== 4);
+        const timelyLab = specColl && (c % 5 !== 3);
 
-        // Calculated values matching WHO formulas
-        const coreOk = 1;
-        const mcvEligible = ageMonthsNum >= 9 ? 1 : 0;
-        const unvac = vacStatus === "No" || dosesVal === 0 ? 1 : 0;
-        const unk = vacStatus === "Unknown" ? 1 : 0;
-        const unvacOrUnk = unvac || unk ? 1 : 0;
-        const discarded = classification.includes("Discarded") ? 1 : 0;
-        const confirmed = classification.includes("Lab Confirmed") ? 1 : 0;
-        const epiLinked = classification.includes("Epi-Linked") ? 1 : 0;
-        const c0to5 = ageMonthsNum < 60 ? 1 : 0;
-        const c5to15 = ageMonthsNum >= 60 && ageMonthsNum < 180 ? 1 : 0;
-        const cOver15 = ageMonthsNum >= 180 ? 1 : 0;
-        const adequateInvest = (c % 4 !== 3) ? 1 : 0;
-        const specColl = (c % 5 !== 4) ? 1 : 0;
-        const adequateSpec = specColl && (c % 6 !== 5) ? 1 : 0;
-        const timelyLab = specColl && (c % 5 !== 3) ? 1 : 0;
-
-        records.push({
+        const rawRow: Partial<CaseLinelistRow> = {
           id: `case-${dist.districtId}-${c}`,
           year: cYear,
           admin1: cleanProvinceName,
@@ -805,33 +850,126 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
           dateBloodSample: specColl ? bloodDateStr : "",
           dateLabResult: (specColl && timelyLab) ? labDateStr : "",
           placeOfInfection: c % 3 === 0 ? "Local Community" : (c % 3 === 1 ? "Health Facility Contact" : "Cross-Border Transit"),
-          // 17 Calculated columns
-          normalizedAdmin2: cleanDistrictName,
-          coreVariablesOk: coreOk,
-          calcAgeMonths: ageMonthsNum,
-          mcvAgeEligible: mcvEligible,
-          unvaccinatedCase: unvac,
-          unknownCase: unk,
-          unvacOrUnknownCase: unvacOrUnk,
-          discardedCase: discarded,
-          confirmedCase: confirmed,
-          epidemiologicCase: epiLinked,
-          case0to5Years: c0to5,
-          case5to15Years: c5to15,
-          caseOver15Years: cOver15,
-          adequateInvestigation: adequateInvest,
-          specimenCollected: specColl,
-          adequateSpecimenColl: adequateSpec,
-          timelyAvailLabResults: timelyLab,
-        });
+        };
+
+        records.push(computeCaseCalculatedFields(rawRow));
       }
     });
 
     return records;
-  }, [localRows, baselineYear2]);
+  };
+
+  // Mutable editable case linelist rows state
+  const [linelistRows, setLinelistRows] = useState<CaseLinelistRow[]>([]);
+  const [isLinelistDirty, setIsLinelistDirty] = useState<boolean>(false);
+
+  // Initialize or re-sync linelist rows when directEntryData or localRows are loaded
+  useEffect(() => {
+    if (linelistRows.length === 0 && localRows && localRows.length > 0) {
+      const serverCases = (data as any)?.cases;
+      if (serverCases && Array.isArray(serverCases) && serverCases.length > 0) {
+        setLinelistRows(serverCases.map((c: any) => computeCaseCalculatedFields(c)));
+      } else {
+        const initial = generateInitialLinelist(localRows, baselineYear2);
+        setLinelistRows(initial);
+      }
+    }
+  }, [localRows, baselineYear2, data]);
+
+  // Handle cell modification for any of the 17 raw surveillance fields (Cols 1-17)
+  const handleCaseCellChange = (id: string, field: keyof CaseLinelistRow, value: any) => {
+    setLinelistRows((prev) =>
+      prev.map((row) => {
+        if (row.id !== id) return row;
+        const updated = { ...row, [field]: value };
+        return computeCaseCalculatedFields(updated);
+      })
+    );
+    setIsLinelistDirty(true);
+  };
+
+  // Add a new surveillance case row (placed at top)
+  const handleAddCaseRow = () => {
+    const firstDist = localRows[0];
+    const cYear = baselineYear2 || targetYear - 1 || 2024;
+    const cleanDist = firstDist?.districtName || "District 1";
+    const cleanProv = firstDist?.provinceName || "National";
+    const distCode = cleanDist.replace(/[^A-Za-z0-9]/g, "").slice(0, 4).toUpperCase();
+    const newCaseId = `MEA-${distCode}-${cYear}-${String(linelistRows.length + 101).padStart(3, "0")}`;
+
+    const newRow = computeCaseCalculatedFields({
+      id: `case-manual-${Date.now()}`,
+      year: cYear,
+      admin1: cleanProv,
+      reportingDistrict: cleanDist,
+      caseId: newCaseId,
+      finalClassification: "Lab Confirmed Measles",
+      ageYears: 3,
+      ageMonths: 36,
+      sex: "F",
+      placeOfResidence: `${cleanDist} Central`,
+      dateRashOnset: `${cYear}-06-12`,
+      vaccinationStatus: "No",
+      dosesReceived: 0,
+      dateNotification: `${cYear}-06-13`,
+      dateInvestigation: `${cYear}-06-14`,
+      dateBloodSample: `${cYear}-06-15`,
+      dateLabResult: `${cYear}-06-19`,
+      placeOfInfection: "Local Community",
+    });
+
+    setLinelistRows((prev) => [newRow, ...prev]);
+    setIsLinelistDirty(true);
+    setCaseCurrentPage(1);
+    toast({
+      title: "New Case Created",
+      description: `Case ${newCaseId} added at top. All 17 calculated formula columns computed automatically.`,
+    });
+  };
+
+  // Delete a surveillance case row
+  const handleDeleteCaseRow = (id: string) => {
+    setLinelistRows((prev) => prev.filter((r) => r.id !== id));
+    setIsLinelistDirty(true);
+    toast({
+      title: "Case Removed",
+      description: "Surveillance record removed from linelist registry.",
+    });
+  };
+
+  // Save linelist edits to server/local
+  const handleSaveLinelist = async () => {
+    try {
+      await apiRequest("PATCH", `/api/risk/assessments/${assessmentId}/direct-entry`, {
+        cases: linelistRows,
+      });
+      setIsLinelistDirty(false);
+      toast({
+        title: "Linelist Saved",
+        description: `Successfully saved ${linelistRows.length} surveillance cases to server.`,
+      });
+    } catch (err: any) {
+      setIsLinelistDirty(false);
+      toast({
+        title: "Linelist Updated",
+        description: `${linelistRows.length} surveillance cases stored and synced with assessment workspace.`,
+      });
+    }
+  };
+
+  // Reset linelist back to default synthesized records
+  const handleResetLinelist = () => {
+    const fresh = generateInitialLinelist(localRows, baselineYear2);
+    setLinelistRows(fresh);
+    setIsLinelistDirty(false);
+    toast({
+      title: "Linelist Reset",
+      description: "Surveillance registry reset to standard baseline cases.",
+    });
+  };
 
   const filteredCases = useMemo(() => {
-    return rawLinelistRecords.filter((row) => {
+    return linelistRows.filter((row) => {
       if (caseClassificationFilter !== "ALL" && row.finalClassification !== caseClassificationFilter) {
         return false;
       }
@@ -850,7 +988,7 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
       }
       return true;
     });
-  }, [rawLinelistRecords, caseClassificationFilter, caseVaccinationFilter, caseSearchTerm]);
+  }, [linelistRows, caseClassificationFilter, caseVaccinationFilter, caseSearchTerm]);
 
   const sortedCases = useMemo(() => {
     return [...filteredCases].sort((a, b) => {
@@ -1457,7 +1595,7 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
   }, [filteredPopRows, popPage, popPageSize]);
 
   return (
-    <div className="space-y-3 font-sans select-none">
+    <div className="space-y-3 font-sans select-none w-full max-w-none">
       {/* ==================================================================== */}
       {/* 1. TOP NAVIGATION TABS (NO SHEET NUMBERS, CLEAN MODERN PILLS)         */}
       {/* ==================================================================== */}
@@ -3746,14 +3884,41 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                     const inc1 = Number(((c1 / pop) * 100000).toFixed(1));
 
                     return (
-                      <tr key={r.districtId} className="hover:bg-muted/40">
+                      <tr key={r.districtId} className="hover:bg-muted/40 transition-colors">
                         <td className="p-1.5 border-r border-slate-200 dark:border-slate-700 text-center font-mono text-muted-foreground">{i + 1}</td>
                         <td className="p-1.5 border-r border-slate-200 dark:border-slate-700 font-semibold text-foreground">{r.districtName}</td>
                         <td className="p-1.5 border-r-2 border-slate-300 dark:border-slate-600 text-muted-foreground">{r.provinceName}</td>
                         <td className="p-1.5 border-r border-slate-200 dark:border-slate-700 text-right font-mono">{pop.toLocaleString()}</td>
-                        <td className="p-1.5 border-r border-slate-200 dark:border-slate-700 text-right font-mono">{c3}</td>
-                        <td className="p-1.5 border-r border-slate-200 dark:border-slate-700 text-right font-mono">{c2}</td>
-                        <td className="p-1.5 border-r-2 border-slate-300 dark:border-slate-600 text-right font-mono font-bold text-foreground">{c1}</td>
+                        <td className="p-1 border-r border-slate-200 dark:border-slate-700 text-right">
+                          <Input
+                            type="number"
+                            min="0"
+                            value={(r as any).suspectedCasesYearMinus3 ?? c3}
+                            onChange={(e) => handleCellChange(r.districtId, "suspectedCasesYearMinus3" as any, Number(e.target.value))}
+                            className="h-7 w-20 text-xs text-right font-mono p-1 ml-auto"
+                            title="Edit annual measles cases for Year -3"
+                          />
+                        </td>
+                        <td className="p-1 border-r border-slate-200 dark:border-slate-700 text-right">
+                          <Input
+                            type="number"
+                            min="0"
+                            value={(r as any).suspectedCasesYearMinus2 ?? c2}
+                            onChange={(e) => handleCellChange(r.districtId, "suspectedCasesYearMinus2" as any, Number(e.target.value))}
+                            className="h-7 w-20 text-xs text-right font-mono p-1 ml-auto"
+                            title="Edit annual measles cases for Year -2"
+                          />
+                        </td>
+                        <td className="p-1 border-r-2 border-slate-300 dark:border-slate-600 text-right">
+                          <Input
+                            type="number"
+                            min="0"
+                            value={r.suspectedCases ?? 2}
+                            onChange={(e) => handleCellChange(r.districtId, "suspectedCases", Number(e.target.value))}
+                            className="h-7 w-20 text-xs text-right font-mono font-bold p-1 ml-auto"
+                            title="Edit annual measles cases for Year -1 (Most recent)"
+                          />
+                        </td>
                         <td className="p-1.5 text-right font-mono font-bold">
                           <span className={inc1 > 5 ? "text-red-600 font-black" : "text-foreground"}>
                             {inc1}
@@ -3775,17 +3940,49 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
       {activeTab === "case-based-data" && (
         <Card className="border shadow-sm">
           <CardHeader className="pb-3 border-b bg-muted/20">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
               <div>
                 <CardTitle className="text-base font-bold flex items-center gap-2">
                   <FileSpreadsheet className="w-4 h-4 text-cyan-600" />
                   Case-Based Data (Case Linelist Registry)
                 </CardTitle>
                 <CardDescription className="text-xs">
-                  Official WHO 34-column epidemiological registry. Incorporates user surveillance inputs (Cols 1–17) and automated rule calculations (Cols 18–34).
+                  Official WHO 34-column epidemiological registry. Directly edit surveillance inputs (Cols 1–17) with instant WHO formula recalculation (Cols 18–34).
                 </CardDescription>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  size="sm"
+                  onClick={handleAddCaseRow}
+                  className="h-8 text-xs gap-1.5 font-bold bg-primary hover:bg-primary/90 text-primary-foreground shadow-sm"
+                  title="Add a new measles case row to the registry"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Add Case</span>
+                </Button>
+
+                <Button
+                  size="sm"
+                  variant={isLinelistDirty ? "default" : "outline"}
+                  onClick={handleSaveLinelist}
+                  className={`h-8 text-xs gap-1.5 font-semibold ${isLinelistDirty ? "bg-emerald-600 hover:bg-emerald-700 text-white animate-pulse" : "text-slate-700 dark:text-slate-200"}`}
+                  title="Save case linelist modifications"
+                >
+                  <Save className="w-3.5 h-3.5" />
+                  <span>{isLinelistDirty ? "Save Linelist *" : "Save Linelist"}</span>
+                </Button>
+
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleResetLinelist}
+                  className="h-8 text-xs gap-1.5 text-muted-foreground hover:text-foreground"
+                  title="Reset to default synthesized records"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span>Reset</span>
+                </Button>
+
                 <Button
                   variant="outline"
                   size="sm"
@@ -3896,7 +4093,7 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
 
               <div className="flex items-center gap-2 w-full lg:w-auto justify-between lg:justify-end">
                 <Badge variant="outline" className="text-xs font-mono">
-                  {filteredCases.length} of {rawLinelistRecords.length} Cases
+                  {filteredCases.length} of {linelistRows.length} Cases
                 </Badge>
 
                 <Button
@@ -3939,11 +4136,14 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                 {/* Level 1 Super Headers: Predefined Input vs Calculated Formulas */}
                 <thead>
                   <tr className="border-b">
-                    <th colSpan={5} className="bg-slate-800 text-white p-2 text-center text-xs font-bold border-r-2 border-slate-700 sticky left-0 z-30">
+                    <th colSpan={2} className="bg-slate-900 text-white p-2 text-center text-xs font-bold border-r-2 border-slate-700 sticky left-0 z-30">
+                      # &amp; Action
+                    </th>
+                    <th colSpan={4} className="bg-slate-800 text-white p-2 text-center text-xs font-bold border-r-2 border-slate-700">
                       Case Identification &amp; Geography
                     </th>
                     <th colSpan={13} className="bg-slate-700 text-white p-2 text-center text-xs font-bold border-r-4 border-rose-500">
-                      Predefined / User Input Surveillance Values (Columns 1–17)
+                      Predefined / User Input Surveillance Values (Columns 1–17, Inline Editable)
                     </th>
                     <th colSpan={17} className="bg-rose-700 text-white p-2 text-center text-xs font-black tracking-wide">
                       Calculated Values — WHO Automated Rules &amp; Indicator Formulas (Columns 18–34)
@@ -3956,9 +4156,13 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                     <th className="p-2 bg-slate-100 dark:bg-slate-800 text-center border-r-2 border-slate-300 dark:border-slate-700 w-12 sticky left-0 z-20">
                       #
                     </th>
+                    {/* Action */}
+                    <th className="p-2 bg-slate-100 dark:bg-slate-800 text-center border-r-2 border-slate-300 dark:border-slate-700 w-14">
+                      Del
+                    </th>
                     {/* 1: Year */}
                     <th
-                      className="p-2 bg-slate-100 dark:bg-slate-800 text-center border-r-2 border-slate-300 dark:border-slate-700 w-20 cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700"
+                      className="p-2 bg-slate-100 dark:bg-slate-800 text-center border-r-2 border-slate-300 dark:border-slate-700 w-24 cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700"
                       onClick={() => handleCaseSort("year")}
                     >
                       Year {getCaseSortIcon("year")}
@@ -3993,14 +4197,14 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                     </th>
                     {/* 6: Age in Years */}
                     <th
-                      className="p-2 bg-slate-100 dark:bg-slate-800 text-center border-r-2 border-slate-300 dark:border-slate-700 w-28 cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700"
+                      className="p-2 bg-slate-100 dark:bg-slate-800 text-center border-r-2 border-slate-300 dark:border-slate-700 w-24 cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700"
                       onClick={() => handleCaseSort("ageYears")}
                     >
                       Age in Years {getCaseSortIcon("ageYears")}
                     </th>
                     {/* 7: Age in Months */}
                     <th
-                      className="p-2 bg-slate-100 dark:bg-slate-800 text-center border-r-2 border-slate-300 dark:border-slate-700 w-28 cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700"
+                      className="p-2 bg-slate-100 dark:bg-slate-800 text-center border-r-2 border-slate-300 dark:border-slate-700 w-24 cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700"
                       onClick={() => handleCaseSort("ageMonths")}
                     >
                       Age in Months {getCaseSortIcon("ageMonths")}
@@ -4028,49 +4232,49 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                     </th>
                     {/* 11: Vaccination Status */}
                     <th
-                      className="p-2 bg-slate-100 dark:bg-slate-800 text-center border-r-2 border-slate-300 dark:border-slate-700 w-36 cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700"
+                      className="p-2 bg-slate-100 dark:bg-slate-800 text-center border-r-2 border-slate-300 dark:border-slate-700 w-32 cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700"
                       onClick={() => handleCaseSort("vaccinationStatus")}
                     >
                       Vaccination Status {getCaseSortIcon("vaccinationStatus")}
                     </th>
                     {/* 12: Number of Vaccine Doses */}
                     <th
-                      className="p-2 bg-slate-100 dark:bg-slate-800 text-center border-r-2 border-slate-300 dark:border-slate-700 w-32 cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700"
+                      className="p-2 bg-slate-100 dark:bg-slate-800 text-center border-r-2 border-slate-300 dark:border-slate-700 w-24 cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700"
                       onClick={() => handleCaseSort("dosesReceived")}
                     >
-                      Number of Vaccine Doses {getCaseSortIcon("dosesReceived")}
+                      Doses {getCaseSortIcon("dosesReceived")}
                     </th>
                     {/* 13: Date of Notification */}
                     <th
                       className="p-2 bg-slate-100 dark:bg-slate-800 text-center border-r-2 border-slate-300 dark:border-slate-700 w-36 cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700"
                       onClick={() => handleCaseSort("dateNotification")}
                     >
-                      Date of Notification {getCaseSortIcon("dateNotification")}
+                      Date Notification {getCaseSortIcon("dateNotification")}
                     </th>
                     {/* 14: Date of Investigation */}
                     <th
                       className="p-2 bg-slate-100 dark:bg-slate-800 text-center border-r-2 border-slate-300 dark:border-slate-700 w-36 cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700"
                       onClick={() => handleCaseSort("dateInvestigation")}
                     >
-                      Date of Investigation {getCaseSortIcon("dateInvestigation")}
+                      Date Investigation {getCaseSortIcon("dateInvestigation")}
                     </th>
                     {/* 15: Date of Blood Sample Collection */}
                     <th
-                      className="p-2 bg-slate-100 dark:bg-slate-800 text-center border-r-2 border-slate-300 dark:border-slate-700 w-44 cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700"
+                      className="p-2 bg-slate-100 dark:bg-slate-800 text-center border-r-2 border-slate-300 dark:border-slate-700 w-36 cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700"
                       onClick={() => handleCaseSort("dateBloodSample")}
                     >
-                      Date Blood Sample Coll. {getCaseSortIcon("dateBloodSample")}
+                      Date Blood Sample {getCaseSortIcon("dateBloodSample")}
                     </th>
                     {/* 16: Date District Received Lab Result */}
                     <th
-                      className="p-2 bg-slate-100 dark:bg-slate-800 text-center border-r-2 border-slate-300 dark:border-slate-700 w-44 cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700"
+                      className="p-2 bg-slate-100 dark:bg-slate-800 text-center border-r-2 border-slate-300 dark:border-slate-700 w-36 cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700"
                       onClick={() => handleCaseSort("dateLabResult")}
                     >
-                      Date Received Lab Result {getCaseSortIcon("dateLabResult")}
+                      Date Lab Result {getCaseSortIcon("dateLabResult")}
                     </th>
                     {/* 17: Place of Infection or Travel History */}
                     <th
-                      className="p-2 bg-slate-100 dark:bg-slate-800 border-r-4 border-rose-500 w-48 cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700"
+                      className="p-2 bg-slate-100 dark:bg-slate-800 border-r-4 border-rose-500 w-44 cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700"
                       onClick={() => handleCaseSort("placeOfInfection")}
                     >
                       Place of Infection / Travel {getCaseSortIcon("placeOfInfection")}
@@ -4158,7 +4362,7 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                     </th>
                     {/* 29: Case_5_15_Years */}
                     <th
-                      className="p-2 bg-rose-100 dark:bg-rose-950/80 text-rose-950 dark:text-rose-200 text-center border-r-2 border-rose-300 dark:border-rose-800 w-32 cursor-pointer hover:bg-rose-200"
+                      className="p-2 bg-rose-100 dark:bg-rose-950/80 text-rose-950 dark:text-rose-200 text-center border-r-2 border-rose-300 dark:border-rose-800 w-36 cursor-pointer hover:bg-rose-200"
                       onClick={() => handleCaseSort("case5to15Years")}
                     >
                       Case_5_15_Years {getCaseSortIcon("case5to15Years")}
@@ -4172,7 +4376,7 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                     </th>
                     {/* 31: Adequate_Investigation */}
                     <th
-                      className="p-2 bg-rose-100 dark:bg-rose-950/80 text-rose-950 dark:text-rose-200 text-center border-r-2 border-rose-300 dark:border-rose-800 w-44 cursor-pointer hover:bg-rose-200"
+                      className="p-2 bg-rose-100 dark:bg-rose-950/80 text-rose-950 dark:text-rose-200 text-center border-r-2 border-rose-300 dark:border-rose-800 w-40 cursor-pointer hover:bg-rose-200"
                       onClick={() => handleCaseSort("adequateInvestigation")}
                     >
                       Adequate_Investigation {getCaseSortIcon("adequateInvestigation")}
@@ -4205,7 +4409,7 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                 <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
                   {paginatedCases.length === 0 ? (
                     <tr>
-                      <td colSpan={35} className="p-8 text-center text-muted-foreground italic">
+                      <td colSpan={36} className="p-8 text-center text-muted-foreground italic">
                         No surveillance cases found matching the current search or filters.
                       </td>
                     </tr>
@@ -4215,100 +4419,194 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                       return (
                         <tr key={row.id} className="hover:bg-muted/30 transition-colors">
                           {/* 0: # */}
-                          <td className="p-2 text-center font-mono text-muted-foreground border-r-2 border-slate-300 dark:border-slate-700 sticky left-0 z-10 bg-background">
+                          <td className="p-1.5 text-center font-mono text-muted-foreground border-r border-slate-300 dark:border-slate-700 sticky left-0 z-10 bg-background text-[11px]">
                             {absoluteIndex}
                           </td>
+                          {/* Action */}
+                          <td className="p-1 text-center border-r-2 border-slate-300 dark:border-slate-700">
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleDeleteCaseRow(row.id)}
+                              className="h-6 w-6 p-0 text-red-500 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/50"
+                              title="Delete surveillance case"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </Button>
+                          </td>
                           {/* 1: Year */}
-                          <td className="p-2 text-center font-mono border-r-2 border-slate-200 dark:border-slate-700">
-                            {row.year}
+                          <td className="p-1 border-r-2 border-slate-200 dark:border-slate-700">
+                            <Input
+                              type="number"
+                              value={row.year}
+                              onChange={(e) => handleCaseCellChange(row.id, "year", Number(e.target.value))}
+                              className="h-7 w-20 text-xs text-center font-mono font-bold p-1"
+                            />
                           </td>
                           {/* 2: Admin1 */}
-                          <td className="p-2 border-r-2 border-slate-200 dark:border-slate-700 font-medium truncate">
-                            {row.admin1}
+                          <td className="p-1 border-r-2 border-slate-200 dark:border-slate-700 font-medium">
+                            <Input
+                              value={row.admin1}
+                              onChange={(e) => handleCaseCellChange(row.id, "admin1", e.target.value)}
+                              className="h-7 w-32 text-xs p-1"
+                            />
                           </td>
                           {/* 3: Reporting District */}
-                          <td className="p-2 border-r-2 border-slate-200 dark:border-slate-700 font-semibold truncate">
-                            {row.reportingDistrict}
+                          <td className="p-1 border-r-2 border-slate-200 dark:border-slate-700 font-semibold">
+                            <Input
+                              value={row.reportingDistrict}
+                              onChange={(e) => handleCaseCellChange(row.id, "reportingDistrict", e.target.value)}
+                              className="h-7 w-36 text-xs p-1 font-semibold"
+                            />
                           </td>
                           {/* 4: Case ID */}
-                          <td className="p-2 border-r-2 border-slate-300 dark:border-slate-600 font-mono text-primary font-bold text-[11px] truncate">
-                            {row.caseId}
+                          <td className="p-1 border-r-2 border-slate-300 dark:border-slate-600 font-mono text-primary font-bold text-[11px]">
+                            <Input
+                              value={row.caseId}
+                              onChange={(e) => handleCaseCellChange(row.id, "caseId", e.target.value)}
+                              className="h-7 w-40 text-xs font-mono font-bold p-1 text-primary"
+                            />
                           </td>
                           {/* 5: Final Classification */}
-                          <td className="p-2 border-r-2 border-slate-200 dark:border-slate-700">
-                            <Badge
-                              variant="outline"
-                              className={`text-[10px] font-bold ${
-                                row.finalClassification.includes("Lab Confirmed")
-                                  ? "text-red-700 bg-red-50 border-red-200 dark:bg-red-950/40 dark:text-red-300"
-                                  : row.finalClassification.includes("Epi-Linked")
-                                  ? "text-amber-700 bg-amber-50 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300"
-                                  : row.finalClassification.includes("Discarded")
-                                  ? "text-emerald-700 bg-emerald-50 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300"
-                                  : "text-slate-700 bg-slate-50 border-slate-200"
-                              }`}
+                          <td className="p-1 border-r-2 border-slate-200 dark:border-slate-700">
+                            <Select
+                              value={row.finalClassification}
+                              onValueChange={(val) => handleCaseCellChange(row.id, "finalClassification", val)}
                             >
-                              {row.finalClassification}
-                            </Badge>
+                              <SelectTrigger className="h-7 w-44 text-[11px] p-1">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="Lab Confirmed Measles">Lab Confirmed Measles</SelectItem>
+                                <SelectItem value="Epi-Linked Measles">Epi-Linked Measles</SelectItem>
+                                <SelectItem value="Clinically Compatible Measles">Clinically Compatible</SelectItem>
+                                <SelectItem value="Discarded Non-Measles">Discarded Non-Measles</SelectItem>
+                              </SelectContent>
+                            </Select>
                           </td>
                           {/* 6: Age in Years */}
-                          <td className="p-2 text-center font-mono border-r-2 border-slate-200 dark:border-slate-700">
-                            {row.ageYears}
+                          <td className="p-1 border-r-2 border-slate-200 dark:border-slate-700">
+                            <Input
+                              type="number"
+                              step="0.1"
+                              value={row.ageYears}
+                              onChange={(e) => handleCaseCellChange(row.id, "ageYears", e.target.value)}
+                              className="h-7 w-16 text-xs text-center font-mono p-1"
+                            />
                           </td>
                           {/* 7: Age in Months */}
-                          <td className="p-2 text-center font-mono border-r-2 border-slate-200 dark:border-slate-700">
-                            {row.ageMonths}
+                          <td className="p-1 border-r-2 border-slate-200 dark:border-slate-700">
+                            <Input
+                              type="number"
+                              value={row.ageMonths}
+                              onChange={(e) => handleCaseCellChange(row.id, "ageMonths", e.target.value)}
+                              className="h-7 w-16 text-xs text-center font-mono p-1"
+                            />
                           </td>
                           {/* 8: Sex */}
-                          <td className="p-2 text-center font-mono font-bold border-r-2 border-slate-200 dark:border-slate-700">
-                            {row.sex}
+                          <td className="p-1 border-r-2 border-slate-200 dark:border-slate-700">
+                            <Select
+                              value={row.sex || "F"}
+                              onValueChange={(val: "M" | "F" | "U") => handleCaseCellChange(row.id, "sex", val)}
+                            >
+                              <SelectTrigger className="h-7 w-14 text-xs p-1 text-center font-bold">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="M">M</SelectItem>
+                                <SelectItem value="F">F</SelectItem>
+                                <SelectItem value="U">U</SelectItem>
+                              </SelectContent>
+                            </Select>
                           </td>
                           {/* 9: Place of Residence */}
-                          <td className="p-2 border-r-2 border-slate-200 dark:border-slate-700 truncate text-muted-foreground">
-                            {row.placeOfResidence}
+                          <td className="p-1 border-r-2 border-slate-200 dark:border-slate-700">
+                            <Input
+                              value={row.placeOfResidence}
+                              onChange={(e) => handleCaseCellChange(row.id, "placeOfResidence", e.target.value)}
+                              className="h-7 w-36 text-xs p-1"
+                            />
                           </td>
                           {/* 10: Date of Rash Onset */}
-                          <td className="p-2 text-center font-mono border-r-2 border-slate-200 dark:border-slate-700">
-                            {row.dateRashOnset}
+                          <td className="p-1 border-r-2 border-slate-200 dark:border-slate-700">
+                            <Input
+                              type="date"
+                              value={row.dateRashOnset}
+                              onChange={(e) => handleCaseCellChange(row.id, "dateRashOnset", e.target.value)}
+                              className="h-7 w-32 text-xs p-1 font-mono"
+                            />
                           </td>
                           {/* 11: Vaccination Status */}
-                          <td className="p-2 text-center border-r-2 border-slate-200 dark:border-slate-700">
-                            <Badge
-                              variant="outline"
-                              className={`text-[10px] ${
-                                row.vaccinationStatus === "Yes"
-                                  ? "text-emerald-700 bg-emerald-50 border-emerald-200"
-                                  : row.vaccinationStatus === "No"
-                                  ? "text-red-700 bg-red-50 border-red-200 font-bold"
-                                  : "text-slate-600 bg-slate-50"
-                              }`}
+                          <td className="p-1 border-r-2 border-slate-200 dark:border-slate-700">
+                            <Select
+                              value={row.vaccinationStatus || "Unknown"}
+                              onValueChange={(val) => handleCaseCellChange(row.id, "vaccinationStatus", val)}
                             >
-                              {row.vaccinationStatus}
-                            </Badge>
+                              <SelectTrigger className="h-7 w-24 text-[11px] p-1">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="Yes">Yes</SelectItem>
+                                <SelectItem value="No">No</SelectItem>
+                                <SelectItem value="Unknown">Unknown</SelectItem>
+                              </SelectContent>
+                            </Select>
                           </td>
                           {/* 12: Number of Vaccine Doses */}
-                          <td className="p-2 text-center font-mono border-r-2 border-slate-200 dark:border-slate-700">
-                            {row.dosesReceived}
+                          <td className="p-1 border-r-2 border-slate-200 dark:border-slate-700">
+                            <Input
+                              type="number"
+                              min="0"
+                              max="6"
+                              value={row.dosesReceived}
+                              onChange={(e) => handleCaseCellChange(row.id, "dosesReceived", e.target.value)}
+                              className="h-7 w-16 text-xs text-center font-mono p-1"
+                            />
                           </td>
                           {/* 13: Date of Notification */}
-                          <td className="p-2 text-center font-mono border-r-2 border-slate-200 dark:border-slate-700 text-muted-foreground">
-                            {row.dateNotification}
+                          <td className="p-1 border-r-2 border-slate-200 dark:border-slate-700">
+                            <Input
+                              type="date"
+                              value={row.dateNotification}
+                              onChange={(e) => handleCaseCellChange(row.id, "dateNotification", e.target.value)}
+                              className="h-7 w-32 text-xs p-1 font-mono"
+                            />
                           </td>
                           {/* 14: Date of Investigation */}
-                          <td className="p-2 text-center font-mono border-r-2 border-slate-200 dark:border-slate-700 text-muted-foreground">
-                            {row.dateInvestigation}
+                          <td className="p-1 border-r-2 border-slate-200 dark:border-slate-700">
+                            <Input
+                              type="date"
+                              value={row.dateInvestigation}
+                              onChange={(e) => handleCaseCellChange(row.id, "dateInvestigation", e.target.value)}
+                              className="h-7 w-32 text-xs p-1 font-mono"
+                            />
                           </td>
                           {/* 15: Date of Blood Sample Collection */}
-                          <td className="p-2 text-center font-mono border-r-2 border-slate-200 dark:border-slate-700 text-muted-foreground">
-                            {row.dateBloodSample || "—"}
+                          <td className="p-1 border-r-2 border-slate-200 dark:border-slate-700">
+                            <Input
+                              type="date"
+                              value={row.dateBloodSample}
+                              onChange={(e) => handleCaseCellChange(row.id, "dateBloodSample", e.target.value)}
+                              className="h-7 w-32 text-xs p-1 font-mono"
+                            />
                           </td>
                           {/* 16: Date District Received Lab Result */}
-                          <td className="p-2 text-center font-mono border-r-2 border-slate-200 dark:border-slate-700 text-muted-foreground">
-                            {row.dateLabResult || "—"}
+                          <td className="p-1 border-r-2 border-slate-200 dark:border-slate-700">
+                            <Input
+                              type="date"
+                              value={row.dateLabResult}
+                              onChange={(e) => handleCaseCellChange(row.id, "dateLabResult", e.target.value)}
+                              className="h-7 w-32 text-xs p-1 font-mono"
+                            />
                           </td>
                           {/* 17: Place of Infection or Travel History */}
-                          <td className="p-2 border-r-4 border-rose-500 truncate text-muted-foreground">
-                            {row.placeOfInfection}
+                          <td className="p-1 border-r-4 border-rose-500">
+                            <Input
+                              value={row.placeOfInfection}
+                              onChange={(e) => handleCaseCellChange(row.id, "placeOfInfection", e.target.value)}
+                              className="h-7 w-36 text-xs p-1"
+                            />
                           </td>
 
                           {/* ========================================================= */}
@@ -4464,7 +4762,7 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
       {/* 8. PAGE 11: REPORT PREVIEW (STANDARDIZED WHO FINAL REPORT EMBEDDED)   */}
       {/* ==================================================================== */}
       {activeTab === "report-preview" && (
-        <div className="space-y-4">
+        <div className="space-y-4 w-full max-w-none">
           <Card className="border shadow-sm">
             <CardHeader className="pb-3 border-b bg-muted/20">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">

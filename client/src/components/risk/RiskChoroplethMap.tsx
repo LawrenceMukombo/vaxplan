@@ -58,6 +58,9 @@ interface RiskChoroplethMapProps {
   selectedDistrictId?: number | null;
   onSelectDistrict?: (district: DistrictCoveragePerformance | null) => void;
   isLoading?: boolean;
+  initialMetric?: ChoroplethMetric;
+  metric?: ChoroplethMetric;
+  onMetricChange?: (metric: ChoroplethMetric) => void;
 }
 
 export type ChoroplethMetric = "mcv1" | "mcv2" | "dropout" | "risk";
@@ -102,6 +105,9 @@ export function RiskChoroplethMap({
   selectedDistrictId,
   onSelectDistrict,
   isLoading = false,
+  initialMetric,
+  metric: controlledMetric,
+  onMetricChange,
 }: RiskChoroplethMapProps) {
   const [internalFilter, setInternalFilter] = useState<string>("ALL");
   const selectedCategoryFilter = controlledFilter !== undefined ? controlledFilter : internalFilter;
@@ -115,7 +121,13 @@ export function RiskChoroplethMap({
     }
   };
 
-  const [metric, setMetric] = useState<ChoroplethMetric>("risk");
+  const [internalMetric, setInternalMetric] = useState<ChoroplethMetric>(initialMetric || "risk");
+  const metric = controlledMetric !== undefined ? controlledMetric : internalMetric;
+  const setMetric = (m: ChoroplethMetric) => {
+    if (onMetricChange) onMetricChange(m);
+    if (controlledMetric === undefined) setInternalMetric(m);
+  };
+
   const [searchTerm, setSearchTerm] = useState("");
   const [basemap, setBasemap] = usePersistedBasemap();
   const geoJsonRef = useRef<L.GeoJSON | null>(null);
