@@ -37,6 +37,7 @@ import {
 import {
   parseCaseLinelistBuffer,
   parseDistrictAggregatesBuffer,
+  parseIncidenceBuffer,
 } from "../services/risk/riskImportService";
 import {
   aggregateCasesByDistrictAndYear,
@@ -457,75 +458,119 @@ riskRouter.delete("/assessments/:id", async (req: any, res) => {
 // DOWNLOADABLE TEMPLATES (WHO STANDARDIZED CSV FORMATS)
 // ============================================================================
 
-riskRouter.get("/templates/linelist", async (_req: any, res) => {
+// ============================================================================
+// TEMPLATES (WHO 34-COLUMN LINELIST, 5-DOMAIN AGGREGATES, ANNUAL INCIDENCE)
+// ============================================================================
+
+riskRouter.get("/templates/linelist", async (req: any, res) => {
   try {
-    const headers = [
-      "case_id",
-      "reporting_district",
-      "province_name",
-      "date_rash_onset",
-      "date_notification",
-      "date_investigation",
-      "date_specimen_collected",
-      "date_lab_results",
-      "final_classification",
-      "age_in_months",
-      "vaccination_status",
-      "lab_result",
+    const tenantDistricts = await db
+      .select({
+        id: districts.id,
+        name: districts.name,
+        provinceName: provinces.name,
+      })
+      .from(districts)
+      .leftJoin(provinces, eq(districts.provinceId, provinces.id))
+      .where(eq(districts.tenantId, req.tenantId))
+      .orderBy(provinces.name, districts.name);
+
+    const row10Types = [
+      "Number", "Text", "Text", "Text or Number", "Predefined Values",
+      "Number", "Number", "Predefined Values", "Text", "DD/MM/YYYY",
+      "Predefined Values", "Predefined Values", "DD/MM/YYYY", "DD/MM/YYYY",
+      "DD/MM/YYYY", "DD/MM/YYYY", "Text",
+      "Calculated Values", "Calculated Values", "Calculated Values", "Calculated Values",
+      "Calculated Values", "Calculated Values", "Calculated Values", "Calculated Values",
+      "Calculated Values", "Calculated Values", "Calculated Values", "Calculated Values",
+      "Calculated Values", "Calculated Values", "Calculated Values", "Calculated Values",
+      "Calculated Values"
     ];
 
-    const sampleRows = [
-      [
-        "CASE-2025-001",
-        "Johannesburg",
-        "Gauteng",
-        "2025-01-12",
-        "2025-01-13",
-        "2025-01-14",
-        "2025-01-15",
-        "2025-01-22",
-        "LAB_CONFIRMED_MEASLES",
-        "24",
-        "0_DOSES",
-        "POSITIVE",
-      ],
-      [
-        "CASE-2025-002",
-        "City of Cape Town",
-        "Western Cape",
-        "2025-02-04",
-        "2025-02-05",
-        "2025-02-06",
-        "2025-02-07",
-        "2025-02-14",
-        "EPI_LINKED_MEASLES",
-        "48",
-        "1_DOSE",
-        "NOT_TESTED",
-      ],
-      [
-        "CASE-2025-003",
-        "eThekwini",
-        "KwaZulu-Natal",
-        "2025-02-18",
-        "2025-02-19",
-        "2025-02-20",
-        "2025-02-21",
-        "2025-02-28",
-        "DISCARDED_NON_MEASLES",
-        "36",
-        "2_PLUS_DOSES",
-        "NEGATIVE",
-      ],
+    const row12Headers = [
+      "Year", "Admin1", "Reporting District", "Case ID", "Final Classification",
+      "Age in Years", "Age in Months", "Sex", "Place of Residence", "Date of Rash Onset",
+      "Vaccination Status", "Number of Vaccine Doses", "Date of Notification", "Date of Investigation",
+      "Date of Blood Sample Collection", "Date District Received Lab Result", "Place of Infection or Travel History",
+      "Normalized_Admin2_Label", "Core_Variables_Ok", "Calc_Age_Months", "MCV_Age_Eligible",
+      "Unvaccinated_Case", "Unknown_Case", "Unvac_Or_Unknown_Case", "Discarded_Case",
+      "Confirmed_Case", "Epidemiologic_Case", "Case_0_5_Years", "Case_5_15_Years",
+      "Case_Over_15_Years", "Adequate_Investigation", "Specimen_Collected", "Adequate_Specimen_Coll",
+      "Timely_Avail_Of_Lab_Results"
     ];
 
-    let csvContent = headers.join(",") + "\n";
+    // Build verified sample rows based on actual tenant districts
+    const sampleDistricts = tenantDistricts.length > 0 ? tenantDistricts.slice(0, 6) : [
+      { id: 1, name: "City of Johannesburg", provinceName: "Gauteng" },
+      { id: 2, name: "City of Cape Town", provinceName: "Western Cape" },
+      { id: 3, name: "eThekwini", provinceName: "KwaZulu-Natal" },
+    ];
+
+    const sampleRows = sampleDistricts.map((d, idx) => {
+      const year = 2024;
+      const prov = d.provinceName || "National";
+      const dist = d.name;
+      const distCode = dist.replace(/[^A-Za-z0-9]/g, "").slice(0, 4).toUpperCase();
+      const caseId = `MEA-${distCode}-${year}-${String(101 + idx).padStart(3, "0")}`;
+      const classifications = [
+        "Lab Confirmed Measles",
+        "Epi-Linked Measles",
+        "Clinically Compatible Measles",
+        "Discarded Non-Measles",
+        "Lab Confirmed Measles",
+        "Epi-Linked Measles"
+      ];
+      const finalClass = classifications[idx % classifications.length];
+      const ageY = (1.5 + (idx * 1.8)).toFixed(1);
+      const ageM = Math.round(Number(ageY) * 12);
+      const sex = idx % 2 === 0 ? "F" : "M";
+      const residence = `${dist} Ward ${(idx % 5) + 1}`;
+      const rashDate = `2024-0${(idx % 8) + 2}-1${idx + 1}`;
+      const vacStatus = idx % 3 === 0 ? "No" : (idx % 3 === 1 ? "Yes" : "Unknown");
+      const doses = vacStatus === "Yes" ? 2 : 0;
+      const notifDate = `2024-0${(idx % 8) + 2}-1${idx + 2}`;
+      const investDate = `2024-0${(idx % 8) + 2}-1${idx + 3}`;
+      const bloodDate = idx % 4 !== 3 ? `2024-0${(idx % 8) + 2}-1${idx + 4}` : "";
+      const labDate = bloodDate ? `2024-0${(idx % 8) + 2}-2${idx + 1}` : "";
+      const travel = idx % 2 === 0 ? "Local Community" : "Cross-Border Transit";
+
+      // 17 Calculated values
+      const mcvEligible = ageM >= 9 ? 1 : 0;
+      const unvac = vacStatus === "No" || doses === 0 ? 1 : 0;
+      const unk = vacStatus === "Unknown" ? 1 : 0;
+      const unvacOrUnk = unvac || unk ? 1 : 0;
+      const isDiscarded = finalClass.includes("Discarded") ? 1 : 0;
+      const isConfirmed = finalClass.includes("Lab Confirmed") ? 1 : 0;
+      const isEpi = finalClass.includes("Epi-Linked") ? 1 : 0;
+      const c0to5 = ageM < 60 ? 1 : 0;
+      const c5to15 = ageM >= 60 && ageM < 180 ? 1 : 0;
+      const cOver15 = ageM >= 180 ? 1 : 0;
+      const specColl = bloodDate ? 1 : 0;
+      const timely = labDate ? 1 : 0;
+
+      return [
+        year, prov, dist, caseId, finalClass,
+        ageY, ageM, sex, residence, rashDate,
+        vacStatus, doses, notifDate, investDate,
+        bloodDate, labDate, travel,
+        dist, 1, ageM, mcvEligible,
+        unvac, unk, unvacOrUnk, isDiscarded,
+        isConfirmed, isEpi, c0to5, c5to15,
+        cOver15, 1, specColl, specColl, timely
+      ];
+    });
+
+    let csvContent = "";
+    csvContent += "# WHO Measles Programmatic Risk Assessment - Official 34-Column Case Linelist Template\n";
+    csvContent += "# Columns 1-17: User Surveillance Inputs (Directly Editable). Columns 18-34: Automated WHO Formula Recalculation Columns.\n";
+    csvContent += row10Types.map(c => `"${c}"`).join(",") + "\n";
+    csvContent += row12Headers.map(c => `"${c}"`).join(",") + "\n";
     for (const r of sampleRows) {
-      csvContent += r.map((f) => `"${f}"`).join(",") + "\n";
+      csvContent += r.map(c => `"${String(c ?? "").replace(/"/g, '""')}"`).join(",") + "\n";
     }
 
     res.setHeader("Content-Type", "text/csv; charset=utf-8");
-    res.setHeader("Content-Disposition", 'attachment; filename="WHO_Measles_Linelist_Template.csv"');
+    res.setHeader("Content-Disposition", 'attachment; filename="WHO_Measles_Case_Based_Linelist_Template.csv"');
     res.send(csvContent);
   } catch (err: any) {
     res.status(500).json({ message: err.message });
@@ -534,47 +579,156 @@ riskRouter.get("/templates/linelist", async (_req: any, res) => {
 
 riskRouter.get("/templates/district-aggregates", async (req: any, res) => {
   try {
+    const domain = String(req.query.domain || "all").toLowerCase();
     const tenantDistricts = await db
       .select({
         id: districts.id,
         name: districts.name,
         code: districts.code,
+        provinceName: provinces.name,
       })
       .from(districts)
+      .leftJoin(provinces, eq(districts.provinceId, provinces.id))
       .where(eq(districts.tenantId, req.tenantId))
-      .orderBy(districts.name);
+      .orderBy(provinces.name, districts.name);
+
+    let headers: string[] = [];
+    let filename = "VPD_Risk_District_Aggregates_Template.csv";
+
+    if (domain === "population") {
+      headers = [
+        "district_id", "district_name", "province_name", "total_population",
+        "mcv1_2022", "mcv1_2023", "mcv1_2024", "mcv2_2022", "mcv2_2023", "mcv2_2024",
+        "penta1_coverage_pct", "sia_coverage_pct", "sia_year", "sia_target_age_group"
+      ];
+      filename = "WHO_Risk_Domain1_Population_Immunity_Template.csv";
+    } else if (domain === "surveillance") {
+      headers = [
+        "district_id", "district_name", "province_name", "total_population",
+        "suspected_cases_count", "discarded_cases", "unvaccinated_cases_pct",
+        "adequate_investigation_pct", "adequate_specimen_pct", "timely_lab_results_pct"
+      ];
+      filename = "WHO_Risk_Domain2_Surveillance_Quality_Template.csv";
+    } else if (domain === "threats" || domain === "vulnerabilities") {
+      headers = [
+        "district_id", "district_name", "province_name", "total_population", "area_km2",
+        "threat_cases_under_5", "threat_cases_5_to_14", "threat_cases_15_plus", "border_case_past_year",
+        "migrant_or_underserved", "vaccine_hesitancy_or_refusal", "security_or_conflict_concerns",
+        "recurrent_natural_disasters", "poor_access_or_terrain", "inadequate_political_support",
+        "high_transit_hub_or_border", "mass_gatherings_or_events"
+      ];
+      filename = "WHO_Risk_Domain4_Threats_and_Vulnerabilities_Template.csv";
+    } else {
+      // Master 5-Domain Template
+      headers = [
+        "district_id", "district_name", "province_name", "total_population", "area_km2",
+        "mcv1_2022", "mcv1_2023", "mcv1_2024", "mcv2_2022", "mcv2_2023", "mcv2_2024",
+        "penta1_coverage_pct", "sia_coverage_pct", "sia_year", "sia_target_age_group",
+        "suspected_cases_count", "discarded_cases", "unvaccinated_cases_pct",
+        "adequate_investigation_pct", "adequate_specimen_pct", "timely_lab_results_pct",
+        "threat_cases_under_5", "threat_cases_5_to_14", "threat_cases_15_plus", "border_case_past_year",
+        "migrant_or_underserved", "vaccine_hesitancy_or_refusal", "security_or_conflict_concerns",
+        "recurrent_natural_disasters", "poor_access_or_terrain", "inadequate_political_support",
+        "high_transit_hub_or_border", "mass_gatherings_or_events"
+      ];
+      filename = "WHO_Measles_District_5Domain_Master_Template.csv";
+    }
+
+    let csvContent = headers.join(",") + "\n";
+    for (const d of tenantDistricts) {
+      const seed = ((Number(d.id) * 9301 + 49297) % 233280) / 233280;
+      const seed2 = ((Number(d.id) * 49297 + 9301) % 233280) / 233280;
+      const mcv1_3 = Number((72 + seed * 16).toFixed(1));
+      const mcv1_2 = Number((mcv1_3 + 1.8).toFixed(1));
+      const mcv1_1 = Number((mcv1_2 + 2.1).toFixed(1));
+      const mcv2_3 = Number(Math.max(45, mcv1_3 - (7 + seed2 * 5)).toFixed(1));
+      const mcv2_2 = Number((mcv2_3 + 1.6).toFixed(1));
+      const mcv2_1 = Number((mcv2_2 + 1.9).toFixed(1));
+      const penta1 = Number(Math.min(99, mcv1_1 + 4.2).toFixed(1));
+      const pop = Math.round(60000 + seed * 180000);
+      const area = Math.round(1200 + seed2 * 3500);
+
+      if (domain === "population") {
+        csvContent += [
+          d.id, `"${d.name.replace(/"/g, '""')}"`, `"${(d.provinceName || "National").replace(/"/g, '""')}"`,
+          pop, mcv1_3, mcv1_2, mcv1_1, mcv2_3, mcv2_2, mcv2_1, penta1, 94.5, 2023, "WIDE"
+        ].join(",") + "\n";
+      } else if (domain === "surveillance") {
+        csvContent += [
+          d.id, `"${d.name.replace(/"/g, '""')}"`, `"${(d.provinceName || "National").replace(/"/g, '""')}"`,
+          pop, Math.round(seed2 * 8), Math.round(seed2 * 2), Math.round(15 + seed * 10), 85.0, 85.0, 85.0
+        ].join(",") + "\n";
+      } else if (domain === "threats" || domain === "vulnerabilities") {
+        csvContent += [
+          d.id, `"${d.name.replace(/"/g, '""')}"`, `"${(d.provinceName || "National").replace(/"/g, '""')}"`,
+          pop, area, Math.round(seed2 * 3), Math.round(seed * 2), Math.round(seed2 * 2), seed > 0.6 ? 1 : 0,
+          seed > 0.7 ? 1 : 0, seed > 0.8 ? 1 : 0, 0, 0, seed > 0.5 ? 1 : 0, 0, seed > 0.6 ? 1 : 0, seed > 0.75 ? 1 : 0
+        ].join(",") + "\n";
+      } else {
+        csvContent += [
+          d.id, `"${d.name.replace(/"/g, '""')}"`, `"${(d.provinceName || "National").replace(/"/g, '""')}"`,
+          pop, area, mcv1_3, mcv1_2, mcv1_1, mcv2_3, mcv2_2, mcv2_1, penta1, 94.5, 2023, "WIDE",
+          Math.round(seed2 * 8), Math.round(seed2 * 2), Math.round(15 + seed * 10), 85.0, 85.0, 85.0,
+          Math.round(seed2 * 3), Math.round(seed * 2), Math.round(seed2 * 2), seed > 0.6 ? 1 : 0,
+          seed > 0.7 ? 1 : 0, seed > 0.8 ? 1 : 0, 0, 0, seed > 0.5 ? 1 : 0, 0, seed > 0.6 ? 1 : 0, seed > 0.75 ? 1 : 0
+        ].join(",") + "\n";
+      }
+    }
+
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.send(csvContent);
+  } catch (err: any) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+riskRouter.get("/templates/incidence", async (req: any, res) => {
+  try {
+    const tenantDistricts = await db
+      .select({
+        id: districts.id,
+        name: districts.name,
+        code: districts.code,
+        provinceName: provinces.name,
+      })
+      .from(districts)
+      .leftJoin(provinces, eq(districts.provinceId, provinces.id))
+      .where(eq(districts.tenantId, req.tenantId))
+      .orderBy(provinces.name, districts.name);
 
     const headers = [
       "district_id",
       "district_name",
-      "target_population_under1",
-      "mcv1_coverage_pct",
-      "mcv2_coverage_pct",
-      "penta1_coverage_pct",
-      "sia_coverage_pct",
-      "time_since_sia_months",
-      "suspected_cases_count",
-      "outbreak_in_last_12mos_yes_no",
+      "province_name",
+      "total_population",
+      "cases_year_minus_3",
+      "cases_year_minus_2",
+      "cases_year_minus_1",
     ];
 
     let csvContent = headers.join(",") + "\n";
     for (const d of tenantDistricts) {
+      const seed = ((Number(d.id) * 9301 + 49297) % 233280) / 233280;
+      const seed2 = ((Number(d.id) * 49297 + 9301) % 233280) / 233280;
+      const pop = Math.round(60000 + seed * 180000);
+      const c1 = Math.round(seed2 * 5);
+      const c2 = Math.round(seed * 7);
+      const c3 = Math.round(seed2 * 9);
+
       csvContent += [
         d.id,
         `"${d.name.replace(/"/g, '""')}"`,
-        12500,
-        85.0,
-        78.5,
-        92.0,
-        95.0,
-        18,
-        2,
-        "NO",
+        `"${(d.provinceName || "National").replace(/"/g, '""')}"`,
+        pop,
+        c1,
+        c2,
+        c3,
       ].join(",") + "\n";
     }
 
     res.setHeader("Content-Type", "text/csv; charset=utf-8");
-    res.setHeader("Content-Disposition", 'attachment; filename="VPD_Risk_District_Aggregates_Template.csv"');
+    res.setHeader("Content-Disposition", 'attachment; filename="Measles_Annual_Incidence_Template.csv"');
     res.send(csvContent);
   } catch (err: any) {
     res.status(500).json({ message: err.message });
@@ -582,7 +736,7 @@ riskRouter.get("/templates/district-aggregates", async (req: any, res) => {
 });
 
 // ============================================================================
-// DATA INGESTION (CASE LINELIST & AGGREGATES)
+// DATA INGESTION (CASE LINELIST, AGGREGATES, INCIDENCE)
 // ============================================================================
 
 riskRouter.post("/assessments/:id/import-cases", async (req: any, res) => {
@@ -596,9 +750,8 @@ riskRouter.post("/assessments/:id/import-cases", async (req: any, res) => {
 
       const parsed = parseCaseLinelistBuffer(req.file.buffer);
 
-      // Store in memory / DB cache for calculation
       // Store raw cases up to batch limit
-      const recordsToInsert = parsed.processedCases.slice(0, 1000).map((c) => ({
+      const recordsToInsert = parsed.processedCases.slice(0, 2000).map((c) => ({
         tenantId: req.tenantId,
         assessmentId: req.params.id,
         caseId: c.caseId,
@@ -625,12 +778,70 @@ riskRouter.post("/assessments/:id/import-cases", async (req: any, res) => {
         .set({ status: "READY_TO_CALCULATE", updatedAt: new Date() })
         .where(and(eq(riskAssessments.id, req.params.id), eq(riskAssessments.tenantId, req.tenantId)));
 
+      // Format parsed cases matching CaseLinelistRow interface so frontend table updates instantly
+      const formattedCases = parsed.processedCases.map((c, idx) => {
+        const ageYears = c.ageMonths !== null ? Number((c.ageMonths / 12).toFixed(1)) : 0;
+        const ageMonths = c.ageMonths ?? Math.round(ageYears * 12);
+        const mcvEligible = ageMonths >= 9 ? 1 : 0;
+        const doses = c.dosesReceived !== null && c.dosesReceived !== undefined ? c.dosesReceived : (c.normalizedVaccinationStatus === "VACCINATED" ? 2 : 0);
+        const vacStatus = c.normalizedVaccinationStatus === "VACCINATED" ? "Yes" : (c.normalizedVaccinationStatus === "UNVACCINATED" ? "No" : "Unknown");
+        const unvac = vacStatus === "No" || doses === 0 ? 1 : 0;
+        const unk = vacStatus === "Unknown" ? 1 : 0;
+        const unvacOrUnk = unvac || unk ? 1 : 0;
+        const classification = c.canonicalClassification === "LAB_CONFIRMED_MEASLES"
+          ? "Lab Confirmed Measles"
+          : (c.canonicalClassification === "EPI_LINKED_MEASLES"
+            ? "Epi-Linked Measles"
+            : (c.canonicalClassification === "DISCARDED_NON_MEASLES"
+              ? "Discarded Non-Measles"
+              : "Clinically Compatible Measles"));
+
+        return {
+          id: `case-imported-${idx}-${Date.now()}`,
+          year: c.calendarYear || 2024,
+          admin1: "National",
+          reportingDistrict: c.assignedDistrict,
+          caseId: c.caseId,
+          finalClassification: classification,
+          ageYears,
+          ageMonths,
+          sex: (c.sex === "M" || c.sex === "F" || c.sex === "U" ? c.sex : "F") as "M" | "F" | "U",
+          placeOfResidence: c.placeOfResidence || `${c.assignedDistrict} Community`,
+          dateRashOnset: c.dateRashOnset || "",
+          vaccinationStatus: vacStatus,
+          dosesReceived: doses,
+          dateNotification: c.dateNotification || "",
+          dateInvestigation: c.dateInvestigation || "",
+          dateBloodSample: c.dateBloodSample || "",
+          dateLabResult: c.dateLabResult || "",
+          placeOfInfection: c.placeOfInfection || "Local Community",
+          normalizedAdmin2: c.assignedDistrict,
+          coreVariablesOk: (c.caseId && c.assignedDistrict && classification) ? 1 : 0,
+          calcAgeMonths: ageMonths,
+          mcvAgeEligible: mcvEligible,
+          unvaccinatedCase: unvac,
+          unknownCase: unk,
+          unvacOrUnknownCase: unvacOrUnk,
+          discardedCase: c.isDiscarded ? 1 : 0,
+          confirmedCase: classification.includes("Lab Confirmed") ? 1 : 0,
+          epidemiologicCase: c.isEpiLinked ? 1 : 0,
+          case0to5Years: ageMonths < 60 ? 1 : 0,
+          case5to15Years: ageMonths >= 60 && ageMonths < 180 ? 1 : 0,
+          caseOver15Years: ageMonths >= 180 ? 1 : 0,
+          adequateInvestigation: c.isAdequateInvestigation ? 1 : 1,
+          specimenCollected: c.isAdequateSpecimen ? 1 : 0,
+          adequateSpecimenColl: c.isAdequateSpecimen ? 1 : 0,
+          timelyAvailLabResults: c.isTimelyLabResult ? 1 : 0,
+        };
+      });
+
       res.json({
         fileChecksum: parsed.fileChecksum,
         totalRows: parsed.totalRows,
         acceptedRows: parsed.acceptedRows,
         rejectedRows: parsed.rejectedRows,
         sampleIssues: parsed.validationIssues.slice(0, 5),
+        cases: formattedCases,
       });
     });
   } catch (err: any) {
@@ -673,12 +884,13 @@ riskRouter.post("/assessments/:id/import-aggregates", async (req: any, res) => {
       let importedCount = 0;
       if (assessment) {
         for (const row of parsed.acceptedDistricts) {
-          const match = tenantDistricts.find(
-            (d) => d.name.toLowerCase().trim() === row.districtName.toLowerCase().trim()
-          ) || tenantDistricts.find(
-            (d) => row.districtName.toLowerCase().trim().includes(d.name.toLowerCase().trim()) ||
-                   d.name.toLowerCase().trim().includes(row.districtName.toLowerCase().trim())
-          );
+          const match = (row.districtId && tenantDistricts.find((d) => String(d.id) === String(row.districtId))) ||
+            tenantDistricts.find(
+              (d) => d.name.toLowerCase().trim() === row.districtName.toLowerCase().trim()
+            ) || tenantDistricts.find(
+              (d) => row.districtName.toLowerCase().trim().includes(d.name.toLowerCase().trim()) ||
+                     d.name.toLowerCase().trim().includes(row.districtName.toLowerCase().trim())
+            );
 
           if (!match) continue;
 
@@ -691,16 +903,26 @@ riskRouter.post("/assessments/:id/import-aggregates", async (req: any, res) => {
               provinceId: match.provinceId || null,
               population: String(row.population),
               areaKm2: String(row.areaKm2),
-              mcv1YearMinus3: row.mcv1YearMinus3 !== null ? String(row.mcv1YearMinus3) : "80.00",
-              mcv1YearMinus2: row.mcv1YearMinus2 !== null ? String(row.mcv1YearMinus2) : "82.00",
-              mcv1YearMinus1: row.mcv1YearMinus1 !== null ? String(row.mcv1YearMinus1) : "85.00",
-              mcv2YearMinus3: row.mcv2YearMinus3 !== null ? String(row.mcv2YearMinus3) : "70.00",
-              mcv2YearMinus2: row.mcv2YearMinus2 !== null ? String(row.mcv2YearMinus2) : "72.00",
-              mcv2YearMinus1: row.mcv2YearMinus1 !== null ? String(row.mcv2YearMinus1) : "75.00",
-              penta1YearMinus1: row.penta1YearMinus1 !== null ? String(row.penta1YearMinus1) : "90.00",
-              siaCoveragePct: row.siaCoveragePct !== null ? String(row.siaCoveragePct) : "92.00",
+              mcv1YearMinus3: row.mcv1YearMinus3 !== null && row.mcv1YearMinus3 !== undefined ? String(row.mcv1YearMinus3) : "80.00",
+              mcv1YearMinus2: row.mcv1YearMinus2 !== null && row.mcv1YearMinus2 !== undefined ? String(row.mcv1YearMinus2) : "82.00",
+              mcv1YearMinus1: row.mcv1YearMinus1 !== null && row.mcv1YearMinus1 !== undefined ? String(row.mcv1YearMinus1) : "85.00",
+              mcv2YearMinus3: row.mcv2YearMinus3 !== null && row.mcv2YearMinus3 !== undefined ? String(row.mcv2YearMinus3) : "70.00",
+              mcv2YearMinus2: row.mcv2YearMinus2 !== null && row.mcv2YearMinus2 !== undefined ? String(row.mcv2YearMinus2) : "72.00",
+              mcv2YearMinus1: row.mcv2YearMinus1 !== null && row.mcv2YearMinus1 !== undefined ? String(row.mcv2YearMinus1) : "75.00",
+              penta1YearMinus1: row.penta1YearMinus1 !== null && row.penta1YearMinus1 !== undefined ? String(row.penta1YearMinus1) : "90.00",
+              siaCoveragePct: row.siaCoveragePct !== null && row.siaCoveragePct !== undefined ? String(row.siaCoveragePct) : "92.00",
               siaTargetAgeGroup: row.siaAgeTarget || "WIDE",
               siaYearsSince: row.siaYear ? Math.max(1, assessment.assessmentYear - row.siaYear) : 2,
+              unvaccinatedCasesPct: row.unvaccinatedCasesPct !== null && row.unvaccinatedCasesPct !== undefined ? String(row.unvaccinatedCasesPct) : "15.00",
+              suspectedCases: row.suspectedCases !== null && row.suspectedCases !== undefined ? Number(row.suspectedCases) : 12,
+              discardedCases: row.discardedCases !== null && row.discardedCases !== undefined ? Number(row.discardedCases) : 3,
+              adequateInvestigationPct: row.adequateInvestigationPct !== null && row.adequateInvestigationPct !== undefined ? String(row.adequateInvestigationPct) : "85.00",
+              adequateSpecimenPct: row.adequateSpecimenPct !== null && row.adequateSpecimenPct !== undefined ? String(row.adequateSpecimenPct) : "85.00",
+              timelyLabResultsPct: row.timelyLabResultsPct !== null && row.timelyLabResultsPct !== undefined ? String(row.timelyLabResultsPct) : "85.00",
+              threatCasesUnder5: row.threatCasesUnder5 !== null && row.threatCasesUnder5 !== undefined ? Number(row.threatCasesUnder5) : 0,
+              threatCases5To14: row.threatCases5To14 !== null && row.threatCases5To14 !== undefined ? Number(row.threatCases5To14) : 0,
+              threatCases15Plus: row.threatCases15Plus !== null && row.threatCases15Plus !== undefined ? Number(row.threatCases15Plus) : 0,
+              borderCaseInPastYear: row.borderCaseInPastYear ?? false,
               vulnerabilities: row.vulnerabilityFactors || {},
               updatedAt: new Date(),
             })
@@ -709,14 +931,24 @@ riskRouter.post("/assessments/:id/import-aggregates", async (req: any, res) => {
               set: {
                 population: String(row.population),
                 areaKm2: String(row.areaKm2),
-                mcv1YearMinus3: row.mcv1YearMinus3 !== null ? String(row.mcv1YearMinus3) : sql`excluded.mcv1_year_minus3`,
-                mcv1YearMinus2: row.mcv1YearMinus2 !== null ? String(row.mcv1YearMinus2) : sql`excluded.mcv1_year_minus2`,
-                mcv1YearMinus1: row.mcv1YearMinus1 !== null ? String(row.mcv1YearMinus1) : sql`excluded.mcv1_year_minus1`,
-                mcv2YearMinus3: row.mcv2YearMinus3 !== null ? String(row.mcv2YearMinus3) : sql`excluded.mcv2_year_minus3`,
-                mcv2YearMinus2: row.mcv2YearMinus2 !== null ? String(row.mcv2YearMinus2) : sql`excluded.mcv2_year_minus2`,
-                mcv2YearMinus1: row.mcv2YearMinus1 !== null ? String(row.mcv2YearMinus1) : sql`excluded.mcv2_year_minus1`,
-                penta1YearMinus1: row.penta1YearMinus1 !== null ? String(row.penta1YearMinus1) : sql`excluded.penta1_year_minus1`,
-                siaCoveragePct: row.siaCoveragePct !== null ? String(row.siaCoveragePct) : sql`excluded.sia_coverage_pct`,
+                mcv1YearMinus3: row.mcv1YearMinus3 !== null && row.mcv1YearMinus3 !== undefined ? String(row.mcv1YearMinus3) : sql`excluded.mcv1_year_minus3`,
+                mcv1YearMinus2: row.mcv1YearMinus2 !== null && row.mcv1YearMinus2 !== undefined ? String(row.mcv1YearMinus2) : sql`excluded.mcv1_year_minus2`,
+                mcv1YearMinus1: row.mcv1YearMinus1 !== null && row.mcv1YearMinus1 !== undefined ? String(row.mcv1YearMinus1) : sql`excluded.mcv1_year_minus1`,
+                mcv2YearMinus3: row.mcv2YearMinus3 !== null && row.mcv2YearMinus3 !== undefined ? String(row.mcv2YearMinus3) : sql`excluded.mcv2_year_minus3`,
+                mcv2YearMinus2: row.mcv2YearMinus2 !== null && row.mcv2YearMinus2 !== undefined ? String(row.mcv2YearMinus2) : sql`excluded.mcv2_year_minus2`,
+                mcv2YearMinus1: row.mcv2YearMinus1 !== null && row.mcv2YearMinus1 !== undefined ? String(row.mcv2YearMinus1) : sql`excluded.mcv2_year_minus1`,
+                penta1YearMinus1: row.penta1YearMinus1 !== null && row.penta1YearMinus1 !== undefined ? String(row.penta1YearMinus1) : sql`excluded.penta1_year_minus1`,
+                siaCoveragePct: row.siaCoveragePct !== null && row.siaCoveragePct !== undefined ? String(row.siaCoveragePct) : sql`excluded.sia_coverage_pct`,
+                unvaccinatedCasesPct: row.unvaccinatedCasesPct !== null && row.unvaccinatedCasesPct !== undefined ? String(row.unvaccinatedCasesPct) : sql`excluded.unvaccinated_cases_pct`,
+                suspectedCases: row.suspectedCases !== null && row.suspectedCases !== undefined ? Number(row.suspectedCases) : sql`excluded.suspected_cases`,
+                discardedCases: row.discardedCases !== null && row.discardedCases !== undefined ? Number(row.discardedCases) : sql`excluded.discarded_cases`,
+                adequateInvestigationPct: row.adequateInvestigationPct !== null && row.adequateInvestigationPct !== undefined ? String(row.adequateInvestigationPct) : sql`excluded.adequate_investigation_pct`,
+                adequateSpecimenPct: row.adequateSpecimenPct !== null && row.adequateSpecimenPct !== undefined ? String(row.adequateSpecimenPct) : sql`excluded.adequate_specimen_pct`,
+                timelyLabResultsPct: row.timelyLabResultsPct !== null && row.timelyLabResultsPct !== undefined ? String(row.timelyLabResultsPct) : sql`excluded.timely_lab_results_pct`,
+                threatCasesUnder5: row.threatCasesUnder5 !== null && row.threatCasesUnder5 !== undefined ? Number(row.threatCasesUnder5) : sql`excluded.threat_cases_under5`,
+                threatCases5To14: row.threatCases5To14 !== null && row.threatCases5To14 !== undefined ? Number(row.threatCases5To14) : sql`excluded.threat_cases_5_to_14`,
+                threatCases15Plus: row.threatCases15Plus !== null && row.threatCases15Plus !== undefined ? Number(row.threatCases15Plus) : sql`excluded.threat_cases_15_plus`,
+                borderCaseInPastYear: row.borderCaseInPastYear ?? sql`excluded.border_case_in_past_year`,
                 vulnerabilities: row.vulnerabilityFactors || sql`excluded.vulnerabilities`,
                 updatedAt: new Date(),
               },
@@ -736,6 +968,91 @@ riskRouter.post("/assessments/:id/import-aggregates", async (req: any, res) => {
         acceptedCount: parsed.acceptedDistricts.length,
         importedCount,
         sampleDistricts: parsed.acceptedDistricts.slice(0, 5),
+      });
+    });
+  } catch (err: any) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+riskRouter.post("/assessments/:id/import-incidence", async (req: any, res) => {
+  try {
+    const _multer = (await import("multer")).default;
+    const upload = _multer({ storage: _multer.memoryStorage() }).single("file");
+
+    upload(req, res, async (uploadErr: any) => {
+      if (uploadErr) return res.status(400).json({ message: uploadErr.message });
+      if (!req.file) return res.status(400).json({ message: "File required" });
+
+      const parsed = parseIncidenceBuffer(req.file.buffer);
+
+      let [assessment] = await db
+        .select()
+        .from(riskAssessments)
+        .where(and(eq(riskAssessments.id, req.params.id), eq(riskAssessments.tenantId, req.tenantId)));
+
+      if (!assessment) {
+        const [byUuid] = await db.select().from(riskAssessments).where(eq(riskAssessments.id, req.params.id));
+        assessment = byUuid;
+      }
+
+      const effectiveTenantId = assessment?.tenantId || req.tenantId;
+
+      const tenantDistricts = await db
+        .select({
+          id: districts.id,
+          name: districts.name,
+          provinceId: districts.provinceId,
+        })
+        .from(districts)
+        .where(eq(districts.tenantId, effectiveTenantId));
+
+      let importedCount = 0;
+      if (assessment) {
+        for (const row of parsed.acceptedDistricts) {
+          const match = (row.districtId && tenantDistricts.find((d) => String(d.id) === String(row.districtId))) ||
+            tenantDistricts.find(
+              (d) => d.name.toLowerCase().trim() === row.districtName.toLowerCase().trim()
+            ) || tenantDistricts.find(
+              (d) => row.districtName.toLowerCase().trim().includes(d.name.toLowerCase().trim()) ||
+                     d.name.toLowerCase().trim().includes(row.districtName.toLowerCase().trim())
+            );
+
+          if (!match) continue;
+
+          await db
+            .insert(riskDistrictDataEntry)
+            .values({
+              tenantId: effectiveTenantId,
+              assessmentId: assessment.id,
+              districtId: match.id,
+              provinceId: match.provinceId || null,
+              population: row.population ? String(row.population) : "100000",
+              suspectedCases: row.casesYearMinus1,
+              updatedAt: new Date(),
+            })
+            .onConflictDoUpdate({
+              target: [riskDistrictDataEntry.assessmentId, riskDistrictDataEntry.districtId],
+              set: {
+                suspectedCases: row.casesYearMinus1,
+                ...(row.population ? { population: String(row.population) } : {}),
+                updatedAt: new Date(),
+              },
+            });
+          importedCount++;
+        }
+      }
+
+      await db
+        .update(riskAssessments)
+        .set({ status: "READY_TO_CALCULATE", updatedAt: new Date() })
+        .where(and(eq(riskAssessments.id, req.params.id), eq(riskAssessments.tenantId, req.tenantId)));
+
+      res.json({
+        fileChecksum: parsed.fileChecksum,
+        totalRows: parsed.totalRows,
+        acceptedDistricts: parsed.acceptedDistricts,
+        importedCount,
       });
     });
   } catch (err: any) {
@@ -1308,27 +1625,111 @@ riskRouter.post("/assessments/:id/reviews", async (req: any, res) => {
 
 riskRouter.post("/actions", async (req: any, res) => {
   try {
+    const body = req.body || {};
+    const tenantId = req.tenantId;
+
+    // Resolve districtId: can be passed as number, string ID, or administrativeAreaId name
+    let targetDistrictId: number | null = null;
+    if (body.districtId && !isNaN(Number(body.districtId))) {
+      targetDistrictId = Number(body.districtId);
+    } else if (body.administrativeAreaId) {
+      const parsedNum = Number(body.administrativeAreaId);
+      if (!isNaN(parsedNum)) {
+        targetDistrictId = parsedNum;
+      } else {
+        // District name match
+        const [matchedDistrict] = await db
+          .select({ id: districts.id })
+          .from(districts)
+          .where(and(
+            eq(districts.tenantId, tenantId),
+            sql`LOWER(${districts.name}) = LOWER(${String(body.administrativeAreaId).trim()})`
+          ))
+          .limit(1);
+        if (matchedDistrict) {
+          targetDistrictId = matchedDistrict.id;
+        }
+      }
+    }
+
+    // Fallback to first tenant district if not resolvable
+    if (!targetDistrictId) {
+      const [firstDist] = await db
+        .select({ id: districts.id })
+        .from(districts)
+        .where(eq(districts.tenantId, tenantId))
+        .limit(1);
+      targetDistrictId = firstDist?.id || 1;
+    }
+
+    const actionTitle = body.actionTitle || "Programmatic Operational Action";
+    const actionDescription = body.actionDescription || actionTitle || "Supportive action linked from measles risk assessment.";
+    const linkedModule = body.linkedModule || body.actionType || "SUPERVISION_VISIT";
+    const responsiblePerson = body.responsiblePerson || body.assignedTo || null;
+    const budgetEstimate = body.budgetEstimate !== undefined && body.budgetEstimate !== null && !isNaN(Number(body.budgetEstimate))
+      ? String(body.budgetEstimate)
+      : (body.budgetCode && !isNaN(Number(body.budgetCode)) ? String(body.budgetCode) : null);
+    const linkedEntityId = body.budgetCode || body.linkedEntityId || null;
+
     const parsed = insertRiskActionLinkSchema.parse({
-      ...req.body,
-      tenantId: req.tenantId,
-      createdBy: req.user?.id,
+      tenantId,
+      assessmentId: body.assessmentId,
+      areaResultId: body.areaResultId || null,
+      districtId: targetDistrictId,
+      indicatorCode: body.indicatorCode || null,
+      actionTitle,
+      actionDescription,
+      linkedModule,
+      linkedEntityId,
+      responsiblePerson,
+      budgetEstimateUsd: budgetEstimate,
+      createdByUserId: req.user?.id || null,
+      status: body.status || "open",
     });
 
     const [created] = await db.insert(riskActionLinks).values(parsed).returning();
     res.status(201).json(created);
   } catch (err: any) {
+    console.error("POST /api/risk/actions error:", err);
     res.status(400).json({ message: err.message });
   }
 });
 
 riskRouter.get("/assessments/:id/actions", async (req: any, res) => {
   try {
-    const actions = await db
-      .select()
+    const rawActions = await db
+      .select({
+        id: riskActionLinks.id,
+        assessmentId: riskActionLinks.assessmentId,
+        areaResultId: riskActionLinks.areaResultId,
+        districtId: riskActionLinks.districtId,
+        districtName: districts.name,
+        indicatorCode: riskActionLinks.indicatorCode,
+        actionTitle: riskActionLinks.actionTitle,
+        actionDescription: riskActionLinks.actionDescription,
+        linkedModule: riskActionLinks.linkedModule,
+        linkedEntityId: riskActionLinks.linkedEntityId,
+        responsiblePerson: riskActionLinks.responsiblePerson,
+        budgetEstimateUsd: riskActionLinks.budgetEstimateUsd,
+        targetCompletionDate: riskActionLinks.targetCompletionDate,
+        createdByUserId: riskActionLinks.createdByUserId,
+        status: riskActionLinks.status,
+        createdAt: riskActionLinks.createdAt,
+      })
       .from(riskActionLinks)
+      .leftJoin(districts, eq(riskActionLinks.districtId, districts.id))
       .where(eq(riskActionLinks.assessmentId, req.params.id))
       .orderBy(desc(riskActionLinks.createdAt));
-    res.json(actions);
+
+    // Enrich for table display
+    const enriched = rawActions.map((act) => ({
+      ...act,
+      administrativeAreaId: act.districtName || (act.districtId ? `District ${act.districtId}` : "All Areas"),
+      actionType: act.linkedModule,
+      budgetCode: act.linkedEntityId || (act.budgetEstimateUsd ? String(act.budgetEstimateUsd) : null),
+    }));
+
+    res.json(enriched);
   } catch (err: any) {
     res.json([]);
   }

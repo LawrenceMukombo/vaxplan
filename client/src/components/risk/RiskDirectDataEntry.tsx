@@ -719,6 +719,21 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
   const [incPage, setIncPage] = useState<number>(1);
   const [incPageSize, setIncPageSize] = useState<number>(25);
 
+  // Template Import Modal state (5-Domain District Aggregates)
+  const [isImportModalOpen, setIsImportModalOpen] = useState<boolean>(false);
+  const [selectedTemplateFile, setSelectedTemplateFile] = useState<File | null>(null);
+  const [isUploadingTemplate, setIsUploadingTemplate] = useState<boolean>(false);
+
+  // Case Linelist Import Modal state (WHO 34-Column Linelist)
+  const [isCaseImportModalOpen, setIsCaseImportModalOpen] = useState<boolean>(false);
+  const [selectedCaseFile, setSelectedCaseFile] = useState<File | null>(null);
+  const [isUploadingCaseFile, setIsUploadingCaseFile] = useState<boolean>(false);
+
+  // Measles Incidence Import Modal state (Annual 3-Year Tracking)
+  const [isIncImportModalOpen, setIsIncImportModalOpen] = useState<boolean>(false);
+  const [selectedIncFile, setSelectedIncFile] = useState<File | null>(null);
+  const [isUploadingInc, setIsUploadingInc] = useState<boolean>(false);
+
   // Column width management
   const [colWidths, setColWidths] = useState<Record<string, number>>(DEFAULT_COL_WIDTHS);
 
@@ -1106,38 +1121,115 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
   };
 
   const downloadBlankLinelistTemplate = () => {
-    const row10Types = [
-      "Number", "Text", "Text", "Text or Number", "Predefined Values",
-      "Number", "Number", "Predefined Values", "Text", "DD/MM/YYYY",
-      "Predefined Values", "Predefined Values", "DD/MM/YYYY", "DD/MM/YYYY",
-      "DD/MM/YYYY", "DD/MM/YYYY", "Text",
-      "Calculated Values", "Calculated Values", "Calculated Values", "Calculated Values",
-      "Calculated Values", "Calculated Values", "Calculated Values", "Calculated Values",
-      "Calculated Values", "Calculated Values", "Calculated Values", "Calculated Values",
-      "Calculated Values", "Calculated Values", "Calculated Values", "Calculated Values",
-      "Calculated Values"
-    ];
-
-    const row12Headers = [
-      "Year", "Admin1", "Reporting District", "Case ID", "Final Classification",
-      "Age in Years", "Age in Months", "Sex", "Place of Residence", "Date of Rash Onset",
-      "Vaccination Status", "Number of Vaccine Doses", "Date of Notification", "Date of Investigation",
-      "Date of Blood Sample Collection", "Date District Received Lab Result", "Place of Infection or Travel History",
-      "Normalized_Admin2_Label", "Core_Variables_Ok", "Calc_Age_Months", "MCV_Age_Eligible",
-      "Unvaccinated_Case", "Unknown_Case", "Unvac_Or_Unknown_Case", "Discarded_Case",
-      "Confirmed_Case", "Epidemiologic_Case", "Case_0_5_Years", "Case_5_15_Years",
-      "Case_Over_15_Years", "Adequate_Investigation", "Specimen_Collected", "Adequate_Specimen_Coll",
-      "Timely_Avail_Of_Lab_Results"
-    ];
-
-    const csvContent = "data:text/csv;charset=utf-8," + [row10Types, row12Headers].map(row => row.map(cell => `"${String(cell ?? "").replace(/"/g, '""')}"`).join(",")).join("\n");
-    const encodedUri = encodeURI(csvContent);
     const link = document.createElement("a");
-    link.setAttribute("href", encodedUri);
-    link.setAttribute("download", "WHO_Measles_Case_Based_Data_Template.csv");
+    link.href = "/api/risk/templates/linelist";
+    link.download = "WHO_Measles_Case_Based_Linelist_Template.csv";
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+  };
+
+  // Case Linelist Upload handler (WHO 34-Column Linelist Registry)
+  const handleUploadCaseLinelist = async () => {
+    if (!selectedCaseFile) return;
+    setIsUploadingCaseFile(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", selectedCaseFile);
+      const res = await fetch(`/api/risk/assessments/${assessmentId}/import-cases`, {
+        method: "POST",
+        body: formData,
+        credentials: "include",
+      });
+
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(errText);
+      }
+
+      const resData = await res.json();
+      if (resData.cases && Array.isArray(resData.cases) && resData.cases.length > 0) {
+        const computed = resData.cases.map((c: any) => computeCaseCalculatedFields(c));
+        setLinelistRows(computed);
+        setIsLinelistDirty(true);
+      }
+
+      setIsCaseImportModalOpen(false);
+      setSelectedCaseFile(null);
+      toast({
+        title: "Case Linelist Imported",
+        description: `Successfully ingested ${resData.acceptedRows || resData.cases?.length || 0} surveillance cases. All 17 WHO formula columns recalculated.`,
+      });
+    } catch (err: any) {
+      toast({
+        title: "Import Failed",
+        description: err.message || "Failed to process case linelist file.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsUploadingCaseFile(false);
+    }
+  };
+
+  // Measles Incidence Upload handler (Annual 3-Year Tracking)
+  const handleUploadIncidence = async () => {
+    if (!selectedIncFile) return;
+    setIsUploadingInc(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", selectedIncFile);
+      const res = await fetch(`/api/risk/assessments/${assessmentId}/import-incidence`, {
+        method: "POST",
+        body: formData,
+        credentials: "include",
+      });
+
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(errText);
+      }
+
+      const resData = await res.json();
+      if (resData.acceptedDistricts && Array.isArray(resData.acceptedDistricts)) {
+        const incMap = new Map<string, any>();
+        resData.acceptedDistricts.forEach((d: any) => {
+          if (d.districtId) incMap.set(String(d.districtId), d);
+          if (d.districtName) incMap.set(d.districtName.toLowerCase().trim(), d);
+        });
+
+        setLocalRows((prev) =>
+          prev.map((r) => {
+            const match = incMap.get(String(r.districtId)) || (r.districtName ? incMap.get(r.districtName.toLowerCase().trim()) : undefined);
+            if (match) {
+              return {
+                ...r,
+                suspectedCasesYearMinus3: match.casesYearMinus3,
+                suspectedCasesYearMinus2: match.casesYearMinus2,
+                suspectedCases: match.casesYearMinus1,
+                ...(match.population ? { population: match.population } : {}),
+              };
+            }
+            return r;
+          })
+        );
+        setIsDirty(true);
+      }
+
+      setIsIncImportModalOpen(false);
+      setSelectedIncFile(null);
+      toast({
+        title: "Incidence Data Imported",
+        description: `Updated annual case counts for ${resData.importedCount || "all"} districts.`,
+      });
+    } catch (err: any) {
+      toast({
+        title: "Import Failed",
+        description: err.message || "Failed to process incidence file.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsUploadingInc(false);
+    }
   };
 
   // Comprehensive resilient district results for Report Preview
@@ -1486,6 +1578,49 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
       title: "Expected Coverages Prefilled",
       description: `Successfully prefilled coverages for ${updatedCount} ${context?.adminLevelLabelPlural || "districts"} (${targetScope && targetScope !== "ALL" ? String(targetScope) : "All"}).`,
     });
+  };
+
+  // Upload completed template file directly into assessment table
+  const handleUploadTemplate = async () => {
+    if (!selectedTemplateFile) return;
+    setIsUploadingTemplate(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", selectedTemplateFile);
+      const res = await fetch(`/api/risk/assessments/${assessmentId}/import-aggregates`, {
+        method: "POST",
+        body: formData,
+        credentials: "include",
+      });
+
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(errText);
+      }
+
+      const resData = await res.json();
+
+      await queryClient.invalidateQueries({ queryKey: [`/api/risk/assessments/${assessmentId}/direct-entry`] });
+      await queryClient.invalidateQueries({ queryKey: [`/api/risk/assessments/${assessmentId}`] });
+      await queryClient.invalidateQueries({ queryKey: [`/api/risk/assessments/${assessmentId}/results`] });
+
+      setIsImportModalOpen(false);
+      setSelectedTemplateFile(null);
+      setIsDirty(false);
+
+      toast({
+        title: "Template Data Ingested Successfully",
+        description: `Successfully populated coverage, population, and surveillance data for ${resData.acceptedCount || "all"} districts.`,
+      });
+    } catch (err: any) {
+      toast({
+        title: "Import Failed",
+        description: err.message || "Failed to process template file.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsUploadingTemplate(false);
+    }
   };
 
   // Open bulk dialog for a specific field
@@ -1839,17 +1974,6 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
             <Button
               variant="outline"
               size="sm"
-              onClick={() => handleImportExpectedCoverages()}
-              className="h-8 text-xs gap-1.5 font-medium border-emerald-300 text-emerald-700 bg-emerald-50 hover:bg-emerald-100 dark:border-emerald-800 dark:text-emerald-300 dark:bg-emerald-950/40"
-              title="Auto-fill routine coverage, population, and surveillance metrics from national health data"
-            >
-              <Sparkles className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-              Import Expected Coverages
-            </Button>
-
-            <Button
-              variant="outline"
-              size="sm"
               disabled={saveMutation.isPending}
               onClick={() => saveMutation.mutate({ recalculate: false })}
               className="h-8 text-xs gap-1.5"
@@ -1967,7 +2091,7 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                 <li>Total risk score is calculated on a 0–100 point scale (Sum of Domains 1–4).</li>
                 <li>Districts are categorized into four tiers: Low (&lt;32 RP), Medium (32–44 RP), High (45–56 RP), and Very High (&gt;=57 RP).</li>
                 <li>Data entry updates automatically propagate deterministic scores in real-time across tables, charts, and maps.</li>
-                <li>Click <strong>Import Expected Coverages</strong> to prefill verified baseline performance from health administrative data.</li>
+                <li>Use <strong>Import / Fill Coverages</strong> in the data table toolbar to upload a completed template or prefill verified baseline performance.</li>
               </ul>
             </div>
 
@@ -2615,11 +2739,18 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => handleImportExpectedCoverages(provinceFilter)}
-                className="h-7 px-2.5 text-xs gap-1.5 font-medium border-emerald-300 text-emerald-700 bg-emerald-50 hover:bg-emerald-100 dark:border-emerald-800 dark:text-emerald-300 dark:bg-emerald-950/40"
+                onClick={() => setIsImportModalOpen(true)}
+                className="h-7 px-2.5 text-xs gap-1.5 font-medium border-emerald-300 text-emerald-700 bg-emerald-50 hover:bg-emerald-100 dark:border-emerald-800 dark:text-emerald-300 dark:bg-emerald-950/40 shadow-2xs"
+                title="Import indicator data from official CSV/Excel template or prefill national baseline"
               >
-                <Sparkles className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
-                {provinceFilter === "ALL" ? "Prefill All Coverages" : `Prefill ${provinceFilter}`}
+                <Upload className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+                {activeTab === "surveillance-quality"
+                  ? "Import / Fill Surveillance Data"
+                  : activeTab === "vulnerable-groups"
+                    ? "Import / Fill Vulnerabilities"
+                    : activeTab === "threat-assessment"
+                      ? "Import / Fill Threat Data"
+                      : "Import / Fill Coverages"}
               </Button>
 
               <div className="flex items-center border rounded p-0.5 bg-background text-xs">
@@ -3657,9 +3788,20 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                           const sqSubtotal = Math.min(20, discardedRp + investRp + specimenRp + labRp);
 
                           // PD calculations
-                          const pdMcv1Trend = Number((mcv1_1 - mcv1_3).toFixed(1));
+                          const mcv1Slope = calculateOlsSlope([
+                            { year: 1, value: mcv1_3 },
+                            { year: 2, value: mcv1_2 },
+                            { year: 3, value: mcv1_1 },
+                          ]);
+                          const pdMcv1Trend = mcv1Slope !== null ? Number(mcv1Slope.toFixed(2)) : 0;
                           const pdMcv1TrendRp = calcTrendRp(pdMcv1Trend);
-                          const pdMcv2Trend = Number((mcv2_1 - mcv2_3).toFixed(1));
+
+                          const mcv2Slope = calculateOlsSlope([
+                            { year: 1, value: mcv2_3 },
+                            { year: 2, value: mcv2_2 },
+                            { year: 3, value: mcv2_1 },
+                          ]);
+                          const pdMcv2Trend = mcv2Slope !== null ? Number(mcv2Slope.toFixed(2)) : 0;
                           const pdMcv2TrendRp = calcTrendRp(pdMcv2Trend);
                           const mcvDropout = mcv1_1 > 0 ? Number((((mcv1_1 - mcv2_1) / mcv1_1) * 100).toFixed(1)) : 0;
                           const mcvDropoutRp = calcDropoutRp(mcvDropout);
@@ -4244,17 +4386,40 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                   Annual confirmed measles cases and incidence per 100,000 population across districts.
                 </CardDescription>
               </div>
-              <div className="relative w-52">
-                <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  placeholder="Filter districts..."
-                  value={incSearchTerm}
-                  onChange={(e) => {
-                    setIncSearchTerm(e.target.value);
-                    setIncPage(1);
-                  }}
-                  className="h-7 text-xs pl-8 font-sans"
-                />
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setIsIncImportModalOpen(true)}
+                  className="h-7 px-2.5 text-xs gap-1.5 font-semibold border-emerald-300 text-emerald-700 bg-emerald-50 hover:bg-emerald-100 dark:border-emerald-800 dark:text-emerald-300 dark:bg-emerald-950/40 shadow-2xs"
+                  title="Upload completed annual incidence spreadsheet (.csv, .xlsx, .xlsm)"
+                >
+                  <Upload className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+                  Import Incidence Data
+                </Button>
+                <a href="/api/risk/templates/incidence" download="Measles_Annual_Incidence_Template.csv">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 px-2.5 text-xs gap-1.5 font-medium text-slate-700 dark:text-slate-200"
+                    title="Download pre-populated annual incidence template"
+                  >
+                    <Download className="w-3 h-3" />
+                    Template (CSV)
+                  </Button>
+                </a>
+                <div className="relative w-52">
+                  <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    placeholder="Filter districts..."
+                    value={incSearchTerm}
+                    onChange={(e) => {
+                      setIncSearchTerm(e.target.value);
+                      setIncPage(1);
+                    }}
+                    className="h-7 text-xs pl-8 font-sans"
+                  />
+                </div>
               </div>
             </div>
           </CardHeader>
@@ -4572,8 +4737,20 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                 <Button
                   variant="outline"
                   size="sm"
+                  onClick={() => setIsCaseImportModalOpen(true)}
+                  className="h-8 text-xs gap-1.5 font-semibold border-cyan-300 text-cyan-700 bg-cyan-50 hover:bg-cyan-100 dark:border-cyan-800 dark:text-cyan-300 dark:bg-cyan-950/40 shadow-2xs"
+                  title="Upload completed WHO 34-column Case Linelist spreadsheet (.csv, .xlsx, .xlsm)"
+                >
+                  <Upload className="w-3.5 h-3.5 text-cyan-600 dark:text-cyan-400" />
+                  <span>Import Case Linelist</span>
+                </Button>
+
+                <Button
+                  variant="outline"
+                  size="sm"
                   onClick={downloadBlankLinelistTemplate}
                   className="h-8 text-xs gap-1.5 text-slate-700 dark:text-slate-200"
+                  title="Download official WHO 34-column template pre-populated with tenant districts and sample rows"
                 >
                   <Download className="w-3.5 h-3.5" />
                   <span>Blank WHO Template</span>
@@ -5557,6 +5734,300 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
             </Button>
             <Button size="sm" onClick={handleApplyManualNationalPop} className="h-8 text-xs font-bold gap-1.5">
               <Check className="w-3.5 h-3.5" /> Apply Population
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ==================================================================== */}
+      {/* 1. UNIFIED IMPORT / FILL DISTRICT 5-DOMAIN AGGREGATES MODAL        */}
+      {/* ==================================================================== */}
+      <Dialog open={isImportModalOpen} onOpenChange={setIsImportModalOpen}>
+        <DialogContent className="sm:max-w-xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="text-base font-bold flex items-center gap-2">
+              <Upload className="w-4 h-4 text-primary" />
+              Import &amp; Populate District Indicators (5 Domains)
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              Populate the table below from a completed CSV/Excel template, or auto-fill verified national baseline performance.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            {/* Context & Alignment Guide */}
+            <div className="p-3 bg-muted/30 rounded-lg border text-xs space-y-1.5 text-muted-foreground">
+              <div className="font-semibold text-foreground flex items-center gap-1.5">
+                <Info className="w-3.5 h-3.5 text-primary" />
+                WHO Indicator Domains &amp; Specifications
+              </div>
+              <p className="leading-relaxed">
+                <strong>Domain Indicators:</strong> Multi-year coverage (MCV1, MCV2, dropouts, SIA), Surveillance Quality (investigation, specimen, lab timeliness), and Vulnerabilities/Threats across all {localRows.length} districts.
+              </p>
+              <p className="leading-relaxed">
+                <strong>Upsert Matching:</strong> Records match by district ID or district name. Numeric coverages are parsed as percentages (0–100%).
+              </p>
+            </div>
+
+            {/* Option 1: Upload from Supplied Template */}
+            <div className="p-4 rounded-xl border bg-background space-y-3 shadow-2xs">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+                  <span className="font-semibold text-xs text-foreground">
+                    Upload Completed Template (CSV / Excel)
+                  </span>
+                </div>
+                <Badge variant="outline" className="text-[10px] bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 border-emerald-300">
+                  Direct Ingestion
+                </Badge>
+              </div>
+
+              <p className="text-xs text-muted-foreground">
+                Upload your completed district aggregates spreadsheet (.csv, .xlsx, or .xlsm). Records will be matched and immediately populated into the table below.
+              </p>
+
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 pt-1">
+                <Input
+                  type="file"
+                  accept=".csv,.xlsx,.xlsm"
+                  onChange={(e) => setSelectedTemplateFile(e.target.files?.[0] || null)}
+                  className="h-8 text-xs file:text-xs"
+                />
+                <Button
+                  size="sm"
+                  disabled={!selectedTemplateFile || isUploadingTemplate}
+                  onClick={handleUploadTemplate}
+                  className="h-8 text-xs font-bold gap-1.5 shrink-0 bg-primary text-primary-foreground"
+                >
+                  <Upload className="w-3.5 h-3.5" />
+                  {isUploadingTemplate ? "Ingesting..." : "Upload & Populate"}
+                </Button>
+              </div>
+
+              {/* Multi-Domain Template Download Links */}
+              <div className="pt-2 border-t space-y-1.5">
+                <span className="text-[11px] font-semibold text-foreground block">Download Standard Pre-Populated Templates:</span>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                  <a href="/api/risk/templates/district-aggregates?domain=all" download="WHO_Measles_District_5Domain_Master_Template.csv">
+                    <Button variant="outline" size="sm" className="w-full justify-start h-7 text-[11px] gap-1.5 text-primary hover:bg-primary/10 font-semibold">
+                      <Download className="w-3 h-3" /> Master 5-Domain Template
+                    </Button>
+                  </a>
+                  <a href="/api/risk/templates/district-aggregates?domain=population" download="WHO_Risk_Domain1_Population_Immunity_Template.csv">
+                    <Button variant="outline" size="sm" className="w-full justify-start h-7 text-[11px] gap-1.5 text-muted-foreground hover:text-foreground">
+                      <Download className="w-3 h-3" /> Population Immunity (CSV)
+                    </Button>
+                  </a>
+                  <a href="/api/risk/templates/district-aggregates?domain=surveillance" download="WHO_Risk_Domain2_Surveillance_Quality_Template.csv">
+                    <Button variant="outline" size="sm" className="w-full justify-start h-7 text-[11px] gap-1.5 text-muted-foreground hover:text-foreground">
+                      <Download className="w-3 h-3" /> Surveillance Quality (CSV)
+                    </Button>
+                  </a>
+                  <a href="/api/risk/templates/district-aggregates?domain=threats" download="WHO_Risk_Domain4_Threats_and_Vulnerabilities_Template.csv">
+                    <Button variant="outline" size="sm" className="w-full justify-start h-7 text-[11px] gap-1.5 text-muted-foreground hover:text-foreground">
+                      <Download className="w-3 h-3" /> Threats &amp; Vulnerabilities
+                    </Button>
+                  </a>
+                </div>
+              </div>
+            </div>
+
+            {/* Option 2: Auto-Fill from Verified Baseline */}
+            <div className="p-4 rounded-xl border bg-muted/20 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-emerald-600" />
+                  <span className="font-semibold text-xs text-foreground">
+                    Auto-Fill Verified National Baseline
+                  </span>
+                </div>
+                <Badge variant="outline" className="text-[10px]">
+                  EPI / DHIS2
+                </Badge>
+              </div>
+
+              <p className="text-xs text-muted-foreground">
+                Automatically prefill routine coverage, population, and surveillance metrics from national health administrative data without uploading a spreadsheet.
+              </p>
+
+              <div className="pt-1 flex items-center justify-end">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    handleImportExpectedCoverages(provinceFilter);
+                    setIsImportModalOpen(false);
+                  }}
+                  className="h-8 text-xs gap-1.5 font-medium border-emerald-300 text-emerald-700 bg-emerald-50 hover:bg-emerald-100 dark:border-emerald-800 dark:text-emerald-300 dark:bg-emerald-950/40"
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  Auto-Fill {provinceFilter === "ALL" ? `All ${localRows.length} Districts` : `${provinceFilter} Districts`}
+                </Button>
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => setIsImportModalOpen(false)} className="h-8 text-xs">
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ==================================================================== */}
+      {/* 2. CASE-BASED DATA (WHO 34-COLUMN LINELIST) IMPORT MODAL             */}
+      {/* ==================================================================== */}
+      <Dialog open={isCaseImportModalOpen} onOpenChange={setIsCaseImportModalOpen}>
+        <DialogContent className="sm:max-w-xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="text-base font-bold flex items-center gap-2">
+              <FileSpreadsheet className="w-4 h-4 text-cyan-600" />
+              Import WHO Case-Based Surveillance Data (34 Columns)
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              Upload official WHO measles case linelist spreadsheet (.csv, .xlsx, .xlsm) into the registry.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            {/* WHO Protocol Specifications Callout */}
+            <div className="p-3 bg-cyan-50 dark:bg-cyan-950/40 rounded-lg border border-cyan-200 dark:border-cyan-800 text-xs space-y-2 text-cyan-950 dark:text-cyan-200">
+              <div className="font-bold flex items-center gap-1.5">
+                <Info className="w-3.5 h-3.5 text-cyan-700 dark:text-cyan-300" />
+                WHO Linelist Protocol &amp; Calculation Rules:
+              </div>
+              <ul className="list-disc pl-5 space-y-1 text-[11px] leading-relaxed">
+                <li><strong>Columns 1–17 (User Surveillance Inputs):</strong> Year, Admin1, Reporting District, Case ID, Final Classification, Age, Sex, Place of Residence, Date of Rash Onset, Vaccination Status, Number of Doses, Notification Date, Investigation Date, Blood Sample Date, Lab Result Date, Place of Infection.</li>
+                <li><strong>Columns 18–34 (Automated Formula Recalculations):</strong> Evaluated immediately on upload to derive MCV eligibility, unvaccinated cases, investigation adequacy (&le;48h), specimen adequacy (&le;28d), and lab timeliness (&le;10d).</li>
+                <li><strong>Date Format:</strong> Standard <code>YYYY-MM-DD</code> or <code>DD/MM/YYYY</code> accepted.</li>
+              </ul>
+              <div className="pt-1 flex flex-wrap items-center gap-1.5">
+                <span className="text-[10px] font-semibold text-muted-foreground">Allowed Classifications:</span>
+                <Badge variant="outline" className="text-[9px] bg-background">Lab Confirmed Measles</Badge>
+                <Badge variant="outline" className="text-[9px] bg-background">Epi-Linked Measles</Badge>
+                <Badge variant="outline" className="text-[9px] bg-background">Clinically Compatible</Badge>
+                <Badge variant="outline" className="text-[9px] bg-background">Discarded Non-Measles</Badge>
+              </div>
+            </div>
+
+            {/* Upload Area */}
+            <div className="p-4 rounded-xl border bg-background space-y-3 shadow-2xs">
+              <div className="flex items-center justify-between">
+                <span className="font-semibold text-xs text-foreground">
+                  Select Linelist Spreadsheet
+                </span>
+                <Badge variant="outline" className="text-[10px] bg-cyan-50 text-cyan-700 dark:bg-cyan-950/40 border-cyan-300">
+                  .csv, .xlsx, .xlsm
+                </Badge>
+              </div>
+
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 pt-1">
+                <Input
+                  type="file"
+                  accept=".csv,.xlsx,.xlsm"
+                  onChange={(e) => setSelectedCaseFile(e.target.files?.[0] || null)}
+                  className="h-8 text-xs file:text-xs"
+                />
+                <Button
+                  size="sm"
+                  disabled={!selectedCaseFile || isUploadingCaseFile}
+                  onClick={handleUploadCaseLinelist}
+                  className="h-8 text-xs font-bold gap-1.5 shrink-0 bg-cyan-700 hover:bg-cyan-800 text-white"
+                >
+                  <Upload className="w-3.5 h-3.5" />
+                  {isUploadingCaseFile ? "Processing..." : "Upload & Ingest Cases"}
+                </Button>
+              </div>
+
+              <div className="flex items-center justify-between pt-2 text-[11px] text-muted-foreground border-t">
+                <span>Need the official WHO 34-column template?</span>
+                <a href="/api/risk/templates/linelist" download="WHO_Measles_Case_Based_Linelist_Template.csv">
+                  <Button variant="ghost" size="sm" className="h-6 text-[11px] gap-1 text-cyan-700 dark:text-cyan-300 hover:bg-cyan-50 dark:hover:bg-cyan-950/50">
+                    <Download className="w-3 h-3" /> Download WHO 34-Column Template (CSV)
+                  </Button>
+                </a>
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => setIsCaseImportModalOpen(false)} className="h-8 text-xs">
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ==================================================================== */}
+      {/* 3. MEASLES ANNUAL INCIDENCE TRACKING IMPORT MODAL                    */}
+      {/* ==================================================================== */}
+      <Dialog open={isIncImportModalOpen} onOpenChange={setIsIncImportModalOpen}>
+        <DialogContent className="sm:max-w-xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="text-base font-bold flex items-center gap-2">
+              <TrendingUp className="w-4 h-4 text-emerald-600" />
+              Import Measles Annual Incidence Tracking Data
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              Upload 3-year confirmed and suspected annual case counts per district (.csv, .xlsx, .xlsm).
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            <div className="p-3 bg-muted/30 rounded-lg border text-xs space-y-1.5 text-muted-foreground">
+              <div className="font-semibold text-foreground flex items-center gap-1.5">
+                <Info className="w-3.5 h-3.5 text-primary" />
+                Annual Incidence Parameters
+              </div>
+              <p className="leading-relaxed">
+                The spreadsheet maps annual cases across the 3 baseline years ({dataFirstYear}, {dataSecondYear}, and {dataLastYear}). Incidence per 100,000 population is automatically computed from the district population.
+              </p>
+            </div>
+
+            <div className="p-4 rounded-xl border bg-background space-y-3 shadow-2xs">
+              <div className="flex items-center justify-between">
+                <span className="font-semibold text-xs text-foreground">
+                  Upload Annual Incidence File
+                </span>
+                <Badge variant="outline" className="text-[10px] bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 border-emerald-300">
+                  .csv, .xlsx, .xlsm
+                </Badge>
+              </div>
+
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 pt-1">
+                <Input
+                  type="file"
+                  accept=".csv,.xlsx,.xlsm"
+                  onChange={(e) => setSelectedIncFile(e.target.files?.[0] || null)}
+                  className="h-8 text-xs file:text-xs"
+                />
+                <Button
+                  size="sm"
+                  disabled={!selectedIncFile || isUploadingInc}
+                  onClick={handleUploadIncidence}
+                  className="h-8 text-xs font-bold gap-1.5 shrink-0 bg-primary text-primary-foreground"
+                >
+                  <Upload className="w-3.5 h-3.5" />
+                  {isUploadingInc ? "Updating..." : "Upload & Ingest"}
+                </Button>
+              </div>
+
+              <div className="flex items-center justify-between pt-2 text-[11px] text-muted-foreground border-t">
+                <span>Need the incidence template?</span>
+                <a href="/api/risk/templates/incidence" download="Measles_Annual_Incidence_Template.csv">
+                  <Button variant="ghost" size="sm" className="h-6 text-[11px] gap-1 text-primary hover:bg-primary/10">
+                    <Download className="w-3 h-3" /> Download Incidence Template (CSV)
+                  </Button>
+                </a>
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => setIsIncImportModalOpen(false)} className="h-8 text-xs">
+              Close
             </Button>
           </DialogFooter>
         </DialogContent>

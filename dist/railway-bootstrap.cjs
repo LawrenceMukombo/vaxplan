@@ -431,6 +431,7 @@ var riskAssessments = (0, import_pg_core.pgTable)("risk_assessments", {
   // draft, importing, validation_required, ready_to_calculate, calculating, calculated, under_review, approved, superseded
   activeRunId: (0, import_pg_core.varchar)("active_run_id"),
   notes: (0, import_pg_core.text)("notes"),
+  reportConfigJson: (0, import_pg_core.jsonb)("report_config_json").default({}),
   createdByUserId: (0, import_pg_core.varchar)("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
   approvedByUserId: (0, import_pg_core.varchar)("approved_by_user_id").references(() => users.id, { onDelete: "set null" }),
   approvedAt: (0, import_pg_core.timestamp)("approved_at"),
@@ -589,11 +590,12 @@ var riskActionLinks = (0, import_pg_core.pgTable)("risk_action_links", {
   // microplan, supervision, budget, surveillance
   linkedEntityId: (0, import_pg_core.varchar)("linked_entity_id", { length: 255 }),
   responsiblePerson: (0, import_pg_core.varchar)("responsible_person", { length: 255 }),
-  budgetEstimate: (0, import_pg_core.decimal)("budget_estimate", { precision: 12, scale: 2 }),
+  targetCompletionDate: (0, import_pg_core.timestamp)("target_completion_date"),
+  budgetEstimateUsd: (0, import_pg_core.decimal)("budget_estimate_usd", { precision: 12, scale: 2 }),
+  createdByUserId: (0, import_pg_core.varchar)("created_by_user_id"),
   status: (0, import_pg_core.varchar)("status", { length: 50 }).notNull().default("open"),
   // open, in_progress, completed, deferred
-  createdAt: (0, import_pg_core.timestamp)("created_at").defaultNow().notNull(),
-  updatedAt: (0, import_pg_core.timestamp)("updated_at").defaultNow().notNull()
+  createdAt: (0, import_pg_core.timestamp)("created_at").defaultNow().notNull()
 }, (table) => ({
   assessmentActionIdx: (0, import_pg_core.index)("idx_risk_action_assessment").on(table.assessmentId),
   tenantActionIdx: (0, import_pg_core.index)("idx_risk_action_tenant").on(table.tenantId)

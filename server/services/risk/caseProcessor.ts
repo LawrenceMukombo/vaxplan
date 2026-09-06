@@ -70,6 +70,16 @@ export interface ProcessedCaseRecord {
   hasSpecimen: boolean;
   coreFieldsCompleteCount: number;
   validationWarnings: string[];
+  dateRashOnset?: string | null;
+  rawVaccinationStatus?: string | null;
+  dosesReceived?: number | null;
+  dateNotification?: string | null;
+  dateInvestigation?: string | null;
+  dateBloodSample?: string | null;
+  dateLabResult?: string | null;
+  sex?: string | null;
+  placeOfResidence?: string | null;
+  placeOfInfection?: string | null;
 }
 
 export interface DistrictSurveillanceAggregate {
@@ -305,6 +315,16 @@ export function processSurveillanceCaseRow(
     hasSpecimen,
     coreFieldsCompleteCount: coreCount,
     validationWarnings: warnings,
+    dateRashOnset: row.dateRashOnset ? String(row.dateRashOnset) : null,
+    rawVaccinationStatus: row.vaccinationStatus ? String(row.vaccinationStatus) : null,
+    dosesReceived: row.dosesReceived ?? null,
+    dateNotification: row.dateNotification ? String(row.dateNotification) : null,
+    dateInvestigation: row.dateInvestigation ? String(row.dateInvestigation) : null,
+    dateBloodSample: row.dateSpecimenCollection ? String(row.dateSpecimenCollection) : null,
+    dateLabResult: row.dateLabResultReceived ? String(row.dateLabResultReceived) : null,
+    sex: row.sex ? String(row.sex) : null,
+    placeOfResidence: row.residenceDistrict ? String(row.residenceDistrict) : null,
+    placeOfInfection: row.placeOfInfection ? String(row.placeOfInfection) : (row.travelHistory ? String(row.travelHistory) : null),
   };
 }
 

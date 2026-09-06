@@ -142,6 +142,7 @@ import {
   SUPPORTED_COUNTRIES,
 } from "./services/geoBoundariesService";
 import { loadBundledBoundary } from "./services/bundledBoundaries";
+import { getOptimizedBoundaryGeoJson, invalidateBoundaryCache } from "./services/boundaryOptimizationService";
 // Turf area calculation for catchment polygons
 import { area as turfArea, intersect as turfIntersect, featureCollection as turfFeatureCollection, booleanPointInPolygon as turfBooleanPointInPolygon, point as turfPoint } from "@turf/turf";
 // HIS Interoperability service
@@ -13012,13 +13013,24 @@ export async function registerRoutes(
     res.json(SUPPORTED_COUNTRIES);
   });
 
-  // GET /api/boundaries/:id/geojson — fetch full GeoJSON for a stored boundary
+  // GET /api/boundaries/:id/geojson — fetch web-optimized (or full) GeoJSON for a stored boundary
   app.get("/api/boundaries/:id/geojson", isAuthenticated, requireTenant, async (req: any, res) => {
     try {
       const tenantId = req.tenantId as string;
       const boundary = await storage.getAdminBoundary(tenantId, req.params.id);
       if (!boundary) return res.status(404).json({ message: "Boundary not found" });
-      res.json(boundary.geojson);
+
+      const fullResolution = req.query.full === "true";
+      const { geojson, etag } = getOptimizedBoundaryGeoJson(boundary, fullResolution);
+
+      res.setHeader("Cache-Control", "public, max-age=86400, stale-while-revalidate=604800");
+      res.setHeader("ETag", etag);
+
+      if (req.headers["if-none-match"] === etag) {
+        return res.status(304).end();
+      }
+
+      res.json(geojson);
     } catch (err) {
       res.status(500).json({ message: "Failed to fetch boundary GeoJSON" });
     }
@@ -13071,6 +13083,7 @@ export async function registerRoutes(
         isActive: true,
       });
 
+      invalidateBoundaryCache(boundary.id);
       await refreshOutsideVillagesCacheForTenant(tenantId);
 
       await logAudit(req, "fetch_boundary", "admin_boundary", null, null, {
@@ -13116,6 +13129,7 @@ export async function registerRoutes(
         isActive: true,
       });
 
+      invalidateBoundaryCache(boundary.id);
       await refreshOutsideVillagesCacheForTenant(tenantId);
 
       await logAudit(req, "upload_boundary", "admin_boundary", null, null, {
@@ -13133,6 +13147,7 @@ export async function registerRoutes(
     const tenantId = req.tenantId as string;
     const deleted = await storage.deleteAdminBoundary(tenantId, req.params.id);
     if (!deleted) return res.status(404).json({ message: "Boundary not found" });
+    invalidateBoundaryCache(req.params.id);
     await refreshOutsideVillagesCacheForTenant(tenantId);
     res.json({ success: true });
   });

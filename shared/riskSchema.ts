@@ -249,10 +249,11 @@ export const riskActionLinks = pgTable("risk_action_links", {
   linkedModule: varchar("linked_module", { length: 50 }).notNull(), // microplan, supervision, budget, surveillance
   linkedEntityId: varchar("linked_entity_id", { length: 255 }),
   responsiblePerson: varchar("responsible_person", { length: 255 }),
-  budgetEstimate: decimal("budget_estimate", { precision: 12, scale: 2 }),
+  targetCompletionDate: timestamp("target_completion_date"),
+  budgetEstimateUsd: decimal("budget_estimate_usd", { precision: 12, scale: 2 }),
+  createdByUserId: varchar("created_by_user_id"),
   status: varchar("status", { length: 50 }).notNull().default("open"), // open, in_progress, completed, deferred
   createdAt: timestamp("created_at").defaultNow().notNull(),
-  updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (table) => ({
   assessmentActionIdx: index("idx_risk_action_assessment").on(table.assessmentId),
   tenantActionIdx: index("idx_risk_action_tenant").on(table.tenantId),

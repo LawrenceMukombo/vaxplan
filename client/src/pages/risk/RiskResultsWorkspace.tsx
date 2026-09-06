@@ -592,15 +592,156 @@ export default function RiskResultsWorkspace() {
   const getCategoryBadge = (category: string) => {
     switch (category) {
       case "LOW":
-        return <Badge className="bg-emerald-600 hover:bg-emerald-700 text-white">Low Risk (&lt; 32)</Badge>;
+        return <Badge className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold shadow-sm">Low Risk (&lt; 32)</Badge>;
       case "MEDIUM":
-        return <Badge className="bg-amber-600 hover:bg-amber-700 text-white">Medium Risk (32–44)</Badge>;
+        return <Badge className="bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold shadow-sm">Medium Risk (32–44)</Badge>;
       case "HIGH":
-        return <Badge className="bg-orange-600 hover:bg-orange-700 text-white">High Risk (45–56)</Badge>;
+        return <Badge className="bg-orange-600 hover:bg-orange-700 text-white font-bold shadow-sm">High Risk (45–56)</Badge>;
       case "VERY_HIGH":
-        return <Badge className="bg-red-600 hover:bg-red-700 text-white">Very High Risk (≥ 57)</Badge>;
+        return <Badge className="bg-red-600 hover:bg-red-700 text-white font-bold shadow-sm">Very High Risk (≥ 57)</Badge>;
       default:
-        return <Badge variant="outline" className="bg-slate-500/10 text-slate-700 dark:text-slate-300">Incomplete</Badge>;
+        return <Badge variant="outline" className="bg-slate-500/10 text-slate-700 dark:text-slate-300 font-semibold">Incomplete</Badge>;
+    }
+  };
+
+  const getRiskColorClasses = (category?: string | null) => {
+    switch (category) {
+      case "VERY_HIGH":
+        return {
+          scoreColor: "text-red-600 dark:text-red-400",
+          scoreBg: "bg-red-500/10 text-red-700 dark:text-red-300 border-red-200 dark:border-red-900/50",
+          cardBorder: "border-red-300 dark:border-red-800",
+          cardBg: "bg-red-50/60 dark:bg-red-950/20",
+          headerBg: "bg-red-100/70 dark:bg-red-900/40 text-red-900 dark:text-red-100",
+          badge: <Badge className="bg-red-600 hover:bg-red-700 text-white font-bold shadow-sm">Very High Risk (≥ 57)</Badge>,
+          guidanceBadgeClass: "bg-red-600 text-white",
+          guidanceLevel: "CRITICAL PROGRAMMATIC ACTION",
+          iconColor: "text-red-600 dark:text-red-400",
+        };
+      case "HIGH":
+        return {
+          scoreColor: "text-orange-600 dark:text-orange-400",
+          scoreBg: "bg-orange-500/10 text-orange-700 dark:text-orange-300 border-orange-200 dark:border-orange-900/50",
+          cardBorder: "border-orange-300 dark:border-orange-800",
+          cardBg: "bg-orange-50/60 dark:bg-orange-950/20",
+          headerBg: "bg-orange-100/70 dark:bg-orange-900/40 text-orange-900 dark:text-orange-100",
+          badge: <Badge className="bg-orange-600 hover:bg-orange-700 text-white font-bold shadow-sm">High Risk (45–56)</Badge>,
+          guidanceBadgeClass: "bg-orange-600 text-white",
+          guidanceLevel: "PRIORITY INTERVENTION",
+          iconColor: "text-orange-600 dark:text-orange-400",
+        };
+      case "MEDIUM":
+        return {
+          scoreColor: "text-amber-600 dark:text-amber-400",
+          scoreBg: "bg-amber-500/10 text-amber-800 dark:text-amber-300 border-amber-200 dark:border-amber-900/50",
+          cardBorder: "border-amber-300 dark:border-amber-800",
+          cardBg: "bg-amber-50/60 dark:bg-amber-950/20",
+          headerBg: "bg-amber-100/70 dark:bg-amber-900/40 text-amber-900 dark:text-amber-100",
+          badge: <Badge className="bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold shadow-sm">Medium Risk (32–44)</Badge>,
+          guidanceBadgeClass: "bg-amber-600 text-white",
+          guidanceLevel: "TARGETED ENHANCEMENT",
+          iconColor: "text-amber-600 dark:text-amber-400",
+        };
+      case "LOW":
+        return {
+          scoreColor: "text-emerald-600 dark:text-emerald-400",
+          scoreBg: "bg-emerald-500/10 text-emerald-800 dark:text-emerald-300 border-emerald-200 dark:border-emerald-900/50",
+          cardBorder: "border-emerald-300 dark:border-emerald-800",
+          cardBg: "bg-emerald-50/60 dark:bg-emerald-950/20",
+          headerBg: "bg-emerald-100/70 dark:bg-emerald-900/40 text-emerald-900 dark:text-emerald-100",
+          badge: <Badge className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold shadow-sm">Low Risk (&lt; 32)</Badge>,
+          guidanceBadgeClass: "bg-emerald-600 text-white",
+          guidanceLevel: "ROUTINE SUSTAINABILITY",
+          iconColor: "text-emerald-600 dark:text-emerald-400",
+        };
+      default:
+        return {
+          scoreColor: "text-slate-600 dark:text-slate-400",
+          scoreBg: "bg-slate-500/10 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-800",
+          cardBorder: "border-border",
+          cardBg: "bg-muted/40",
+          headerBg: "bg-muted text-muted-foreground",
+          badge: <Badge variant="outline" className="bg-slate-500/10 text-slate-700 dark:text-slate-300 font-semibold">Incomplete</Badge>,
+          guidanceBadgeClass: "bg-slate-600 text-white",
+          guidanceLevel: "DATA AUDIT REQUIRED",
+          iconColor: "text-slate-500",
+        };
+    }
+  };
+
+  const getWHOOperationalGuidance = (category?: string | null) => {
+    switch (category) {
+      case "VERY_HIGH":
+        return {
+          title: "Immediate Programmatic Outbreak Intervention Protocol",
+          protocolNumber: "WHO Field Guide Section 4.1 (Very High Risk Response)",
+          rationale:
+            "District has accumulated severe susceptibility gaps and surveillance/delivery deficits, establishing an imminent risk of explosive measles transmission.",
+          actions: [
+            "Convene emergency District Outbreak Preparedness & Response Committee (EPRC) within 48 hours.",
+            "Deploy Rapid Coverage Assessment (RCA) teams to survey informal settlements, unreached wards, and zero-dose clusters.",
+            "Execute targeted non-selective Outbreak Response Immunization (mop-up) for children aged 6–59 months.",
+            "Conduct active retrospective case searches in all district hospitals and clinic registers for missed rash/fever cases.",
+            "Dispatch emergency measles diagnostic specimen collection kits and pre-position vitamin A & cold-chain buffer stock.",
+          ],
+          defaultActionTitle: "Urgent Outbreak Preparedness and Targeted RCA Mop-Up",
+        };
+      case "HIGH":
+        return {
+          title: "Intensified Routine Immunization & Catch-Up Prioritization",
+          protocolNumber: "WHO Field Guide Section 4.2 (Intensification & Catch-up)",
+          rationale:
+            "Elevated accumulation of susceptible cohorts and notable dropout or surveillance reporting weaknesses requiring urgent programmatic course correction.",
+          actions: [
+            "Revise district microplans: schedule supplementary fixed and mobile outreach sessions targeting bottom-quartile wards.",
+            "Deploy Community Health Workers (CHWs) for defaulter tracking focused on MCV1-to-MCV2 dropouts.",
+            "Conduct prioritized supportive supervision and data quality verification at lowest-performing health facilities.",
+            "Strengthen community-based event surveillance for rapid detection and reporting of suspected measles clusters.",
+            "Audit cold chain storage reliability and eliminate recurring vaccine stock-out points.",
+          ],
+          defaultActionTitle: "Intensified Outreach Sessions & MCV2 Defaulter Tracking",
+        };
+      case "MEDIUM":
+        return {
+          title: "Targeted Corrective Measures & Data Quality Assurance",
+          protocolNumber: "WHO Field Guide Section 4.3 (Quality Verification)",
+          rationale:
+            "Moderate risk profile with localized vulnerabilities or surveillance completeness gaps that could escalate if susceptible cohorts expand.",
+          actions: [
+            "Conduct facility-level EPI register audits to reconcile administrative vs. survey coverage discrepancies.",
+            "Reinforce social mobilization and local leadership dialogues to address emerging pockets of vaccine hesitancy.",
+            "Verify discarded non-measles rash illness rate (target ≥ 2.0 per 100,000 population) and specimen transit timeliness.",
+            "Ensure continuous availability of auto-disable (AD) syringes, dilution syringes, and safety boxes.",
+          ],
+          defaultActionTitle: "Facility EPI Register Audit & Social Mobilization Enhancement",
+        };
+      case "LOW":
+        return {
+          title: "Standard Routine Maintenance & Surveillance Sustainability",
+          protocolNumber: "WHO Field Guide Section 4.4 (Maintenance & Zero-Reporting)",
+          rationale:
+            "Robust population immunity and resilient surveillance indicators. Primary objective is sustaining high equitable coverage.",
+          actions: [
+            "Sustain ≥ 95% equitable coverage across all health sub-districts for both MCV1 and MCV2.",
+            "Maintain monthly zero-reporting compliance and prompt laboratory specimen transportation within 48 hours.",
+            "Conduct quarterly cold chain temperature logging and vaccine stock rotation audits.",
+            "Continue standard cross-border and inter-district population movement monitoring.",
+          ],
+          defaultActionTitle: "Routine Coverage Monitoring and Monthly Zero-Reporting",
+        };
+      default:
+        return {
+          title: "Indicator Ingestion & Validation Protocol",
+          protocolNumber: "WHO Assessment Prerequisite",
+          rationale:
+            "One or more essential indicators are missing or incomplete. Full WHO risk classification requires all 21 indicator data points.",
+          actions: [
+            "Audit missing indicators in the WHO Indicator Lineage table below.",
+            "Upload missing administrative coverage, surveillance, or campaign records via the Ingest/Import tool.",
+            "Recalculate risk score once data inputs are validated.",
+          ],
+          defaultActionTitle: "Complete Missing WHO Indicator Ingestion",
+        };
     }
   };
 
@@ -1332,10 +1473,10 @@ export default function RiskResultsWorkspace() {
                           )}
 
                           <td className="p-2.5 border-r-2 border-slate-400 dark:border-slate-600">
-                            <span className="font-bold text-sm">
+                            <span className={`font-mono font-bold text-sm ${getRiskColorClasses(row.riskCategory).scoreColor}`}>
                               {row.totalRiskScore ?? `${row.minPossibleScore}–${row.maxPossibleScore}`}
                             </span>
-                            <span className="text-muted-foreground">/100</span>
+                            <span className="text-muted-foreground text-xs font-mono">/100</span>
                           </td>
 
                           <td className="p-2.5 border-r-2 border-slate-400 dark:border-slate-600">
@@ -2005,23 +2146,133 @@ export default function RiskResultsWorkspace() {
           </SheetHeader>
 
           <div className="py-4 space-y-4">
-            {/* Score Summary Box */}
-            <div className="p-3 bg-muted/50 rounded-lg border space-y-1 text-xs">
-              <div className="flex items-center justify-between">
-                <span className="font-semibold text-sm">Overall Programmatic Risk:</span>
-                <div className="flex items-center gap-2">
-                  <Badge variant="outline" className="font-bold">
-                    {displayArea?.riskCategory}
-                  </Badge>
-                  <span className="font-bold text-base text-primary">
-                    {displayArea?.totalRiskScore ?? `${displayArea?.minPossibleScore}–${displayArea?.maxPossibleScore}`}/100
-                  </span>
+            {/* Score Summary & Programmatic Guidance Box */}
+            {(() => {
+              const riskMeta = getRiskColorClasses(displayArea?.riskCategory);
+              const guidance = getWHOOperationalGuidance(displayArea?.riskCategory);
+              const scoreValue =
+                displayArea?.totalRiskScore ??
+                (displayArea?.minPossibleScore !== undefined
+                  ? `${displayArea?.minPossibleScore}–${displayArea?.maxPossibleScore}`
+                  : "—");
+
+              return (
+                <div className={`rounded-xl border ${riskMeta.cardBorder} ${riskMeta.cardBg} shadow-sm overflow-hidden`}>
+                  {/* Header Banner */}
+                  <div className="p-4 space-y-3">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div>
+                        <div className="text-xs uppercase tracking-wider font-semibold text-muted-foreground">
+                          Overall Programmatic Risk Classification
+                        </div>
+                        <div className="text-base font-bold text-foreground mt-0.5">
+                          {displayArea?.areaName || selectedAreaForExplanation?.areaName}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2.5">
+                        {riskMeta.badge}
+                        <div className={`px-3 py-1 rounded-lg font-mono font-extrabold text-xl sm:text-2xl border ${riskMeta.scoreBg}`}>
+                          <span>{scoreValue}</span>
+                          <span className="text-xs font-normal opacity-70 ml-1">/100</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <p className="text-xs text-muted-foreground leading-relaxed">
+                      {displayArea?.summaryExplanation}
+                    </p>
+
+                    {/* Domain Score Breakdown Pills */}
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
+                      <div className="p-2 rounded-lg bg-background/80 border text-xs shadow-2xs">
+                        <div className="text-[11px] text-muted-foreground font-medium">Population Immunity</div>
+                        <div className="flex items-baseline justify-between mt-0.5">
+                          <span className="font-mono font-bold">{displayArea?.populationImmunityScore ?? "—"}</span>
+                          <span className="text-[10px] text-muted-foreground">/ 40 pts</span>
+                        </div>
+                      </div>
+                      <div className="p-2 rounded-lg bg-background/80 border text-xs shadow-2xs">
+                        <div className="text-[11px] text-muted-foreground font-medium">Surveillance Quality</div>
+                        <div className="flex items-baseline justify-between mt-0.5">
+                          <span className="font-mono font-bold">{displayArea?.surveillanceQualityScore ?? "—"}</span>
+                          <span className="text-[10px] text-muted-foreground">/ 20 pts</span>
+                        </div>
+                      </div>
+                      <div className="p-2 rounded-lg bg-background/80 border text-xs shadow-2xs">
+                        <div className="text-[11px] text-muted-foreground font-medium">Programme Delivery</div>
+                        <div className="flex items-baseline justify-between mt-0.5">
+                          <span className="font-mono font-bold">{displayArea?.programmeDeliveryScore ?? "—"}</span>
+                          <span className="text-[10px] text-muted-foreground">/ 16 pts</span>
+                        </div>
+                      </div>
+                      <div className="p-2 rounded-lg bg-background/80 border text-xs shadow-2xs">
+                        <div className="text-[11px] text-muted-foreground font-medium">Threat Assessment</div>
+                        <div className="flex items-baseline justify-between mt-0.5">
+                          <span className="font-mono font-bold">{displayArea?.threatAssessmentScore ?? "—"}</span>
+                          <span className="text-[10px] text-muted-foreground">/ 24 pts</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Programmatic Guidance Panel */}
+                  <div className="border-t bg-background/90 p-4 space-y-3">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <ShieldAlert className={`w-4 h-4 ${riskMeta.iconColor}`} />
+                        <span className="font-bold text-xs uppercase tracking-wide">
+                          {guidance.title}
+                        </span>
+                      </div>
+                      <Badge className={`text-[10px] uppercase font-bold tracking-wider ${riskMeta.guidanceBadgeClass}`}>
+                        {riskMeta.guidanceLevel}
+                      </Badge>
+                    </div>
+
+                    <p className="text-xs text-muted-foreground leading-relaxed">
+                      {guidance.rationale}
+                    </p>
+
+                    <div className="space-y-1.5 pt-1">
+                      <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                        WHO Recommended Operational Guidance &amp; Priority Actions:
+                      </div>
+                      <ul className="space-y-1.5 text-xs">
+                        {guidance.actions.map((actionText: string, aIdx: number) => (
+                          <li key={aIdx} className="flex items-start gap-2">
+                            <span className={`inline-flex items-center justify-center w-4 h-4 rounded-full text-[10px] font-bold shrink-0 mt-0.5 ${riskMeta.scoreBg}`}>
+                              {aIdx + 1}
+                            </span>
+                            <span className="leading-snug text-foreground/90">{actionText}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+
+                    <div className="pt-2 flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-t text-xs">
+                      <span className="text-[11px] text-muted-foreground italic">
+                        {guidance.protocolNumber}
+                      </span>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-7 text-xs gap-1.5 font-medium hover:bg-primary hover:text-primary-foreground transition-colors"
+                        onClick={() => {
+                          if (displayArea) {
+                            setSelectedAreaForAction(displayArea);
+                            setActionTitle(`${guidance.defaultActionTitle} in ${displayArea.areaName || displayArea.administrativeAreaId}`);
+                            setIsActionModalOpen(true);
+                          }
+                        }}
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        Link Programmatic Action to Register
+                      </Button>
+                    </div>
+                  </div>
                 </div>
-              </div>
-              <p className="text-muted-foreground leading-relaxed">
-                {displayArea?.summaryExplanation}
-              </p>
-            </div>
+              );
+            })()}
 
             {/* Indicator Toolbar (Domain Filters & Search) */}
             <div className="space-y-3">
@@ -2068,14 +2319,26 @@ export default function RiskResultsWorkspace() {
               ) : (
                 <div className="border rounded-md overflow-x-auto shadow-sm">
                   <table className="w-full min-w-full text-xs text-left border-collapse table-auto">
-                    <thead className="bg-slate-900 text-slate-100 dark:bg-slate-950 dark:text-slate-100 font-semibold sticky top-0 z-30 shadow-sm">
-                      <tr className="bg-slate-900 text-slate-100 dark:bg-slate-950 dark:text-slate-100">
-                        <th className="p-2.5 border-r border-slate-700 font-bold w-20 min-w-20 text-slate-100">Indicator</th>
-                        <th className="p-2.5 border-r border-slate-700 font-bold w-28 min-w-28 text-slate-100">Domain</th>
-                        <th className="p-2.5 border-r border-slate-700 font-bold w-24 min-w-24 text-right text-slate-100">Observed</th>
-                        <th className="p-2.5 border-r border-slate-700 font-bold w-36 min-w-36 text-right text-slate-100">Threshold</th>
-                        <th className="p-2.5 border-r border-slate-700 font-bold w-28 min-w-28 text-center text-slate-100">Score</th>
-                        <th className="p-2.5 font-bold text-slate-100">Lineage & Policy Rationale</th>
+                    <thead className="bg-slate-200/90 dark:bg-slate-800 border-b-2 border-slate-300 dark:border-slate-700 sticky top-0 z-30 shadow-xs">
+                      <tr className="bg-slate-200/90 dark:bg-slate-800 text-slate-800 dark:text-slate-100">
+                        <th className="p-2.5 border-r border-slate-300 dark:border-slate-700 font-bold w-20 min-w-20 text-slate-800 dark:text-slate-100 bg-slate-200/90 dark:bg-slate-800">
+                          Indicator
+                        </th>
+                        <th className="p-2.5 border-r border-slate-300 dark:border-slate-700 font-bold w-28 min-w-28 text-slate-800 dark:text-slate-100 bg-slate-200/90 dark:bg-slate-800">
+                          Domain
+                        </th>
+                        <th className="p-2.5 border-r border-slate-300 dark:border-slate-700 font-bold w-24 min-w-24 text-right text-slate-800 dark:text-slate-100 bg-slate-200/90 dark:bg-slate-800">
+                          Observed
+                        </th>
+                        <th className="p-2.5 border-r border-slate-300 dark:border-slate-700 font-bold w-36 min-w-36 text-right text-slate-800 dark:text-slate-100 bg-slate-200/90 dark:bg-slate-800">
+                          Threshold
+                        </th>
+                        <th className="p-2.5 border-r border-slate-300 dark:border-slate-700 font-bold w-28 min-w-28 text-center text-slate-800 dark:text-slate-100 bg-slate-200/90 dark:bg-slate-800">
+                          Score
+                        </th>
+                        <th className="p-2.5 font-bold text-slate-800 dark:text-slate-100 bg-slate-200/90 dark:bg-slate-800">
+                          Lineage & Policy Rationale
+                        </th>
                       </tr>
                     </thead>
                     <tbody className="divide-y text-foreground">
@@ -2231,9 +2494,14 @@ export default function RiskResultsWorkspace() {
                 if (!actionTitle || !selectedAreaForAction) return;
                 actionMutation.mutate({
                   assessmentId: effectiveId,
-                  administrativeAreaId: selectedAreaForAction.areaName,
+                  districtId: selectedAreaForAction.districtId ? Number(selectedAreaForAction.districtId) : undefined,
+                  administrativeAreaId: selectedAreaForAction.areaName || String(selectedAreaForAction.districtId || ""),
+                  areaResultId: selectedAreaForAction.id || undefined,
+                  linkedModule: actionType,
                   actionType,
                   actionTitle,
+                  actionDescription: actionTitle,
+                  responsiblePerson: actionResponsible,
                   assignedTo: actionResponsible,
                   budgetCode: actionBudget,
                 });
