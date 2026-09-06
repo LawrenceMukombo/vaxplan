@@ -80,6 +80,18 @@ describe("WHO Measles Programmatic Risk Assessment Engine", () => {
     ...overrides,
   });
 
+  it("correctly computes totalScore as the sum of all 4 domain scores and never leaves it at 0 when domain points are positive", () => {
+    const res = calculateAreaRiskScore(createBaseInput());
+    const expectedSum = (res.domains.POPULATION_IMMUNITY.points ?? 0) +
+      (res.domains.SURVEILLANCE_QUALITY.points ?? 0) +
+      (res.domains.PROGRAMME_DELIVERY.points ?? 0) +
+      (res.domains.THREAT_ASSESSMENT.points ?? 0);
+
+    expect(res.totalScore).not.toBeNull();
+    expect(res.totalScore).toBe(expectedSum);
+    expect(res.totalScore).toBeGreaterThanOrEqual(0);
+  });
+
   describe("Population Immunity (PI1 to PI7) Boundaries", () => {
     it("PI1: evaluates coverage thresholds at exact boundaries (95, 90, 85, 80)", () => {
       // >= 95% -> 0 pts
@@ -393,13 +405,23 @@ describe("WHO Measles Programmatic Risk Assessment Engine", () => {
   });
 
   describe("Overall Risk Score & Classification Bands", () => {
-    it("classifies exact cutoffs: 47 (Low), 48 (Medium), 54 (Medium), 55 (High), 60 (High), 61 (Very High)", () => {
-      expect(classifyRiskScore(47)).toBe("LOW");
-      expect(classifyRiskScore(48)).toBe("MEDIUM");
-      expect(classifyRiskScore(54)).toBe("MEDIUM");
-      expect(classifyRiskScore(55)).toBe("HIGH");
-      expect(classifyRiskScore(60)).toBe("HIGH");
-      expect(classifyRiskScore(61)).toBe("VERY_HIGH");
+    it("classifies exact cutoffs for Global (Lam et al. 2017) model", () => {
+      expect(classifyRiskScore(47, false, "GLOBAL_LAM_2017")).toBe("LOW");
+      expect(classifyRiskScore(48, false, "GLOBAL_LAM_2017")).toBe("MEDIUM");
+      expect(classifyRiskScore(54, false, "GLOBAL_LAM_2017")).toBe("MEDIUM");
+      expect(classifyRiskScore(55, false, "GLOBAL_LAM_2017")).toBe("HIGH");
+      expect(classifyRiskScore(60, false, "GLOBAL_LAM_2017")).toBe("HIGH");
+      expect(classifyRiskScore(61, false, "GLOBAL_LAM_2017")).toBe("VERY_HIGH");
+      expect(classifyRiskScore(100, false, "GLOBAL_LAM_2017")).toBe("VERY_HIGH");
+    });
+
+    it("classifies exact cutoffs for WHO Tool v1.8 Regional standard (<32, 32-44, 45-56, >=57)", () => {
+      expect(classifyRiskScore(31)).toBe("LOW");
+      expect(classifyRiskScore(32)).toBe("MEDIUM");
+      expect(classifyRiskScore(44)).toBe("MEDIUM");
+      expect(classifyRiskScore(45)).toBe("HIGH");
+      expect(classifyRiskScore(56)).toBe("HIGH");
+      expect(classifyRiskScore(57)).toBe("VERY_HIGH");
       expect(classifyRiskScore(100)).toBe("VERY_HIGH");
     });
 

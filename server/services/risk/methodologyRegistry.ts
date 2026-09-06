@@ -434,6 +434,24 @@ export const WHO_MEASLES_INDICATORS: Record<IndicatorId, IndicatorDefinition> = 
   },
 };
 
+export const WHO_TOOL_V1_8_CUTOFFS = {
+  lowMax: 31,
+  mediumMin: 32,
+  mediumMax: 44,
+  highMin: 45,
+  highMax: 56,
+  veryHighMin: 57,
+};
+
+export const GLOBAL_LAM_2017_CUTOFFS = {
+  lowMax: 47,
+  mediumMin: 48,
+  mediumMax: 54,
+  highMin: 55,
+  highMax: 60,
+  veryHighMin: 61,
+};
+
 export const WHO_MEASLES_GLOBAL_RECONCILED_V1: MethodologyDefinition = {
   code: "WHO_MEASLES_GLOBAL_RECONCILED_V1",
   disease: "MEASLES",
@@ -450,23 +468,36 @@ export const WHO_MEASLES_GLOBAL_RECONCILED_V1: MethodologyDefinition = {
   maxTotalPoints: 100,
   domains: WHO_MEASLES_DOMAINS,
   indicators: WHO_MEASLES_INDICATORS,
-  cutoffs: {
-    lowMax: 47,
-    mediumMin: 48,
-    mediumMax: 54,
-    highMin: 55,
-    highMax: 60,
-    veryHighMin: 61,
-  },
+  cutoffs: WHO_TOOL_V1_8_CUTOFFS,
 };
 
 /**
  * Standard classification helper
+ * Defaults to WHO Tool v1.8 Regional cutoff standards:
+ * - Low: < 32
+ * - Medium: 32 - 44
+ * - High: 45 - 56
+ * - Very High: >= 57
+ * Supports GLOBAL_LAM_2017 model (<=47, 48-54, 55-60, >=61) when specified.
  */
-export function classifyRiskScore(totalScore: number, isIncomplete: boolean = false): RiskCategory {
+export function classifyRiskScore(
+  totalScore: number,
+  isIncomplete: boolean = false,
+  model: "WHO_TOOL_V1_8" | "GLOBAL_LAM_2017" = "WHO_TOOL_V1_8"
+): RiskCategory {
   if (isIncomplete) return "INCOMPLETE";
-  if (totalScore <= 47) return "LOW";
-  if (totalScore <= 54) return "MEDIUM";
-  if (totalScore <= 60) return "HIGH";
+
+  if (model === "GLOBAL_LAM_2017") {
+    if (totalScore <= 47) return "LOW";
+    if (totalScore <= 54) return "MEDIUM";
+    if (totalScore <= 60) return "HIGH";
+    return "VERY_HIGH";
+  }
+
+  // Default: WHO Tool v1.8 Regional standard
+  if (totalScore < 32) return "LOW";
+  if (totalScore < 45) return "MEDIUM";
+  if (totalScore < 57) return "HIGH";
   return "VERY_HIGH";
 }
+

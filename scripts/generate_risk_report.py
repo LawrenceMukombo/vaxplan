@@ -100,34 +100,43 @@ def build_country_profile_table(doc, placeholder_p, data):
     total_districts = len(data.get("districtResults", [])) or 1
     total_pop = sum(float(d.get("population") or 0) for d in data.get("districtResults", []))
     
-    counts = {"VERY_HIGH": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0}
-    pops = {"VERY_HIGH": 0.0, "HIGH": 0.0, "MEDIUM": 0.0, "LOW": 0.0}
+    counts = {"VERY_HIGH": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0, "INCOMPLETE": 0}
+    pops = {"VERY_HIGH": 0.0, "HIGH": 0.0, "MEDIUM": 0.0, "LOW": 0.0, "INCOMPLETE": 0.0}
     
     for d in data.get("districtResults", []):
         cat = d.get("riskCategory", "LOW")
         if cat in counts:
             counts[cat] += 1
             pops[cat] += float(d.get("population") or 0)
+        else:
+            counts["INCOMPLETE"] += 1
+            pops["INCOMPLETE"] += float(d.get("population") or 0)
             
+    row_defs = [
+        ("Very High Risk (Score >= 57)", counts["VERY_HIGH"], f"{(counts['VERY_HIGH']/total_districts)*100:.1f}%", f"{int(pops['VERY_HIGH']):,}", f"{(pops['VERY_HIGH']/total_pop*100) if total_pop else 0:.1f}%", COLOR_VHR),
+        ("High Risk (Score 45-56)", counts["HIGH"], f"{(counts['HIGH']/total_districts)*100:.1f}%", f"{int(pops['HIGH']):,}", f"{(pops['HIGH']/total_pop*100) if total_pop else 0:.1f}%", COLOR_HR),
+        ("Medium Risk (Score 32-44)", counts["MEDIUM"], f"{(counts['MEDIUM']/total_districts)*100:.1f}%", f"{int(pops['MEDIUM']):,}", f"{(pops['MEDIUM']/total_pop*100) if total_pop else 0:.1f}%", COLOR_MR),
+        ("Low Risk (Score < 32)", counts["LOW"], f"{(counts['LOW']/total_districts)*100:.1f}%", f"{int(pops['LOW']):,}", f"{(pops['LOW']/total_pop*100) if total_pop else 0:.1f}%", COLOR_LR),
+    ]
+    if counts["INCOMPLETE"] > 0:
+        row_defs.append(
+            ("Data Incomplete / Unclassified", counts["INCOMPLETE"], f"{(counts['INCOMPLETE']/total_districts)*100:.1f}%", f"{int(pops['INCOMPLETE']):,}", f"{(pops['INCOMPLETE']/total_pop*100) if total_pop else 0:.1f}%", "64748B")
+        )
+    row_defs.append(
+        ("National Total", total_districts, "100.0%", f"{int(total_pop):,}", "100.0%", "0F172A")
+    )
+    
     # Insert Table right after placeholder
-    table = doc.add_table(rows=6, cols=5)
+    table = doc.add_table(rows=len(row_defs) + 1, cols=5)
     placeholder_p._element.addnext(table._element)
     table.alignment = WD_TABLE_ALIGNMENT.CENTER
     
     headers = ["Programmatic Risk Category", "Number of Districts", "% of Districts", "Total Population", "% of Total Population"]
     style_table_header(table.rows[0], headers, bg_hex="1E293B")
     
-    row_defs = [
-        ("Very High Risk (Score >= 61)", counts["VERY_HIGH"], f"{(counts['VERY_HIGH']/total_districts)*100:.1f}%", f"{int(pops['VERY_HIGH']):,}", f"{(pops['VERY_HIGH']/total_pop*100) if total_pop else 0:.1f}%", COLOR_VHR),
-        ("High Risk (Score 55-60)", counts["HIGH"], f"{(counts['HIGH']/total_districts)*100:.1f}%", f"{int(pops['HIGH']):,}", f"{(pops['HIGH']/total_pop*100) if total_pop else 0:.1f}%", COLOR_HR),
-        ("Medium Risk (Score 48-54)", counts["MEDIUM"], f"{(counts['MEDIUM']/total_districts)*100:.1f}%", f"{int(pops['MEDIUM']):,}", f"{(pops['MEDIUM']/total_pop*100) if total_pop else 0:.1f}%", COLOR_MR),
-        ("Low Risk (Score <= 47)", counts["LOW"], f"{(counts['LOW']/total_districts)*100:.1f}%", f"{int(pops['LOW']):,}", f"{(pops['LOW']/total_pop*100) if total_pop else 0:.1f}%", COLOR_LR),
-        ("National Total", total_districts, "100.0%", f"{int(total_pop):,}", "100.0%", "0F172A")
-    ]
-    
     for idx, (label, count, pct, pop_str, pop_pct, color_code) in enumerate(row_defs, start=1):
         row = table.rows[idx]
-        is_total = idx == 5
+        is_total = idx == len(row_defs)
         bg = "F1F5F9" if is_total else (COLOR_ZEBRA if idx % 2 == 1 else "FFFFFF")
         format_data_cell(row.cells[0], label, align=WD_ALIGN_PARAGRAPH.LEFT, bold=is_total, color=color_code if not is_total else "000000", bg_color=bg)
         format_data_cell(row.cells[1], count, align=WD_ALIGN_PARAGRAPH.RIGHT, bold=is_total, bg_color=bg)
@@ -137,31 +146,37 @@ def build_country_profile_table(doc, placeholder_p, data):
 
 def build_admin1_breakdown_table(doc, placeholder_p, data):
     prov_map = {}
+    has_incomplete = False
     for d in data.get("districtResults", []):
         prov = d.get("provinceName") or "Other Province"
         if prov not in prov_map:
-            prov_map[prov] = {"VERY_HIGH": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0, "total": 0}
+            prov_map[prov] = {"VERY_HIGH": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0, "INCOMPLETE": 0, "total": 0}
         cat = d.get("riskCategory", "LOW")
         if cat in prov_map[prov]:
             prov_map[prov][cat] += 1
+        else:
+            prov_map[prov]["INCOMPLETE"] += 1
+        if cat == "INCOMPLETE":
+            has_incomplete = True
         prov_map[prov]["total"] += 1
 
     sorted_provs = sorted(prov_map.keys())
-    table = doc.add_table(rows=len(sorted_provs) + 2, cols=6)
+    cols_count = 7 if has_incomplete else 6
+    table = doc.add_table(rows=len(sorted_provs) + 2, cols=cols_count)
     placeholder_p._element.addnext(table._element)
     table.alignment = WD_TABLE_ALIGNMENT.CENTER
 
-    headers = [data.get("admin1Label", "Province"), "Very High Risk", "High Risk", "Medium Risk", "Low Risk", "Total Districts"]
+    headers = [data.get("admin1Label", "Province"), "Very High Risk", "High Risk", "Medium Risk", "Low Risk"]
+    if has_incomplete:
+        headers.append("Incomplete")
+    headers.append("Total Districts")
     style_table_header(table.rows[0], headers, bg_hex="1E293B")
 
-    totals = {"VERY_HIGH": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0, "total": 0}
+    totals = {"VERY_HIGH": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0, "INCOMPLETE": 0, "total": 0}
     for idx, prov in enumerate(sorted_provs, start=1):
         st = prov_map[prov]
-        totals["VERY_HIGH"] += st["VERY_HIGH"]
-        totals["HIGH"] += st["HIGH"]
-        totals["MEDIUM"] += st["MEDIUM"]
-        totals["LOW"] += st["LOW"]
-        totals["total"] += st["total"]
+        for k in totals:
+            totals[k] += st.get(k, 0)
 
         row = table.rows[idx]
         bg = COLOR_ZEBRA if idx % 2 == 1 else "FFFFFF"
@@ -170,7 +185,11 @@ def build_admin1_breakdown_table(doc, placeholder_p, data):
         format_data_cell(row.cells[2], st["HIGH"], align=WD_ALIGN_PARAGRAPH.RIGHT, color=COLOR_HR if st["HIGH"] > 0 else "64748B", bg_color=bg)
         format_data_cell(row.cells[3], st["MEDIUM"], align=WD_ALIGN_PARAGRAPH.RIGHT, color=COLOR_MR if st["MEDIUM"] > 0 else "64748B", bg_color=bg)
         format_data_cell(row.cells[4], st["LOW"], align=WD_ALIGN_PARAGRAPH.RIGHT, color=COLOR_LR if st["LOW"] > 0 else "64748B", bg_color=bg)
-        format_data_cell(row.cells[5], st["total"], align=WD_ALIGN_PARAGRAPH.RIGHT, bold=True, bg_color=bg)
+        if has_incomplete:
+            format_data_cell(row.cells[5], st["INCOMPLETE"], align=WD_ALIGN_PARAGRAPH.RIGHT, color="64748B", bg_color=bg)
+            format_data_cell(row.cells[6], st["total"], align=WD_ALIGN_PARAGRAPH.RIGHT, bold=True, bg_color=bg)
+        else:
+            format_data_cell(row.cells[5], st["total"], align=WD_ALIGN_PARAGRAPH.RIGHT, bold=True, bg_color=bg)
 
     # National Total Row
     tot_row = table.rows[len(sorted_provs) + 1]
@@ -180,7 +199,11 @@ def build_admin1_breakdown_table(doc, placeholder_p, data):
     format_data_cell(tot_row.cells[2], totals["HIGH"], align=WD_ALIGN_PARAGRAPH.RIGHT, bold=True, color=COLOR_HR, bg_color=bg_tot)
     format_data_cell(tot_row.cells[3], totals["MEDIUM"], align=WD_ALIGN_PARAGRAPH.RIGHT, bold=True, color=COLOR_MR, bg_color=bg_tot)
     format_data_cell(tot_row.cells[4], totals["LOW"], align=WD_ALIGN_PARAGRAPH.RIGHT, bold=True, color=COLOR_LR, bg_color=bg_tot)
-    format_data_cell(tot_row.cells[5], totals["total"], align=WD_ALIGN_PARAGRAPH.RIGHT, bold=True, bg_color=bg_tot)
+    if has_incomplete:
+        format_data_cell(tot_row.cells[5], totals["INCOMPLETE"], align=WD_ALIGN_PARAGRAPH.RIGHT, bold=True, color="64748B", bg_color=bg_tot)
+        format_data_cell(tot_row.cells[6], totals["total"], align=WD_ALIGN_PARAGRAPH.RIGHT, bold=True, bg_color=bg_tot)
+    else:
+        format_data_cell(tot_row.cells[5], totals["total"], align=WD_ALIGN_PARAGRAPH.RIGHT, bold=True, bg_color=bg_tot)
 
 def build_priority_districts_table(doc, placeholder_p, data, category_filter, table_name):
     districts = [

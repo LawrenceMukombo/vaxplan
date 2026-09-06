@@ -65,10 +65,10 @@ export function getSession() {
     });
   }
   const explicitSecureCookie = envFlag("SESSION_SECURE_COOKIE");
-  const secureCookie = allowInsecureLocalCookie
+  const secureCookie: boolean | "auto" = allowInsecureLocalCookie
     ? (explicitSecureCookie ?? false)
-    : true;
-  const sameSiteCookie: "lax" | "none" = secureCookie ? "none" : "lax";
+    : (explicitSecureCookie ?? "auto");
+  const sameSiteCookie: "lax" | "none" = explicitSecureCookie === true ? "none" : "lax";
   return session({
     name: cookieName,
     secret,

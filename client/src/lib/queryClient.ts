@@ -927,11 +927,14 @@ export const getQueryFn: <T>(options: {
       }
 
       if (typeof window !== "undefined") {
-        clearClientAuthStorage({
-          reason: "unauthenticated",
-          message: "Session expired. Please sign in again.",
-        });
-        broadcastLogout("unauthenticated");
+        const hadActiveSession = !!localStorage.getItem("vaxplan_active_user");
+        if (hadActiveSession) {
+          clearClientAuthStorage({
+            reason: "unauthenticated",
+            message: "Session expired. Please sign in again.",
+          });
+          broadcastLogout("unauthenticated");
+        }
       }
       
       if (unauthorizedBehavior === "returnNull") {

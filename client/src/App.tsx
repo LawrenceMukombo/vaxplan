@@ -35,6 +35,7 @@ import { HeartPulse, ShieldCheck } from "lucide-react";
 import {
   getOfflineAuthMessage,
   getLogoutState,
+  clearLogoutState,
   LOGOUT_BROADCAST_KEY,
   LOGOUT_CHANNEL,
 } from "./lib/authSession";
@@ -535,6 +536,11 @@ function App() {
 
   useEffect(() => {
     const flushLogout = () => {
+      const activeUser = typeof window !== "undefined" ? localStorage.getItem("vaxplan_active_user") : null;
+      if (activeUser) {
+        clearLogoutState();
+        return;
+      }
       const logoutState = getLogoutState();
       if (logoutState?.pendingServerLogout && typeof navigator !== "undefined" && navigator.onLine) {
         flushPendingServerLogout(logoutState.reason ?? "offline_logout");

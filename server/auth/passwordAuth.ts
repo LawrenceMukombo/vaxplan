@@ -159,16 +159,33 @@ export function registerPasswordAuthRoutes(app: Express) {
               }
             }
           }
-          return res.json({
-            ok: true,
-            user: {
-              id: dbUser.id,
-              email: dbUser.email,
-              firstName: dbUser.firstName,
-              lastName: dbUser.lastName,
-              role: dbUser.role,
-            },
-          });
+          const userPayload = {
+            id: dbUser.id,
+            email: dbUser.email,
+            firstName: dbUser.firstName,
+            lastName: dbUser.lastName,
+            role: dbUser.role,
+            roles: dbUser.roles || [],
+            permissions: dbUser.permissions || [],
+            tenantId: userTenantId,
+          };
+          if (reqAny.session && typeof reqAny.session.save === "function") {
+            reqAny.session.save((saveErr: any) => {
+              if (saveErr) {
+                console.error("[password-auth] session save failed:", saveErr);
+                return res.status(500).json({ message: "Login failed." });
+              }
+              return res.json({
+                ok: true,
+                user: userPayload,
+              });
+            });
+          } else {
+            return res.json({
+              ok: true,
+              user: userPayload,
+            });
+          }
         });
       };
 

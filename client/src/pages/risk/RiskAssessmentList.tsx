@@ -11,7 +11,10 @@ import {
   AlertTriangle,
   ArrowRight,
   ExternalLink,
+  ChevronLeft,
   ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
   Info,
   Calendar,
   Layers,
@@ -1541,23 +1544,61 @@ export default function RiskAssessmentList() {
                   <Button
                     size="sm"
                     variant="outline"
-                    className="h-8 px-3 text-xs"
-                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                    className="h-8 px-2 text-xs"
+                    onClick={() => setPage(1)}
                     disabled={page <= 1}
+                    title="First Page"
                   >
-                    Previous
+                    <ChevronsLeft className="w-4 h-4" />
                   </Button>
-                  <span className="px-3 py-1 bg-muted rounded font-medium text-xs">
-                    Page {page} of {totalPages}
-                  </span>
                   <Button
                     size="sm"
                     variant="outline"
-                    className="h-8 px-3 text-xs"
+                    className="h-8 px-2 text-xs"
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                    disabled={page <= 1}
+                    title="Previous Page"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                  </Button>
+                  <div className="flex items-center gap-1 mx-1 text-xs">
+                    <span className="text-muted-foreground">Page</span>
+                    <Select
+                      value={String(page)}
+                      onValueChange={(val) => setPage(Number(val))}
+                    >
+                      <SelectTrigger className="h-8 w-16 text-xs font-semibold">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent className="max-h-56">
+                        {Array.from({ length: totalPages }, (_, i) => i + 1).map((pNum) => (
+                          <SelectItem key={pNum} value={String(pNum)}>
+                            {pNum}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <span className="text-muted-foreground">of {totalPages}</span>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-8 px-2 text-xs"
                     onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
                     disabled={page >= totalPages}
+                    title="Next Page"
                   >
-                    Next
+                    <ChevronRight className="w-4 h-4" />
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-8 px-2 text-xs"
+                    onClick={() => setPage(totalPages)}
+                    disabled={page >= totalPages}
+                    title="Last Page"
+                  >
+                    <ChevronsRight className="w-4 h-4" />
                   </Button>
                 </div>
               </div>
@@ -1822,23 +1863,61 @@ export default function RiskAssessmentList() {
                       <Button
                         size="sm"
                         variant="outline"
-                        className="h-8 px-3 text-xs"
-                        onClick={() => setRoundsPage((p) => Math.max(1, p - 1))}
+                        className="h-8 px-2 text-xs"
+                        onClick={() => setRoundsPage(1)}
                         disabled={roundsPage <= 1}
+                        title="First Page"
                       >
-                        Previous
+                        <ChevronsLeft className="w-4 h-4" />
                       </Button>
-                      <span className="px-3 py-1 bg-muted rounded font-medium text-xs">
-                        Page {roundsPage} of {totalRoundsPages}
-                      </span>
                       <Button
                         size="sm"
                         variant="outline"
-                        className="h-8 px-3 text-xs"
+                        className="h-8 px-2 text-xs"
+                        onClick={() => setRoundsPage((p) => Math.max(1, p - 1))}
+                        disabled={roundsPage <= 1}
+                        title="Previous Page"
+                      >
+                        <ChevronLeft className="w-4 h-4" />
+                      </Button>
+                      <div className="flex items-center gap-1 mx-1 text-xs">
+                        <span className="text-muted-foreground">Page</span>
+                        <Select
+                          value={String(roundsPage)}
+                          onValueChange={(val) => setRoundsPage(Number(val))}
+                        >
+                          <SelectTrigger className="h-8 w-16 text-xs font-semibold">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent className="max-h-56">
+                            {Array.from({ length: totalRoundsPages }, (_, i) => i + 1).map((pNum) => (
+                              <SelectItem key={pNum} value={String(pNum)}>
+                                {pNum}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <span className="text-muted-foreground">of {totalRoundsPages}</span>
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-8 px-2 text-xs"
                         onClick={() => setRoundsPage((p) => Math.min(totalRoundsPages, p + 1))}
                         disabled={roundsPage >= totalRoundsPages}
+                        title="Next Page"
                       >
-                        Next
+                        <ChevronRight className="w-4 h-4" />
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-8 px-2 text-xs"
+                        onClick={() => setRoundsPage(totalRoundsPages)}
+                        disabled={roundsPage >= totalRoundsPages}
+                        title="Last Page"
+                      >
+                        <ChevronsRight className="w-4 h-4" />
                       </Button>
                     </div>
                   </div>

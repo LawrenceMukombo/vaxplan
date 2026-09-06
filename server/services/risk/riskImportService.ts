@@ -193,11 +193,23 @@ export function parseCaseLinelistBuffer(
       continue;
     }
 
+    const notificationDate = getCol(r, "dateofnotification", "notificationdate");
+    const investigationDate = getCol(r, "dateofinvestigation", "investigationdate");
+    const specimenDate = getCol(r, "dateofbloodsamplecollection", "dateofspecimencollection", "specimendate");
+    const reportingYear = getCol(r, "year") ? Number(getCol(r, "year")) : undefined;
+
+    // Progressive date fallback: rash onset -> notification -> investigation -> specimen collection -> reporting year
+    const effectiveRashOnset = rashDate
+      || notificationDate
+      || investigationDate
+      || specimenDate
+      || (reportingYear && !isNaN(reportingYear) ? `${reportingYear}-07-01` : null);
+
     const rawCase: RawSurveillanceCaseRow = {
       caseId,
       reportingDistrict: district,
       residenceDistrict: String(getCol(r, "placeofresidence", "residencedistrict", "districtofresidence") ?? district).trim(),
-      reportingYear: getCol(r, "year") ? Number(getCol(r, "year")) : undefined,
+      reportingYear,
       dateOfBirth: getCol(r, "dateofbirth", "dob"),
       ageYears: getCol(r, "ageinyears", "ageyears", "age") !== null ? Number(getCol(r, "ageinyears", "ageyears", "age")) : null,
       ageMonths: getCol(r, "ageinmonths", "agemonths") !== null ? Number(getCol(r, "ageinmonths", "agemonths")) : null,
@@ -205,11 +217,11 @@ export function parseCaseLinelistBuffer(
       finalClassification: classification,
       vaccinationStatus: getCol(r, "vaccinationstatus", "vaccinated"),
       dosesReceived: getCol(r, "numberofvaccinedoses", "doses", "dosesreceived") !== null ? Number(getCol(r, "numberofvaccinedoses", "doses", "dosesreceived")) : null,
-      dateRashOnset: rashDate || new Date(),
-      dateNotification: getCol(r, "dateofnotification", "notificationdate"),
-      dateInvestigation: getCol(r, "dateofinvestigation", "investigationdate"),
+      dateRashOnset: effectiveRashOnset,
+      dateNotification: notificationDate,
+      dateInvestigation: investigationDate,
       specimenCollected: getCol(r, "specimencollected", "specimen"),
-      dateSpecimenCollection: getCol(r, "dateofbloodsamplecollection", "dateofspecimencollection", "specimendate"),
+      dateSpecimenCollection: specimenDate,
       dateLabResultReceived: getCol(r, "datedistrictreceivedlabresult", "datelabresultreceived", "labresultdate"),
       placeOfInfection: getCol(r, "placeofinfectionortravelhistory", "placeofinfection", "travelhistory"),
       travelHistory: getCol(r, "travelhistory"),

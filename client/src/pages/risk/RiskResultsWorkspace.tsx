@@ -24,6 +24,8 @@ import {
   ChevronsUpDown,
   ChevronLeft,
   ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
   ExternalLink,
   Plus,
   RefreshCw,
@@ -79,10 +81,12 @@ interface IndicatorDetail {
   pointsAwarded: string | null;
   maxPoints: number;
   valueState: string;
-  displayedValue: string;
+  displayedValue?: string;
+  valueRaw?: string | null;
   thresholdApplied: string;
-  explanationText: string;
-  validationWarnings: string[];
+  explanationText?: string;
+  explanation?: string;
+  validationWarnings?: string[];
 }
 
 export default function RiskResultsWorkspace() {
@@ -588,13 +592,13 @@ export default function RiskResultsWorkspace() {
   const getCategoryBadge = (category: string) => {
     switch (category) {
       case "LOW":
-        return <Badge className="bg-emerald-600 hover:bg-emerald-700 text-white">Low Risk (0–47)</Badge>;
+        return <Badge className="bg-emerald-600 hover:bg-emerald-700 text-white">Low Risk (&lt; 32)</Badge>;
       case "MEDIUM":
-        return <Badge className="bg-amber-600 hover:bg-amber-700 text-white">Medium Risk (48–54)</Badge>;
+        return <Badge className="bg-amber-600 hover:bg-amber-700 text-white">Medium Risk (32–44)</Badge>;
       case "HIGH":
-        return <Badge className="bg-orange-600 hover:bg-orange-700 text-white">High Risk (55–60)</Badge>;
+        return <Badge className="bg-orange-600 hover:bg-orange-700 text-white">High Risk (45–56)</Badge>;
       case "VERY_HIGH":
-        return <Badge className="bg-red-600 hover:bg-red-700 text-white">Very High Risk (61–100)</Badge>;
+        return <Badge className="bg-red-600 hover:bg-red-700 text-white">Very High Risk (≥ 57)</Badge>;
       default:
         return <Badge variant="outline" className="bg-slate-500/10 text-slate-700 dark:text-slate-300">Incomplete</Badge>;
     }
@@ -679,19 +683,46 @@ export default function RiskResultsWorkspace() {
     document.body.removeChild(link);
   };
 
+  // Resolved area for explanation drawer (falls back to fresh API payload if available)
+  const displayArea = useMemo(() => {
+    if (!selectedAreaForExplanation) return null;
+    if (explanationData?.area) {
+      const dbArea: any = explanationData.area;
+      return {
+        ...selectedAreaForExplanation,
+        ...dbArea,
+        totalRiskScore: dbArea.totalScore !== undefined && dbArea.totalScore !== null ? String(dbArea.totalScore) : selectedAreaForExplanation.totalRiskScore,
+        riskCategory: dbArea.riskCategory || selectedAreaForExplanation.riskCategory,
+        summaryExplanation: dbArea.summaryExplanation || selectedAreaForExplanation.summaryExplanation,
+      };
+    }
+    return selectedAreaForExplanation;
+  }, [selectedAreaForExplanation, explanationData?.area]);
+
   // Explain Drawer Filtered Indicators
   const filteredIndicators = useMemo(() => {
     const list = explanationData?.indicators || [];
     return list.filter((ind) => {
+      const indCode = (ind.indicatorCode || "").toUpperCase();
+      const domCode = (ind.domainCode || "").toUpperCase();
+      const filter = indicatorDomainFilter.toUpperCase();
+
       const matchDomain =
-        indicatorDomainFilter === "ALL" ||
-        ind.domainCode.toUpperCase().startsWith(indicatorDomainFilter.toUpperCase());
+        filter === "ALL" ||
+        indCode.startsWith(filter) ||
+        (filter === "PI" && (domCode.includes("IMMUNITY") || indCode.startsWith("PI"))) ||
+        (filter === "SQ" && (domCode.includes("SURVEILLANCE") || indCode.startsWith("SQ"))) ||
+        (filter === "PD" && (domCode.includes("DELIVERY") || indCode.startsWith("PD"))) ||
+        (filter === "TA" && (domCode.includes("THREAT") || indCode.startsWith("TA")));
+
       const term = indicatorSearchTerm.toLowerCase();
+      const expl = ((ind as any).explanation || (ind as any).explanationText || "").toLowerCase();
       const matchSearch =
         !term ||
-        ind.indicatorCode.toLowerCase().includes(term) ||
-        ind.explanationText.toLowerCase().includes(term) ||
-        ind.domainCode.toLowerCase().includes(term);
+        indCode.toLowerCase().includes(term) ||
+        expl.includes(term) ||
+        domCode.toLowerCase().includes(term);
+
       return matchDomain && matchSearch;
     });
   }, [explanationData?.indicators, indicatorDomainFilter, indicatorSearchTerm]);
@@ -1368,27 +1399,72 @@ export default function RiskResultsWorkspace() {
                 </span>
               </div>
 
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-1.5">
                 <Button
                   size="sm"
                   variant="outline"
-                  className="h-8 px-3 text-xs"
+                  className="h-8 px-2.5 text-xs gap-1"
+                  onClick={() => setPage(1)}
+                  disabled={page <= 1}
+                  title="First Page"
+                >
+                  <ChevronsLeft className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">First</span>
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-8 px-2.5 text-xs gap-1"
                   onClick={() => setPage((p) => Math.max(1, p - 1))}
                   disabled={page <= 1}
+                  title="Previous Page"
                 >
-                  Previous
+                  <ChevronLeft className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Prev</span>
                 </Button>
-                <span className="px-3 py-1 bg-muted rounded font-medium text-xs">
-                  Page {page} of {totalPages || 1}
-                </span>
+
+                {/* Page Jump Selector Dropdown */}
+                <div className="flex items-center gap-1 mx-1">
+                  <span className="text-muted-foreground">Page</span>
+                  <Select
+                    value={String(page)}
+                    onValueChange={(val) => setPage(Number(val))}
+                  >
+                    <SelectTrigger className="h-8 w-16 text-xs font-mono font-semibold">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent className="max-h-56">
+                      {Array.from({ length: totalPages || 1 }, (_, idx) => idx + 1).map((pNum) => (
+                        <SelectItem key={pNum} value={String(pNum)} className="text-xs font-mono">
+                          {pNum}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <span className="text-muted-foreground font-mono">of {totalPages || 1}</span>
+                </div>
+
                 <Button
                   size="sm"
                   variant="outline"
-                  className="h-8 px-3 text-xs"
+                  className="h-8 px-2.5 text-xs gap-1"
                   onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
                   disabled={page >= totalPages}
+                  title="Next Page"
                 >
-                  Next
+                  <span className="hidden sm:inline">Next</span>
+                  <ChevronRight className="w-3.5 h-3.5" />
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-8 px-2.5 text-xs gap-1"
+                  onClick={() => setPage(totalPages)}
+                  disabled={page >= totalPages}
+                  title="Last Page"
+                >
+                  <span className="hidden sm:inline">Last</span>
+                  <ChevronsRight className="w-3.5 h-3.5" />
                 </Button>
               </div>
             </div>
@@ -1921,7 +1997,7 @@ export default function RiskResultsWorkspace() {
           <SheetHeader className="pb-3 border-b">
             <SheetTitle className="text-base font-bold flex items-center gap-2">
               <ShieldAlert className="w-5 h-5 text-primary" />
-              Explain Risk Score: {selectedAreaForExplanation?.areaName}
+              Explain Risk Score: {displayArea?.areaName || selectedAreaForExplanation?.areaName}
             </SheetTitle>
             <SheetDescription className="text-xs">
               Mathematical lineage, applied thresholds, and indicator breakdown across all 21 WHO indicators for this district.
@@ -1935,15 +2011,15 @@ export default function RiskResultsWorkspace() {
                 <span className="font-semibold text-sm">Overall Programmatic Risk:</span>
                 <div className="flex items-center gap-2">
                   <Badge variant="outline" className="font-bold">
-                    {selectedAreaForExplanation?.riskCategory}
+                    {displayArea?.riskCategory}
                   </Badge>
                   <span className="font-bold text-base text-primary">
-                    {selectedAreaForExplanation?.totalRiskScore ?? `${selectedAreaForExplanation?.minPossibleScore}–${selectedAreaForExplanation?.maxPossibleScore}`}/100
+                    {displayArea?.totalRiskScore ?? `${displayArea?.minPossibleScore}–${displayArea?.maxPossibleScore}`}/100
                   </span>
                 </div>
               </div>
               <p className="text-muted-foreground leading-relaxed">
-                {selectedAreaForExplanation?.summaryExplanation}
+                {displayArea?.summaryExplanation}
               </p>
             </div>
 
@@ -1992,14 +2068,14 @@ export default function RiskResultsWorkspace() {
               ) : (
                 <div className="border rounded-md overflow-x-auto shadow-sm">
                   <table className="w-full min-w-full text-xs text-left border-collapse table-auto">
-                    <thead className="bg-slate-800 text-white font-semibold sticky top-0 z-30">
-                      <tr>
-                        <th className="p-2.5 border-r-2 border-slate-600 w-24 min-w-24">Indicator</th>
-                        <th className="p-2.5 border-r-2 border-slate-600 w-24 min-w-24">Domain</th>
-                        <th className="p-2.5 border-r-2 border-slate-600 w-24 min-w-24 text-right">Observed</th>
-                        <th className="p-2.5 border-r-2 border-slate-600 w-28 min-w-28 text-right">Threshold</th>
-                        <th className="p-2.5 border-r-2 border-slate-600 w-24 min-w-24 text-center">Score</th>
-                        <th className="p-2.5">Lineage & Policy Rationale</th>
+                    <thead className="bg-slate-900 text-slate-100 dark:bg-slate-950 dark:text-slate-100 font-semibold sticky top-0 z-30 shadow-sm">
+                      <tr className="bg-slate-900 text-slate-100 dark:bg-slate-950 dark:text-slate-100">
+                        <th className="p-2.5 border-r border-slate-700 font-bold w-20 min-w-20 text-slate-100">Indicator</th>
+                        <th className="p-2.5 border-r border-slate-700 font-bold w-28 min-w-28 text-slate-100">Domain</th>
+                        <th className="p-2.5 border-r border-slate-700 font-bold w-24 min-w-24 text-right text-slate-100">Observed</th>
+                        <th className="p-2.5 border-r border-slate-700 font-bold w-36 min-w-36 text-right text-slate-100">Threshold</th>
+                        <th className="p-2.5 border-r border-slate-700 font-bold w-28 min-w-28 text-center text-slate-100">Score</th>
+                        <th className="p-2.5 font-bold text-slate-100">Lineage & Policy Rationale</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y text-foreground">
@@ -2022,11 +2098,16 @@ export default function RiskResultsWorkspace() {
                               ? "bg-red-50 text-red-700 border-red-300 dark:bg-red-950/40 dark:text-red-400"
                               : "bg-amber-50 text-amber-700 border-amber-300 dark:bg-amber-950/40 dark:text-amber-400";
 
+                          const indCode = (ind.indicatorCode || "").toUpperCase();
+                          const domCode = (ind.domainCode || "").toUpperCase();
                           const domainLabel =
-                            ind.domainCode.toUpperCase().startsWith("PI") ? "Immunity"
-                            : ind.domainCode.toUpperCase().startsWith("SQ") ? "Surveillance"
-                            : ind.domainCode.toUpperCase().startsWith("PD") ? "Delivery"
+                            indCode.startsWith("PI") || domCode.includes("IMMUNITY") ? "Immunity"
+                            : indCode.startsWith("SQ") || domCode.includes("SURVEILLANCE") ? "Surveillance"
+                            : indCode.startsWith("PD") || domCode.includes("DELIVERY") ? "Delivery"
                             : "Threats";
+
+                          const obsVal = ind.displayedValue || ind.valueRaw || "—";
+                          const explText = ind.explanationText || (ind as any).explanation || "—";
 
                           return (
                             <tr key={ind.id || idx} className="hover:bg-slate-50/70 dark:hover:bg-slate-900/50 transition-colors">
@@ -2041,7 +2122,7 @@ export default function RiskResultsWorkspace() {
                               </td>
 
                               <td className="p-2.5 text-right font-mono font-semibold border-r whitespace-nowrap">
-                                {ind.displayedValue || "—"}
+                                {obsVal}
                               </td>
 
                               <td className="p-2.5 text-right font-mono text-[11px] text-muted-foreground border-r whitespace-nowrap">
@@ -2055,7 +2136,7 @@ export default function RiskResultsWorkspace() {
                               </td>
 
                               <td className="p-2.5 text-[11px] text-muted-foreground leading-relaxed">
-                                <p>{ind.explanationText}</p>
+                                <p className="text-foreground/90 font-normal">{explText}</p>
                                 {ind.validationWarnings && ind.validationWarnings.length > 0 && (
                                   <p className="text-[10px] text-amber-600 dark:text-amber-400 font-medium mt-1">
                                     Warning: {ind.validationWarnings.join(", ")}

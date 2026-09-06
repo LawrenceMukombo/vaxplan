@@ -1260,6 +1260,16 @@ export function calculateAreaRiskScore(input: AreaAssessmentInput): AreaAssessme
 
   if (isAnyIncomplete) {
     totalScore = null;
+  } else {
+    totalScore = Math.min(
+      100,
+      Math.round(
+        (domains.POPULATION_IMMUNITY.points ?? 0) +
+        (domains.SURVEILLANCE_QUALITY.points ?? 0) +
+        (domains.PROGRAMME_DELIVERY.points ?? 0) +
+        (domains.THREAT_ASSESSMENT.points ?? 0)
+      )
+    );
   }
 
   const category: RiskCategory = classifyRiskScore(totalScore ?? minPossible, isAnyIncomplete);

@@ -65,6 +65,17 @@ export function loadActiveTenant(): CachedTenant | null {
   }
 }
 
+/** Save the currently-active tenant object to cache. */
+export function saveActiveTenant(tenant: CachedTenant): void {
+  try {
+    if (tenant && typeof tenant === "object" && typeof tenant.id === "string") {
+      localStorage.setItem(ACTIVE_TENANT_KEY, JSON.stringify(tenant));
+    }
+  } catch {
+    /* storage full / disabled */
+  }
+}
+
 /**
  * Return the tenant ID the sync engine should use as its IndexedDB partition
  * key and server tenantId parameter.

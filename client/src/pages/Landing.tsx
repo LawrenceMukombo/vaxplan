@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -29,7 +29,9 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 import { PageHead } from "@/components/PageHead";
 import { versionLabel } from "@/lib/version";
 import { getDomainLinks } from "@/lib/navigation";
-import { saveTenantsCache, loadTenantsCache } from "@/lib/tenantCache";
+import { saveTenantsCache, loadTenantsCache, saveActiveTenant } from "@/lib/tenantCache";
+import { clearLogoutState, recordOnlineAuthSession } from "@/lib/authSession";
+import { queryClient } from "@/lib/queryClient";
 
 interface PublicTenant {
   id: string;
@@ -170,6 +172,12 @@ function PasswordLoginDialog({
     setKeepMeSignedIn(false);
   }
 
+  useEffect(() => {
+    if (open) {
+      clearLogoutState();
+    }
+  }, [open]);
+
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setBusy(true);
@@ -192,7 +200,19 @@ function PasswordLoginDialog({
         setError(data?.message || "Login failed.");
         return;
       }
-      window.location.href = "/";
+      clearLogoutState();
+      if (data?.user) {
+        recordOnlineAuthSession(data.user);
+        if (selectedTenantId) {
+          const matchedTenant = activeTenants.find((t) => t.id === selectedTenantId);
+          if (matchedTenant) {
+            saveActiveTenant(matchedTenant);
+          }
+        }
+        queryClient.setQueryData(["/api/auth/user"], data.user);
+        void queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
+      }
+      window.location.replace("/");
     } catch (err) {
       setError("Network error. Try again.");
     } finally {

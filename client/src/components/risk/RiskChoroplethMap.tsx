@@ -159,17 +159,19 @@ export function RiskChoroplethMap({
     staleTime: 60 * 60 * 1000,
   });
 
+  const effectiveCountryCode = countryCode || contextData?.countryCode || "ZAF";
+
   const effectiveBoundaryId =
     boundaryId ||
     contextData?.boundaryId ||
     contextData?.defaultBoundaryId ||
-    (countryCode === "ZAF"
+    (effectiveCountryCode === "ZAF"
       ? "a942c119-c045-492f-97ee-b95a8dbb8440"
-      : countryCode === "ZMB"
+      : effectiveCountryCode === "ZMB"
         ? "1edd5bcf-d20a-4910-a3cb-dd44c7e84c61"
-        : countryCode === "SSD"
+        : effectiveCountryCode === "SSD"
           ? "af760f67-cc8e-4075-8938-777c387f141f"
-          : countryCode === "PNG"
+          : effectiveCountryCode === "PNG"
             ? "90336ae8-7f06-4133-b5dd-d962a145d5c2"
             : null);
 
@@ -280,15 +282,19 @@ export function RiskChoroplethMap({
       }
     }
 
-    // Fuzzy contains match
+    // Fuzzy contains match (only for non-numeric keys with meaningful length >= 4)
     for (const c of candidates) {
       if (typeof c === "string" && c.trim()) {
         const lower = c.toLowerCase().trim();
-        const entries = Array.from(districtDataMap.entries());
-        for (let i = 0; i < entries.length; i++) {
-          const [key, val] = entries[i];
-          if (key.includes(lower) || lower.includes(key)) {
-            return val;
+        if (lower.length >= 4 && !/^\d+$/.test(lower)) {
+          const entries = Array.from(districtDataMap.entries());
+          for (let i = 0; i < entries.length; i++) {
+            const [key, val] = entries[i];
+            if (key.length >= 4 && !/^\d+$/.test(key)) {
+              if (key.includes(lower) || lower.includes(key)) {
+                return val;
+              }
+            }
           }
         }
       }
@@ -818,7 +824,7 @@ export function RiskChoroplethMap({
                 >
                   <div className="flex items-center gap-2 min-w-0">
                     <span className="w-3.5 h-3.5 rounded bg-[#10b981] inline-block border border-black/10 shrink-0" />
-                    <span className="truncate">Low Risk (0–47 pts)</span>
+                    <span className="truncate">Low Risk (&lt; 32 pts)</span>
                   </div>
                   <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-4 bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 font-bold ml-2 shrink-0">
                     {categoryCounts.risk.low}
@@ -837,7 +843,7 @@ export function RiskChoroplethMap({
                 >
                   <div className="flex items-center gap-2 min-w-0">
                     <span className="w-3.5 h-3.5 rounded bg-[#f59e0b] inline-block border border-black/10 shrink-0" />
-                    <span className="truncate">Medium Risk (48–54 pts)</span>
+                    <span className="truncate">Medium Risk (32–44 pts)</span>
                   </div>
                   <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-4 bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300 font-bold ml-2 shrink-0">
                     {categoryCounts.risk.medium}
@@ -856,7 +862,7 @@ export function RiskChoroplethMap({
                 >
                   <div className="flex items-center gap-2 min-w-0">
                     <span className="w-3.5 h-3.5 rounded bg-[#f97316] inline-block border border-black/10 shrink-0" />
-                    <span className="truncate">High Risk (55–60 pts)</span>
+                    <span className="truncate">High Risk (45–56 pts)</span>
                   </div>
                   <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-4 bg-orange-100 dark:bg-orange-950 text-orange-800 dark:text-orange-300 font-bold ml-2 shrink-0">
                     {categoryCounts.risk.high}
@@ -875,7 +881,7 @@ export function RiskChoroplethMap({
                 >
                   <div className="flex items-center gap-2 min-w-0">
                     <span className="w-3.5 h-3.5 rounded bg-[#ef4444] inline-block border border-black/10 shrink-0" />
-                    <span className="truncate">Very High Risk (61–100 pts)</span>
+                    <span className="truncate">Very High Risk (≥ 57 pts)</span>
                   </div>
                   <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-4 bg-rose-100 dark:bg-rose-950 text-rose-800 dark:text-rose-300 font-bold ml-2 shrink-0">
                     {categoryCounts.risk.veryHigh}

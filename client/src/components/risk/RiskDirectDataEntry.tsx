@@ -16,6 +16,8 @@ import {
   Search,
   ChevronLeft,
   ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
   ChevronsUpDown,
   ChevronUp,
   ChevronDown,
@@ -275,7 +277,8 @@ export function calcMcv2Rp(avg: number): number {
   return 8;
 }
 
-export function calcSiaCovRp(cov: number): number {
+export function calcSiaCovRp(cov: number, hasCampaign: boolean = true): number {
+  if (!hasCampaign) return 8;
   if (isNaN(cov) || cov <= 0) return 6;
   if (cov >= 95.0) return 0;
   if (cov >= 90.0) return 2;
@@ -293,12 +296,29 @@ export function calcSiaYearsRp(years: number): number {
   return 4;
 }
 
+export function calculateOlsSlope(data: Array<{ year: number; value: number }>): number | null {
+  if (data.length < 2) return null;
+  const n = data.length;
+  const meanX = data.reduce((acc, d) => acc + d.year, 0) / n;
+  const meanY = data.reduce((acc, d) => acc + d.value, 0) / n;
+
+  let numerator = 0;
+  let denominator = 0;
+
+  for (const d of data) {
+    const dx = d.year - meanX;
+    const dy = d.value - meanY;
+    numerator += dx * dy;
+    denominator += dx * dx;
+  }
+
+  if (denominator === 0) return 0;
+  return numerator / denominator;
+}
+
 export function calcUnvacRp(pct: number): number {
-  if (isNaN(pct) || pct <= 0) return 0;
-  if (pct >= 30.0) return 6;
-  if (pct >= 20.0) return 4;
-  if (pct >= 10.0) return 2;
-  return 0;
+  if (isNaN(pct) || pct < 0) return 0;
+  return pct >= 20.0 ? 6 : 0;
 }
 
 export function calcDiscardedRateRp(rate: number): number {
@@ -309,9 +329,8 @@ export function calcDiscardedRateRp(rate: number): number {
 }
 
 export function calcQualityRp(pct: number): number {
-  if (isNaN(pct) || pct < 50.0) return 4;
-  if (pct >= 80.0) return 0;
-  return 2;
+  if (isNaN(pct)) return 4;
+  return pct >= 80.0 ? 0 : 4;
 }
 
 export function calcTrendRp(slopeVal: number): number {
@@ -327,7 +346,9 @@ export function calcDropoutRp(rate: number): number {
 }
 
 export function calcDensityRp(density: number): number {
-  if (isNaN(density) || density < 50) return 0;
+  if (isNaN(density) || density <= 50) return 0;
+  if (density > 1000) return 4;
+  if (density > 300) return 3;
   if (density > 100) return 2;
   return 1;
 }
@@ -341,11 +362,11 @@ export function calcThreatPoints(
   vulnCount: number
 ): number {
   let pts = 0;
-  pts += casesUnder5 > 0 ? 6 : 0;
-  pts += cases5to14 > 0 ? 2 : 0;
-  pts += cases15plus > 0 ? 1 : 0;
+  pts += casesUnder5 > 0 ? 4 : 0;
+  pts += cases5to14 > 0 ? 3 : 0;
+  pts += cases15plus > 0 ? 3 : 0;
   pts += calcDensityRp(density);
-  pts += borderCase ? 4 : 0;
+  pts += borderCase ? 2 : 0;
   pts += Math.min(8, vulnCount);
   return Math.min(24, pts);
 }
@@ -491,24 +512,36 @@ export function getSortValue(row: DirectEntryRow, field: string): number | strin
 
     // PD
     case "pdMcv1Trend": {
-      const m1_3 = Number(row.mcv1YearMinus3) || 0;
-      const m1_1 = Number(row.mcv1YearMinus1) || 0;
-      return m1_1 - m1_3;
+      const slope = calculateOlsSlope([
+        { year: 1, value: Number(row.mcv1YearMinus3) || 0 },
+        { year: 2, value: Number(row.mcv1YearMinus2) || 0 },
+        { year: 3, value: Number(row.mcv1YearMinus1) || 0 },
+      ]);
+      return slope !== null ? Number(slope.toFixed(2)) : 0;
     }
     case "pdMcv1TrendRp": {
-      const m1_3 = Number(row.mcv1YearMinus3) || 0;
-      const m1_1 = Number(row.mcv1YearMinus1) || 0;
-      return calcTrendRp(m1_1 - m1_3);
+      const slope = calculateOlsSlope([
+        { year: 1, value: Number(row.mcv1YearMinus3) || 0 },
+        { year: 2, value: Number(row.mcv1YearMinus2) || 0 },
+        { year: 3, value: Number(row.mcv1YearMinus1) || 0 },
+      ]);
+      return calcTrendRp(slope ?? 0);
     }
     case "pdMcv2Trend": {
-      const m2_3 = Number(row.mcv2YearMinus3) || 0;
-      const m2_1 = Number(row.mcv2YearMinus1) || 0;
-      return m2_1 - m2_3;
+      const slope = calculateOlsSlope([
+        { year: 1, value: Number(row.mcv2YearMinus3) || 0 },
+        { year: 2, value: Number(row.mcv2YearMinus2) || 0 },
+        { year: 3, value: Number(row.mcv2YearMinus1) || 0 },
+      ]);
+      return slope !== null ? Number(slope.toFixed(2)) : 0;
     }
     case "pdMcv2TrendRp": {
-      const m2_3 = Number(row.mcv2YearMinus3) || 0;
-      const m2_1 = Number(row.mcv2YearMinus1) || 0;
-      return calcTrendRp(m2_1 - m2_3);
+      const slope = calculateOlsSlope([
+        { year: 1, value: Number(row.mcv2YearMinus3) || 0 },
+        { year: 2, value: Number(row.mcv2YearMinus2) || 0 },
+        { year: 3, value: Number(row.mcv2YearMinus1) || 0 },
+      ]);
+      return calcTrendRp(slope ?? 0);
     }
     case "pdMcvDropout": {
       const m1_1 = Number(row.mcv1YearMinus1) || 0;
@@ -575,19 +608,19 @@ export function getSortValue(row: DirectEntryRow, field: string): number | strin
     case "threatCasesUnder5":
       return Number(row.threatCasesUnder5) || 0;
     case "threatCasesUnder5Rp":
-      return (Number(row.threatCasesUnder5) || 0) > 0 ? 6 : 0;
+      return (Number(row.threatCasesUnder5) || 0) > 0 ? 4 : 0;
     case "threatCases5To14":
     case "threatCases5to14":
       return Number(row.threatCases5To14) || 0;
     case "threatCases5to14Rp":
     case "threatCases5To14Rp":
-      return (Number(row.threatCases5To14) || 0) > 0 ? 2 : 0;
+      return (Number(row.threatCases5To14) || 0) > 0 ? 3 : 0;
     case "threatCases15Plus":
     case "threatCases15plus":
       return Number(row.threatCases15Plus) || 0;
     case "threatCases15plusRp":
     case "threatCases15PlusRp":
-      return (Number(row.threatCases15Plus) || 0) > 0 ? 1 : 0;
+      return (Number(row.threatCases15Plus) || 0) > 0 ? 3 : 0;
     case "threatDensity": {
       const pop = Number(row.population) || 100000;
       const area = Number(row.areaKm2) || 1000;
@@ -602,7 +635,7 @@ export function getSortValue(row: DirectEntryRow, field: string): number | strin
     case "borderCaseInPastYear":
       return row.borderCaseInPastYear ? 1 : 0;
     case "threatBorderRp":
-      return row.borderCaseInPastYear ? 4 : 0;
+      return row.borderCaseInPastYear ? 2 : 0;
     case "threatVulnPts":
       return Object.values(row.vulnerabilities || {}).filter(Boolean).length;
     case "threatVulnRp":
@@ -672,6 +705,19 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
   const [popSearchTerm, setPopSearchTerm] = useState<string>("");
   const [popPage, setPopPage] = useState<number>(1);
   const [popPageSize, setPopPageSize] = useState<number>(10);
+  const [popSortField, setPopSortField] = useState<string>("index");
+  const [popSortDirection, setPopSortDirection] = useState<"asc" | "desc">("asc");
+
+  // Main Assessment Table pagination state
+  const [mainPage, setMainPage] = useState<number>(1);
+  const [mainPageSize, setMainPageSize] = useState<number>(50);
+
+  // Measles Incidence Table search, sorting & pagination state
+  const [incSearchTerm, setIncSearchTerm] = useState<string>("");
+  const [incSortField, setIncSortField] = useState<string>("index");
+  const [incSortDirection, setIncSortDirection] = useState<"asc" | "desc">("asc");
+  const [incPage, setIncPage] = useState<number>(1);
+  const [incPageSize, setIncPageSize] = useState<number>(25);
 
   // Column width management
   const [colWidths, setColWidths] = useState<Record<string, number>>(DEFAULT_COL_WIDTHS);
@@ -1519,12 +1565,20 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
     });
   }, [filteredRows, sortField, sortDirection]);
 
+  // Main assessment table pagination
+  const totalMainPages = mainPageSize === -1 ? 1 : Math.max(1, Math.ceil(sortedRows.length / mainPageSize));
+  const paginatedMainRows = useMemo(() => {
+    if (mainPageSize === -1) return sortedRows;
+    const start = (mainPage - 1) * mainPageSize;
+    return sortedRows.slice(start, start + mainPageSize);
+  }, [sortedRows, mainPage, mainPageSize]);
+
   // Grouped by Province for rendering Admin1 header rows seamlessly
   const groupedByProvince = useMemo(() => {
     const groups: Array<{ provinceName: string; provinceId?: number | null; districts: DirectEntryRow[] }> = [];
     const map = new Map<string, DirectEntryRow[]>();
 
-    sortedRows.forEach((r) => {
+    paginatedMainRows.forEach((r) => {
       const pName = r.provinceName || "Unassigned Province";
       if (!map.has(pName)) {
         map.set(pName, []);
@@ -1541,7 +1595,7 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
     });
 
     return groups;
-  }, [sortedRows]);
+  }, [paginatedMainRows]);
 
   const handleSort = (field: string) => {
     if (sortField === field) {
@@ -1577,7 +1631,27 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
     return localRows.reduce((acc, r) => acc + (Number(r.population) || 0), 0);
   }, [localRows]);
 
-  // District Population breakdown search and pagination
+  // District Population breakdown search, sorting, and pagination
+  const handlePopSort = (field: string) => {
+    if (popSortField === field) {
+      setPopSortDirection((prev) => (prev === "asc" ? "desc" : "asc"));
+    } else {
+      setPopSortField(field);
+      setPopSortDirection("asc");
+    }
+  };
+
+  const getPopSortIcon = (field: string) => {
+    if (popSortField !== field) {
+      return <ChevronsUpDown className="w-3 h-3 ml-0.5 opacity-30 shrink-0 inline text-slate-400 group-hover/th:opacity-80 transition-opacity" />;
+    }
+    return popSortDirection === "asc" ? (
+      <ChevronUp className="w-3 h-3 ml-0.5 text-primary shrink-0 inline font-bold" />
+    ) : (
+      <ChevronDown className="w-3 h-3 ml-0.5 text-primary shrink-0 inline font-bold" />
+    );
+  };
+
   const filteredPopRows = useMemo(() => {
     if (!popSearchTerm.trim()) return localRows;
     const q = popSearchTerm.toLowerCase();
@@ -1588,11 +1662,124 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
     );
   }, [localRows, popSearchTerm]);
 
-  const totalPopPages = Math.max(1, Math.ceil(filteredPopRows.length / popPageSize));
+  const sortedPopRows = useMemo(() => {
+    const rows = [...filteredPopRows];
+    return rows.sort((a, b) => {
+      let valA: any;
+      let valB: any;
+      if (popSortField === "index") {
+        valA = localRows.findIndex((r) => r.districtId === a.districtId);
+        valB = localRows.findIndex((r) => r.districtId === b.districtId);
+      } else if (popSortField === "districtName") {
+        valA = a.districtName || "";
+        valB = b.districtName || "";
+      } else if (popSortField === "provinceName") {
+        valA = a.provinceName || "";
+        valB = b.provinceName || "";
+      } else if (popSortField === "population" || popSortField === "pct" || popSortField === "under1") {
+        valA = Number(a.population) || 0;
+        valB = Number(b.population) || 0;
+      } else {
+        valA = (a as any)[popSortField] ?? "";
+        valB = (b as any)[popSortField] ?? "";
+      }
+
+      if (typeof valA === "number" && typeof valB === "number") {
+        return popSortDirection === "asc" ? valA - valB : valB - valA;
+      }
+      return popSortDirection === "asc"
+        ? String(valA).localeCompare(String(valB))
+        : String(valB).localeCompare(String(valA));
+    });
+  }, [filteredPopRows, popSortField, popSortDirection, localRows]);
+
+  const totalPopPages = Math.max(1, Math.ceil(sortedPopRows.length / popPageSize));
   const paginatedPopRows = useMemo(() => {
     const start = (popPage - 1) * popPageSize;
-    return filteredPopRows.slice(start, start + popPageSize);
-  }, [filteredPopRows, popPage, popPageSize]);
+    return sortedPopRows.slice(start, start + popPageSize);
+  }, [sortedPopRows, popPage, popPageSize]);
+
+  // Measles Incidence Table search, sorting & pagination
+  const handleIncSort = (field: string) => {
+    if (incSortField === field) {
+      setIncSortDirection((prev) => (prev === "asc" ? "desc" : "asc"));
+    } else {
+      setIncSortField(field);
+      setIncSortDirection("asc");
+    }
+  };
+
+  const getIncSortIcon = (field: string) => {
+    if (incSortField !== field) {
+      return <ChevronsUpDown className="w-3 h-3 ml-0.5 opacity-30 shrink-0 inline text-slate-400 group-hover/th:opacity-80 transition-opacity" />;
+    }
+    return incSortDirection === "asc" ? (
+      <ChevronUp className="w-3 h-3 ml-0.5 text-primary shrink-0 inline font-bold" />
+    ) : (
+      <ChevronDown className="w-3 h-3 ml-0.5 text-primary shrink-0 inline font-bold" />
+    );
+  };
+
+  const filteredIncRows = useMemo(() => {
+    if (!incSearchTerm.trim()) return localRows;
+    const q = incSearchTerm.toLowerCase();
+    return localRows.filter(
+      (r) =>
+        (r.districtName && r.districtName.toLowerCase().includes(q)) ||
+        (r.provinceName && r.provinceName.toLowerCase().includes(q))
+    );
+  }, [localRows, incSearchTerm]);
+
+  const sortedIncRows = useMemo(() => {
+    const rows = [...filteredIncRows];
+    return rows.sort((a, b) => {
+      let valA: any;
+      let valB: any;
+      if (incSortField === "index") {
+        valA = localRows.findIndex((r) => r.districtId === a.districtId);
+        valB = localRows.findIndex((r) => r.districtId === b.districtId);
+      } else if (incSortField === "districtName") {
+        valA = a.districtName || "";
+        valB = b.districtName || "";
+      } else if (incSortField === "provinceName") {
+        valA = a.provinceName || "";
+        valB = b.provinceName || "";
+      } else if (incSortField === "population") {
+        valA = Number(a.population) || 0;
+        valB = Number(b.population) || 0;
+      } else if (incSortField === "suspectedCasesYearMinus3") {
+        valA = (a as any).suspectedCasesYearMinus3 ?? Math.round((a.suspectedCases || 2) * 0.4);
+        valB = (b as any).suspectedCasesYearMinus3 ?? Math.round((b.suspectedCases || 2) * 0.4);
+      } else if (incSortField === "suspectedCasesYearMinus2") {
+        valA = (a as any).suspectedCasesYearMinus2 ?? Math.round((a.suspectedCases || 2) * 0.6);
+        valB = (b as any).suspectedCasesYearMinus2 ?? Math.round((b.suspectedCases || 2) * 0.6);
+      } else if (incSortField === "suspectedCases") {
+        valA = a.suspectedCases || 2;
+        valB = b.suspectedCases || 2;
+      } else if (incSortField === "incidence") {
+        const popA = Number(a.population) || 100000;
+        const popB = Number(b.population) || 100000;
+        valA = ((a.suspectedCases || 2) / popA) * 100000;
+        valB = ((b.suspectedCases || 2) / popB) * 100000;
+      } else {
+        valA = (a as any)[incSortField] ?? "";
+        valB = (b as any)[incSortField] ?? "";
+      }
+
+      if (typeof valA === "number" && typeof valB === "number") {
+        return incSortDirection === "asc" ? valA - valB : valB - valA;
+      }
+      return incSortDirection === "asc"
+        ? String(valA).localeCompare(String(valB))
+        : String(valB).localeCompare(String(valA));
+    });
+  }, [filteredIncRows, incSortField, incSortDirection, localRows]);
+
+  const totalIncPages = Math.max(1, Math.ceil(sortedIncRows.length / incPageSize));
+  const paginatedIncRows = useMemo(() => {
+    const start = (incPage - 1) * incPageSize;
+    return sortedIncRows.slice(start, start + incPageSize);
+  }, [sortedIncRows, incPage, incPageSize]);
 
   return (
     <div className="space-y-3 font-sans select-none w-full max-w-none">
@@ -2089,22 +2276,71 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
               </div>
 
               {/* Table conforming to Rule 24: Enterprise Table */}
-              <div className="border rounded-md overflow-hidden">
+              <div className="border rounded-lg overflow-x-auto max-h-[600px] relative bg-card shadow-sm custom-scrollbar">
                 <table className="w-full min-w-full text-xs text-left border-collapse table-auto">
-                  <thead className="bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 font-semibold border-b">
+                  <thead className="sticky top-0 z-30 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 font-semibold border-b shadow-sm select-none">
                     <tr>
-                      <th className="p-2 border-r-2 border-slate-300 dark:border-slate-600 text-center w-12">#</th>
-                      <th className="p-2 border-r-2 border-slate-300 dark:border-slate-600">District / Administrative Area</th>
-                      <th className="p-2 border-r-2 border-slate-400 dark:border-slate-500">Province / Region</th>
-                      <th className="p-2 border-r-2 border-slate-300 dark:border-slate-600 text-right w-40">Population (Editable)</th>
-                      <th className="p-2 border-r-2 border-slate-300 dark:border-slate-600 text-right w-32">% of National Total</th>
-                      <th className="p-2 text-right w-36">Est. Under 1 Pop (3.5%)</th>
+                      <th
+                        className="p-2 border-r border-slate-200 dark:border-slate-700 text-center sticky top-0 left-0 z-40 bg-slate-100 dark:bg-slate-800 w-14 min-w-[56px] cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
+                        onClick={() => handlePopSort("index")}
+                      >
+                        <div className="flex items-center justify-center gap-1">
+                          <span>#</span>
+                          {getPopSortIcon("index")}
+                        </div>
+                      </th>
+                      <th
+                        className="p-2 border-r-2 border-slate-300 dark:border-slate-600 shadow-[4px_0_8px_-2px_rgba(0,0,0,0.12)] sticky top-0 z-40 bg-slate-100 dark:bg-slate-800 min-w-[220px] cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors group/th"
+                        style={{ left: "56px" }}
+                        onClick={() => handlePopSort("districtName")}
+                      >
+                        <div className="flex items-center justify-between pr-2">
+                          <span className="font-bold text-foreground">District / Administrative Area</span>
+                          {getPopSortIcon("districtName")}
+                        </div>
+                      </th>
+                      <th
+                        className="p-2 border-r-2 border-slate-300 dark:border-slate-600 min-w-[160px] cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors group/th"
+                        onClick={() => handlePopSort("provinceName")}
+                      >
+                        <div className="flex items-center justify-between pr-2">
+                          <span>Province / Region</span>
+                          {getPopSortIcon("provinceName")}
+                        </div>
+                      </th>
+                      <th
+                        className="p-2 border-r-2 border-slate-300 dark:border-slate-600 text-right min-w-[170px] cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors group/th"
+                        onClick={() => handlePopSort("population")}
+                      >
+                        <div className="flex items-center justify-end gap-1.5 pr-2">
+                          <span>Population (Editable)</span>
+                          {getPopSortIcon("population")}
+                        </div>
+                      </th>
+                      <th
+                        className="p-2 border-r-2 border-slate-300 dark:border-slate-600 text-right min-w-[140px] cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors group/th"
+                        onClick={() => handlePopSort("pct")}
+                      >
+                        <div className="flex items-center justify-end gap-1.5 pr-2">
+                          <span>% of National Total</span>
+                          {getPopSortIcon("pct")}
+                        </div>
+                      </th>
+                      <th
+                        className="p-2 text-right min-w-[160px] cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors group/th"
+                        onClick={() => handlePopSort("under1")}
+                      >
+                        <div className="flex items-center justify-end gap-1.5 pr-2">
+                          <span>Est. Under 1 Pop (3.5%)</span>
+                          {getPopSortIcon("under1")}
+                        </div>
+                      </th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
+                  <tbody className="divide-y divide-slate-200 dark:divide-slate-700 bg-background text-foreground text-xs font-sans">
                     {paginatedPopRows.length === 0 ? (
                       <tr>
-                        <td colSpan={6} className="p-4 text-center text-muted-foreground text-xs">
+                        <td colSpan={6} className="p-8 text-center text-muted-foreground text-xs">
                           No matching districts found.
                         </td>
                       </tr>
@@ -2116,11 +2352,23 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                         const under1Est = Math.round(popNum * 0.035);
 
                         return (
-                          <tr key={r.districtId} className="hover:bg-muted/30 transition-colors">
-                            <td className="p-2 border-r border-slate-200 dark:border-slate-700 text-center font-mono text-muted-foreground">{globalIdx}</td>
-                            <td className="p-2 border-r border-slate-200 dark:border-slate-700 font-semibold text-foreground">{r.districtName || `District ${r.districtId}`}</td>
-                            <td className="p-2 border-r-2 border-slate-300 dark:border-slate-600 text-muted-foreground">{r.provinceName || "National"}</td>
-                            <td className="p-1.5 border-r border-slate-200 dark:border-slate-700 text-right">
+                          <tr key={r.districtId} className="hover:bg-muted/30 transition-colors group">
+                            <td
+                              className="p-2 border-r border-slate-200 dark:border-slate-700 text-center font-mono text-muted-foreground sticky left-0 z-20 bg-card group-hover:bg-muted/60"
+                              style={{ width: "56px", minWidth: "56px" }}
+                            >
+                              {globalIdx}
+                            </td>
+                            <td
+                              className="p-2 border-r-2 border-slate-300 dark:border-slate-600 shadow-[4px_0_8px_-2px_rgba(0,0,0,0.12)] font-semibold text-foreground sticky z-20 bg-card group-hover:bg-muted/60"
+                              style={{ left: "56px", minWidth: "220px" }}
+                            >
+                              {r.districtName || `District ${r.districtId}`}
+                            </td>
+                            <td className="p-2 border-r-2 border-slate-300 dark:border-slate-600 text-muted-foreground">
+                              {r.provinceName || "National"}
+                            </td>
+                            <td className="p-1.5 border-r-2 border-slate-300 dark:border-slate-600 text-right">
                               <Input
                                 type="number"
                                 min={0}
@@ -2131,8 +2379,12 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                                 className="h-7 text-xs font-mono text-right font-bold w-36 ml-auto"
                               />
                             </td>
-                            <td className="p-2 border-r border-slate-200 dark:border-slate-700 text-right font-mono text-muted-foreground">{pctOfTotal}%</td>
-                            <td className="p-2 text-right font-mono text-muted-foreground">{under1Est.toLocaleString()}</td>
+                            <td className="p-2 border-r-2 border-slate-300 dark:border-slate-600 text-right font-mono text-muted-foreground">
+                              {pctOfTotal}%
+                            </td>
+                            <td className="p-2 text-right font-mono text-muted-foreground">
+                              {under1Est.toLocaleString()}
+                            </td>
                           </tr>
                         );
                       })
@@ -2141,15 +2393,15 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                 </table>
               </div>
 
-              {/* Pagination controls */}
-              <div className="flex flex-col sm:flex-row items-center justify-between gap-2 pt-2 text-xs text-muted-foreground">
+              {/* Pagination controls conforming to Rule 24 */}
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-3 text-xs text-muted-foreground border-t">
                 <div className="flex items-center gap-2">
                   <span>
                     Showing {paginatedPopRows.length > 0 ? (popPage - 1) * popPageSize + 1 : 0} to{" "}
-                    {Math.min(popPage * popPageSize, filteredPopRows.length)} of {filteredPopRows.length} districts
+                    {Math.min(popPage * popPageSize, sortedPopRows.length)} of {sortedPopRows.length} districts
                   </span>
                   <span className="text-muted-foreground">•</span>
-                  <div className="flex items-center gap-1">
+                  <div className="flex items-center gap-1.5">
                     <span>Rows per page:</span>
                     <Select
                       value={String(popPageSize)}
@@ -2158,58 +2410,86 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                         setPopPage(1);
                       }}
                     >
-                      <SelectTrigger className="h-6 w-16 text-xs font-mono">
+                      <SelectTrigger className="h-7 w-20 text-xs font-mono">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="10">10</SelectItem>
                         <SelectItem value="25">25</SelectItem>
-                        <SelectItem value="52">52</SelectItem>
+                        <SelectItem value="50">50</SelectItem>
                         <SelectItem value="100">100</SelectItem>
+                        <SelectItem value="200">200</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
                 </div>
 
-                <div className="flex items-center gap-1">
+                <div className="flex items-center gap-1.5">
                   <Button
                     size="sm"
                     variant="outline"
                     onClick={() => setPopPage(1)}
                     disabled={popPage <= 1}
-                    className="h-6 px-2 text-xs"
+                    className="h-7 px-2 text-xs gap-1"
+                    title="First Page"
                   >
-                    First
+                    <ChevronsLeft className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline">First</span>
                   </Button>
                   <Button
                     size="sm"
                     variant="outline"
                     onClick={() => setPopPage((p) => Math.max(1, p - 1))}
                     disabled={popPage <= 1}
-                    className="h-6 px-2 text-xs"
+                    className="h-7 px-2 text-xs gap-1"
+                    title="Previous Page"
                   >
-                    Prev
+                    <ChevronLeft className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline">Prev</span>
                   </Button>
-                  <span className="px-2 font-mono text-xs">
-                    Page {popPage} of {totalPopPages}
-                  </span>
+
+                  {/* Page Jump Selector Dropdown */}
+                  <div className="flex items-center gap-1 mx-1">
+                    <span className="text-muted-foreground">Page</span>
+                    <Select
+                      value={String(popPage)}
+                      onValueChange={(v) => setPopPage(Number(v))}
+                    >
+                      <SelectTrigger className="h-7 w-16 text-xs font-mono font-semibold">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent className="max-h-56">
+                        {Array.from({ length: totalPopPages }, (_, idx) => idx + 1).map((pNum) => (
+                          <SelectItem key={pNum} value={String(pNum)} className="text-xs font-mono">
+                            {pNum}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <span className="text-muted-foreground font-mono">of {totalPopPages}</span>
+                  </div>
+
                   <Button
                     size="sm"
                     variant="outline"
                     onClick={() => setPopPage((p) => Math.min(totalPopPages, p + 1))}
                     disabled={popPage >= totalPopPages}
-                    className="h-6 px-2 text-xs"
+                    className="h-7 px-2 text-xs gap-1"
+                    title="Next Page"
                   >
-                    Next
+                    <span className="hidden sm:inline">Next</span>
+                    <ChevronRight className="w-3.5 h-3.5" />
                   </Button>
                   <Button
                     size="sm"
                     variant="outline"
                     onClick={() => setPopPage(totalPopPages)}
                     disabled={popPage >= totalPopPages}
-                    className="h-6 px-2 text-xs"
+                    className="h-7 px-2 text-xs gap-1"
+                    title="Last Page"
                   >
-                    Last
+                    <span className="hidden sm:inline">Last</span>
+                    <ChevronsRight className="w-3.5 h-3.5" />
                   </Button>
                 </div>
               </div>
@@ -3400,10 +3680,10 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                           const cUnder5 = Number(row.threatCasesUnder5) || 0;
                           const c5to14 = Number(row.threatCases5To14) || 0;
                           const c15plus = Number(row.threatCases15Plus) || 0;
-                          const cUnder5Rp = cUnder5 > 0 ? 6 : 0;
-                          const c5to14Rp = c5to14 > 0 ? 2 : 0;
-                          const c15plusRp = c15plus > 0 ? 1 : 0;
-                          const borderRp = row.borderCaseInPastYear ? 4 : 0;
+                          const cUnder5Rp = cUnder5 > 0 ? 4 : 0;
+                          const c5to14Rp = c5to14 > 0 ? 3 : 0;
+                          const c15plusRp = c15plus > 0 ? 3 : 0;
+                          const borderRp = row.borderCaseInPastYear ? 2 : 0;
                           const taSubtotal = calcThreatPoints(cUnder5, c5to14, c15plus, density, row.borderCaseInPastYear, vulnCount);
 
                           return (
@@ -3842,6 +4122,108 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                 </tbody>
               </table>
             </div>
+
+            {/* Table 2 Pagination controls conforming to Rule 24 */}
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-3 p-3 bg-muted/20 border-t text-xs text-muted-foreground">
+              <div className="flex items-center gap-2">
+                <span>
+                  Showing {paginatedMainRows.length > 0 ? (mainPage - 1) * mainPageSize + 1 : 0} to{" "}
+                  {mainPageSize === -1 ? sortedRows.length : Math.min(mainPage * mainPageSize, sortedRows.length)} of {sortedRows.length} districts
+                </span>
+                <span className="text-muted-foreground">•</span>
+                <div className="flex items-center gap-1.5">
+                  <span>Rows per page:</span>
+                  <Select
+                    value={String(mainPageSize)}
+                    onValueChange={(v) => {
+                      setMainPageSize(Number(v));
+                      setMainPage(1);
+                    }}
+                  >
+                    <SelectTrigger className="h-7 w-24 text-xs font-mono">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="25">25</SelectItem>
+                      <SelectItem value="50">50</SelectItem>
+                      <SelectItem value="100">100</SelectItem>
+                      <SelectItem value="200">200</SelectItem>
+                      <SelectItem value="-1">All ({sortedRows.length})</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              {mainPageSize !== -1 && totalMainPages > 1 && (
+                <div className="flex items-center gap-1.5">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setMainPage(1)}
+                    disabled={mainPage <= 1}
+                    className="h-7 px-2 text-xs gap-1"
+                    title="First Page"
+                  >
+                    <ChevronsLeft className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline">First</span>
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setMainPage((p) => Math.max(1, p - 1))}
+                    disabled={mainPage <= 1}
+                    className="h-7 px-2 text-xs gap-1"
+                    title="Previous Page"
+                  >
+                    <ChevronLeft className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline">Prev</span>
+                  </Button>
+
+                  <div className="flex items-center gap-1 mx-1">
+                    <span className="text-muted-foreground">Page</span>
+                    <Select
+                      value={String(mainPage)}
+                      onValueChange={(v) => setMainPage(Number(v))}
+                    >
+                      <SelectTrigger className="h-7 w-16 text-xs font-mono font-semibold">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent className="max-h-56">
+                        {Array.from({ length: totalMainPages }, (_, idx) => idx + 1).map((pNum) => (
+                          <SelectItem key={pNum} value={String(pNum)} className="text-xs font-mono">
+                            {pNum}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <span className="text-muted-foreground font-mono">of {totalMainPages}</span>
+                  </div>
+
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setMainPage((p) => Math.min(totalMainPages, p + 1))}
+                    disabled={mainPage >= totalMainPages}
+                    className="h-7 px-2 text-xs gap-1"
+                    title="Next Page"
+                  >
+                    <span className="hidden sm:inline">Next</span>
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setMainPage(totalMainPages)}
+                    disabled={mainPage >= totalMainPages}
+                    className="h-7 px-2 text-xs gap-1"
+                    title="Last Page"
+                  >
+                    <span className="hidden sm:inline">Last</span>
+                    <ChevronsRight className="w-3.5 h-3.5" />
+                  </Button>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}
@@ -3852,83 +4234,287 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
       {activeTab === "measles-incidence" && (
         <Card className="border shadow-sm">
           <CardHeader className="pb-3 border-b bg-muted/20">
-            <CardTitle className="text-base font-bold flex items-center gap-2">
-              <TrendingUp className="w-4 h-4 text-emerald-600" />
-              Measles Annual Incidence &amp; Outbreak Tracking
-            </CardTitle>
-            <CardDescription className="text-xs">
-              Annual confirmed measles cases and incidence per 100,000 population across districts.
-            </CardDescription>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <CardTitle className="text-base font-bold flex items-center gap-2">
+                  <TrendingUp className="w-4 h-4 text-emerald-600" />
+                  Measles Annual Incidence &amp; Outbreak Tracking
+                </CardTitle>
+                <CardDescription className="text-xs">
+                  Annual confirmed measles cases and incidence per 100,000 population across districts.
+                </CardDescription>
+              </div>
+              <div className="relative w-52">
+                <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  placeholder="Filter districts..."
+                  value={incSearchTerm}
+                  onChange={(e) => {
+                    setIncSearchTerm(e.target.value);
+                    setIncPage(1);
+                  }}
+                  className="h-7 text-xs pl-8 font-sans"
+                />
+              </div>
+            </div>
           </CardHeader>
           <CardContent className="p-4 space-y-3">
-            <div className="border rounded-lg overflow-hidden">
+            <div className="border rounded-lg overflow-x-auto max-h-[600px] relative bg-card shadow-sm custom-scrollbar">
               <table className="w-full min-w-full text-xs text-left border-collapse table-auto">
-                <thead className="bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 font-semibold border-b">
+                <thead className="sticky top-0 z-30 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 font-semibold border-b shadow-sm select-none">
                   <tr>
-                    <th className="p-2 border-r-2 border-slate-300 dark:border-slate-600 text-center w-12">#</th>
-                    <th className="p-2 border-r-2 border-slate-300 dark:border-slate-600">District / Area</th>
-                    <th className="p-2 border-r-2 border-slate-400 dark:border-slate-500">Province</th>
-                    <th className="p-2 border-r-2 border-slate-300 dark:border-slate-600 text-right">Population</th>
-                    <th className="p-2 border-r-2 border-slate-300 dark:border-slate-600 text-right">Cases ({dataFirstYear})</th>
-                    <th className="p-2 border-r-2 border-slate-300 dark:border-slate-600 text-right">Cases ({dataSecondYear})</th>
-                    <th className="p-2 border-r-2 border-slate-300 dark:border-slate-600 text-right">Cases ({dataLastYear})</th>
-                    <th className="p-2 text-right">Incidence / 100k ({dataLastYear})</th>
+                    <th
+                      className="p-2 border-r border-slate-200 dark:border-slate-700 text-center sticky top-0 left-0 z-40 bg-slate-100 dark:bg-slate-800 w-14 min-w-[56px] cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
+                      onClick={() => handleIncSort("index")}
+                    >
+                      <div className="flex items-center justify-center gap-1">
+                        <span>#</span>
+                        {getIncSortIcon("index")}
+                      </div>
+                    </th>
+                    <th
+                      className="p-2 border-r-2 border-slate-300 dark:border-slate-600 shadow-[4px_0_8px_-2px_rgba(0,0,0,0.12)] sticky top-0 z-40 bg-slate-100 dark:bg-slate-800 min-w-[200px] cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors group/th"
+                      style={{ left: "56px" }}
+                      onClick={() => handleIncSort("districtName")}
+                    >
+                      <div className="flex items-center justify-between pr-2">
+                        <span className="font-bold text-foreground">District / Area</span>
+                        {getIncSortIcon("districtName")}
+                      </div>
+                    </th>
+                    <th
+                      className="p-2 border-r-2 border-slate-300 dark:border-slate-600 min-w-[150px] cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors group/th"
+                      onClick={() => handleIncSort("provinceName")}
+                    >
+                      <div className="flex items-center justify-between pr-2">
+                        <span>Province</span>
+                        {getIncSortIcon("provinceName")}
+                      </div>
+                    </th>
+                    <th
+                      className="p-2 border-r-2 border-slate-300 dark:border-slate-600 text-right min-w-[140px] cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors group/th"
+                      onClick={() => handleIncSort("population")}
+                    >
+                      <div className="flex items-center justify-end gap-1.5 pr-2">
+                        <span>Population</span>
+                        {getIncSortIcon("population")}
+                      </div>
+                    </th>
+                    <th
+                      className="p-2 border-r-2 border-slate-300 dark:border-slate-600 text-right min-w-[130px] cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors group/th"
+                      onClick={() => handleIncSort("suspectedCasesYearMinus3")}
+                    >
+                      <div className="flex items-center justify-end gap-1.5 pr-2">
+                        <span>Cases ({dataFirstYear})</span>
+                        {getIncSortIcon("suspectedCasesYearMinus3")}
+                      </div>
+                    </th>
+                    <th
+                      className="p-2 border-r-2 border-slate-300 dark:border-slate-600 text-right min-w-[130px] cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors group/th"
+                      onClick={() => handleIncSort("suspectedCasesYearMinus2")}
+                    >
+                      <div className="flex items-center justify-end gap-1.5 pr-2">
+                        <span>Cases ({dataSecondYear})</span>
+                        {getIncSortIcon("suspectedCasesYearMinus2")}
+                      </div>
+                    </th>
+                    <th
+                      className="p-2 border-r-2 border-slate-300 dark:border-slate-600 text-right min-w-[140px] cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors group/th"
+                      onClick={() => handleIncSort("suspectedCases")}
+                    >
+                      <div className="flex items-center justify-end gap-1.5 pr-2">
+                        <span>Cases ({dataLastYear})</span>
+                        {getIncSortIcon("suspectedCases")}
+                      </div>
+                    </th>
+                    <th
+                      className="p-2 text-right min-w-[160px] cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors group/th"
+                      onClick={() => handleIncSort("incidence")}
+                    >
+                      <div className="flex items-center justify-end gap-1.5 pr-2">
+                        <span>Incidence / 100k ({dataLastYear})</span>
+                        {getIncSortIcon("incidence")}
+                      </div>
+                    </th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
-                  {localRows.slice(0, 50).map((r, i) => {
-                    const pop = Number(r.population) || 100000;
-                    const c3 = Math.max(0, Math.round((r.suspectedCases || 2) * 0.4));
-                    const c2 = Math.max(0, Math.round((r.suspectedCases || 2) * 0.6));
-                    const c1 = r.suspectedCases || 2;
-                    const inc1 = Number(((c1 / pop) * 100000).toFixed(1));
+                <tbody className="divide-y divide-slate-200 dark:divide-slate-700 bg-background text-foreground text-xs font-sans">
+                  {paginatedIncRows.length === 0 ? (
+                    <tr>
+                      <td colSpan={8} className="p-8 text-center text-muted-foreground text-xs">
+                        No matching districts found.
+                      </td>
+                    </tr>
+                  ) : (
+                    paginatedIncRows.map((r, i) => {
+                      const globalIdx = (incPage - 1) * incPageSize + i + 1;
+                      const pop = Number(r.population) || 100000;
+                      const c3 = Math.max(0, Math.round((r.suspectedCases || 2) * 0.4));
+                      const c2 = Math.max(0, Math.round((r.suspectedCases || 2) * 0.6));
+                      const c1 = r.suspectedCases || 2;
+                      const inc1 = Number(((c1 / pop) * 100000).toFixed(1));
 
-                    return (
-                      <tr key={r.districtId} className="hover:bg-muted/40 transition-colors">
-                        <td className="p-1.5 border-r border-slate-200 dark:border-slate-700 text-center font-mono text-muted-foreground">{i + 1}</td>
-                        <td className="p-1.5 border-r border-slate-200 dark:border-slate-700 font-semibold text-foreground">{r.districtName}</td>
-                        <td className="p-1.5 border-r-2 border-slate-300 dark:border-slate-600 text-muted-foreground">{r.provinceName}</td>
-                        <td className="p-1.5 border-r border-slate-200 dark:border-slate-700 text-right font-mono">{pop.toLocaleString()}</td>
-                        <td className="p-1 border-r border-slate-200 dark:border-slate-700 text-right">
-                          <Input
-                            type="number"
-                            min="0"
-                            value={(r as any).suspectedCasesYearMinus3 ?? c3}
-                            onChange={(e) => handleCellChange(r.districtId, "suspectedCasesYearMinus3" as any, Number(e.target.value))}
-                            className="h-7 w-20 text-xs text-right font-mono p-1 ml-auto"
-                            title="Edit annual measles cases for Year -3"
-                          />
-                        </td>
-                        <td className="p-1 border-r border-slate-200 dark:border-slate-700 text-right">
-                          <Input
-                            type="number"
-                            min="0"
-                            value={(r as any).suspectedCasesYearMinus2 ?? c2}
-                            onChange={(e) => handleCellChange(r.districtId, "suspectedCasesYearMinus2" as any, Number(e.target.value))}
-                            className="h-7 w-20 text-xs text-right font-mono p-1 ml-auto"
-                            title="Edit annual measles cases for Year -2"
-                          />
-                        </td>
-                        <td className="p-1 border-r-2 border-slate-300 dark:border-slate-600 text-right">
-                          <Input
-                            type="number"
-                            min="0"
-                            value={r.suspectedCases ?? 2}
-                            onChange={(e) => handleCellChange(r.districtId, "suspectedCases", Number(e.target.value))}
-                            className="h-7 w-20 text-xs text-right font-mono font-bold p-1 ml-auto"
-                            title="Edit annual measles cases for Year -1 (Most recent)"
-                          />
-                        </td>
-                        <td className="p-1.5 text-right font-mono font-bold">
-                          <span className={inc1 > 5 ? "text-red-600 font-black" : "text-foreground"}>
-                            {inc1}
-                          </span>
-                        </td>
-                      </tr>
-                    );
-                  })}
+                      return (
+                        <tr key={r.districtId} className="hover:bg-muted/30 transition-colors group">
+                          <td
+                            className="p-1.5 border-r border-slate-200 dark:border-slate-700 text-center font-mono text-muted-foreground sticky left-0 z-20 bg-card group-hover:bg-muted/60"
+                            style={{ width: "56px", minWidth: "56px" }}
+                          >
+                            {globalIdx}
+                          </td>
+                          <td
+                            className="p-1.5 border-r-2 border-slate-300 dark:border-slate-600 shadow-[4px_0_8px_-2px_rgba(0,0,0,0.12)] font-semibold text-foreground sticky z-20 bg-card group-hover:bg-muted/60"
+                            style={{ left: "56px", minWidth: "200px" }}
+                          >
+                            {r.districtName}
+                          </td>
+                          <td className="p-1.5 border-r-2 border-slate-300 dark:border-slate-600 text-muted-foreground">
+                            {r.provinceName}
+                          </td>
+                          <td className="p-1.5 border-r-2 border-slate-300 dark:border-slate-600 text-right font-mono">
+                            {pop.toLocaleString()}
+                          </td>
+                          <td className="p-1 border-r-2 border-slate-300 dark:border-slate-600 text-right">
+                            <Input
+                              type="number"
+                              min="0"
+                              value={(r as any).suspectedCasesYearMinus3 ?? c3}
+                              onChange={(e) => handleCellChange(r.districtId, "suspectedCasesYearMinus3" as any, Number(e.target.value))}
+                              className="h-7 w-20 text-xs text-right font-mono p-1 ml-auto"
+                              title="Edit annual measles cases for Year -3"
+                            />
+                          </td>
+                          <td className="p-1 border-r-2 border-slate-300 dark:border-slate-600 text-right">
+                            <Input
+                              type="number"
+                              min="0"
+                              value={(r as any).suspectedCasesYearMinus2 ?? c2}
+                              onChange={(e) => handleCellChange(r.districtId, "suspectedCasesYearMinus2" as any, Number(e.target.value))}
+                              className="h-7 w-20 text-xs text-right font-mono p-1 ml-auto"
+                              title="Edit annual measles cases for Year -2"
+                            />
+                          </td>
+                          <td className="p-1 border-r-2 border-slate-300 dark:border-slate-600 text-right">
+                            <Input
+                              type="number"
+                              min="0"
+                              value={r.suspectedCases ?? 2}
+                              onChange={(e) => handleCellChange(r.districtId, "suspectedCases", Number(e.target.value))}
+                              className="h-7 w-20 text-xs text-right font-mono font-bold p-1 ml-auto"
+                              title="Edit annual measles cases for Year -1 (Most recent)"
+                            />
+                          </td>
+                          <td className="p-1.5 text-right font-mono font-bold">
+                            <span className={inc1 > 5 ? "text-red-600 font-black" : "text-foreground"}>
+                              {inc1}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
                 </tbody>
               </table>
+            </div>
+
+            {/* Incidence Pagination Controls conforming to Rule 24 */}
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-3 text-xs text-muted-foreground border-t">
+              <div className="flex items-center gap-2">
+                <span>
+                  Showing {paginatedIncRows.length > 0 ? (incPage - 1) * incPageSize + 1 : 0} to{" "}
+                  {Math.min(incPage * incPageSize, sortedIncRows.length)} of {sortedIncRows.length} districts
+                </span>
+                <span className="text-muted-foreground">•</span>
+                <div className="flex items-center gap-1.5">
+                  <span>Rows per page:</span>
+                  <Select
+                    value={String(incPageSize)}
+                    onValueChange={(v) => {
+                      setIncPageSize(Number(v));
+                      setIncPage(1);
+                    }}
+                  >
+                    <SelectTrigger className="h-7 w-20 text-xs font-mono">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="10">10</SelectItem>
+                      <SelectItem value="25">25</SelectItem>
+                      <SelectItem value="50">50</SelectItem>
+                      <SelectItem value="100">100</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-1.5">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setIncPage(1)}
+                  disabled={incPage <= 1}
+                  className="h-7 px-2 text-xs gap-1"
+                  title="First Page"
+                >
+                  <ChevronsLeft className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">First</span>
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setIncPage((p) => Math.max(1, p - 1))}
+                  disabled={incPage <= 1}
+                  className="h-7 px-2 text-xs gap-1"
+                  title="Previous Page"
+                >
+                  <ChevronLeft className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Prev</span>
+                </Button>
+
+                {/* Page Jump Selector Dropdown */}
+                <div className="flex items-center gap-1 mx-1">
+                  <span className="text-muted-foreground">Page</span>
+                  <Select
+                    value={String(incPage)}
+                    onValueChange={(v) => setIncPage(Number(v))}
+                  >
+                    <SelectTrigger className="h-7 w-16 text-xs font-mono font-semibold">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent className="max-h-56">
+                      {Array.from({ length: totalIncPages }, (_, idx) => idx + 1).map((pNum) => (
+                        <SelectItem key={pNum} value={String(pNum)} className="text-xs font-mono">
+                          {pNum}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <span className="text-muted-foreground font-mono">of {totalIncPages}</span>
+                </div>
+
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setIncPage((p) => Math.min(totalIncPages, p + 1))}
+                  disabled={incPage >= totalIncPages}
+                  className="h-7 px-2 text-xs gap-1"
+                  title="Next Page"
+                >
+                  <span className="hidden sm:inline">Next</span>
+                  <ChevronRight className="w-3.5 h-3.5" />
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setIncPage(totalIncPages)}
+                  disabled={incPage >= totalIncPages}
+                  className="h-7 px-2 text-xs gap-1"
+                  title="Last Page"
+                >
+                  <span className="hidden sm:inline">Last</span>
+                  <ChevronsRight className="w-3.5 h-3.5" />
+                </Button>
+              </div>
             </div>
           </CardContent>
         </Card>
@@ -4702,55 +5288,103 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
               </table>
             </div>
 
-            {/* Pagination Controls */}
-            <div className="flex flex-col sm:flex-row items-center justify-between gap-2 pt-2 text-xs text-muted-foreground">
-              <div>
-                Showing {sortedCases.length > 0 ? (caseCurrentPage - 1) * casePageSize + 1 : 0} to{" "}
-                {Math.min(caseCurrentPage * casePageSize, sortedCases.length)} of {sortedCases.length} records
+            {/* Pagination Controls conforming to Rule 24 */}
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-3 text-xs text-muted-foreground border-t">
+              <div className="flex items-center gap-2">
+                <span>
+                  Showing {sortedCases.length > 0 ? (caseCurrentPage - 1) * casePageSize + 1 : 0} to{" "}
+                  {Math.min(caseCurrentPage * casePageSize, sortedCases.length)} of {sortedCases.length} records
+                </span>
+                <span className="text-muted-foreground">•</span>
+                <div className="flex items-center gap-1.5">
+                  <span>Rows per page:</span>
+                  <Select
+                    value={String(casePageSize)}
+                    onValueChange={(v) => {
+                      setCasePageSize(Number(v));
+                      setCaseCurrentPage(1);
+                    }}
+                  >
+                    <SelectTrigger className="h-7 w-20 text-xs font-mono">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="10">10</SelectItem>
+                      <SelectItem value="25">25</SelectItem>
+                      <SelectItem value="50">50</SelectItem>
+                      <SelectItem value="100">100</SelectItem>
+                      <SelectItem value="200">200</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
+
               <div className="flex items-center gap-1.5">
                 <Button
-                  variant="outline"
                   size="sm"
-                  disabled={caseCurrentPage <= 1}
+                  variant="outline"
                   onClick={() => setCaseCurrentPage(1)}
-                  className="h-7 w-7 p-0"
+                  disabled={caseCurrentPage <= 1}
+                  className="h-7 px-2 text-xs gap-1"
                   title="First Page"
                 >
-                  &laquo;
+                  <ChevronsLeft className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">First</span>
                 </Button>
                 <Button
-                  variant="outline"
                   size="sm"
-                  disabled={caseCurrentPage <= 1}
+                  variant="outline"
                   onClick={() => setCaseCurrentPage((p) => Math.max(1, p - 1))}
-                  className="h-7 w-7 p-0"
+                  disabled={caseCurrentPage <= 1}
+                  className="h-7 px-2 text-xs gap-1"
                   title="Previous Page"
                 >
                   <ChevronLeft className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Prev</span>
                 </Button>
-                <span className="px-2 font-mono font-medium text-foreground">
-                  Page {caseCurrentPage} of {totalCasePages}
-                </span>
+
+                {/* Page Jump Selector Dropdown */}
+                <div className="flex items-center gap-1 mx-1">
+                  <span className="text-muted-foreground">Page</span>
+                  <Select
+                    value={String(caseCurrentPage)}
+                    onValueChange={(v) => setCaseCurrentPage(Number(v))}
+                  >
+                    <SelectTrigger className="h-7 w-16 text-xs font-mono font-semibold">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent className="max-h-56">
+                      {Array.from({ length: totalCasePages }, (_, idx) => idx + 1).map((pNum) => (
+                        <SelectItem key={pNum} value={String(pNum)} className="text-xs font-mono">
+                          {pNum}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <span className="text-muted-foreground font-mono">of {totalCasePages}</span>
+                </div>
+
                 <Button
-                  variant="outline"
                   size="sm"
-                  disabled={caseCurrentPage >= totalCasePages}
+                  variant="outline"
                   onClick={() => setCaseCurrentPage((p) => Math.min(totalCasePages, p + 1))}
-                  className="h-7 w-7 p-0"
+                  disabled={caseCurrentPage >= totalCasePages}
+                  className="h-7 px-2 text-xs gap-1"
                   title="Next Page"
                 >
+                  <span className="hidden sm:inline">Next</span>
                   <ChevronRight className="w-3.5 h-3.5" />
                 </Button>
                 <Button
-                  variant="outline"
                   size="sm"
-                  disabled={caseCurrentPage >= totalCasePages}
+                  variant="outline"
                   onClick={() => setCaseCurrentPage(totalCasePages)}
-                  className="h-7 w-7 p-0"
+                  disabled={caseCurrentPage >= totalCasePages}
+                  className="h-7 px-2 text-xs gap-1"
                   title="Last Page"
                 >
-                  &raquo;
+                  <span className="hidden sm:inline">Last</span>
+                  <ChevronsRight className="w-3.5 h-3.5" />
                 </Button>
               </div>
             </div>

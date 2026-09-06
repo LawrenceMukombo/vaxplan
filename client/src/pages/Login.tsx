@@ -16,8 +16,9 @@ import {
 } from "lucide-react";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { PageHead } from "@/components/PageHead";
-import { saveTenantsCache, loadTenantsCache } from "@/lib/tenantCache";
-import { clearLogoutState } from "@/lib/authSession";
+import { saveTenantsCache, loadTenantsCache, saveActiveTenant } from "@/lib/tenantCache";
+import { clearLogoutState, recordOnlineAuthSession } from "@/lib/authSession";
+import { queryClient } from "@/lib/queryClient";
 
 interface PublicTenant {
   id: string;
@@ -112,7 +113,19 @@ export default function LoginPage() {
         setError(data?.message || "Login failed.");
         return;
       }
-      window.location.href = "/";
+      clearLogoutState();
+      if (data?.user) {
+        recordOnlineAuthSession(data.user);
+        if (selectedTenantId) {
+          const matchedTenant = activeTenants.find((t) => t.id === selectedTenantId);
+          if (matchedTenant) {
+            saveActiveTenant(matchedTenant);
+          }
+        }
+        queryClient.setQueryData(["/api/auth/user"], data.user);
+        void queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
+      }
+      window.location.replace("/");
     } catch (err) {
       setError("Network error. Try again.");
     } finally {
