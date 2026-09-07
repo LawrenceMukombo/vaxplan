@@ -81,6 +81,8 @@ export async function applyRiskAssessmentSchema(db: NodePgDatabase<any>): Promis
       created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at              TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+    ALTER TABLE risk_assessments
+      ADD COLUMN IF NOT EXISTS report_config_json JSONB DEFAULT '{}'::jsonb;
     CREATE INDEX IF NOT EXISTS idx_risk_assessment_tenant ON risk_assessments(tenant_id);
   `);
 
