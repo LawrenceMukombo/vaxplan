@@ -325,36 +325,104 @@ riskRouter.get("/assessments", async (req: any, res) => {
 riskRouter.post("/assessments", async (req: any, res) => {
   try {
     const body = req.body || {};
-    
-    // Accept version code string or fallback to WHO_MEASLES_GLOBAL_RECONCILED_V1
-    const methodologyVerId = 
-      (typeof body.methodologyVersionId === "string" && body.methodologyVersionId.trim()) 
-        ? body.methodologyVersionId.trim() 
+    const requestedMethodologyVersion =
+      typeof body.methodologyVersionId === "string" && body.methodologyVersionId.trim()
+        ? body.methodologyVersionId.trim()
         : WHO_MEASLES_GLOBAL_RECONCILED_V1.code;
+    const parsedYear = Number(body.assessmentYear);
 
-    const parsedYear = Number(body.assessmentYear) || 2023;
+    if (!Number.isInteger(parsedYear) || parsedYear < 2000 || parsedYear > 2100) {
+      return res.status(400).json({ message: "Assessment year must be between 2000 and 2100." });
+    }
+
+    let [methodologyVersion] = await db
+      .select({ id: riskMethodologyVersions.id })
+      .from(riskMethodologyVersions)
+      .where(
+        or(
+          eq(riskMethodologyVersions.id, requestedMethodologyVersion),
+          eq(riskMethodologyVersions.version, requestedMethodologyVersion),
+        ),
+      )
+      .limit(1);
+
+    // Older production databases may have the risk tables without migration
+    // 032's methodology seed. Recreate the built-in published package here so
+    // assessment creation remains safe and idempotent after partial deploys.
+    if (!methodologyVersion && requestedMethodologyVersion === WHO_MEASLES_GLOBAL_RECONCILED_V1.code) {
+      let [methodology] = await db
+        .select({ id: riskMethodologies.id })
+        .from(riskMethodologies)
+        .where(eq(riskMethodologies.key, "who_measles"))
+        .limit(1);
+
+      if (!methodology) {
+        await db
+          .insert(riskMethodologies)
+          .values({
+            id: "who_measles",
+            key: "who_measles",
+            name: WHO_MEASLES_GLOBAL_RECONCILED_V1.name,
+            disease: WHO_MEASLES_GLOBAL_RECONCILED_V1.disease,
+            description: "WHO subnational measles programmatic risk assessment methodology.",
+            sourceOrg: WHO_MEASLES_GLOBAL_RECONCILED_V1.sourceOrganization,
+          })
+          .onConflictDoNothing();
+
+        [methodology] = await db
+          .select({ id: riskMethodologies.id })
+          .from(riskMethodologies)
+          .where(eq(riskMethodologies.key, "who_measles"))
+          .limit(1);
+      }
+
+      if (!methodology) {
+        throw new Error("Unable to initialize the WHO measles methodology.");
+      }
+
+      await db
+        .insert(riskMethodologyVersions)
+        .values({
+          id: WHO_MEASLES_GLOBAL_RECONCILED_V1.code,
+          methodologyId: methodology.id,
+          version: WHO_MEASLES_GLOBAL_RECONCILED_V1.version,
+          status: "published",
+          rulesJson: WHO_MEASLES_GLOBAL_RECONCILED_V1,
+          checksum: "who-measles-v1-reconciled-sha256",
+        })
+        .onConflictDoNothing();
+
+      [methodologyVersion] = await db
+        .select({ id: riskMethodologyVersions.id })
+        .from(riskMethodologyVersions)
+        .where(eq(riskMethodologyVersions.id, WHO_MEASLES_GLOBAL_RECONCILED_V1.code))
+        .limit(1);
+    }
+
+    if (!methodologyVersion) {
+      return res.status(400).json({ message: "Selected assessment methodology is not available." });
+    }
 
     const [created] = await db
       .insert(riskAssessments)
       .values({
         tenantId: req.tenantId,
         title: body.title || `${parsedYear} Measles Programmatic Risk Assessment`,
-        methodologyVersionId: methodologyVerId,
+        methodologyVersionId: methodologyVersion.id,
         assessmentYear: parsedYear,
         baselineYears: body.baselineYears || [parsedYear - 3, parsedYear - 2, parsedYear - 1],
         status: "draft",
         notes: body.notes || null,
-        createdByUserId: req.user?.id || (req.user as any)?.claims?.sub || null,
+        createdByUserId: req.dbUser?.id || null,
       })
       .returning();
 
     res.status(201).json(created);
   } catch (err: any) {
     console.error("POST /api/risk/assessments error:", err);
-    res.status(400).json({ message: err.message || "Failed to create assessment" });
+    res.status(500).json({ message: safeErrorMessage(err, "Failed to create assessment") });
   }
 });
-
 riskRouter.get("/assessments/:id", async (req: any, res) => {
   try {
     const requestedId = req.params.id;
