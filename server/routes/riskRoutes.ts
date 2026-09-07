@@ -23,7 +23,7 @@ import {
   insertRiskActionLinkSchema,
 } from "@shared/riskSchema";
 import { districts, provinces, tenants, adminBoundaries } from "@shared/schema";
-import { eq, and, desc, sql, inArray } from "drizzle-orm";
+import { eq, and, or, ne, desc, sql, inArray } from "drizzle-orm";
 import { isAuthenticated } from "../replitAuth";
 import { requireTenant } from "../auth/tenantResolver";
 import { requireDbUser } from "../auth/loadDbUser";
@@ -157,7 +157,8 @@ riskRouter.get("/context", async (req: any, res) => {
 
     const countryCode = (tenant.countryCode || "ZAF").toUpperCase();
 
-    // Find Level 2 admin boundary for this country
+    // Prefer this tenant's boundary. Trusted standard country boundaries may be
+    // reused across tenants because their geometry is public and identical.
     const [level2Boundary] = await db
       .select({
         id: adminBoundaries.id,
@@ -165,13 +166,14 @@ riskRouter.get("/context", async (req: any, res) => {
         featureCount: adminBoundaries.featureCount,
       })
       .from(adminBoundaries)
-      .where(
-        and(
-          eq(adminBoundaries.countryCode, countryCode),
-          eq(adminBoundaries.adminLevel, 2),
-          eq(adminBoundaries.isActive, true)
-        )
-      )
+      .where(and(
+        eq(adminBoundaries.countryCode, countryCode),
+        eq(adminBoundaries.adminLevel, 2),
+        eq(adminBoundaries.isActive, true),
+        or(eq(adminBoundaries.tenantId, req.tenantId), ne(adminBoundaries.source, "custom")),
+        sql`jsonb_array_length(COALESCE(${adminBoundaries.geojson}->'features', '[]'::jsonb)) > 0`,
+      ))
+      .orderBy(sql`CASE WHEN ${adminBoundaries.tenantId} = ${req.tenantId} THEN 0 ELSE 1 END`)
       .limit(1);
 
     const adminLabel = countryCode === "SSD" ? "County" : countryCode === "KEN" ? "Sub-County" : "District";

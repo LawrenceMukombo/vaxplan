@@ -13018,7 +13018,19 @@ export async function registerRoutes(
   app.get("/api/boundaries/:id/geojson", isAuthenticated, requireTenant, async (req: any, res) => {
     try {
       const tenantId = req.tenantId as string;
-      const boundary = await storage.getAdminBoundary(tenantId, req.params.id);
+      let boundary = await storage.getAdminBoundary(tenantId, req.params.id);
+      if (!boundary) {
+        const [tenant] = await db.select({ countryCode: tenants.countryCode })
+          .from(tenants).where(eq(tenants.id, tenantId)).limit(1);
+        if (tenant?.countryCode) {
+          [boundary] = await db.select().from(adminBoundaries).where(and(
+            eq(adminBoundaries.id, req.params.id),
+            eq(adminBoundaries.countryCode, tenant.countryCode.toUpperCase()),
+            eq(adminBoundaries.isActive, true),
+            ne(adminBoundaries.source, "custom"),
+          )).limit(1);
+        }
+      }
       if (!boundary) return res.status(404).json({ message: "Boundary not found" });
 
       const fullResolution = req.query.full === "true";

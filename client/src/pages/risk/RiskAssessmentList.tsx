@@ -991,7 +991,7 @@ export default function RiskAssessmentList() {
             countryCode={activeCountryCode}
             countryName={activeCountryName}
             adminLevelLabel={adminLevel}
-            boundaryId={context?.boundaryId || context?.defaultBoundaryId || (activeCountryCode === "ZAF" ? "a942c119-c045-492f-97ee-b95a8dbb8440" : activeCountryCode === "ZMB" ? "1edd5bcf-d20a-4910-a3cb-dd44c7e84c61" : activeCountryCode === "SSD" ? "af760f67-cc8e-4075-8938-777c387f141f" : activeCountryCode === "PNG" ? "90336ae8-7f06-4133-b5dd-d962a145d5c2" : undefined)}
+            boundaryId={context?.boundaryId || context?.defaultBoundaryId}
             data={performanceRows}
             selectedCategoryFilter={selectedCategoryFilter}
             onSelectCategoryFilter={setSelectedCategoryFilter}

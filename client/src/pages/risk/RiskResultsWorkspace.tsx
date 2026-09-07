@@ -1617,7 +1617,7 @@ export default function RiskResultsWorkspace() {
             countryCode={assessment?.countryCode || context?.countryCode || "ZAF"}
             countryName={assessment?.countryName || context?.countryName || "Republic of South Africa National Department of Health"}
             adminLevelLabel={context?.adminLevelLabel || "District"}
-            boundaryId={context?.boundaryId || context?.defaultBoundaryId || (assessment?.countryCode === "ZAF" || !assessment ? "a942c119-c045-492f-97ee-b95a8dbb8440" : undefined)}
+            boundaryId={context?.boundaryId || context?.defaultBoundaryId}
             data={effectiveChoroplethData}
             selectedCategoryFilter={selectedCategory}
             onSelectCategoryFilter={setSelectedCategory}
