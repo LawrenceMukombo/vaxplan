@@ -109,11 +109,11 @@ export async function runMigration() {
 
       if (pentaId) {
         await db.execute(sql`
-          INSERT INTO catalogue_schedule_doses (tenant_id, vaccine_id, name, dose_number, target_age, stock_deducting)
+          INSERT INTO catalogue_schedule_doses (tenant_id, vaccine_id, dose_code, name, dose_number, target_age, stock_deducting)
           VALUES 
-            (${tenantId}, ${pentaId}, 'PENTA-1', 1, '6 weeks', true),
-            (${tenantId}, ${pentaId}, 'PENTA-2', 2, '10 weeks', true),
-            (${tenantId}, ${pentaId}, 'PENTA-3', 3, '14 weeks', true)
+            (${tenantId}, ${pentaId}, 'penta_1', 'PENTA-1', 1, '6 weeks', true),
+            (${tenantId}, ${pentaId}, 'penta_2', 'PENTA-2', 2, '10 weeks', true),
+            (${tenantId}, ${pentaId}, 'penta_3', 'PENTA-3', 3, '14 weeks', true)
           ON CONFLICT DO NOTHING;
         `);
       }
