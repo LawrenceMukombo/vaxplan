@@ -627,7 +627,9 @@ async function backfillClientIds() {
   // importantly only setup vite in development and after
   // setting up all the other routes so the catch-all route
   // doesn't interfere with the other routes
-  if (process.env.NODE_ENV === "production") {
+  const isBuiltServer =
+    /[\\/]dist[\\/]index\.cjs$/i.test(process.argv[1] || "");
+  if (process.env.NODE_ENV === "production" || isBuiltServer) {
     serveStatic(app);
   } else {
     const { setupVite } = await import("./vite");
