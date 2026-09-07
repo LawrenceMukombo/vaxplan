@@ -1,4 +1,5 @@
 import { type Express, type Request, type Response } from "express";
+import { safeErrorMessage } from "../errorUtils";
 import { db } from "../db";
 import { sql, eq, and, isNull, inArray } from "drizzle-orm";
 import {
@@ -260,14 +261,14 @@ export async function runDBSCANHotspots(districtId: number, epsKm: number = 1.0,
 export function getRouteHazards(lat: number, lng: number) {
   // Hash coordinates to generate deterministic, realistic mock values for local demonstration
   const coordinateHash = Math.abs(Math.sin(lat) * Math.cos(lng));
-  
+
   const elevationMeters = Math.round(800 + coordinateHash * 1200); // 800m to 2000m
   const maxSlopePercent = Math.round(coordinateHash * 35); // 0% to 35% slope
-  
+
   // Prone to flood if coordinate hash satisfies a specific range (e.g. low-lying regions)
   const floodRiskScore = Math.round(coordinateHash * 100);
   const activeFloodDetected = floodRiskScore >= 75; // Flood warning for scores >= 75
-  
+
   let riskLevel: "low" | "medium" | "high" = "low";
   const warnings: string[] = [];
 
@@ -302,7 +303,7 @@ export function getRouteHazards(lat: number, lng: number) {
 export function refinePopulationTarget(worldpopEstimate: number, buildingCount: number) {
   const avgHouseholdSize = 5.2; // Standard rural household multiplier
   const estimatedCap = buildingCount * avgHouseholdSize;
-  
+
   // Calculate average of census WorldPop density raster and building counts
   const refinedTotal = Math.round((worldpopEstimate + estimatedCap) / 2);
   const targetInfants = Math.round(refinedTotal * 0.04);
@@ -342,7 +343,7 @@ export function registerRemoteSensingRoutes(app: Express) {
       const result = await calculateSpatialGaps(districtId, 5.0);
       res.json({ ...result, districtId, districtName: districtRow.name });
     } catch (err: any) {
-      res.status(500).json({ message: err?.message || "Spatial gap calculations failed" });
+      res.status(500).json({ message: safeErrorMessage(err, "Spatial gap calculations failed") });
     }
   });
 
@@ -370,7 +371,7 @@ export function registerRemoteSensingRoutes(app: Express) {
       const result = await runDBSCANHotspots(targetDistrictId as number, eps, minPoints);
       res.json({ ...result, districtId: targetDistrictId as number, districtName: targetDistrictName, epsKm: eps, minPoints });
     } catch (err: any) {
-      res.status(500).json({ message: err?.message || "Hotspot clustering calculations failed" });
+      res.status(500).json({ message: safeErrorMessage(err, "Hotspot clustering calculations failed") });
     }
   });
 

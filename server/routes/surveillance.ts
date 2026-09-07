@@ -1,9 +1,10 @@
+import { safeErrorMessage } from "../errorUtils";
 import { Router } from "express";
 import { db } from "../db";
-import { 
-  vpdLinelistTemplates, 
-  tenantVpdConfigurations, 
-  surveillanceCases, 
+import {
+  vpdLinelistTemplates,
+  tenantVpdConfigurations,
+  surveillanceCases,
   labSamples,
   insertSurveillanceCaseSchema,
   insertVpdLinelistTemplateSchema,
@@ -34,7 +35,7 @@ surveillanceRouter.get("/templates", async (req: any, res) => {
       .where(eq(vpdLinelistTemplates.tenantId, req.tenantId));
     res.json(templates);
   } catch (err: any) {
-    res.status(500).json({ message: err.message });
+    res.status(500).json({ message: safeErrorMessage(err, "An unexpected error occurred") });
   }
 });
 
@@ -64,11 +65,11 @@ surveillanceRouter.patch("/templates/:id", async (req: any, res) => {
         )
       )
       .returning();
-      
+
     if (!updated) {
       return res.status(404).json({ message: "Template not found" });
     }
-    
+
     res.json(updated);
   } catch (err: any) {
     res.status(400).json({ message: err.message });
@@ -86,14 +87,14 @@ surveillanceRouter.delete("/templates/:id", async (req: any, res) => {
         )
       )
       .returning();
-      
+
     if (!deleted) {
       return res.status(404).json({ message: "Template not found" });
     }
-    
+
     res.json({ success: true });
   } catch (err: any) {
-    res.status(500).json({ message: err.message });
+    res.status(500).json({ message: safeErrorMessage(err, "An unexpected error occurred") });
   }
 });
 
@@ -109,7 +110,7 @@ surveillanceRouter.get("/config", async (req: any, res) => {
       .where(eq(tenantVpdConfigurations.tenantId, req.tenantId));
     res.json(configs);
   } catch (err: any) {
-    res.status(500).json({ message: err.message });
+    res.status(500).json({ message: safeErrorMessage(err, "An unexpected error occurred") });
   }
 });
 
@@ -165,7 +166,7 @@ surveillanceRouter.get("/cases", async (req: any, res) => {
 
     res.json(cases);
   } catch (err: any) {
-    res.status(500).json({ message: err.message });
+    res.status(500).json({ message: safeErrorMessage(err, "An unexpected error occurred") });
   }
 });
 
@@ -181,7 +182,7 @@ surveillanceRouter.get("/cases/kpis", async (req: any, res) => {
 
     const totalPop = popResult[0]?.total || 0;
     const under5Pop = popResult[0]?.under5 || 0;
-    // Proxy for under 15 population if not explicitly available, roughly 40-45% of total in many developing countries, 
+    // Proxy for under 15 population if not explicitly available, roughly 40-45% of total in many developing countries,
     // or we can use under5 * 3 as a heuristic. We'll use total * 0.45.
     const under15Pop = Math.round(totalPop * 0.45);
 
@@ -207,7 +208,7 @@ surveillanceRouter.get("/cases/kpis", async (req: any, res) => {
       totalMeaslesCases: measlesCases.length
     });
   } catch (err: any) {
-    res.status(500).json({ message: err.message });
+    res.status(500).json({ message: safeErrorMessage(err, "An unexpected error occurred") });
   }
 });
 
@@ -235,7 +236,7 @@ surveillanceRouter.get("/population/choropleth", async (req: any, res) => {
       .groupBy(populationData.districtId);
     res.json(rows);
   } catch (err: any) {
-    res.status(500).json({ message: err.message });
+    res.status(500).json({ message: safeErrorMessage(err, "An unexpected error occurred") });
   }
 });
 
@@ -279,7 +280,7 @@ surveillanceRouter.get("/cases/epi-curve", async (req: any, res) => {
 
     res.json(Object.values(buckets));
   } catch (err: any) {
-    res.status(500).json({ message: err.message });
+    res.status(500).json({ message: safeErrorMessage(err, "An unexpected error occurred") });
   }
 });
 
@@ -291,9 +292,9 @@ surveillanceRouter.post("/cases", async (req: any, res) => {
       tenantId: req.tenantId,
       investigatorUserId: req.user?.id,
     });
-    
+
     const [created] = await db.insert(surveillanceCases).values(parsed).returning();
-    
+
     // Check if this disease triggers real-time notifications
     const [config] = await db
       .select()
@@ -304,11 +305,11 @@ surveillanceRouter.post("/cases", async (req: any, res) => {
           eq(tenantVpdConfigurations.disease, created.disease)
         )
       );
-      
+
     if (config?.isActive && (config.notifyRoles as any[])?.length > 0) {
       // Dispatch omnichannel alerts via UCE
       const messageBody = `VPD ALERT: New suspected ${created.disease.toUpperCase()} case reported at Facility ID ${created.facilityId}. Patient: ${created.patientName}. Date of Onset: ${created.dateOfOnset.toISOString().split('T')[0]}.`;
-      
+
       // Dispatch immediately to the UCE pipeline in the background
       // dispatchNotification({
       //   tenantId: req.tenantId,
@@ -349,11 +350,11 @@ surveillanceRouter.patch("/cases/:id", async (req: any, res) => {
         )
       )
       .returning();
-      
+
     if (!updated) {
       return res.status(404).json({ message: "Case not found" });
     }
-    
+
     res.json(updated);
   } catch (err: any) {
     res.status(400).json({ message: err.message });
@@ -371,14 +372,14 @@ surveillanceRouter.delete("/cases/:id", async (req: any, res) => {
         )
       )
       .returning();
-      
+
     if (!deleted) {
       return res.status(404).json({ message: "Case not found" });
     }
-    
+
     res.json({ success: true });
   } catch (err: any) {
-    res.status(500).json({ message: err.message });
+    res.status(500).json({ message: safeErrorMessage(err, "An unexpected error occurred") });
   }
 });
 
@@ -399,7 +400,7 @@ surveillanceRouter.get("/cases/:caseId/samples", async (req: any, res) => {
       .where(eq(labSamples.caseId, req.params.caseId));
     res.json(samples);
   } catch (err: any) {
-    res.status(500).json({ message: err.message });
+    res.status(500).json({ message: safeErrorMessage(err, "An unexpected error occurred") });
   }
 });
 
@@ -433,7 +434,7 @@ surveillanceRouter.patch("/samples/:id", async (req: any, res) => {
           eq(surveillanceCases.tenantId, req.tenantId)
         )
       );
-      
+
     if (!existing) {
       return res.status(404).json({ message: "Lab sample not found or access denied" });
     }
@@ -443,7 +444,7 @@ surveillanceRouter.patch("/samples/:id", async (req: any, res) => {
       .set({ ...req.body, updatedAt: new Date() })
       .where(eq(labSamples.id, req.params.id))
       .returning();
-      
+
     res.json(updated);
   } catch (err: any) {
     res.status(400).json({ message: err.message });
@@ -462,7 +463,7 @@ surveillanceRouter.delete("/samples/:id", async (req: any, res) => {
           eq(surveillanceCases.tenantId, req.tenantId)
         )
       );
-      
+
     if (!existing) {
       return res.status(404).json({ message: "Lab sample not found or access denied" });
     }
@@ -470,6 +471,6 @@ surveillanceRouter.delete("/samples/:id", async (req: any, res) => {
     await db.delete(labSamples).where(eq(labSamples.id, req.params.id));
     res.json({ success: true });
   } catch (err: any) {
-    res.status(500).json({ message: err.message });
+    res.status(500).json({ message: safeErrorMessage(err, "An unexpected error occurred") });
   }
 });

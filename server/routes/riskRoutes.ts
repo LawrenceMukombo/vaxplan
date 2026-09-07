@@ -1,3 +1,4 @@
+import { safeErrorMessage } from "../errorUtils";
 import { Router } from "express";
 import fs from "fs";
 import path from "path";
@@ -67,7 +68,7 @@ riskRouter.get("/methodologies", async (_req: any, res) => {
     ];
     res.json(methodologies);
   } catch (err: any) {
-    res.status(500).json({ message: err.message });
+    res.status(500).json({ message: safeErrorMessage(err, "An unexpected error occurred") });
   }
 });
 
@@ -79,7 +80,7 @@ riskRouter.get("/methodologies/:code", async (req: any, res) => {
       res.status(404).json({ message: "Methodology package not found" });
     }
   } catch (err: any) {
-    res.status(500).json({ message: err.message });
+    res.status(500).json({ message: safeErrorMessage(err, "An unexpected error occurred") });
   }
 });
 
@@ -189,7 +190,7 @@ riskRouter.get("/context", async (req: any, res) => {
     });
   } catch (err: any) {
     console.error("GET /api/risk/context error:", err);
-    res.status(500).json({ message: err.message });
+    res.status(500).json({ message: safeErrorMessage(err, "An unexpected error occurred") });
   }
 });
 
@@ -298,7 +299,7 @@ riskRouter.get("/coverage-performance", async (req: any, res) => {
     });
   } catch (err: any) {
     console.error("GET /api/risk/coverage-performance error:", err);
-    res.status(500).json({ message: err.message });
+    res.status(500).json({ message: safeErrorMessage(err, "An unexpected error occurred") });
   }
 });
 
@@ -315,7 +316,7 @@ riskRouter.get("/assessments", async (req: any, res) => {
       .orderBy(desc(riskAssessments.createdAt));
     res.json(list);
   } catch (err: any) {
-    res.status(500).json({ message: err.message });
+    res.status(500).json({ message: safeErrorMessage(err, "An unexpected error occurred") });
   }
 });
 
@@ -396,7 +397,7 @@ riskRouter.get("/assessments/:id", async (req: any, res) => {
 
     res.json({ ...assessment, runs });
   } catch (err: any) {
-    res.status(500).json({ message: err.message });
+    res.status(500).json({ message: safeErrorMessage(err, "An unexpected error occurred") });
   }
 });
 
@@ -450,7 +451,7 @@ riskRouter.delete("/assessments/:id", async (req: any, res) => {
 
     res.json({ message: "Assessment deleted successfully", id: deleted.id });
   } catch (err: any) {
-    res.status(500).json({ message: err.message });
+    res.status(500).json({ message: safeErrorMessage(err, "An unexpected error occurred") });
   }
 });
 
@@ -573,7 +574,7 @@ riskRouter.get("/templates/linelist", async (req: any, res) => {
     res.setHeader("Content-Disposition", 'attachment; filename="WHO_Measles_Case_Based_Linelist_Template.csv"');
     res.send(csvContent);
   } catch (err: any) {
-    res.status(500).json({ message: err.message });
+    res.status(500).json({ message: safeErrorMessage(err, "An unexpected error occurred") });
   }
 });
 
@@ -679,7 +680,7 @@ riskRouter.get("/templates/district-aggregates", async (req: any, res) => {
     res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
     res.send(csvContent);
   } catch (err: any) {
-    res.status(500).json({ message: err.message });
+    res.status(500).json({ message: safeErrorMessage(err, "An unexpected error occurred") });
   }
 });
 
@@ -731,7 +732,7 @@ riskRouter.get("/templates/incidence", async (req: any, res) => {
     res.setHeader("Content-Disposition", 'attachment; filename="Measles_Annual_Incidence_Template.csv"');
     res.send(csvContent);
   } catch (err: any) {
-    res.status(500).json({ message: err.message });
+    res.status(500).json({ message: safeErrorMessage(err, "An unexpected error occurred") });
   }
 });
 
@@ -845,7 +846,7 @@ riskRouter.post("/assessments/:id/import-cases", async (req: any, res) => {
       });
     });
   } catch (err: any) {
-    res.status(500).json({ message: err.message });
+    res.status(500).json({ message: safeErrorMessage(err, "An unexpected error occurred") });
   }
 });
 
@@ -971,7 +972,7 @@ riskRouter.post("/assessments/:id/import-aggregates", async (req: any, res) => {
       });
     });
   } catch (err: any) {
-    res.status(500).json({ message: err.message });
+    res.status(500).json({ message: safeErrorMessage(err, "An unexpected error occurred") });
   }
 });
 
@@ -1056,7 +1057,7 @@ riskRouter.post("/assessments/:id/import-incidence", async (req: any, res) => {
       });
     });
   } catch (err: any) {
-    res.status(500).json({ message: err.message });
+    res.status(500).json({ message: safeErrorMessage(err, "An unexpected error occurred") });
   }
 });
 
@@ -1450,7 +1451,7 @@ riskRouter.post("/assessments/:id/calculate", async (req: any, res) => {
       },
     });
   } catch (err: any) {
-    res.status(500).json({ message: err.message });
+    res.status(500).json({ message: safeErrorMessage(err, "An unexpected error occurred") });
   }
 });
 
@@ -1546,7 +1547,7 @@ riskRouter.get("/assessments/:id/results", async (req: any, res) => {
       latestRun,
     });
   } catch (err: any) {
-    res.status(500).json({ message: err.message });
+    res.status(500).json({ message: safeErrorMessage(err, "An unexpected error occurred") });
   }
 });
 
@@ -1581,7 +1582,7 @@ riskRouter.get("/assessments/:id/results/:areaResultId/explanation", async (req:
       indicators: enrichedIndicators,
     });
   } catch (err: any) {
-    res.status(500).json({ message: err.message });
+    res.status(500).json({ message: safeErrorMessage(err, "An unexpected error occurred") });
   }
 });
 
@@ -1615,7 +1616,7 @@ riskRouter.post("/assessments/:id/reviews", async (req: any, res) => {
       reviewedAt: new Date(),
     });
   } catch (err: any) {
-    res.status(500).json({ message: err.message });
+    res.status(500).json({ message: safeErrorMessage(err, "An unexpected error occurred") });
   }
 });
 
@@ -1908,7 +1909,7 @@ riskRouter.get("/assessments/:id/direct-entry", async (req: any, res) => {
 
     res.json({ assessment, entries: seeded });
   } catch (err: any) {
-    res.status(500).json({ message: err.message });
+    res.status(500).json({ message: safeErrorMessage(err, "An unexpected error occurred") });
   }
 });
 
@@ -2195,7 +2196,7 @@ riskRouter.post("/assessments/:id/direct-entry", async (req: any, res) => {
     });
   } catch (err: any) {
     console.error("Direct data entry error:", err);
-    res.status(500).json({ message: err.message });
+    res.status(500).json({ message: safeErrorMessage(err, "An unexpected error occurred") });
   }
 });
 
@@ -2364,10 +2365,10 @@ riskRouter.get("/assessments/:id/export-report-docx", async (req: any, res) => {
       try {
         if (fs.existsSync(tempJsonPath)) fs.unlinkSync(tempJsonPath);
       } catch (e) {}
-      res.status(500).json({ message: `Failed to spawn Python process (${pythonCmd}): ${err.message}` });
+      res.status(500).json({ message: safeErrorMessage(err, "An unexpected error occurred") });
     });
   } catch (err: any) {
-    res.status(500).json({ message: err.message });
+    res.status(500).json({ message: safeErrorMessage(err, "An unexpected error occurred") });
   }
 });
 

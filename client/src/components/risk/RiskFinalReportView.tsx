@@ -1,3 +1,4 @@
+import { assessmentMapRow } from '@shared/riskPresentation';
 import React, { useState, useMemo, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
@@ -116,98 +117,14 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
     year: "numeric",
   });
 
-  // Direct Entry Fallback query if results are empty or pending calculation
-  const { data: directEntryData } = useQuery<{ entries: any[] }>({
-    queryKey: [`/api/risk/assessments/${assessment?.id}/direct-entry`],
-    queryFn: async () => {
-      if (!assessment?.id) return { entries: [] };
-      return await apiRequest<any>("GET", `/api/risk/assessments/${assessment.id}/direct-entry`);
-    },
-    enabled: Boolean(assessment?.id && districtResults.length <= 1),
-  });
-
-  // Synthesize resilient results if districtResults has <= 1 row
-  const effectiveDistrictResults: AreaResult[] = useMemo(() => {
-    if (districtResults && districtResults.length > 1) {
-      return districtResults;
-    }
-
-    if (directEntryData?.entries && directEntryData.entries.length > 0) {
-      return directEntryData.entries.map((entry, idx) => {
-        const pop = Number(entry.population) || 120000;
-        const mcv1 = (Number(entry.mcv1YearMinus1) + Number(entry.mcv1YearMinus2) + Number(entry.mcv1YearMinus3)) / 3 || 80;
-        const mcv2 = (Number(entry.mcv2YearMinus1) + Number(entry.mcv2YearMinus2) + Number(entry.mcv2YearMinus3)) / 3 || 75;
-
-        // Approximate WHO domain scoring
-        let pi = mcv1 < 70 ? 36 : mcv1 < 80 ? 28 : mcv1 < 90 ? 18 : mcv1 < 95 ? 8 : 2;
-        let sq = (Number(entry.discardedCases) || 0) < 2 ? 16 : 6;
-        let pd = (mcv1 - mcv2) > 10 ? 12 : 4;
-        let ta = (Number(entry.threatCasesUnder5) || 0) > 0 ? 18 : 6;
-        const total = pi + sq + pd + ta;
-        const cat = total >= 57 ? "VERY_HIGH" : total >= 45 ? "HIGH" : total >= 32 ? "MEDIUM" : "LOW";
-
-        return {
-          id: entry.id || String(entry.districtId),
-          districtId: entry.districtId,
-          districtName: entry.districtName || `District ${entry.districtId}`,
-          areaName: entry.districtName || `District ${entry.districtId}`,
-          provinceName: entry.provinceName || "National",
-          population: pop,
-          riskCategory: cat,
-          totalScore: String(total),
-          totalRiskScore: String(total),
-          riskScore: total,
-          populationImmunityScore: String(pi),
-          surveillanceQualityScore: String(sq),
-          programmeDeliveryScore: String(pd),
-          threatAssessmentScore: String(ta),
-          mcv1Coverage: Math.round(mcv1),
-          mcv2Coverage: Math.round(mcv2),
-          penta1Coverage: Math.round(mcv1 + 4),
-          dropoutRate: Math.max(0, Math.round(mcv1 - mcv2)),
-          mcvDropout: Math.max(0, Math.round(mcv1 - mcv2)),
-          suspectedCases: Number(entry.discardedCases || 0) + Number(entry.threatCasesUnder5 || 0),
-        };
-      });
-    }
-
-    return districtResults;
-  }, [districtResults, directEntryData]);
+  const effectiveDistrictResults = districtResults;
 
   // Report Map Mode: Single maps, 2x2 grid, or all sequential
   const [reportMapMode, setReportMapMode] = useState<"risk" | "mcv1" | "mcv2" | "dropout" | "grid" | "all">("risk");
 
   // Normalized Choropleth dataset for spatial reporting
   const reportMapData: DistrictCoveragePerformance[] = useMemo(() => {
-    return effectiveDistrictResults.map((d) => {
-      const pop = Number(d.population) || 100000;
-      const score = Number(d.totalScore || d.riskScore || 50);
-      const cat = (d.riskCategory as any) || "LOW";
-      const mcv1 = Number(d.mcv1Coverage) || (cat === "VERY_HIGH" ? 64 : cat === "HIGH" ? 74 : cat === "MEDIUM" ? 84 : 94);
-      const mcv2 = Number(d.mcv2Coverage) || (cat === "VERY_HIGH" ? 52 : cat === "HIGH" ? 66 : cat === "MEDIUM" ? 78 : 91);
-      const penta1 = Number(d.penta1Coverage) || Math.min(100, mcv1 + 5);
-      const dropout = Number(d.dropoutRate) || Math.max(0, Math.round(((mcv1 - mcv2) / (mcv1 || 1)) * 100));
-      const mcvDrop = Number(d.mcvDropout) || dropout;
-      const suspected = Number(d.suspectedCases) || (cat === "VERY_HIGH" ? 18 : cat === "HIGH" ? 9 : 2);
-
-      return {
-        districtId: d.districtId,
-        districtName: d.districtName || d.areaName || `District ${d.districtId}`,
-        provinceId: d.provinceId || null,
-        provinceName: d.provinceName || "National",
-        population: pop,
-        targetUnder1: Math.round(pop * 0.035),
-        mcv1Coverage: mcv1,
-        mcv2Coverage: mcv2,
-        penta1Coverage: penta1,
-        dropoutRate: dropout,
-        mcvDropout: mcvDrop,
-        suspectedCases: suspected,
-        riskScore: score,
-        riskCategory: cat,
-        hasAssessmentRun: true,
-      };
-    });
+    return effectiveDistrictResults.map(assessmentMapRow);
   }, [effectiveDistrictResults]);
 
   // Report Config State
@@ -567,23 +484,23 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
         return sortDir === "asc" ? valA - valB : valB - valA;
       }
       if (sortCol === "pi") {
-        const valA = Number(a.populationImmunityScore || (a as any).domainScoresJson?.PI || 0);
-        const valB = Number(b.populationImmunityScore || (b as any).domainScoresJson?.PI || 0);
+        const valA = Number(a.populationImmunityScore ?? (a as any).domainScoresJson?.PI ?? 0);
+        const valB = Number(b.populationImmunityScore ?? (b as any).domainScoresJson?.PI ?? 0);
         return sortDir === "asc" ? valA - valB : valB - valA;
       }
       if (sortCol === "sq") {
-        const valA = Number(a.surveillanceQualityScore || (a as any).domainScoresJson?.SQ || 0);
-        const valB = Number(b.surveillanceQualityScore || (b as any).domainScoresJson?.SQ || 0);
+        const valA = Number(a.surveillanceQualityScore ?? (a as any).domainScoresJson?.SQ ?? 0);
+        const valB = Number(b.surveillanceQualityScore ?? (b as any).domainScoresJson?.SQ ?? 0);
         return sortDir === "asc" ? valA - valB : valB - valA;
       }
       if (sortCol === "pd") {
-        const valA = Number(a.programmeDeliveryScore || (a as any).domainScoresJson?.PD || 0);
-        const valB = Number(b.programmeDeliveryScore || (b as any).domainScoresJson?.PD || 0);
+        const valA = Number(a.programmeDeliveryScore ?? (a as any).domainScoresJson?.PD ?? 0);
+        const valB = Number(b.programmeDeliveryScore ?? (b as any).domainScoresJson?.PD ?? 0);
         return sortDir === "asc" ? valA - valB : valB - valA;
       }
       if (sortCol === "ta") {
-        const valA = Number(a.threatAssessmentScore || (a as any).domainScoresJson?.TA || 0);
-        const valB = Number(b.threatAssessmentScore || (b as any).domainScoresJson?.TA || 0);
+        const valA = Number(a.threatAssessmentScore ?? (a as any).domainScoresJson?.TA ?? 0);
+        const valB = Number(b.threatAssessmentScore ?? (b as any).domainScoresJson?.TA ?? 0);
         return sortDir === "asc" ? valA - valB : valB - valA;
       }
       // total
@@ -720,10 +637,10 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
         d.provinceName || "National",
         d.areaName || d.districtName || "",
         Number(d.population) || 0,
-        d.populationImmunityScore || (d as any).domainScoresJson?.PI || "",
-        d.surveillanceQualityScore || (d as any).domainScoresJson?.SQ || "",
-        d.programmeDeliveryScore || (d as any).domainScoresJson?.PD || "",
-        d.threatAssessmentScore || (d as any).domainScoresJson?.TA || "",
+        d.populationImmunityScore ?? (d as any).domainScoresJson?.PI ?? "",
+        d.surveillanceQualityScore ?? (d as any).domainScoresJson?.SQ ?? "",
+        d.programmeDeliveryScore ?? (d as any).domainScoresJson?.PD ?? "",
+        d.threatAssessmentScore ?? (d as any).domainScoresJson?.TA ?? "",
         d.totalRiskScore || d.totalScore || d.riskScore || "",
         getDistrictRecommendation(d),
       ]),
@@ -738,10 +655,10 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
         d.provinceName || "National",
         d.areaName || d.districtName || "",
         Number(d.population) || 0,
-        d.populationImmunityScore || (d as any).domainScoresJson?.PI || "",
-        d.surveillanceQualityScore || (d as any).domainScoresJson?.SQ || "",
-        d.programmeDeliveryScore || (d as any).domainScoresJson?.PD || "",
-        d.threatAssessmentScore || (d as any).domainScoresJson?.TA || "",
+        d.populationImmunityScore ?? (d as any).domainScoresJson?.PI ?? "",
+        d.surveillanceQualityScore ?? (d as any).domainScoresJson?.SQ ?? "",
+        d.programmeDeliveryScore ?? (d as any).domainScoresJson?.PD ?? "",
+        d.threatAssessmentScore ?? (d as any).domainScoresJson?.TA ?? "",
         d.totalRiskScore || d.totalScore || d.riskScore || "",
         getDistrictRecommendation(d),
       ]),
@@ -756,10 +673,10 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
         d.provinceName || "National",
         d.areaName || d.districtName || "",
         Number(d.population) || 0,
-        d.populationImmunityScore || (d as any).domainScoresJson?.PI || "",
-        d.surveillanceQualityScore || (d as any).domainScoresJson?.SQ || "",
-        d.programmeDeliveryScore || (d as any).domainScoresJson?.PD || "",
-        d.threatAssessmentScore || (d as any).domainScoresJson?.TA || "",
+        d.populationImmunityScore ?? (d as any).domainScoresJson?.PI ?? "",
+        d.surveillanceQualityScore ?? (d as any).domainScoresJson?.SQ ?? "",
+        d.programmeDeliveryScore ?? (d as any).domainScoresJson?.PD ?? "",
+        d.threatAssessmentScore ?? (d as any).domainScoresJson?.TA ?? "",
         d.totalRiskScore || d.totalScore || d.riskScore || "",
         getDistrictRecommendation(d),
       ]),
@@ -774,10 +691,10 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
         d.provinceName || "National",
         d.areaName || d.districtName || "",
         Number(d.population) || 0,
-        d.populationImmunityScore || (d as any).domainScoresJson?.PI || "",
-        d.surveillanceQualityScore || (d as any).domainScoresJson?.SQ || "",
-        d.programmeDeliveryScore || (d as any).domainScoresJson?.PD || "",
-        d.threatAssessmentScore || (d as any).domainScoresJson?.TA || "",
+        d.populationImmunityScore ?? (d as any).domainScoresJson?.PI ?? "",
+        d.surveillanceQualityScore ?? (d as any).domainScoresJson?.SQ ?? "",
+        d.programmeDeliveryScore ?? (d as any).domainScoresJson?.PD ?? "",
+        d.threatAssessmentScore ?? (d as any).domainScoresJson?.TA ?? "",
         d.totalRiskScore || d.totalScore || d.riskScore || "",
         getDistrictRecommendation(d),
       ]),
@@ -792,10 +709,10 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
         d.provinceName || "National",
         d.areaName || d.districtName || "",
         Number(d.population) || 0,
-        d.populationImmunityScore || (d as any).domainScoresJson?.PI || "",
-        d.surveillanceQualityScore || (d as any).domainScoresJson?.SQ || "",
-        d.programmeDeliveryScore || (d as any).domainScoresJson?.PD || "",
-        d.threatAssessmentScore || (d as any).domainScoresJson?.TA || "",
+        d.populationImmunityScore ?? (d as any).domainScoresJson?.PI ?? "",
+        d.surveillanceQualityScore ?? (d as any).domainScoresJson?.SQ ?? "",
+        d.programmeDeliveryScore ?? (d as any).domainScoresJson?.PD ?? "",
+        d.threatAssessmentScore ?? (d as any).domainScoresJson?.TA ?? "",
         d.totalRiskScore || d.totalScore || d.riskScore || "",
         d.riskCategory || "LOW",
         getDistrictRecommendation(d),
@@ -817,10 +734,10 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
       return reportConfig.districtRecommendations[name];
     }
     // Automated recommendation based on domain drivers
-    const pi = Number(dist.populationImmunityScore || (dist as any).domainScoresJson?.PI || 0);
-    const sq = Number(dist.surveillanceQualityScore || (dist as any).domainScoresJson?.SQ || 0);
-    const pd = Number(dist.programmeDeliveryScore || (dist as any).domainScoresJson?.PD || 0);
-    const ta = Number(dist.threatAssessmentScore || (dist as any).domainScoresJson?.TA || 0);
+    const pi = Number(dist.populationImmunityScore ?? (dist as any).domainScoresJson?.PI ?? 0);
+    const sq = Number(dist.surveillanceQualityScore ?? (dist as any).domainScoresJson?.SQ ?? 0);
+    const pd = Number(dist.programmeDeliveryScore ?? (dist as any).domainScoresJson?.PD ?? 0);
+    const ta = Number(dist.threatAssessmentScore ?? (dist as any).domainScoresJson?.TA ?? 0);
 
     const scores = [
       { val: pi, rec: "Conduct targeted catch-up mop-up; track unimmunized cohorts." },
@@ -1334,7 +1251,7 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
                 </div>
                 <div className="border rounded-lg overflow-hidden shadow-sm bg-card p-1">
                   <RiskChoroplethMap
-                    countryCode={assessment?.countryCode || "SSD"}
+                    countryCode={assessment?.countryCode || "ZAF"}
                     countryName={countryName}
                     adminLevelLabel="District"
                     data={reportMapData}
@@ -1362,7 +1279,7 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
                 </div>
                 <div className="border rounded-lg overflow-hidden shadow-sm bg-card p-1">
                   <RiskChoroplethMap
-                    countryCode={assessment?.countryCode || "SSD"}
+                    countryCode={assessment?.countryCode || "ZAF"}
                     countryName={countryName}
                     adminLevelLabel="District"
                     data={reportMapData}
@@ -1390,7 +1307,7 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
                 </div>
                 <div className="border rounded-lg overflow-hidden shadow-sm bg-card p-1">
                   <RiskChoroplethMap
-                    countryCode={assessment?.countryCode || "SSD"}
+                    countryCode={assessment?.countryCode || "ZAF"}
                     countryName={countryName}
                     adminLevelLabel="District"
                     data={reportMapData}
@@ -1418,7 +1335,7 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
                 </div>
                 <div className="border rounded-lg overflow-hidden shadow-sm bg-card p-1">
                   <RiskChoroplethMap
-                    countryCode={assessment?.countryCode || "SSD"}
+                    countryCode={assessment?.countryCode || "ZAF"}
                     countryName={countryName}
                     adminLevelLabel="District"
                     data={reportMapData}
@@ -1448,7 +1365,7 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
                       <Badge variant="secondary" className="text-[10px]">Composite Score</Badge>
                     </div>
                     <RiskChoroplethMap
-                      countryCode={assessment?.countryCode || "SSD"}
+                      countryCode={assessment?.countryCode || "ZAF"}
                       countryName={countryName}
                       adminLevelLabel="District"
                       data={reportMapData}
@@ -1466,7 +1383,7 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
                       <Badge variant="secondary" className="text-[10px]">Population Immunity</Badge>
                     </div>
                     <RiskChoroplethMap
-                      countryCode={assessment?.countryCode || "SSD"}
+                      countryCode={assessment?.countryCode || "ZAF"}
                       countryName={countryName}
                       adminLevelLabel="District"
                       data={reportMapData}
@@ -1484,7 +1401,7 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
                       <Badge variant="secondary" className="text-[10px]">2nd Dose Attainment</Badge>
                     </div>
                     <RiskChoroplethMap
-                      countryCode={assessment?.countryCode || "SSD"}
+                      countryCode={assessment?.countryCode || "ZAF"}
                       countryName={countryName}
                       adminLevelLabel="District"
                       data={reportMapData}
@@ -1502,7 +1419,7 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
                       <Badge variant="secondary" className="text-[10px]">Programme Delivery</Badge>
                     </div>
                     <RiskChoroplethMap
-                      countryCode={assessment?.countryCode || "SSD"}
+                      countryCode={assessment?.countryCode || "ZAF"}
                       countryName={countryName}
                       adminLevelLabel="District"
                       data={reportMapData}
@@ -1528,7 +1445,7 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
                   </div>
                   <div className="border rounded-lg overflow-hidden shadow-sm bg-card p-1">
                     <RiskChoroplethMap
-                      countryCode={assessment?.countryCode || "SSD"}
+                      countryCode={assessment?.countryCode || "ZAF"}
                       countryName={countryName}
                       adminLevelLabel="District"
                       data={reportMapData}
@@ -1553,7 +1470,7 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
                   </div>
                   <div className="border rounded-lg overflow-hidden shadow-sm bg-card p-1">
                     <RiskChoroplethMap
-                      countryCode={assessment?.countryCode || "SSD"}
+                      countryCode={assessment?.countryCode || "ZAF"}
                       countryName={countryName}
                       adminLevelLabel="District"
                       data={reportMapData}
@@ -1578,7 +1495,7 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
                   </div>
                   <div className="border rounded-lg overflow-hidden shadow-sm bg-card p-1">
                     <RiskChoroplethMap
-                      countryCode={assessment?.countryCode || "SSD"}
+                      countryCode={assessment?.countryCode || "ZAF"}
                       countryName={countryName}
                       adminLevelLabel="District"
                       data={reportMapData}
@@ -1603,7 +1520,7 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
                   </div>
                   <div className="border rounded-lg overflow-hidden shadow-sm bg-card p-1">
                     <RiskChoroplethMap
-                      countryCode={assessment?.countryCode || "SSD"}
+                      countryCode={assessment?.countryCode || "ZAF"}
                       countryName={countryName}
                       adminLevelLabel="District"
                       data={reportMapData}
@@ -1890,10 +1807,10 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
                           </td>
 
                           <td className="p-2.5 text-right text-muted-foreground border-r-2 border-slate-300 dark:border-slate-700">{(Number(d.population) || 0).toLocaleString()}</td>
-                          <td className="p-2.5 text-right border-r-2 border-slate-300 dark:border-slate-700 font-mono">{d.populationImmunityScore || domains.PI || "-"}</td>
-                          <td className="p-2.5 text-right border-r-2 border-slate-300 dark:border-slate-700 font-mono">{d.surveillanceQualityScore || domains.SQ || "-"}</td>
-                          <td className="p-2.5 text-right border-r-2 border-slate-300 dark:border-slate-700 font-mono">{d.programmeDeliveryScore || domains.PD || "-"}</td>
-                          <td className="p-2.5 text-right border-r-2 border-slate-300 dark:border-slate-700 font-mono">{d.threatAssessmentScore || domains.TA || "-"}</td>
+                          <td className="p-2.5 text-right border-r-2 border-slate-300 dark:border-slate-700 font-mono">{d.populationImmunityScore ?? domains.PI ?? "-"}</td>
+                          <td className="p-2.5 text-right border-r-2 border-slate-300 dark:border-slate-700 font-mono">{d.surveillanceQualityScore ?? domains.SQ ?? "-"}</td>
+                          <td className="p-2.5 text-right border-r-2 border-slate-300 dark:border-slate-700 font-mono">{d.programmeDeliveryScore ?? domains.PD ?? "-"}</td>
+                          <td className="p-2.5 text-right border-r-2 border-slate-300 dark:border-slate-700 font-mono">{d.threatAssessmentScore ?? domains.TA ?? "-"}</td>
                           <td className="p-2.5 text-right font-bold text-red-600 dark:text-red-400 border-r-2 border-slate-300 dark:border-slate-700 font-mono">
                             {d.totalRiskScore || d.totalScore || d.riskScore}
                           </td>
@@ -2133,10 +2050,10 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
                           </td>
 
                           <td className="p-2.5 text-right text-muted-foreground border-r-2 border-slate-300 dark:border-slate-700">{(Number(d.population) || 0).toLocaleString()}</td>
-                          <td className="p-2.5 text-right border-r-2 border-slate-300 dark:border-slate-700 font-mono">{d.populationImmunityScore || domains.PI || "-"}</td>
-                          <td className="p-2.5 text-right border-r-2 border-slate-300 dark:border-slate-700 font-mono">{d.surveillanceQualityScore || domains.SQ || "-"}</td>
-                          <td className="p-2.5 text-right border-r-2 border-slate-300 dark:border-slate-700 font-mono">{d.programmeDeliveryScore || domains.PD || "-"}</td>
-                          <td className="p-2.5 text-right border-r-2 border-slate-300 dark:border-slate-700 font-mono">{d.threatAssessmentScore || domains.TA || "-"}</td>
+                          <td className="p-2.5 text-right border-r-2 border-slate-300 dark:border-slate-700 font-mono">{d.populationImmunityScore ?? domains.PI ?? "-"}</td>
+                          <td className="p-2.5 text-right border-r-2 border-slate-300 dark:border-slate-700 font-mono">{d.surveillanceQualityScore ?? domains.SQ ?? "-"}</td>
+                          <td className="p-2.5 text-right border-r-2 border-slate-300 dark:border-slate-700 font-mono">{d.programmeDeliveryScore ?? domains.PD ?? "-"}</td>
+                          <td className="p-2.5 text-right border-r-2 border-slate-300 dark:border-slate-700 font-mono">{d.threatAssessmentScore ?? domains.TA ?? "-"}</td>
                           <td className="p-2.5 text-right font-bold text-orange-600 dark:text-orange-400 border-r-2 border-slate-300 dark:border-slate-700 font-mono">
                             {d.totalRiskScore || d.totalScore || d.riskScore}
                           </td>
@@ -2376,10 +2293,10 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
                           </td>
 
                           <td className="p-2.5 text-right text-muted-foreground border-r-2 border-slate-300 dark:border-slate-700">{(Number(d.population) || 0).toLocaleString()}</td>
-                          <td className="p-2.5 text-right border-r-2 border-slate-300 dark:border-slate-700 font-mono">{d.populationImmunityScore || domains.PI || "-"}</td>
-                          <td className="p-2.5 text-right border-r-2 border-slate-300 dark:border-slate-700 font-mono">{d.surveillanceQualityScore || domains.SQ || "-"}</td>
-                          <td className="p-2.5 text-right border-r-2 border-slate-300 dark:border-slate-700 font-mono">{d.programmeDeliveryScore || domains.PD || "-"}</td>
-                          <td className="p-2.5 text-right border-r-2 border-slate-300 dark:border-slate-700 font-mono">{d.threatAssessmentScore || domains.TA || "-"}</td>
+                          <td className="p-2.5 text-right border-r-2 border-slate-300 dark:border-slate-700 font-mono">{d.populationImmunityScore ?? domains.PI ?? "-"}</td>
+                          <td className="p-2.5 text-right border-r-2 border-slate-300 dark:border-slate-700 font-mono">{d.surveillanceQualityScore ?? domains.SQ ?? "-"}</td>
+                          <td className="p-2.5 text-right border-r-2 border-slate-300 dark:border-slate-700 font-mono">{d.programmeDeliveryScore ?? domains.PD ?? "-"}</td>
+                          <td className="p-2.5 text-right border-r-2 border-slate-300 dark:border-slate-700 font-mono">{d.threatAssessmentScore ?? domains.TA ?? "-"}</td>
                           <td className="p-2.5 text-right font-bold text-amber-600 dark:text-amber-400 border-r-2 border-slate-300 dark:border-slate-700 font-mono">
                             {d.totalRiskScore || d.totalScore || d.riskScore}
                           </td>
@@ -2619,10 +2536,10 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
                           </td>
 
                           <td className="p-2.5 text-right text-muted-foreground border-r-2 border-slate-300 dark:border-slate-700">{(Number(d.population) || 0).toLocaleString()}</td>
-                          <td className="p-2.5 text-right border-r-2 border-slate-300 dark:border-slate-700 font-mono">{d.populationImmunityScore || domains.PI || "-"}</td>
-                          <td className="p-2.5 text-right border-r-2 border-slate-300 dark:border-slate-700 font-mono">{d.surveillanceQualityScore || domains.SQ || "-"}</td>
-                          <td className="p-2.5 text-right border-r-2 border-slate-300 dark:border-slate-700 font-mono">{d.programmeDeliveryScore || domains.PD || "-"}</td>
-                          <td className="p-2.5 text-right border-r-2 border-slate-300 dark:border-slate-700 font-mono">{d.threatAssessmentScore || domains.TA || "-"}</td>
+                          <td className="p-2.5 text-right border-r-2 border-slate-300 dark:border-slate-700 font-mono">{d.populationImmunityScore ?? domains.PI ?? "-"}</td>
+                          <td className="p-2.5 text-right border-r-2 border-slate-300 dark:border-slate-700 font-mono">{d.surveillanceQualityScore ?? domains.SQ ?? "-"}</td>
+                          <td className="p-2.5 text-right border-r-2 border-slate-300 dark:border-slate-700 font-mono">{d.programmeDeliveryScore ?? domains.PD ?? "-"}</td>
+                          <td className="p-2.5 text-right border-r-2 border-slate-300 dark:border-slate-700 font-mono">{d.threatAssessmentScore ?? domains.TA ?? "-"}</td>
                           <td className="p-2.5 text-right font-bold text-emerald-600 dark:text-emerald-400 border-r-2 border-slate-300 dark:border-slate-700 font-mono">
                             {d.totalRiskScore || d.totalScore || d.riskScore}
                           </td>
@@ -3032,10 +2949,10 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
                         </td>
 
                         <td className="p-2.5 text-right text-muted-foreground border-r">{(Number(d.population) || 0).toLocaleString()}</td>
-                        <td className="p-2.5 text-right border-r font-mono">{d.populationImmunityScore || domains.PI || "-"}</td>
-                        <td className="p-2.5 text-right border-r font-mono">{d.surveillanceQualityScore || domains.SQ || "-"}</td>
-                        <td className="p-2.5 text-right border-r font-mono">{d.programmeDeliveryScore || domains.PD || "-"}</td>
-                        <td className="p-2.5 text-right border-r font-mono">{d.threatAssessmentScore || domains.TA || "-"}</td>
+                        <td className="p-2.5 text-right border-r font-mono">{d.populationImmunityScore ?? domains.PI ?? "-"}</td>
+                        <td className="p-2.5 text-right border-r font-mono">{d.surveillanceQualityScore ?? domains.SQ ?? "-"}</td>
+                        <td className="p-2.5 text-right border-r font-mono">{d.programmeDeliveryScore ?? domains.PD ?? "-"}</td>
+                        <td className="p-2.5 text-right border-r font-mono">{d.threatAssessmentScore ?? domains.TA ?? "-"}</td>
                         <td className="p-2.5 text-right font-bold border-r font-mono">
                           {d.totalRiskScore || d.totalScore || d.riskScore}
                         </td>

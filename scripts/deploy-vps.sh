@@ -30,11 +30,12 @@ cd "$APP_DIR"
 
 # Load env variables from .env file
 if [ -f ".env" ]; then
-  if grep -q "neon.tech" .env; then
-    echo "⚠️  Detected deprecated Neon database URL in .env. Migrating to local Hostinger PostgreSQL..."
-    sed -i 's|DATABASE_URL=.*|DATABASE_URL=postgresql://postgres:postgres@localhost:5432/vaxplan|' .env
+  # Read configuration through Node's dotenv parser. Never rewrite credentials.
+  DATABASE_URL=$(node --env-file=.env -e 'process.stdout.write(process.env.DATABASE_URL || "")')
+  if [ -z "$DATABASE_URL" ]; then
+    echo "[ERROR] DATABASE_URL is not configured; deployment stopped."
+    exit 1
   fi
-  DATABASE_URL=$(grep DATABASE_URL .env | cut -d '=' -f2-)
 else
   echo "      [ERROR] .env file not found at $APP_DIR/.env"
   exit 1
@@ -47,7 +48,10 @@ echo ""
 echo "[0/5] Backing up database before deployment..."
 mkdir -p backups
 BACKUP_FILE="backups/backup_$(date +%Y%m%d_%H%M%S).sql"
-pg_dump "$DATABASE_URL" -f "$BACKUP_FILE" || echo "⚠️ Warning: pg_dump backup skipped (pg_dump unavailable or connection check)"
+if ! pg_dump "$DATABASE_URL" -f "$BACKUP_FILE"; then
+  echo "[ERROR] Database backup failed. Restore valid database authentication before deploying."
+  exit 1
+fi
 echo "      ✓ Database backup step completed."
 
 # ─────────────────────────────────────────────────────

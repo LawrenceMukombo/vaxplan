@@ -1,3 +1,4 @@
+import { safeErrorMessage } from "../errorUtils";
 import { Router, type Response, type NextFunction } from "express";
 import { db } from "../db";
 import { eq, and, or, ilike, desc, asc, sql } from "drizzle-orm";
@@ -188,7 +189,7 @@ researchRouter.post(
         });
       });
     } catch (error: any) {
-      res.status(500).json({ message: error.message || "Failed to upload file" });
+      res.status(500).json({ message: safeErrorMessage(error, "Failed to upload file") });
     }
   }
 );
@@ -225,7 +226,7 @@ researchRouter.get("/filter-metadata", async (req: any, res) => {
 
     res.json({ docTypes, countries, years });
   } catch (error: any) {
-    res.status(500).json({ message: error.message || "Failed to fetch filter metadata" });
+    res.status(500).json({ message: safeErrorMessage(error, "Failed to fetch filter metadata") });
   }
 });
 
@@ -299,7 +300,7 @@ researchRouter.get("/documents", loadDbUser, async (req: any, res) => {
 
     res.json(docs);
   } catch (error: any) {
-    res.status(500).json({ message: error.message || "Failed to fetch documents" });
+    res.status(500).json({ message: safeErrorMessage(error, "Failed to fetch documents") });
   }
 });
 
@@ -323,7 +324,7 @@ researchRouter.get("/documents/:id", loadDbUser, async (req: any, res) => {
 
     res.json(doc);
   } catch (error: any) {
-    res.status(500).json({ message: error.message || "Failed to fetch document" });
+    res.status(500).json({ message: safeErrorMessage(error, "Failed to fetch document") });
   }
 });
 
@@ -422,7 +423,7 @@ researchRouter.delete(
       await db.delete(researchDocuments).where(eq(researchDocuments.id, id));
       res.json({ success: true, message: "Document deleted successfully" });
     } catch (error: any) {
-      res.status(500).json({ message: error.message || "Failed to delete document" });
+      res.status(500).json({ message: safeErrorMessage(error, "Failed to delete document") });
     }
   }
 );
@@ -472,7 +473,7 @@ researchRouter.get("/pilots", loadDbUser, async (req: any, res) => {
 
     res.json(list);
   } catch (error: any) {
-    res.status(500).json({ message: error.message || "Failed to fetch pilots" });
+    res.status(500).json({ message: safeErrorMessage(error, "Failed to fetch pilots") });
   }
 });
 
@@ -502,7 +503,7 @@ researchRouter.get("/pilots/:id", loadDbUser, async (req: any, res) => {
 
     res.json({ ...pilot, updates });
   } catch (error: any) {
-    res.status(500).json({ message: error.message || "Failed to fetch pilot details" });
+    res.status(500).json({ message: safeErrorMessage(error, "Failed to fetch pilot details") });
   }
 });
 
@@ -598,7 +599,7 @@ researchRouter.delete(
       await db.delete(pilotActivities).where(eq(pilotActivities.id, id));
       res.json({ success: true, message: "Pilot deleted successfully" });
     } catch (error: any) {
-      res.status(500).json({ message: error.message || "Failed to delete pilot" });
+      res.status(500).json({ message: safeErrorMessage(error, "Failed to delete pilot") });
     }
   }
 );
@@ -670,7 +671,7 @@ researchRouter.get("/lessons", loadDbUser, async (req: any, res) => {
 
     res.json(list);
   } catch (error: any) {
-    res.status(500).json({ message: error.message || "Failed to fetch lessons" });
+    res.status(500).json({ message: safeErrorMessage(error, "Failed to fetch lessons") });
   }
 });
 
@@ -755,7 +756,7 @@ researchRouter.delete(
       await db.delete(implementationLessons).where(eq(implementationLessons.id, id));
       res.json({ success: true, message: "Lesson deleted successfully" });
     } catch (error: any) {
-      res.status(500).json({ message: error.message || "Failed to delete lesson" });
+      res.status(500).json({ message: safeErrorMessage(error, "Failed to delete lesson") });
     }
   }
 );
@@ -796,7 +797,7 @@ researchRouter.get("/assets", loadDbUser, async (req: any, res) => {
 
     res.json(list);
   } catch (error: any) {
-    res.status(500).json({ message: error.message || "Failed to fetch assets" });
+    res.status(500).json({ message: safeErrorMessage(error, "Failed to fetch assets") });
   }
 });
 
@@ -882,7 +883,7 @@ researchRouter.delete(
       await db.delete(downloadAssets).where(eq(downloadAssets.id, id));
       res.json({ success: true, message: "Asset deleted successfully" });
     } catch (error: any) {
-      res.status(500).json({ message: error.message || "Failed to delete asset" });
+      res.status(500).json({ message: safeErrorMessage(error, "Failed to delete asset") });
     }
   }
 );
@@ -925,7 +926,7 @@ researchRouter.get(
 
       res.json(list);
     } catch (error: any) {
-      res.status(500).json({ message: error.message || "Failed to fetch submissions" });
+      res.status(500).json({ message: safeErrorMessage(error, "Failed to fetch submissions") });
     }
   }
 );
@@ -953,7 +954,7 @@ researchRouter.patch(
 
       res.json(updated);
     } catch (error: any) {
-      res.status(500).json({ message: error.message || "Failed to update submission" });
+      res.status(500).json({ message: safeErrorMessage(error, "Failed to update submission") });
     }
   }
 );
@@ -1009,7 +1010,7 @@ researchRouter.post("/download/:id", async (req: any, res) => {
 
     res.status(400).json({ message: "Invalid type: must be document or asset" });
   } catch (error: any) {
-    res.status(500).json({ message: error.message || "Failed to track download" });
+    res.status(500).json({ message: safeErrorMessage(error, "Failed to track download") });
   }
 });
 
@@ -1106,7 +1107,7 @@ researchRouter.get(
         pendingSubmissions: Number(submissionsCount?.count || 0),
       });
     } catch (error: any) {
-      res.status(500).json({ message: error.message || "Failed to fetch analytics" });
+      res.status(500).json({ message: safeErrorMessage(error, "Failed to fetch analytics") });
     }
   }
 );

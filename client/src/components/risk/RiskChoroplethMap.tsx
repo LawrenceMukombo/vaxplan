@@ -1,3 +1,4 @@
+import { riskNumber } from '@shared/riskPresentation';
 import React, { useState, useMemo, useEffect, useRef } from "react";
 import {
   MapContainer,
@@ -38,13 +39,13 @@ export interface DistrictCoveragePerformance {
   provinceName: string;
   population: number;
   targetUnder1: number;
-  mcv1Coverage: number;
-  mcv2Coverage: number;
-  penta1Coverage: number;
-  dropoutRate: number;
-  mcvDropout: number;
-  suspectedCases: number;
-  riskScore: number;
+  mcv1Coverage: number | null;
+  mcv2Coverage: number | null;
+  penta1Coverage: number | null;
+  dropoutRate: number | null;
+  mcvDropout: number | null;
+  suspectedCases: number | null;
+  riskScore: number | null;
   riskCategory: "LOW" | "MEDIUM" | "HIGH" | "VERY_HIGH" | "INCOMPLETE";
   hasAssessmentRun?: boolean;
 }
@@ -161,37 +162,11 @@ export function RiskChoroplethMap({
 
   const effectiveCountryCode = countryCode || contextData?.countryCode || "ZAF";
 
-  const effectiveBoundaryId =
-    boundaryId ||
-    contextData?.boundaryId ||
-    contextData?.defaultBoundaryId ||
-    (effectiveCountryCode === "ZAF"
-      ? "a942c119-c045-492f-97ee-b95a8dbb8440"
-      : effectiveCountryCode === "ZMB"
-        ? "1edd5bcf-d20a-4910-a3cb-dd44c7e84c61"
-        : effectiveCountryCode === "SSD"
-          ? "af760f67-cc8e-4075-8938-777c387f141f"
-          : effectiveCountryCode === "PNG"
-            ? "90336ae8-7f06-4133-b5dd-d962a145d5c2"
-            : null);
-
-  // Fallback query if data is empty (ensures the map always renders coverage indicators)
-  const { data: fallbackResponse } = useQuery<{ performance?: DistrictCoveragePerformance[] }>({
-    queryKey: ["/api/risk/coverage-performance"],
-    enabled: !data || data.length === 0,
-    staleTime: 5 * 60 * 1000,
-  });
-
-  const effectiveData = useMemo(() => {
-    if (data && data.length > 0) return data;
-    if (fallbackResponse?.performance && fallbackResponse.performance.length > 0) {
-      return fallbackResponse.performance;
-    }
-    return [];
-  }, [data, fallbackResponse]);
+  const effectiveBoundaryId = boundaryId || contextData?.boundaryId || null;
+  const effectiveData = data || [];
 
   // GeoJSON boundary query
-  const { data: geoJsonData, isLoading: isGeoLoading } = useQuery<any>({
+  const { data: geoJsonData, isLoading: isGeoLoading, isError: isGeoError, refetch: refetchBoundaries, dataUpdatedAt: boundaryUpdatedAt } = useQuery<any>({
     queryKey: [`/api/boundaries/${effectiveBoundaryId}/geojson`],
     enabled: Boolean(effectiveBoundaryId),
     staleTime: 60 * 60 * 1000, // Boundaries are static, cache for 1 hr
@@ -303,12 +278,17 @@ export function RiskChoroplethMap({
     return undefined;
   };
 
+  const metricValue = (district: DistrictCoveragePerformance) => metric === 'risk' ? district.riskScore
+    : metric === 'mcv1' ? district.mcv1Coverage : metric === 'mcv2' ? district.mcv2Coverage : district.dropoutRate;
+  const formatValue = (value: number | null, suffix = '') => value === null ? 'No data' : value + suffix;
+  const dataRevision = JSON.stringify(effectiveData);
+
   // Color functions
   const getColor = (district?: DistrictCoveragePerformance): string => {
-    if (!district) return "#94a3b8"; // slate-400
+    if (!district || metricValue(district) === null) return "#94a3b8"; // slate-400
 
     if (metric === "mcv1") {
-      const val = district.mcv1Coverage;
+      const val = district.mcv1Coverage!;
       if (val >= 90) return "#10b981"; // Target Met (>=90%)
       if (val >= 80) return "#84cc16"; // Approaching Target (80-89%)
       if (val >= 70) return "#f59e0b"; // Suboptimal (70-79%)
@@ -316,7 +296,7 @@ export function RiskChoroplethMap({
     }
 
     if (metric === "mcv2") {
-      const val = district.mcv2Coverage;
+      const val = district.mcv2Coverage!;
       if (val >= 80) return "#10b981"; // Target Met (>=80%)
       if (val >= 70) return "#84cc16"; // Approaching (70-79%)
       if (val >= 60) return "#f59e0b"; // Suboptimal (60-69%)
@@ -324,7 +304,7 @@ export function RiskChoroplethMap({
     }
 
     if (metric === "dropout") {
-      const val = district.dropoutRate;
+      const val = district.dropoutRate!;
       if (val <= 10) return "#10b981"; // Good Retention (<=10%)
       if (val <= 19.9) return "#f59e0b"; // High Dropout (10-20%)
       return "#ef4444"; // Severe Service Bottleneck (>20%)
@@ -389,23 +369,23 @@ export function RiskChoroplethMap({
           </div>
           <div style="display: flex; justify-content: space-between; font-size: 11px; margin-bottom: 3px;">
             <span style="color: #64748b;">MCV1 Coverage:</span>
-            <strong style="color: ${d.mcv1Coverage >= 90 ? '#10b981' : d.mcv1Coverage >= 80 ? '#65a30d' : '#ef4444'};">${d.mcv1Coverage}%</strong>
+            <strong style="color: ${(d.mcv1Coverage ?? -Infinity) >= 90 ? '#10b981' : (d.mcv1Coverage ?? -Infinity) >= 80 ? '#65a30d' : '#ef4444'};">${formatValue(d.mcv1Coverage, '%')}</strong>
           </div>
           <div style="display: flex; justify-content: space-between; font-size: 11px; margin-bottom: 3px;">
             <span style="color: #64748b;">MCV2 Coverage:</span>
-            <strong style="color: ${d.mcv2Coverage >= 80 ? '#10b981' : '#f59e0b'};">${d.mcv2Coverage}%</strong>
+            <strong style="color: ${(d.mcv2Coverage ?? -Infinity) >= 80 ? '#10b981' : '#f59e0b'};">${formatValue(d.mcv2Coverage, '%')}</strong>
           </div>
           <div style="display: flex; justify-content: space-between; font-size: 11px; margin-bottom: 3px;">
             <span style="color: #64748b;">Penta1-MCV1 Dropout:</span>
-            <strong style="color: ${d.dropoutRate <= 10 ? '#10b981' : '#ef4444'};">${d.dropoutRate}%</strong>
+            <strong style="color: ${(d.dropoutRate ?? Infinity) <= 10 ? '#10b981' : '#ef4444'};">${formatValue(d.dropoutRate, '%')}</strong>
           </div>
           <div style="display: flex; justify-content: space-between; font-size: 11px; margin-bottom: 3px;">
             <span style="color: #64748b;">Suspected Cases:</span>
-            <strong>${d.suspectedCases}</strong>
+            <strong>${formatValue(d.suspectedCases)}</strong>
           </div>
           <div style="display: flex; justify-content: space-between; font-size: 11px; border-top: 1px dashed #e2e8f0; padding-top: 4px; margin-top: 4px;">
             <span style="color: #64748b;">Programmatic Risk:</span>
-            <span style="font-weight: 700; color: ${getColor(d)};">${d.riskCategory.replace('_', ' ')} (${d.riskScore} pts)</span>
+            <span style="font-weight: 700; color: ${getColor(d)};">${d.riskCategory.replace('_', ' ')} (${formatValue(d.riskScore, ' pts')})</span>
           </div>
         </div>
       `
@@ -459,21 +439,21 @@ export function RiskChoroplethMap({
       else if (d.riskCategory === "VERY_HIGH") veryHighRisk++;
 
       // MCV1
-      if (d.mcv1Coverage >= 90) mcv1Target++;
-      else if (d.mcv1Coverage >= 80) mcv1Suboptimal++;
-      else if (d.mcv1Coverage >= 70) mcv1Poor++;
-      else mcv1Critical++;
+      if ((d.mcv1Coverage ?? -Infinity) >= 90) mcv1Target++;
+      else if ((d.mcv1Coverage ?? -Infinity) >= 80) mcv1Suboptimal++;
+      else if ((d.mcv1Coverage ?? -Infinity) >= 70) mcv1Poor++;
+      else if (d.mcv1Coverage !== null) mcv1Critical++;
 
       // MCV2
-      if (d.mcv2Coverage >= 80) mcv2Target++;
-      else if (d.mcv2Coverage >= 70) mcv2Moderate++;
-      else if (d.mcv2Coverage >= 60) mcv2Low++;
-      else mcv2Critical++;
+      if ((d.mcv2Coverage ?? -Infinity) >= 80) mcv2Target++;
+      else if ((d.mcv2Coverage ?? -Infinity) >= 70) mcv2Moderate++;
+      else if ((d.mcv2Coverage ?? -Infinity) >= 60) mcv2Low++;
+      else if (d.mcv2Coverage !== null) mcv2Critical++;
 
       // Dropout
-      if (d.dropoutRate <= 10) dropLow++;
-      else if (d.dropoutRate <= 19.9) dropHigh++;
-      else dropSevere++;
+      if ((d.dropoutRate ?? Infinity) <= 10) dropLow++;
+      else if ((d.dropoutRate ?? Infinity) <= 19.9) dropHigh++;
+      else if (d.dropoutRate !== null) dropSevere++;
     }
 
     return {
@@ -484,23 +464,21 @@ export function RiskChoroplethMap({
     };
   }, [effectiveData]);
 
-  // KPIs
-  const summary = useMemo(() => {
-    if (!effectiveData.length) return { mcv1Avg: 0, mcv2Avg: 0, dropoutAvg: 0, targetMetCount: 0, highRiskCount: 0 };
-    const mcv1Sum = effectiveData.reduce((acc, d) => acc + d.mcv1Coverage, 0);
-    const mcv2Sum = effectiveData.reduce((acc, d) => acc + d.mcv2Coverage, 0);
-    const dropSum = effectiveData.reduce((acc, d) => acc + d.dropoutRate, 0);
-    const targetMet = effectiveData.filter((d) => d.mcv1Coverage >= 90).length;
-    const highRisk = effectiveData.filter((d) => d.riskCategory === "HIGH" || d.riskCategory === "VERY_HIGH").length;
-
-    return {
-      mcv1Avg: Number((mcv1Sum / effectiveData.length).toFixed(1)),
-      mcv2Avg: Number((mcv2Sum / effectiveData.length).toFixed(1)),
-      dropoutAvg: Number((dropSum / effectiveData.length).toFixed(1)),
-      targetMetCount: targetMet,
-      highRiskCount: highRisk,
-    };
-  }, [effectiveData]);
+  // Each map summarizes only its selected indicator; missing values never count as zero.
+  const values = effectiveData.map(metricValue).filter((v): v is number => v !== null && Number.isFinite(v));
+  const metricLabel = {risk: 'Overall risk score', mcv1: 'MCV1 coverage (3-year mean)', mcv2: 'MCV2 coverage (introduced years mean)', dropout: 'Penta1 to MCV1 dropout (previous year)'}[metric];
+  const mean = values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
+  const suffix = metric === 'risk' ? ' pts' : '%';
+  const metricCards = [
+    ['District mean', mean === null ? 'No data' : mean.toFixed(1) + suffix],
+    ['District range', values.length ? Math.min(...values).toFixed(1) + '–' + Math.max(...values).toFixed(1) + suffix : 'No data'],
+    ['Districts with data', values.length + ' / ' + effectiveData.length],
+    [metric === 'risk' ? 'High / very high risk' : 'Within map target', String(effectiveData.filter(d => {
+      const value = metricValue(d);
+      if (value === null) return false;
+      return metric === 'risk' ? ['HIGH', 'VERY_HIGH'].includes(d.riskCategory) : metric === 'dropout' ? value <= 10 : value >= (metric === 'mcv1' ? 90 : 80);
+    }).length)],
+  ];
 
   const selectedDistrict = useMemo(() => {
     if (!selectedDistrictId) return null;
@@ -515,7 +493,7 @@ export function RiskChoroplethMap({
             <div className="flex items-center gap-2 flex-wrap">
               <Layers className="w-5 h-5 text-primary" />
               <CardTitle className="text-base font-semibold">
-                {countryName} • Coverage Performance & Vulnerability Map
+                {countryName} • {metricLabel}
               </CardTitle>
               {selectedCategoryFilter && selectedCategoryFilter !== "ALL" ? (
                 <Badge className="text-xs bg-primary text-primary-foreground gap-1 font-semibold">
@@ -592,55 +570,20 @@ export function RiskChoroplethMap({
           </div>
         </div>
 
-        {/* National Snapshot KPI Chips */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-2">
-          <div className="bg-background rounded-md p-2 border flex items-center justify-between">
-            <div>
-              <p className="text-[10px] text-muted-foreground uppercase font-semibold">National MCV1 Mean</p>
-              <p className="text-base font-bold text-foreground">{summary.mcv1Avg}%</p>
-            </div>
-            {summary.mcv1Avg >= 90 ? (
-              <TrendingUp className="w-4 h-4 text-emerald-600" />
-            ) : (
-              <TrendingDown className="w-4 h-4 text-amber-600" />
-            )}
-          </div>
-
-          <div className="bg-background rounded-md p-2 border flex items-center justify-between">
-            <div>
-              <p className="text-[10px] text-muted-foreground uppercase font-semibold">National MCV2 Mean</p>
-              <p className="text-base font-bold text-foreground">{summary.mcv2Avg}%</p>
-            </div>
-            <Activity className="w-4 h-4 text-blue-600" />
-          </div>
-
-          <div className="bg-background rounded-md p-2 border flex items-center justify-between">
-            <div>
-              <p className="text-[10px] text-muted-foreground uppercase font-semibold">Mean Dropout Rate</p>
-              <p className={`text-base font-bold ${summary.dropoutAvg <= 10 ? 'text-emerald-600' : 'text-rose-600'}`}>
-                {summary.dropoutAvg}%
-              </p>
-            </div>
-            {summary.dropoutAvg <= 10 ? (
-              <CheckCircle className="w-4 h-4 text-emerald-600" />
-            ) : (
-              <AlertTriangle className="w-4 h-4 text-rose-600" />
-            )}
-          </div>
-
-          <div className="bg-background rounded-md p-2 border flex items-center justify-between">
-            <div>
-              <p className="text-[10px] text-muted-foreground uppercase font-semibold">High / Very High Risk</p>
-              <p className="text-base font-bold text-rose-600">
-                {summary.highRiskCount} <span className="text-xs font-normal text-muted-foreground">/ {effectiveData.length}</span>
-              </p>
-            </div>
-            <ShieldAlert className="w-4 h-4 text-rose-600" />
-          </div>
+          {metricCards.map(([label, value]) => <div key={label} className="bg-background rounded-md p-2 border">
+            <p className="text-[10px] text-muted-foreground uppercase font-semibold">{label}</p>
+            <p className="text-base font-bold">{value}</p>
+          </div>)}
         </div>
       </CardHeader>
 
       <CardContent className="p-0 relative">
+        {!isGeoLoading && (isGeoError || !geoJsonData?.features?.length) && <div role="status" className="p-3 bg-amber-50 text-amber-900 text-sm">
+          District boundaries are unavailable for {countryName}. Assessment values remain available in the tables.
+          {effectiveBoundaryId && <Button variant="outline" size="sm" className="ml-2" onClick={() => refetchBoundaries()}>Retry boundaries</Button>}
+        </div>}
+        <p className="px-3 py-1 text-xs text-muted-foreground">{effectiveData.length - values.length} districts without this indicator. Grey areas have no matched data.</p>
         {/* Map Container */}
         <div className="h-[500px] w-full relative z-0">
           <BasemapSwitcher basemap={basemap} onChange={setBasemap} className="top-3 right-3" />
@@ -657,7 +600,7 @@ export function RiskChoroplethMap({
               <>
                 {isolateCountry && countryMaskGeoJson && (
                   <GeoJSON
-                    key={`mask-${effectiveBoundaryId}`}
+                    key={`mask-${effectiveBoundaryId}-${boundaryUpdatedAt}`}
                     data={countryMaskGeoJson}
                     style={{
                       fillColor: "#f8fafc",
@@ -673,7 +616,7 @@ export function RiskChoroplethMap({
                 )}
                 <GeoJSON
                   ref={geoJsonRef}
-                  key={`${effectiveBoundaryId}-${metric}-${selectedDistrictId}-${selectedCategoryFilter}-${isolateCountry}`}
+                  key={`${effectiveBoundaryId}-${metric}-${selectedDistrictId}-${selectedCategoryFilter}-${isolateCountry}-${boundaryUpdatedAt}-${dataRevision}`}
                   data={geoJsonData}
                   style={styleFeature}
                   onEachFeature={onEachFeature}

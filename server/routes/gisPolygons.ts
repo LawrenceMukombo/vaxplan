@@ -1,3 +1,4 @@
+import { safeErrorMessage } from "../errorUtils";
 import { Router } from "express";
 import { eq, and } from "drizzle-orm";
 import { db, pool } from "../db";
@@ -30,7 +31,7 @@ gisPolygonsRouter.get("/", async (req, res) => {
     const results = await query;
     res.json(results);
   } catch (err: any) {
-    res.status(500).json({ message: "Failed to fetch polygons", error: err.message });
+    res.status(500).json({ message: "Failed to fetch polygons" });
   }
 });
 
@@ -53,7 +54,7 @@ gisPolygonsRouter.post("/", async (req, res) => {
     
     res.json(inserted);
   } catch (err: any) {
-    res.status(500).json({ message: "Failed to create polygon", error: err.message });
+    res.status(500).json({ message: "Failed to create polygon" });
   }
 });
 
@@ -84,7 +85,7 @@ gisPolygonsRouter.put("/:id", async (req, res) => {
     
     res.json(updated);
   } catch (err: any) {
-    res.status(500).json({ message: "Failed to update polygon", error: err.message });
+    res.status(500).json({ message: "Failed to update polygon" });
   }
 });
 
@@ -110,7 +111,7 @@ gisPolygonsRouter.delete("/:id", async (req, res) => {
       
     res.json({ success: true });
   } catch (err: any) {
-    res.status(500).json({ message: "Failed to delete polygon", error: err.message });
+    res.status(500).json({ message: "Failed to delete polygon" });
   }
 });
 
@@ -130,7 +131,7 @@ gisPolygonsRouter.post("/buffer", async (req, res) => {
     
     res.json(result.rows[0].geometry);
   } catch (err: any) {
-    res.status(500).json({ message: "Failed to generate buffer polygon", error: err.message });
+    res.status(500).json({ message: "Failed to generate buffer polygon" });
   }
 });
 
@@ -173,7 +174,7 @@ gisPolygonsRouter.post("/suggest", async (req, res) => {
     
     res.json(geometry);
   } catch (err: any) {
-    res.status(500).json({ message: "Failed to suggest polygon", error: err.message });
+    res.status(500).json({ message: "Failed to suggest polygon" });
   }
 });
 
@@ -189,6 +190,6 @@ gisPolygonsRouter.post("/intelligence", async (req, res) => {
     const intelligence = await PopulationIntelligenceService.fetchPolygonPopulation(tenantId, geometry, countryCode, ownerType, ownerId);
     res.json(intelligence);
   } catch (err: any) {
-    res.status(500).json({ message: "Failed to calculate intelligence", error: err.message });
+    res.status(500).json({ message: "Failed to calculate intelligence" });
   }
 });

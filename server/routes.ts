@@ -1,3 +1,4 @@
+import { safeErrorMessage } from "./errorUtils";
 import { DenominatorHarmonisationService } from "./services/denominatorHarmonisationService.js";
 import { EntityHistoryService } from "./services/entityHistoryService";
 import { AsOfDateService } from "./services/asOfDateService";
@@ -1417,7 +1418,7 @@ export async function registerRoutes(
       res.status(201).json(tenant);
     } catch (err: any) {
       console.error("POST /api/admin/tenants error:", err);
-      res.status(500).json({ message: err.message || "Failed to provision country tenant" });
+      res.status(500).json({ message: safeErrorMessage(err, "Failed to provision country tenant") });
     }
   });
 
@@ -1453,7 +1454,7 @@ export async function registerRoutes(
       return res.status(200).json(updated);
     } catch (err: any) {
       console.error("PATCH /api/admin/tenants/:id error:", err);
-      res.status(500).json({ message: err.message || "Failed to update country tenant" });
+      res.status(500).json({ message: safeErrorMessage(err, "Failed to update country tenant") });
     }
   });
 
@@ -1468,7 +1469,7 @@ export async function registerRoutes(
       res.json({ success: true, tenant: updated });
     } catch (err: any) {
       console.error("DELETE /api/admin/tenants/:id error:", err);
-      res.status(500).json({ message: err.message || "Failed to archive country tenant" });
+      res.status(500).json({ message: safeErrorMessage(err, "Failed to archive country tenant") });
     }
   });
 
@@ -1494,7 +1495,7 @@ export async function registerRoutes(
       });
     } catch (err: any) {
       console.error("AI Generation error:", err);
-      res.status(500).json({ error: err.message || "Failed to generate AI recommendations" });
+      res.status(500).json({ message: safeErrorMessage(err, "Failed to generate AI recommendations") });
     }
   };
 
@@ -2950,7 +2951,7 @@ export async function registerRoutes(
       res.json({ success: true, message: `Country ${tenant.name} archived successfully.` });
     } catch (err: any) {
       console.error("DELETE /api/admin/tenants/:id failed:", err);
-      res.status(500).json({ message: err?.message || "Failed to delete tenant" });
+      res.status(500).json({ message: safeErrorMessage(err, "Failed to delete tenant") });
     }
   });
 
@@ -3514,7 +3515,7 @@ export async function registerRoutes(
           res.json({ url, filename, size: req.file.size });
         } catch (err: any) {
           console.error("POST /api/me/tenant/brand-logo failed:", err);
-          res.status(500).json({ message: err?.message || "Failed to upload logo" });
+          res.status(500).json({ message: safeErrorMessage(err, "Failed to upload logo") });
         }
       },
     );
@@ -3880,7 +3881,7 @@ export async function registerRoutes(
           });
         } catch (err: any) {
           console.error("POST /api/admin/population-refresh-jobs/upload-raster failed:", err);
-          res.status(500).json({ message: err?.message || "Failed to upload raster" });
+          res.status(500).json({ message: safeErrorMessage(err, "Failed to upload raster") });
         }
       },
     );
@@ -4880,7 +4881,7 @@ export async function registerRoutes(
       res.json(staffList);
     } catch (error: any) {
       console.error("Error listing all staff:", error);
-      res.status(500).json({ message: "Failed to list staff: " + error.message });
+      res.status(500).json({ message: safeErrorMessage(error, "Failed to list staff") });
     }
   });
 
@@ -4903,7 +4904,7 @@ export async function registerRoutes(
       res.json(staffList);
     } catch (error: any) {
       console.error("Error listing facility staff:", error);
-      res.status(500).json({ message: "Failed to list facility staff: " + error.message });
+      res.status(500).json({ message: safeErrorMessage(error, "Failed to list facility staff") });
     }
   });
 
@@ -5090,7 +5091,7 @@ export async function registerRoutes(
       res.json({ success: true });
     } catch (error: any) {
       console.error("Error deleting facility staff:", error);
-      res.status(500).json({ message: "Failed to delete staff: " + error.message });
+      res.status(500).json({ message: safeErrorMessage(error, "Failed to delete staff") });
     }
   });
 
@@ -5148,7 +5149,7 @@ export async function registerRoutes(
       }
       res.json({ results });
     } catch (err: any) {
-      res.status(500).json({ message: err?.message || "Bulk save failed" });
+      res.status(500).json({ message: safeErrorMessage(err, "Bulk save failed") });
     }
   });
 
@@ -5175,7 +5176,7 @@ export async function registerRoutes(
         res.json(rows);
       }
     } catch (error: any) {
-      res.status(500).json({ message: "Failed to list HFC Committee: " + error.message });
+      res.status(500).json({ message: safeErrorMessage(error, "Failed to list HFC Committee") });
     }
   });
 
@@ -5268,7 +5269,7 @@ export async function registerRoutes(
         res.json({ ok: true });
       }
     } catch (error: any) {
-      res.status(500).json({ message: "Failed to delete HFC Committee member: " + error.message });
+      res.status(500).json({ message: safeErrorMessage(error, "Failed to delete HFC Committee member") });
     }
   });
 
@@ -5325,7 +5326,7 @@ export async function registerRoutes(
         res.json(mapped);
       }
     } catch (error: any) {
-      res.status(500).json({ message: "Failed to list CHVs: " + error.message });
+      res.status(500).json({ message: safeErrorMessage(error, "Failed to list CHVs") });
     }
   });
 
@@ -5620,7 +5621,7 @@ export async function registerRoutes(
         res.json({ ok: true });
       }
     } catch (error: any) {
-      res.status(500).json({ message: "Failed to delete CHV: " + error.message });
+      res.status(500).json({ message: safeErrorMessage(error, "Failed to delete CHV") });
     }
   });
 
@@ -5686,7 +5687,7 @@ export async function registerRoutes(
         res.json({ results });
       }
     } catch (err: any) {
-      res.status(500).json({ message: err?.message || "Bulk save failed" });
+      res.status(500).json({ message: safeErrorMessage(err, "Bulk save failed") });
     }
   });
 
@@ -5717,7 +5718,7 @@ export async function registerRoutes(
       await logAudit(req, "update", "chv_profile_bulk_reassign", 0, null, { chvIds, villageId, succeeded });
       res.json({ succeeded, failed: results.filter(r => !r.ok).length, results });
     } catch (err: any) {
-      res.status(500).json({ message: "Bulk reassign failed: " + err.message });
+      res.status(500).json({ message: safeErrorMessage(err, "Bulk reassign failed") });
     }
   });
 
@@ -5782,7 +5783,7 @@ export async function registerRoutes(
 
       res.json(rows);
     } catch (err: any) {
-      res.status(500).json({ message: "Failed to fetch cold chain inventory: " + err.message });
+      res.status(500).json({ message: safeErrorMessage(err, "Failed to fetch cold chain inventory") });
     }
   });
 
@@ -5805,7 +5806,7 @@ export async function registerRoutes(
         .orderBy(coldChainEquipment.equipmentType, coldChainEquipment.brand);
       res.json(rows);
     } catch (err: any) {
-      res.status(500).json({ message: "Failed to list cold chain equipment: " + err.message });
+      res.status(500).json({ message: safeErrorMessage(err, "Failed to list cold chain equipment") });
     }
   });
 
@@ -5945,7 +5946,7 @@ export async function registerRoutes(
       await logAudit(req, "delete", "cold_chain_equipment", equipId, existing, null);
       res.json({ success: true });
     } catch (err: any) {
-      res.status(500).json({ message: "Failed to delete equipment: " + err.message });
+      res.status(500).json({ message: safeErrorMessage(err, "Failed to delete equipment") });
     }
   });
 
@@ -6116,7 +6117,7 @@ export async function registerRoutes(
       });
     } catch (err: any) {
       console.error("POST /api/cold-chain/import error:", err);
-      res.status(500).json({ message: "Failed to import cold chain equipment: " + err.message });
+      res.status(500).json({ message: safeErrorMessage(err, "Failed to import cold chain equipment") });
     }
   });
 
@@ -6193,7 +6194,7 @@ export async function registerRoutes(
       res.setHeader("Content-Disposition", `attachment; filename="cold-chain-iga-facility-${facilityId}.json"`);
       return res.json(igaExport);
     } catch (err: any) {
-      res.status(500).json({ message: "Export failed: " + err.message });
+      res.status(500).json({ message: safeErrorMessage(err, "Export failed") });
     }
   });
 
@@ -6359,7 +6360,7 @@ export async function registerRoutes(
     } catch (error: any) {
       if (error?.name === "ZodError") return res.status(400).json({ success: false, message: "Invalid payload format.", errors: error.errors });
       console.error("Error importing facilities:", error);
-      res.status(500).json({ success: false, message: "Failed to import facilities: " + error.message });
+      res.status(500).json({ success: false, message: safeErrorMessage(error, "Failed to import facilities") });
     }
   });
 
@@ -6500,7 +6501,7 @@ export async function registerRoutes(
       res.json({ catchment, assignedCount: villageIds?.length || 0 });
     } catch (error: any) {
       console.error("Error saving catchment area:", error);
-      res.status(500).json({ message: "Failed to save catchment area: " + error.message });
+      res.status(500).json({ message: safeErrorMessage(error, "Failed to save catchment area") });
     }
   });
 
@@ -8014,7 +8015,7 @@ export async function registerRoutes(
       });
     } catch (error: any) {
       console.error("Aggressive extraction failed:", error);
-      res.status(500).json({ message: "Aggressive extraction failed: " + error.message });
+      res.status(500).json({ message: safeErrorMessage(error, "Aggressive extraction failed") });
     }
   });
 
@@ -8061,7 +8062,7 @@ export async function registerRoutes(
       stream.pipe(res);
     } catch (error: any) {
       console.error("Error serving GeoTIFF raster file:", error);
-      res.status(500).json({ message: "Failed to serve GeoTIFF raster file: " + error.message });
+      res.status(500).json({ message: safeErrorMessage(error, "Failed to serve GeoTIFF raster file") });
     }
   });
   */
@@ -8227,7 +8228,7 @@ export async function registerRoutes(
       stream.pipe(res);
     } catch (error: any) {
       console.error("Error serving GeoTIFF raster file:", error);
-      res.status(500).json({ message: "Failed to serve GeoTIFF raster file: " + error.message });
+      res.status(500).json({ message: safeErrorMessage(error, "Failed to serve GeoTIFF raster file") });
     }
   });
 
@@ -8309,7 +8310,7 @@ export async function registerRoutes(
       res.json({ success: true, files: rasters });
     } catch (error: any) {
       console.error("Error listing GeoTIFF population rasters:", error);
-      res.status(500).json({ success: false, message: "Failed to list rasters: " + error.message });
+      res.status(500).json({ success: false, message: safeErrorMessage(error, "Failed to list rasters") });
     }
   });
 
@@ -8369,7 +8370,7 @@ export async function registerRoutes(
       res.json(geojsonData);
     } catch (error: any) {
       console.error("Error resolving tenant GRID3 settlement footprints:", error);
-      res.status(500).json({ success: false, message: "GRID3 settlement footprint lookup failed: " + error.message });
+      res.status(500).json({ success: false, message: safeErrorMessage(error, "GRID3 settlement footprint lookup failed") });
     }
   });
 
@@ -8420,12 +8421,12 @@ export async function registerRoutes(
 
       req.on("error", (err: any) => {
         console.error("Upload request stream error:", err);
-        res.status(500).json({ success: false, message: "Upload stream broke: " + err.message });
+        res.status(500).json({ success: false, message: safeErrorMessage(err, "Upload stream broke") });
       });
 
       writeStream.on("error", (err: any) => {
         console.error("Write stream error:", err);
-        res.status(500).json({ success: false, message: "Failed to write file: " + err.message });
+        res.status(500).json({ success: false, message: safeErrorMessage(err, "Failed to write file") });
       });
 
       writeStream.on("finish", async () => {
@@ -8435,7 +8436,7 @@ export async function registerRoutes(
 
     } catch (error: any) {
       console.error("Error in GeoTIFF upload handler:", error);
-      res.status(500).json({ success: false, message: "GeoTIFF upload failed: " + error.message });
+      res.status(500).json({ success: false, message: safeErrorMessage(error, "GeoTIFF upload failed") });
     }
   });
 
@@ -8741,7 +8742,7 @@ export async function registerRoutes(
         return res.status(400).json({ success: false, message: "Invalid population payload.", errors: error.errors });
       }
       console.error("Error importing population data:", error);
-      res.status(500).json({ success: false, message: "Failed to import population: " + error.message });
+      res.status(500).json({ success: false, message: safeErrorMessage(error, "Failed to import population") });
     }
   });
 
@@ -9136,7 +9137,7 @@ export async function registerRoutes(
       res.json({ total: all.length, uncoveredCount: uncovered.length, communities: all });
     } catch (err: any) {
       console.error("[uncovered-communities]", err);
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrorMessage(err, "An unexpected error occurred") });
     }
   });
 
@@ -9339,7 +9340,7 @@ export async function registerRoutes(
       });
     } catch (error: any) {
       console.error("Error estimating polygon population:", error);
-      res.status(500).json({ message: "Failed to estimate polygon population: " + error.message });
+      res.status(500).json({ message: safeErrorMessage(error, "Failed to estimate polygon population") });
     }
   });
 
@@ -10249,7 +10250,7 @@ export async function registerRoutes(
       console.error("Error fetching session villages:", error);
       res.status(500).json({
         message: "Failed to fetch session villages",
-        error: error.message,
+        error: safeErrorMessage(error, "Unable to load session villages"),
         stack: error.stack
       });
     }
@@ -10823,7 +10824,7 @@ export async function registerRoutes(
       res.status(204).send();
     } catch (error) {
       console.error("Error deleting session:", error);
-      res.status(500).json({ message: error instanceof Error ? error.message : "Failed to delete session" });
+      res.status(500).json({ message: safeErrorMessage(error, "Failed to delete session") });
     }
   });
 
@@ -12025,7 +12026,7 @@ export async function registerRoutes(
       });
     } catch (error: any) {
       console.error("Error fetching supervisors:", error);
-      res.status(500).json({ message: "Failed to fetch supervisors: " + error.message });
+      res.status(500).json({ message: safeErrorMessage(error, "Failed to fetch supervisors") });
     }
   });
 
@@ -12141,7 +12142,7 @@ export async function registerRoutes(
       });
     } catch (error: any) {
       console.error("Error creating supervisor:", error);
-      res.status(500).json({ message: "Failed to create supervisor: " + error.message });
+      res.status(500).json({ message: safeErrorMessage(error, "Failed to create supervisor") });
     }
   });
 
@@ -12387,7 +12388,7 @@ export async function registerRoutes(
       res.json(result);
     } catch (err: any) {
       console.error("POST /api/supervision/digest/run failed:", err);
-      res.status(500).json({ message: err?.message || "Failed to run supervision digest" });
+      res.status(500).json({ message: safeErrorMessage(err, "Failed to run supervision digest") });
     }
   });
 
@@ -13138,7 +13139,7 @@ export async function registerRoutes(
 
       res.status(201).json({ ...boundary, geojson: undefined, featureCount });
     } catch (err: any) {
-      res.status(500).json({ message: err?.message ?? "Failed to upload boundary" });
+      res.status(500).json({ message: safeErrorMessage(err, "Failed to upload boundary") });
     }
   });
 
@@ -13349,7 +13350,7 @@ export async function registerRoutes(
           res.status(201).json({ ...layer, geojson: undefined, featureCount });
         } catch (err: any) {
           console.error("POST /api/custom-layers failed:", err);
-          res.status(500).json({ message: err?.message ?? "Failed to upload custom layer" });
+          res.status(500).json({ message: safeErrorMessage(err, "Failed to upload custom layer") });
         }
       },
     );
@@ -13499,7 +13500,7 @@ export async function registerRoutes(
 
       res.status(201).json(catchment);
     } catch (err: any) {
-      res.status(500).json({ message: err?.message ?? "Failed to save catchment" });
+      res.status(500).json({ message: safeErrorMessage(err, "Failed to save catchment") });
     }
   });
 
@@ -13686,7 +13687,7 @@ export async function registerRoutes(
       });
     } catch (err: any) {
       console.error("POST /api/catchments/extract failed:", err);
-      res.status(500).json({ message: err?.message ?? "Failed to extract communities" });
+      res.status(500).json({ message: safeErrorMessage(err, "Failed to extract communities") });
     }
   });
 
@@ -16235,7 +16236,7 @@ export async function registerRoutes(
         res.json(preview);
       } catch (err: any) {
         console.error("POST /api/imports/csv failed:", err);
-        res.status(500).json({ message: err?.message ?? "CSV preview failed" });
+        res.status(500).json({ message: safeErrorMessage(err, "CSV preview failed") });
       }
     },
   );
@@ -16268,7 +16269,7 @@ export async function registerRoutes(
         });
       } catch (err: any) {
         console.error("POST /api/imports/csv/commit failed:", err);
-        res.status(500).json({ message: err?.message ?? "CSV commit failed" });
+        res.status(500).json({ message: safeErrorMessage(err, "CSV commit failed") });
       }
     },
   );
@@ -16283,7 +16284,7 @@ export async function registerRoutes(
       `);
       res.json((rows as any).rows ?? []);
     } catch (err: any) {
-      res.status(500).json({ message: err?.message ?? "Failed to list imports" });
+      res.status(500).json({ message: safeErrorMessage(err, "Failed to list imports") });
     }
   });
 
@@ -16300,7 +16301,7 @@ export async function registerRoutes(
       if (!row) return res.status(404).json({ message: "Import not found" });
       res.json(row);
     } catch (err: any) {
-      res.status(500).json({ message: err?.message ?? "Failed to fetch import" });
+      res.status(500).json({ message: safeErrorMessage(err, "Failed to fetch import") });
     }
   });
 
@@ -16354,7 +16355,7 @@ export async function registerRoutes(
       } catch (err: any) {
         if (err?.name === "ZodError") return res.status(400).json({ message: "Invalid payload", errors: err.errors });
         console.error("POST /api/imports/dhis2/pull failed:", err);
-        res.status(500).json({ message: err?.message ?? "DHIS2 pull failed" });
+        res.status(500).json({ message: safeErrorMessage(err, "DHIS2 pull failed") });
       }
     },
   );
@@ -16386,7 +16387,7 @@ export async function registerRoutes(
     } catch (err: any) {
       if (err?.name === "ZodError") return res.status(400).json({ message: "Invalid query", errors: err.errors });
       console.error("GET /api/missed-communities failed:", err);
-      res.status(500).json({ message: err?.message ?? "Scoring failed" });
+      res.status(500).json({ message: safeErrorMessage(err, "Scoring failed") });
     }
   });
 
@@ -16500,7 +16501,7 @@ export async function registerRoutes(
       } catch (err: any) {
         if (err?.name === "ZodError") return res.status(400).json({ message: "Invalid payload", errors: err.errors });
         console.error("POST /api/missed-communities/create-outreach failed:", err);
-        res.status(500).json({ message: err?.message ?? "Failed to create outreach microplan" });
+        res.status(500).json({ message: safeErrorMessage(err, "Failed to create outreach microplan") });
       }
     },
   );
@@ -18664,7 +18665,7 @@ export async function registerRoutes(
         }
       } catch (err: any) {
         console.error("POST /api/me/tenant/test-communication failed:", err);
-        res.status(500).json({ message: "Internal server error", error: err.message });
+        res.status(500).json({ message: "Internal server error" });
       }
     }
   );
@@ -18887,7 +18888,7 @@ export async function registerRoutes(
       res.json({ results });
     } catch (err: any) {
       console.error("POST /api/sessions/bulk failed:", err);
-      res.status(500).json({ message: err?.message || "Bulk save failed" });
+      res.status(500).json({ message: safeErrorMessage(err, "Bulk save failed") });
     }
   });
 
@@ -18984,7 +18985,7 @@ export async function registerRoutes(
       res.json({ results });
     } catch (err: any) {
       console.error("POST /api/sessions/days/bulk failed:", err);
-      res.status(500).json({ message: err?.message || "Bulk save failed" });
+      res.status(500).json({ message: safeErrorMessage(err, "Bulk save failed") });
     }
   });
 
@@ -19023,7 +19024,7 @@ export async function registerRoutes(
       res.json({ results });
     } catch (err: any) {
       console.error("POST /api/population/bulk failed:", err);
-      res.status(500).json({ message: err?.message || "Bulk save failed" });
+      res.status(500).json({ message: safeErrorMessage(err, "Bulk save failed") });
     }
   });
 
@@ -19050,7 +19051,7 @@ export async function registerRoutes(
       res.json({ results });
     } catch (err: any) {
       console.error("POST /api/htr-scores/bulk failed:", err);
-      res.status(500).json({ message: err?.message || "Bulk save failed" });
+      res.status(500).json({ message: safeErrorMessage(err, "Bulk save failed") });
     }
   });
 
@@ -19124,7 +19125,7 @@ export async function registerRoutes(
       res.json({ results });
     } catch (err: any) {
       console.error("POST /api/vaccine-requirements/bulk failed:", err);
-      res.status(500).json({ message: err?.message || "Bulk save failed" });
+      res.status(500).json({ message: safeErrorMessage(err, "Bulk save failed") });
     }
   });
 
@@ -19216,7 +19217,7 @@ export async function registerRoutes(
       res.json({ results });
     } catch (err: any) {
       console.error("POST /api/mobilization/bulk failed:", err);
-      res.status(500).json({ message: err?.message || "Bulk save failed" });
+      res.status(500).json({ message: safeErrorMessage(err, "Bulk save failed") });
     }
   });
 
@@ -19300,7 +19301,7 @@ export async function registerRoutes(
       res.json({ results });
     } catch (err: any) {
       console.error("POST /api/budget-items/bulk failed:", err);
-      res.status(500).json({ message: err?.message || "Bulk save failed" });
+      res.status(500).json({ message: safeErrorMessage(err, "Bulk save failed") });
     }
   });
 
@@ -19414,7 +19415,7 @@ export async function registerRoutes(
       res.json({ results });
     } catch (err: any) {
       console.error("POST /api/supervision-visits/bulk failed:", err);
-      res.status(500).json({ message: err?.message || "Bulk save failed" });
+      res.status(500).json({ message: safeErrorMessage(err, "Bulk save failed") });
     }
   });
 
@@ -19475,7 +19476,7 @@ export async function registerRoutes(
         res.json({ ok: true, purgedClientId: clientId, vaccinationsRemoved: vaxCount });
       } catch (err: any) {
         console.error("POST /api/admin/clients/:id/purge failed:", err);
-        res.status(500).json({ message: err?.message || "Failed to purge client" });
+        res.status(500).json({ message: safeErrorMessage(err, "Failed to purge client") });
       }
     },
   );
@@ -19677,7 +19678,7 @@ export async function registerRoutes(
         res.send(JSON.stringify(fc));
       } catch (err: any) {
         console.error(`GET /api/export/geojson/${req.params.type} failed:`, err);
-        res.status(500).json({ message: err?.message || "Export failed" });
+        res.status(500).json({ message: safeErrorMessage(err, "Export failed") });
       }
     },
   );
@@ -19699,7 +19700,7 @@ export async function registerRoutes(
         res.send(kml);
       } catch (err: any) {
         console.error(`GET /api/export/kml/${req.params.type} failed:`, err);
-        res.status(500).json({ message: err?.message || "Export failed" });
+        res.status(500).json({ message: safeErrorMessage(err, "Export failed") });
       }
     },
   );
@@ -19781,7 +19782,7 @@ export async function registerRoutes(
         res.json({ total: rows.length, updated, unmapped });
       } catch (err: any) {
         console.error("POST /api/admin/vaccine-codes/backfill failed:", err);
-        res.status(500).json({ message: err?.message || "Backfill failed" });
+        res.status(500).json({ message: safeErrorMessage(err, "Backfill failed") });
       }
     },
   );
@@ -19914,7 +19915,7 @@ export async function registerRoutes(
         res.json(updated);
       } catch (err: any) {
         console.error("PATCH /api/annual-plans/:id failed:", err);
-        res.status(500).json({ message: err?.message || "Update failed" });
+        res.status(500).json({ message: safeErrorMessage(err, "Update failed") });
       }
     },
   );
@@ -19958,7 +19959,7 @@ export async function registerRoutes(
         res.json(updated);
       } catch (err: any) {
         console.error("POST /api/annual-plans/:id/approve failed:", err);
-        res.status(500).json({ message: err?.message || "Approve failed" });
+        res.status(500).json({ message: safeErrorMessage(err, "Approve failed") });
       }
     },
   );
@@ -20883,7 +20884,7 @@ Instructions:
         }
       } catch (err: any) {
         console.error("POST /api/ai/chat failed:", err);
-        res.status(500).json({ message: err?.message || "Failed to process chat query" });
+        res.status(500).json({ message: safeErrorMessage(err, "Failed to process chat query") });
       }
     });
 
@@ -20945,7 +20946,7 @@ Instructions:
       res.json(resQuery.rows);
     } catch (error: any) {
       console.error("Error suggesting unmapped communities:", error);
-      res.status(500).json({ message: "Failed to suggest unmapped communities: " + error.message });
+      res.status(500).json({ message: safeErrorMessage(error, "Failed to suggest unmapped communities") });
     }
   });
 
@@ -21035,7 +21036,7 @@ Instructions:
       res.json({ gapGeoJSON });
     } catch (error: any) {
       console.error("Error computing coverage gaps:", error);
-      res.status(500).json({ message: "Failed to compute coverage gaps: " + error.message });
+      res.status(500).json({ message: safeErrorMessage(error, "Failed to compute coverage gaps") });
     }
   });
 
@@ -21155,7 +21156,7 @@ Instructions:
       res.json({ success: true, flaggedCount: flagged.length, details: flagged });
     } catch (error: any) {
       console.error("Error flagging uncovered communities:", error);
-      res.status(500).json({ message: "Failed to flag uncovered communities: " + error.message });
+      res.status(500).json({ message: safeErrorMessage(error, "Failed to flag uncovered communities") });
     }
   });
 
@@ -21184,7 +21185,7 @@ Instructions:
       res.json(balance);
     } catch (error: any) {
       console.error("Error fetching stock balance:", error);
-      res.status(500).json({ message: "Failed to fetch stock balance: " + error.message });
+      res.status(500).json({ message: safeErrorMessage(error, "Failed to fetch stock balance") });
     }
   });
 
@@ -21255,7 +21256,7 @@ Instructions:
         } : null
       });
     } catch (err: any) {
-      res.status(500).json({ message: err?.message || "Failed to load catchment polygon" });
+      res.status(500).json({ message: safeErrorMessage(err, "Failed to load catchment polygon") });
     }
   });
 
@@ -21447,7 +21448,7 @@ Instructions:
         status
       });
     } catch (err: any) {
-      res.status(500).json({ message: err?.message || "Failed to save catchment polygon" });
+      res.status(500).json({ message: safeErrorMessage(err, "Failed to save catchment polygon") });
     }
   });
 
@@ -21525,7 +21526,7 @@ Instructions:
       res.json({ success: true, message: "Facility catchment polygon deleted successfully." });
     } catch (err: any) {
       console.error("DELETE /api/facilities/:id/catchment-polygon error:", err);
-      res.status(500).json({ message: err?.message || "Failed to delete catchment polygon" });
+      res.status(500).json({ message: safeErrorMessage(err, "Failed to delete catchment polygon") });
     }
   });
 
@@ -21597,7 +21598,7 @@ Instructions:
         } : null
       });
     } catch (err: any) {
-      res.status(500).json({ message: err?.message || "Failed to load community polygon" });
+      res.status(500).json({ message: safeErrorMessage(err, "Failed to load community polygon") });
     }
   });
 
@@ -21840,7 +21841,7 @@ Instructions:
         status
       });
     } catch (err: any) {
-      res.status(500).json({ message: err?.message || "Failed to save community polygon" });
+      res.status(500).json({ message: safeErrorMessage(err, "Failed to save community polygon") });
     }
   });
 
@@ -21914,7 +21915,7 @@ Instructions:
       res.json({ success: true, message: "Community polygon deleted successfully." });
     } catch (err: any) {
       console.error("DELETE /api/villages/:id/community-polygon error:", err);
-      res.status(500).json({ message: err?.message || "Failed to delete community polygon" });
+      res.status(500).json({ message: safeErrorMessage(err, "Failed to delete community polygon") });
     }
   });
 
@@ -21929,7 +21930,7 @@ Instructions:
         .orderBy(uncoveredCommunities.flaggedAt);
       res.json(rows);
     } catch (err: any) {
-      res.status(500).json({ message: err?.message || "Failed to load uncovered communities" });
+      res.status(500).json({ message: safeErrorMessage(err, "Failed to load uncovered communities") });
     }
   });
 
@@ -21974,7 +21975,7 @@ Instructions:
       } catch { /* notification failure should not fail the flag action */ }
       res.status(201).json({ ok: true, flagged: created.length, items: created });
     } catch (err: any) {
-      res.status(500).json({ message: err?.message || "Failed to flag uncovered communities" });
+      res.status(500).json({ message: safeErrorMessage(err, "Failed to flag uncovered communities") });
     }
   });
 
@@ -22085,7 +22086,7 @@ Instructions:
       res.setHeader("Content-Type", "text/html; charset=utf-8");
       res.send(html);
     } catch (err: any) {
-      res.status(500).json({ message: err?.message || "Print map failed" });
+      res.status(500).json({ message: safeErrorMessage(err, "Print map failed") });
     }
   });
 
@@ -22355,7 +22356,7 @@ Instructions:
         });
       } catch (err: any) {
         console.error("POST /api/wiki/upload failed:", err);
-        return res.status(500).json({ message: err.message || "Failed to upload file." });
+        return res.status(500).json({ message: safeErrorMessage(err, "Failed to upload file.") });
       }
     }
   );
@@ -22372,7 +22373,7 @@ Instructions:
       res.json(recommendations);
     } catch (err: any) {
       console.error("[vgie/recommendations]", err);
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrorMessage(err, "An unexpected error occurred") });
     }
   });
 
@@ -22382,7 +22383,7 @@ Instructions:
       res.json(alerts);
     } catch (err: any) {
       console.error("[vgie/alerts]", err);
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrorMessage(err, "An unexpected error occurred") });
     }
   });
 
@@ -22393,7 +22394,7 @@ Instructions:
       res.json({ success: true, recommendationsCount: recommendations.length, alertsCount: alerts.length });
     } catch (err: any) {
       console.error("[vgie/analyze-catchment]", err);
-      res.status(500).json({ message: err.message });
+      res.status(500).json({ message: safeErrorMessage(err, "An unexpected error occurred") });
     }
   });
   */
@@ -22519,7 +22520,7 @@ Instructions:
       });
     } catch (err: any) {
       console.error("[GIS Intelligence API]", err);
-      res.status(500).json({ message: "Failed to load GIS intelligence data: " + err.message });
+      res.status(500).json({ message: safeErrorMessage(err, "Failed to load GIS intelligence data") });
     }
   });
 
@@ -22540,7 +22541,7 @@ Instructions:
       res.json({ success: true, data: result });
     } catch (err: any) {
       console.error("[Pop Intel API]", err);
-      res.status(500).json({ message: "Failed to load population intelligence: " + err.message });
+      res.status(500).json({ message: safeErrorMessage(err, "Failed to load population intelligence") });
     }
   });
 
@@ -22559,7 +22560,7 @@ Instructions:
       res.json({ success: true, data: result });
     } catch (err: any) {
       console.error("[Pop Intel API]", err);
-      res.status(500).json({ message: "Failed to load facility population intelligence: " + err.message });
+      res.status(500).json({ message: safeErrorMessage(err, "Failed to load facility population intelligence") });
     }
   });
 
@@ -22585,7 +22586,7 @@ Instructions:
       res.json({ success: true, data: result });
     } catch (err: any) {
       console.error("[Pop Intel API]", err);
-      res.status(500).json({ message: "Failed to load microplan population intelligence: " + err.message });
+      res.status(500).json({ message: safeErrorMessage(err, "Failed to load microplan population intelligence") });
     }
   });
 
@@ -22692,7 +22693,7 @@ Instructions:
         totalPages: Math.ceil(totalCount / pageSize)
       });
     } catch (err: any) {
-      res.status(500).json({ message: err?.message || "Failed to fetch community health workers directory" });
+      res.status(500).json({ message: safeErrorMessage(err, "Failed to fetch community health workers directory") });
     }
   });
 
@@ -22717,7 +22718,7 @@ Instructions:
 
       res.json({ data: rows, total: rows.length });
     } catch (err: any) {
-      res.status(500).json({ message: err?.message || "Failed to fetch CHV coverage data" });
+      res.status(500).json({ message: safeErrorMessage(err, "Failed to fetch CHV coverage data") });
     }
   });
 
@@ -22769,7 +22770,7 @@ Instructions:
       if (!row) return res.status(404).json({ message: "CHV not found" });
       res.json(row);
     } catch (err: any) {
-      res.status(500).json({ message: err?.message || "Failed to fetch CHV" });
+      res.status(500).json({ message: safeErrorMessage(err, "Failed to fetch CHV") });
     }
   });
 
@@ -23099,7 +23100,7 @@ Instructions:
 
       res.json({ success: true, message: "Community health volunteer deactivated." });
     } catch (err: any) {
-      res.status(500).json({ message: err?.message || "Failed to deactivate CHV" });
+      res.status(500).json({ message: safeErrorMessage(err, "Failed to deactivate CHV") });
     }
   });
 
@@ -23131,7 +23132,7 @@ Instructions:
 
       res.json(versions);
     } catch (err: any) {
-      res.status(500).json({ message: err?.message || "Failed to fetch global entity history" });
+      res.status(500).json({ message: safeErrorMessage(err, "Failed to fetch global entity history") });
     }
   });
 
@@ -23142,7 +23143,7 @@ Instructions:
       const current = await EntityHistoryService.getCurrent(req.tenantId, entityType, entityId);
       res.json(current || { message: "No active version recorded yet", entityId, entityType });
     } catch (err: any) {
-      res.status(500).json({ message: err?.message || "Failed to fetch current version" });
+      res.status(500).json({ message: safeErrorMessage(err, "Failed to fetch current version") });
     }
   });
 
@@ -23153,7 +23154,7 @@ Instructions:
       const history = await EntityHistoryService.getHistory(req.tenantId, entityType, entityId);
       res.json(history);
     } catch (err: any) {
-      res.status(500).json({ message: err?.message || "Failed to fetch history" });
+      res.status(500).json({ message: safeErrorMessage(err, "Failed to fetch history") });
     }
   });
 
@@ -23166,7 +23167,7 @@ Instructions:
       const version = await EntityHistoryService.getAsOf(req.tenantId, entityType, entityId, String(date));
       res.json(version || { message: "No version found as of specified date", date });
     } catch (err: any) {
-      res.status(500).json({ message: err?.message || "Failed to resolve as-of date" });
+      res.status(500).json({ message: safeErrorMessage(err, "Failed to resolve as-of date") });
     }
   });
 
@@ -23197,7 +23198,7 @@ Instructions:
 
       res.json(timeline);
     } catch (err: any) {
-      res.status(500).json({ message: err?.message || "Failed to fetch timeline" });
+      res.status(500).json({ message: safeErrorMessage(err, "Failed to fetch timeline") });
     }
   });
 
@@ -23215,7 +23216,7 @@ Instructions:
       );
       res.json(comparison);
     } catch (err: any) {
-      res.status(500).json({ message: err?.message || "Failed to compare versions" });
+      res.status(500).json({ message: safeErrorMessage(err, "Failed to compare versions") });
     }
   });
 
@@ -23240,7 +23241,7 @@ Instructions:
 
       res.json(pending);
     } catch (err: any) {
-      res.status(500).json({ message: err?.message || "Failed to fetch pending approvals" });
+      res.status(500).json({ message: safeErrorMessage(err, "Failed to fetch pending approvals") });
     }
   });
 
@@ -23384,7 +23385,7 @@ Instructions:
       const qb = await db.select().from(supervisionQuestionBank).where(eq(supervisionQuestionBank.tenantId, req.tenantId));
       res.json(qb);
     } catch (err: any) {
-      res.status(500).json({ message: err?.message || "Failed to fetch question bank" });
+      res.status(500).json({ message: safeErrorMessage(err, "Failed to fetch question bank") });
     }
   });
 

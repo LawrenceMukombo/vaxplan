@@ -1,3 +1,4 @@
+import { safeErrorMessage } from "../errorUtils";
 import { Router } from "express";
 import { db } from "../db";
 import { eq, and } from "drizzle-orm";
@@ -66,7 +67,7 @@ router.post("/vaccines", isAuthenticated, requireTenant, requirePermission("mana
     res.json(inserted);
   } catch (err: any) {
     console.error(err);
-    res.status(500).json({ message: "Failed to insert catalogue vaccine", error: err.message });
+    res.status(500).json({ message: "Failed to insert catalogue vaccine" });
   }
 });
 
@@ -77,7 +78,7 @@ router.patch("/vaccines/:id", isAuthenticated, requireTenant, requirePermission(
     res.json(updated);
   } catch (err: any) {
     console.error(err);
-    res.status(500).json({ message: "Failed to update catalogue vaccine", error: err.message });
+    res.status(500).json({ message: "Failed to update catalogue vaccine" });
   }
 });
 
@@ -101,7 +102,7 @@ router.post("/schedules", isAuthenticated, requireTenant, requirePermission("man
     res.json(inserted);
   } catch (err: any) {
     console.error(err);
-    res.status(500).json({ message: "Failed to insert catalogue schedule", error: err.message });
+    res.status(500).json({ message: "Failed to insert catalogue schedule" });
   }
 });
 
@@ -155,7 +156,7 @@ router.post("/commodities", isAuthenticated, requireTenant, requirePermission("m
     res.json(inserted);
   } catch (err: any) {
     console.error(err);
-    res.status(500).json({ message: "Failed to insert catalogue commodity", error: err.message });
+    res.status(500).json({ message: "Failed to insert catalogue commodity" });
   }
 });
 
@@ -166,7 +167,7 @@ router.patch("/commodities/:id", isAuthenticated, requireTenant, requirePermissi
     res.json(updated);
   } catch (err: any) {
     console.error(err);
-    res.status(500).json({ message: "Failed to update commodity", error: err.message });
+    res.status(500).json({ message: "Failed to update commodity" });
   }
 });
 
@@ -190,7 +191,7 @@ router.post("/wastage-thresholds", isAuthenticated, requireTenant, requirePermis
     res.json(inserted);
   } catch (err: any) {
     console.error(err);
-    res.status(500).json({ message: "Failed to insert wastage threshold", error: err.message });
+    res.status(500).json({ message: "Failed to insert wastage threshold" });
   }
 });
 
@@ -327,7 +328,7 @@ router.post("/seed", isAuthenticated, requireTenant, requirePermission("manage_u
     res.json({ message: "Default immunization catalogue seeded successfully." });
   } catch (err: any) {
     console.error(err);
-    res.status(500).json({ message: "Failed to seed catalogue", error: err.message });
+    res.status(500).json({ message: "Failed to seed catalogue" });
   }
 });
 

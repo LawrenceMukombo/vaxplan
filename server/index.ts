@@ -12,6 +12,7 @@ import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
 import { getSession } from "./auth";
+import { isInternalError } from "./errorUtils";
 import { setupRealtime, realtimeBroadcastMiddleware } from "./services/realtime";
 import { startPopulationRefreshScheduler } from "./jobs/populationRefresh";
 import { startSessionArchiveScheduler } from "./jobs/sessionArchive";
@@ -44,6 +45,8 @@ import { upsertMicroplanVersionPermissionsForAllTenants } from "./migrations/031
 import { applyRiskAssessmentSchema } from "./migrations/032-risk-assessment-schema";
 import { applyRiskPermissionsAndSeed } from "./migrations/033-risk-permissions-and-seed";
 import { applyRiskDirectEntrySchema } from "./migrations/034-risk-direct-entry";
+import { seedVgieRules } from "./migrations/025-seed-reference-data";
+import { runMigration as runCatalogueMigration } from "./migrations/020-catalogue-migration";
 import { realignIdentitySequences } from "./services/identitySequences";
 import { applySupervisionTemplatesSeed } from "./migrations/028-supervision-templates-seed";
 const app = express();
@@ -77,6 +80,23 @@ app.use(
   }),
 );
 app.use(express.urlencoded({ extended: false, limit: "50mb" }));
+
+// ─── Health Check ────────────────────────────────────────────────────────────
+// Returns database connectivity status. Never exposes internal error details.
+// Registered early so it works even if later middleware/routes fail to load.
+app.get("/api/health", async (_req, res) => {
+  try {
+    const { checkDbHealth } = await import("./db");
+    const dbOk = await checkDbHealth();
+    if (dbOk) {
+      res.json({ status: "ok", timestamp: new Date().toISOString() });
+    } else {
+      res.status(503).json({ status: "unavailable", message: "Service temporarily unavailable. Please try again shortly." });
+    }
+  } catch {
+    res.status(503).json({ status: "unavailable", message: "Service temporarily unavailable. Please try again shortly." });
+  }
+});
 // --- CORS for packaged native apps ---
 // The web app is same-origin and needs no CORS. The packaged Android
 // (Capacitor) and Windows (Electron) shells, however, load their UI from a
@@ -379,6 +399,14 @@ async function backfillClientIds() {
     await applyRiskDirectEntrySchema(db as any);
     log("identity sequences, templates, and all-tenant lifecycle permissions ready", "db");
   }).catch((err) => log("identity sequence and lifecycle permission warning: " + String(err?.message ?? err), "db"));
+  // VGIE recommendation and alert rules for all tenants (migration 025)
+  seedVgieRules()
+    .then(() => log("VGIE recommendation and alert rules upserted", "db"))
+    .catch((err) => log(`VGIE rules seed warning: ${err?.message ?? err}`, "db"));
+  // Catalogue tables and WHO default vaccines (migration 020)
+  runCatalogueMigration()
+    .then(() => log("catalogue tables and default vaccine seed complete", "db"))
+    .catch((err) => log(`catalogue migration warning: ${err?.message ?? err}`, "db"));
   // Stock ledger columns upgrade (migration 027)
   import("./db").then(({ db }) =>
     import("./migrations/027-stock-ledger-columns").then(({ applyStockLedgerColumnsMigration }) =>
@@ -572,13 +600,29 @@ async function backfillClientIds() {
     );
   }
   }
+  // ─── Global Error Handler ─────────────────────────────────────────────────
+  // SECURITY: Never expose raw internal/database errors to users in production.
+  // Internal errors (DB auth failures, connection resets, OOM, etc.) are
+  // replaced with a generic message. 4xx errors pass through as they are
+  // intentional client-facing messages.
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
-    const message = err.message || "Internal Server Error";
-    if (status === 500) {
+    // Always log the real error server-side for debugging/ops
+    if (status >= 500) {
       console.error("[Server Error]", err);
     }
-    res.status(status).json({ message });
+    if (res.headersSent) return; // Guard against double-send
+    if (status >= 500) {
+      // In production, NEVER leak internal error details to the client
+      const safeMessage =
+        process.env.NODE_ENV === "production" || isInternalError(err)
+          ? "An unexpected error occurred. Please try again later."
+          : (err.message || "Internal Server Error");
+      res.status(status).json({ message: safeMessage });
+    } else {
+      // 4xx errors are intentional client-facing messages — safe to forward
+      res.status(status).json({ message: err.message || "Bad Request" });
+    }
   });
   // importantly only setup vite in development and after
   // setting up all the other routes so the catch-all route

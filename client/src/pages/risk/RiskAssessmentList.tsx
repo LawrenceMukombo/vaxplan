@@ -1,3 +1,4 @@
+import { assessmentMapRow } from '@shared/riskPresentation';
 import React, { useState, useMemo, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation } from "wouter";
@@ -195,23 +196,7 @@ export default function RiskAssessmentList() {
   const adminLevel = context?.adminLevelLabel || (activeCountryCode === "SSD" ? "County" : "District");
   const adminLevelPlural = context?.adminLevelLabelPlural || (activeCountryCode === "SSD" ? "Counties" : "Districts");
 
-  // Effective Assessment Rounds (ensure official active round is always available)
-  const effectiveAssessments: RiskAssessmentItem[] = useMemo(() => {
-    if (assessments && assessments.length > 0) return assessments;
-    return [
-      {
-        id: "040e350a-da99-4b8f-9ad6-78299dc87d04",
-        countryCode: activeCountryCode,
-        title: `${new Date().getFullYear()} National Measles Programmatic Risk Assessment`,
-        notes: `Official ${activeCountryCode} subnational measles programmatic risk assessment following WHO Setup Guide v1.5 and Technical Appendix.`,
-        assessmentYear: new Date().getFullYear(),
-        status: "CALCULATED",
-        administrativeLevelName: adminLevel,
-        approvedAt: null,
-        createdAt: new Date().toISOString(),
-      },
-    ];
-  }, [assessments, activeCountryCode, adminLevel]);
+  const effectiveAssessments = assessments || [];
 
   // Province Name lookup map
   const provinceMap = useMemo(() => {
@@ -248,50 +233,7 @@ export default function RiskAssessmentList() {
           };
         }
 
-        // Calibrated baseline matching WHO scale
-        const s = ((distId * 9301 + 49297) % 233280) / 233280;
-        const s2 = ((distId * 49297 + 9301) % 233280) / 233280;
-        const pop = d.population || Math.round(45000 + s * 250000);
-        const mcv1 = Number((72 + s * 23).toFixed(1));
-        const mcv2 = Number(Math.max(50, mcv1 - (5 + s2 * 8)).toFixed(1));
-        const penta1 = Number(Math.min(99, mcv1 + (4 + s * 5)).toFixed(1));
-        const dropout = Number(Math.max(0, (((penta1 - mcv1) / penta1) * 100)).toFixed(1));
-        const mcvDrop = Number(Math.max(0, (((mcv1 - mcv2) / mcv1) * 100)).toFixed(1));
-        const suspected = Math.round(s2 * 12);
-
-        let cat: "LOW" | "MEDIUM" | "HIGH" | "VERY_HIGH" = "LOW";
-        let score = 32;
-        if (mcv1 < 75 || dropout > 15 || suspected > 8) {
-          cat = "VERY_HIGH";
-          score = Math.round(62 + s * 20);
-        } else if (mcv1 < 82 || dropout > 10) {
-          cat = "HIGH";
-          score = Math.round(52 + s * 6);
-        } else if (mcv1 < 90 || dropout > 7) {
-          cat = "MEDIUM";
-          score = Math.round(42 + s * 7);
-        } else {
-          cat = "LOW";
-          score = Math.round(18 + s * 20);
-        }
-
-        return {
-          districtId: distId,
-          districtName: d.name || d.districtName || `District ${distId}`,
-          provinceId: d.provinceId || null,
-          provinceName: d.provinceId ? provinceMap.get(d.provinceId) || d.provinceName || "Provincial" : "Provincial",
-          population: pop,
-          targetUnder1: Math.round(pop * 0.035),
-          mcv1Coverage: mcv1,
-          mcv2Coverage: mcv2,
-          penta1Coverage: penta1,
-          dropoutRate: dropout,
-          mcvDropout: mcvDrop,
-          suspectedCases: suspected,
-          riskScore: score,
-          riskCategory: cat,
-          hasAssessmentRun: false,
-        };
+        return assessmentMapRow({ ...d, districtId: distId });
       });
     }
 
@@ -1454,8 +1396,8 @@ export default function RiskAssessmentList() {
                               className="p-3 border-r-2 border-slate-200 dark:border-slate-800"
                               style={{ width: `${perfColWidths.mcv1}px`, minWidth: `${perfColWidths.mcv1}px` }}
                             >
-                              <span className={`font-semibold ${d.mcv1Coverage >= 90 ? 'text-emerald-600' : d.mcv1Coverage >= 80 ? 'text-lime-600' : 'text-rose-600'}`}>
-                                {d.mcv1Coverage}%
+                              <span className={`font-semibold ${(d.mcv1Coverage ?? -Infinity) >= 90 ? 'text-emerald-600' : (d.mcv1Coverage ?? -Infinity) >= 80 ? 'text-lime-600' : 'text-rose-600'}`}>
+                                {d.mcv1Coverage === null ? 'No data' : d.mcv1Coverage + '%'}
                               </span>
                             </td>
                           )}
@@ -1464,8 +1406,8 @@ export default function RiskAssessmentList() {
                               className="p-3 border-r-2 border-slate-200 dark:border-slate-800"
                               style={{ width: `${perfColWidths.mcv2}px`, minWidth: `${perfColWidths.mcv2}px` }}
                             >
-                              <span className={`font-semibold ${d.mcv2Coverage >= 80 ? 'text-emerald-600' : 'text-amber-600'}`}>
-                                {d.mcv2Coverage}%
+                              <span className={`font-semibold ${(d.mcv2Coverage ?? -Infinity) >= 80 ? 'text-emerald-600' : 'text-amber-600'}`}>
+                                {d.mcv2Coverage === null ? 'No data' : d.mcv2Coverage + '%'}
                               </span>
                             </td>
                           )}
@@ -1474,8 +1416,8 @@ export default function RiskAssessmentList() {
                               className="p-3 border-r-2 border-slate-200 dark:border-slate-800"
                               style={{ width: `${perfColWidths.dropout}px`, minWidth: `${perfColWidths.dropout}px` }}
                             >
-                              <span className={`font-semibold ${d.dropoutRate <= 10 ? 'text-emerald-600' : 'text-rose-600'}`}>
-                                {d.dropoutRate}%
+                              <span className={`font-semibold ${(d.dropoutRate ?? Infinity) <= 10 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                                {d.dropoutRate === null ? 'No data' : d.dropoutRate + '%'}
                               </span>
                             </td>
                           )}
@@ -1484,7 +1426,7 @@ export default function RiskAssessmentList() {
                               className="p-3 text-muted-foreground font-mono border-r-2 border-slate-200 dark:border-slate-800"
                               style={{ width: `${perfColWidths.suspectedCases}px`, minWidth: `${perfColWidths.suspectedCases}px` }}
                             >
-                              {d.suspectedCases}
+                              {d.suspectedCases ?? "No data"}
                             </td>
                           )}
                           {visibleColumns.riskScore && (
@@ -1492,7 +1434,7 @@ export default function RiskAssessmentList() {
                               className="p-3 font-bold font-mono text-foreground border-r-2 border-slate-300 dark:border-slate-700"
                               style={{ width: `${perfColWidths.riskScore}px`, minWidth: `${perfColWidths.riskScore}px` }}
                             >
-                              {d.riskScore}
+                              {d.riskScore ?? "No data"}
                             </td>
                           )}
                           {visibleColumns.riskCategory && (
@@ -1500,6 +1442,7 @@ export default function RiskAssessmentList() {
                               className="p-3 border-r-2 border-slate-300 dark:border-slate-700"
                               style={{ width: `${perfColWidths.riskCategory}px`, minWidth: `${perfColWidths.riskCategory}px` }}
                             >
+                              {d.riskCategory === "INCOMPLETE" && <Badge variant="secondary">Incomplete / no data</Badge>}
                               {d.riskCategory === "LOW" && <Badge className="bg-emerald-600 text-white hover:bg-emerald-700">Low</Badge>}
                               {d.riskCategory === "MEDIUM" && <Badge className="bg-amber-600 text-white hover:bg-amber-700">Medium</Badge>}
                               {d.riskCategory === "HIGH" && <Badge className="bg-orange-600 text-white hover:bg-orange-700">High</Badge>}

@@ -1,3 +1,4 @@
+import { assessmentMapRow } from '@shared/riskPresentation';
 import React, { useState, useMemo, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useParams, Link, useLocation } from "wouter";
@@ -395,40 +396,24 @@ export default function RiskResultsWorkspace() {
     enabled: (!resultsData || !resultsData.rows || resultsData.rows.length === 0),
   });
 
+  // Keep the full calculated result fields for reporting, independent of map transforms.
+  // Destructure districtId out of the spread so TS sees it as `number` (not string|number|undefined).
+  const reportResults = useMemo(() => (mapResultsData?.rows || []).map((row) => {
+    const { districtId: _rawDistrictId, ...rest } = row as any;
+    return {
+      ...rest,
+      districtId: Number(_rawDistrictId ?? (row as any).administrativeAreaId) || 0,
+      provinceName: (row as any).provinceName ?? undefined,
+    };
+  }), [mapResultsData]);
+
   // Transform results rows for Choropleth map
   const choroplethData: DistrictCoveragePerformance[] = useMemo(() => {
     const sourceRows = (mapResultsData?.rows && mapResultsData.rows.length > 0)
       ? mapResultsData.rows
       : (resultsData?.rows || []);
 
-    return sourceRows.map((r, idx) => {
-      const piScore = Number(r.populationImmunityScore ?? (r as any).domainScoresJson?.PI) || 0;
-      const pdScore = Number(r.programmeDeliveryScore ?? (r as any).domainScoresJson?.PD) || 0;
-      const taScore = Number(r.threatAssessmentScore ?? (r as any).domainScoresJson?.TA) || 0;
-      const totalScore = Number(r.totalRiskScore ?? (r as any).totalScore) || 35;
-
-      const mcv1 = Math.max(40, Math.min(98, Math.round(100 - piScore * 1.5)));
-      const mcv2 = Math.max(35, Math.min(95, Math.round(mcv1 - (5 + (idx % 6)))));
-      const dropout = Math.max(0, Math.round(pdScore * 2.2));
-
-      return {
-        districtId: Number((r as any).districtId || r.administrativeAreaId) || idx + 1,
-        districtName: (r as any).districtName || r.areaName || `District ${idx + 1}`,
-        provinceId: (r as any).provinceId || null,
-        provinceName: (r as any).provinceName || "National",
-        population: r.population || 120000,
-        targetUnder1: Math.round((r.population || 120000) * 0.035),
-        mcv1Coverage: mcv1,
-        mcv2Coverage: mcv2,
-        penta1Coverage: Math.min(99, mcv1 + 4),
-        dropoutRate: dropout,
-        mcvDropout: Math.max(0, Math.round(((mcv1 - mcv2) / mcv1) * 100)),
-        suspectedCases: Math.round(taScore * 1.5),
-        riskScore: totalScore,
-        riskCategory: r.riskCategory,
-        hasAssessmentRun: true,
-      };
-    });
+    return sourceRows.map(assessmentMapRow);
   }, [mapResultsData, resultsData]);
 
   const effectiveChoroplethData = useMemo(() => {
@@ -1658,7 +1643,7 @@ export default function RiskResultsWorkspace() {
         <TabsContent value="report" className="space-y-4">
           <RiskFinalReportView
             assessment={assessment}
-            districtResults={effectiveChoroplethData as any}
+            districtResults={reportResults}
           />
         </TabsContent>
 
