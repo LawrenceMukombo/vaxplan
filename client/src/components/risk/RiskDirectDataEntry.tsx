@@ -1234,11 +1234,21 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
 
   // Comprehensive resilient district results for Report Preview
   const effectiveReportDistrictResults = useMemo(() => {
-    if (resultsData?.districtResults && resultsData.districtResults.length > 0) {
-      return resultsData.districtResults;
-    }
-    if (resultsData?.results && resultsData.results.length > 0) {
-      return resultsData.results;
+    const calculatedRows = resultsData?.districtResults?.length
+      ? resultsData.districtResults
+      : resultsData?.results?.length
+        ? resultsData.results
+        : resultsData?.rows?.length
+          ? resultsData.rows
+          : [];
+    if (calculatedRows.length > 0) {
+      const localByDistrictId = new Map(localRows.map((row) => [String(row.districtId), row]));
+      const localByDistrictName = new Map(localRows.map((row) => [(row.districtName || '').trim().toLowerCase(), row]));
+      return calculatedRows.map((result: any) => {
+        const local = localByDistrictId.get(String(result.districtId ?? result.administrativeAreaId))
+          || localByDistrictName.get(String(result.districtName ?? result.areaName ?? '').trim().toLowerCase());
+        return local ? { ...local, ...result } : result;
+      });
     }
     return localRows.map((r) => {
       const m1Avg = ((Number(r.mcv1YearMinus3) || 0) + (Number(r.mcv1YearMinus2) || 0) + (Number(r.mcv1YearMinus1) || 0)) / 3;
@@ -1256,6 +1266,7 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
       const cat = getRiskCategory(total);
 
       return {
+        ...r,
         id: r.id || String(r.districtId),
         districtId: r.districtId,
         districtName: r.districtName || `District ${r.districtId}`,

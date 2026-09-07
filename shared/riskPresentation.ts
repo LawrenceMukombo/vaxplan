@@ -4,7 +4,21 @@ export function riskNumber(value: unknown): number | null {
   return Number.isFinite(number) ? number : null;
 }
 
+function riskMean(values: unknown[]): number | null {
+  const numbers = values.map(riskNumber).filter((value): value is number => value !== null);
+  return numbers.length ? numbers.reduce((sum, value) => sum + value, 0) / numbers.length : null;
+}
+
+function percentageDropout(start: number | null, end: number | null): number | null {
+  return start !== null && start > 0 && end !== null ? ((start - end) / start) * 100 : null;
+}
+
 export function assessmentMapRow(row: any) {
+  const mcv1Coverage = riskNumber(row.mcv1Coverage) ?? riskMean([row.mcv1YearMinus3, row.mcv1YearMinus2, row.mcv1YearMinus1]);
+  const mcv2Coverage = riskNumber(row.mcv2Coverage) ?? riskMean([row.mcv2YearMinus3, row.mcv2YearMinus2, row.mcv2YearMinus1]);
+  const penta1Coverage = riskNumber(row.penta1Coverage) ?? riskNumber(row.penta1YearMinus1);
+  const latestMcv1Coverage = riskNumber(row.mcv1YearMinus1) ?? mcv1Coverage;
+
   return {
     districtId: Number(row.districtId ?? row.administrativeAreaId ?? row.id),
     districtName: row.districtName || row.areaName || row.name || 'Unknown district',
@@ -12,11 +26,11 @@ export function assessmentMapRow(row: any) {
     provinceName: row.provinceName || 'National',
     population: riskNumber(row.population) ?? 0,
     targetUnder1: riskNumber(row.targetUnder1) ?? 0,
-    mcv1Coverage: riskNumber(row.mcv1Coverage),
-    mcv2Coverage: riskNumber(row.mcv2Coverage),
-    penta1Coverage: riskNumber(row.penta1Coverage),
-    dropoutRate: riskNumber(row.dropoutRate),
-    mcvDropout: riskNumber(row.mcvDropout),
+    mcv1Coverage,
+    mcv2Coverage,
+    penta1Coverage,
+    dropoutRate: riskNumber(row.dropoutRate) ?? percentageDropout(penta1Coverage, latestMcv1Coverage),
+    mcvDropout: riskNumber(row.mcvDropout) ?? percentageDropout(mcv1Coverage, mcv2Coverage),
     suspectedCases: riskNumber(row.suspectedCases),
     riskScore: riskNumber(row.totalRiskScore ?? row.totalScore ?? row.riskScore),
     riskCategory: row.riskCategory || 'INCOMPLETE',
