@@ -1666,9 +1666,11 @@ riskRouter.post("/actions", async (req: any, res) => {
     const actionDescription = body.actionDescription || actionTitle || "Supportive action linked from measles risk assessment.";
     const linkedModule = body.linkedModule || body.actionType || "SUPERVISION_VISIT";
     const responsiblePerson = body.responsiblePerson || body.assignedTo || null;
-    const budgetEstimate = body.budgetEstimate !== undefined && body.budgetEstimate !== null && !isNaN(Number(body.budgetEstimate))
-      ? String(body.budgetEstimate)
-      : (body.budgetCode && !isNaN(Number(body.budgetCode)) ? String(body.budgetCode) : null);
+    const budgetEstimate = body.budgetEstimateUsd !== undefined && body.budgetEstimateUsd !== null && !isNaN(Number(body.budgetEstimateUsd))
+      ? String(body.budgetEstimateUsd)
+      : (body.budgetEstimate !== undefined && body.budgetEstimate !== null && !isNaN(Number(body.budgetEstimate))
+        ? String(body.budgetEstimate)
+        : (body.budgetCode && !isNaN(Number(body.budgetCode)) ? String(body.budgetCode) : null));
     const linkedEntityId = body.budgetCode || body.linkedEntityId || null;
 
     const parsed = insertRiskActionLinkSchema.parse({
