@@ -108,7 +108,10 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  const countryName = assessment?.tenantName || "South Africa";
+  const countryName = assessment?.tenantName || assessment?.countryName || "National programme";
+  const countryCode = assessment?.countryCode || "";
+  const adminLevelLabel = assessment?.adminLevelLabel || "Administrative Area";
+  const boundaryId = assessment?.boundaryId || undefined;
   const assessmentYear = assessment?.assessmentYear || 2024;
   const baselineYears = assessment?.baselineYears || [assessmentYear - 3, assessmentYear - 2, assessmentYear - 1];
   const dateFormatted = new Date().toLocaleDateString("en-US", {
@@ -1251,9 +1254,10 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
                 </div>
                 <div className="border rounded-lg overflow-hidden shadow-sm bg-card p-1">
                   <RiskChoroplethMap
-                    countryCode={assessment?.countryCode || "ZAF"}
+                    countryCode={countryCode}
                     countryName={countryName}
-                    adminLevelLabel="District"
+                    adminLevelLabel={adminLevelLabel}
+                      boundaryId={boundaryId}
                     data={reportMapData}
                     initialMetric="risk"
                     metric="risk"
@@ -1279,9 +1283,10 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
                 </div>
                 <div className="border rounded-lg overflow-hidden shadow-sm bg-card p-1">
                   <RiskChoroplethMap
-                    countryCode={assessment?.countryCode || "ZAF"}
+                    countryCode={countryCode}
                     countryName={countryName}
-                    adminLevelLabel="District"
+                    adminLevelLabel={adminLevelLabel}
+                      boundaryId={boundaryId}
                     data={reportMapData}
                     initialMetric="mcv1"
                     metric="mcv1"
@@ -1307,9 +1312,10 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
                 </div>
                 <div className="border rounded-lg overflow-hidden shadow-sm bg-card p-1">
                   <RiskChoroplethMap
-                    countryCode={assessment?.countryCode || "ZAF"}
+                    countryCode={countryCode}
                     countryName={countryName}
-                    adminLevelLabel="District"
+                    adminLevelLabel={adminLevelLabel}
+                      boundaryId={boundaryId}
                     data={reportMapData}
                     initialMetric="mcv2"
                     metric="mcv2"
@@ -1335,9 +1341,10 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
                 </div>
                 <div className="border rounded-lg overflow-hidden shadow-sm bg-card p-1">
                   <RiskChoroplethMap
-                    countryCode={assessment?.countryCode || "ZAF"}
+                    countryCode={countryCode}
                     countryName={countryName}
-                    adminLevelLabel="District"
+                    adminLevelLabel={adminLevelLabel}
+                      boundaryId={boundaryId}
                     data={reportMapData}
                     initialMetric="dropout"
                     metric="dropout"
@@ -1365,9 +1372,10 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
                       <Badge variant="secondary" className="text-[10px]">Composite Score</Badge>
                     </div>
                     <RiskChoroplethMap
-                      countryCode={assessment?.countryCode || "ZAF"}
+                      countryCode={countryCode}
                       countryName={countryName}
-                      adminLevelLabel="District"
+                      adminLevelLabel={adminLevelLabel}
+                      boundaryId={boundaryId}
                       data={reportMapData}
                       initialMetric="risk"
                       metric="risk"
@@ -1383,9 +1391,10 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
                       <Badge variant="secondary" className="text-[10px]">Population Immunity</Badge>
                     </div>
                     <RiskChoroplethMap
-                      countryCode={assessment?.countryCode || "ZAF"}
+                      countryCode={countryCode}
                       countryName={countryName}
-                      adminLevelLabel="District"
+                      adminLevelLabel={adminLevelLabel}
+                      boundaryId={boundaryId}
                       data={reportMapData}
                       initialMetric="mcv1"
                       metric="mcv1"
@@ -1401,9 +1410,10 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
                       <Badge variant="secondary" className="text-[10px]">2nd Dose Attainment</Badge>
                     </div>
                     <RiskChoroplethMap
-                      countryCode={assessment?.countryCode || "ZAF"}
+                      countryCode={countryCode}
                       countryName={countryName}
-                      adminLevelLabel="District"
+                      adminLevelLabel={adminLevelLabel}
+                      boundaryId={boundaryId}
                       data={reportMapData}
                       initialMetric="mcv2"
                       metric="mcv2"
@@ -1419,9 +1429,10 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
                       <Badge variant="secondary" className="text-[10px]">Programme Delivery</Badge>
                     </div>
                     <RiskChoroplethMap
-                      countryCode={assessment?.countryCode || "ZAF"}
+                      countryCode={countryCode}
                       countryName={countryName}
-                      adminLevelLabel="District"
+                      adminLevelLabel={adminLevelLabel}
+                      boundaryId={boundaryId}
                       data={reportMapData}
                       initialMetric="dropout"
                       metric="dropout"
@@ -1445,9 +1456,10 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
                   </div>
                   <div className="border rounded-lg overflow-hidden shadow-sm bg-card p-1">
                     <RiskChoroplethMap
-                      countryCode={assessment?.countryCode || "ZAF"}
+                      countryCode={countryCode}
                       countryName={countryName}
-                      adminLevelLabel="District"
+                      adminLevelLabel={adminLevelLabel}
+                      boundaryId={boundaryId}
                       data={reportMapData}
                       initialMetric="risk"
                       metric="risk"
@@ -1470,9 +1482,10 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
                   </div>
                   <div className="border rounded-lg overflow-hidden shadow-sm bg-card p-1">
                     <RiskChoroplethMap
-                      countryCode={assessment?.countryCode || "ZAF"}
+                      countryCode={countryCode}
                       countryName={countryName}
-                      adminLevelLabel="District"
+                      adminLevelLabel={adminLevelLabel}
+                      boundaryId={boundaryId}
                       data={reportMapData}
                       initialMetric="mcv1"
                       metric="mcv1"
@@ -1495,9 +1508,10 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
                   </div>
                   <div className="border rounded-lg overflow-hidden shadow-sm bg-card p-1">
                     <RiskChoroplethMap
-                      countryCode={assessment?.countryCode || "ZAF"}
+                      countryCode={countryCode}
                       countryName={countryName}
-                      adminLevelLabel="District"
+                      adminLevelLabel={adminLevelLabel}
+                      boundaryId={boundaryId}
                       data={reportMapData}
                       initialMetric="mcv2"
                       metric="mcv2"
@@ -1520,9 +1534,10 @@ export function RiskFinalReportView({ assessment, districtResults = [] }: Props)
                   </div>
                   <div className="border rounded-lg overflow-hidden shadow-sm bg-card p-1">
                     <RiskChoroplethMap
-                      countryCode={assessment?.countryCode || "ZAF"}
+                      countryCode={countryCode}
                       countryName={countryName}
-                      adminLevelLabel="District"
+                      adminLevelLabel={adminLevelLabel}
+                      boundaryId={boundaryId}
                       data={reportMapData}
                       initialMetric="dropout"
                       metric="dropout"

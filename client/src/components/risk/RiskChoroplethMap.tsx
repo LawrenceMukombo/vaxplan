@@ -215,8 +215,8 @@ export function RiskChoroplethMap({
     }
   }, [geoJsonData, isolateCountry]);
 
-  const tenantMock: TenantLike = { countryCode };
-  const mapDefaults = useMemo(() => getTenantMapDefaults(tenantMock), [countryCode]);
+  const tenantMock: TenantLike = { countryCode: effectiveCountryCode };
+  const mapDefaults = useMemo(() => getTenantMapDefaults(tenantMock), [effectiveCountryCode]);
 
   // Index performance data by normalized district name
   const districtDataMap = useMemo(() => {
@@ -235,6 +235,12 @@ export function RiskChoroplethMap({
     if (!feature || !feature.properties) return undefined;
     const props = feature.properties;
     const candidates = [
+      props.districtId,
+      props.administrativeAreaId,
+      props.shapeID,
+      props.shapeId,
+      props.ADM2_PCODE,
+      props.GID_2,
       props.shapeName,
       props.shapeName_1,
       props.ADM2_EN,
