@@ -40,7 +40,10 @@ import {
   WifiOff,
   ArrowUpRight,
   FileText,
+  Pencil,
+  RotateCcw,
 } from "lucide-react";
+import { Textarea } from "@/components/ui/textarea";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { PageHead } from "@/components/PageHead";
 import { versionLabel } from "@/lib/version";
@@ -48,6 +51,43 @@ import { getDomainLinks } from "@/lib/navigation";
 import { saveTenantsCache, loadTenantsCache, saveActiveTenant } from "@/lib/tenantCache";
 import { clearLogoutState, recordOnlineAuthSession } from "@/lib/authSession";
 import { queryClient } from "@/lib/queryClient";
+
+interface PersonaStory {
+  tag: string;
+  quote: string;
+  role: string;
+  location: string;
+  initials: string;
+}
+
+const DEFAULT_PERSONA_STORIES: Record<"chw" | "facility" | "manager", PersonaStory> = {
+  chw: {
+    tag: "Voice from the Field",
+    quote:
+      "During rainy seasons, our paper tally sheets often got soaked and unreadable while crossing the river. With VaxPlan cached on our phones, our outreach team has the whole settlement list, carrier packing counts, and village maps safe and offline.",
+    role: "Sr. Community Health Nurse",
+    location: "Western Highlands Province",
+    initials: "RN",
+  },
+  facility: {
+    tag: "District Management Impact",
+    quote:
+      "Consolidating 38 health center microplans used to take four weeks of manual Excel reconciling. With VaxPlan, we reviewed, adjusted, and approved the entire district operational plan in under 48 hours.",
+    role: "District Medical Officer of Health",
+    location: "Ministry of Health District Operations",
+    initials: "DM",
+  },
+  manager: {
+    tag: "Global Strategic Value",
+    quote:
+      "For the first time, our technical partner review had zero unmapped settlements and 100% verified population denominators. Funding approvals happened without delay because the data was backed by spatial evidence.",
+    role: "National EPI Program Manager",
+    location: "Department of Public Health & Disease Control",
+    initials: "NE",
+  },
+};
+
+const LANDING_STORIES_STORAGE_KEY = "vaxplan_landing_stories_v1";
 
 interface PublicTenant {
   id: string;
@@ -557,6 +597,80 @@ export default function Landing() {
   });
   const { researchUrl, docsUrl } = getDomainLinks();
 
+  const [personaStories, setPersonaStories] = useState<Record<"chw" | "facility" | "manager", PersonaStory>>(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const stored = localStorage.getItem(LANDING_STORIES_STORAGE_KEY);
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          return {
+            chw: { ...DEFAULT_PERSONA_STORIES.chw, ...(parsed.chw || {}) },
+            facility: { ...DEFAULT_PERSONA_STORIES.facility, ...(parsed.facility || {}) },
+            manager: { ...DEFAULT_PERSONA_STORIES.manager, ...(parsed.manager || {}) },
+          };
+        }
+      } catch (e) {
+        console.warn("Could not read landing stories from localStorage:", e);
+      }
+    }
+    return DEFAULT_PERSONA_STORIES;
+  });
+
+  const [editingStoryRole, setEditingStoryRole] = useState<"chw" | "facility" | "manager" | null>(null);
+  const [storyFormData, setStoryFormData] = useState<PersonaStory>({
+    tag: "",
+    quote: "",
+    role: "",
+    location: "",
+    initials: "",
+  });
+
+  const handleOpenEditStory = (role: "chw" | "facility" | "manager") => {
+    setStoryFormData({ ...personaStories[role] });
+    setEditingStoryRole(role);
+  };
+
+  const handleSaveStory = () => {
+    if (!editingStoryRole) return;
+    const updated: Record<"chw" | "facility" | "manager", PersonaStory> = {
+      ...personaStories,
+      [editingStoryRole]: {
+        tag: storyFormData.tag.trim() || DEFAULT_PERSONA_STORIES[editingStoryRole].tag,
+        quote: storyFormData.quote.trim() || DEFAULT_PERSONA_STORIES[editingStoryRole].quote,
+        role: storyFormData.role.trim() || DEFAULT_PERSONA_STORIES[editingStoryRole].role,
+        location: storyFormData.location.trim() || DEFAULT_PERSONA_STORIES[editingStoryRole].location,
+        initials: (storyFormData.initials.trim() || DEFAULT_PERSONA_STORIES[editingStoryRole].initials).slice(0, 4).toUpperCase(),
+      },
+    };
+    setPersonaStories(updated);
+    if (typeof window !== "undefined") {
+      try {
+        localStorage.setItem(LANDING_STORIES_STORAGE_KEY, JSON.stringify(updated));
+      } catch (e) {
+        console.error("Failed to save stories to localStorage:", e);
+      }
+    }
+    setEditingStoryRole(null);
+  };
+
+  const handleResetStory = () => {
+    if (!editingStoryRole) return;
+    const defaultStory = DEFAULT_PERSONA_STORIES[editingStoryRole];
+    setStoryFormData({ ...defaultStory });
+    const updated = {
+      ...personaStories,
+      [editingStoryRole]: defaultStory,
+    };
+    setPersonaStories(updated);
+    if (typeof window !== "undefined") {
+      try {
+        localStorage.setItem(LANDING_STORIES_STORAGE_KEY, JSON.stringify(updated));
+      } catch (e) {
+        console.error("Failed to save stories to localStorage:", e);
+      }
+    }
+  };
+
   return (
     <div className="min-h-screen bg-background">
       <PageHead
@@ -565,6 +679,100 @@ export default function Landing() {
         image="/og-card.png"
       />
       <PasswordLoginDialog open={loginOpen} onOpenChange={setLoginOpen} tenants={activeTenantsList} />
+
+      {/* Edit Story Dialog */}
+      <Dialog open={editingStoryRole !== null} onOpenChange={(open) => { if (!open) setEditingStoryRole(null); }}>
+        <DialogContent className="sm:max-w-[540px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Pencil className="h-4 w-4 text-primary" />
+              Edit Testimonial &amp; Field Story
+            </DialogTitle>
+            <DialogDescription>
+              Customize the quote, role, and location for this testimonial card. Edits are saved locally in your browser.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="story-tag">Badge / Category Tag</Label>
+              <Input
+                id="story-tag"
+                value={storyFormData.tag}
+                onChange={(e) => setStoryFormData((prev) => ({ ...prev, tag: e.target.value }))}
+                placeholder="e.g. Voice from the Field"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="story-quote">Testimonial Quote</Label>
+              <Textarea
+                id="story-quote"
+                rows={4}
+                value={storyFormData.quote}
+                onChange={(e) => setStoryFormData((prev) => ({ ...prev, quote: e.target.value }))}
+                placeholder="Enter field quote or testimonial..."
+                className="resize-y"
+              />
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="story-role">Author Title / Role</Label>
+                <Input
+                  id="story-role"
+                  value={storyFormData.role}
+                  onChange={(e) => setStoryFormData((prev) => ({ ...prev, role: e.target.value }))}
+                  placeholder="e.g. Sr. Community Health Nurse"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="story-initials">Avatar Initials</Label>
+                <Input
+                  id="story-initials"
+                  maxLength={4}
+                  value={storyFormData.initials}
+                  onChange={(e) => setStoryFormData((prev) => ({ ...prev, initials: e.target.value.toUpperCase() }))}
+                  placeholder="e.g. RN"
+                />
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="story-location">Location / Organization</Label>
+              <Input
+                id="story-location"
+                value={storyFormData.location}
+                onChange={(e) => setStoryFormData((prev) => ({ ...prev, location: e.target.value }))}
+                placeholder="e.g. Western Highlands Province"
+              />
+            </div>
+          </div>
+          <div className="flex items-center justify-between pt-3 border-t mt-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={handleResetStory}
+              className="gap-1.5 text-muted-foreground hover:text-foreground"
+            >
+              <RotateCcw className="h-3.5 w-3.5" />
+              Reset Default
+            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => setEditingStoryRole(null)}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                onClick={handleSaveStory}
+              >
+                Save Changes
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
       <header className="sticky top-0 z-50 border-b bg-background/95 backdrop-blur">
         <div className="container mx-auto px-4 h-16 flex items-center justify-between gap-4">
           <div className="flex items-center gap-3" data-testid="brand-header">
@@ -815,23 +1023,35 @@ export default function Landing() {
                   </div>
                 </div>
 
-                <div className="lg:col-span-5 bg-gradient-to-br from-emerald-500/10 via-teal-500/5 to-background border border-emerald-500/20 rounded-2xl p-6 lg:p-8 flex flex-col justify-between">
+                <div className="lg:col-span-5 bg-gradient-to-br from-emerald-500/10 via-teal-500/5 to-background border border-emerald-500/20 rounded-2xl p-6 lg:p-8 flex flex-col justify-between relative group">
                   <div className="space-y-4">
-                    <Badge variant="outline" className="bg-emerald-500/20 text-emerald-800 dark:text-emerald-200 border-none font-medium">
-                      Voice from the Field
-                    </Badge>
+                    <div className="flex items-center justify-between gap-2">
+                      <Badge variant="outline" className="bg-emerald-500/20 text-emerald-800 dark:text-emerald-200 border-none font-medium">
+                        {personaStories.chw.tag}
+                      </Badge>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 px-2.5 text-xs text-muted-foreground hover:text-foreground gap-1.5 rounded-md border border-emerald-500/20 bg-background/50 hover:bg-background shadow-xs transition-colors"
+                        onClick={() => handleOpenEditStory("chw")}
+                        title="Edit this testimonial card"
+                        data-testid="button-edit-story-chw"
+                      >
+                        <Pencil className="h-3 w-3" />
+                        <span>Edit Story</span>
+                      </Button>
+                    </div>
                     <blockquote className="text-base italic text-foreground leading-relaxed">
-                      "During rainy seasons, our paper tally sheets often got soaked and unreadable while crossing the river.
-                      With VaxPlan cached on our phones, our outreach team has the whole settlement list, carrier packing counts, and village maps safe and offline."
+                      "{personaStories.chw.quote}"
                     </blockquote>
                   </div>
                   <div className="pt-6 border-t border-emerald-500/20 flex items-center gap-3">
                     <div className="h-10 w-10 rounded-full bg-emerald-600 text-white flex items-center justify-center font-bold text-sm">
-                      RN
+                      {personaStories.chw.initials}
                     </div>
                     <div>
-                      <div className="font-semibold text-sm">Sr. Community Health Nurse</div>
-                      <div className="text-xs text-muted-foreground">Western Highlands Province</div>
+                      <div className="font-semibold text-sm">{personaStories.chw.role}</div>
+                      <div className="text-xs text-muted-foreground">{personaStories.chw.location}</div>
                     </div>
                   </div>
                 </div>
@@ -901,23 +1121,35 @@ export default function Landing() {
                   </div>
                 </div>
 
-                <div className="lg:col-span-5 bg-gradient-to-br from-blue-500/10 via-indigo-500/5 to-background border border-blue-500/20 rounded-2xl p-6 lg:p-8 flex flex-col justify-between">
+                <div className="lg:col-span-5 bg-gradient-to-br from-blue-500/10 via-indigo-500/5 to-background border border-blue-500/20 rounded-2xl p-6 lg:p-8 flex flex-col justify-between relative group">
                   <div className="space-y-4">
-                    <Badge variant="outline" className="bg-blue-500/20 text-blue-800 dark:text-blue-200 border-none font-medium">
-                      District Management Impact
-                    </Badge>
+                    <div className="flex items-center justify-between gap-2">
+                      <Badge variant="outline" className="bg-blue-500/20 text-blue-800 dark:text-blue-200 border-none font-medium">
+                        {personaStories.facility.tag}
+                      </Badge>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 px-2.5 text-xs text-muted-foreground hover:text-foreground gap-1.5 rounded-md border border-blue-500/20 bg-background/50 hover:bg-background shadow-xs transition-colors"
+                        onClick={() => handleOpenEditStory("facility")}
+                        title="Edit this testimonial card"
+                        data-testid="button-edit-story-facility"
+                      >
+                        <Pencil className="h-3 w-3" />
+                        <span>Edit Story</span>
+                      </Button>
+                    </div>
                     <blockquote className="text-base italic text-foreground leading-relaxed">
-                      "Consolidating 38 health center microplans used to take four weeks of manual Excel reconciling.
-                      With VaxPlan, we reviewed, adjusted, and approved the entire district operational plan in under 48 hours."
+                      "{personaStories.facility.quote}"
                     </blockquote>
                   </div>
                   <div className="pt-6 border-t border-blue-500/20 flex items-center gap-3">
                     <div className="h-10 w-10 rounded-full bg-blue-600 text-white flex items-center justify-center font-bold text-sm">
-                      DM
+                      {personaStories.facility.initials}
                     </div>
                     <div>
-                      <div className="font-semibold text-sm">District Medical Officer of Health</div>
-                      <div className="text-xs text-muted-foreground">Ministry of Health District Operations</div>
+                      <div className="font-semibold text-sm">{personaStories.facility.role}</div>
+                      <div className="text-xs text-muted-foreground">{personaStories.facility.location}</div>
                     </div>
                   </div>
                 </div>
@@ -987,23 +1219,35 @@ export default function Landing() {
                   </div>
                 </div>
 
-                <div className="lg:col-span-5 bg-gradient-to-br from-purple-500/10 via-pink-500/5 to-background border border-purple-500/20 rounded-2xl p-6 lg:p-8 flex flex-col justify-between">
+                <div className="lg:col-span-5 bg-gradient-to-br from-purple-500/10 via-pink-500/5 to-background border border-purple-500/20 rounded-2xl p-6 lg:p-8 flex flex-col justify-between relative group">
                   <div className="space-y-4">
-                    <Badge variant="outline" className="bg-purple-500/20 text-purple-800 dark:text-purple-200 border-none font-medium">
-                      Global Strategic Value
-                    </Badge>
+                    <div className="flex items-center justify-between gap-2">
+                      <Badge variant="outline" className="bg-purple-500/20 text-purple-800 dark:text-purple-200 border-none font-medium">
+                        {personaStories.manager.tag}
+                      </Badge>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 px-2.5 text-xs text-muted-foreground hover:text-foreground gap-1.5 rounded-md border border-purple-500/20 bg-background/50 hover:bg-background shadow-xs transition-colors"
+                        onClick={() => handleOpenEditStory("manager")}
+                        title="Edit this testimonial card"
+                        data-testid="button-edit-story-manager"
+                      >
+                        <Pencil className="h-3 w-3" />
+                        <span>Edit Story</span>
+                      </Button>
+                    </div>
                     <blockquote className="text-base italic text-foreground leading-relaxed">
-                      "For the first time, our technical partner review had zero unmapped settlements and 100% verified population denominators.
-                      Funding approvals happened without delay because the data was backed by spatial evidence."
+                      "{personaStories.manager.quote}"
                     </blockquote>
                   </div>
                   <div className="pt-6 border-t border-purple-500/20 flex items-center gap-3">
                     <div className="h-10 w-10 rounded-full bg-purple-600 text-white flex items-center justify-center font-bold text-sm">
-                      NE
+                      {personaStories.manager.initials}
                     </div>
                     <div>
-                      <div className="font-semibold text-sm">National EPI Program Manager</div>
-                      <div className="text-xs text-muted-foreground">Department of Public Health &amp; Disease Control</div>
+                      <div className="font-semibold text-sm">{personaStories.manager.role}</div>
+                      <div className="text-xs text-muted-foreground">{personaStories.manager.location}</div>
                     </div>
                   </div>
                 </div>
