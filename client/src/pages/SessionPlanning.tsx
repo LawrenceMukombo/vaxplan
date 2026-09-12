@@ -3467,7 +3467,7 @@ function CaregiverSessionBroadcastModal({
       <DialogContent className="max-w-2xl">
         <DialogHeader>
           <div className="flex items-center gap-2">
-            <Badge className="bg-sky-600 text-white hover:bg-sky-700">Roadmap Capability</Badge>
+            <Badge className="bg-emerald-600 text-white hover:bg-emerald-700">Operational Capability</Badge>
             <DialogTitle className="flex items-center gap-2 text-xl font-bold">
               <Radio className="h-5 w-5 text-sky-600" />
               Automated Caregiver Outreach Session SMS Broadcast

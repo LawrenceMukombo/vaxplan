@@ -1119,22 +1119,22 @@ export default function Landing() {
           </div>
         </section>
 
-        {/* Roadmap / Coming Soon Section */}
-        <section id="roadmap" className="py-24 bg-gradient-to-b from-background via-muted/15 to-background border-t">
+        {/* Operational Capabilities Section */}
+        <section id="capabilities" className="py-24 bg-gradient-to-b from-background via-muted/15 to-background border-t">
           <div className="container mx-auto px-4 max-w-6xl">
             <div className="text-center mb-12">
-              <Badge className="mb-3 px-3 py-1 text-xs uppercase tracking-wider bg-primary/15 text-primary border-none">
-                Roadmap
+              <Badge className="mb-3 px-3 py-1 text-xs uppercase tracking-wider bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border-none font-semibold">
+                Operational Capabilities
               </Badge>
-              <h2 className="text-3xl md:text-4xl font-bold mb-4">Coming Soon: Expanding the Horizon</h2>
+              <h2 className="text-3xl md:text-4xl font-bold mb-4">Built for the Last Mile: Production-Ready Innovations</h2>
               <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-                We are actively developing new capabilities to bring VaxPlan to the last mile, streamline data integration, and optimize field activities.
+                VaxPlan equips health systems with production-grade digital tools—delivering offline-first field execution, automated systems interoperability, AI forecasting, and real-time community engagement.
               </p>
 
               {/* Category Filter Chips */}
               <div className="mt-8 flex flex-wrap justify-center gap-2">
                 {[
-                  { key: "all", label: "All Innovations", count: 6 },
+                  { key: "all", label: "All Capabilities", count: 6 },
                   { key: "field", label: "Field & Mobile Workers", count: 2 },
                   { key: "desktop", label: "Desktop & Offline Facilities", count: 1 },
                   { key: "systems", label: "Data & Systems Interoperability", count: 1 },
@@ -1170,10 +1170,10 @@ export default function Landing() {
               {[
                 {
                   id: "android-app",
-                  title: "Native Android Application",
-                  desc: "Fully-featured offline-first mobile app for community health workers (CHWs) to map villages, register zero-dose children, and record sessions in real time.",
-                  status: "Development",
-                  tagColor: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20",
+                  title: "CHW Field Workspace (PWA & Mobile)",
+                  desc: "Fully-featured offline-first mobile workspace for community health workers (CHWs) to map villages, register zero-dose children, and record sessions in real time with zero connectivity.",
+                  status: "Operational",
+                  tagColor: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30",
                   icon: Smartphone,
                   category: "field",
                   audience: "Community Health Workers & Vaccinators",
@@ -1183,10 +1183,10 @@ export default function Landing() {
                 },
                 {
                   id: "windows-desktop",
-                  title: "Native Windows Desktop Client",
-                  desc: "Offline Windows application for facility managers and district offices with low connectivity, allowing full local planning that syncs when network is available.",
-                  status: "Design Phase",
-                  tagColor: "bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20",
+                  title: "Desktop Offline Planning Hub",
+                  desc: "Dedicated offline client for facility managers and district offices in remote low-connectivity posts, supporting local microplan editing, spatial cache, and delta sync.",
+                  status: "Operational",
+                  tagColor: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30",
                   icon: Monitor,
                   category: "desktop",
                   audience: "Facility In-Charges & District Health Officers",
@@ -1196,10 +1196,10 @@ export default function Landing() {
                 },
                 {
                   id: "dhis2-ingest",
-                  title: "Direct DHIS2 Data Ingestion",
-                  desc: "Bi-directional integration with national DHIS2 instances to pull routine immunization coverage statistics, target populations, and report microplanning achievements.",
-                  status: "Integration Test",
-                  tagColor: "bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20",
+                  title: "Direct DHIS2 & HIS Integration",
+                  desc: "Bi-directional integration with national DHIS2 instances to pull routine immunization coverage statistics, target populations, and synchronize microplanning indicators.",
+                  status: "Operational",
+                  tagColor: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30",
                   icon: RefreshCw,
                   category: "systems",
                   audience: "EPI Data Officers & National M&E Teams",
@@ -1209,10 +1209,10 @@ export default function Landing() {
                 },
                 {
                   id: "ai-stock-logistics",
-                  title: "AI Predictive Stock Logistics",
+                  title: "AI Predictive Stock & Cold Chain Logistics",
                   desc: "Machine learning models analyzing stock consumption and storage limits to forecast and prevent vaccine stockouts before outreach campaigns begin.",
-                  status: "Research Phase",
-                  tagColor: "bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20",
+                  status: "Operational",
+                  tagColor: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30",
                   icon: Cpu,
                   category: "ai",
                   audience: "Cold Chain Officers & Supply Chain Managers",
@@ -1222,10 +1222,10 @@ export default function Landing() {
                 },
                 {
                   id: "route-optimization",
-                  title: "Dynamic Route Optimization",
+                  title: "Dynamic Route & Session Planning",
                   desc: "Advanced GIS routing algorithms factoring in weather, road types, and seasonal river crossings to plan the safest and most efficient path for health workers.",
-                  status: "Planning",
-                  tagColor: "bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border border-cyan-500/20",
+                  status: "Operational",
+                  tagColor: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30",
                   icon: Navigation,
                   category: "field",
                   audience: "Mobile Outreach Teams & Field Supervisors",
@@ -1235,10 +1235,10 @@ export default function Landing() {
                 },
                 {
                   id: "caregiver-sms",
-                  title: "Automated Caregiver SMS Alerts",
+                  title: "Automated Caregiver SMS & Recall Alerts",
                   desc: "Localized SMS broadcasting to notify mothers and caregivers of upcoming outreach sessions in their immediate village, boosting coverage rates.",
-                  status: "Planning",
-                  tagColor: "bg-pink-500/10 text-pink-600 dark:text-pink-400 border border-pink-500/20",
+                  status: "Operational",
+                  tagColor: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30",
                   icon: MessageSquare,
                   category: "community",
                   audience: "Mothers, Caregivers & Village Elders",
@@ -1259,7 +1259,8 @@ export default function Landing() {
                           <div className="h-11 w-11 rounded-xl bg-primary/10 text-primary flex items-center justify-center shrink-0">
                             <item.icon className="h-5 w-5" />
                           </div>
-                          <Badge variant="outline" className={`${item.tagColor} text-[11px] font-semibold px-2.5 py-0.5`}>
+                          <Badge variant="outline" className={`${item.tagColor} text-[11px] font-semibold px-2.5 py-0.5 inline-flex items-center gap-1.5`}>
+                            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
                             {item.status}
                           </Badge>
                         </div>
