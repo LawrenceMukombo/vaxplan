@@ -14,6 +14,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import { GeoCascadeFilter } from "@/components/GeoCascadeFilter";
 import { FacilityCascadePicker } from "@/components/FacilityCascadePicker";
+import { getCountryConfig } from "@/lib/countryConfig";
 import {
   FileSpreadsheet,
   Plus,
@@ -171,20 +172,29 @@ export interface HfDailySummarySheet {
   multiAntigenDoses?: MultiAntigenDoseItem[];
 }
 
-const STORAGE_KEY = "vaxplan_sia_summary_sheets_v1";
-
 // Initial seed records so the page loads with realistic field operations data
-function getInitialSummarySheets(): HfDailySummarySheet[] {
+function getInitialSummarySheets(
+  countryName: string = "National",
+  facilitiesList: any[] = [],
+  districtsList: any[] = [],
+  provincesList: any[] = []
+): HfDailySummarySheet[] {
+  const fac1 = facilitiesList[0] || { id: 1, name: `${countryName} Central Referral Hospital`, districtId: 1 };
+  const dist1 = districtsList.find((d: any) => d.id === fac1.districtId) || { id: 1, name: `${countryName} Central District`, provinceId: 1 };
+  const prov1 = provincesList.find((p: any) => p.id === dist1.provinceId) || { id: 1, name: `${countryName} Central Province` };
+
+  const fac2 = facilitiesList[1] || { id: 2, name: `${countryName} Primary Health Care Centre`, districtId: dist1.id };
+
   return [
     {
       id: "ss-001",
       campaignId: "campaign-mr-2026",
-      facilityId: 1,
-      facilityName: "Addo Clinic",
-      districtId: 1,
-      districtName: "Cacadu Health District",
-      provinceId: 1,
-      provinceName: "Eastern Cape",
+      facilityId: fac1.id,
+      facilityName: fac1.name,
+      districtId: dist1.id,
+      districtName: dist1.name,
+      provinceId: prov1.id,
+      provinceName: prov1.name,
       dayNumber: 1,
       reportingDate: "2026-09-08",
       fixedTeams: 2,
@@ -205,19 +215,19 @@ function getInitialSummarySheets(): HfDailySummarySheet[] {
       aefiMinor: 2,
       aefiSevere: 0,
       status: "verified",
-      supervisorName: "Sister N. Dlamini",
-      remarks: "High turnout at outreach post 1. Mobile team reached pastoralist kraals safely.",
+      supervisorName: "Field Supervisor",
+      remarks: "High turnout at outreach post 1. Mobile team reached communities safely.",
       updatedAt: "2026-09-08T18:30:00Z",
     },
     {
       id: "ss-002",
       campaignId: "campaign-mr-2026",
-      facilityId: 1,
-      facilityName: "Addo Clinic",
-      districtId: 1,
-      districtName: "Cacadu Health District",
-      provinceId: 1,
-      provinceName: "Eastern Cape",
+      facilityId: fac1.id,
+      facilityName: fac1.name,
+      districtId: dist1.id,
+      districtName: dist1.name,
+      provinceId: prov1.id,
+      provinceName: prov1.name,
       dayNumber: 2,
       reportingDate: "2026-09-09",
       fixedTeams: 2,
@@ -238,19 +248,19 @@ function getInitialSummarySheets(): HfDailySummarySheet[] {
       aefiMinor: 1,
       aefiSevere: 0,
       status: "verified",
-      supervisorName: "Sister N. Dlamini",
-      remarks: "Coordination with village head helped mobilize hesitant farm workers.",
+      supervisorName: "Field Supervisor",
+      remarks: "Coordination with community leaders helped mobilize hesitant households.",
       updatedAt: "2026-09-09T18:45:00Z",
     },
     {
       id: "ss-003",
       campaignId: "campaign-mr-2026",
-      facilityId: 1,
-      facilityName: "Addo Clinic",
-      districtId: 1,
-      districtName: "Cacadu Health District",
-      provinceId: 1,
-      provinceName: "Eastern Cape",
+      facilityId: fac1.id,
+      facilityName: fac1.name,
+      districtId: dist1.id,
+      districtName: dist1.name,
+      provinceId: prov1.id,
+      provinceName: prov1.name,
       dayNumber: 3,
       reportingDate: "2026-09-10",
       fixedTeams: 2,
@@ -271,19 +281,19 @@ function getInitialSummarySheets(): HfDailySummarySheet[] {
       aefiMinor: 3,
       aefiSevere: 0,
       status: "submitted",
-      supervisorName: "Sister N. Dlamini",
-      remarks: "Rain in afternoon slowed outreach team 2. Rescheduled absent houses for Day 4 morning.",
+      supervisorName: "Field Supervisor",
+      remarks: "Afternoon weather slowed outreach team 2. Rescheduled absent households.",
       updatedAt: "2026-09-10T19:15:00Z",
     },
     {
       id: "ss-004",
       campaignId: "campaign-mr-2026",
-      facilityId: 2,
-      facilityName: "Kirkwood Community Health Centre",
-      districtId: 1,
-      districtName: "Cacadu Health District",
-      provinceId: 1,
-      provinceName: "Eastern Cape",
+      facilityId: fac2.id,
+      facilityName: fac2.name,
+      districtId: dist1.id,
+      districtName: dist1.name,
+      provinceId: prov1.id,
+      provinceName: prov1.name,
       dayNumber: 1,
       reportingDate: "2026-09-08",
       fixedTeams: 3,
@@ -304,19 +314,19 @@ function getInitialSummarySheets(): HfDailySummarySheet[] {
       aefiMinor: 4,
       aefiSevere: 0,
       status: "verified",
-      supervisorName: "Dr. P. Khumalo",
-      remarks: "Strong community health worker turnout. Finger marking adherence audited at 98%.",
+      supervisorName: "Field Supervisor",
+      remarks: "Strong community mobilizer turnout. Finger marking adherence audited at 98%.",
       updatedAt: "2026-09-08T19:00:00Z",
     },
     {
       id: "ss-005",
       campaignId: "campaign-mr-2026",
-      facilityId: 2,
-      facilityName: "Kirkwood Community Health Centre",
-      districtId: 1,
-      districtName: "Cacadu Health District",
-      provinceId: 1,
-      provinceName: "Eastern Cape",
+      facilityId: fac2.id,
+      facilityName: fac2.name,
+      districtId: dist1.id,
+      districtName: dist1.name,
+      provinceId: prov1.id,
+      provinceName: prov1.name,
       dayNumber: 2,
       reportingDate: "2026-09-09",
       fixedTeams: 3,
@@ -337,7 +347,7 @@ function getInitialSummarySheets(): HfDailySummarySheet[] {
       aefiMinor: 2,
       aefiSevere: 0,
       status: "verified",
-      supervisorName: "Dr. P. Khumalo",
+      supervisorName: "Field Supervisor",
       remarks: "Vaccine carrier ice packs replenished midday as per cold chain SOP.",
       updatedAt: "2026-09-09T18:50:00Z",
     },
@@ -347,6 +357,33 @@ function getInitialSummarySheets(): HfDailySummarySheet[] {
 export default function CampaignSummarySheets() {
   const { user } = useAuth();
   const { toast } = useToast();
+
+  // Dynamic Tenant & Country Configuration
+  const { data: tenant } = useQuery<any>({
+    queryKey: ["/api/me/tenant"],
+  });
+  const countryConfig = useMemo(() => getCountryConfig(tenant), [tenant]);
+  const effectiveCountryCode = tenant?.countryCode || countryConfig.code || "SSD";
+  const effectiveCountryName = tenant?.name || countryConfig.officialName || countryConfig.name;
+
+  // Dynamic Geographic Entities
+  const { data: dbDistricts = [] } = useQuery<any[]>({
+    queryKey: ["/api/districts"],
+  });
+
+  const { data: dbFacilities = [] } = useQuery<Facility[]>({
+    queryKey: ["/api/facilities"],
+  });
+
+  const { data: dbProvinces = [] } = useQuery<any[]>({
+    queryKey: ["/api/provinces"],
+  });
+
+  // Tenant-scoped LocalStorage Key
+  const tenantStorageKey = useMemo(
+    () => `vaxplan_sia_summary_sheets_${tenant?.id || tenant?.code || effectiveCountryCode}_v2`,
+    [tenant?.id, tenant?.code, effectiveCountryCode]
+  );
 
   // Campaign selection
   const [selectedCampaignId, setSelectedCampaignId] = useState<string>("campaign-mr-2026");
@@ -362,23 +399,32 @@ export default function CampaignSummarySheets() {
   const [selectedFacility, setSelectedFacility] = useState<Facility | null>(null);
 
   // Summary sheets collection
-  const [sheets, setSheets] = useState<HfDailySummarySheet[]>(() => {
-    try {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      if (stored) return JSON.parse(stored);
-    } catch (e) {
-      console.warn("Could not load stored summary sheets:", e);
-    }
-    return getInitialSummarySheets();
-  });
+  const [sheets, setSheets] = useState<HfDailySummarySheet[]>([]);
 
   useEffect(() => {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(sheets));
+      const stored = localStorage.getItem(tenantStorageKey);
+      if (stored) {
+        setSheets(JSON.parse(stored));
+      } else {
+        const initial = getInitialSummarySheets(effectiveCountryName, dbFacilities, dbDistricts, dbProvinces);
+        setSheets(initial);
+      }
     } catch (e) {
-      console.warn("Could not save summary sheets to storage:", e);
+      console.warn("Could not load stored summary sheets:", e);
+      setSheets([]);
     }
-  }, [sheets]);
+  }, [tenantStorageKey, effectiveCountryName, dbFacilities.length, dbDistricts.length]);
+
+  useEffect(() => {
+    if (sheets.length > 0) {
+      try {
+        localStorage.setItem(tenantStorageKey, JSON.stringify(sheets));
+      } catch (e) {
+        console.warn("Could not save summary sheets to storage:", e);
+      }
+    }
+  }, [sheets, tenantStorageKey]);
 
   // Super User role gating
   const userRole = user?.role;
@@ -402,7 +448,7 @@ export default function CampaignSummarySheets() {
   const [formFacilityId, setFormFacilityId] = useState<number | null>(null);
   const [formFacilityName, setFormFacilityName] = useState<string>("");
   const [formDistrictId, setFormDistrictId] = useState<number>(1);
-  const [formDistrictName, setFormDistrictName] = useState<string>("Cacadu Health District");
+  const [formDistrictName, setFormDistrictName] = useState<string>("");
   const [formProvinceId, setFormProvinceId] = useState<number>(1);
 
   const [formFixedTeams, setFormFixedTeams] = useState<number>(2);
@@ -673,15 +719,20 @@ export default function CampaignSummarySheets() {
       return;
     }
 
+    const resolvedDistrict = dbDistricts.find((d: any) => d.id === (fac?.districtId || formDistrictId));
+    const resolvedProvince = dbProvinces.find((p: any) => p.id === (resolvedDistrict?.provinceId || formProvinceId));
+    const resolvedDistrictName = (fac as any)?.district || resolvedDistrict?.name || formDistrictName || `${countryConfig.adminLabels.level2 || "District"}`;
+    const resolvedProvinceName = resolvedProvince?.name || (resolvedDistrict as any)?.province || countryConfig.adminLabels.level1 || "Province";
+
     const newRecord: HfDailySummarySheet = {
       id: `ss-${Date.now()}`,
       campaignId: selectedCampaignId,
       facilityId: formFacilityId,
       facilityName: fac?.name || formFacilityName || `Facility #${formFacilityId}`,
       districtId: fac?.districtId || formDistrictId,
-      districtName: formDistrictName,
+      districtName: resolvedDistrictName,
       provinceId: formProvinceId,
-      provinceName: "Eastern Cape",
+      provinceName: resolvedProvinceName,
       dayNumber: Number(formDayNumber),
       reportingDate: formDate,
       fixedTeams: Number(formFixedTeams),

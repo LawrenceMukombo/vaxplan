@@ -1,0 +1,1 @@
+async function a(s,i="GET",n){const e=await fetch(s,{method:i,credentials:"include",headers:n?{"Content-Type":"application/json"}:void 0,body:n?JSON.stringify(n):void 0}),t=await e.json();if(!e.ok)throw new Error(t.message||"Planning request failed");return t}export{a as p};

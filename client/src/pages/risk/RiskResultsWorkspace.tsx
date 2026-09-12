@@ -1614,8 +1614,8 @@ export default function RiskResultsWorkspace() {
         {/* ==================================================================== */}
         <TabsContent value="map" className="space-y-4">
           <RiskChoroplethMap
-            countryCode={assessment?.countryCode || context?.countryCode || "ZAF"}
-            countryName={assessment?.countryName || context?.countryName || "Republic of South Africa National Department of Health"}
+            countryCode={assessment?.countryCode || context?.countryCode || "SSD"}
+            countryName={assessment?.countryName || context?.countryName || "National Ministry of Health"}
             adminLevelLabel={context?.adminLevelLabel || "District"}
             boundaryId={context?.boundaryId || context?.defaultBoundaryId}
             data={effectiveChoroplethData}

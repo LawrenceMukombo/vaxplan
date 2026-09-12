@@ -115,8 +115,8 @@ export interface SiaCoverageChoroplethMapProps {
 }
 
 export function SiaCoverageChoroplethMap({
-  countryCode = "ZAF",
-  countryName = "Republic of South Africa National Department of Health",
+  countryCode,
+  countryName,
   campaignName = "Overall Campaign Coverage",
   boundaryId,
   districtsData = [],
@@ -136,6 +136,12 @@ export function SiaCoverageChoroplethMap({
   const [basemap, setBasemap] = usePersistedBasemap();
   const geoJsonRef = useRef<L.GeoJSON | null>(null);
 
+  // Active Tenant Query for Dynamic Country Scope
+  const { data: tenant } = useQuery<any>({
+    queryKey: ["/api/me/tenant"],
+    staleTime: 60 * 60 * 1000,
+  });
+
   // Context & Boundaries Query
   const { data: contextData } = useQuery<any>({
     queryKey: ["/api/risk/context"],
@@ -143,7 +149,8 @@ export function SiaCoverageChoroplethMap({
     staleTime: 60 * 60 * 1000,
   });
 
-  const effectiveCountryCode = countryCode || contextData?.countryCode || "ZAF";
+  const effectiveCountryCode = countryCode || tenant?.countryCode || contextData?.countryCode || "SSD";
+  const effectiveCountryName = countryName || tenant?.name || "National Ministry of Health";
   const effectiveBoundaryId = boundaryId || contextData?.boundaryId || null;
 
   const { data: geoJsonData, isLoading: isGeoLoading } = useQuery<any>({
@@ -303,7 +310,7 @@ export function SiaCoverageChoroplethMap({
           <div className="flex items-center gap-2 flex-wrap">
             <Globe2 className="h-5 w-5 text-primary" />
             <h2 className="text-lg font-bold text-foreground tracking-tight">
-              {countryName} &bull; {campaignName}
+              {effectiveCountryName} &bull; {campaignName}
             </h2>
             <Badge variant="secondary" className="font-semibold text-xs bg-muted">
               {districtsData.length} Districts

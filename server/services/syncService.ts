@@ -209,6 +209,17 @@ export async function pullChanges(
   // Performs the clients pull query by joining with geographic tables (facilities, districts,
   // provinces, and villages) to resolve and return administrative names, so offline caches
   // can correctly render province and district columns.
+  // Safe query executor helper: catches missing columns or unmigrated schema errors
+  // gracefully and logs a warning instead of failing the entire pull request with HTTP 500.
+  const safeQuery = async <T>(tableName: string, queryFn: () => Promise<T[]>): Promise<T[]> => {
+    try {
+      return await queryFn();
+    } catch (err: any) {
+      console.warn(`[SyncService] safeQuery warning for table '${tableName}': ${err?.message || err}`);
+      return [];
+    }
+  };
+
   const [
     regionsData,
     provincesData,
@@ -231,54 +242,61 @@ export async function pullChanges(
     supervisionTemplatesData,
     catchmentsData,
   ] = await Promise.all([
-    db.select().from(regions).where(tenantFilter(regions)),
-    db.select().from(provinces).where(tenantFilter(provinces)),
-    db.select().from(districts).where(tenantFilter(districts)),
-    db.select().from(llgs).where(tenantFilter(llgs)),
-    db.select().from(facilities).where(tenantFilter(facilities)),
-    db.select().from(villages).where(tenantFilter(villages)),
-    db.select({
-      client: clients,
-      _geoProvinceId: districts.provinceId,
-      _geoProvinceName: provinces.name,
-      _geoDistrictId: facilities.districtId,
-      _geoDistrictName: districts.name,
-      _geoVillageName: villages.name,
-    })
-    .from(clients)
-    .leftJoin(facilities, eq(facilities.id, clients.facilityId))
-    .leftJoin(districts, eq(districts.id, facilities.districtId))
-    .leftJoin(provinces, eq(provinces.id, districts.provinceId))
-    .leftJoin(villages, eq(villages.id, clients.villageId))
-    .where(tenantFilter(clients)),
-    db.select().from(clientVaccinations).where(tenantFilter(clientVaccinations)),
-    db.select().from(sessionPlans).where(tenantFilter(sessionPlans)),
-    db.select().from(sessionDayPlans).where(tenantFilter(sessionDayPlans)),
-    db.select().from(budgetItems).where(tenantFilter(budgetItems)),
-    db.select().from(mobilizationActivities).where(tenantFilter(mobilizationActivities)),
-    db.select().from(stockTransactions).where(tenantFilter(stockTransactions)),
-    db.select().from(monthlyReports).where(tenantFilter(monthlyReports)),
-    db.select().from(populationData).where(tenantFilter(populationData)),
-    db.select().from(vaccineConfigurations).where(tenantFilter(vaccineConfigurations)),
-    db.select().from(microplans).where(tenantFilter(microplans)),
-    db.select().from(supervisionVisits).where(tenantFilter(supervisionVisits)),
-    db.select().from(supervisionChecklistTemplates).where(tenantFilter(supervisionChecklistTemplates)),
-    db.select().from(facilityCatchments).where(tenantFilter(facilityCatchments)),
+    safeQuery("regions", () => db.select().from(regions).where(tenantFilter(regions))),
+    safeQuery("provinces", () => db.select().from(provinces).where(tenantFilter(provinces))),
+    safeQuery("districts", () => db.select().from(districts).where(tenantFilter(districts))),
+    safeQuery("llgs", () => db.select().from(llgs).where(tenantFilter(llgs))),
+    safeQuery("facilities", () => db.select().from(facilities).where(tenantFilter(facilities))),
+    safeQuery("villages", () => db.select().from(villages).where(tenantFilter(villages))),
+    safeQuery("clients", () =>
+      db.select({
+        client: clients,
+        _geoProvinceId: districts.provinceId,
+        _geoProvinceName: provinces.name,
+        _geoDistrictId: facilities.districtId,
+        _geoDistrictName: districts.name,
+        _geoVillageName: villages.name,
+      })
+      .from(clients)
+      .leftJoin(facilities, eq(facilities.id, clients.facilityId))
+      .leftJoin(districts, eq(districts.id, facilities.districtId))
+      .leftJoin(provinces, eq(provinces.id, districts.provinceId))
+      .leftJoin(villages, eq(villages.id, clients.villageId))
+      .where(tenantFilter(clients))
+    ),
+    safeQuery("clientVaccinations", () => db.select().from(clientVaccinations).where(tenantFilter(clientVaccinations))),
+    safeQuery("sessionPlans", () => db.select().from(sessionPlans).where(tenantFilter(sessionPlans))),
+    safeQuery("sessionDayPlans", () => db.select().from(sessionDayPlans).where(tenantFilter(sessionDayPlans))),
+    safeQuery("budgetItems", () => db.select().from(budgetItems).where(tenantFilter(budgetItems))),
+    safeQuery("mobilizationActivities", () => db.select().from(mobilizationActivities).where(tenantFilter(mobilizationActivities))),
+    safeQuery("stockTransactions", () => db.select().from(stockTransactions).where(tenantFilter(stockTransactions))),
+    safeQuery("monthlyReports", () => db.select().from(monthlyReports).where(tenantFilter(monthlyReports))),
+    safeQuery("populationData", () => db.select().from(populationData).where(tenantFilter(populationData))),
+    safeQuery("vaccineConfigurations", () => db.select().from(vaccineConfigurations).where(tenantFilter(vaccineConfigurations))),
+    safeQuery("microplans", () => db.select().from(microplans).where(tenantFilter(microplans))),
+    safeQuery("supervisionVisits", () => db.select().from(supervisionVisits).where(tenantFilter(supervisionVisits))),
+    safeQuery("supervisionChecklistTemplates", () => db.select().from(supervisionChecklistTemplates).where(tenantFilter(supervisionChecklistTemplates))),
+    safeQuery("facilityCatchments", () => db.select().from(facilityCatchments).where(tenantFilter(facilityCatchments))),
   ]);
 
-  const clientsData = clientsRawData.map(({ client, ...geo }) => ({
+  const clientsData = clientsRawData.map(({ client, ...geo }: any) => ({
     ...client,
     ...geo,
   }));
 
-  const firstVillage = await db
-    .select({ id: villages.id, createdAt: villages.createdAt })
-    .from(villages)
-    .orderBy(villages.id)
-    .limit(1);
-  const databaseFingerprint = firstVillage.length > 0
-    ? `${firstVillage[0].id}|${firstVillage[0].createdAt ? new Date(firstVillage[0].createdAt).getTime() : 0}`
-    : "empty";
+  let databaseFingerprint = "empty";
+  try {
+    const firstVillage = await db
+      .select({ id: villages.id, createdAt: villages.createdAt })
+      .from(villages)
+      .orderBy(villages.id)
+      .limit(1);
+    if (firstVillage.length > 0) {
+      databaseFingerprint = `${firstVillage[0].id}|${firstVillage[0].createdAt ? new Date(firstVillage[0].createdAt).getTime() : 0}`;
+    }
+  } catch (err: any) {
+    console.warn("[syncService] Failed to read firstVillage for fingerprint:", err?.message || err);
+  }
 
   return {
     serverTime: new Date().toISOString(),

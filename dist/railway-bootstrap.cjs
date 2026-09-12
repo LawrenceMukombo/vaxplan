@@ -213,6 +213,10 @@ __export(schema_exports, {
   pilotActivitiesRelations: () => pilotActivitiesRelations,
   pilotUpdates: () => pilotUpdates,
   pilotUpdatesRelations: () => pilotUpdatesRelations,
+  planningActionHistory: () => planningActionHistory,
+  planningActionRecords: () => planningActionRecords,
+  planningEvidenceHistory: () => planningEvidenceHistory,
+  planningEvidenceRecords: () => planningEvidenceRecords,
   populationData: () => populationData,
   populationGrids: () => populationGrids,
   populationGridsRelations: () => populationGridsRelations,
@@ -1057,6 +1061,7 @@ var villages = (0, import_pg_core2.pgTable)("villages", {
   isMappedInHmis: (0, import_pg_core2.boolean)("is_mapped_in_hmis").default(false),
   lastVerified: (0, import_pg_core2.timestamp)("last_verified"),
   linkedSettlementId: (0, import_pg_core2.integer)("linked_settlement_id"),
+  isActive: (0, import_pg_core2.boolean)("is_active").default(true),
   createdAt: (0, import_pg_core2.timestamp)("created_at").defaultNow(),
   updatedAt: (0, import_pg_core2.timestamp)("updated_at").defaultNow()
 }, (table) => [
@@ -1208,9 +1213,11 @@ var microplans = (0, import_pg_core2.pgTable)("microplans", {
   autoApproveAt: (0, import_pg_core2.timestamp)("auto_approve_at"),
   reminderSentAt: (0, import_pg_core2.timestamp)("reminder_sent_at"),
   districtEditReason: (0, import_pg_core2.text)("district_edit_reason"),
+  autoApprovedAt: (0, import_pg_core2.timestamp)("auto_approved_at"),
   createdByUserId: (0, import_pg_core2.varchar)("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
   updatedByUserId: (0, import_pg_core2.varchar)("updated_by_user_id").references(() => users.id, { onDelete: "set null" }),
   approvedByUserId: (0, import_pg_core2.varchar)("approved_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  approvedAt: (0, import_pg_core2.timestamp)("approved_at"),
   createdAt: (0, import_pg_core2.timestamp)("created_at").defaultNow(),
   updatedAt: (0, import_pg_core2.timestamp)("updated_at").defaultNow()
 }, (table) => [(0, import_pg_core2.index)("idx_microplans_tenant").on(table.tenantId)]);
@@ -1913,6 +1920,8 @@ var clients = (0, import_pg_core2.pgTable)("clients", {
   clientId: (0, import_pg_core2.varchar)("client_id", { length: 100 }),
   serialNumber: (0, import_pg_core2.integer)("serial_number"),
   registrationYear: (0, import_pg_core2.integer)("registration_year"),
+  isActive: (0, import_pg_core2.boolean)("is_active").default(true),
+  isArchived: (0, import_pg_core2.boolean)("is_archived").default(false),
   createdAt: (0, import_pg_core2.timestamp)("created_at").defaultNow(),
   updatedAt: (0, import_pg_core2.timestamp)("updated_at").defaultNow()
 }, (table) => ({
@@ -1935,6 +1944,7 @@ var clientVaccinations = (0, import_pg_core2.pgTable)("client_vaccinations", {
   administeredByUserId: (0, import_pg_core2.varchar)("administered_by_user_id").references(() => users.id, { onDelete: "set null" }),
   scheduleDoseId: (0, import_pg_core2.integer)("schedule_dose_id"),
   stockTransactionId: (0, import_pg_core2.integer)("stock_transaction_id"),
+  isArchived: (0, import_pg_core2.boolean)("is_archived").default(false),
   createdAt: (0, import_pg_core2.timestamp)("created_at").defaultNow()
 }, (table) => ({
   tenantIdx: (0, import_pg_core2.index)("client_vac_tenant_idx").on(table.tenantId),
@@ -2016,6 +2026,8 @@ var stockTransactions = (0, import_pg_core2.pgTable)("stock_transactions", {
   balanceAfter: (0, import_pg_core2.integer)("balance_after"),
   sourceModule: (0, import_pg_core2.varchar)("source_module", { length: 100 }),
   sourceRecordId: (0, import_pg_core2.varchar)("source_record_id", { length: 100 }),
+  isVoid: (0, import_pg_core2.boolean)("is_void").default(false),
+  voidReason: (0, import_pg_core2.text)("void_reason"),
   createdAt: (0, import_pg_core2.timestamp)("created_at").defaultNow()
 }, (table) => ({
   tenantIdx: (0, import_pg_core2.index)("stock_txn_tenant_idx").on(table.tenantId),
@@ -3773,6 +3785,52 @@ var insertSupervisionQuestionBankSchema = (0, import_drizzle_zod2.createInsertSc
 var selectSupervisionQuestionBankSchema = (0, import_drizzle_zod2.createSelectSchema)(supervisionQuestionBank);
 var insertClientImportBatchSchema = (0, import_drizzle_zod2.createInsertSchema)(clientImportBatches);
 var selectClientImportBatchSchema = (0, import_drizzle_zod2.createSelectSchema)(clientImportBatches);
+var planningActionRecords = (0, import_pg_core2.pgTable)("planning_actions", {
+  id: (0, import_pg_core2.uuid)("id").primaryKey(),
+  tenantId: (0, import_pg_core2.varchar)("tenant_id").notNull().references(() => tenants.id),
+  facilityId: (0, import_pg_core2.integer)("facility_id").notNull().references(() => facilities.id),
+  payload: (0, import_pg_core2.jsonb)("payload").notNull(),
+  version: (0, import_pg_core2.integer)("version").notNull().default(1),
+  createdAt: (0, import_pg_core2.timestamp)("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: (0, import_pg_core2.timestamp)("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedBy: (0, import_pg_core2.varchar)("updated_by").notNull().references(() => users.id)
+}, (table) => [
+  (0, import_pg_core2.index)("planning_actions_scope_idx").on(table.tenantId, table.facilityId),
+  (0, import_pg_core2.check)("planning_actions_version_check", import_drizzle_orm2.sql`${table.version} > 0`)
+]);
+var planningActionHistory = (0, import_pg_core2.pgTable)("planning_action_history", {
+  actionId: (0, import_pg_core2.uuid)("action_id").notNull().references(() => planningActionRecords.id),
+  version: (0, import_pg_core2.integer)("version").notNull(),
+  payload: (0, import_pg_core2.jsonb)("payload").notNull(),
+  changedAt: (0, import_pg_core2.timestamp)("changed_at", { withTimezone: true }).notNull().defaultNow(),
+  changedBy: (0, import_pg_core2.varchar)("changed_by").notNull().references(() => users.id)
+}, (table) => [(0, import_pg_core2.primaryKey)({ columns: [table.actionId, table.version] })]);
+var planningEvidenceRecords = (0, import_pg_core2.pgTable)("planning_evidence", {
+  id: (0, import_pg_core2.uuid)("id").primaryKey(),
+  tenantId: (0, import_pg_core2.varchar)("tenant_id").notNull().references(() => tenants.id),
+  facilityId: (0, import_pg_core2.integer)("facility_id").notNull().references(() => facilities.id),
+  kind: (0, import_pg_core2.varchar)("kind", { length: 40 }).notNull(),
+  microplanId: (0, import_pg_core2.integer)("microplan_id").references(() => microplans.id),
+  payload: (0, import_pg_core2.jsonb)("payload").notNull(),
+  version: (0, import_pg_core2.integer)("version").notNull().default(1),
+  createdAt: (0, import_pg_core2.timestamp)("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: (0, import_pg_core2.timestamp)("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedBy: (0, import_pg_core2.varchar)("updated_by").notNull().references(() => users.id)
+}, (table) => [
+  (0, import_pg_core2.index)("planning_evidence_scope_idx").on(table.tenantId, table.facilityId, table.kind),
+  (0, import_pg_core2.check)("planning_evidence_version_check", import_drizzle_orm2.sql`${table.version} > 0`),
+  (0, import_pg_core2.check)(
+    "planning_evidence_kind_check",
+    import_drizzle_orm2.sql`${table.kind} IN ('consultation','barrier','target_group','population_estimate','finance','household_assessment','service_review')`
+  )
+]);
+var planningEvidenceHistory = (0, import_pg_core2.pgTable)("planning_evidence_history", {
+  evidenceId: (0, import_pg_core2.uuid)("evidence_id").notNull().references(() => planningEvidenceRecords.id),
+  version: (0, import_pg_core2.integer)("version").notNull(),
+  payload: (0, import_pg_core2.jsonb)("payload").notNull(),
+  changedAt: (0, import_pg_core2.timestamp)("changed_at", { withTimezone: true }).notNull().defaultNow(),
+  changedBy: (0, import_pg_core2.varchar)("changed_by").notNull().references(() => users.id)
+}, (table) => [(0, import_pg_core2.primaryKey)({ columns: [table.evidenceId, table.version] })]);
 
 // server/db.ts
 var { Pool } = import_pg.default;
@@ -3786,6 +3844,9 @@ if ((connString.includes("supabase.co") || connString.includes("upstash.io")) &&
   connString += connString.includes("?") ? "&sslmode=require" : "?sslmode=require";
 }
 var pool = new Pool({ connectionString: connString });
+pool.on("error", (err) => {
+  console.error("[db] Unexpected pool error (connection may have been lost):", err.message);
+});
 var db = (0, import_node_postgres.drizzle)(pool, { schema: schema_exports });
 
 // scripts/railway-bootstrap.ts

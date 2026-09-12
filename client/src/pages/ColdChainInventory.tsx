@@ -296,10 +296,10 @@ export default function ColdChainInventory() {
       "Power Source", "Condition", "Manufacture Year", "Installation Date", "Last Service Date"
     ];
     const sampleRows = [
-      ',25318,"Addo Clinic",solar_direct_drive_refrigerator,"Dulas Arctiko","PURE 50","SN-ADD-001290","E003/042",55.00,45.00,solar,functional,2023,2023-08-15,2026-05-10',
-      ',25318,"Addo Clinic",icm,"Haier","HBC-80","SN-ADD-001291","E003/014",80.00,68.00,electric,functional,2021,2021-11-20,2026-04-18',
-      ',25318,"Addo Clinic",freezer,"Vestfrost","MF 314","SN-ADD-001292","E003/023",281.00,230.00,electric,functional,2020,2021-02-14,2026-05-22',
-      ',25318,"Addo Clinic",cold_box,"AOV","AOV-CB-25","SN-ADD-001293","E004/008",24.00,20.00,none,functional,2022,2022-03-10,2026-04-01'
+      ',25318,"Central Health Center",solar_direct_drive_refrigerator,"Dulas Arctiko","PURE 50","SN-ADD-001290","E003/042",55.00,45.00,solar,functional,2023,2023-08-15,2026-05-10',
+      ',25318,"Central Health Center",icm,"Haier","HBC-80","SN-ADD-001291","E003/014",80.00,68.00,electric,functional,2021,2021-11-20,2026-04-18',
+      ',25318,"Central Health Center",freezer,"Vestfrost","MF 314","SN-ADD-001292","E003/023",281.00,230.00,electric,functional,2020,2021-02-14,2026-05-22',
+      ',25318,"Central Health Center",cold_box,"AOV","AOV-CB-25","SN-ADD-001293","E004/008",24.00,20.00,none,functional,2022,2022-03-10,2026-04-01'
     ];
     const content = [headers.join(","), ...sampleRows].join("\n");
     const blob = new Blob([content], { type: "text/csv;charset=utf-8;" });

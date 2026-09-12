@@ -113,6 +113,7 @@ self.addEventListener("message", (event) => {
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
   if (event.request.method !== "GET") return;
+  if (url.protocol !== "http:" && url.protocol !== "https:") return;
 
   if (TILE_HOSTS.some((h) => url.hostname.includes(h))) {
     event.respondWith(tileStrategy(event.request));
@@ -136,7 +137,7 @@ async function cacheFirst(request, cacheName) {
   const cached = await cache.match(request);
   if (cached) return cached;
   const response = await fetch(request);
-  if (response.ok) cache.put(request, response.clone());
+  if (response.ok) await cache.put(request, response.clone());
   return response;
 }
 
@@ -144,7 +145,7 @@ async function networkFirst(request, cacheName) {
   const cache = await caches.open(cacheName);
   try {
     const response = await fetch(request);
-    if (response.ok) cache.put(request, response.clone());
+    if (response.ok) await cache.put(request, response.clone());
     return response;
   } catch {
     const cached = await cache.match(request);
@@ -161,7 +162,7 @@ async function navigationStrategy(request) {
     const response = await fetch(request);
     if (response.ok) {
       const cache = await caches.open(STATIC_CACHE);
-      cache.put(request, response.clone());
+      await cache.put(request, response.clone());
     }
     return response;
   } catch {
@@ -188,7 +189,7 @@ async function tileStrategy(request) {
       if (keys.length >= MAX_TILE_CACHE_ENTRIES) {
         await cache.delete(keys[0]);
       }
-      cache.put(request, response.clone());
+      await cache.put(request, response.clone());
     }
     return response;
   } catch {

@@ -191,8 +191,8 @@ export default function RiskAssessmentList() {
   });
 
   // Effective Country Identity
-  const activeCountryCode = cachedTenant?.countryCode || context?.countryCode || activeTenant?.countryCode || "ZAF";
-  const activeCountryName = cachedTenant?.name || context?.countryName || activeTenant?.name || "Republic of South Africa";
+  const activeCountryCode = cachedTenant?.countryCode || context?.countryCode || activeTenant?.countryCode || "SSD";
+  const activeCountryName = cachedTenant?.name || context?.countryName || activeTenant?.name || "National Health Authority";
   const adminLevel = context?.adminLevelLabel || (activeCountryCode === "SSD" ? "County" : "District");
   const adminLevelPlural = context?.adminLevelLabelPlural || (activeCountryCode === "SSD" ? "Counties" : "Districts");
 

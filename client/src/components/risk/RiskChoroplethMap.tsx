@@ -160,7 +160,13 @@ export function RiskChoroplethMap({
     staleTime: 60 * 60 * 1000,
   });
 
-  const effectiveCountryCode = countryCode || contextData?.countryCode || "ZAF";
+  // Active tenant query
+  const { data: tenant } = useQuery<any>({
+    queryKey: ["/api/me/tenant"],
+    staleTime: 60 * 60 * 1000,
+  });
+
+  const effectiveCountryCode = countryCode || tenant?.countryCode || contextData?.countryCode || "SSD";
 
   const effectiveBoundaryId = boundaryId || contextData?.boundaryId || null;
   const effectiveData = data || [];

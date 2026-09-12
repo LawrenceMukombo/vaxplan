@@ -244,7 +244,7 @@ export function OutreachPostsManager({
   const cachedTenant = loadActiveTenant();
   const activeTenant = tenantInfo || cachedTenant;
   const activeTenantId = activeTenant?.id;
-  const iso3 = tenantCodeOf(activeTenant) || "ZAF";
+  const iso3 = tenantCodeOf(activeTenant) || activeTenant?.countryCode || activeTenant?.code || "SSD";
 
   // Delete Confirmation State
   const [deleteTarget, setDeleteTarget] = useState<Village | null>(null);

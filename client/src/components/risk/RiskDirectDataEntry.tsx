@@ -742,6 +742,11 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
     queryKey: ["/api/risk/context"],
   });
 
+  // Fetch active tenant for fallback resolution
+  const { data: activeTenant } = useQuery<any>({
+    queryKey: ["/api/me/tenant"],
+  });
+
   // Fetch expected district coverages for the logged-in tenant
   const { data: rawCoverageData } = useQuery<any>({
     queryKey: ["/api/risk/coverage-performance"],
@@ -1314,7 +1319,8 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
   const dataFirstYear = baselineYear1;
   const dataSecondYear = baselineYear2;
   const dataLastYear = baselineYear3;
-  const assessmentCountry = assessment?.countryName || context?.countryName || "National";
+  const assessmentCountry = assessment?.countryName || context?.countryName || activeTenant?.countryName || "National";
+  const effectiveCountryCode = assessment?.countryCode || context?.countryCode || activeTenant?.countryCode || "SSD";
   const reportAssessment = {
     ...(assessment || {
       id: assessmentId,
@@ -1322,9 +1328,9 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
       assessmentYear: targetYear,
       baselineYears: [baselineYear1, baselineYear2, baselineYear3],
     }),
-    tenantName: assessment?.tenantName || context?.countryName || assessmentCountry,
-    countryName: assessment?.countryName || context?.countryName || assessmentCountry,
-    countryCode: assessment?.countryCode || context?.countryCode || "",
+    tenantName: assessment?.tenantName || context?.countryName || activeTenant?.countryName || assessmentCountry,
+    countryName: assessmentCountry,
+    countryCode: effectiveCountryCode,
     boundaryId: assessment?.boundaryId || context?.boundaryId || undefined,
     adminLevelLabel: assessment?.adminLevelLabel || context?.adminLevelLabel || "Administrative Area",
   };
@@ -2200,7 +2206,7 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                   </div>
                   <div className="flex justify-between py-1 border-b">
                     <span className="text-muted-foreground">Country Code:</span>
-                    <Badge variant="outline" className="font-mono text-xs">{context?.countryCode || "ZAF"}</Badge>
+                    <Badge variant="outline" className="font-mono text-xs">{effectiveCountryCode}</Badge>
                   </div>
                   <div className="flex justify-between py-1 border-b">
                     <span className="text-muted-foreground">Admin Level Label:</span>
@@ -2711,7 +2717,7 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
           </CardHeader>
           <CardContent className="p-4 space-y-4">
             <RiskChoroplethMap
-              countryCode={context?.countryCode || "ZAF"}
+              countryCode={effectiveCountryCode}
               countryName={assessmentCountry}
               adminLevelLabel={context?.adminLevelLabel || "District"}
               boundaryId={context?.boundaryId || undefined}
