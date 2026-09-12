@@ -306,13 +306,24 @@ async function run() {
 
   // 7. Facilities — 1,984 rows
   const facilityRows: (typeof facilities.$inferInsert)[] = [];
-  const existingHmis = new Set<string>(
-    (await db.select({ hmisCode: facilities.hmisCode })
-      .from(facilities)
-      .where(eq(facilities.tenantId, tenantId))).map((r) => r.hmisCode)
-  );
+  const existingFacilities = await db.select({ hmisCode: facilities.hmisCode, districtId: facilities.districtId, name: facilities.name })
+    .from(facilities)
+    .where(eq(facilities.tenantId, tenantId));
+  const existingHmis = new Set<string>(existingFacilities.map((r) => r.hmisCode));
+  const existingNameDist = new Set<string>(existingFacilities.map((r) => `${r.districtId}:${r.name.toLowerCase().trim()}`));
 
   for (const r of rows) {
+    const distId = districtMap.get(r.county_code.trim());
+    if (!distId) {
+      console.warn(`Warning: Missing county ID mapping for county code: ${r.county_code}`);
+      continue;
+    }
+
+    const nameDistKey = `${distId}:${r.site.toLowerCase().trim()}`;
+    if (existingNameDist.has(nameDistKey)) {
+      continue;
+    }
+
     const dhisId = r.site_dhis2_id.trim();
     let hmis = dhisId;
     if (!hmis || hmis === "NA") {
@@ -322,12 +333,7 @@ async function run() {
       continue;
     }
     existingHmis.add(hmis);
-
-    const distId = districtMap.get(r.county_code.trim());
-    if (!distId) {
-      console.warn(`Warning: Missing county ID mapping for county code: ${r.county_code}`);
-      continue;
-    }
+    existingNameDist.add(nameDistKey);
     
     const lat = toNumOrNull(r.latitude);
     const lon = toNumOrNull(r.longitude);

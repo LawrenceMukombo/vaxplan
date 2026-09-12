@@ -93,29 +93,34 @@ export async function runMigration() {
     for (const tenantRow of tenants.rows) {
       const tenantId = tenantRow.id;
 
-      // Seed PENTA
-      const pentaResult = await db.execute(sql`
-        INSERT INTO catalogue_vaccines (tenant_id, product_id, name, antigen_name, doses_per_vial, wastage_threshold, active, approval_status)
-        VALUES (${tenantId}, 'vaccine_product_penta', 'PENTA', 'DTP-HepB-Hib', 10, 10.00, true, 'published')
-        ON CONFLICT DO NOTHING
-        RETURNING id;
-      `);
-      
-      let pentaId = pentaResult.rows[0]?.id;
+      // Seed PENTA idempotently
+      let existingPenta = (await db.execute(sql`
+        SELECT id FROM catalogue_vaccines WHERE tenant_id = ${tenantId} AND product_id = 'vaccine_product_penta' LIMIT 1
+      `)).rows[0];
+
+      let pentaId = existingPenta?.id;
       if (!pentaId) {
-        const existingPenta = await db.execute(sql`SELECT id FROM catalogue_vaccines WHERE tenant_id = ${tenantId} AND product_id = 'vaccine_product_penta'`);
-        pentaId = existingPenta.rows[0]?.id;
+        const pentaResult = await db.execute(sql`
+          INSERT INTO catalogue_vaccines (tenant_id, product_id, name, antigen_name, doses_per_vial, wastage_threshold, active, approval_status)
+          VALUES (${tenantId}, 'vaccine_product_penta', 'PENTA', 'DTP-HepB-Hib', 10, 10.00, true, 'published')
+          RETURNING id;
+        `);
+        pentaId = pentaResult.rows[0]?.id;
       }
 
       if (pentaId) {
-        await db.execute(sql`
-          INSERT INTO catalogue_schedule_doses (tenant_id, vaccine_id, dose_code, name, dose_number, target_age, stock_deducting)
-          VALUES 
-            (${tenantId}, ${pentaId}, 'penta_1', 'PENTA-1', 1, '6 weeks', true),
-            (${tenantId}, ${pentaId}, 'penta_2', 'PENTA-2', 2, '10 weeks', true),
-            (${tenantId}, ${pentaId}, 'penta_3', 'PENTA-3', 3, '14 weeks', true)
-          ON CONFLICT DO NOTHING;
+        const existingDoses = await db.execute(sql`
+          SELECT id FROM catalogue_schedule_doses WHERE tenant_id = ${tenantId} AND vaccine_id = ${pentaId} LIMIT 1
         `);
+        if (existingDoses.rows.length === 0) {
+          await db.execute(sql`
+            INSERT INTO catalogue_schedule_doses (tenant_id, vaccine_id, dose_code, name, dose_number, target_age, stock_deducting)
+            VALUES 
+              (${tenantId}, ${pentaId}, 'penta_1', 'PENTA-1', 1, '6 weeks', true),
+              (${tenantId}, ${pentaId}, 'penta_2', 'PENTA-2', 2, '10 weeks', true),
+              (${tenantId}, ${pentaId}, 'penta_3', 'PENTA-3', 3, '14 weeks', true);
+          `);
+        }
       }
 
       // We will seed more vaccines later or via admin UI. PENTA acts as base test for migration.
