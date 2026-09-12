@@ -39,6 +39,26 @@ export interface CountryConfig {
     text: string;
     border: string;
   };
+
+  // National GIS & Catchment Norms
+  defaultExtractionRadiusKm?: number;
+  maxExtractionRadiusKm?: number;
+
+  // National Demographic Ratios (Official Census Breakdown)
+  demographicRatios?: {
+    under1Percent: number;
+    under5Percent: number;
+    pregnantPercent: number;
+    girls9to14Percent?: number;
+  };
+
+  // Operational Immunization Delivery Norms
+  operationalNorms?: {
+    maxChildrenPerSessionDay: number;
+    defaultBufferStockPercent: number;
+    standardVaccineCarrierLitres: number;
+    minSessionLeadDays: number;
+  };
 }
 
 export * from "@shared/countryFormats";
@@ -71,6 +91,20 @@ export const COUNTRY_CONFIGS: Record<string, CountryConfig> = {
       text: "text-emerald-700 dark:text-emerald-300",
       border: "border-emerald-500/30",
     },
+    defaultExtractionRadiusKm: 25,
+    maxExtractionRadiusKm: 50,
+    demographicRatios: {
+      under1Percent: 4.0,
+      under5Percent: 18.0,
+      pregnantPercent: 5.0,
+      girls9to14Percent: 3.5,
+    },
+    operationalNorms: {
+      maxChildrenPerSessionDay: 60,
+      defaultBufferStockPercent: 25,
+      standardVaccineCarrierLitres: 2.6,
+      minSessionLeadDays: 7,
+    },
   },
 
   VNM: {
@@ -99,6 +133,20 @@ export const COUNTRY_CONFIGS: Record<string, CountryConfig> = {
       bg: "bg-red-500/10 dark:bg-red-500/20",
       text: "text-red-700 dark:text-red-300",
       border: "border-red-500/30",
+    },
+    defaultExtractionRadiusKm: 15,
+    maxExtractionRadiusKm: 35,
+    demographicRatios: {
+      under1Percent: 1.8,
+      under5Percent: 7.5,
+      pregnantPercent: 2.1,
+      girls9to14Percent: 2.8,
+    },
+    operationalNorms: {
+      maxChildrenPerSessionDay: 80,
+      defaultBufferStockPercent: 20,
+      standardVaccineCarrierLitres: 1.7,
+      minSessionLeadDays: 7,
     },
   },
 
@@ -129,6 +177,20 @@ export const COUNTRY_CONFIGS: Record<string, CountryConfig> = {
       text: "text-teal-700 dark:text-teal-300",
       border: "border-teal-500/30",
     },
+    defaultExtractionRadiusKm: 20,
+    maxExtractionRadiusKm: 45,
+    demographicRatios: {
+      under1Percent: 2.2,
+      under5Percent: 9.8,
+      pregnantPercent: 2.5,
+      girls9to14Percent: 3.0,
+    },
+    operationalNorms: {
+      maxChildrenPerSessionDay: 75,
+      defaultBufferStockPercent: 20,
+      standardVaccineCarrierLitres: 2.6,
+      minSessionLeadDays: 7,
+    },
   },
 
   PNG: {
@@ -158,6 +220,20 @@ export const COUNTRY_CONFIGS: Record<string, CountryConfig> = {
       text: "text-rose-700 dark:text-rose-300",
       border: "border-rose-500/30",
     },
+    defaultExtractionRadiusKm: 30,
+    maxExtractionRadiusKm: 60,
+    demographicRatios: {
+      under1Percent: 3.8,
+      under5Percent: 17.2,
+      pregnantPercent: 4.8,
+      girls9to14Percent: 3.6,
+    },
+    operationalNorms: {
+      maxChildrenPerSessionDay: 50,
+      defaultBufferStockPercent: 30,
+      standardVaccineCarrierLitres: 2.6,
+      minSessionLeadDays: 14,
+    },
   },
 
   MWI: {
@@ -180,12 +256,26 @@ export const COUNTRY_CONFIGS: Record<string, CountryConfig> = {
     },
     hasDistricts: true,
     flagColors: ["#000000", "#d21034", "#007a3d"],
-    primaryColor: "#15803d",
-    themeGradient: "linear-gradient(135deg, #111827 0%, #b91c1c 50%, #15803d 100%)",
+    primaryColor: "#007a3d",
+    themeGradient: "linear-gradient(135deg, #000000 0%, #d21034 50%, #007a3d 100%)",
     badgeStyle: {
-      bg: "bg-green-500/10 dark:bg-green-500/20",
-      text: "text-green-700 dark:text-green-300",
-      border: "border-green-500/30",
+      bg: "bg-emerald-500/10 dark:bg-emerald-500/20",
+      text: "text-emerald-700 dark:text-emerald-300",
+      border: "border-emerald-500/30",
+    },
+    defaultExtractionRadiusKm: 25,
+    maxExtractionRadiusKm: 50,
+    demographicRatios: {
+      under1Percent: 4.0,
+      under5Percent: 17.5,
+      pregnantPercent: 5.0,
+      girls9to14Percent: 3.5,
+    },
+    operationalNorms: {
+      maxChildrenPerSessionDay: 60,
+      defaultBufferStockPercent: 25,
+      standardVaccineCarrierLitres: 2.6,
+      minSessionLeadDays: 7,
     },
   },
 
@@ -358,6 +448,20 @@ export function getCountryConfig(tenant: any): CountryConfig & { formatSpec: Cou
       text: "text-sky-700 dark:text-sky-300",
       border: "border-sky-500/30",
     },
+    defaultExtractionRadiusKm: 25,
+    maxExtractionRadiusKm: 50,
+    demographicRatios: {
+      under1Percent: 4.0,
+      under5Percent: 18.0,
+      pregnantPercent: 5.0,
+      girls9to14Percent: 3.5,
+    },
+    operationalNorms: {
+      maxChildrenPerSessionDay: 60,
+      defaultBufferStockPercent: 25,
+      standardVaccineCarrierLitres: 2.6,
+      minSessionLeadDays: 7,
+    },
   };
 
   // Merge any dynamic settings overrides
@@ -379,5 +483,15 @@ export function getCountryConfig(tenant: any): CountryConfig & { formatSpec: Cou
       ...(settings.adminLevelLabels || {}),
     },
     hasDistricts: code === "VNM" ? false : baseConfig.hasDistricts,
+    defaultExtractionRadiusKm: settings.defaultExtractionRadiusKm || baseConfig.defaultExtractionRadiusKm || 25,
+    maxExtractionRadiusKm: settings.maxExtractionRadiusKm || baseConfig.maxExtractionRadiusKm || 50,
+    demographicRatios: {
+      ...baseConfig.demographicRatios,
+      ...(settings.demographicRatios || {}),
+    },
+    operationalNorms: {
+      ...baseConfig.operationalNorms,
+      ...(settings.operationalNorms || {}),
+    },
   };
 }

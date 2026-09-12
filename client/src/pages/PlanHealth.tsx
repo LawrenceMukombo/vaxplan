@@ -91,6 +91,11 @@ export default function PlanHealth() {
   const { data: mobilization = [] } = useQuery<MobilizationActivity[]>({ queryKey: ["/api/mobilization"] });
   const { data: supervision = [] } = useQuery<SupervisionVisit[]>({ queryKey: ["/api/supervision-visits"] });
   const { data: reviews = [] } = useQuery<QuarterlyReview[]>({ queryKey: ["/api/quarterly-reviews"] });
+  const facilityIds = facilities.map(facility => facility.id).join(",");
+  const { data: actionSummary = { facilities: {} } } = useQuery<{ facilities: Record<string, { recorded: number; assigned: number; completed: number; verified: number; overdue: number; blocked: number }> }>({
+    queryKey: [`/api/planning-actions/summary/facilities?facilityIds=${facilityIds}`],
+    enabled: Boolean(facilityIds),
+  });
   const rows = useMemo(() => {
     const safeFacilities = Array.isArray(facilities) ? facilities : [];
     const safeVillages = Array.isArray(villages) ? villages : [];
@@ -117,6 +122,7 @@ export default function PlanHealth() {
           Number(r.year) === CURRENT_YEAR &&
           Number(r.quarter) === CURRENT_QUARTER,
       );
+      const actions = actionSummary.facilities[String(facilityId)] || { recorded: 0, assigned: 0, completed: 0, verified: 0, overdue: 0, blocked: 0 };
       const plannedVillageIds = new Set(
         facilitySessions
           .flatMap((s: any) => [
@@ -231,12 +237,26 @@ export default function PlanHealth() {
           detail: review ? "Quarterly review note saved" : "Needs defaulter/dropout review evidence",
           href: "/clients/defaulters",
         },
+        {
+          key: "review-actions-assigned",
+          label: "Review actions assigned",
+          met: Boolean(review) && actions.assigned > 0,
+          detail: `${actions.assigned} assigned · ${actions.overdue} overdue · ${actions.blocked} blocked`,
+          href: `/planning-actions?facilityId=${facilityId}`,
+        },
+        {
+          key: "review-actions-completed",
+          label: "Review actions completed",
+          met: actions.recorded > 0 && actions.completed === actions.recorded,
+          detail: `${actions.completed}/${actions.recorded} completed · ${actions.verified} verified`,
+          href: `/planning-actions?facilityId=${facilityId}`,
+        },
       ];
       const met = metrics.filter((m) => m.met).length;
       const score = Math.round((met / metrics.length) * 100);
       return { facility, score, met, total: metrics.length, metrics, accessSummary };
     });
-  }, [budget, facilities, mobilization, population, reviews, sessions, supervision, vaccines, villages]);
+  }, [actionSummary.facilities, budget, facilities, mobilization, population, reviews, sessions, supervision, vaccines, villages]);
   const filtered = useMemo(() => {
     const safeRows = Array.isArray(rows) ? rows : [];
     return safeRows
@@ -270,6 +290,8 @@ export default function PlanHealth() {
           <Button asChild variant="outline">
             <Link href="/microplans/routine">Open microplans</Link>
           </Button>
+          <Button asChild variant="outline"><Link href="/planning-actions">Action register</Link></Button>
+          <Button asChild variant="outline"><Link href="/planning-evidence">Planning evidence</Link></Button>
           <Button asChild>
             <Link href="/clients/defaulters">Review defaulters</Link>
           </Button>

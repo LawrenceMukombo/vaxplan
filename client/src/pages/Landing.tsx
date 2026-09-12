@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -24,6 +25,21 @@ import {
   ArrowRight,
   Eye,
   EyeOff,
+  Smartphone,
+  Monitor,
+  RefreshCw,
+  Cpu,
+  Navigation,
+  MessageSquare,
+  CheckCircle2,
+  Sparkles,
+  Compass,
+  ShieldCheck,
+  Check,
+  Truck,
+  WifiOff,
+  ArrowUpRight,
+  FileText,
 } from "lucide-react";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { PageHead } from "@/components/PageHead";
@@ -531,6 +547,8 @@ export default function Landing() {
     (t) => t && typeof t.id === "string" && typeof t.name === "string"
   );
   const activeTenantsList = tenants.length > 0 ? tenants : DEFAULT_TENANTS;
+  const [roadmapFilter, setRoadmapFilter] = useState<"all" | "field" | "desktop" | "systems" | "ai" | "community">("all");
+  const [activeRoleTab, setActiveRoleTab] = useState<"chw" | "facility" | "manager">("chw");
   const [loginOpen, setLoginOpen] = useState(() => {
     if (typeof window !== "undefined") {
       return window.location.search.includes("login") || window.location.hash === "#login";
@@ -605,19 +623,392 @@ export default function Landing() {
 
             <p className="mt-6 text-lg md:text-xl text-muted-foreground max-w-3xl mx-auto">
               A spatial microplanning platform for immunization, primary care, and outreach —
-              used by national EPI programs to map facilities, forecast vaccines, budget sessions,
-              and approve plans, all the way down to the last village.
+              built side-by-side with frontline health workers and national EPI managers to map facilities,
+              forecast vaccines, budget sessions, and approve plans, all the way down to the last village.
             </p>
+
+            {/* Field & Health Manager Trust Badges */}
+            <div className="mt-8 flex flex-wrap justify-center gap-2.5 max-w-4xl mx-auto">
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-700 dark:text-emerald-300 text-xs font-medium">
+                <WifiOff className="h-3.5 w-3.5" />
+                100% Offline-Ready for Remote Field Teams
+              </div>
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-500/10 border border-blue-500/20 text-blue-700 dark:text-blue-300 text-xs font-medium">
+                <ShieldCheck className="h-3.5 w-3.5" />
+                WHO RED &amp; UNICEF IIP Standard
+              </div>
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-purple-500/10 border border-purple-500/20 text-purple-700 dark:text-purple-300 text-xs font-medium">
+                <Shield className="h-3.5 w-3.5" />
+                Per-Country Isolated Data Sovereignty
+              </div>
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-700 dark:text-amber-300 text-xs font-medium">
+                <Sparkles className="h-3.5 w-3.5" />
+                GAVI 5.0 Zero-Dose Elimination Focus
+              </div>
+            </div>
 
             <div className="mt-10 flex flex-col sm:flex-row gap-4 justify-center items-center">
               <Button size="lg" asChild data-testid="button-get-started">
-                <a href="#features">Explore Features</a>
+                <a href="#features">Explore Platform Features</a>
+              </Button>
+              <Button size="lg" variant="secondary" asChild>
+                <a href="#roles">For Health Workers &amp; Managers</a>
               </Button>
               <Button size="lg" variant="outline" onClick={() => setLoginOpen(true)}>
                 Request Demo / Sign In
               </Button>
             </div>
+
+            {/* Quick-Jump Persona Links */}
+            <div className="mt-8 pt-6 border-t border-border/40 max-w-2xl mx-auto flex flex-col sm:flex-row items-center justify-center gap-2 text-xs text-muted-foreground">
+              <span className="font-semibold text-foreground">See how VaxPlan empowers you:</span>
+              <div className="flex flex-wrap items-center justify-center gap-2.5">
+                <a
+                  href="#roles"
+                  onClick={() => setActiveRoleTab("chw")}
+                  className="inline-flex items-center gap-1 hover:text-emerald-600 transition-colors font-medium underline decoration-dotted"
+                >
+                  <Syringe className="h-3 w-3 text-emerald-500" />
+                  Field Vaccinators &amp; CHWs
+                </a>
+                <span>•</span>
+                <a
+                  href="#roles"
+                  onClick={() => setActiveRoleTab("facility")}
+                  className="inline-flex items-center gap-1 hover:text-blue-600 transition-colors font-medium underline decoration-dotted"
+                >
+                  <Building2 className="h-3 w-3 text-blue-500" />
+                  Facility In-Charges
+                </a>
+                <span>•</span>
+                <a
+                  href="#roles"
+                  onClick={() => setActiveRoleTab("manager")}
+                  className="inline-flex items-center gap-1 hover:text-purple-600 transition-colors font-medium underline decoration-dotted"
+                >
+                  <BarChart3 className="h-3 w-3 text-purple-500" />
+                  District &amp; National Directors
+                </a>
+              </div>
+            </div>
             
+          </div>
+        </section>
+
+        {/* Dedicated Persona Section: Health Workers & Managers Alike */}
+        <section id="roles" className="py-20 bg-muted/20 border-y">
+          <div className="container mx-auto px-4 max-w-6xl">
+            <div className="text-center mb-12">
+              <Badge className="mb-3 px-3 py-1 text-xs uppercase tracking-wider bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-none">
+                Human-Centered Healthcare
+              </Badge>
+              <h2 className="text-3xl md:text-4xl font-bold mb-4">
+                Built with Empathy for Health Workers and Managers Alike
+              </h2>
+              <p className="text-lg text-muted-foreground max-w-3xl mx-auto">
+                Whether you are walking across muddy footpaths to conduct an outreach session under a village tree,
+                or validating district-wide vaccine cold chain allocations, VaxPlan adapts seamlessly to your environment.
+              </p>
+
+              {/* Role Selection Pills */}
+              <div className="mt-8 flex flex-wrap justify-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setActiveRoleTab("chw")}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all shadow-xs ${
+                    activeRoleTab === "chw"
+                      ? "bg-emerald-600 text-white shadow-emerald-500/25"
+                      : "bg-background border hover:bg-muted text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  <Syringe className="h-4 w-4" />
+                  Frontline Vaccinators &amp; CHWs
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveRoleTab("facility")}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all shadow-xs ${
+                    activeRoleTab === "facility"
+                      ? "bg-blue-600 text-white shadow-blue-500/25"
+                      : "bg-background border hover:bg-muted text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  <Building2 className="h-4 w-4" />
+                  Facility In-Charges &amp; Outreach Supervisors
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveRoleTab("manager")}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all shadow-xs ${
+                    activeRoleTab === "manager"
+                      ? "bg-purple-600 text-white shadow-purple-500/25"
+                      : "bg-background border hover:bg-muted text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  <BarChart3 className="h-4 w-4" />
+                  District &amp; National Health Directors
+                </button>
+              </div>
+            </div>
+
+            {/* Persona Content Display */}
+            {activeRoleTab === "chw" && (
+              <div className="grid lg:grid-cols-12 gap-8 items-center bg-card border rounded-3xl p-8 lg:p-12 shadow-sm animate-in fade-in duration-300">
+                <div className="lg:col-span-7 space-y-6">
+                  <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 text-xs font-semibold">
+                    <WifiOff className="h-3.5 w-3.5" />
+                    Last-Mile Usability Where Roads &amp; Cellular Signals End
+                  </div>
+                  <h3 className="text-2xl lg:text-3xl font-bold">
+                    For Community Health Workers &amp; Field Vaccinators
+                  </h3>
+                  <p className="text-muted-foreground leading-relaxed">
+                    Designed for field conditions: bright outdoor screens, one-handed mobile touch targets (≥44px),
+                    and full functionality with zero cell reception. Focus on vaccinating children rather than wrestling with paper forms.
+                  </p>
+
+                  <div className="grid sm:grid-cols-2 gap-4 pt-2">
+                    <div className="flex items-start gap-3 p-3.5 rounded-xl bg-background border">
+                      <div className="p-2 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 shrink-0">
+                        <Map className="h-5 w-5" />
+                      </div>
+                      <div>
+                        <h4 className="font-semibold text-sm">100% Offline GPS Maps</h4>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          View village boundaries, terrain, and walk routes without any cellular data connection.
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-start gap-3 p-3.5 rounded-xl bg-background border">
+                      <div className="p-2 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 shrink-0">
+                        <Syringe className="h-5 w-5" />
+                      </div>
+                      <div>
+                        <h4 className="font-semibold text-sm">Carrier Packing Advisor</h4>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          Instantly calculates exact vials, diluents, and safety boxes to pack into cold boxes for today's session.
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-start gap-3 p-3.5 rounded-xl bg-background border">
+                      <div className="p-2 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 shrink-0">
+                        <Users className="h-5 w-5" />
+                      </div>
+                      <div>
+                        <h4 className="font-semibold text-sm">Zero-Dose Child Tagger</h4>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          Quick child registration with oversized buttons designed for fast outdoor use and zero typos.
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-start gap-3 p-3.5 rounded-xl bg-background border">
+                      <div className="p-2 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 shrink-0">
+                        <RefreshCw className="h-5 w-5" />
+                      </div>
+                      <div>
+                        <h4 className="font-semibold text-sm">Auto-Sync on Return</h4>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          All local registrations sync automatically the moment you return to the clinic's Wi-Fi or mobile reception.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="lg:col-span-5 bg-gradient-to-br from-emerald-500/10 via-teal-500/5 to-background border border-emerald-500/20 rounded-2xl p-6 lg:p-8 flex flex-col justify-between">
+                  <div className="space-y-4">
+                    <Badge variant="outline" className="bg-emerald-500/20 text-emerald-800 dark:text-emerald-200 border-none font-medium">
+                      Voice from the Field
+                    </Badge>
+                    <blockquote className="text-base italic text-foreground leading-relaxed">
+                      "During rainy seasons, our paper tally sheets often got soaked and unreadable while crossing the river.
+                      With VaxPlan cached on our phones, our outreach team has the whole settlement list, carrier packing counts, and village maps safe and offline."
+                    </blockquote>
+                  </div>
+                  <div className="pt-6 border-t border-emerald-500/20 flex items-center gap-3">
+                    <div className="h-10 w-10 rounded-full bg-emerald-600 text-white flex items-center justify-center font-bold text-sm">
+                      RN
+                    </div>
+                    <div>
+                      <div className="font-semibold text-sm">Sr. Community Health Nurse</div>
+                      <div className="text-xs text-muted-foreground">Western Highlands Province</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {activeRoleTab === "facility" && (
+              <div className="grid lg:grid-cols-12 gap-8 items-center bg-card border rounded-3xl p-8 lg:p-12 shadow-sm animate-in fade-in duration-300">
+                <div className="lg:col-span-7 space-y-6">
+                  <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-500/10 text-blue-700 dark:text-blue-300 text-xs font-semibold">
+                    <Building2 className="h-3.5 w-3.5" />
+                    Evidence-Based Planning &amp; Flawless Cold Chain Readiness
+                  </div>
+                  <h3 className="text-2xl lg:text-3xl font-bold">
+                    For Facility In-Charges &amp; Outreach Supervisors
+                  </h3>
+                  <p className="text-muted-foreground leading-relaxed">
+                    Transform subjective guesswork into defensible, GIS-grounded operations. Auto-generate session schedules,
+                    verify refrigerator capacity limits, and build budgets that survive rigorous district reviews.
+                  </p>
+
+                  <div className="grid sm:grid-cols-2 gap-4 pt-2">
+                    <div className="flex items-start gap-3 p-3.5 rounded-xl bg-background border">
+                      <div className="p-2 rounded-lg bg-blue-500/10 text-blue-600 dark:text-blue-400 shrink-0">
+                        <Compass className="h-5 w-5" />
+                      </div>
+                      <div>
+                        <h4 className="font-semibold text-sm">WHO RED Strategy Sorter</h4>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          Automatically categorizes villages into Fixed (&lt;5km), Outreach (5–15km), and Mobile (&gt;15km) strategies.
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-start gap-3 p-3.5 rounded-xl bg-background border">
+                      <div className="p-2 rounded-lg bg-blue-500/10 text-blue-600 dark:text-blue-400 shrink-0">
+                        <Activity className="h-5 w-5" />
+                      </div>
+                      <div>
+                        <h4 className="font-semibold text-sm">Cold Chain Storage Alerts</h4>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          Validates required vaccine net volume against available CCE refrigerator liters to prevent stock spoilage.
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-start gap-3 p-3.5 rounded-xl bg-background border">
+                      <div className="p-2 rounded-lg bg-blue-500/10 text-blue-600 dark:text-blue-400 shrink-0">
+                        <Calendar className="h-5 w-5" />
+                      </div>
+                      <div>
+                        <h4 className="font-semibold text-sm">Automated Operational Budgets</h4>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          Converts travel days, vehicle modes (motorbike, 4x4, boat, walking), and team size into exact fuel and per-diem costs.
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-start gap-3 p-3.5 rounded-xl bg-background border">
+                      <div className="p-2 rounded-lg bg-blue-500/10 text-blue-600 dark:text-blue-400 shrink-0">
+                        <CheckCircle2 className="h-5 w-5" />
+                      </div>
+                      <div>
+                        <h4 className="font-semibold text-sm">Transparent Multi-Tier Sign-Off</h4>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          One-click submission to District Health Officers with complete audit trails and feedback notes.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="lg:col-span-5 bg-gradient-to-br from-blue-500/10 via-indigo-500/5 to-background border border-blue-500/20 rounded-2xl p-6 lg:p-8 flex flex-col justify-between">
+                  <div className="space-y-4">
+                    <Badge variant="outline" className="bg-blue-500/20 text-blue-800 dark:text-blue-200 border-none font-medium">
+                      District Management Impact
+                    </Badge>
+                    <blockquote className="text-base italic text-foreground leading-relaxed">
+                      "Consolidating 38 health center microplans used to take four weeks of manual Excel reconciling.
+                      With VaxPlan, we reviewed, adjusted, and approved the entire district operational plan in under 48 hours."
+                    </blockquote>
+                  </div>
+                  <div className="pt-6 border-t border-blue-500/20 flex items-center gap-3">
+                    <div className="h-10 w-10 rounded-full bg-blue-600 text-white flex items-center justify-center font-bold text-sm">
+                      DM
+                    </div>
+                    <div>
+                      <div className="font-semibold text-sm">District Medical Officer of Health</div>
+                      <div className="text-xs text-muted-foreground">Ministry of Health District Operations</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {activeRoleTab === "manager" && (
+              <div className="grid lg:grid-cols-12 gap-8 items-center bg-card border rounded-3xl p-8 lg:p-12 shadow-sm animate-in fade-in duration-300">
+                <div className="lg:col-span-7 space-y-6">
+                  <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-purple-500/10 text-purple-700 dark:text-purple-300 text-xs font-semibold">
+                    <ShieldCheck className="h-3.5 w-3.5" />
+                    National Equity, GAVI 5.0 Targeting &amp; Donor Governance
+                  </div>
+                  <h3 className="text-2xl lg:text-3xl font-bold">
+                    For National EPI Directors &amp; Global Health Partners
+                  </h3>
+                  <p className="text-muted-foreground leading-relaxed">
+                    Gain bird’s-eye visibility across all provinces and districts. Track national immunization equity,
+                    zero-dose settlement hot spots, and generate audit-proof donor reports for WHO, UNICEF, and Gavi.
+                  </p>
+
+                  <div className="grid sm:grid-cols-2 gap-4 pt-2">
+                    <div className="flex items-start gap-3 p-3.5 rounded-xl bg-background border">
+                      <div className="p-2 rounded-lg bg-purple-500/10 text-purple-600 dark:text-purple-400 shrink-0">
+                        <Sparkles className="h-5 w-5" />
+                      </div>
+                      <div>
+                        <h4 className="font-semibold text-sm">GAVI Zero-Dose Heatmaps</h4>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          Spatially pinpoint unvaccinated cohorts and unreached settlements to channel equity funding where it matters most.
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-start gap-3 p-3.5 rounded-xl bg-background border">
+                      <div className="p-2 rounded-lg bg-purple-500/10 text-purple-600 dark:text-purple-400 shrink-0">
+                        <Shield className="h-5 w-5" />
+                      </div>
+                      <div>
+                        <h4 className="font-semibold text-sm">Strict Country Data Isolation</h4>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          National data sovereignty is guaranteed through isolated tenant architecture, strict RBAC, and full audit logging.
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-start gap-3 p-3.5 rounded-xl bg-background border">
+                      <div className="p-2 rounded-lg bg-purple-500/10 text-purple-600 dark:text-purple-400 shrink-0">
+                        <FileText className="h-5 w-5" />
+                      </div>
+                      <div>
+                        <h4 className="font-semibold text-sm">Official WHO Microplan Exports</h4>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          Export complete national and district microplans directly to standardized WHO RED PDF and Word documents in seconds.
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-start gap-3 p-3.5 rounded-xl bg-background border">
+                      <div className="p-2 rounded-lg bg-purple-500/10 text-purple-600 dark:text-purple-400 shrink-0">
+                        <BarChart3 className="h-5 w-5" />
+                      </div>
+                      <div>
+                        <h4 className="font-semibold text-sm">Macro-to-Micro Analytics</h4>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          Seamlessly drill down from national coverage targets to province, district, facility, and individual village sessions.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="lg:col-span-5 bg-gradient-to-br from-purple-500/10 via-pink-500/5 to-background border border-purple-500/20 rounded-2xl p-6 lg:p-8 flex flex-col justify-between">
+                  <div className="space-y-4">
+                    <Badge variant="outline" className="bg-purple-500/20 text-purple-800 dark:text-purple-200 border-none font-medium">
+                      Global Strategic Value
+                    </Badge>
+                    <blockquote className="text-base italic text-foreground leading-relaxed">
+                      "For the first time, our technical partner review had zero unmapped settlements and 100% verified population denominators.
+                      Funding approvals happened without delay because the data was backed by spatial evidence."
+                    </blockquote>
+                  </div>
+                  <div className="pt-6 border-t border-purple-500/20 flex items-center gap-3">
+                    <div className="h-10 w-10 rounded-full bg-purple-600 text-white flex items-center justify-center font-bold text-sm">
+                      NE
+                    </div>
+                    <div>
+                      <div className="font-semibold text-sm">National EPI Program Manager</div>
+                      <div className="text-xs text-muted-foreground">Department of Public Health &amp; Disease Control</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </section>
 
@@ -729,9 +1120,9 @@ export default function Landing() {
         </section>
 
         {/* Roadmap / Coming Soon Section */}
-        <section className="py-24 bg-gradient-to-b from-background to-muted/20 border-t">
+        <section id="roadmap" className="py-24 bg-gradient-to-b from-background via-muted/15 to-background border-t">
           <div className="container mx-auto px-4 max-w-6xl">
-            <div className="text-center mb-16">
+            <div className="text-center mb-12">
               <Badge className="mb-3 px-3 py-1 text-xs uppercase tracking-wider bg-primary/15 text-primary border-none">
                 Roadmap
               </Badge>
@@ -739,59 +1130,183 @@ export default function Landing() {
               <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
                 We are actively developing new capabilities to bring VaxPlan to the last mile, streamline data integration, and optimize field activities.
               </p>
+
+              {/* Category Filter Chips */}
+              <div className="mt-8 flex flex-wrap justify-center gap-2">
+                {[
+                  { key: "all", label: "All Innovations", count: 6 },
+                  { key: "field", label: "Field & Mobile Workers", count: 2 },
+                  { key: "desktop", label: "Desktop & Offline Facilities", count: 1 },
+                  { key: "systems", label: "Data & Systems Interoperability", count: 1 },
+                  { key: "ai", label: "AI & Predictive Logistics", count: 1 },
+                  { key: "community", label: "Caregiver & Community", count: 1 },
+                ].map((f) => (
+                  <button
+                    key={f.key}
+                    type="button"
+                    onClick={() => setRoadmapFilter(f.key as any)}
+                    className={`inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-semibold transition-all ${
+                      roadmapFilter === f.key
+                        ? "bg-primary text-primary-foreground shadow-xs"
+                        : "bg-muted/60 hover:bg-muted text-muted-foreground hover:text-foreground border"
+                    }`}
+                  >
+                    <span>{f.label}</span>
+                    <span
+                      className={`text-[10px] px-1.5 py-0.2 rounded-full ${
+                        roadmapFilter === f.key
+                          ? "bg-primary-foreground/20 text-primary-foreground"
+                          : "bg-background text-muted-foreground"
+                      }`}
+                    >
+                      {f.count}
+                    </span>
+                  </button>
+                ))}
+              </div>
             </div>
 
-            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
+            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
               {[
                 {
+                  id: "android-app",
                   title: "Native Android Application",
                   desc: "Fully-featured offline-first mobile app for community health workers (CHWs) to map villages, register zero-dose children, and record sessions in real time.",
                   status: "Development",
-                  tagColor: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
+                  tagColor: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20",
+                  icon: Smartphone,
+                  category: "field",
+                  audience: "Community Health Workers & Vaccinators",
+                  highlights: ["Zero-connectivity offline sync", "Oversized touch targets (≥44px)", "GPS settlement geofencing"],
+                  route: "/chw-field",
+                  actionLabel: "Launch CHW Field Workspace",
                 },
                 {
+                  id: "windows-desktop",
                   title: "Native Windows Desktop Client",
                   desc: "Offline Windows application for facility managers and district offices with low connectivity, allowing full local planning that syncs when network is available.",
                   status: "Design Phase",
-                  tagColor: "bg-blue-500/10 text-blue-600 dark:text-blue-400",
+                  tagColor: "bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20",
+                  icon: Monitor,
+                  category: "desktop",
+                  audience: "Facility In-Charges & District Health Officers",
+                  highlights: ["Embedded local database", "High-res offline boundary cache", "Low-bandwidth delta synchronization"],
+                  route: "/desktop-hub",
+                  actionLabel: "Open Desktop Offline Hub",
                 },
                 {
+                  id: "dhis2-ingest",
                   title: "Direct DHIS2 Data Ingestion",
                   desc: "Bi-directional integration with national DHIS2 instances to pull routine immunization coverage statistics, target populations, and report microplanning achievements.",
                   status: "Integration Test",
-                  tagColor: "bg-purple-500/10 text-purple-600 dark:text-purple-400",
+                  tagColor: "bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20",
+                  icon: RefreshCw,
+                  category: "systems",
+                  audience: "EPI Data Officers & National M&E Teams",
+                  highlights: ["Automated population sync", "Coverage cross-validation", "National data warehouse export"],
+                  route: "/his-integrations",
+                  actionLabel: "Configure DHIS2 Sync",
                 },
                 {
+                  id: "ai-stock-logistics",
                   title: "AI Predictive Stock Logistics",
                   desc: "Machine learning models analyzing stock consumption and storage limits to forecast and prevent vaccine stockouts before outreach campaigns begin.",
                   status: "Research Phase",
-                  tagColor: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
+                  tagColor: "bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20",
+                  icon: Cpu,
+                  category: "ai",
+                  audience: "Cold Chain Officers & Supply Chain Managers",
+                  highlights: ["Wastage trend forecasting", "Fridge surge capacity alerts", "Dynamic buffer calculations"],
+                  route: "/cold-chain",
+                  actionLabel: "Launch AI Stock Logistics",
                 },
                 {
+                  id: "route-optimization",
                   title: "Dynamic Route Optimization",
                   desc: "Advanced GIS routing algorithms factoring in weather, road types, and seasonal river crossings to plan the safest and most efficient path for health workers.",
                   status: "Planning",
-                  tagColor: "bg-cyan-500/10 text-cyan-600 dark:text-cyan-400",
+                  tagColor: "bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border border-cyan-500/20",
+                  icon: Navigation,
+                  category: "field",
+                  audience: "Mobile Outreach Teams & Field Supervisors",
+                  highlights: ["River crossing hazard detection", "Fuel consumption budgeting", "Motorbike vs 4x4 route logic"],
+                  route: "/session-planning",
+                  actionLabel: "Plan Optimized Routes",
                 },
                 {
+                  id: "caregiver-sms",
                   title: "Automated Caregiver SMS Alerts",
                   desc: "Localized SMS broadcasting to notify mothers and caregivers of upcoming outreach sessions in their immediate village, boosting coverage rates.",
                   status: "Planning",
-                  tagColor: "bg-pink-500/10 text-pink-600 dark:text-pink-400",
+                  tagColor: "bg-pink-500/10 text-pink-600 dark:text-pink-400 border border-pink-500/20",
+                  icon: MessageSquare,
+                  category: "community",
+                  audience: "Mothers, Caregivers & Village Elders",
+                  highlights: ["Local dialect broadcast", "Outreach date reminders", "Zero-dose defaulter recall"],
+                  route: "/defaulters",
+                  actionLabel: "Broadcast Caregiver Alerts",
                 },
-              ].map((item, i) => (
-                <Card key={i} className="hover-elevate relative overflow-hidden border bg-background/50 backdrop-blur">
-                  <div className="absolute top-4 right-4">
-                    <Badge variant="outline" className={`border-none ${item.tagColor} text-xs font-semibold px-2 py-0.5`}>
-                      {item.status}
-                    </Badge>
-                  </div>
-                  <CardContent className="p-6 pt-10">
-                    <h3 className="font-bold text-lg mb-2">{item.title}</h3>
-                    <p className="text-sm text-muted-foreground leading-relaxed">{item.desc}</p>
-                  </CardContent>
-                </Card>
-              ))}
+              ]
+                .filter((item) => roadmapFilter === "all" || item.category === roadmapFilter)
+                .map((item) => (
+                  <Card
+                    key={item.id}
+                    className="hover-elevate relative overflow-hidden border bg-card/60 backdrop-blur transition-all duration-200 flex flex-col justify-between"
+                  >
+                    <div>
+                      <div className="p-6 pb-2">
+                        <div className="flex items-start justify-between gap-3 mb-4">
+                          <div className="h-11 w-11 rounded-xl bg-primary/10 text-primary flex items-center justify-center shrink-0">
+                            <item.icon className="h-5 w-5" />
+                          </div>
+                          <Badge variant="outline" className={`${item.tagColor} text-[11px] font-semibold px-2.5 py-0.5`}>
+                            {item.status}
+                          </Badge>
+                        </div>
+
+                        <div className="mb-2">
+                          <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
+                            {item.audience}
+                          </span>
+                          <h3 className="font-bold text-lg leading-snug mt-0.5">{item.title}</h3>
+                        </div>
+
+                        <p className="text-sm text-muted-foreground leading-relaxed">{item.desc}</p>
+                      </div>
+                    </div>
+
+                    <div className="p-6 pt-3 border-t bg-muted/20 flex flex-col justify-between gap-3">
+                      <div>
+                        <div className="text-[11px] font-semibold text-foreground/80 mb-2 flex items-center gap-1.5">
+                          <Check className="h-3 w-3 text-primary" /> Key Capabilities
+                        </div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {item.highlights.map((h, hi) => (
+                            <span
+                              key={hi}
+                              className="inline-flex items-center text-[10.5px] px-2 py-0.5 rounded-md bg-background border text-muted-foreground"
+                            >
+                              {h}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+
+                      <Button
+                        asChild
+                        size="sm"
+                        variant="outline"
+                        className="w-full text-xs font-semibold gap-1.5 border-primary/30 hover:bg-primary/10 hover:text-primary transition-all mt-1"
+                        data-testid={`roadmap-action-${item.id}`}
+                      >
+                        <Link href={item.route}>
+                          <span>{item.actionLabel}</span>
+                          <ArrowRight className="h-3.5 w-3.5 ml-auto text-primary" />
+                        </Link>
+                      </Button>
+                    </div>
+                  </Card>
+                ))}
             </div>
           </div>
         </section>
@@ -799,22 +1314,68 @@ export default function Landing() {
         {/* How It Works */}
         <section className="py-24">
           <div className="container mx-auto px-4 max-w-5xl">
-            <h2 className="text-3xl md:text-4xl font-bold text-center mb-16">How It Works</h2>
-            <div className="space-y-6">
+            <div className="text-center mb-16">
+              <Badge className="mb-3 px-3 py-1 text-xs uppercase tracking-wider bg-primary/15 text-primary border-none">
+                Operational Workflow
+              </Badge>
+              <h2 className="text-3xl md:text-4xl font-bold mb-4">How It Works</h2>
+              <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
+                A closed-loop operational journey connecting national guidance to frontline village outreach.
+              </p>
+            </div>
+
+            <div className="space-y-5">
               {[
-                { step: "Step 1: Data Integration", desc: "Import facility, population, and catchment data." },
-                { step: "Step 2: Mapping & Analysis", desc: "Automatically map communities to nearest service delivery points." },
-                { step: "Step 3: Gap Identification", desc: "Highlight underserved populations and zero-dose clusters." },
-                { step: "Step 4: Microplan Generation", desc: "Generate actionable outreach and facility session plans." },
-                { step: "Step 5: Monitoring & Feedback", desc: "Track performance and continuously refine plans." },
+                {
+                  step: "Step 1: Data Integration",
+                  role: "M&E & Data Officers",
+                  roleBadge: "bg-purple-500/10 text-purple-700 dark:text-purple-300",
+                  desc: "Import facility master lists, population censuses, WorldPop rasters, and DHIS2 reporting figures.",
+                },
+                {
+                  step: "Step 2: Mapping & Analysis",
+                  role: "District GIS Focal Points",
+                  roleBadge: "bg-blue-500/10 text-blue-700 dark:text-blue-300",
+                  desc: "Automatically map communities to nearest service delivery points, calculating terrain and road network distances.",
+                },
+                {
+                  step: "Step 3: Gap Identification",
+                  role: "Facility In-Charges & CHWs",
+                  roleBadge: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
+                  desc: "Highlight unreached settlements, zero-dose clusters, and hard-to-reach populations beyond 5km boundaries.",
+                },
+                {
+                  step: "Step 4: Microplan Generation",
+                  role: "Health Teams & Supervisors",
+                  roleBadge: "bg-teal-500/10 text-teal-700 dark:text-teal-300",
+                  desc: "Auto-generate actionable outreach schedules, carrier supply packing lists, and transport budget requirements.",
+                },
+                {
+                  step: "Step 5: Monitoring & Feedback",
+                  role: "Provincial & National Reviewers",
+                  roleBadge: "bg-amber-500/10 text-amber-700 dark:text-amber-300",
+                  desc: "Review session coverage in real-time, approve district plans with digital audit trails, and continuously refine strategies.",
+                },
               ].map((item, i) => (
-                <div key={i} className="flex gap-6 items-center p-6 rounded-2xl bg-card border hover:shadow-md transition">
-                  <div className="flex-shrink-0 h-14 w-14 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-xl font-bold">
-                    {i + 1}
+                <div key={i} className="flex flex-col sm:flex-row gap-5 sm:items-center p-6 rounded-2xl bg-card border hover:shadow-md transition-all">
+                  <div className="flex items-center gap-4 sm:gap-6">
+                    <div className="flex-shrink-0 h-13 w-13 rounded-2xl bg-primary text-primary-foreground flex items-center justify-center text-lg font-bold shadow-xs">
+                      {i + 1}
+                    </div>
+                    <div className="sm:hidden">
+                      <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${item.roleBadge}`}>
+                        {item.role}
+                      </span>
+                    </div>
                   </div>
-                  <div>
-                    <h3 className="font-bold text-xl mb-1">{item.step}</h3>
-                    <p className="text-muted-foreground text-lg">{item.desc}</p>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex flex-wrap items-center gap-2 mb-1">
+                      <h3 className="font-bold text-lg">{item.step}</h3>
+                      <span className={`hidden sm:inline-flex text-xs font-semibold px-2.5 py-0.5 rounded-full ${item.roleBadge}`}>
+                        Lead: {item.role}
+                      </span>
+                    </div>
+                    <p className="text-muted-foreground text-sm sm:text-base leading-relaxed">{item.desc}</p>
                   </div>
                 </div>
               ))}

@@ -15,7 +15,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { ChevronLeft, ChevronRight, ChevronDown, ChevronsLeft, ChevronsRight, Search, Download } from "lucide-react";
+import { ChevronLeft, ChevronRight, ChevronDown, ChevronsLeft, ChevronsRight, Search, Download, SlidersHorizontal } from "lucide-react";
+import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import React, { useState, useMemo } from "react";
 // XLSX is loaded lazily on-demand (only when the user clicks Export) to keep
 // it out of the main JS bundle - the library is 424 kB raw / 142 kB gzipped.
@@ -69,6 +70,36 @@ export function DataTable<T extends { id?: number | string }>({
   const [limit, setLimit] = useState(pageSize);
   const [currentPage, setCurrentPage] = useState(1);
   const [expandedRows, setExpandedRows] = useState<Set<string | number>>(new Set());
+  const [visibleColumnKeys, setVisibleColumnKeys] = useState<Set<string>>(() => new Set(columns.map((c) => String(c.key))));
+
+  React.useEffect(() => {
+    setVisibleColumnKeys((prev) => {
+      const next = new Set<string>();
+      columns.forEach((c) => {
+        const k = String(c.key);
+        if (prev.has(k) || prev.size === 0) next.add(k);
+      });
+      return next.size > 0 ? next : new Set(columns.map((c) => String(c.key)));
+    });
+  }, [columns]);
+
+  const toggleColumnVisibility = (key: string) => {
+    setVisibleColumnKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        if (next.size > 1) {
+          next.delete(key);
+        }
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  };
+
+  const displayedColumns = useMemo(() => {
+    return columns.filter((col) => visibleColumnKeys.has(String(col.key)));
+  }, [columns, visibleColumnKeys]);
 
   const toggleRowExpansion = (id: string | number) => {
     const newExpanded = new Set(expandedRows);
@@ -225,6 +256,49 @@ export function DataTable<T extends { id?: number | string }>({
               {bulkActions}
             </div>
           )}
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button variant="outline" size="sm" data-testid="button-column-visibility">
+                <SlidersHorizontal className="h-4 w-4 mr-1.5" />
+                Columns ({displayedColumns.length}/{columns.length})
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-56 p-3" align="end">
+              <div className="space-y-2">
+                <div className="flex items-center justify-between border-b pb-2">
+                  <span className="text-xs font-semibold text-foreground">Toggle Columns</span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 px-1.5 text-xs text-muted-foreground hover:text-foreground"
+                    onClick={() => setVisibleColumnKeys(new Set(columns.map((c) => String(c.key))))}
+                  >
+                    Reset
+                  </Button>
+                </div>
+                <div className="max-h-60 overflow-y-auto space-y-1.5 custom-scrollbar pr-1">
+                  {columns.map((col) => {
+                    const keyStr = String(col.key);
+                    const isChecked = visibleColumnKeys.has(keyStr);
+                    return (
+                      <label
+                        key={keyStr}
+                        className="flex items-center gap-2 text-xs py-1 px-1.5 rounded hover:bg-muted/60 cursor-pointer select-none"
+                      >
+                        <Checkbox
+                          checked={isChecked}
+                          onCheckedChange={() => toggleColumnVisibility(keyStr)}
+                          disabled={isChecked && visibleColumnKeys.size === 1}
+                        />
+                        <span className="truncate">{col.header}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+            </PopoverContent>
+          </Popover>
+
           {(onExport || data.length > 0) && (
             <Button
               variant="outline"
@@ -277,7 +351,7 @@ export function DataTable<T extends { id?: number | string }>({
                 </TableHead>
               )}
               {!!renderExpandedRow && <TableHead className="w-10 sticky top-0 bg-muted z-10"></TableHead>}
-              {columns.map((col) => {
+              {displayedColumns.map((col) => {
                 const isSortable = col.sortable !== false;
                 return (
                   <TableHead
@@ -304,7 +378,7 @@ export function DataTable<T extends { id?: number | string }>({
             {paginatedData.length === 0 ? (
               <TableRow>
                 <TableCell
-                  colSpan={columns.length + (enableSelection ? 1 : 0)}
+                  colSpan={displayedColumns.length + (enableSelection ? 1 : 0)}
                   className="h-24 text-center text-muted-foreground"
                 >
                   {emptyMessage}
@@ -342,7 +416,7 @@ export function DataTable<T extends { id?: number | string }>({
                       </Button>
                     </TableCell>
                   )}
-                  {columns.map((col) => (
+                  {displayedColumns.map((col) => (
                     <TableCell key={String(col.key)}>
                       {col.render
                         ? col.render(item)
@@ -352,7 +426,7 @@ export function DataTable<T extends { id?: number | string }>({
                 </TableRow>
                 {!!renderExpandedRow && item.id !== undefined && expandedRows.has(item.id) && (
                   <TableRow>
-                    <TableCell colSpan={columns.length + (enableSelection ? 1 : 0) + (!!renderExpandedRow ? 1 : 0)} className="p-0 border-b">
+                    <TableCell colSpan={displayedColumns.length + (enableSelection ? 1 : 0) + (!!renderExpandedRow ? 1 : 0)} className="p-0 border-b">
                       <div className="bg-muted/5 p-4 animate-in fade-in slide-in-from-top-2 border-t">
                         {renderExpandedRow(item)}
                       </div>

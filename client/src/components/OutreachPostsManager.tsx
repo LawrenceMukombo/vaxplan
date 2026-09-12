@@ -65,10 +65,12 @@ import {
   Sparkles,
   RefreshCw,
   Check,
+  List,
 } from "lucide-react";
 import { MapContainer, TileLayer, Marker, useMapEvents } from "react-leaflet";
 import L from "leaflet";
 import type { Village, Facility, District, Province } from "@shared/schema";
+import { OutreachPostsMap } from "@/components/OutreachPostsMap";
 
 // Custom glowing and flashing violet pin icon for outreach posts
 const OUTREACH_PIN_ICON = L.divIcon({
@@ -161,6 +163,7 @@ export interface OutreachPostsManagerProps {
   adminLabels?: { level1?: string; level2?: string; level3?: string; level4?: string };
   canManage?: (village?: Village) => boolean;
   onOpenOutreachModalDirectly?: (village: Village) => void;
+  initialView?: "table" | "map";
 }
 
 export function OutreachPostsManager({
@@ -174,10 +177,20 @@ export function OutreachPostsManager({
   selectedFacilityId,
   adminLabels = {},
   canManage = () => true,
+  initialView = "table",
 }: OutreachPostsManagerProps) {
   const { toast } = useToast();
   const [, setLocation] = useLocation();
   const queryClient = useQueryClient();
+
+  // View Mode: Table or Map
+  const [viewMode, setViewMode] = useState<"table" | "map">(initialView);
+
+  useEffect(() => {
+    if (initialView) {
+      setViewMode(initialView);
+    }
+  }, [initialView]);
 
   // Search & Filter State
   const [searchQuery, setSearchQuery] = useState("");
@@ -900,7 +913,62 @@ export function OutreachPostsManager({
         </Card>
       </div>
 
-      {/* Main Table Card */}
+      {/* View Switcher Controls */}
+      <div className="flex items-center justify-between gap-4 flex-wrap">
+        <div className="flex items-center bg-muted/70 p-1 rounded-xl border border-border/60 shadow-2xs">
+          <Button
+            variant={viewMode === "table" ? "secondary" : "ghost"}
+            size="sm"
+            onClick={() => setViewMode("table")}
+            className="h-8 text-xs gap-1.5 font-medium px-3.5"
+          >
+            <List className="h-3.5 w-3.5" />
+            Directory Table
+          </Button>
+          <Button
+            variant={viewMode === "map" ? "secondary" : "ghost"}
+            size="sm"
+            onClick={() => setViewMode("map")}
+            className="h-8 text-xs gap-1.5 font-medium px-3.5 text-purple-600 dark:text-purple-400"
+          >
+            <MapPin className="h-3.5 w-3.5" />
+            Configured Posts Map
+            {metrics.configuredCount > 0 && (
+              <Badge className="bg-purple-600 hover:bg-purple-600 text-white text-[10px] h-4 px-1.5 ml-1 font-semibold">
+                {metrics.configuredCount}
+              </Badge>
+            )}
+          </Button>
+        </div>
+
+        {viewMode === "map" && (
+          <Button
+            size="sm"
+            onClick={() => handleOpenCreate()}
+            className="bg-purple-600 hover:bg-purple-700 text-white gap-1.5 text-xs shadow-sm h-8"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            Create Outreach Post
+          </Button>
+        )}
+      </div>
+
+      {viewMode === "map" ? (
+        <OutreachPostsMap
+          villages={villages}
+          facilities={facilities}
+          districts={districts}
+          provinces={provinces}
+          selectedRegionId={selectedRegionId}
+          selectedProvinceId={selectedProvinceId}
+          selectedDistrictId={selectedDistrictId}
+          selectedFacilityId={selectedFacilityId}
+          adminLabels={adminLabels}
+          onEditPost={(targetVillage) => handleOpenCreate(targetVillage)}
+          onSwitchToTable={() => setViewMode("table")}
+        />
+      ) : (
+      /* Main Table Card */
       <Card className="bg-card border-border/40 shadow-sm">
         <CardHeader className="pb-4">
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
@@ -1530,6 +1598,7 @@ export function OutreachPostsManager({
           </div>
         </CardContent>
       </Card>
+      )}
 
       {/* Outreach Post Configuration / CRUD Modal */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>

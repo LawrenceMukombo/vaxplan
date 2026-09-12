@@ -54,7 +54,9 @@ import {
   Map,
   Plus,
   Users,
-  UserPlus
+  UserPlus,
+  SlidersHorizontal,
+  RotateCcw,
 } from "lucide-react";
 import { TenantCommunicationCard } from "@/components/TenantCommunicationCard";
 import { APP_VERSION, formatBuildTime } from "@/lib/version";
@@ -64,7 +66,14 @@ import SignupRequests from "./SignupRequests";
 import CountryOnboarding from "./CountryOnboarding";
 import BoundaryManager from "./BoundaryManager";
 import { WastageThresholdsCard } from "@/components/WastageThresholdsCard";
-import { DEFAULT_MODULES, MODULE_METADATA, MODULE_CATEGORIES } from "@/lib/modules";
+import {
+  DEFAULT_MODULES,
+  MODULE_METADATA,
+  MODULE_CATEGORIES,
+  getUserModulePreferences,
+  setUserModulePreference,
+  resetUserModulePreferences,
+} from "@/lib/modules";
 import { canAccessUserManagement } from "@/lib/accessControl";
 
 /** Shows the actual browser storage usage for this origin. */
@@ -233,8 +242,12 @@ export default function Settings() {
   });
 
   const [births, setBirths] = useState("3.2");
-  const [under1, setUnder1] = useState("3.0");
-  const [pregnant, setPregnant] = useState("3.2");
+  const [under1, setUnder1] = useState("4.0");
+  const [secondYearOfLife, setSecondYearOfLife] = useState("3.8");
+  const [children24to59m, setChildren24to59m] = useState("11.5");
+  const [under5, setUnder5] = useState("19.3");
+  const [girls9to14, setGirls9to14] = useState("6.5");
+  const [pregnant, setPregnant] = useState("4.5");
   const [schoolEntry, setSchoolEntry] = useState("2.7");
   const [currencyCode, setCurrencyCode] = useState("PGK");
   const [currencySymbol, setCurrencySymbol] = useState("K");
@@ -958,10 +971,14 @@ export default function Settings() {
     if (tenant?.settings) {
       const s = tenant.settings as Record<string, any>;
       if (s.demographics) {
-        setBirths(((s.demographics.births || 0) * 100).toFixed(1));
-        setUnder1(((s.demographics.under1 || 0) * 100).toFixed(1));
-        setPregnant(((s.demographics.pregnant || 0) * 100).toFixed(1));
-        setSchoolEntry(((s.demographics.schoolEntry || 0) * 100).toFixed(1));
+        setBirths(((s.demographics.births ?? 0.032) * 100).toFixed(1));
+        setUnder1(((s.demographics.under1 ?? 0.04) * 100).toFixed(1));
+        setSecondYearOfLife(((s.demographics.secondYearOfLife ?? 0.038) * 100).toFixed(1));
+        setChildren24to59m(((s.demographics.children24to59m ?? 0.115) * 100).toFixed(1));
+        setUnder5(((s.demographics.under5 ?? 0.193) * 100).toFixed(1));
+        setGirls9to14(((s.demographics.girls9to14 ?? 0.065) * 100).toFixed(1));
+        setPregnant(((s.demographics.pregnant ?? 0.045) * 100).toFixed(1));
+        setSchoolEntry(((s.demographics.schoolEntry ?? 0.027) * 100).toFixed(1));
       }
       setCurrencyCode(s.currency || "PGK");
       setCurrencySymbol(s.currencySymbol || "K");
@@ -1027,8 +1044,12 @@ export default function Settings() {
       mapZoom: parseInt(zoom) || 6,
       demographics: {
         births: (parseFloat(births) || 3.2) / 100,
-        under1: (parseFloat(under1) || 3.0) / 100,
-        pregnant: (parseFloat(pregnant) || 3.2) / 100,
+        under1: (parseFloat(under1) || 4.0) / 100,
+        secondYearOfLife: (parseFloat(secondYearOfLife) || 3.8) / 100,
+        children24to59m: (parseFloat(children24to59m) || 11.5) / 100,
+        under5: (parseFloat(under5) || 19.3) / 100,
+        girls9to14: (parseFloat(girls9to14) || 6.5) / 100,
+        pregnant: (parseFloat(pregnant) || 4.5) / 100,
         schoolEntry: (parseFloat(schoolEntry) || 2.7) / 100,
         schoolExit: s.demographics?.schoolExit || 0.022,
       },
@@ -1047,6 +1068,13 @@ export default function Settings() {
     ...DEFAULT_MODULES,
     ...((tenant?.settings as any)?.modules || {})
   };
+
+  const [userPrefs, setUserPrefs] = useState(() => getUserModulePreferences());
+  useEffect(() => {
+    const handleUpdate = () => setUserPrefs(getUserModulePreferences());
+    window.addEventListener("vaxplan-modules-updated", handleUpdate);
+    return () => window.removeEventListener("vaxplan-modules-updated", handleUpdate);
+  }, []);
 
   const toggleModule = (key: string) => {
     const updatedSettings = {
@@ -1394,6 +1422,100 @@ export default function Settings() {
 
               </CardContent>
             </Card>
+
+            {/* USER-LEVEL PERSONAL SIDEBAR NAVIGATION PREFERENCES */}
+            <Card className="border border-border/80 shadow-md">
+              <CardHeader className="pb-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="h-10 w-10 rounded-2xl bg-gradient-to-tr from-sky-500/20 to-indigo-500/20 text-primary border border-primary/20 flex items-center justify-center">
+                      <SlidersHorizontal className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <CardTitle className="text-lg">My Sidebar Navigation Preferences</CardTitle>
+                      <CardDescription>
+                        Personalize your navigation by showing or hiding optional operational modules. Modules disabled by administrators are locked.
+                      </CardDescription>
+                    </div>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => resetUserModulePreferences()}
+                    className="gap-1.5 text-xs rounded-xl"
+                  >
+                    <RotateCcw className="h-3.5 w-3.5" />
+                    Reset to Defaults
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-6 pt-2">
+                {MODULE_CATEGORIES.map((category) => {
+                  const userModules = MODULE_METADATA.filter(
+                    (m) => m.category === category.id && m.userToggleable
+                  );
+                  if (userModules.length === 0) return null;
+
+                  return (
+                    <div key={category.id} className="space-y-3">
+                      <div className="flex items-center gap-2 pb-1 border-b border-border/30">
+                        <span className={`text-xs font-bold uppercase tracking-wider ${category.color}`}>
+                          {category.name}
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        {userModules.map((mod) => {
+                          const Icon = mod.icon;
+                          const isTenantDisabled = modules[mod.key as keyof typeof DEFAULT_MODULES] === false;
+                          const isVisible = isTenantDisabled ? false : userPrefs[mod.key] !== false;
+
+                          return (
+                            <div
+                              key={mod.key}
+                              className={`flex items-start justify-between p-3 rounded-xl border transition-all ${
+                                isTenantDisabled
+                                  ? "opacity-50 bg-muted/40 border-dashed border-border cursor-not-allowed"
+                                  : "bg-card/50 hover:bg-accent/20 border-border/70 shadow-sm"
+                              }`}
+                            >
+                              <div className="flex gap-2.5 min-w-0 pr-2">
+                                <div className={`mt-0.5 h-7 w-7 rounded-lg flex items-center justify-center shrink-0 border ${
+                                  isVisible && !isTenantDisabled
+                                    ? `${category.bg} ${category.color} border-primary/20`
+                                    : "bg-muted text-muted-foreground border-border"
+                                }`}>
+                                  <Icon className="h-3.5 w-3.5" />
+                                </div>
+                                <div className="min-w-0 space-y-0.5">
+                                  <div className="text-xs font-semibold truncate flex items-center gap-1.5">
+                                    <span>{mod.title}</span>
+                                    {isTenantDisabled && (
+                                      <Badge variant="secondary" className="text-[9px] h-3.5 px-1 bg-muted text-muted-foreground">
+                                        Disabled by Admin
+                                      </Badge>
+                                    )}
+                                  </div>
+                                  <p className="text-[11px] text-muted-foreground line-clamp-2 leading-tight">
+                                    {mod.description}
+                                  </p>
+                                </div>
+                              </div>
+                              <div className="shrink-0 self-center">
+                                <Switch
+                                  checked={isVisible}
+                                  disabled={isTenantDisabled}
+                                  onCheckedChange={(checked) => setUserModulePreference(mod.key, checked)}
+                                />
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </CardContent>
+            </Card>
           </div>
 
           <div className="space-y-6">
@@ -1546,22 +1668,19 @@ export default function Settings() {
             </CardHeader>
             <CardContent className="space-y-5">
               <div className="space-y-3">
-                <h3 className="text-sm font-semibold text-primary">Target Demographics (Annual %)</h3>
-                <div className="grid sm:grid-cols-4 gap-4">
-                  <div className="space-y-1.5">
-                    <Label htmlFor="births-ratio" className="text-xs">Annual Births</Label>
-                    <div className="relative">
-                      <Input
-                        id="births-ratio"
-                        value={births}
-                        onChange={(e) => setBirths(e.target.value)}
-                        className="pr-7 font-mono text-sm"
-                      />
-                      <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">%</span>
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-semibold text-primary">Target Demographics & Cohort Breakdown (Annual %)</h3>
+                  <span className="text-xs bg-primary/10 text-primary font-medium px-2 py-0.5 rounded-md">
+                    Total Population Base: 100%
+                  </span>
+                </div>
+
+                <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  <div className="space-y-1.5 p-3 rounded-xl border border-border/60 bg-muted/20">
+                    <div className="flex items-center justify-between">
+                      <Label htmlFor="under1-ratio" className="text-xs font-semibold">0–11 months (Infants)</Label>
+                      <span className="text-[10px] text-muted-foreground">EPI Primary</span>
                     </div>
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="under1-ratio" className="text-xs">Infants (&lt;1 yr)</Label>
                     <div className="relative">
                       <Input
                         id="under1-ratio"
@@ -1571,9 +1690,82 @@ export default function Settings() {
                       />
                       <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">%</span>
                     </div>
+                    <p className="text-[10px] text-muted-foreground">Penta, PCV, Rota, BCG targets</p>
                   </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="pregnant-ratio" className="text-xs">Pregnant Women</Label>
+
+                  <div className="space-y-1.5 p-3 rounded-xl border border-border/60 bg-muted/20">
+                    <div className="flex items-center justify-between">
+                      <Label htmlFor="2yl-ratio" className="text-xs font-semibold">12–23 months (2YL)</Label>
+                      <span className="text-[10px] text-muted-foreground">2nd Year Life</span>
+                    </div>
+                    <div className="relative">
+                      <Input
+                        id="2yl-ratio"
+                        value={secondYearOfLife}
+                        onChange={(e) => setSecondYearOfLife(e.target.value)}
+                        className="pr-7 font-mono text-sm"
+                      />
+                      <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">%</span>
+                    </div>
+                    <p className="text-[10px] text-muted-foreground">MCV2, Booster doses</p>
+                  </div>
+
+                  <div className="space-y-1.5 p-3 rounded-xl border border-border/60 bg-muted/20">
+                    <div className="flex items-center justify-between">
+                      <Label htmlFor="24to59m-ratio" className="text-xs font-semibold">24–59 months (Under 5)</Label>
+                      <span className="text-[10px] text-muted-foreground">Older Under-5</span>
+                    </div>
+                    <div className="relative">
+                      <Input
+                        id="24to59m-ratio"
+                        value={children24to59m}
+                        onChange={(e) => setChildren24to59m(e.target.value)}
+                        className="pr-7 font-mono text-sm"
+                      />
+                      <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">%</span>
+                    </div>
+                    <p className="text-[10px] text-muted-foreground">SIA campaigns, catch-up</p>
+                  </div>
+
+                  <div className="space-y-1.5 p-3 rounded-xl border border-border/60 bg-muted/20">
+                    <div className="flex items-center justify-between">
+                      <Label htmlFor="under5-ratio" className="text-xs font-semibold">Total Under 5 (0–59m)</Label>
+                      <span className="text-[10px] text-muted-foreground">Combined</span>
+                    </div>
+                    <div className="relative">
+                      <Input
+                        id="under5-ratio"
+                        value={under5}
+                        onChange={(e) => setUnder5(e.target.value)}
+                        className="pr-7 font-mono text-sm"
+                      />
+                      <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">%</span>
+                    </div>
+                    <p className="text-[10px] text-muted-foreground">National Under-5 total proportion</p>
+                  </div>
+
+                  <div className="space-y-1.5 p-3 rounded-xl border border-border/60 bg-muted/20">
+                    <div className="flex items-center justify-between">
+                      <Label htmlFor="hpv-ratio" className="text-xs font-semibold">Girls 9–14 years (HPV)</Label>
+                      <span className="text-[10px] text-muted-foreground">School / Adolescent</span>
+                    </div>
+                    <div className="relative">
+                      <Input
+                        id="hpv-ratio"
+                        value={girls9to14}
+                        onChange={(e) => setGirls9to14(e.target.value)}
+                        className="pr-7 font-mono text-sm"
+                      />
+                      <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">%</span>
+                    </div>
+                    <p className="text-[10px] text-muted-foreground">HPV vaccine cohorts</p>
+                  </div>
+
+                  <div className="space-y-1.5 p-3 rounded-xl border border-border/60 bg-muted/20">
+                    <div className="flex items-center justify-between">
+                      <Label htmlFor="pregnant-ratio" className="text-xs font-semibold">Pregnant women (Td)</Label>
+                      <span className="text-[10px] text-muted-foreground">Maternal</span>
+                    </div>
                     <div className="relative">
                       <Input
                         id="pregnant-ratio"
@@ -1583,9 +1775,25 @@ export default function Settings() {
                       />
                       <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">%</span>
                     </div>
+                    <p className="text-[10px] text-muted-foreground">Tetanus-diphtheria (Td) protection</p>
                   </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="school-ratio" className="text-xs">School Entry</Label>
+
+                  <div className="space-y-1.5 p-3 rounded-xl border border-border/60 bg-muted/20">
+                    <Label htmlFor="births-ratio" className="text-xs font-semibold">Annual Births</Label>
+                    <div className="relative">
+                      <Input
+                        id="births-ratio"
+                        value={births}
+                        onChange={(e) => setBirths(e.target.value)}
+                        className="pr-7 font-mono text-sm"
+                      />
+                      <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">%</span>
+                    </div>
+                    <p className="text-[10px] text-muted-foreground">Crude birth rate proxy</p>
+                  </div>
+
+                  <div className="space-y-1.5 p-3 rounded-xl border border-border/60 bg-muted/20">
+                    <Label htmlFor="school-ratio" className="text-xs font-semibold">School Entry</Label>
                     <div className="relative">
                       <Input
                         id="school-ratio"
@@ -1595,10 +1803,36 @@ export default function Settings() {
                       />
                       <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">%</span>
                     </div>
+                    <p className="text-[10px] text-muted-foreground">6-year-old school entrance cohort</p>
                   </div>
                 </div>
+
+                <div className="p-3.5 rounded-xl bg-primary/5 border border-primary/20 text-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                  <div className="space-y-0.5">
+                    <p className="font-semibold text-primary">Live Demographic Target Simulator</p>
+                    <p className="text-muted-foreground">Calculated breakdown per 1,000 total community census population:</p>
+                  </div>
+                  <div className="flex flex-wrap gap-2 text-xs font-mono font-medium">
+                    <span className="bg-background px-2.5 py-1 rounded-md border border-border shadow-xs">
+                      0–11m: <strong className="text-primary">{Math.round(1000 * (parseFloat(under1) || 4.0) / 100)}</strong>
+                    </span>
+                    <span className="bg-background px-2.5 py-1 rounded-md border border-border shadow-xs">
+                      12–23m: <strong className="text-primary">{Math.round(1000 * (parseFloat(secondYearOfLife) || 3.8) / 100)}</strong>
+                    </span>
+                    <span className="bg-background px-2.5 py-1 rounded-md border border-border shadow-xs">
+                      24–59m: <strong className="text-primary">{Math.round(1000 * (parseFloat(children24to59m) || 11.5) / 100)}</strong>
+                    </span>
+                    <span className="bg-background px-2.5 py-1 rounded-md border border-border shadow-xs">
+                      Girls 9–14y: <strong className="text-primary">{Math.round(1000 * (parseFloat(girls9to14) || 6.5) / 100)}</strong>
+                    </span>
+                    <span className="bg-background px-2.5 py-1 rounded-md border border-border shadow-xs">
+                      Pregnant: <strong className="text-primary">{Math.round(1000 * (parseFloat(pregnant) || 4.5) / 100)}</strong>
+                    </span>
+                  </div>
+                </div>
+
                 <p className="text-[10px] text-muted-foreground italic">
-                  Ratios scale facility microplanning vaccine demand dynamically based on total village census populations.
+                  WHO/EPI Life-Course ratios dynamically disaggregate total village census populations into operational microplanning targets.
                 </p>
               </div>
 

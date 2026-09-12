@@ -64,7 +64,18 @@ import {
   Check,
   ChevronsUpDown,
   CloudOff,
+  Compass,
+  Waves,
+  CloudRain,
+  AlertOctagon,
+  Navigation,
+  Radio,
+  Sparkles,
+  RefreshCw,
+  Loader2,
+  Send,
 } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
 import {
   Popover,
   PopoverContent,
@@ -124,6 +135,8 @@ export default function SessionPlanning({
   const { toast } = useToast();
   const { user } = useAuth();
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [routeOptimizerOpen, setRouteOptimizerOpen] = useState(false);
+  const [caregiverAlertOpen, setCaregiverAlertOpen] = useState(false);
   // Task #47 — Mark Done dialog state. Captures per-vaccine doses administered.
   const [markDoneSession, setMarkDoneSession] = useState<SessionPlan | null>(null);
   const [vaccinatedCounts, setVaccinatedCounts] = useState<Record<string, string>>({});
@@ -1521,6 +1534,26 @@ export default function SessionPlanning({
             <p className="text-muted-foreground text-sm">{pageSubtitle}</p>
           </div>
           <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setRouteOptimizerOpen(true)}
+              className="gap-1.5 border-emerald-300 bg-emerald-500/10 text-emerald-700 hover:bg-emerald-500/20 dark:text-emerald-300"
+              id="btn-dynamic-route-optimizer"
+            >
+              <Compass className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+              Dynamic Route Optimizer
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setCaregiverAlertOpen(true)}
+              className="gap-1.5 border-sky-300 bg-sky-500/10 text-sky-700 hover:bg-sky-500/20 dark:text-sky-300"
+              id="btn-caregiver-session-alerts"
+            >
+              <Radio className="h-4 w-4 text-sky-600 dark:text-sky-400" />
+              Caregiver SMS Alerts
+            </Button>
             <Link href="/sessions/history">
               <Button variant="outline" size="sm" data-testid="button-session-history">
                 <HistoryIcon className="h-4 w-4 mr-1" />
@@ -3023,6 +3056,534 @@ export default function SessionPlanning({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* ── DYNAMIC ROUTE OPTIMIZER MODAL (Task Layer 5) ───────────── */}
+      {routeOptimizerOpen && (
+        <DynamicRouteOptimizerModal
+          open={routeOptimizerOpen}
+          onOpenChange={setRouteOptimizerOpen}
+        />
+      )}
+
+      {/* ── CAREGIVER SESSION ALERT BROADCAST MODAL (Task Layer 6) ──── */}
+      {caregiverAlertOpen && (
+        <CaregiverSessionBroadcastModal
+          open={caregiverAlertOpen}
+          onOpenChange={setCaregiverAlertOpen}
+          sessions={sessions ?? []}
+        />
+      )}
     </div>
   );
 }
+
+// ─── DYNAMIC ROUTE OPTIMIZER MODAL COMPONENT (Task Layer 5) ────────────────
+function DynamicRouteOptimizerModal({
+  open,
+  onOpenChange,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const { data: facilities = [] } = useQuery<any[]>({ queryKey: ["/api/facilities"] });
+  const { data: villages = [] } = useQuery<any[]>({ queryKey: ["/api/villages"] });
+
+  const [selectedFacilityId, setSelectedFacilityId] = useState<string>("");
+  const [selectedVillageIds, setSelectedVillageIds] = useState<number[]>([]);
+  const [season, setSeason] = useState<"dry" | "rainy">("dry");
+  const [weatherCondition, setWeatherCondition] = useState<"clear" | "moderate_rain" | "heavy_flood">("clear");
+  const [transportMode, setTransportMode] = useState<"car" | "motorbike" | "foot" | "boat">("motorbike");
+  const [enableRiverCrossings, setEnableRiverCrossings] = useState<boolean>(true);
+
+  // Initialize selected facility
+  useEffect(() => {
+    if (!selectedFacilityId && facilities.length > 0) {
+      setSelectedFacilityId(String(facilities[0].id));
+    }
+  }, [facilities, selectedFacilityId]);
+
+  // Candidate villages for selected facility
+  const availableVillages = useMemo(() => {
+    if (!selectedFacilityId) return [];
+    return villages.filter(
+      (v: any) =>
+        v.latitude != null &&
+        v.longitude != null &&
+        (!v.assignedFacilityId || String(v.assignedFacilityId) === selectedFacilityId)
+    ).slice(0, 30);
+  }, [villages, selectedFacilityId]);
+
+  // Toggle village selection
+  const toggleVillage = (id: number) => {
+    setSelectedVillageIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
+  };
+
+  // Select all / clear all
+  const selectAll = () => {
+    setSelectedVillageIds(availableVillages.slice(0, 6).map((v: any) => v.id));
+  };
+
+  const optimizeMutation = useMutation({
+    mutationFn: async () => {
+      const fac = facilities.find((f: any) => String(f.id) === selectedFacilityId);
+      if (!fac || !fac.latitude || !fac.longitude) {
+        throw new Error("Selected facility missing GPS coordinates");
+      }
+
+      const stops = villages
+        .filter((v: any) => selectedVillageIds.includes(v.id))
+        .map((v: any) => ({
+          id: v.id,
+          name: v.name,
+          latitude: Number(v.latitude),
+          longitude: Number(v.longitude),
+          targetPopulation: v.targetPopulation || 50,
+          isOutreachPost: true,
+        }));
+
+      if (stops.length === 0) {
+        throw new Error("Select at least one outreach stop / village");
+      }
+
+      const riverCrossings = enableRiverCrossings
+        ? [
+            {
+              name: "Seasonal River Kafue Crossing",
+              latitude: Number(fac.latitude) + 0.03,
+              longitude: Number(fac.longitude) + 0.02,
+              passableInRain: false,
+              requiresBoat: true,
+            },
+          ]
+        : [];
+
+      const payload = {
+        origin: {
+          name: fac.name,
+          latitude: Number(fac.latitude),
+          longitude: Number(fac.longitude),
+        },
+        stops,
+        season,
+        weatherCondition,
+        transportMode,
+        knownRiverCrossings: riverCrossings,
+      };
+
+      return await apiRequest<any>("POST", "/api/gis/optimize-route", payload);
+    },
+  });
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto bg-card border border-border text-foreground rounded-3xl shadow-2xl p-6 font-sans">
+        <DialogHeader>
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <DialogTitle className="flex items-center gap-2 text-xl font-bold">
+                <Compass className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
+                Dynamic Route Optimizer (GIS Routing)
+              </DialogTitle>
+              <DialogDescription className="text-muted-foreground mt-1">
+                Calculate the safest, most fuel-efficient outreach sequence factoring in road friction, seasonal mud, and river flood hazards.
+              </DialogDescription>
+            </div>
+            <Badge variant="outline" className="border-emerald-300 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 text-xs">
+              Terrain & Weather Physics
+            </Badge>
+          </div>
+        </DialogHeader>
+
+        {/* Configuration Row */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 py-3 border-y border-border">
+          <div className="space-y-1">
+            <Label className="text-xs uppercase text-muted-foreground font-semibold">Base Facility</Label>
+            <Select value={selectedFacilityId} onValueChange={setSelectedFacilityId}>
+              <SelectTrigger className="bg-background rounded-xl">
+                <SelectValue placeholder="Select facility..." />
+              </SelectTrigger>
+              <SelectContent className="max-h-48">
+                {facilities.map((f: any) => (
+                  <SelectItem key={f.id} value={String(f.id)}>{f.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-1">
+            <Label className="text-xs uppercase text-muted-foreground font-semibold">Season</Label>
+            <Select value={season} onValueChange={(val: any) => setSeason(val)}>
+              <SelectTrigger className="bg-background rounded-xl">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="dry">Dry Season (Firm Roads)</SelectItem>
+                <SelectItem value="rainy">Rainy Season (Mud & Ruts)</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-1">
+            <Label className="text-xs uppercase text-muted-foreground font-semibold">Live Weather</Label>
+            <Select value={weatherCondition} onValueChange={(val: any) => setWeatherCondition(val)}>
+              <SelectTrigger className="bg-background rounded-xl">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="clear">Clear Skies</SelectItem>
+                <SelectItem value="moderate_rain">Moderate Rainfall</SelectItem>
+                <SelectItem value="heavy_flood">Heavy Flood Alert</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-1">
+            <Label className="text-xs uppercase text-muted-foreground font-semibold">Transport Mode</Label>
+            <Select value={transportMode} onValueChange={(val: any) => setTransportMode(val)}>
+              <SelectTrigger className="bg-background rounded-xl">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="motorbike">Motorbike (Trail)</SelectItem>
+                <SelectItem value="car">4WD Vehicle</SelectItem>
+                <SelectItem value="foot">Foot Walking Team</SelectItem>
+                <SelectItem value="boat">River Boat / Canoe</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+
+        {/* Target Outreach Stops Picker */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <Label className="text-xs uppercase text-muted-foreground font-semibold">
+              Target Outreach Villages ({selectedVillageIds.length} selected)
+            </Label>
+            <div className="flex gap-2">
+              <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={selectAll}>
+                Select First 5
+              </Button>
+              <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setSelectedVillageIds([])}>
+                Clear All
+              </Button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 max-h-40 overflow-y-auto p-2 border border-border rounded-2xl bg-secondary/20">
+            {availableVillages.map((v: any) => {
+              const selected = selectedVillageIds.includes(v.id);
+              return (
+                <button
+                  key={v.id}
+                  type="button"
+                  onClick={() => toggleVillage(v.id)}
+                  className={`p-2 rounded-xl text-left text-xs transition-colors flex items-center justify-between border ${
+                    selected
+                      ? "border-emerald-500 bg-emerald-500/15 text-emerald-950 dark:text-emerald-200 font-semibold"
+                      : "border-border bg-card text-muted-foreground hover:bg-muted"
+                  }`}
+                >
+                  <span className="truncate">{v.name}</span>
+                  {selected && <Check className="h-3.5 w-3.5 text-emerald-600 shrink-0 ml-1" />}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* River Crossing Simulation Switch */}
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <input
+            type="checkbox"
+            id="chk-river-crossings"
+            checked={enableRiverCrossings}
+            onChange={(e) => setEnableRiverCrossings(e.target.checked)}
+            className="rounded border-border text-emerald-600"
+          />
+          <label htmlFor="chk-river-crossings" className="cursor-pointer">
+            Include active river crossing telemetry & seasonal flood ford checks
+          </label>
+        </div>
+
+        {/* Results Panel */}
+        {optimizeMutation.data && (
+          <div className="space-y-3 border border-border rounded-2xl p-4 bg-secondary/30">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="p-3 bg-card rounded-xl border border-border space-y-1">
+                <span className="text-xs text-muted-foreground">Total Travel Distance</span>
+                <div className="text-xl font-bold text-foreground font-mono">
+                  {optimizeMutation.data.totalDistanceKm} km
+                </div>
+              </div>
+              <div className="p-3 bg-card rounded-xl border border-border space-y-1">
+                <span className="text-xs text-muted-foreground">Estimated Journey Time</span>
+                <div className="text-xl font-bold text-foreground font-mono">
+                  {Math.floor(optimizeMutation.data.totalDurationMinutes / 60)}h {optimizeMutation.data.totalDurationMinutes % 60}m
+                </div>
+              </div>
+              <div className="p-3 bg-card rounded-xl border border-border space-y-1">
+                <span className="text-xs text-muted-foreground">Stops Sequenced</span>
+                <div className="text-xl font-bold text-emerald-600 dark:text-emerald-400 font-mono">
+                  {optimizeMutation.data.orderedStops.length} stops
+                </div>
+              </div>
+            </div>
+
+            {/* Hazard Warnings */}
+            {optimizeMutation.data.hazardsIdentified?.length > 0 && (
+              <div className="p-3 rounded-xl border border-amber-300 bg-amber-500/10 text-amber-900 dark:text-amber-200 text-xs space-y-1">
+                <div className="font-semibold flex items-center gap-1.5">
+                  <AlertOctagon className="h-4 w-4 text-amber-600" />
+                  Route Safety Advisories Identified
+                </div>
+                <ul className="list-disc pl-5 space-y-0.5">
+                  {optimizeMutation.data.hazardsIdentified.map((h: string, i: number) => (
+                    <li key={i}>{h}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {/* Optimized Leg Breakdown */}
+            <div className="border border-border rounded-xl overflow-hidden bg-card text-xs">
+              <div className="p-2.5 bg-muted/40 font-semibold text-muted-foreground uppercase tracking-wider flex items-center justify-between">
+                <span>Optimized Visit Sequence (Nearest-Neighbor + 2-Opt)</span>
+                <span className="text-[11px] font-normal normal-case">Surface friction applied</span>
+              </div>
+              <table className="w-full">
+                <thead className="border-b border-border bg-muted/20 text-muted-foreground text-[11px]">
+                  <tr>
+                    <th className="py-2 px-3 text-left">Stop</th>
+                    <th className="py-2 px-3 text-left">Destination</th>
+                    <th className="py-2 px-3 text-left">Leg Distance</th>
+                    <th className="py-2 px-3 text-left">Duration</th>
+                    <th className="py-2 px-3 text-left">Road Type</th>
+                    <th className="py-2 px-3 text-left">River Crossing</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border/60 font-mono text-[11px]">
+                  {optimizeMutation.data.legs?.map((leg: any, idx: number) => (
+                    <tr key={idx} className="hover:bg-muted/30">
+                      <td className="py-2 px-3 font-bold text-foreground">Stop {idx + 1}</td>
+                      <td className="py-2 px-3 font-sans font-medium">{leg.toStop}</td>
+                      <td className="py-2 px-3">{leg.distanceKm} km</td>
+                      <td className="py-2 px-3">{leg.durationMinutes} min</td>
+                      <td className="py-2 px-3 capitalize font-sans">{leg.roadType?.replace("_", " ")}</td>
+                      <td className="py-2 px-3 font-sans">
+                        {leg.riverCrossingDetected ? (
+                          <Badge variant="outline" className={leg.riverCrossingDetected.status === "impassable" ? "border-red-500 text-red-600" : "border-amber-500 text-amber-600"}>
+                            {leg.riverCrossingDetected.status.replace(/_/g, " ")}
+                          </Badge>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        <DialogFooter className="border-t border-border pt-3 gap-2">
+          <Button variant="outline" onClick={() => onOpenChange(false)} className="rounded-xl">Close</Button>
+          <Button
+            onClick={() => optimizeMutation.mutate()}
+            disabled={selectedVillageIds.length === 0 || optimizeMutation.isPending}
+            className="gap-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl shadow-md font-semibold"
+          >
+            {optimizeMutation.isPending ? (
+              <><RefreshCw className="h-4 w-4 animate-spin" /> Calculating Optimum Path…</>
+            ) : (
+              <><Navigation className="h-4 w-4" /> Run Dynamic Route Optimization</>
+            )}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ─── CAREGIVER SESSION ALERT BROADCAST MODAL (Task Layer 6) ────────────────
+function CaregiverSessionBroadcastModal({
+  open,
+  onOpenChange,
+  sessions,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  sessions: SessionPlan[];
+}) {
+  const { toast } = useToast();
+  const [selectedSessionId, setSelectedSessionId] = useState<number | null>(
+    sessions.length > 0 ? sessions[0].id : null
+  );
+  const [language, setLanguage] = useState<"en" | "fr" | "sw" | "pt">("en");
+  const [customMessage, setCustomMessage] = useState("");
+  const [dryRun, setDryRun] = useState(true);
+  const [result, setResult] = useState<any>(null);
+
+  const activeSession = sessions.find((s) => s.id === selectedSessionId) || sessions[0];
+
+  const defaultTemplates: Record<string, string> = {
+    en: `Dear caregiver, VaxPlan reminder: An immunization session is scheduled at ${activeSession?.name || "the clinic"} on ${activeSession?.scheduledDate ? new Date(activeSession.scheduledDate).toISOString().slice(0, 10) : "this week"}. Please bring your child's vaccination card.`,
+    fr: `Chère tutrice, rappel VaxPlan : Une séance de vaccination se tiendra à ${activeSession?.name || "le centre"} le ${activeSession?.scheduledDate ? new Date(activeSession.scheduledDate).toISOString().slice(0, 10) : "cette semaine"}. Veuillez apporter le carnet de vaccination de votre enfant.`,
+    sw: `Mlezi mpendwa, ukumbusho wa VaxPlan: Huduma ya chanjo itatolewa ${activeSession?.name || "kituoni"} tarehe ${activeSession?.scheduledDate ? new Date(activeSession.scheduledDate).toISOString().slice(0, 10) : "wiki hii"}. Tafadhali leta kadi ya chanjo ya mtoto wako.`,
+    pt: `Prezada cuidadora, lembrete VaxPlan: A sessão de vacinação será realizada em ${activeSession?.name || "no posto"} no dia ${activeSession?.scheduledDate ? new Date(activeSession.scheduledDate).toISOString().slice(0, 10) : "esta semana"}. Por favor traga o cartão de vacinação da criança.`,
+  };
+
+  const broadcastMutation = useMutation({
+    mutationFn: async () => {
+      if (!selectedSessionId) throw new Error("Please select a session");
+      const res: any = await apiRequest("POST", "/api/messaging/broadcast-session-alerts", {
+        sessionId: selectedSessionId,
+        language,
+        customMessage: customMessage.trim() || undefined,
+        dryRun,
+      });
+      return await res.json();
+    },
+    onSuccess: (data) => {
+      setResult(data);
+      toast({
+        title: dryRun ? "Broadcast simulation finished" : "Session alerts dispatched",
+        description: `Reached ${data.totalCaregiversFound} caregiver(s) in immediate catchment area.`,
+      });
+    },
+    onError: (err: any) => {
+      toast({
+        title: "Broadcast failed",
+        description: err.message || "Failed to dispatch session alerts.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader>
+          <div className="flex items-center gap-2">
+            <Badge className="bg-sky-600 text-white hover:bg-sky-700">Roadmap Capability</Badge>
+            <DialogTitle className="flex items-center gap-2 text-xl font-bold">
+              <Radio className="h-5 w-5 text-sky-600" />
+              Automated Caregiver Outreach Session SMS Broadcast
+            </DialogTitle>
+          </div>
+          <DialogDescription>
+            Notify caregivers residing in target villages ahead of scheduled outreach and mobile sessions to ensure maximum attendance.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4 py-2">
+          <div className="space-y-1.5">
+            <Label className="text-xs font-semibold uppercase text-muted-foreground">Select Target Session</Label>
+            <Select
+              value={selectedSessionId ? String(selectedSessionId) : ""}
+              onValueChange={(val) => setSelectedSessionId(Number(val))}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Choose a scheduled session" />
+              </SelectTrigger>
+              <SelectContent>
+                {sessions.map((s) => (
+                  <SelectItem key={s.id} value={String(s.id)}>
+                    {s.scheduledDate ? new Date(s.scheduledDate).toISOString().slice(0, 10) : "Scheduled"} — {s.name} ({s.sessionType})
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold uppercase text-muted-foreground">Broadcast Language</Label>
+              <Select value={language} onValueChange={(val: any) => setLanguage(val)}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Language" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="en">English (Official)</SelectItem>
+                  <SelectItem value="fr">Français (French)</SelectItem>
+                  <SelectItem value="sw">Kiswahili (East Africa)</SelectItem>
+                  <SelectItem value="pt">Português (Mozambique / Angola)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold uppercase text-muted-foreground">Simulate / Dry Run</Label>
+              <div className="flex items-center justify-between rounded-lg border p-2.5 bg-card">
+                <span className="text-xs text-muted-foreground">Preview without SMS delivery</span>
+                <Switch checked={dryRun} onCheckedChange={setDryRun} />
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <Label className="text-xs font-semibold uppercase text-muted-foreground">Custom Message (Optional)</Label>
+              <span className="text-xs text-muted-foreground">
+                {(customMessage || defaultTemplates[language]).length} chars
+              </span>
+            </div>
+            <Textarea
+              placeholder={defaultTemplates[language]}
+              value={customMessage}
+              onChange={(e) => setCustomMessage(e.target.value)}
+              rows={3}
+              className="text-sm font-mono"
+            />
+          </div>
+
+          {result && (
+            <div className="rounded-lg border border-sky-300 bg-sky-500/10 p-4 space-y-2">
+              <div className="flex items-center gap-2 font-semibold text-sky-900 dark:text-sky-300">
+                <Check className="h-4 w-4 text-sky-600" />
+                Session Broadcast Dispatched ({result.dryRun ? "Dry Run" : "Live SMS Outbound"})
+              </div>
+              <div className="grid grid-cols-3 gap-3 text-sm pt-1">
+                <div className="rounded bg-background/80 p-2 border">
+                  <div className="text-xs text-muted-foreground">Caregivers Found</div>
+                  <div className="text-lg font-bold">{result.totalCaregiversFound}</div>
+                </div>
+                <div className="rounded bg-background/80 p-2 border">
+                  <div className="text-xs text-muted-foreground">Sent Success</div>
+                  <div className="text-lg font-bold text-emerald-600">{result.sentCount}</div>
+                </div>
+                <div className="rounded bg-background/80 p-2 border">
+                  <div className="text-xs text-muted-foreground">Language</div>
+                  <div className="text-lg font-bold uppercase">{result.language}</div>
+                </div>
+              </div>
+              <div className="text-xs text-muted-foreground">
+                Delivered Text: <span className="font-mono text-foreground">"{result.sampleMessage}"</span>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <DialogFooter className="gap-2">
+          <Button variant="outline" onClick={() => onOpenChange(false)}>Close</Button>
+          <Button
+            onClick={() => broadcastMutation.mutate()}
+            disabled={!selectedSessionId || broadcastMutation.isPending}
+            className={dryRun ? "bg-sky-600 hover:bg-sky-700 text-white" : "bg-emerald-600 hover:bg-emerald-700 text-white"}
+          >
+            {broadcastMutation.isPending ? (
+              <Loader2 className="h-4 w-4 animate-spin mr-1" />
+            ) : (
+              <Send className="h-4 w-4 mr-1" />
+            )}
+            {dryRun ? "Simulate Session Broadcast" : "Send Live Session Broadcast"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+

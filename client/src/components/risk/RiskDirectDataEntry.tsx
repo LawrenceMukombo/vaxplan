@@ -755,7 +755,7 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
   }, [rawCoverageData]);
 
   // Fetch direct entry data from backend
-  const { data, isLoading } = useQuery<{ assessment: any; entries: DirectEntryRow[] }>({
+  const { data, isLoading } = useQuery<{ assessment: any; entries: DirectEntryRow[]; districts?: any[] }>({
     queryKey: [`/api/risk/assessments/${assessmentId}/direct-entry`],
     queryFn: async () => {
       return await apiRequest<any>("GET", `/api/risk/assessments/${assessmentId}/direct-entry`);
@@ -1315,6 +1315,19 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
   const dataSecondYear = baselineYear2;
   const dataLastYear = baselineYear3;
   const assessmentCountry = assessment?.countryName || context?.countryName || "National";
+  const reportAssessment = {
+    ...(assessment || {
+      id: assessmentId,
+      title: "Measles Programmatic Risk Assessment (" + assessmentCountry + ")",
+      assessmentYear: targetYear,
+      baselineYears: [baselineYear1, baselineYear2, baselineYear3],
+    }),
+    tenantName: assessment?.tenantName || context?.countryName || assessmentCountry,
+    countryName: assessment?.countryName || context?.countryName || assessmentCountry,
+    countryCode: assessment?.countryCode || context?.countryCode || "",
+    boundaryId: assessment?.boundaryId || context?.boundaryId || undefined,
+    adminLevelLabel: assessment?.adminLevelLabel || context?.adminLevelLabel || "Administrative Area",
+  };
 
   // Timeframe change handler
   const handleTargetYearChange = (newYear: number) => {
@@ -1633,6 +1646,46 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
       setIsUploadingTemplate(false);
     }
   };
+
+  // File-argument variant used by the empty-state upload button
+  const handleTemplateUpload = async (file: File) => {
+    setIsUploadingTemplate(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const res = await fetch(`/api/risk/assessments/${assessmentId}/import-aggregates`, {
+        method: "POST",
+        body: formData,
+        credentials: "include",
+      });
+
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(errText);
+      }
+
+      const resData = await res.json();
+
+      await queryClient.invalidateQueries({ queryKey: [`/api/risk/assessments/${assessmentId}/direct-entry`] });
+      await queryClient.invalidateQueries({ queryKey: [`/api/risk/assessments/${assessmentId}`] });
+      await queryClient.invalidateQueries({ queryKey: [`/api/risk/assessments/${assessmentId}/results`] });
+      setIsDirty(false);
+
+      toast({
+        title: "Data Uploaded Successfully",
+        description: `Populated ${resData.acceptedCount || "district"} records. The assessment workspace is now ready.`,
+      });
+    } catch (err: any) {
+      toast({
+        title: "Upload Failed",
+        description: err.message || "Failed to process the uploaded file.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsUploadingTemplate(false);
+    }
+  };
+
 
   // Open bulk dialog for a specific field
   const openImportDialog = (field: string, title: string, provinceId: string = "ALL") => {
@@ -3716,8 +3769,47 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
                     </tr>
                   ) : groupedByProvince.length === 0 ? (
                     <tr>
-                      <td colSpan={25} className="text-center py-12 text-muted-foreground">
-                        <span>No districts found matching filter.</span>
+                      <td colSpan={25} className="py-0">
+                        {/* Empty-state: no data uploaded yet — show upload prompt */}
+                        <div className="flex flex-col items-center justify-center gap-6 py-16 px-8 text-center">
+                          <div className="flex h-16 w-16 items-center justify-center rounded-full bg-primary/10">
+                            <FileSpreadsheet className="w-8 h-8 text-primary" />
+                          </div>
+                          <div className="space-y-2 max-w-md">
+                            <h3 className="text-lg font-semibold text-foreground">No data uploaded yet</h3>
+                            <p className="text-sm text-muted-foreground">
+                              This assessment round is empty. Download the blank template, fill in your country's real district-level data, then upload it to populate the tables, charts and maps.
+                            </p>
+                          </div>
+                          <div className="flex flex-col sm:flex-row gap-3 w-full max-w-sm">
+                            <a
+                              href={`/api/risk/templates/district-aggregates`}
+                              download
+                              className="flex-1 inline-flex items-center justify-center gap-2 rounded-md bg-primary text-primary-foreground px-4 py-2 text-sm font-medium shadow hover:bg-primary/90 transition-colors"
+                            >
+                              <Download className="w-4 h-4" />
+                              Download Template
+                            </a>
+                            <label className="flex-1 inline-flex items-center justify-center gap-2 rounded-md border border-input bg-background px-4 py-2 text-sm font-medium cursor-pointer hover:bg-accent transition-colors">
+                              <Upload className="w-4 h-4" />
+                              {isUploadingTemplate ? "Uploading…" : "Upload Filled CSV"}
+                              <input
+                                type="file"
+                                accept=".csv"
+                                className="hidden"
+                                disabled={isUploadingTemplate}
+                                onChange={(e) => {
+                                  const f = e.target.files?.[0];
+                                  if (f) handleTemplateUpload(f);
+                                  e.target.value = "";
+                                }}
+                              />
+                            </label>
+                          </div>
+                          <p className="text-xs text-muted-foreground">
+                            You can also use the <span className="font-medium">Upload / Import</span> panel above, or manually enter values row by row once data exists.
+                          </p>
+                        </div>
                       </td>
                     </tr>
                   ) : (
@@ -5623,16 +5715,7 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
 
           {/* Embedded Full WHO RiskFinalReportView showing ALL tables and records */}
           <RiskFinalReportView
-            assessment={
-              assessment || {
-                id: assessmentId,
-                title: `Measles Programmatic Risk Assessment (${assessmentCountry})`,
-                tenantName: assessmentCountry,
-                assessmentYear: targetYear,
-                baselineYears: [baselineYear1, baselineYear2, baselineYear3],
-                countryName: assessmentCountry,
-              }
-            }
+            assessment={reportAssessment}
             districtResults={effectiveReportDistrictResults}
           />
         </div>

@@ -116,6 +116,7 @@ import {
 } from "@shared/schema";
 import type { UserRole } from "@shared/schema";
 import { normalizeStockVaccineName } from "@shared/vaccineSchedule";
+import { isApprovedPlan, approvalEligibility } from "@shared/microplanPolicy";
 import { db } from "./db";
 import { eq, and, desc, isNull, inArray, getTableColumns, sql, gte } from "drizzle-orm";
 
@@ -398,7 +399,7 @@ export interface IStorage {
       recordedByUserId: string | null;
     },
   ): Promise<{ issue: StockTransaction; receipt: StockTransaction }>;
-  deleteStockTransaction(tenantId: string, id: number): Promise<boolean>;
+  deleteStockTransaction(tenantId: string, id: number, reason?: string): Promise<boolean>;
 
   // --- 6. Monthly Reports ---
   getMonthlyReports(tenantId: string, facilityId?: number): Promise<MonthlyReport[]>;
@@ -602,10 +603,12 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deleteUser(tenantId: string, id: string): Promise<boolean> {
-    await db
-      .delete(users)
-      .where(and(eq(users.id, id), eq(users.tenantId, tenantId)));
-    return true;
+    const [u] = await db
+      .update(users)
+      .set({ isActive: false, updatedAt: new Date() })
+      .where(and(eq(users.id, id), eq(users.tenantId, tenantId)))
+      .returning({ id: users.id });
+    return !!u;
   }
 
   // --- Custom User Roles ---
@@ -987,11 +990,7 @@ export class DatabaseStorage implements IStorage {
     return f;
   }
   async deleteFacility(tenantId: string, id: number): Promise<boolean> {
-    const rows = await db
-      .delete(facilities)
-      .where(and(eq(facilities.id, id), eq(facilities.tenantId, tenantId)))
-      .returning({ id: facilities.id });
-    return rows.length > 0;
+    return await this.softDeleteFacility(tenantId, id);
   }
   async softDeleteFacility(tenantId: string, id: number): Promise<boolean> {
     const [f] = await db
@@ -1116,22 +1115,13 @@ export class DatabaseStorage implements IStorage {
     return v;
   }
   async deleteVillage(tenantId: string, id: number): Promise<boolean> {
-    return await db.transaction(async (tx) => {
-      // 1. Delete associated htr_scores
-      await tx.delete(htrScores).where(eq(htrScores.villageId, id));
-
-      // 2. Delete associated session_villages
-      await tx.delete(sessionVillages).where(eq(sessionVillages.villageId, id));
-
-      // 3. Delete associated population_data
-      await tx.delete(populationData).where(eq(populationData.villageId, id));
-
-      // 4. Delete the village itself
-      const result = await tx
-        .delete(villages)
-        .where(and(eq(villages.id, id), eq(villages.tenantId, tenantId)));
-      return (result.rowCount ?? 0) > 0;
-    });
+    // Non-destructive soft delete: preserves population records, session links, and HTR history per Rule 3
+    const [v] = await db
+      .update(villages)
+      .set({ isActive: false, updatedAt: new Date() })
+      .where(and(eq(villages.id, id), eq(villages.tenantId, tenantId)))
+      .returning({ id: villages.id });
+    return !!v;
   }
   async createCatchmentConflict(tenantId: string, data: InsertCatchmentConflict): Promise<CatchmentConflict> {
     const { tenantId: _drop, ...rest } = data as any;
@@ -1629,6 +1619,11 @@ export class DatabaseStorage implements IStorage {
         targetPopulation: microplans.targetPopulation,
         budget: microplans.budget,
         // staffing excluded — JSONB array, fetched only by getMicroplan()
+        submittedAt: microplans.submittedAt,
+        autoApprovedAt: microplans.autoApprovedAt,
+        approvedAt: microplans.approvedAt,
+        approvedByUserId: microplans.approvedByUserId,
+        createdByUserId: microplans.createdByUserId,
         createdAt: microplans.createdAt,
         updatedAt: microplans.updatedAt,
       })
@@ -1650,7 +1645,26 @@ export class DatabaseStorage implements IStorage {
     return row;
   }
   async updateMicroplan(tenantId: string, id: number, data: Partial<InsertMicroplan>): Promise<Microplan | undefined> {
-    const { tenantId: _i, ...safe } = data as any;
+    const existing = await this.getMicroplan(tenantId, id);
+    if (existing && isApprovedPlan(existing.status)) {
+      const keys = Object.keys(data).filter(
+        (k) => k !== "tenantId" && k !== "updatedAt" && (data as any)[k] !== undefined
+      );
+      const isOnlyRename = keys.length === 1 && keys[0] === "name";
+      if (!isOnlyRename) {
+        throw new Error("Approved microplans are read-only.");
+      }
+    }
+
+    if (existing && data.status && isApprovedPlan(data.status) && !isApprovedPlan(existing.status)) {
+      const tenant = await this.getTenant(tenantId);
+      const eligibility = approvalEligibility(existing.createdAt, tenant?.settings);
+      if (!eligibility.allowed) {
+        throw new Error(eligibility.message);
+      }
+    }
+
+    const { tenantId: _i, createdAt: _c, ...safe } = data as any;
     const [row] = await db
       .update(microplans)
       .set({ ...safe, updatedAt: new Date() })
@@ -1659,10 +1673,13 @@ export class DatabaseStorage implements IStorage {
     return row;
   }
   async deleteMicroplan(tenantId: string, id: number): Promise<boolean> {
-    const result = await db
-      .delete(microplans)
-      .where(and(eq(microplans.id, id), eq(microplans.tenantId, tenantId)));
-    return (result.rowCount ?? 0) > 0;
+    // Non-destructive soft archive: sets status to 'archived' per Rule 3
+    const [row] = await db
+      .update(microplans)
+      .set({ status: "archived", updatedAt: new Date() })
+      .where(and(eq(microplans.id, id), eq(microplans.tenantId, tenantId)))
+      .returning({ id: microplans.id });
+    return !!row;
   }
 
   // --- Session plans ---
@@ -1737,8 +1754,10 @@ export class DatabaseStorage implements IStorage {
     return s;
   }
   async deleteSessionPlan(tenantId: string, id: number): Promise<boolean> {
+    // Non-destructive soft cancel: preserves historic coordinates and geojson
     const rows = await db
-      .delete(sessionPlans)
+      .update(sessionPlans)
+      .set({ status: "cancelled", updatedAt: new Date() })
       .where(and(eq(sessionPlans.id, id), eq(sessionPlans.tenantId, tenantId)))
       .returning({ id: sessionPlans.id });
     return rows.length > 0;
@@ -2610,10 +2629,13 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deleteClient(tenantId: string, id: string): Promise<boolean> {
-    const result = await db
-      .delete(clients)
-      .where(and(eq(clients.id, id), eq(clients.tenantId, tenantId)));
-    return (result.rowCount ?? 0) > 0;
+    // Non-destructive soft archive: preserves patient medical history
+    const [row] = await db
+      .update(clients)
+      .set({ isArchived: true, isActive: false, updatedAt: new Date() })
+      .where(and(eq(clients.id, id), eq(clients.tenantId, tenantId)))
+      .returning({ id: clients.id });
+    return !!row;
   }
 
   // --- 3. Client Vaccinations ---
@@ -2642,10 +2664,13 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deleteClientVaccination(tenantId: string, id: number): Promise<boolean> {
-    const result = await db
-      .delete(clientVaccinations)
-      .where(and(eq(clientVaccinations.id, id), eq(clientVaccinations.tenantId, tenantId)));
-    return (result.rowCount ?? 0) > 0;
+    // Non-destructive soft archive: marks vaccination record as archived
+    const [row] = await db
+      .update(clientVaccinations)
+      .set({ isArchived: true })
+      .where(and(eq(clientVaccinations.id, id), eq(clientVaccinations.tenantId, tenantId)))
+      .returning({ id: clientVaccinations.id });
+    return !!row;
   }
 
   // --- 4. Session Day Plans ---
@@ -2806,11 +2831,14 @@ export class DatabaseStorage implements IStorage {
     });
   }
 
-  async deleteStockTransaction(tenantId: string, id: number): Promise<boolean> {
-    const result = await db
-      .delete(stockTransactions)
-      .where(and(eq(stockTransactions.id, id), eq(stockTransactions.tenantId, tenantId)));
-    return (result.rowCount ?? 0) > 0;
+  async deleteStockTransaction(tenantId: string, id: number, reason?: string): Promise<boolean> {
+    // Non-destructive voiding: preserves inventory audit log per Rule 3
+    const [row] = await db
+      .update(stockTransactions)
+      .set({ isVoid: true, voidReason: reason || "Voided by user" })
+      .where(and(eq(stockTransactions.id, id), eq(stockTransactions.tenantId, tenantId)))
+      .returning({ id: stockTransactions.id });
+    return !!row;
   }
 
   // --- 6. Monthly Reports ---

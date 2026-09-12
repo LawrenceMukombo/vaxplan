@@ -41,6 +41,7 @@ import { applyPolygonPlanningMigration } from "./migrations/026-polygon-planning
 import { applyPolygonLifecycleMigration } from "./migrations/028-polygon-lifecycle";
 import { upsertPolygonPermissionsForAllTenants } from "./migrations/029-polygon-permissions-all-tenants";
 import { applyMicroplanVersionControlMigration } from "./migrations/030-microplan-version-control";
+import { applyMinimumPlanDevelopmentDaysMigration } from "./migrations/036-minimum-plan-development-days";
 import { upsertMicroplanVersionPermissionsForAllTenants } from "./migrations/031-microplan-version-permissions";
 import { applyRiskAssessmentSchema } from "./migrations/032-risk-assessment-schema";
 import { applyRiskPermissionsAndSeed } from "./migrations/033-risk-permissions-and-seed";
@@ -66,20 +67,41 @@ app.use((req, res, next) => {
   }
   next();
 });
+// --- HTTP Security Headers ---
+app.use((_req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "SAMEORIGIN");
+  res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+  if (process.env.NODE_ENV === "production") {
+    res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+  }
+  next();
+});
 // --- Gzip compression ---
 // Must be the FIRST middleware so every response (API + static) is compressed.
 // On a slow mobile connection (MTN hotspot) this can reduce sync/pull payloads
 // from 1-2 MB down to 80-200 KB - a 5-10x speed improvement on large datasets.
 app.use(compression({ level: 6, threshold: 1024 }));
+// --- Body Parsers ---
+// Bulk routes (offline sync push, bulk imports, raster/geotiff payloads) receive a 50MB allowance.
+// All standard API routes are capped at 5MB to mitigate JSON memory-exhaustion DoS attacks.
+const bulkBodyParser = express.json({
+  limit: "50mb",
+  verify: (req, _res, buf) => {
+    req.rawBody = buf;
+  },
+});
+app.use(["/api/sync/push", "/api/clients/import", "/api/resources", "/api/geotiff"], bulkBodyParser);
+
 app.use(
   express.json({
-    limit: "50mb",
+    limit: "5mb",
     verify: (req, _res, buf) => {
       req.rawBody = buf;
     },
   }),
 );
-app.use(express.urlencoded({ extended: false, limit: "50mb" }));
+app.use(express.urlencoded({ extended: false, limit: "5mb" }));
 
 // ─── Health Check ────────────────────────────────────────────────────────────
 // Returns database connectivity status. Never exposes internal error details.
@@ -129,13 +151,114 @@ app.use((req, res, next) => {
     );
     res.header(
       "Access-Control-Allow-Headers",
-      "Content-Type, Authorization, x-tenant-id, x-release-token",
+      "Content-Type, Authorization, x-tenant-id, x-release-token, x-requested-with",
     );
     if (req.method === "OPTIONS") {
       return res.sendStatus(204);
     }
   }
   next();
+});
+
+// ─── CSRF Defense for Mutating API Routes ────────────────────────────────────
+// Mitigates cross-site request forgery by enforcing origin / referer checks
+// and custom header validation on all state-changing API operations.
+// Exempts public endpoints (like login / password reset / SSO) and native apps.
+app.use((req: Request, res: Response, next: NextFunction) => {
+  const mutatingMethods = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+  if (!mutatingMethods.has(req.method) || !req.path.startsWith("/api")) {
+    return next();
+  }
+
+  // Exempt public auth & webhook endpoints that do not rely on pre-existing session cookies
+  const exemptPrefixes = [
+    "/api/auth/login-password",
+    "/api/auth/request-password-reset",
+    "/api/auth/reset-password",
+    "/api/auth/verify-reset-token",
+    "/api/public",
+    "/api/sso",
+    "/api/login",
+  ];
+  if (exemptPrefixes.some((prefix) => req.path.startsWith(prefix))) {
+    return next();
+  }
+
+  // 1. Sec-Fetch-Site check (standards-compliant browser guard)
+  const secFetchSite = req.headers["sec-fetch-site"];
+  if (secFetchSite === "cross-site") {
+    const origin = req.headers.origin;
+    if (!origin || !isAllowedCorsOrigin(origin)) {
+      return res.status(403).json({
+        success: false,
+        error: "Cross-site request blocked (CSRF protection)",
+      });
+    }
+  }
+
+  // 2. Origin header check if present
+  const origin = req.headers.origin;
+  const host = req.headers.host;
+
+  if (origin) {
+    let originHost = "";
+    try {
+      originHost = new URL(origin).host;
+    } catch {
+      originHost = origin;
+    }
+
+    const isSameHost = Boolean(host && originHost === host);
+    const isAllowedNative = isAllowedCorsOrigin(origin);
+
+    if (!isSameHost && !isAllowedNative) {
+      return res.status(403).json({
+        success: false,
+        error: "Forbidden: Request origin not allowed (CSRF protection)",
+      });
+    }
+    return next();
+  }
+
+  // 3. Referer header check if origin is omitted
+  const referer = req.headers.referer;
+  if (referer) {
+    try {
+      const refererHost = new URL(referer).host;
+      if (host && refererHost !== host) {
+        return res.status(403).json({
+          success: false,
+          error: "Forbidden: Request referer not allowed (CSRF protection)",
+        });
+      }
+    } catch {
+      return res.status(403).json({
+        success: false,
+        error: "Forbidden: Malformed request referer",
+      });
+    }
+    return next();
+  }
+
+  // 4. Fallback for clients without origin/referer: allow if carrying custom header or JSON/multipart content
+  const customHeader =
+    req.headers["x-requested-with"] ||
+    req.headers["x-tenant-id"] ||
+    req.headers["x-release-token"] ||
+    req.headers["authorization"];
+  const contentType = req.headers["content-type"] || "";
+  const isSafeType =
+    contentType.includes("application/json") ||
+    contentType.includes("multipart/form-data");
+
+  if (customHeader || isSafeType) {
+    return next();
+  }
+
+  return res.status(403).json({
+    success: false,
+    error: "Forbidden: Missing origin validation headers",
+  });
 });
 export function log(message: string, source = "express") {
   const formattedTime = new Date().toLocaleTimeString("en-US", {
@@ -282,7 +405,7 @@ async function backfillClientIds() {
     }
   }
 
-  await registerRoutes(httpServer, app);
+  await registerRoutes(httpServer, app, sessionMiddleware);
   // Run backfill asynchronously in the background so as not to block startup
   if (skipDbBootstrap) {
     log("DB bootstrap disabled: skipping client ID backfill", "db");
@@ -326,6 +449,9 @@ async function backfillClientIds() {
   applyMicroplanApprovalColumns()
     .then(() => log("microplan approval columns migration complete", "db"))
     .catch((err) => log(`microplan approval columns warning: ${err?.message ?? err}`, "db"));
+  applyMinimumPlanDevelopmentDaysMigration()
+    .then(() => log("minimum plan development period defaulted to seven days", "db"))
+    .catch((err) => log(`minimum plan development period warning: ${err?.message ?? err}`, "db"));
   applySessionsTable()
     .then(() => log("sessions table ensured", "db"))
     .catch((err) => log(`sessions table warning: ${err?.message ?? err}`, "db"));

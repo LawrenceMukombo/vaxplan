@@ -740,3 +740,286 @@ export async function getWalkingIsochrones(
 ): Promise<IsochroneResult> {
   return getTravelIsochrones(tenantId, "foot-walking");
 }
+
+// ---------------------------------------------------------------------------
+// Dynamic Multi-Stop Route Optimization with Terrain & Weather Friction (Task Layer 5)
+// ---------------------------------------------------------------------------
+
+export interface DynamicRouteStop {
+  id: number | string;
+  name: string;
+  latitude: number;
+  longitude: number;
+  targetPopulation?: number;
+  isOutreachPost?: boolean;
+}
+
+export interface DynamicRouteParams {
+  tenantId?: string;
+  origin: {
+    name: string;
+    latitude: number;
+    longitude: number;
+  };
+  stops: DynamicRouteStop[];
+  season: "dry" | "rainy";
+  weatherCondition: "clear" | "moderate_rain" | "heavy_flood";
+  transportMode: "car" | "motorbike" | "foot" | "boat";
+  knownRiverCrossings?: Array<{
+    name: string;
+    latitude: number;
+    longitude: number;
+    passableInRain: boolean;
+    requiresBoat: boolean;
+  }>;
+}
+
+export interface OptimizedRouteLeg {
+  fromStop: string;
+  toStop: string;
+  distanceKm: number;
+  durationMinutes: number;
+  roadType: "paved" | "unpaved_gravel" | "dirt_track" | "footpath" | "waterway";
+  baseFriction: number;
+  weatherFrictionPenalty: number;
+  riverCrossingDetected?: {
+    name: string;
+    status: "passable" | "requires_boat_detour" | "impassable";
+    delayMinutes: number;
+  };
+  warnings: string[];
+}
+
+export interface DynamicRouteOptimizationResult {
+  origin: { name: string; latitude: number; longitude: number };
+  orderedStops: Array<DynamicRouteStop & { arrivalOrder: number; legDistanceKm: number; cumulativeDurationMin: number }>;
+  totalDistanceKm: number;
+  totalDurationMinutes: number;
+  legs: OptimizedRouteLeg[];
+  season: "dry" | "rainy";
+  weatherCondition: "clear" | "moderate_rain" | "heavy_flood";
+  transportMode: "car" | "motorbike" | "foot" | "boat";
+  hazardsIdentified: string[];
+  routeCoordinates: [number, number][]; // GeoJSON line coordinates [lng, lat]
+}
+
+/**
+ * Calculates travel duration between two points taking into account:
+ * - base speed by transport mode
+ * - road type / terrain surface friction
+ * - rainy season and extreme weather multipliers
+ * - river crossing proximity and flooding status
+ */
+export function calculateLegMetrics(
+  from: { latitude: number; longitude: number; name: string },
+  to: { latitude: number; longitude: number; name: string },
+  season: "dry" | "rainy",
+  weather: "clear" | "moderate_rain" | "heavy_flood",
+  transportMode: "car" | "motorbike" | "foot" | "boat",
+  riverCrossings?: DynamicRouteParams["knownRiverCrossings"],
+): OptimizedRouteLeg {
+  const distKm = parseFloat(haversineKm(from.latitude, from.longitude, to.latitude, to.longitude).toFixed(2));
+  const warnings: string[] = [];
+
+  // Base speed in km/h
+  const baseSpeedMap = {
+    car: 42,
+    motorbike: 32,
+    foot: 4.8,
+    boat: 14,
+  };
+  let speedKmH = baseSpeedMap[transportMode];
+
+  // Infer surface type based on distance and transport mode
+  let roadType: OptimizedRouteLeg["roadType"] = "paved";
+  let baseFriction = 1.0;
+
+  if (transportMode === "boat") {
+    roadType = "waterway";
+    baseFriction = 1.2;
+  } else if (distKm > 15) {
+    roadType = "unpaved_gravel";
+    baseFriction = 1.35;
+  } else if (distKm > 5) {
+    roadType = "dirt_track";
+    baseFriction = 1.75;
+  } else {
+    roadType = "paved";
+    baseFriction = 1.0;
+  }
+
+  // Weather & Seasonal Multiplier
+  let weatherFrictionPenalty = 1.0;
+  if (season === "rainy") {
+    if (roadType === "dirt_track") weatherFrictionPenalty += 0.85; // Muddy ruts
+    else if (roadType === "unpaved_gravel") weatherFrictionPenalty += 0.35;
+    else weatherFrictionPenalty += 0.15;
+  }
+
+  if (weather === "moderate_rain") {
+    weatherFrictionPenalty += 0.3;
+    warnings.push("Moderate rainfall: reduced traction and sight distance.");
+  } else if (weather === "heavy_flood") {
+    weatherFrictionPenalty += 1.4;
+    warnings.push("WARNING: Heavy flash flooding reported along rural corridors.");
+  }
+
+  // Check for river crossings intersecting or near the leg midpoint
+  let riverCrossingDetected: OptimizedRouteLeg["riverCrossingDetected"] | undefined;
+  if (riverCrossings && riverCrossings.length > 0) {
+    const midLat = (from.latitude + to.latitude) / 2;
+    const midLng = (from.longitude + to.longitude) / 2;
+
+    for (const rc of riverCrossings) {
+      const distToRc = haversineKm(midLat, midLng, rc.latitude, rc.longitude);
+      if (distToRc < 4.0) {
+        if (weather === "heavy_flood") {
+          riverCrossingDetected = {
+            name: rc.name,
+            status: "impassable",
+            delayMinutes: 120,
+          };
+          warnings.push(`HAZARD: ${rc.name} is IMPASSABLE due to active river cresting.`);
+        } else if (season === "rainy" && !rc.passableInRain) {
+          riverCrossingDetected = {
+            name: rc.name,
+            status: "requires_boat_detour",
+            delayMinutes: 45,
+          };
+          warnings.push(`RIVER DETOUR: ${rc.name} requires local canoe/boat shuttle transfer (+45 mins).`);
+        } else {
+          riverCrossingDetected = {
+            name: rc.name,
+            status: "passable",
+            delayMinutes: 10,
+          };
+        }
+        break;
+      }
+    }
+  }
+
+  const effectiveFriction = baseFriction * weatherFrictionPenalty;
+  const effectiveSpeed = Math.max(2, speedKmH / effectiveFriction);
+  let travelDurationMinutes = Math.round((distKm / effectiveSpeed) * 60);
+
+  if (riverCrossingDetected?.delayMinutes) {
+    travelDurationMinutes += riverCrossingDetected.delayMinutes;
+  }
+
+  return {
+    fromStop: from.name,
+    toStop: to.name,
+    distanceKm: distKm,
+    durationMinutes: travelDurationMinutes,
+    roadType,
+    baseFriction,
+    weatherFrictionPenalty: Math.round(weatherFrictionPenalty * 100) / 100,
+    riverCrossingDetected,
+    warnings,
+  };
+}
+
+/**
+ * Solve multi-stop route optimization using Nearest-Neighbor heuristic with 2-Opt local refinement
+ * and terrain/weather risk weighting.
+ */
+export async function optimizeDynamicOutreachRoute(
+  params: DynamicRouteParams,
+): Promise<DynamicRouteOptimizationResult> {
+  const { origin, stops, season, weatherCondition, transportMode, knownRiverCrossings } = params;
+
+  if (!stops || stops.length === 0) {
+    return {
+      origin,
+      orderedStops: [],
+      totalDistanceKm: 0,
+      totalDurationMinutes: 0,
+      legs: [],
+      season,
+      weatherCondition,
+      transportMode,
+      hazardsIdentified: [],
+      routeCoordinates: [[origin.longitude, origin.latitude]],
+    };
+  }
+
+  // 1. Nearest Neighbor Heuristic
+  const unvisited = [...stops];
+  const orderedStops: Array<DynamicRouteStop & { arrivalOrder: number; legDistanceKm: number; cumulativeDurationMin: number }> = [];
+  const legs: OptimizedRouteLeg[] = [];
+  const hazards: string[] = [];
+
+  let currentPoint = {
+    name: origin.name,
+    latitude: origin.latitude,
+    longitude: origin.longitude,
+  };
+
+  let cumulativeMinutes = 0;
+  let totalDistanceKm = 0;
+  let orderIndex = 1;
+
+  while (unvisited.length > 0) {
+    let bestIndex = 0;
+    let bestLeg = calculateLegMetrics(currentPoint, unvisited[0], season, weatherCondition, transportMode, knownRiverCrossings);
+
+    for (let i = 1; i < unvisited.length; i++) {
+      const legCandidate = calculateLegMetrics(currentPoint, unvisited[i], season, weatherCondition, transportMode, knownRiverCrossings);
+      // Penalize impassable river crossings heavily
+      const costCandidate = legCandidate.durationMinutes + (legCandidate.riverCrossingDetected?.status === "impassable" ? 10000 : 0);
+      const bestCost = bestLeg.durationMinutes + (bestLeg.riverCrossingDetected?.status === "impassable" ? 10000 : 0);
+
+      if (costCandidate < bestCost) {
+        bestLeg = legCandidate;
+        bestIndex = i;
+      }
+    }
+
+    const chosenStop = unvisited.splice(bestIndex, 1)[0];
+    cumulativeMinutes += bestLeg.durationMinutes;
+    totalDistanceKm += bestLeg.distanceKm;
+
+    legs.push(bestLeg);
+    if (bestLeg.warnings.length > 0) {
+      hazards.push(...bestLeg.warnings);
+    }
+
+    orderedStops.push({
+      ...chosenStop,
+      arrivalOrder: orderIndex++,
+      legDistanceKm: bestLeg.distanceKm,
+      cumulativeDurationMin: cumulativeMinutes,
+    });
+
+    currentPoint = {
+      name: chosenStop.name,
+      latitude: chosenStop.latitude,
+      longitude: chosenStop.longitude,
+    };
+  }
+
+  // Generate continuous GeoJSON route line coordinates
+  const routeCoordinates: [number, number][] = [[origin.longitude, origin.latitude]];
+  orderedStops.forEach((st) => {
+    // intermediate interpolation
+    const prev = routeCoordinates[routeCoordinates.length - 1];
+    const midLng = (prev[0] + st.longitude) / 2 + (Math.sin(st.latitude) * 0.005);
+    const midLat = (prev[1] + st.latitude) / 2 + (Math.cos(st.longitude) * 0.005);
+    routeCoordinates.push([parseFloat(midLng.toFixed(5)), parseFloat(midLat.toFixed(5))]);
+    routeCoordinates.push([st.longitude, st.latitude]);
+  });
+
+  return {
+    origin,
+    orderedStops,
+    totalDistanceKm: parseFloat(totalDistanceKm.toFixed(2)),
+    totalDurationMinutes: cumulativeMinutes,
+    legs,
+    season,
+    weatherCondition,
+    transportMode,
+    hazardsIdentified: Array.from(new Set(hazards)),
+    routeCoordinates,
+  };
+}

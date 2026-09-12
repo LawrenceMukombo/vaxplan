@@ -38,6 +38,7 @@ import { Globe, Loader2 } from "lucide-react";
 import { tenantCodeOf, getTenantMapDefaults } from "@/lib/tenantGeo";
 import { loadActiveTenant } from "@/lib/tenantCache";
 import type { PopulationData, Province, District, Village, Facility } from "@shared/schema";
+import { populationRatios } from "@shared/populationDisaggregation";
 
 type PopulationSource = "nso" | "hmis" | "worldpop" | "survey" | "community_census";
 
@@ -261,18 +262,7 @@ export function PopulationDialog({
   }, [editData, defaultSource, form]);
 
   const getDemographicsRatios = () => {
-    const settings = tenantInfo?.settings?.demographics || {};
-    const under1Ratio = settings.under1 !== undefined ? Number(settings.under1) : 0.04;
-    const under5Ratio = settings.under5 !== undefined ? Number(settings.under5) : (under1Ratio * 5);
-    const pregnantRatio = settings.pregnant !== undefined ? Number(settings.pregnant) : 0.04;
-
-    const norm = (val: number) => val > 1 ? val / 100 : val;
-
-    return {
-      under1: norm(under1Ratio),
-      under5: norm(under5Ratio),
-      pregnant: norm(pregnantRatio)
-    };
+    return populationRatios(tenantInfo?.settings);
   };
 
   const handleAutoCalculateChange = (checked: boolean) => {
@@ -425,6 +415,11 @@ export function PopulationDialog({
         schoolExit: data.schoolExit || undefined,
         growthRate: data.growthRate?.toString() || undefined,
         confidenceScore: data.confidenceScore?.toString() || undefined,
+        metadata: {
+          secondYearOfLife: Math.round(data.totalPopulation * getDemographicsRatios().secondYearOfLife),
+          children24to59m: Math.round(data.totalPopulation * getDemographicsRatios().children24to59m),
+          girls9to14: Math.round(data.totalPopulation * getDemographicsRatios().girls9to14),
+        },
       };
 
       if (data.locationType === "province" && data.provinceId) {
@@ -474,6 +469,12 @@ export function PopulationDialog({
         schoolExit: data.schoolExit || undefined,
         growthRate: data.growthRate?.toString() || undefined,
         confidenceScore: data.confidenceScore?.toString() || undefined,
+        metadata: {
+          ...(editData?.metadata || {}),
+          secondYearOfLife: Math.round(data.totalPopulation * getDemographicsRatios().secondYearOfLife),
+          children24to59m: Math.round(data.totalPopulation * getDemographicsRatios().children24to59m),
+          girls9to14: Math.round(data.totalPopulation * getDemographicsRatios().girls9to14),
+        },
       };
 
       if (data.locationType === "province" && data.provinceId) {
@@ -874,13 +875,13 @@ export function PopulationDialog({
               </div>
             </div>
 
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3">
               <FormField
                 control={form.control}
                 name="under1Population"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Under 1</FormLabel>
+                    <FormLabel className="text-xs">0–11m (Infants)</FormLabel>
                     <FormControl>
                       <Input 
                         type="number" 
@@ -888,6 +889,7 @@ export function PopulationDialog({
                         value={field.value ?? ""} 
                         disabled={autoCalculate}
                         data-testid="input-under1"
+                        className="text-xs font-mono"
                       />
                     </FormControl>
                     <FormMessage />
@@ -895,12 +897,26 @@ export function PopulationDialog({
                 )}
               />
 
+              <div className="space-y-2">
+                <FormLabel className="text-xs text-sky-700 dark:text-sky-300">12–23m (2YL)</FormLabel>
+                <div className="h-9 px-3 py-2 rounded-md border border-sky-500/30 bg-sky-50/30 dark:bg-sky-950/20 text-xs font-mono font-medium flex items-center">
+                  {Math.round((form.watch("totalPopulation") || 0) * getDemographicsRatios().secondYearOfLife).toLocaleString()}
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <FormLabel className="text-xs text-teal-700 dark:text-teal-300">24–59m (Under 5)</FormLabel>
+                <div className="h-9 px-3 py-2 rounded-md border border-teal-500/30 bg-teal-50/30 dark:bg-teal-950/20 text-xs font-mono font-medium flex items-center">
+                  {Math.round((form.watch("totalPopulation") || 0) * getDemographicsRatios().children24to59m).toLocaleString()}
+                </div>
+              </div>
+
               <FormField
                 control={form.control}
                 name="under5Population"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Under 5</FormLabel>
+                    <FormLabel className="text-xs">Total Under 5</FormLabel>
                     <FormControl>
                       <Input 
                         type="number" 
@@ -908,6 +924,7 @@ export function PopulationDialog({
                         value={field.value ?? ""} 
                         disabled={autoCalculate}
                         data-testid="input-under5"
+                        className="text-xs font-mono"
                       />
                     </FormControl>
                     <FormMessage />
@@ -915,12 +932,19 @@ export function PopulationDialog({
                 )}
               />
 
+              <div className="space-y-2">
+                <FormLabel className="text-xs text-pink-700 dark:text-pink-300">Girls 9–14y (HPV)</FormLabel>
+                <div className="h-9 px-3 py-2 rounded-md border border-pink-500/30 bg-pink-50/30 dark:bg-pink-950/20 text-xs font-mono font-medium flex items-center">
+                  {Math.round((form.watch("totalPopulation") || 0) * getDemographicsRatios().girls9to14).toLocaleString()}
+                </div>
+              </div>
+
               <FormField
                 control={form.control}
                 name="pregnantWomen"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Pregnant Women</FormLabel>
+                    <FormLabel className="text-xs">Pregnant (Td)</FormLabel>
                     <FormControl>
                       <Input 
                         type="number" 
@@ -928,6 +952,7 @@ export function PopulationDialog({
                         value={field.value ?? ""} 
                         disabled={autoCalculate}
                         data-testid="input-pregnant"
+                        className="text-xs font-mono"
                       />
                     </FormControl>
                     <FormMessage />

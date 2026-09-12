@@ -91,10 +91,6 @@ const ALLOWED_MIME: Record<string, string> = {
   "application/x-7z-compressed": ".7z",
   // ── Executables / App installers ─────────────────────────────────────
   "application/vnd.android.package-archive": ".apk",
-  "application/octet-stream": ".exe",   // also catches generic binary blobs
-  "application/x-msdownload": ".exe",
-  "application/x-msdos-program": ".exe",
-  "application/x-executable": ".bin",
   // ── Video / Data ──────────────────────────────────────────────────────
   "video/mp4": ".mp4",
   "application/json": ".json",
@@ -111,19 +107,19 @@ function resolveExt(file: Express.Multer.File): string {
   for (const ext of knownExts) {
     if (orig.endsWith(ext)) return ext;
   }
-  return ".bin";
+  return ".dat";
 }
 */
 function resolveExt(file: Express.Multer.File): string {
   const orig = (file.originalname || "").toLowerCase();
-  const knownExts = [".apk", ".exe", ".zip", ".7z", ".tar", ".gz", ".pdf",
-    ".docx", ".xlsx", ".pptx", ".csv", ".mp4", ".json", ".geojson", ".png", ".jpg", ".jpeg", ".gif", ".webp"];
+  const knownExts = [".apk", ".zip", ".7z", ".tar", ".gz", ".pdf",
+    ".docx", ".xlsx", ".pptx", ".csv", ".mp4", ".json", ".geojson", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".txt"];
   for (const ext of knownExts) {
     if (orig.endsWith(ext)) return ext === ".jpeg" ? ".jpg" : ext;
   }
   const fromMime = ALLOWED_MIME[file.mimetype];
   if (fromMime) return fromMime;
-  return ".bin";
+  return ".dat";
 }
 
 researchRouter.post(
@@ -144,23 +140,24 @@ researchRouter.post(
         _fs.mkdirSync(researchDir, { recursive: true });
       } catch {}
 
-      // 500 MB cap – large enough for Windows installers and Android APKs.
-      // The ALLOWED_MIME map acts as the gate; octet-stream is always allowed
-      // so the browser can send .exe/.apk files without spoofing MIME types.
+      // 500 MB cap – large enough for research datasets and APK packages
       const upload = _multer({
         storage: _multer.memoryStorage(),
         limits: { fileSize: 500 * 1024 * 1024 }, // 500 MB
         fileFilter: (_req, file, cb) => {
-          // Accept if MIME is in the whitelist OR if it looks like a known file
-          // extension that the browser is sending as octet-stream.
-          if (ALLOWED_MIME[file.mimetype]) return cb(null, true);
           const orig = (file.originalname || "").toLowerCase();
-          const ok = [".apk", ".exe", ".zip", ".7z", ".tar", ".gz", ".bin",
-            ".json", ".geojson", ".mp4"];
+          // Explicitly reject executable / script extensions
+          const dangerous = [".exe", ".bat", ".cmd", ".sh", ".bin", ".msi", ".dll", ".ps1", ".vbs", ".js", ".mjs", ".scr", ".com"];
+          if (dangerous.some((ext) => orig.endsWith(ext))) {
+            return cb(new Error("Executable and binary script uploads are forbidden."));
+          }
+          if (ALLOWED_MIME[file.mimetype]) return cb(null, true);
+          const ok = [".apk", ".zip", ".7z", ".tar", ".gz",
+            ".json", ".geojson", ".mp4", ".pdf", ".docx", ".xlsx", ".pptx", ".csv", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".txt"];
           if (ok.some((e) => orig.endsWith(e))) return cb(null, true);
           cb(new Error(
-            "Unsupported file format. Allowed: PDF, DOCX, XLSX, PPTX, CSV, " +
-            "PNG, JPG, ZIP, 7Z, APK, EXE, MP4, JSON, GeoJSON."
+            "Unsupported file format. Allowed: PDF, DOCX, XLSX, PPTX, CSV, TXT, " +
+            "PNG, JPG, WEBP, ZIP, 7Z, APK, MP4, JSON, GeoJSON."
           ));
         },
       }).single("file");

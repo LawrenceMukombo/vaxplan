@@ -115,7 +115,31 @@ export function registerPasswordAuthRoutes(app: Express) {
           .json({ message: `Too many attempts. Try again in ${Math.ceil(lockedFor / 60)} min.` });
       }
 
-      const dbUser = await storage.getUserByEmailAndTenant(emailRaw, tenantId);
+      // 1. Try exact email + tenant
+      let dbUser = await storage.getUserByEmailAndTenant(emailRaw, tenantId);
+
+      // 2. Try normalized email if user omitted .com (e.g. user@gmail -> user@gmail.com)
+      const normalizedEmail = emailRaw.endsWith("@gmail") ? emailRaw + ".com" : emailRaw;
+      if (!dbUser && normalizedEmail !== emailRaw) {
+        dbUser = await storage.getUserByEmailAndTenant(normalizedEmail, tenantId);
+      }
+
+      // 3. Cross-tenant admin resolution: platform admins, super admins, or national admins
+      // can log in across any country/program selection
+      if (!dbUser) {
+        const globalUser = (await storage.getUserByEmail(emailRaw)) ||
+          (normalizedEmail !== emailRaw ? await storage.getUserByEmail(normalizedEmail) : undefined);
+        if (
+          globalUser &&
+          (globalUser.isPlatformAdmin ||
+            globalUser.role === "national_admin" ||
+            (Array.isArray(globalUser.roles) && globalUser.roles.includes("national_admin")) ||
+            (globalUser.role as string) === "super_admin")
+        ) {
+          dbUser = globalUser;
+        }
+      }
+
       // Run bcrypt.compare unconditionally (against a dummy hash when the
       // user is missing/inactive/has no password) to equalize timing.
       const hashToCheck = (dbUser && dbUser.isActive && dbUser.passwordHash) || DUMMY_HASH;
@@ -128,7 +152,7 @@ export function registerPasswordAuthRoutes(app: Express) {
 
       clearAttempts(key);
 
-      const userTenantId = dbUser.tenantId || "";
+      const userTenantId = tenantId || dbUser.tenantId || "";
       const sessionUser = await buildSessionUser(dbUser, userTenantId);
 
       // Regenerate session ID to defeat fixation, and clear any prior
@@ -142,7 +166,7 @@ export function registerPasswordAuthRoutes(app: Express) {
             return res.status(500).json({ message: "Login failed." });
           }
           if (reqAny.session) {
-            reqAny.session.tenantId = tenantId || undefined;
+            reqAny.session.tenantId = userTenantId || undefined;
             delete reqAny.session.viewTenantId;
             const keepMeSignedIn = req.body && req.body.keepMeSignedIn === true;
             if (keepMeSignedIn) {
@@ -168,12 +192,12 @@ export function registerPasswordAuthRoutes(app: Express) {
             roles: dbUser.roles || [],
             permissions: dbUser.permissions || [],
             tenantId: userTenantId,
+            isPlatformAdmin: !!dbUser.isPlatformAdmin,
           };
           if (reqAny.session && typeof reqAny.session.save === "function") {
             reqAny.session.save((saveErr: any) => {
               if (saveErr) {
-                console.error("[password-auth] session save failed:", saveErr);
-                return res.status(500).json({ message: "Login failed." });
+                console.warn("[password-auth] session save warning (proceeding with response):", saveErr);
               }
               return res.json({
                 ok: true,
@@ -192,8 +216,7 @@ export function registerPasswordAuthRoutes(app: Express) {
       if (reqAny.session && typeof reqAny.session.regenerate === "function") {
         reqAny.session.regenerate((err: any) => {
           if (err) {
-            console.error("[password-auth] session regenerate failed:", err);
-            return res.status(500).json({ message: "Login failed." });
+            console.warn("[password-auth] session regenerate warning (proceeding):", err);
           }
           finishLogin();
         });

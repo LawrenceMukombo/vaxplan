@@ -470,6 +470,9 @@ const defaultGuides = [
 
 const defaultResources = [
   { name: "Data Sources & Acknowledgements", url: "/data-sources" },
+  { name: "VaxPlan — Stakeholder & Sponsor Slide Deck (14-Slide Presentation)", url: "/docs/VAXPLAN_STAKEHOLDER_SLIDE_DECK.md" },
+  { name: "VaxPlan — Business Case & Stakeholder Prospectus (WHO RED Aligned)", url: "/docs/VAXPLAN_BUSINESS_CASE_AND_STAKEHOLDER_PROSPECTUS.md" },
+  { name: "VaxPlan — Organizational Terms of Reference (ToR) & Operating Manual", url: "/docs/VAXPLAN_ORGANIZATIONAL_TOR_AND_OPERATING_MANUAL.md" },
   { name: "VaxPlan — Microplanning Workflow (WHO RED + Gavi RED-Q)", url: "/docs/microplanning-workflow.md" },
   { name: "WHO Immunization Guidelines", url: "https://www.who.int/teams/immunization-vaccines-and-biologicals" },
   { name: "National Health Plan Guideline", url: "https://www.health.gov" },

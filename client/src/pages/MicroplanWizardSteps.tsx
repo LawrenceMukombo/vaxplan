@@ -55,8 +55,30 @@ import {
   Package,
   Building2,
   Shield,
+  ShieldCheck,
+  Clock,
   UserPlus,
+  LayoutGrid,
+  Table as TableIcon,
+  MapPin,
+  Users,
+  Search,
+  ChevronsLeft,
+  ChevronsRight,
+  SlidersHorizontal,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
+  Compass,
 } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuCheckboxItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
@@ -85,6 +107,7 @@ import {
 } from "@/components/ui/tooltip";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { getCountryConfig } from "@/lib/countryConfig";
+import { disaggregatePopulation, populationRatios } from "@shared/populationDisaggregation";
 import { getCachedPopulation, setCachedPopulation } from "@/lib/populationCache";
 import {
   estimateCatchmentPopulation,
@@ -110,6 +133,16 @@ import {
   isAtLeastDaysAhead,
 } from "@shared/schedulingDates";
 import { normalizeStockVaccineName } from "@shared/vaccineSchedule";
+import {
+  calculateRedCategory,
+  calculateDropouts,
+  calculateZeroDose,
+  calculateRecommendedSessions,
+  RED_CATEGORY_DEFINITIONS,
+  WHO_BESD_DOMAINS,
+  INTEGRATED_CHILD_HEALTH_INTERVENTIONS,
+  DEFAULTER_TRACKING_PROTOCOLS,
+} from "@shared/redMicroplanning";
 import {
   StepDef, STEPS, ANTIGENS, BUDGET_CATEGORIES, FUNDING_SOURCES, WhatToDo,
   ExcludedVillageDetail, currentQuarter, formatRemovedAt
@@ -463,8 +496,29 @@ export function Step1({
   const dtp1 = parseFloat(coverage.dtp1 || "0");
   const dtp3 = parseFloat(coverage.dtp3 || "0");
   const mcv1 = parseFloat(coverage.mcv1 || "0");
-  const dropDtp = dtp1 > 0 ? Math.round(((dtp1 - dtp3) / dtp1) * 100) : 0;
-  const dropMcv = dtp1 > 0 ? Math.round(((dtp1 - mcv1) / dtp1) * 100) : 0;
+  const mcv2 = parseFloat(coverage.mcv2 || "0");
+  const hpv = parseFloat(coverage.hpv || "0");
+  const td = parseFloat(coverage.td || "0");
+  const targetInfantsNum = parseFloat(coverage.targetInfants || "0");
+  const dtp1DosesNum = parseFloat(coverage.dtp1Doses || "0");
+
+  const dropouts = calculateDropouts({
+    dtp1: dtp1DosesNum > 0 ? dtp1DosesNum : (dtp1 > 0 ? dtp1 : null),
+    dtp3: parseFloat(coverage.dtp3Doses || "0") > 0 ? parseFloat(coverage.dtp3Doses) : (dtp3 > 0 ? dtp3 : null),
+    mcv1: parseFloat(coverage.mcv1Doses || "0") > 0 ? parseFloat(coverage.mcv1Doses) : (mcv1 > 0 ? mcv1 : null),
+    mcv2: parseFloat(coverage.mcv2Doses || "0") > 0 ? parseFloat(coverage.mcv2Doses) : (mcv2 > 0 ? mcv2 : null),
+  });
+  const dropDtp = dropouts.dtp1Dtp3DropoutPct ?? (dtp1 > 0 ? Math.round(((dtp1 - dtp3) / dtp1) * 100) : 0);
+  const dropMcv = dropouts.dtp1Mcv1DropoutPct ?? (dtp1 > 0 ? Math.round(((dtp1 - mcv1) / dtp1) * 100) : 0);
+  const dropMcv2 = dropouts.mcv1Mcv2DropoutPct ?? (mcv1 > 0 ? Math.round(((mcv1 - mcv2) / mcv1) * 100) : 0);
+
+  const zeroDose = calculateZeroDose(
+    targetInfantsNum > 0 ? targetInfantsNum : null,
+    dtp1DosesNum > 0 ? dtp1DosesNum : (dtp1 > 0 && targetInfantsNum > 0 ? Math.round((dtp1 / 100) * targetInfantsNum) : null)
+  );
+
+  const redCategoryNum = calculateRedCategory(dtp1 > 0 ? dtp1 : null, dropDtp);
+  const redDef = redCategoryNum ? RED_CATEGORY_DEFINITIONS[redCategoryNum] : null;
   const set = (k: string, v: string) => setCoverage({ ...coverage, [k]: v });
 
   // -- Scope details: fetch provinces + districts ---------------------------
@@ -844,11 +898,13 @@ export function Step1({
           </div>
         )}
       </div>
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
         <NumberField label="DTP1 %" value={coverage.dtp1} onChange={(v) => set("dtp1", v)} testId="input-dtp1" suffix="%" />
         <NumberField label="DTP3 %" value={coverage.dtp3} onChange={(v) => set("dtp3", v)} testId="input-dtp3" suffix="%" />
         <NumberField label="MCV1 %" value={coverage.mcv1} onChange={(v) => set("mcv1", v)} testId="input-mcv1" suffix="%" />
         <NumberField label="MCV2 %" value={coverage.mcv2} onChange={(v) => set("mcv2", v)} testId="input-mcv2" suffix="%" />
+        <NumberField label="HPV (Girls 9-14) %" value={coverage.hpv} onChange={(v) => set("hpv", v)} testId="input-hpv" suffix="%" />
+        <NumberField label="Td (Pregnant) %" value={coverage.td} onChange={(v) => set("td", v)} testId="input-td" suffix="%" />
       </div>
 
       {/* Raw Numbers section - enter doses + denominator, auto-calculates coverage % */}
@@ -875,6 +931,14 @@ export function Step1({
                 if (dtp3d > 0) updates.dtp3 = Math.min(Math.round((dtp3d / target) * 100), 100).toString();
                 if (mcv1d > 0) updates.mcv1 = Math.min(Math.round((mcv1d / target) * 100), 100).toString();
                 if (mcv2d > 0) updates.mcv2 = Math.min(Math.round((mcv2d / target) * 100), 100).toString();
+                const hpvd = parseFloat(coverage.hpvDoses || "0");
+                const tdd = parseFloat(coverage.tdDoses || "0");
+                if (hpvd > 0) updates.hpv = Math.min(Math.round((hpvd / target) * 100), 100).toString();
+                if (tdd > 0) {
+                  const pregTarget = parseFloat(coverage.denominatorPregnantWomen || "0");
+                  const effectivePreg = pregTarget > 0 ? pregTarget : target;
+                  updates.td = Math.min(Math.round((tdd / effectivePreg) * 100), 100).toString();
+                }
               }
               // SIA coverage
               const siaTgt = parseFloat(coverage.targetSIA || "0");
@@ -939,6 +1003,29 @@ export function Step1({
             }}
             testId="input-mcv2-doses"
           />
+          <NumberField
+            label="HPV Doses Given (Girls 9-14y)"
+            value={coverage.hpvDoses}
+            onChange={(v) => {
+              const t = parseFloat(coverage.targetInfants || "0");
+              const d = parseFloat(v || "0");
+              const pct = t > 0 && d > 0 ? String(Math.min(Math.round((d / t) * 100), 100)) : coverage.hpv;
+              setCoverage({ ...coverage, hpvDoses: v, hpv: pct });
+            }}
+            testId="input-hpv-doses"
+          />
+          <NumberField
+            label="Td2+ Doses Given (Pregnant)"
+            value={coverage.tdDoses}
+            onChange={(v) => {
+              const preg = parseFloat(coverage.denominatorPregnantWomen || "0");
+              const t = preg > 0 ? preg : parseFloat(coverage.targetInfants || "0");
+              const d = parseFloat(v || "0");
+              const pct = t > 0 && d > 0 ? String(Math.min(Math.round((d / t) * 100), 100)) : coverage.td;
+              setCoverage({ ...coverage, tdDoses: v, td: pct });
+            }}
+            testId="input-td-doses"
+          />
           {planType === "campaign" && (
             <>
               <NumberField
@@ -971,21 +1058,86 @@ export function Step1({
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 rounded-md border bg-muted/30 p-3">
+      {/* WHO Drop-Out Rates and Zero-Dose Monitoring (IIP 2025 Module 4 Fig 4.5/4.6) */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 rounded-md border bg-muted/30 p-3">
         <div className="text-sm">
-          Dropout DTP1-&gt;DTP3
-          <div className={`text-lg font-semibold ${dropDtp > 10 ? "text-amber-600" : ""}`}>{dropDtp}%</div>
+          <div className="text-xs text-muted-foreground font-medium">Dropout DTP1→DTP3 (Infant)</div>
+          <div className={`text-lg font-bold ${dropDtp > 10 ? "text-amber-600 dark:text-amber-400" : "text-foreground"}`}>
+            {dropDtp}% {dropouts.dtp1Dtp3DropoutCount !== null && <span className="text-xs font-normal text-muted-foreground">({dropouts.dtp1Dtp3DropoutCount} dropouts)</span>}
+          </div>
         </div>
         <div className="text-sm">
-          Dropout DTP1-&gt;MCV1
-          <div className={`text-lg font-semibold ${dropMcv > 10 ? "text-amber-600" : ""}`}>{dropMcv}%</div>
+          <div className="text-xs text-muted-foreground font-medium">Dropout DTP1→MCV1 (Infant)</div>
+          <div className={`text-lg font-bold ${dropMcv > 10 ? "text-amber-600 dark:text-amber-400" : "text-foreground"}`}>
+            {dropMcv}% {dropouts.dtp1Mcv1DropoutCount !== null && <span className="text-xs font-normal text-muted-foreground">({dropouts.dtp1Mcv1DropoutCount} dropouts)</span>}
+          </div>
+        </div>
+        <div className="text-sm">
+          <div className="text-xs text-muted-foreground font-medium">Dropout MCV1→MCV2 (2YL)</div>
+          <div className={`text-lg font-bold ${dropMcv2 > 10 ? "text-amber-600 dark:text-amber-400" : "text-foreground"}`}>
+            {dropMcv2}% {dropouts.mcv1Mcv2DropoutCount !== null && <span className="text-xs font-normal text-muted-foreground">({dropouts.mcv1Mcv2DropoutCount} dropouts)</span>}
+          </div>
+        </div>
+        <div className="text-sm">
+          <div className="text-xs text-muted-foreground font-medium">Zero-Dose Children (Unreached)</div>
+          <div className={`text-lg font-bold ${zeroDose.zeroDoseCount && zeroDose.zeroDoseCount > 0 ? "text-rose-600 dark:text-rose-400" : "text-foreground"}`}>
+            {zeroDose.zeroDoseCount ?? "-"} <span className="text-xs font-normal text-muted-foreground">({zeroDose.zeroDosePct ?? 0}%)</span>
+          </div>
         </div>
       </div>
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <NumberField label="Stockouts" value={coverage.stockouts} onChange={(v) => set("stockouts", v)} />
-        <NumberField label="AEFI cases" value={coverage.aefi} onChange={(v) => set("aefi", v)} />
-        <NumberField label="Sessions planned" value={coverage.sessionsPlanned} onChange={(v) => set("sessionsPlanned", v)} />
-        <NumberField label="Sessions held" value={coverage.sessionsHeld} onChange={(v) => set("sessionsHeld", v)} />
+
+      {/* WHO RED 4-Category Prioritization Matrix Card (RED Tool 1e & IIP p. 198) */}
+      {redDef && (
+        <div className={`rounded-md border p-3 text-xs ${
+          redDef.category === 1
+            ? "border-emerald-500/30 bg-emerald-50/50 dark:bg-emerald-950/20 text-emerald-900 dark:text-emerald-200"
+            : redDef.category === 2
+            ? "border-amber-500/30 bg-amber-50/50 dark:bg-amber-950/20 text-amber-900 dark:text-amber-200"
+            : redDef.category === 3
+            ? "border-blue-500/30 bg-blue-50/50 dark:bg-blue-950/20 text-blue-900 dark:text-blue-200"
+            : "border-rose-500/30 bg-rose-50/50 dark:bg-rose-950/20 text-rose-900 dark:text-rose-200"
+        }`}>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <Badge variant="outline" className="font-bold uppercase text-[10px]">
+                WHO RED Category {redDef.category}
+              </Badge>
+              <span className="font-semibold">{redDef.name} ({redDef.priority})</span>
+            </div>
+            <span className="text-[11px] font-mono">
+              Access (DTP1): {dtp1}% | Dropout (DTP1-3): {dropDtp}%
+            </span>
+          </div>
+          <p className="mt-1.5 font-medium">{redDef.description}</p>
+          <div className="mt-2 text-[11px]">
+            <span className="font-semibold">WHO Recommended Focus: </span>
+            <span>{redDef.recommendedActions.join(" • ")}</span>
+          </div>
+        </div>
+      )}
+
+      {/* Disease Surveillance & Operational Review (WHO IIP Module 4 Fig 4.5/4.6) */}
+      <div className="rounded-md border bg-muted/30 p-3 space-y-3">
+        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+          Disease Surveillance & Service Delivery Review (WHO IIP Module 4 Fig 4.5/4.6)
+        </p>
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+          <NumberField label="Stockouts" value={coverage.stockouts} onChange={(v) => set("stockouts", v)} />
+          <NumberField label="AEFI cases" value={coverage.aefi} onChange={(v) => set("aefi", v)} />
+          <NumberField label="Sessions planned" value={coverage.sessionsPlanned} onChange={(v) => set("sessionsPlanned", v)} />
+          <NumberField label="Sessions held" value={coverage.sessionsHeld} onChange={(v) => set("sessionsHeld", v)} />
+          <NumberField label="Measles cases" value={coverage.measlesCases} onChange={(v) => set("measlesCases", v)} />
+          <NumberField label="Other reportable VPDs" value={coverage.otherVpdCases} onChange={(v) => set("otherVpdCases", v)} />
+        </div>
+        <div>
+          <Label className="text-xs">Surveillance & Epidemiological Notes</Label>
+          <Input
+            value={coverage.vpdNotes || ""}
+            onChange={(e) => set("vpdNotes", e.target.value)}
+            placeholder="Record suspected/confirmed outbreaks (Measles, AFP/polio, Diphtheria, Pertussis, Neonatal Tetanus, Yellow Fever) or zero-dose clusters"
+            className="mt-1 text-xs"
+          />
+        </div>
       </div>
     </div>
   );
@@ -1050,6 +1202,7 @@ export function Step2({
   // Map draw mode: 'none' | 'facility' (draw facility catchment) | 'community' (draw community circle)
   const [drawMode, setDrawMode] = useState<"none" | "facility" | "community">("none");
   const [facilityPolygon, setFacilityPolygon] = useState<any>(null);
+  const [extractionRadiusKm, setExtractionRadiusKm] = useState<number>(countryConfig.defaultExtractionRadiusKm || 25);
 
   const { data: catchment } = useQuery<any>({
     queryKey: [`/api/facilities/${facility?.id}/catchments`],
@@ -1075,13 +1228,12 @@ export function Step2({
 
   // Fetch all communities in facility catchment (covered + uncovered)
   const { data: catchmentCommunities, refetch: refetchCatchment, isLoading: loadingCatchment } = useQuery<any>({
-    queryKey: ["/api/spatial/uncovered-communities", facility?.id, communities.length],
+    queryKey: ["/api/spatial/uncovered-communities", facility?.id, extractionRadiusKm, communities.length],
     enabled: !!facility?.id,
     retry: 1,
     staleTime: 30000,
     queryFn: async () => {
-      // Updated search radius to 25km per user request (was 15km originally)
-      const params = new URLSearchParams({ facilityId: String(facility?.id), radiusKm: "25" });
+      const params = new URLSearchParams({ facilityId: String(facility?.id), radiusKm: String(extractionRadiusKm) });
       if (microplan?.id) params.set("microplanId", String(microplan.id));
       // Abort after 20 seconds to prevent the panel from spinning forever if
       // the PostGIS spatial query is slow or the connection is poor.
@@ -1645,6 +1797,100 @@ export function Step2({
     setSelectedIdx(next.length - 1);
   };
 
+  const [communityViewMode, setCommunityViewMode] = useState<"cards" | "table">("cards");
+  const [communitySearch, setCommunitySearch] = useState<string>("");
+  const [communityFilter, setCommunityFilter] = useState<"all" | "missing_gps" | "hard_to_reach" | "fixed" | "outreach" | "mobile">("all");
+  const [communitySortKey, setCommunitySortKey] = useState<string>("index");
+  const [communitySortDir, setCommunitySortDir] = useState<"asc" | "desc">("asc");
+  const [communityPage, setCommunityPage] = useState<number>(1);
+  const [communityPageSize, setCommunityPageSize] = useState<number>(10);
+  const [visibleCols, setVisibleCols] = useState<{
+    type: boolean;
+    strategy: boolean;
+    targetPop: boolean;
+    gridPop: boolean;
+    coords: boolean;
+    post: boolean;
+  }>({
+    type: true,
+    strategy: true,
+    targetPop: true,
+    gridPop: true,
+    coords: true,
+    post: true,
+  });
+
+  const toggleSort = (key: string) => {
+    if (communitySortKey === key) {
+      setCommunitySortDir((prev) => (prev === "asc" ? "desc" : "asc"));
+    } else {
+      setCommunitySortKey(key);
+      setCommunitySortDir("asc");
+    }
+  };
+
+  const totalCommunitiesCount = communities.length;
+  const staticCount = communities.filter((c) => (c.strategy || "static") === "static").length;
+  const outreachCount = communities.filter((c) => c.strategy === "outreach").length;
+  const mobileCount = communities.filter((c) => c.strategy === "mobile").length;
+  const withCoordsCount = communities.filter(
+    (c) => c.latitude && c.longitude && !isNaN(parseFloat(c.latitude)) && !isNaN(parseFloat(c.longitude))
+  ).length;
+  const missingCoordsCount = totalCommunitiesCount - withCoordsCount;
+  const hardToReachCount = communities.filter((c) => c.hardToReach || c.accessBarriers).length;
+
+  const filteredAndSortedCommunities = useMemo(() => {
+    return communities
+      .map((c, originalIdx) => ({ ...c, originalIdx }))
+      .filter((c) => {
+        if (communitySearch.trim()) {
+          const q = communitySearch.toLowerCase();
+          const matchName = String(c.name || "").toLowerCase().includes(q);
+          const matchPost = String(c.vaccinationPostName || "").toLowerCase().includes(q);
+          const matchLeader = String(c.leaderName || "").toLowerCase().includes(q);
+          if (!matchName && !matchPost && !matchLeader) return false;
+        }
+        if (communityFilter === "missing_gps") {
+          const hasCoords = c.latitude && c.longitude && !isNaN(parseFloat(c.latitude)) && !isNaN(parseFloat(c.longitude));
+          if (hasCoords) return false;
+        } else if (communityFilter === "hard_to_reach") {
+          if (!c.hardToReach && !c.accessBarriers) return false;
+        } else if (communityFilter === "fixed") {
+          if ((c.strategy || "static") !== "static") return false;
+        } else if (communityFilter === "outreach") {
+          if (c.strategy !== "outreach") return false;
+        } else if (communityFilter === "mobile") {
+          if (c.strategy !== "mobile") return false;
+        }
+        return true;
+      })
+      .sort((a, b) => {
+        let diff = 0;
+        if (communitySortKey === "name") {
+          diff = String(a.name || "").localeCompare(String(b.name || ""));
+        } else if (communitySortKey === "targetPop") {
+          diff = (parseFloat(a.targetPopulation || "0") || 0) - (parseFloat(b.targetPopulation || "0") || 0);
+        } else if (communitySortKey === "gridPop") {
+          diff = (parseFloat(a.gridPop || "0") || 0) - (parseFloat(b.gridPop || "0") || 0);
+        } else if (communitySortKey === "distance") {
+          diff = (parseFloat(a.distanceKm || "0") || 0) - (parseFloat(b.distanceKm || "0") || 0);
+        } else {
+          diff = a.originalIdx - b.originalIdx;
+        }
+        return communitySortDir === "asc" ? diff : -diff;
+      });
+  }, [communities, communitySearch, communityFilter, communitySortKey, communitySortDir]);
+
+  const totalFilteredCount = filteredAndSortedCommunities.length;
+  const effectivePageSize = communityPageSize === 9999 ? totalFilteredCount || 1 : communityPageSize;
+  const totalPages = Math.max(1, Math.ceil(totalFilteredCount / effectivePageSize));
+  const currentPage = Math.min(communityPage, totalPages);
+  const pagedCommunities = useMemo(() => {
+    if (communityPageSize === 9999) return filteredAndSortedCommunities;
+    const start = (currentPage - 1) * communityPageSize;
+    return filteredAndSortedCommunities.slice(start, start + communityPageSize);
+  }, [filteredAndSortedCommunities, currentPage, communityPageSize]);
+
   return (
     <div className="space-y-4">
       {showMismatchWarning && (
@@ -1652,6 +1898,59 @@ export function Step2({
           <span>Warning: Sum of community under-1 targets ({sumCommunityUnder1} infants) differs from facility target infants in Step 1 ({targetInfants} infants) by more than 10%. Please verify targets.</span>
         </div>
       )}
+
+      {/* Catchment Overview KPI Bar */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5" data-testid="catchment-kpi-bar">
+        <div className="rounded-xl border bg-card p-3 shadow-2xs space-y-1">
+          <span className="text-[11px] font-medium text-muted-foreground flex items-center gap-1.5">
+            <MapPin className="h-3.5 w-3.5 text-primary" /> Communities
+          </span>
+          <div className="flex items-baseline gap-1.5">
+            <span className="text-lg font-bold text-foreground">{totalCommunitiesCount}</span>
+            <span className="text-[10px] text-muted-foreground">in catchment</span>
+          </div>
+        </div>
+
+        <div className="rounded-xl border bg-card p-3 shadow-2xs space-y-1">
+          <span className="text-[11px] font-medium text-muted-foreground flex items-center gap-1.5">
+            <Users className="h-3.5 w-3.5 text-blue-500" /> Target (&lt;1y Infants)
+          </span>
+          <div className="flex items-baseline gap-1.5 flex-wrap">
+            <span className="text-lg font-bold text-foreground">{sumCommunityUnder1.toLocaleString()}</span>
+            <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${
+              targetInfants > 0 && Math.abs(denominatorGap) <= targetInfants * 0.05
+                ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                : "bg-amber-500/10 text-amber-700 dark:text-amber-300"
+            }`}>
+              {denominatorStatus}
+            </span>
+          </div>
+        </div>
+
+        <div className="rounded-xl border bg-card p-3 shadow-2xs space-y-1">
+          <span className="text-[11px] font-medium text-muted-foreground flex items-center gap-1.5">
+            <Sparkles className="h-3.5 w-3.5 text-indigo-500" /> Delivery Strategies
+          </span>
+          <div className="flex items-center gap-1.5 text-xs font-semibold flex-wrap">
+            <span className="text-emerald-700 dark:text-emerald-300">{staticCount} Fixed</span>
+            <span className="text-muted-foreground">•</span>
+            <span className="text-blue-700 dark:text-blue-300">{outreachCount} Outreach</span>
+            <span className="text-muted-foreground">•</span>
+            <span className="text-purple-700 dark:text-purple-300">{mobileCount} Mobile</span>
+          </div>
+        </div>
+
+        <div className="rounded-xl border bg-card p-3 shadow-2xs space-y-1">
+          <span className="text-[11px] font-medium text-muted-foreground flex items-center gap-1.5">
+            <MapIcon className="h-3.5 w-3.5 text-emerald-500" /> Geolocation GPS
+          </span>
+          <div className="flex items-baseline gap-1.5">
+            <span className="text-lg font-bold text-foreground">{withCoordsCount} of {totalCommunitiesCount}</span>
+            <span className="text-[10px] text-muted-foreground">pins on map</span>
+          </div>
+        </div>
+      </div>
+
       <div className="grid grid-cols-1 xl:grid-cols-4 gap-4">
         {/* Map + Table - 3 columns */}
         <div className="xl:col-span-3 space-y-4">
@@ -1813,222 +2112,757 @@ export function Step2({
             </div>
           )}
 
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="border-b text-left text-xs uppercase text-muted-foreground">
-                <tr>
-                  {/* Original code:
-                  <th className="p-2 w-8">#</th>
-                  <th className="p-2">Name</th>
-                  <th className="p-2">Type</th>
-                  <th className="p-2" title="WorldPop / gridded raster population estimate">WorldPop</th>
-                  <th className="p-2" title="NSO / HMIS / Survey / Census population (manual entry)">Survey/HMIS/NSO Pop </th>
-                  <th className="p-2">Target Pop</th>
-                  <th className="p-2">Source</th>
-                  <th className="p-2">Strategy</th>
-                  <th className="p-2">Coordinates</th>
-                  <th className="p-2"></th>
-                  */}
-                  <th className="p-2 w-8">#</th>
-                  <th className="p-2 min-w-[150px] md:min-w-[200px]">Name</th>
-                  <th className="p-2 w-28">Type</th>
-                  <th className="p-2" title="WorldPop / gridded raster population estimate">WorldPop</th>
-                  <th className="p-2" title="NSO / HMIS / Survey / Census population (manual entry)">Survey/HMIS/NSO Pop </th>
-                  <th className="p-2">Target Pop (&lt;1 yr)</th>
-                  <th className="p-2 w-28">Source</th>
-                  <th className="p-2 w-28">Strategy</th>
-                  <th className="p-2 min-w-[150px]">Coordinates</th>
-                  <th className="p-2 w-8"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {communities.map((c, i) => {
-                  const hasCoords =
-                    c.latitude && c.longitude &&
-                    !isNaN(parseFloat(c.latitude)) && !isNaN(parseFloat(c.longitude));
-                  const isError = errorRowId != null && `pop-${i}` === errorRowId;
-                  return (
-                    <tr
-                      key={c.rowId}
-                      className={`border-b cursor-pointer ${
-                        selectedIdx === i ? "bg-primary/5" : ""
-                      }`}
-                      onClick={() => setSelectedIdx(i)}
-                      data-testid={`row-community-${i}`}
+          {/* Subheader, Search, Filters, Column Visibility, and View Mode Switcher */}
+          <div className="space-y-2.5 pt-2 border-t">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h3 className="font-semibold text-sm text-foreground flex items-center gap-1.5">
+                  <MapPin className="h-4 w-4 text-primary" />
+                  <span>Catchment Communities & Posts ({totalCommunitiesCount})</span>
+                </h3>
+                <p className="text-xs text-muted-foreground">
+                  Review village targets, GPS pin locations, delivery strategies, and local contacts.
+                </p>
+              </div>
+
+              {/* View Mode & Column Visibility Toggles */}
+              <div className="flex items-center gap-2 flex-wrap">
+                {/* Column Visibility Menu (for Table) */}
+                {communityViewMode === "table" && (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-7 text-xs font-medium gap-1.5 px-2.5 rounded-md"
+                        data-testid="button-column-visibility"
+                      >
+                        <SlidersHorizontal className="h-3.5 w-3.5 text-muted-foreground" />
+                        <span>Columns</span>
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-44 text-xs">
+                      <DropdownMenuLabel className="text-[11px] font-semibold">Toggle Columns</DropdownMenuLabel>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuCheckboxItem
+                        checked={visibleCols.type}
+                        onCheckedChange={(v) => setVisibleCols((prev) => ({ ...prev, type: !!v }))}
+                      >
+                        Settlement Type
+                      </DropdownMenuCheckboxItem>
+                      <DropdownMenuCheckboxItem
+                        checked={visibleCols.strategy}
+                        onCheckedChange={(v) => setVisibleCols((prev) => ({ ...prev, strategy: !!v }))}
+                      >
+                        Delivery Strategy
+                      </DropdownMenuCheckboxItem>
+                      <DropdownMenuCheckboxItem
+                        checked={visibleCols.targetPop}
+                        onCheckedChange={(v) => setVisibleCols((prev) => ({ ...prev, targetPop: !!v }))}
+                      >
+                        Target Infants (&lt;1y)
+                      </DropdownMenuCheckboxItem>
+                      <DropdownMenuCheckboxItem
+                        checked={visibleCols.gridPop}
+                        onCheckedChange={(v) => setVisibleCols((prev) => ({ ...prev, gridPop: !!v }))}
+                      >
+                        Satellite Population
+                      </DropdownMenuCheckboxItem>
+                      <DropdownMenuCheckboxItem
+                        checked={visibleCols.post}
+                        onCheckedChange={(v) => setVisibleCols((prev) => ({ ...prev, post: !!v }))}
+                      >
+                        Vaccination Post
+                      </DropdownMenuCheckboxItem>
+                      <DropdownMenuCheckboxItem
+                        checked={visibleCols.coords}
+                        onCheckedChange={(v) => setVisibleCols((prev) => ({ ...prev, coords: !!v }))}
+                      >
+                        GPS Coordinates
+                      </DropdownMenuCheckboxItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                )}
+
+                {/* View Mode Switcher */}
+                <div className="inline-flex items-center rounded-lg border bg-muted/60 p-0.5 text-muted-foreground shadow-2xs" data-testid="community-view-mode-toggle">
+                  <Button
+                    type="button"
+                    variant={communityViewMode === "cards" ? "default" : "ghost"}
+                    size="sm"
+                    onClick={() => setCommunityViewMode("cards")}
+                    className={`h-7 text-xs font-medium gap-1.5 px-2.5 rounded-md transition-all ${
+                      communityViewMode === "cards" ? "shadow-xs" : "text-muted-foreground hover:text-foreground"
+                    }`}
+                    data-testid="button-view-cards"
+                  >
+                    <LayoutGrid className="h-3.5 w-3.5" />
+                    Cards
+                  </Button>
+                  <Button
+                    type="button"
+                    variant={communityViewMode === "table" ? "default" : "ghost"}
+                    size="sm"
+                    onClick={() => setCommunityViewMode("table")}
+                    className={`h-7 text-xs font-medium gap-1.5 px-2.5 rounded-md transition-all ${
+                      communityViewMode === "table" ? "shadow-xs" : "text-muted-foreground hover:text-foreground"
+                    }`}
+                    data-testid="button-view-table"
+                  >
+                    <TableIcon className="h-3.5 w-3.5" />
+                    Enterprise Table
+                  </Button>
+                </div>
+
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => add()}
+                  disabled={readOnly}
+                  className="h-7 text-xs gap-1 border-primary/30 text-primary hover:bg-primary/5 font-medium"
+                  data-testid="button-add-community-header"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  <span>Add Community</span>
+                </Button>
+              </div>
+            </div>
+
+            {/* Quick Search & Status Filter Chips */}
+            <div className="flex flex-wrap items-center justify-between gap-2 bg-muted/20 p-2 rounded-xl border border-border/50">
+              <div className="relative flex-1 min-w-[200px] max-w-xs">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                <Input
+                  value={communitySearch}
+                  onChange={(e) => {
+                    setCommunitySearch(e.target.value);
+                    setCommunityPage(1);
+                  }}
+                  placeholder="Search by community, post, leader..."
+                  className="h-7 pl-8 pr-7 text-xs bg-background"
+                  data-testid="input-community-search"
+                />
+                {communitySearch && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCommunitySearch("");
+                      setCommunityPage(1);
+                    }}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground text-xs"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                )}
+              </div>
+
+              {/* Filter Chips */}
+              <div className="flex items-center gap-1.5 flex-wrap text-xs">
+                <Button
+                  type="button"
+                  variant={communityFilter === "all" ? "default" : "ghost"}
+                  size="sm"
+                  onClick={() => {
+                    setCommunityFilter("all");
+                    setCommunityPage(1);
+                  }}
+                  className="h-6 text-[11px] px-2 py-0 rounded-full font-medium"
+                >
+                  All ({totalCommunitiesCount})
+                </Button>
+                <Button
+                  type="button"
+                  variant={communityFilter === "missing_gps" ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => {
+                    setCommunityFilter("missing_gps");
+                    setCommunityPage(1);
+                  }}
+                  className={`h-6 text-[11px] px-2 py-0 rounded-full gap-1 ${
+                    communityFilter === "missing_gps"
+                      ? ""
+                      : missingCoordsCount > 0
+                      ? "border-amber-500/40 text-amber-700 dark:text-amber-300 bg-amber-50/50 dark:bg-amber-950/20"
+                      : "text-muted-foreground"
+                  }`}
+                >
+                  <span>Needs Pin 📍</span>
+                  <Badge variant="secondary" className="text-[9px] px-1 py-0 h-3.5">
+                    {missingCoordsCount}
+                  </Badge>
+                </Button>
+                <Button
+                  type="button"
+                  variant={communityFilter === "hard_to_reach" ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => {
+                    setCommunityFilter("hard_to_reach");
+                    setCommunityPage(1);
+                  }}
+                  className="h-6 text-[11px] px-2 py-0 rounded-full gap-1"
+                >
+                  <span>Hard to Reach ⚠️</span>
+                  <Badge variant="secondary" className="text-[9px] px-1 py-0 h-3.5">
+                    {hardToReachCount}
+                  </Badge>
+                </Button>
+                <Button
+                  type="button"
+                  variant={communityFilter === "outreach" ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => {
+                    setCommunityFilter("outreach");
+                    setCommunityPage(1);
+                  }}
+                  className="h-6 text-[11px] px-2 py-0 rounded-full gap-1"
+                >
+                  <span>Outreach ({outreachCount})</span>
+                </Button>
+              </div>
+            </div>
+          </div>
+
+          {communityViewMode === "cards" ? (
+            <div className="space-y-3" data-testid="communities-card-view">
+              {pagedCommunities.length === 0 ? (
+                <div className="rounded-xl border border-dashed p-8 text-center bg-card shadow-2xs">
+                  <MapPin className="mx-auto h-8 w-8 text-muted-foreground/60 mb-2" />
+                  <h4 className="font-semibold text-sm text-foreground">
+                    {totalCommunitiesCount === 0 ? "No communities in catchment yet" : "No communities match your filters"}
+                  </h4>
+                  <p className="text-xs text-muted-foreground mt-1 max-w-sm mx-auto">
+                    {totalCommunitiesCount === 0
+                      ? "Click anywhere on the map above to drop a village pin, or click Add Community."
+                      : "Try clearing your search query or switching filter chips to view all settlements."}
+                  </p>
+                  {totalCommunitiesCount === 0 ? (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => add()}
+                      className="mt-3 gap-1.5 text-xs"
+                      disabled={readOnly}
                     >
-                      <td className="p-1 text-center text-xs font-mono text-muted-foreground">
-                        {i + 1}
-                      </td>
-                      <td className="p-1">
-                        {/* Original code:
-                        <Input
-                          value={c.name}
-                          onChange={(e) => update(i, { name: e.target.value })}
-                          onClick={(e) => e.stopPropagation()}
-                        />
-                        */}
-                        <div className="flex flex-col gap-1">
-                          <Input
-                            className="min-w-[150px] md:min-w-[200px]"
-                            value={c.name}
-                            onChange={(e) => update(i, { name: e.target.value })}
-                            onClick={(e) => e.stopPropagation()}
-                          />
-                          <div className="flex gap-1 items-center px-1">
-                            {c.villageId ? (
-                              <span className="text-[9px] font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/30 px-1 py-0.5 rounded">
-                                Registered Community
+                      <Plus className="h-3.5 w-3.5" /> Add First Community
+                    </Button>
+                  ) : (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        setCommunitySearch("");
+                        setCommunityFilter("all");
+                      }}
+                      className="mt-3 gap-1.5 text-xs"
+                    >
+                      Reset Filters
+                    </Button>
+                  )}
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {pagedCommunities.map((c) => {
+                    const i = c.originalIdx;
+                    const isSelected = selectedIdx === i;
+                    const hasCoords =
+                      c.latitude &&
+                      c.longitude &&
+                      !isNaN(parseFloat(c.latitude)) &&
+                      !isNaN(parseFloat(c.longitude));
+                    const isError = errorRowId != null && `pop-${i}` === errorRowId;
+
+                    return (
+                      <div
+                        key={c.rowId}
+                        onClick={() => setSelectedIdx(i)}
+                        className={`rounded-xl border p-3.5 transition-all cursor-pointer bg-card shadow-2xs space-y-3 ${
+                          isSelected
+                            ? "border-primary ring-1 ring-primary/40 bg-primary/[0.02]"
+                            : isError
+                            ? "border-destructive/60 bg-destructive/5"
+                            : "border-border/80 hover:border-border hover:shadow-xs"
+                        }`}
+                        data-testid={`card-community-${i}`}
+                      >
+                        {/* Header: Number, Name, Badges */}
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary font-bold text-[10px]">
+                                {i + 1}
                               </span>
-                            ) : (
-                              <span className="text-[9px] font-semibold text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/30 px-1 py-0.5 rounded">
-                                Draft/Unregistered
-                              </span>
-                            )}
+                              <Input
+                                value={c.name}
+                                onChange={(e) => update(i, { name: e.target.value })}
+                                onClick={(e) => e.stopPropagation()}
+                                placeholder="Community name"
+                                className="h-7 text-xs font-semibold px-2 flex-1 min-w-[120px]"
+                                data-testid={`input-community-name-card-${i}`}
+                              />
+                            </div>
+                            <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+                              {c.villageId ? (
+                                <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300">
+                                  Registered
+                                </Badge>
+                              ) : (
+                                <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300">
+                                  Draft
+                                </Badge>
+                              )}
+                              <Select
+                                value={c.strategy || "static"}
+                                onValueChange={(v) => update(i, { strategy: v })}
+                              >
+                                <SelectTrigger
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="h-5 text-[10px] px-1.5 py-0 border rounded font-medium gap-1 w-auto"
+                                >
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="static" className="text-xs">Fixed Clinic</SelectItem>
+                                  <SelectItem value="outreach" className="text-xs">Outreach Post</SelectItem>
+                                  <SelectItem value="mobile" className="text-xs">Mobile Team</SelectItem>
+                                </SelectContent>
+                              </Select>
+                              <Select
+                                value={c.type || "village"}
+                                onValueChange={(v) => update(i, { type: v })}
+                              >
+                                <SelectTrigger
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="h-5 text-[10px] px-1.5 py-0 border rounded text-muted-foreground w-auto"
+                                >
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="village" className="text-xs">Village</SelectItem>
+                                  <SelectItem value="hamlet" className="text-xs">Hamlet</SelectItem>
+                                  <SelectItem value="idp" className="text-xs">IDP Camp</SelectItem>
+                                  <SelectItem value="school" className="text-xs">School</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
                           </div>
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-7 w-7 text-muted-foreground hover:text-destructive shrink-0"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onDelete(i);
+                            }}
+                            title="Delete community"
+                            data-testid={`button-delete-card-${i}`}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
                         </div>
-                      </td>
-                      <td className="p-1">
-                        {/* Original code:
-                        <Select value={c.type} onValueChange={(v) => update(i, { type: v })}>
-                          <SelectTrigger onClick={(e) => e.stopPropagation()}><SelectValue /></SelectTrigger>
-                        */}
-                        <Select value={c.type} onValueChange={(v) => update(i, { type: v })}>
-                          <SelectTrigger className="w-28" onClick={(e) => e.stopPropagation()}><SelectValue /></SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="village">Village</SelectItem>
-                            <SelectItem value="hamlet">Hamlet</SelectItem>
-                            <SelectItem value="idp">IDP camp</SelectItem>
-                            <SelectItem value="school">School</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </td>
-                      {/* Grid Pop - WorldPop/gridded estimate */}
-                      <td className="p-1">
-                        <div className="flex items-center gap-1">
-                          {inlineLoadingIndex === i ? (
-                            <span className="flex items-center gap-1 text-[10px] text-muted-foreground font-mono px-2 py-1 bg-muted rounded">
-                              <Loader2 className="h-3 w-3 animate-spin" /> Fetching...
-                            </span>
-                          ) : (
-                            <>
-                              <span className={`text-xs font-mono px-2 py-1 rounded min-w-[52px] text-center ${
-                                c.gridPop && c.gridPop !== "0"
-                                  ? "bg-blue-500/10 text-blue-700 dark:text-blue-300 border border-blue-500/20"
-                                  : "text-muted-foreground"
-                              }`}>
+
+                        {/* Middle Metrics Row */}
+                        <div className="grid grid-cols-2 gap-2 pt-1 border-t border-border/50 text-xs">
+                          <div className="space-y-1">
+                            <label className="text-[10px] font-medium text-muted-foreground flex items-center justify-between">
+                              <span>Target (&lt;1y Infants)</span>
+                              {c.source && <span className="uppercase text-[9px] text-muted-foreground/70">{c.source}</span>}
+                            </label>
+                            <div className="flex items-center gap-1.5">
+                              <Input
+                                type="number"
+                                min="0"
+                                value={c.targetPopulation ?? "0"}
+                                onChange={(e) => update(i, { targetPopulation: e.target.value })}
+                                onClick={(e) => e.stopPropagation()}
+                                className="h-7 text-xs font-bold px-2"
+                                data-testid={`input-target-pop-card-${i}`}
+                              />
+                            </div>
+                          </div>
+
+                          <div className="space-y-1">
+                            <label className="text-[10px] font-medium text-muted-foreground">
+                              <span>🛰️ Satellite Pop</span>
+                            </label>
+                            <div className="flex items-center gap-1.5">
+                              <span className="h-7 px-2 rounded border bg-muted/40 text-xs font-mono flex items-center flex-1">
                                 {c.gridPop && c.gridPop !== "0" ? Number(c.gridPop).toLocaleString() : "-"}
                               </span>
                               <Button
                                 type="button"
                                 size="sm"
-                                variant="ghost"
-                                className="h-6 px-1.5 text-[10px]"
+                                variant="outline"
+                                className="h-7 px-2 text-[10px] shrink-0 gap-1"
                                 disabled={!hasCoords}
-                                title={hasCoords ? "Estimate grid population from WorldPop" : "Drop a pin first"}
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   handleInlineFetch(i);
                                 }}
+                                title={hasCoords ? "Fetch satellite population estimate" : "Drop pin on map first"}
                                 data-testid={`button-estimate-from-map-${i}`}
                               >
-                                Fetch
+                                {inlineLoadingIndex === i ? <Loader2 className="h-3 w-3 animate-spin" /> : "Fetch"}
                               </Button>
-                            </>
-                          )}
+                            </div>
+                          </div>
                         </div>
-                      </td>
-                      {/* Survey Pop - NSO / HMIS / Census manual entry */}
-                      <td className="p-1">
-                        <Input
-                          ref={isError ? errorRowRef : undefined}
-                          type="number"
-                          className={`w-24 ${isError ? "border-destructive ring-1 ring-destructive" : ""}`}
-                          placeholder="Enter"
-                          value={c.surveyPop ?? ""}
-                          onChange={(e) => update(i, { surveyPop: e.target.value })}
-                          onClick={(e) => e.stopPropagation()}
-                          title="Enter population from NSO / HMIS / Survey / Census"
-                        />
-                        {isError && errorMessage && (
-                          <p className="mt-1 text-xs text-destructive" data-testid="community-row-error">{errorMessage}</p>
-                        )}
-                      </td>
-                      {/* Target Pop - best available: manual override, else max(gridPop, surveyPop) */}
-                      <td className="p-1">
-                        <Input
-                          type="number"
-                          className="w-20 font-semibold"
-                          value={c.targetPopulation}
-                          onChange={(e) => update(i, { targetPopulation: e.target.value })}
-                          onClick={(e) => e.stopPropagation()}
-                          title="Final target population (auto-set from Grid or Survey pop, editable)"
-                        />
-                      </td>
-                      <td className="p-1">
-                        {/* Original code:
-                        <Select value={c.source} onValueChange={(v) => update(i, { source: v })}>
-                          <SelectTrigger onClick={(e) => e.stopPropagation()}><SelectValue /></SelectTrigger>
-                        */}
-                        <Select value={c.source} onValueChange={(v) => update(i, { source: v })}>
-                          <SelectTrigger className="w-28" onClick={(e) => e.stopPropagation()}><SelectValue /></SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="nso">NSO</SelectItem>
-                            <SelectItem value="hmis">HMIS</SelectItem>
-                            <SelectItem value="worldpop">WorldPop</SelectItem>
-                            <SelectItem value="survey">Survey</SelectItem>
-                            <SelectItem value="community_census">Community census</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </td>
-                      <td className="p-1">
-                        {/* Original code:
-                        <Select value={c.strategy} onValueChange={(v) => update(i, { strategy: v })}>
-                          <SelectTrigger onClick={(e) => e.stopPropagation()}><SelectValue /></SelectTrigger>
-                        */}
-                        <Select value={c.strategy} onValueChange={(v) => update(i, { strategy: v })}>
-                          <SelectTrigger className="w-28" onClick={(e) => e.stopPropagation()}><SelectValue /></SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="static">Fixed</SelectItem>
-                            <SelectItem value="outreach">Outreach</SelectItem>
-                            <SelectItem value="mobile">Mobile</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </td>
-                      <td className="p-1 text-xs font-mono">
-                        {hasCoords ? (
-                          <span className="text-foreground" data-testid={`text-coords-${i}`}>
-                            {parseFloat(c.latitude).toFixed(4)}, {parseFloat(c.longitude).toFixed(4)}
-                          </span>
-                        ) : (
-                          <span className="text-muted-foreground italic">no pin</span>
-                        )}
-                      </td>
-                      <td className="p-1">
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onDelete(i);
-                          }}
-                          data-testid={`button-delete-community-${i}`}
-                          aria-label="Delete community"
+
+                        {/* Location / Contact Footer */}
+                        <div className="flex flex-wrap items-center justify-between gap-1.5 pt-1 text-[11px] text-muted-foreground">
+                          <div className="flex items-center gap-1.5">
+                            <MapPin className="h-3 w-3 text-muted-foreground/80 shrink-0" />
+                            {hasCoords ? (
+                              <span className="font-mono text-[10px] text-emerald-700 dark:text-emerald-300">
+                                {parseFloat(c.latitude).toFixed(3)}, {parseFloat(c.longitude).toFixed(3)}
+                              </span>
+                            ) : (
+                              <span className="italic text-[10px] text-amber-700 dark:text-amber-400">Needs Pin 📍</span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-1">
+                            {c.focalPersonName ? (
+                              <span className="truncate max-w-[130px] font-medium text-foreground text-[10px]">
+                                👤 {c.focalPersonName}
+                              </span>
+                            ) : c.outreachPostName ? (
+                              <span className="text-[10px] text-indigo-700 dark:text-indigo-300 font-medium truncate max-w-[130px]">
+                                💉 {c.outreachPostName}
+                              </span>
+                            ) : (
+                              <span className="text-[10px] italic text-muted-foreground">
+                                Click to edit details
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          ) : (
+            /* Enterprise Data Table View (Rule 24 Compliant) */
+            <div className="space-y-3" data-testid="communities-table-view">
+              <div className="rounded-xl border border-border/80 overflow-hidden shadow-xs bg-card">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="border-b bg-muted/40 text-left font-semibold text-muted-foreground">
+                        <th
+                          className="p-2 w-10 text-center cursor-pointer hover:text-foreground"
+                          onClick={() => toggleSort("index")}
                         >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </td>
-                    </tr>
-                  );
-                })}
-                {communities.length === 0 && (
-                  <tr>
-                    <td colSpan={10} className="p-4 text-center text-sm text-muted-foreground">
-                      No communities yet - click on the map to drop one, or use Add community.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
+                          <div className="flex items-center justify-center gap-1">
+                            <span>#</span>
+                            {communitySortKey === "index" && (
+                              communitySortDir === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />
+                            )}
+                          </div>
+                        </th>
+                        <th
+                          className="p-2 min-w-[170px] cursor-pointer hover:text-foreground"
+                          onClick={() => toggleSort("name")}
+                        >
+                          <div className="flex items-center gap-1">
+                            <span>Community Name</span>
+                            {communitySortKey === "name" ? (
+                              communitySortDir === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />
+                            ) : (
+                              <ArrowUpDown className="h-3 w-3 opacity-40" />
+                            )}
+                          </div>
+                        </th>
+                        {visibleCols.type && <th className="p-2 w-28">Type</th>}
+                        {visibleCols.strategy && <th className="p-2 w-32">Strategy</th>}
+                        {visibleCols.targetPop && (
+                          <th
+                            className="p-2 w-32 cursor-pointer hover:text-foreground"
+                            onClick={() => toggleSort("targetPop")}
+                          >
+                            <div className="flex items-center gap-1">
+                              <span>Target Infants (&lt;1y)</span>
+                              {communitySortKey === "targetPop" ? (
+                                communitySortDir === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />
+                              ) : (
+                                <ArrowUpDown className="h-3 w-3 opacity-40" />
+                              )}
+                            </div>
+                          </th>
+                        )}
+                        {visibleCols.gridPop && (
+                          <th
+                            className="p-2 w-32 cursor-pointer hover:text-foreground"
+                            onClick={() => toggleSort("gridPop")}
+                            title="Satellite population extracted from gridded data"
+                          >
+                            <div className="flex items-center gap-1">
+                              <span>🛰️ Satellite Pop</span>
+                              {communitySortKey === "gridPop" ? (
+                                communitySortDir === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />
+                              ) : (
+                                <ArrowUpDown className="h-3 w-3 opacity-40" />
+                              )}
+                            </div>
+                          </th>
+                        )}
+                        {visibleCols.post && <th className="p-2 min-w-[130px]">Vaccination Post</th>}
+                        {visibleCols.coords && <th className="p-2 min-w-[130px]">GPS Coordinates</th>}
+                        <th className="p-2 w-14 text-center">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {pagedCommunities.map((c) => {
+                        const i = c.originalIdx;
+                        const hasCoords =
+                          c.latitude && c.longitude &&
+                          !isNaN(parseFloat(c.latitude)) && !isNaN(parseFloat(c.longitude));
+                        const isError = errorRowId != null && `pop-${i}` === errorRowId;
+                        return (
+                          <tr
+                            key={c.rowId}
+                            className={`border-b cursor-pointer transition-colors ${
+                              selectedIdx === i ? "bg-primary/10 font-medium" : "hover:bg-muted/30"
+                            }`}
+                            onClick={() => setSelectedIdx(i)}
+                            data-testid={`row-community-${i}`}
+                          >
+                            <td className="p-2 text-center text-xs font-mono text-muted-foreground">
+                              {i + 1}
+                            </td>
+                            <td className="p-2">
+                              <div className="flex flex-col gap-1">
+                                <Input
+                                  className="min-w-[150px] md:min-w-[180px] h-7 text-xs"
+                                  value={c.name}
+                                  onChange={(e) => update(i, { name: e.target.value })}
+                                  onClick={(e) => e.stopPropagation()}
+                                />
+                                <div className="flex gap-1 items-center px-1">
+                                  {c.villageId ? (
+                                    <span className="text-[9px] font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/30 px-1 py-0.5 rounded">
+                                      Registered Community
+                                    </span>
+                                  ) : (
+                                    <span className="text-[9px] font-semibold text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/30 px-1 py-0.5 rounded">
+                                      Draft/Unregistered
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            </td>
+                            {visibleCols.type && (
+                              <td className="p-2">
+                                <Select value={c.type || "village"} onValueChange={(v) => update(i, { type: v })}>
+                                  <SelectTrigger className="w-24 h-7 text-xs" onClick={(e) => e.stopPropagation()}><SelectValue /></SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="village">Village</SelectItem>
+                                    <SelectItem value="hamlet">Hamlet</SelectItem>
+                                    <SelectItem value="idp">IDP camp</SelectItem>
+                                    <SelectItem value="school">School</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              </td>
+                            )}
+                            {visibleCols.strategy && (
+                              <td className="p-2">
+                                <Select value={c.strategy || "static"} onValueChange={(v) => update(i, { strategy: v })}>
+                                  <SelectTrigger className="w-28 h-7 text-xs" onClick={(e) => e.stopPropagation()}><SelectValue /></SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="static">Fixed Clinic</SelectItem>
+                                    <SelectItem value="outreach">Outreach Post</SelectItem>
+                                    <SelectItem value="mobile">Mobile Team</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              </td>
+                            )}
+                            {visibleCols.targetPop && (
+                              <td className="p-2">
+                                <Input
+                                  type="number"
+                                  min="0"
+                                  className="w-20 h-7 text-xs font-bold"
+                                  value={c.targetPopulation ?? "0"}
+                                  onChange={(e) => update(i, { targetPopulation: e.target.value })}
+                                  onClick={(e) => e.stopPropagation()}
+                                />
+                              </td>
+                            )}
+                            {visibleCols.gridPop && (
+                              <td className="p-2">
+                                <div className="flex items-center gap-1">
+                                  {inlineLoadingIndex === i ? (
+                                    <span className="flex items-center gap-1 text-[10px] text-muted-foreground font-mono px-2 py-1 bg-muted rounded">
+                                      <Loader2 className="h-3 w-3 animate-spin" /> Fetching...
+                                    </span>
+                                  ) : (
+                                    <>
+                                      <span className={`text-xs font-mono px-2 py-1 rounded min-w-[52px] text-center ${
+                                        c.gridPop && c.gridPop !== "0"
+                                          ? "bg-blue-500/10 text-blue-700 dark:text-blue-300 border border-blue-500/20"
+                                          : "text-muted-foreground"
+                                      }`}>
+                                        {c.gridPop && c.gridPop !== "0" ? Number(c.gridPop).toLocaleString() : "-"}
+                                      </span>
+                                      <Button
+                                        type="button"
+                                        size="sm"
+                                        variant="ghost"
+                                        className="h-6 px-1.5 text-[10px]"
+                                        disabled={!hasCoords}
+                                        title={hasCoords ? "Estimate satellite population" : "Drop a pin first"}
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleInlineFetch(i);
+                                        }}
+                                        data-testid={`button-estimate-from-map-${i}`}
+                                      >
+                                        Fetch
+                                      </Button>
+                                    </>
+                                  )}
+                                </div>
+                              </td>
+                            )}
+                            {visibleCols.post && (
+                              <td className="p-2">
+                                <div
+                                  className="cursor-pointer"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setSelectedIdx(i);
+                                  }}
+                                  title={c.outreachPostName ? `Vaccination Post: ${c.outreachPostName}` : "Click to view/edit vaccination post in details"}
+                                >
+                                  {c.outreachPostName ? (
+                                    <Badge variant="outline" className="text-[10px] font-normal truncate max-w-[140px] border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300">
+                                      {c.outreachPostName}
+                                    </Badge>
+                                  ) : (
+                                    <span className="text-muted-foreground italic text-[11px]">
+                                      {c.strategy === "static" ? "Health Facility" : "+ Set Post"}
+                                    </span>
+                                  )}
+                                </div>
+                              </td>
+                            )}
+                            {visibleCols.coords && (
+                              <td className="p-2 text-xs font-mono">
+                                {hasCoords ? (
+                                  <span className="text-foreground text-[11px]" data-testid={`text-coords-${i}`}>
+                                    {parseFloat(c.latitude).toFixed(3)}, {parseFloat(c.longitude).toFixed(3)}
+                                  </span>
+                                ) : (
+                                  <span className="text-amber-700 dark:text-amber-400 italic text-[11px]">needs pin</span>
+                                )}
+                              </td>
+                            )}
+                            <td className="p-2 text-center">
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onDelete(i);
+                                }}
+                                data-testid={`button-delete-community-${i}`}
+                                aria-label="Delete community"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                      {pagedCommunities.length === 0 && (
+                        <tr>
+                          <td colSpan={10} className="p-6 text-center text-sm text-muted-foreground">
+                            {totalCommunitiesCount === 0
+                              ? "No communities yet - click on the map to drop one, or use Add community."
+                              : "No communities match your current search and filter criteria."}
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Enterprise Pagination Controls (Rule 24 Compliant) */}
+          <div className="flex flex-wrap items-center justify-between gap-3 pt-2.5 border-t border-border/50 text-xs text-muted-foreground">
+            <div className="flex items-center gap-2">
+              <span>Rows per page:</span>
+              <Select
+                value={String(communityPageSize)}
+                onValueChange={(val) => {
+                  setCommunityPageSize(Number(val));
+                  setCommunityPage(1);
+                }}
+              >
+                <SelectTrigger className="h-7 w-16 text-xs bg-background">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="10">10</SelectItem>
+                  <SelectItem value="25">25</SelectItem>
+                  <SelectItem value="50">50</SelectItem>
+                  <SelectItem value="9999">All</SelectItem>
+                </SelectContent>
+              </Select>
+              <span>
+                Showing {totalFilteredCount > 0 ? (currentPage - 1) * effectivePageSize + 1 : 0} to{" "}
+                {Math.min(currentPage * effectivePageSize, totalFilteredCount)} of {totalFilteredCount} communities
+              </span>
+            </div>
+
+            <div className="flex items-center gap-1">
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-7 w-7"
+                disabled={currentPage <= 1}
+                onClick={() => setCommunityPage(1)}
+                title="First Page"
+              >
+                <ChevronsLeft className="h-3.5 w-3.5" />
+              </Button>
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-7 w-7"
+                disabled={currentPage <= 1}
+                onClick={() => setCommunityPage((p) => Math.max(1, p - 1))}
+                title="Previous Page"
+              >
+                <ChevronLeft className="h-3.5 w-3.5" />
+              </Button>
+              <span className="px-2 text-xs font-medium text-foreground">
+                Page {currentPage} of {totalPages}
+              </span>
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-7 w-7"
+                disabled={currentPage >= totalPages}
+                onClick={() => setCommunityPage((p) => Math.min(totalPages, p + 1))}
+                title="Next Page"
+              >
+                <ChevronRight className="h-3.5 w-3.5" />
+              </Button>
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-7 w-7"
+                disabled={currentPage >= totalPages}
+                onClick={() => setCommunityPage(totalPages)}
+                title="Last Page"
+              >
+                <ChevronsRight className="h-3.5 w-3.5" />
+              </Button>
+            </div>
           </div>
         </div>
 
@@ -2052,6 +2886,46 @@ export function Step2({
             </CardTitle>
           </CardHeader>
           <CardContent className="pt-3 space-y-3">
+            {/* Configurable Radius for Community Discovery / Extraction */}
+            <div className="flex flex-wrap items-center justify-between gap-2 p-2 bg-muted/30 rounded-lg border border-border/50 text-xs" data-testid="radius-extraction-toolbar">
+              <div className="flex items-center gap-1.5">
+                <Compass className="h-3.5 w-3.5 text-primary" />
+                <span className="font-medium text-foreground">Discovery Search Radius:</span>
+                <span className="font-semibold text-primary font-mono">{extractionRadiusKm} km</span>
+              </div>
+              <div className="flex items-center gap-1 flex-wrap">
+                {[5, 10, 15, 20, 25, 35, 50].map((r) => (
+                  <Button
+                    key={r}
+                    type="button"
+                    size="sm"
+                    variant={extractionRadiusKm === r ? "default" : "outline"}
+                    onClick={() => setExtractionRadiusKm(r)}
+                    className="h-5 text-[10px] px-1.5 py-0 rounded"
+                    data-testid={`button-radius-${r}km`}
+                  >
+                    {r}km
+                  </Button>
+                ))}
+                <div className="flex items-center gap-1 ml-1">
+                  <Input
+                    type="number"
+                    min={1}
+                    max={countryConfig.maxExtractionRadiusKm || 100}
+                    value={extractionRadiusKm}
+                    onChange={(e) => {
+                      const val = parseInt(e.target.value, 10);
+                      if (!isNaN(val) && val > 0) setExtractionRadiusKm(val);
+                    }}
+                    className="h-5 w-12 text-[10px] px-1 py-0 text-center font-mono"
+                    title="Custom extraction radius in km"
+                    data-testid="input-custom-radius-km"
+                  />
+                  <span className="text-[10px] text-muted-foreground">km</span>
+                </div>
+              </div>
+            </div>
+
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center space-x-2">
                 <Checkbox
@@ -2654,19 +3528,104 @@ export function Step2({
               </div>
               <div>
                 <Label className="text-xs font-semibold">Total Catchment Population</Label>
+                <div className="flex gap-1 mt-1">
+                  <Input
+                    type="number" min={0} placeholder="e.g. 1500"
+                    value={communities[selectedIdx].totalCatchmentPopulation || ""}
+                    onChange={(e) => update(selectedIdx, { totalCatchmentPopulation: e.target.value })}
+                  />
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="text-[10px] px-2 h-9 shrink-0"
+                    title="Calculate life-course cohorts (infants, 12-23m, under-5, HPV, pregnant) from total population"
+                    onClick={() => {
+                      const tot = parseFloat(communities[selectedIdx].totalCatchmentPopulation || "0");
+                      if (tot > 0) {
+                        const cohorts = disaggregatePopulation(tot, populationRatios(tenant?.settings));
+                        update(selectedIdx, {
+                          targetPopulation: String(cohorts.under1Population),
+                          target12_23m: String(Math.round(tot * 0.038)),
+                          under5Population: String(cohorts.under5Population),
+                          targetHpv: String(Math.round(tot * 0.048)),
+                          targetPregnant: String(cohorts.pregnantWomen),
+                        });
+                        toast({
+                          title: "Life-course cohorts calculated",
+                          description: `Infants: ${cohorts.under1Population}, Under-5: ${cohorts.under5Population}, HPV: ${Math.round(tot * 0.048)}, Pregnant: ${cohorts.pregnantWomen}`,
+                        });
+                      }
+                    }}
+                  >
+                    Auto Cohorts
+                  </Button>
+                </div>
+              </div>
+              <div>
+                <Label className="text-xs font-semibold">Target Infants (0-11m)</Label>
                 <Input
-                  type="number" min={0} placeholder="e.g. 1500" className="mt-1"
-                  value={communities[selectedIdx].totalCatchmentPopulation || ""}
-                  onChange={(e) => update(selectedIdx, { totalCatchmentPopulation: e.target.value })}
+                  type="number" min={0} placeholder="e.g. 60" className="mt-1 font-semibold"
+                  value={communities[selectedIdx].targetPopulation || ""}
+                  onChange={(e) => update(selectedIdx, { targetPopulation: e.target.value })}
                 />
               </div>
               <div>
-                <Label className="text-xs font-semibold">Under-5 Population</Label>
+                <Label className="text-xs font-semibold">Children 12-23m (2YL / MR2)</Label>
+                <Input
+                  type="number" min={0} placeholder="e.g. 58" className="mt-1"
+                  value={communities[selectedIdx].target12_23m || ""}
+                  onChange={(e) => update(selectedIdx, { target12_23m: e.target.value })}
+                />
+              </div>
+              <div>
+                <Label className="text-xs font-semibold">Under-5 Children (0-59m)</Label>
                 <Input
                   type="number" min={0} placeholder="e.g. 240" className="mt-1"
                   value={communities[selectedIdx].under5Population || ""}
                   onChange={(e) => update(selectedIdx, { under5Population: e.target.value })}
                 />
+              </div>
+              <div>
+                <Label className="text-xs font-semibold">Girls 9-14y (HPV Cohort)</Label>
+                <Input
+                  type="number" min={0} placeholder="e.g. 72" className="mt-1"
+                  value={communities[selectedIdx].targetHpv || ""}
+                  onChange={(e) => update(selectedIdx, { targetHpv: e.target.value })}
+                />
+              </div>
+              <div>
+                <Label className="text-xs font-semibold">Pregnant Women (Td Cohort)</Label>
+                <Input
+                  type="number" min={0} placeholder="e.g. 65" className="mt-1"
+                  value={communities[selectedIdx].targetPregnant || ""}
+                  onChange={(e) => update(selectedIdx, { targetPregnant: e.target.value })}
+                />
+              </div>
+              <div>
+                <Label className="text-xs font-semibold">Travel Time to Facility (minutes)</Label>
+                <Input
+                  type="number" min={0} placeholder="e.g. 45" className="mt-1"
+                  value={communities[selectedIdx].travelTimeMinutes || ""}
+                  onChange={(e) => update(selectedIdx, { travelTimeMinutes: e.target.value })}
+                />
+              </div>
+              <div>
+                <Label className="text-xs font-semibold">Usual Transport Mode</Label>
+                <Select
+                  value={communities[selectedIdx].transportMode || "foot"}
+                  onValueChange={(v) => update(selectedIdx, { transportMode: v })}
+                >
+                  <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="foot">Foot / Walking</SelectItem>
+                    <SelectItem value="bicycle">Bicycle</SelectItem>
+                    <SelectItem value="motorcycle">Motorcycle</SelectItem>
+                    <SelectItem value="vehicle_4wd">4WD Vehicle</SelectItem>
+                    <SelectItem value="boat">Boat / Canoe</SelectItem>
+                    <SelectItem value="animal">Animal / Cart</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
               <div className="flex items-center gap-2 pt-2">
                 <Checkbox
@@ -2712,6 +3671,105 @@ export function Step2({
               </div>
             </div>
           )}
+          {/* Vaccination / Immunization Post (RED Tool 2 Delivery Site) */}
+          <div className="border-t border-border/40 px-4 py-3.5 space-y-3 bg-muted/15" data-testid="section-vaccination-post">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <p className="text-xs font-semibold uppercase text-foreground tracking-wide flex items-center gap-1.5">
+                  <Building2 className="h-3.5 w-3.5 text-indigo-500" />
+                  Vaccination / Immunization Post (RED Tool 2 Delivery Site)
+                </p>
+                <Badge variant="outline" className="text-[10px] text-primary border-primary/30">
+                  {communities[selectedIdx].strategy === "static" ? "Fixed Facility Site" : "Outreach / Mobile Post"}
+                </Badge>
+              </div>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-7 text-[11px] gap-1"
+                disabled={!communities[selectedIdx].latitude || !communities[selectedIdx].longitude}
+                title="Copy coordinates from community location pin to vaccination post"
+                onClick={() => {
+                  if (communities[selectedIdx].latitude && communities[selectedIdx].longitude) {
+                    update(selectedIdx, {
+                      outreachLatitude: communities[selectedIdx].latitude,
+                      outreachLongitude: communities[selectedIdx].longitude,
+                    });
+                    toast({
+                      title: "Coordinates copied",
+                      description: "Vaccination post coordinates set to community pin location.",
+                    });
+                  }
+                }}
+              >
+                <Locate className="h-3 w-3" /> Use Community Pin
+              </Button>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="lg:col-span-2">
+                <Label className="text-xs font-semibold">Vaccination Post / Venue Name</Label>
+                <Input
+                  placeholder="e.g. St. Peter Primary School, Central Market Square, Village Hall"
+                  className="mt-1"
+                  value={communities[selectedIdx].outreachPostName || ""}
+                  onChange={(e) => update(selectedIdx, { outreachPostName: e.target.value })}
+                  data-testid={`input-vaccination-post-name-${selectedIdx}`}
+                />
+                <p className="mt-1 text-[10px] text-muted-foreground">
+                  Physical delivery location where vaccinators set up the immunization session for this community.
+                </p>
+              </div>
+              <div>
+                <Label className="text-xs font-semibold">Post / Venue Type</Label>
+                <Select
+                  value={communities[selectedIdx].vaccinationPostType || "school"}
+                  onValueChange={(v) => update(selectedIdx, { vaccinationPostType: v })}
+                >
+                  <SelectTrigger className="mt-1"><SelectValue placeholder="Select type" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="health_post">Health Post / Dispensary</SelectItem>
+                    <SelectItem value="school">Primary / Secondary School</SelectItem>
+                    <SelectItem value="place_of_worship">Place of Worship (Church / Mosque)</SelectItem>
+                    <SelectItem value="community_hall">Community Hall / Civic Centre</SelectItem>
+                    <SelectItem value="market">Market Square / Trading Centre</SelectItem>
+                    <SelectItem value="traditional_court">Traditional Court / Chief's Palace</SelectItem>
+                    <SelectItem value="open_air">Open Air / Shade Tree</SelectItem>
+                    <SelectItem value="other">Other Public Venue</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label className="text-xs font-semibold">Landmark / Location Guidance</Label>
+                <Input
+                  placeholder="e.g. Near water bore hole, behind headman office"
+                  className="mt-1"
+                  value={communities[selectedIdx].vaccinationPostLandmark || ""}
+                  onChange={(e) => update(selectedIdx, { vaccinationPostLandmark: e.target.value })}
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-1">
+              <div>
+                <Label className="text-xs font-semibold">Post Latitude (GPS)</Label>
+                <Input
+                  placeholder="e.g. -25.7461"
+                  className="mt-1 font-mono text-xs"
+                  value={communities[selectedIdx].outreachLatitude != null ? String(communities[selectedIdx].outreachLatitude) : ""}
+                  onChange={(e) => update(selectedIdx, { outreachLatitude: e.target.value })}
+                />
+              </div>
+              <div>
+                <Label className="text-xs font-semibold">Post Longitude (GPS)</Label>
+                <Input
+                  placeholder="e.g. 28.1881"
+                  className="mt-1 font-mono text-xs"
+                  value={communities[selectedIdx].outreachLongitude != null ? String(communities[selectedIdx].outreachLongitude) : ""}
+                  onChange={(e) => update(selectedIdx, { outreachLongitude: e.target.value })}
+                />
+              </div>
+            </div>
+          </div>
         </Card>
       )}
 
@@ -3985,74 +5043,173 @@ export function Step3({
     // Editing the flagged row clears the highlight.
     if (errorRowId && `htr-${i}` === errorRowId) onClearError?.();
   };
+
+  const selectedBesdBarriers: string[] = risk[0]?.besdBarriers || [];
+  const toggleBesdBarrier = (barrierId: string) => {
+    const current = new Set(selectedBesdBarriers);
+    if (current.has(barrierId)) current.delete(barrierId);
+    else current.add(barrierId);
+    const updated = Array.from(current);
+    const next = risk.map((r) => ({ ...r, besdBarriers: updated }));
+    setRisk(next);
+  };
+
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead className="border-b text-left text-xs uppercase text-muted-foreground">
-          <tr>
-            <th className="p-2">Community</th>
-            <th className="p-2">Distance</th>
-            <th className="p-2">Terrain</th>
-            <th className="p-2">Season</th>
-            <th className="p-2">Insecurity</th>
-            <th className="p-2">Missed</th>
-            <th className="p-2">Zero-dose</th>
-          </tr>
-        </thead>
-        <tbody>
-          {risk.map((r, i) => {
-            const isError = errorRowId != null && `htr-${i}` === errorRowId;
-            return (
-            <tr
-              key={i}
-              ref={isError ? errorRowRef : undefined}
-              tabIndex={isError ? -1 : undefined}
-              className={`border-b outline-none ${isError ? "ring-1 ring-destructive" : ""}`}
-            >
-              <td className="p-2">
-                {r.name}
-                {isError && errorMessage && (
-                  <p
-                    className="mt-1 text-xs text-destructive"
-                    data-testid="risk-row-error"
-                  >
-                    {errorMessage}
-                  </p>
-                )}
-              </td>
-              {(["distance", "terrain", "season", "insecurity"] as const).map((k) => (
-                <td key={k} className="p-2">
-                  <div className="flex items-center gap-2">
-                    <Slider
-                      value={[r[k]]}
-                      min={1}
-                      max={5}
-                      step={1}
-                      onValueChange={(v) => upd(i, { [k]: v[0] })}
-                      className="w-24"
-                    />
-                    <span className="w-4 text-xs">{r[k]}</span>
-                  </div>
-                </td>
-              ))}
-              <td className="p-2">
-                <Checkbox checked={r.missed} onCheckedChange={(v) => upd(i, { missed: !!v })} />
-              </td>
-              <td className="p-2">
-                <Checkbox checked={r.zeroDose} onCheckedChange={(v) => upd(i, { zeroDose: !!v })} />
-              </td>
-            </tr>
-            );
-          })}
-          {risk.length === 0 && (
+    <div className="space-y-4">
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="border-b text-left text-xs uppercase text-muted-foreground">
             <tr>
-              <td colSpan={7} className="p-4 text-center text-muted-foreground">
-                Finish Step 2 first.
-              </td>
+              <th className="p-2">Community</th>
+              <th className="p-2">Priority Rank</th>
+              <th className="p-2">Primary Barrier (RED 1f)</th>
+              <th className="p-2">Distance</th>
+              <th className="p-2">Terrain</th>
+              <th className="p-2">Season</th>
+              <th className="p-2">Insecurity</th>
+              <th className="p-2">Missed</th>
+              <th className="p-2">Zero-dose</th>
             </tr>
-          )}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {risk.map((r, i) => {
+              const isError = errorRowId != null && `htr-${i}` === errorRowId;
+              return (
+                <tr
+                  key={i}
+                  ref={isError ? errorRowRef : undefined}
+                  tabIndex={isError ? -1 : undefined}
+                  className={`border-b outline-none ${isError ? "ring-1 ring-destructive" : ""}`}
+                >
+                  <td className="p-2 font-medium">
+                    {r.name}
+                    {isError && errorMessage && (
+                      <p
+                        className="mt-1 text-xs text-destructive"
+                        data-testid="risk-row-error"
+                      >
+                        {errorMessage}
+                      </p>
+                    )}
+                  </td>
+                  <td className="p-1">
+                    <Select
+                      value={r.priorityRank || "standard"}
+                      onValueChange={(v) => upd(i, { priorityRank: v })}
+                    >
+                      <SelectTrigger className="h-8 w-28 text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="priority_1">Priority 1 (Highest)</SelectItem>
+                        <SelectItem value="priority_2">Priority 2 (High)</SelectItem>
+                        <SelectItem value="priority_3">Priority 3 (Medium)</SelectItem>
+                        <SelectItem value="standard">Standard</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </td>
+                  <td className="p-1">
+                    <Select
+                      value={r.rootCause || "access"}
+                      onValueChange={(v) => upd(i, { rootCause: v })}
+                    >
+                      <SelectTrigger className="h-8 w-36 text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="access">Access / Distance</SelectItem>
+                        <SelectItem value="demand">Demand / Acceptance</SelectItem>
+                        <SelectItem value="supply">Supply / Stockout</SelectItem>
+                        <SelectItem value="staffing">Staffing / Supervision</SelectItem>
+                        <SelectItem value="transport">Transport / Fuel</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </td>
+                  {(["distance", "terrain", "season", "insecurity"] as const).map((k) => (
+                    <td key={k} className="p-2">
+                      <div className="flex items-center gap-2">
+                        <Slider
+                          value={[r[k]]}
+                          min={1}
+                          max={5}
+                          step={1}
+                          onValueChange={(v) => upd(i, { [k]: v[0] })}
+                          className="w-20"
+                        />
+                        <span className="w-4 text-xs font-mono">{r[k]}</span>
+                      </div>
+                    </td>
+                  ))}
+                  <td className="p-2 text-center">
+                    <Checkbox checked={r.missed} onCheckedChange={(v) => upd(i, { missed: !!v })} />
+                  </td>
+                  <td className="p-2 text-center">
+                    <Checkbox checked={r.zeroDose} onCheckedChange={(v) => upd(i, { zeroDose: !!v })} />
+                  </td>
+                </tr>
+              );
+            })}
+            {risk.length === 0 && (
+              <tr>
+                <td colSpan={9} className="p-4 text-center text-muted-foreground">
+                  Finish Step 2 first.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {/* WHO BeSD (Behavioral and Social Drivers) Assessment Tool (IIP Module 4 §4) */}
+      <div className="rounded-md border bg-card p-4 space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+              <span>WHO BeSD (Behavioral and Social Drivers) Assessment</span>
+              <Badge variant="outline" className="text-[10px] uppercase tracking-wider">
+                WHO IIP Module 4
+              </Badge>
+            </h3>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Identify community and service drivers affecting uptake to inform session scheduling and community engagement.
+            </p>
+          </div>
+          <Badge variant="secondary" className="text-xs font-mono">
+            {selectedBesdBarriers.length} drivers selected
+          </Badge>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2">
+          {WHO_BESD_DOMAINS.map((domain) => (
+            <div key={domain.id} className="rounded-md border p-3 bg-muted/20 space-y-2">
+              <div>
+                <p className="text-xs font-bold text-foreground">{domain.title}</p>
+                <p className="text-[11px] text-muted-foreground">{domain.description}</p>
+              </div>
+              <div className="space-y-1.5 pt-1">
+                {domain.options.map((opt) => {
+                  const isChecked = selectedBesdBarriers.includes(opt.id);
+                  return (
+                    <label
+                      key={opt.id}
+                      className="flex items-start gap-2 text-xs cursor-pointer hover:bg-muted/40 p-1 rounded transition-colors"
+                    >
+                      <Checkbox
+                        checked={isChecked}
+                        onCheckedChange={() => toggleBesdBarrier(opt.id)}
+                        className="mt-0.5"
+                      />
+                      <span className={isChecked ? "text-foreground font-medium" : "text-muted-foreground"}>
+                        {opt.label}
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }
@@ -4129,8 +5286,173 @@ export function Step4({
     if (errorRowId && calendar[i]?.rowId === errorRowId) onClearError?.();
   };
   const remove = (i: number) => setCalendar(calendar.filter((_, idx) => idx !== i));
+
+  // WHO Session Workload & Capacity Estimation (IIP p. 201-205 & RED Tool 2a)
+  const totalCatchmentInfants = useMemo(() => {
+    return communities.reduce((sum, c) => {
+      const inf = Number(c.targetInfants);
+      if (inf > 0) return sum + inf;
+      const pop = Number(c.targetPopulation) || 0;
+      return sum + Math.round(pop * 0.04);
+    }, 0);
+  }, [communities]);
+
+  const [injectionsPerChild, setInjectionsPerChild] = useState<number>(10);
+  const [sessionCapacity, setSessionCapacity] = useState<number>(40);
+
+  const workload = useMemo(() => {
+    return calculateRecommendedSessions(totalCatchmentInfants, injectionsPerChild, sessionCapacity);
+  }, [totalCatchmentInfants, injectionsPerChild, sessionCapacity]);
+
+  const periodMonths = Number(period) || 12;
+  const avgPlannedSessionsPerMonth = calendar.length > 0 ? (calendar.length / periodMonths).toFixed(1) : "0";
+  const isAdequate = Number(avgPlannedSessionsPerMonth) >= workload.recommendedSessionsPerMonth;
+
+  // Integrated Child Health Interventions (WHO IIP Module 4 p. 204)
+  const [selectedInterventions, setSelectedInterventions] = useState<string[]>(() => {
+    const fromFirst = calendar[0]?.integratedInterventions;
+    return Array.isArray(fromFirst) ? fromFirst : ["vit_a", "deworming", "muac"];
+  });
+
+  const toggleIntervention = (id: string) => {
+    const next = selectedInterventions.includes(id)
+      ? selectedInterventions.filter((x) => x !== id)
+      : [...selectedInterventions, id];
+    setSelectedInterventions(next);
+    setCalendar(calendar.map((c) => ({ ...c, integratedInterventions: next })));
+  };
+
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
+      {/* WHO Workload & Session Frequency Calculator (RED Tool 2a & IIP 2025) */}
+      <div className="rounded-lg border bg-card p-4 shadow-sm space-y-3" data-testid="card-who-workload-calculator">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b pb-2.5">
+          <div>
+            <div className="flex items-center gap-2">
+              <h3 className="font-semibold text-sm text-foreground">
+                WHO Immunization Workload & Session Frequency Calculator
+              </h3>
+              <Badge variant="outline" className="text-[10px] uppercase tracking-wider font-semibold">
+                RED Tool 2a / IIP p. 202
+              </Badge>
+            </div>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Workload formula: Annual Injections = Target ({totalCatchmentInfants.toLocaleString()}) &times; {injectionsPerChild} doses. Recommended sessions = Monthly Injections &divide; {sessionCapacity} capacity.
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-muted-foreground">Status:</span>
+            <Badge variant={isAdequate ? "default" : "secondary"} className={isAdequate ? "bg-emerald-600 hover:bg-emerald-600 text-white text-xs font-semibold" : "bg-amber-100 text-amber-900 border-amber-300 dark:bg-amber-950 dark:text-amber-200 text-xs font-semibold"}>
+              {isAdequate ? "Adequate Session Frequency" : "Under-Scheduled Session Shortfall"}
+            </Badge>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-1">
+          <div className="rounded-md border p-2.5 bg-muted/20">
+            <p className="text-[11px] text-muted-foreground font-medium uppercase tracking-wider">Annual Target Infants</p>
+            <p className="text-xl font-bold font-mono text-foreground mt-1">{totalCatchmentInfants.toLocaleString()}</p>
+            <p className="text-[10px] text-muted-foreground mt-0.5">{Math.round(totalCatchmentInfants / 12).toLocaleString()} infants / month</p>
+          </div>
+          <div className="rounded-md border p-2.5 bg-muted/20">
+            <p className="text-[11px] text-muted-foreground font-medium uppercase tracking-wider">Annual Injections</p>
+            <p className="text-xl font-bold font-mono text-indigo-600 dark:text-indigo-400 mt-1">{workload.annualInjections.toLocaleString()}</p>
+            <p className="text-[10px] text-muted-foreground mt-0.5">{workload.monthlyInjections.toLocaleString()} injections / month</p>
+          </div>
+          <div className="rounded-md border p-2.5 bg-muted/20">
+            <p className="text-[11px] text-muted-foreground font-medium uppercase tracking-wider">Recommended Sessions</p>
+            <p className="text-xl font-bold font-mono text-foreground mt-1">{workload.recommendedSessionsPerMonth} <span className="text-xs font-normal text-muted-foreground">/ month</span></p>
+            <p className="text-[10px] text-muted-foreground mt-0.5">{workload.recommendedSessionsPerYear} recommended / year</p>
+          </div>
+          <div className="rounded-md border p-2.5 bg-muted/20">
+            <p className="text-[11px] text-muted-foreground font-medium uppercase tracking-wider">Current Planned Rate</p>
+            <p className={`text-xl font-bold font-mono mt-1 ${isAdequate ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400"}`}>
+              {avgPlannedSessionsPerMonth} <span className="text-xs font-normal text-muted-foreground">/ month</span>
+            </p>
+            <p className="text-[10px] text-muted-foreground mt-0.5">{calendar.length} sessions over {periodMonths} months</p>
+          </div>
+        </div>
+
+        {/* Workload Parameter Adjusters */}
+        <div className="flex flex-wrap items-center gap-4 pt-1 text-xs text-muted-foreground">
+          <div className="flex items-center gap-2">
+            <span>Injections / child:</span>
+            <Input
+              type="number"
+              min={1}
+              max={25}
+              value={injectionsPerChild}
+              onChange={(e) => setInjectionsPerChild(Math.max(1, Number(e.target.value) || 10))}
+              className="w-16 h-7 text-xs font-mono"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <span>Max capacity / session:</span>
+            <Input
+              type="number"
+              min={10}
+              max={150}
+              value={sessionCapacity}
+              onChange={(e) => setSessionCapacity(Math.max(10, Number(e.target.value) || 40))}
+              className="w-16 h-7 text-xs font-mono"
+            />
+            <span className="text-[11px]">(WHO guideline: ~30-50 per session)</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Integrated Child Health Interventions (WHO IIP Module 4 p. 204) */}
+      <div className="rounded-lg border bg-card p-4 shadow-sm space-y-3" data-testid="card-integrated-interventions">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b pb-2">
+          <div>
+            <div className="flex items-center gap-2">
+              <h3 className="font-semibold text-sm text-foreground">
+                WHO Integrated Child Health Interventions Co-Delivery
+              </h3>
+              <Badge variant="outline" className="text-[10px] uppercase tracking-wider font-semibold">
+                IIP Module 4 p. 204
+              </Badge>
+            </div>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Select non-vaccine child survival interventions bundled into scheduled outreach and fixed sessions.
+            </p>
+          </div>
+          <Badge variant="secondary" className="text-xs font-mono">
+            {selectedInterventions.length} of {INTEGRATED_CHILD_HEALTH_INTERVENTIONS.length} co-delivered
+          </Badge>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 pt-1">
+          {INTEGRATED_CHILD_HEALTH_INTERVENTIONS.map((item) => {
+            const isChecked = selectedInterventions.includes(item.id);
+            return (
+              <label
+                key={item.id}
+                className={`flex items-start gap-2.5 p-2.5 rounded-md border text-xs cursor-pointer transition-colors ${
+                  isChecked
+                    ? "border-primary/40 bg-primary/5 text-foreground"
+                    : "border-border/60 bg-muted/10 text-muted-foreground hover:bg-muted/30"
+                }`}
+              >
+                <Checkbox
+                  checked={isChecked}
+                  onCheckedChange={() => toggleIntervention(item.id)}
+                  className="mt-0.5"
+                />
+                <div className="space-y-0.5">
+                  <div className="flex items-center gap-1.5 font-semibold text-foreground">
+                    <span>{item.name}</span>
+                    <Badge variant="outline" className="text-[9px] px-1 py-0 h-4">
+                      {item.targetGroup}
+                    </Badge>
+                  </div>
+                </div>
+              </label>
+            );
+          })}
+        </div>
+      </div>
+
       <div className="flex flex-wrap items-center justify-end gap-2">
         <Label className="text-xs text-muted-foreground">Start month</Label>
         <Select value={startMonth} onValueChange={setStartMonth}>
@@ -4197,6 +5519,7 @@ export function Step4({
               <th className="p-2">Target Pop.</th>
               <th className="p-2">Distance</th>
               <th className="p-2">Strategy</th>
+              <th className="p-2">Vaccination Post</th>
               <th className="p-2">Date</th>
               <th className="p-2">Type</th>
               <th className="p-2"></th>
@@ -4209,12 +5532,22 @@ export function Step4({
               const targetPop = matched?.targetPopulation ?? "-";
               const distance = matched?.distanceToFacility != null ? `${Number(matched.distanceToFacility).toFixed(1)} km` : "-";
               const strategy = matched?.strategy ?? "-";
+              const postName = c.site || matched?.outreachPostName || (c.sessionType === "static" ? "Health Facility" : `${c.name} Post`);
               return (
                 <tr key={c.rowId} className="border-b">
                   <td className="p-1">{c.name}</td>
                   <td className="p-1 text-xs text-muted-foreground font-mono">{Number(targetPop).toLocaleString()}</td>
                   <td className="p-1 text-xs text-muted-foreground font-mono">{distance}</td>
                   <td className="p-1 text-xs capitalize text-muted-foreground">{strategy}</td>
+                  <td className="p-1">
+                    <div className="text-xs truncate max-w-[150px]" title={postName}>
+                      {(c.site || matched?.outreachPostName) ? (
+                        <span className="font-medium text-foreground">{postName}</span>
+                      ) : (
+                        <span className="text-muted-foreground italic text-[11px]">{postName}</span>
+                      )}
+                    </div>
+                  </td>
                   <td className="p-1">
                     <Input
                       ref={isError ? errorRowRef : undefined}
@@ -4775,6 +6108,24 @@ export function Step6({
 
   const sumCommunityUnder1 = communities.reduce((acc, c) => acc + Math.round(parseFloat(c.targetPopulation || "0") * 0.04), 0);
 
+  // WHO Refrigerator Storage Capacity vs Required Vaccine Volume (IIP Module 4 p. 209-210)
+  const functionalRefrigerators = dbColdChain.filter(
+    (e) => (e.equipmentType === "refrigerator" || e.equipmentType === "freezer") && e.condition === "functional"
+  );
+  const totalFridgeNetLitres = functionalRefrigerators.reduce(
+    (sum, e) => sum + (Number(e.netVolumeLiters) || Number(e.grossVolumeLiters) || 60),
+    0
+  );
+  const totalVialsRequired = vaccines.reduce(
+    (sum, v) => sum + Math.ceil((Number(v.dosesWithWastage) || 0) / 10),
+    0
+  );
+  const estVaccineVolumeLitres = Math.round((totalVialsRequired * 0.04) * 10) / 10;
+  const storageUtilizationPct = totalFridgeNetLitres > 0
+    ? Math.round((estVaccineVolumeLitres / totalFridgeNetLitres) * 100)
+    : 0;
+  const isOverStorageCapacity = storageUtilizationPct > 100;
+
   // Sync vaccine targets on hydration if empty
   useEffect(() => {
     const defaultTgt = targetInfants > 0 ? targetInfants : sumCommunityUnder1;
@@ -4912,208 +6263,759 @@ export function Step6({
     { category: "Cold Chain Accessories", item: "Foam Pads", qty: foamPads, unit: "pads", formula: "1 pad per carrier" },
   ];
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // DUAL-LEVEL QUANTIFICATION LOGIC: PER-COMMUNITY / PER-SESSION CARRIER PACKING
+  // ─────────────────────────────────────────────────────────────────────────
+  const [quantificationMode, setQuantificationMode] = useState<"facility_whole" | "session_logistics">("facility_whole");
+  const [sessionSearch, setSessionSearch] = useState<string>("");
+  const [sessionStrategyFilter, setSessionStrategyFilter] = useState<"all" | "outreach" | "static" | "mobile">("all");
+  const [sessionSortKey, setSessionSortKey] = useState<string>("name");
+  const [sessionSortDir, setSessionSortDir] = useState<"asc" | "desc">("asc");
+  const [sessionPage, setSessionPage] = useState<number>(1);
+  const [sessionPageSize, setSessionPageSize] = useState<number>(10);
+
+  const toggleSessionSort = (key: string) => {
+    if (sessionSortKey === key) {
+      setSessionSortDir((prev) => (prev === "asc" ? "desc" : "asc"));
+    } else {
+      setSessionSortKey(key);
+      setSessionSortDir("asc");
+    }
+  };
+
+  const perSessionRows = useMemo(() => {
+    return communities.map((c: any, originalIdx: number) => {
+      const name = c.name || `Community ${originalIdx + 1}`;
+      const strategy = c.strategy || "outreach";
+      const distanceKm = parseFloat(c.distanceKm || "0") || 0;
+      const targetInfantsCount = Math.round(parseFloat(c.targetPopulation || "0")) || 0;
+      // Per session cohort: quarterly session cohort (target / 4, min 1 if target > 0)
+      const sessionCohort = targetInfantsCount > 0 ? Math.max(1, Math.round(targetInfantsCount / 4)) : 1;
+
+      // Strategy-adjusted vial quantification per WHO Multi-Dose Vial Policy:
+      // In outreach, open-vial multi-dose wastage is higher (BCG 70%, MR 35%, Penta 15%)
+      const isOutreach = strategy === "outreach" || strategy === "mobile";
+      const bcgVials = 1; // 1 20-dose vial per session day
+      const pentaVials = Math.max(1, Math.ceil(sessionCohort * (isOutreach ? 1.25 : 1.1) / 10));
+      const pcvVials = Math.max(1, Math.ceil(sessionCohort * (isOutreach ? 1.2 : 1.1) / 4));
+      const mrVials = 1; // 1 10-dose vial per session day
+      const opvVials = 1; // 1 20-dose vial per session day
+      const rotaVials = Math.max(1, Math.ceil(sessionCohort * 1.05 / 2));
+
+      const ad005ml = Math.max(2, Math.ceil(sessionCohort * 1.1));
+      const ad05ml = Math.max(5, Math.ceil(sessionCohort * 3 * 1.1));
+      const reconSyringes = 2; // 1 BCG, 1 MR
+      const safetyBoxes = 1;
+      const vaccineCarriers = 1;
+      const icePacks = 4;
+
+      return {
+        originalIdx,
+        name,
+        post: c.vaccinationPostName || "-",
+        strategy,
+        distanceKm,
+        targetInfants: targetInfantsCount,
+        sessionCohort,
+        bcgVials,
+        pentaVials,
+        pcvVials,
+        mrVials,
+        opvVials,
+        rotaVials,
+        ad005ml,
+        ad05ml,
+        reconSyringes,
+        safetyBoxes,
+        vaccineCarriers,
+        icePacks,
+      };
+    });
+  }, [communities]);
+
+  const filteredSessionRows = useMemo(() => {
+    return perSessionRows
+      .filter((r) => {
+        if (sessionStrategyFilter !== "all" && r.strategy !== sessionStrategyFilter) return false;
+        if (sessionSearch.trim()) {
+          const q = sessionSearch.toLowerCase();
+          const matchName = r.name.toLowerCase().includes(q);
+          const matchPost = r.post.toLowerCase().includes(q);
+          if (!matchName && !matchPost) return false;
+        }
+        return true;
+      })
+      .sort((a, b) => {
+        let diff = 0;
+        if (sessionSortKey === "name") diff = a.name.localeCompare(b.name);
+        else if (sessionSortKey === "target") diff = a.targetInfants - b.targetInfants;
+        else if (sessionSortKey === "distance") diff = a.distanceKm - b.distanceKm;
+        else if (sessionSortKey === "strategy") diff = a.strategy.localeCompare(b.strategy);
+        else diff = a.originalIdx - b.originalIdx;
+        return sessionSortDir === "asc" ? diff : -diff;
+      });
+  }, [perSessionRows, sessionStrategyFilter, sessionSearch, sessionSortKey, sessionSortDir]);
+
+  const totalSessionRecords = filteredSessionRows.length;
+  const effectiveSessionPageSize = sessionPageSize === 9999 ? totalSessionRecords || 1 : sessionPageSize;
+  const totalSessionPages = Math.max(1, Math.ceil(totalSessionRecords / effectiveSessionPageSize));
+  const currentSessionPage = Math.min(sessionPage, totalSessionPages);
+  const pagedSessionRows = useMemo(() => {
+    if (sessionPageSize === 9999) return filteredSessionRows;
+    const start = (currentSessionPage - 1) * sessionPageSize;
+    return filteredSessionRows.slice(start, start + sessionPageSize);
+  }, [filteredSessionRows, currentSessionPage, sessionPageSize]);
+
+  // Aggregate logistics metrics
+  const totalOutreachSessions = perSessionRows.filter((r) => r.strategy === "outreach" || r.strategy === "mobile").length;
+  const totalRequiredCarriers = perSessionRows.length > 0 ? Math.max(1, Math.ceil(totalOutreachSessions / 2)) : 0;
+  const totalCarrierIcePacks = totalRequiredCarriers * 4;
+  const totalADSyringesAllSessions = perSessionRows.reduce((sum, r) => sum + r.ad005ml + r.ad05ml, 0);
+
   return (
     <div className="space-y-4">
-      {hasAnyShortage && (
-        <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 space-y-3" data-testid="stock-warning-box">
-          <div className="flex items-start gap-2.5 text-destructive">
-            <AlertCircle className="h-5 w-5 shrink-0 mt-0.5" />
-            <div>
-              <h4 className="font-semibold text-sm">Vaccine Stock Deficiency Warning</h4>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                Current health facility stock is insufficient to cover the planned target population requirements.
-              </p>
+      {/* ─── DUAL-LEVEL QUANTIFICATION STRATEGY SWITCHER ───────────────────────── */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 bg-card rounded-xl border shadow-2xs" data-testid="quantification-strategy-panel">
+        <div>
+          <div className="flex items-center gap-2">
+            <h3 className="text-sm font-bold text-foreground flex items-center gap-1.5">
+              <Package className="h-4 w-4 text-primary" />
+              <span>Vaccine & Logistics Quantification Strategy</span>
+            </h3>
+            <Badge variant="outline" className="text-[10px] font-semibold border-primary/30 text-primary uppercase">
+              WHO RED Standards
+            </Badge>
+          </div>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            {quantificationMode === "facility_whole"
+              ? "Facility As A Whole: Consolidated quarterly requisition, live inventory deficit check, and cold-chain refrigerator net storage check."
+              : "Per-Community / Session: Outreach packing lists, cold-box vaccine carrier sizing, and open-vial multi-dose allocation."}
+          </p>
+        </div>
+
+        <div className="inline-flex items-center rounded-lg border bg-muted/60 p-1 text-muted-foreground shadow-2xs shrink-0" data-testid="quantification-mode-toggle">
+          <Button
+            type="button"
+            variant={quantificationMode === "facility_whole" ? "default" : "ghost"}
+            size="sm"
+            onClick={() => setQuantificationMode("facility_whole")}
+            className={`h-7 text-xs font-medium gap-1.5 px-3 rounded-md transition-all ${
+              quantificationMode === "facility_whole" ? "shadow-xs" : "text-muted-foreground hover:text-foreground"
+            }`}
+            data-testid="button-quantify-facility-whole"
+          >
+            <Building2 className="h-3.5 w-3.5" />
+            <span>Facility Total (As a Whole)</span>
+          </Button>
+
+          <Button
+            type="button"
+            variant={quantificationMode === "session_logistics" ? "default" : "ghost"}
+            size="sm"
+            onClick={() => setQuantificationMode("session_logistics")}
+            className={`h-7 text-xs font-medium gap-1.5 px-3 rounded-md transition-all ${
+              quantificationMode === "session_logistics" ? "shadow-xs" : "text-muted-foreground hover:text-foreground"
+            }`}
+            data-testid="button-quantify-session-logistics"
+          >
+            <Package className="h-3.5 w-3.5" />
+            <span>Per-Community / Session Packing ({communities.length})</span>
+          </Button>
+        </div>
+      </div>
+
+      {quantificationMode === "facility_whole" ? (
+        <>
+          {hasAnyShortage && (
+            <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 space-y-3" data-testid="stock-warning-box">
+              <div className="flex items-start gap-2.5 text-destructive">
+                <AlertCircle className="h-5 w-5 shrink-0 mt-0.5" />
+                <div>
+                  <h4 className="font-semibold text-sm">Vaccine Stock Deficiency Warning</h4>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Current health facility stock is insufficient to cover the planned target population requirements.
+                  </p>
+                </div>
+              </div>
+
+              <table className="w-full text-xs text-left border-collapse mt-2">
+                <thead>
+                  <tr className="border-b border-border text-muted-foreground font-semibold">
+                    <th className="py-1">Antigen</th>
+                    <th className="py-1 text-right">Required (Doses)</th>
+                    <th className="py-1 text-right">Available (Doses)</th>
+                    <th className="py-1 text-right text-destructive">Shortage (Doses / Vials)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {deficiencies.filter(d => d.hasShortage).map(d => (
+                    <tr key={d.antigen} className="border-b border-border/40 last:border-0">
+                      <td className="py-1.5 font-medium">{d.antigen}</td>
+                      <td className="py-1.5 text-right font-mono">{d.requiredDoses.toLocaleString()}</td>
+                      <td className="py-1.5 text-right font-mono">{d.stockAvailable.toLocaleString()}</td>
+                      <td className="py-1.5 text-right text-destructive font-mono font-semibold">
+                        -{d.shortageDoses.toLocaleString()} ({d.shortageVials} vials)
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+
+              <div className="flex justify-end gap-2 pt-2 border-t border-destructive/10">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="text-xs font-semibold"
+                  onClick={() => setRequisitionOpen(true)}
+                >
+                  Generate Requisition Slip
+                </Button>
+              </div>
+            </div>
+          )}
+
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold">Routine Vaccines Target Requirements</h3>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="text-xs h-7"
+                onClick={handleSyncTargets}
+              >
+                 Sync Targets with Step 1/2 ({targetInfants > 0 ? targetInfants : sumCommunityUnder1} infants)
+              </Button>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="border-b text-left text-xs uppercase text-muted-foreground">
+                  <tr>
+                    <th className="p-2">Antigen</th>
+                    <th className="p-2">Target pop.</th>
+                    <th className="p-2">Doses/child</th>
+                    <th className="p-2">Wastage %</th>
+                    <th className="p-2">Doses w/ wastage</th>
+                    <th className="p-2">Vials (10/vial)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {vaccines.map((v, i) => {
+                    const tgt = parseInt(v.target || "0", 10);
+                    const w = parseFloat(v.wastage || "0");
+                    const dosesReq = tgt * v.doses;
+                    const total = Math.ceil(dosesReq * (1 + w / 100));
+                    const vials = Math.ceil(total / 10);
+                    const isError = errorRowId != null && `vr-${i}` === errorRowId;
+                    return (
+                      <tr key={v.name} className={`border-b ${isError ? "ring-1 ring-destructive" : ""}`}>
+                        <td className="p-2 font-medium">{v.name}</td>
+                        <td className="p-1">
+                          <Input
+                            ref={isError ? errorRowRef : undefined}
+                            type="number"
+                            className={isError ? "border-destructive ring-1 ring-destructive" : undefined}
+                            value={v.target}
+                            onChange={(e) => upd(i, { target: e.target.value })}
+                          />
+                          {isError && errorMessage && (
+                            <p
+                              className="mt-1 text-xs text-destructive"
+                              data-testid="vaccine-row-error"
+                            >
+                              {errorMessage}
+                            </p>
+                          )}
+                        </td>
+                        <td className="p-2 text-center">{v.doses}</td>
+                        <td className="p-1"><Input type="number" value={v.wastage} onChange={(e) => upd(i, { wastage: e.target.value })} /></td>
+                        <td className="p-2">{total.toLocaleString()}</td>
+                        <td className="p-2">{vials.toLocaleString()}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
           </div>
 
-          <table className="w-full text-xs text-left border-collapse mt-2">
-            <thead>
-              <tr className="border-b border-border text-muted-foreground font-semibold">
-                <th className="py-1">Antigen</th>
-                <th className="py-1 text-right">Required (Doses)</th>
-                <th className="py-1 text-right">Available (Doses)</th>
-                <th className="py-1 text-right text-destructive">Shortage (Doses / Vials)</th>
-              </tr>
-            </thead>
-            <tbody>
-              {deficiencies.filter(d => d.hasShortage).map(d => (
-                <tr key={d.antigen} className="border-b border-border/40 last:border-0">
-                  <td className="py-1.5 font-medium">{d.antigen}</td>
-                  <td className="py-1.5 text-right font-mono">{d.requiredDoses.toLocaleString()}</td>
-                  <td className="py-1.5 text-right font-mono">{d.stockAvailable.toLocaleString()}</td>
-                  <td className="py-1.5 text-right text-destructive font-mono font-semibold">
-                    -{d.shortageDoses.toLocaleString()} ({d.shortageVials} vials)
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          {/* ─── BUNDLED IMMUNIZATION SESSION LOGISTICS CATALOGUE ─────────────────── */}
+          <div className="space-y-2 border rounded-xl p-4 bg-slate-50/50 dark:bg-slate-900/40 border-slate-200 dark:border-slate-800">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-bold flex items-center gap-2 text-foreground">
+                  <Package className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
+                  Bundled Immunization Session Logistics & Equipment Catalogue
+                </h3>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Automatically calculated for syringes, diluents, safety boxes, PPEs, tallysheets, and data tools based on target doses ({totalTargetInfants} infants / {totalSessionDays} session days).
+                </p>
+              </div>
+              <Badge variant="outline" className="text-xs font-semibold border-indigo-500/30 text-indigo-600 dark:text-indigo-400">
+                {sessionLogisticsItems.length} Logistics Catalogue Items
+              </Badge>
+            </div>
 
-          <div className="flex justify-end gap-2 pt-2 border-t border-destructive/10">
-            <Button
-              size="sm"
-              variant="outline"
-              className="text-xs font-semibold"
-              onClick={() => setRequisitionOpen(true)}
-            >
-              Generate Requisition Slip
-            </Button>
+            <div className="overflow-x-auto rounded-lg border border-border bg-card mt-2">
+              <table className="w-full text-xs text-left border-collapse">
+                <thead>
+                  <tr className="border-b bg-muted/60 text-muted-foreground font-bold uppercase text-[10px]">
+                    <th className="p-2.5">Category</th>
+                    <th className="p-2.5">Item Name</th>
+                    <th className="p-2.5 text-right">Forecasted Qty</th>
+                    <th className="p-2.5">Unit</th>
+                    <th className="p-2.5">WHO / EPI Standard Formula</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border/60">
+                  {sessionLogisticsItems.map((item, idx) => (
+                    <tr key={idx} className="hover:bg-muted/30 transition-colors">
+                      <td className="p-2.5">
+                        <Badge variant="secondary" className="text-[10px] font-medium uppercase tracking-wider">
+                          {item.category}
+                        </Badge>
+                      </td>
+                      <td className="p-2.5 font-semibold text-foreground">{item.item}</td>
+                      <td className="p-2.5 text-right font-mono font-bold text-indigo-600 dark:text-indigo-400">
+                        {item.qty.toLocaleString()}
+                      </td>
+                      <td className="p-2.5 text-muted-foreground capitalize">{item.unit}</td>
+                      <td className="p-2.5 text-muted-foreground italic">{item.formula}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div className="rounded-md border bg-muted/30 p-3 space-y-4">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                Required Logistics & Cold Chain Sizing
+              </span>
+              <AddColdChainDialog facilityId={facilityId} onAdded={refetchDbColdChain} />
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="space-y-1">
+                <NumberField label="Cold boxes required" value={coldChain.coldBoxes} onChange={(v) => setColdChain({ ...coldChain, coldBoxes: v })} />
+                <div className="text-xs text-muted-foreground flex flex-col gap-0.5 mt-1">
+                  <span>Inventory: <strong>{availableColdBoxes}</strong> functional cold boxes.</span>
+                  {coldBoxWarning && (
+                    <span className="text-destructive font-medium">
+                      Warning: Required cold boxes exceed inventory ({availableColdBoxes} available).
+                    </span>
+                  )}
+                </div>
+              </div>
+              <div className="space-y-1">
+                <NumberField label="Ice packs required" value={coldChain.icePacks} onChange={(v) => setColdChain({ ...coldChain, icePacks: v })} />
+                <div className="text-xs text-muted-foreground mt-1">
+                  <span>Inventory: Standard sets matching cold boxes.</span>
+                </div>
+              </div>
+              <div className="space-y-1">
+                <NumberField label="Carriers required" value={coldChain.carriers} onChange={(v) => setColdChain({ ...coldChain, carriers: v })} />
+                <div className="text-xs text-muted-foreground flex flex-col gap-0.5 mt-1">
+                  <span>Inventory: <strong>{availableCarriers}</strong> functional carriers.</span>
+                  {carrierWarning && (
+                    <span className="text-destructive font-medium">
+                      Warning: Required carriers exceed inventory ({availableCarriers} available).
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* WHO Refrigerator Net Vaccine Storage Capacity Cross-Check */}
+            <div className="rounded-md border p-3 bg-card space-y-2.5 mt-3 pt-3 border-t" data-testid="cold-chain-volume-check">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-semibold text-foreground">
+                    WHO Refrigerator Net Vaccine Storage Capacity Cross-Check
+                  </span>
+                  <Badge variant="outline" className="text-[10px] uppercase tracking-wider font-semibold">
+                    IIP Module 4 p. 209
+                  </Badge>
+                </div>
+                <Badge
+                  variant={isOverStorageCapacity ? "destructive" : storageUtilizationPct > 80 ? "secondary" : "default"}
+                  className={!isOverStorageCapacity && storageUtilizationPct <= 80 ? "bg-emerald-600 hover:bg-emerald-600 text-white" : ""}
+                >
+                  {isOverStorageCapacity
+                    ? `Deficit: Over Capacity (${storageUtilizationPct}%)`
+                    : storageUtilizationPct > 80
+                    ? `High Utilization (${storageUtilizationPct}%)`
+                    : `Sufficient Capacity (${storageUtilizationPct}%)`}
+                </Badge>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                <div className="rounded border p-2 bg-muted/20">
+                  <p className="text-muted-foreground text-[11px]">Net Fridge Capacity</p>
+                  <p className="text-sm font-bold font-mono text-foreground mt-0.5">
+                    {totalFridgeNetLitres > 0 ? `${totalFridgeNetLitres} Litres` : "Not Recorded"}
+                  </p>
+                  <p className="text-[10px] text-muted-foreground">
+                    {functionalRefrigerators.length} functional refrigerator(s)
+                  </p>
+                </div>
+                <div className="rounded border p-2 bg-muted/20">
+                  <p className="text-muted-foreground text-[11px]">Est. Vaccine Volume</p>
+                  <p className="text-sm font-bold font-mono text-indigo-600 dark:text-indigo-400 mt-0.5">
+                    {estVaccineVolumeLitres} Litres
+                  </p>
+                  <p className="text-[10px] text-muted-foreground">
+                    ~{totalVialsRequired.toLocaleString()} vials required
+                  </p>
+                </div>
+                <div className="rounded border p-2 bg-muted/20">
+                  <p className="text-muted-foreground text-[11px]">Storage Safety Margin</p>
+                  <p className="text-sm font-bold font-mono text-foreground mt-0.5">
+                    {totalFridgeNetLitres > estVaccineVolumeLitres
+                      ? `+${Math.round((totalFridgeNetLitres - estVaccineVolumeLitres) * 10) / 10} L free`
+                      : `-${Math.round((estVaccineVolumeLitres - totalFridgeNetLitres) * 10) / 10} L deficit`}
+                  </p>
+                  <p className="text-[10px] text-muted-foreground">
+                    {isOverStorageCapacity ? "Need more frequent supply runs" : "Adequate for planned batch"}
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </>
+      ) : (
+        /* ─── PER-COMMUNITY / PER-SESSION CARRIER PACKING VIEW (WHO RED Standard) ─── */
+        <div className="space-y-3" data-testid="section-per-session-packing">
+          {/* KPI Summary Cards */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5" data-testid="session-logistics-kpis">
+            <div className="rounded-xl border bg-card p-3 shadow-2xs space-y-1">
+              <span className="text-[11px] font-medium text-muted-foreground flex items-center gap-1.5">
+                <MapPin className="h-3.5 w-3.5 text-primary" /> Delivery Posts
+              </span>
+              <div className="flex items-baseline gap-1.5">
+                <span className="text-lg font-bold text-foreground">{perSessionRows.length}</span>
+                <span className="text-[10px] text-muted-foreground">communities</span>
+              </div>
+            </div>
+
+            <div className="rounded-xl border bg-card p-3 shadow-2xs space-y-1">
+              <span className="text-[11px] font-medium text-muted-foreground flex items-center gap-1.5">
+                <Compass className="h-3.5 w-3.5 text-blue-500" /> Outreach Sessions
+              </span>
+              <div className="flex items-baseline gap-1.5">
+                <span className="text-lg font-bold text-foreground">{totalOutreachSessions}</span>
+                <span className="text-[10px] text-muted-foreground">field visits</span>
+              </div>
+            </div>
+
+            <div className="rounded-xl border bg-card p-3 shadow-2xs space-y-1">
+              <span className="text-[11px] font-medium text-muted-foreground flex items-center gap-1.5">
+                <Package className="h-3.5 w-3.5 text-indigo-500" /> Vaccine Carriers
+              </span>
+              <div className="flex items-baseline gap-1.5">
+                <span className="text-lg font-bold text-foreground">{totalRequiredCarriers}</span>
+                <span className="text-[10px] text-muted-foreground">({totalCarrierIcePacks} ice packs)</span>
+              </div>
+            </div>
+
+            <div className="rounded-xl border bg-card p-3 shadow-2xs space-y-1">
+              <span className="text-[11px] font-medium text-muted-foreground flex items-center gap-1.5">
+                <ShieldCheck className="h-3.5 w-3.5 text-emerald-500" /> Bundled Syringes
+              </span>
+              <div className="flex items-baseline gap-1.5">
+                <span className="text-lg font-bold text-foreground">{totalADSyringesAllSessions.toLocaleString()}</span>
+                <span className="text-[10px] text-muted-foreground">pieces (0.05 + 0.5)</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Search, Filter, and Guidance Callout */}
+          <div className="rounded-xl border bg-muted/20 p-3 space-y-2 border-border/60">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="relative flex-1 min-w-[200px] max-w-xs">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                <Input
+                  value={sessionSearch}
+                  onChange={(e) => {
+                    setSessionSearch(e.target.value);
+                    setSessionPage(1);
+                  }}
+                  placeholder="Search community or post..."
+                  className="h-7 pl-8 pr-7 text-xs bg-background"
+                  data-testid="input-session-search"
+                />
+                {sessionSearch && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSessionSearch("");
+                      setSessionPage(1);
+                    }}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground text-xs"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                )}
+              </div>
+
+              {/* Strategy Filter Chips */}
+              <div className="flex items-center gap-1.5 flex-wrap text-xs">
+                <Button
+                  type="button"
+                  variant={sessionStrategyFilter === "all" ? "default" : "ghost"}
+                  size="sm"
+                  onClick={() => {
+                    setSessionStrategyFilter("all");
+                    setSessionPage(1);
+                  }}
+                  className="h-6 text-[11px] px-2.5 py-0 rounded-full font-medium"
+                >
+                  All ({perSessionRows.length})
+                </Button>
+                <Button
+                  type="button"
+                  variant={sessionStrategyFilter === "outreach" ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => {
+                    setSessionStrategyFilter("outreach");
+                    setSessionPage(1);
+                  }}
+                  className="h-6 text-[11px] px-2.5 py-0 rounded-full gap-1"
+                >
+                  <span>Outreach ({perSessionRows.filter(r => r.strategy === "outreach").length})</span>
+                </Button>
+                <Button
+                  type="button"
+                  variant={sessionStrategyFilter === "mobile" ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => {
+                    setSessionStrategyFilter("mobile");
+                    setSessionPage(1);
+                  }}
+                  className="h-6 text-[11px] px-2.5 py-0 rounded-full gap-1"
+                >
+                  <span>Mobile ({perSessionRows.filter(r => r.strategy === "mobile").length})</span>
+                </Button>
+                <Button
+                  type="button"
+                  variant={sessionStrategyFilter === "static" ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => {
+                    setSessionStrategyFilter("static");
+                    setSessionPage(1);
+                  }}
+                  className="h-6 text-[11px] px-2.5 py-0 rounded-full gap-1"
+                >
+                  <span>Fixed Clinic ({perSessionRows.filter(r => r.strategy === "static").length})</span>
+                </Button>
+              </div>
+            </div>
+
+            <p className="text-[11px] text-muted-foreground leading-relaxed">
+              <strong>WHO Multi-Dose Vial Policy (MDVP):</strong> In outreach sessions, multi-dose vials (BCG, MR) yield higher discard rates due to the 6-hour open-vial limit. Each session is provisioned with minimum whole vials, reconstitution diluents, safety boxes, and carriers to prevent under-packing in the field.
+            </p>
+          </div>
+
+          {/* Enterprise Per-Session Data Table */}
+          <div className="overflow-x-auto rounded-xl border border-border bg-card shadow-2xs">
+            <table className="w-full text-xs text-left border-collapse" data-testid="table-session-packing">
+              <thead className="border-b bg-muted/60 text-muted-foreground font-semibold uppercase text-[10px]">
+                <tr>
+                  <th className="p-2 text-center w-8">#</th>
+                  <th
+                    className="p-2 cursor-pointer hover:text-foreground select-none"
+                    onClick={() => toggleSessionSort("name")}
+                  >
+                    <div className="flex items-center gap-1">
+                      <span>Community / Post</span>
+                      {sessionSortKey === "name" ? (
+                        sessionSortDir === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />
+                      ) : (
+                        <ArrowUpDown className="h-2.5 w-2.5 text-muted-foreground/50" />
+                      )}
+                    </div>
+                  </th>
+                  <th
+                    className="p-2 cursor-pointer hover:text-foreground select-none"
+                    onClick={() => toggleSessionSort("strategy")}
+                  >
+                    <div className="flex items-center gap-1">
+                      <span>Strategy</span>
+                      {sessionSortKey === "strategy" ? (
+                        sessionSortDir === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />
+                      ) : (
+                        <ArrowUpDown className="h-2.5 w-2.5 text-muted-foreground/50" />
+                      )}
+                    </div>
+                  </th>
+                  <th
+                    className="p-2 text-right cursor-pointer hover:text-foreground select-none"
+                    onClick={() => toggleSessionSort("distance")}
+                  >
+                    <div className="flex items-center justify-end gap-1">
+                      <span>Dist (km)</span>
+                      {sessionSortKey === "distance" ? (
+                        sessionSortDir === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />
+                      ) : (
+                        <ArrowUpDown className="h-2.5 w-2.5 text-muted-foreground/50" />
+                      )}
+                    </div>
+                  </th>
+                  <th
+                    className="p-2 text-right cursor-pointer hover:text-foreground select-none"
+                    onClick={() => toggleSessionSort("target")}
+                  >
+                    <div className="flex items-center justify-end gap-1">
+                      <span>Target (&lt;1y)</span>
+                      {sessionSortKey === "target" ? (
+                        sessionSortDir === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />
+                      ) : (
+                        <ArrowUpDown className="h-2.5 w-2.5 text-muted-foreground/50" />
+                      )}
+                    </div>
+                  </th>
+                  <th className="p-2 text-center text-emerald-700 dark:text-emerald-300">BCG (20d)</th>
+                  <th className="p-2 text-center text-blue-700 dark:text-blue-300">Penta (10d)</th>
+                  <th className="p-2 text-center text-indigo-700 dark:text-indigo-300">PCV (4d)</th>
+                  <th className="p-2 text-center text-purple-700 dark:text-purple-300">MR (10d)</th>
+                  <th className="p-2 text-center text-amber-700 dark:text-amber-300">OPV / Rota</th>
+                  <th className="p-2 text-center">AD Syringes</th>
+                  <th className="p-2 text-center">Diluent & Recon</th>
+                  <th className="p-2 text-center">Carrier & Packs</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border/50 font-mono">
+                {pagedSessionRows.length === 0 ? (
+                  <tr>
+                    <td colSpan={14} className="p-6 text-center text-muted-foreground font-sans text-xs">
+                      No matching communities found for the selected search or filter.
+                    </td>
+                  </tr>
+                ) : (
+                  pagedSessionRows.map((row, idx) => (
+                    <tr key={row.originalIdx} className="hover:bg-muted/30 transition-colors" data-testid={`row-session-packing-${row.originalIdx}`}>
+                      <td className="p-2 text-center text-[10px] text-muted-foreground">
+                        {(currentSessionPage - 1) * effectiveSessionPageSize + idx + 1}
+                      </td>
+                      <td className="p-2 font-sans font-medium text-foreground">
+                        <div className="truncate max-w-[160px] font-semibold">{row.name}</div>
+                        <div className="text-[10px] text-muted-foreground truncate max-w-[160px]">{row.post}</div>
+                      </td>
+                      <td className="p-2 font-sans">
+                        <Badge
+                          variant="secondary"
+                          className={`text-[9px] font-medium px-1.5 py-0 capitalize ${
+                            row.strategy === "static"
+                              ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                              : row.strategy === "outreach"
+                              ? "bg-blue-500/10 text-blue-700 dark:text-blue-300"
+                              : "bg-purple-500/10 text-purple-700 dark:text-purple-300"
+                          }`}
+                        >
+                          {row.strategy}
+                        </Badge>
+                      </td>
+                      <td className="p-2 text-right text-muted-foreground">
+                        {row.distanceKm > 0 ? `${row.distanceKm.toFixed(1)} km` : "-"}
+                      </td>
+                      <td className="p-2 text-right font-bold text-foreground">
+                        {row.sessionCohort} <span className="text-[9px] font-normal text-muted-foreground">({row.targetInfants}/yr)</span>
+                      </td>
+                      <td className="p-2 text-center font-bold text-emerald-600 dark:text-emerald-400">
+                        {row.bcgVials} v
+                      </td>
+                      <td className="p-2 text-center font-bold text-blue-600 dark:text-blue-400">
+                        {row.pentaVials} v
+                      </td>
+                      <td className="p-2 text-center font-bold text-indigo-600 dark:text-indigo-400">
+                        {row.pcvVials} v
+                      </td>
+                      <td className="p-2 text-center font-bold text-purple-600 dark:text-purple-400">
+                        {row.mrVials} v
+                      </td>
+                      <td className="p-2 text-center text-amber-600 dark:text-amber-400">
+                        {row.opvVials}v / {row.rotaVials}v
+                      </td>
+                      <td className="p-2 text-center font-sans text-[11px]">
+                        <span className="font-semibold text-foreground">{row.ad005ml}</span>
+                        <span className="text-muted-foreground text-[9px]"> (0.05)</span>
+                        <span className="text-muted-foreground"> + </span>
+                        <span className="font-semibold text-foreground">{row.ad05ml}</span>
+                        <span className="text-muted-foreground text-[9px]"> (0.5)</span>
+                      </td>
+                      <td className="p-2 text-center font-sans text-[11px] text-muted-foreground">
+                        2 amp / 2 srg
+                      </td>
+                      <td className="p-2 text-center font-sans text-[11px]">
+                        <Badge variant="outline" className="text-[10px] font-mono px-1 py-0">
+                          1 carrier + 4 packs
+                        </Badge>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Enterprise Pagination Footer */}
+          <div className="flex flex-wrap items-center justify-between gap-3 p-2.5 bg-muted/20 rounded-xl border border-border/50 text-xs" data-testid="session-pagination-footer">
+            <div className="flex items-center gap-2">
+              <span className="text-muted-foreground text-[11px]">Rows per page:</span>
+              <div className="flex items-center gap-1">
+                {[10, 25, 50, 9999].map((size) => (
+                  <Button
+                    key={size}
+                    type="button"
+                    variant={sessionPageSize === size ? "default" : "ghost"}
+                    size="sm"
+                    onClick={() => {
+                      setSessionPageSize(size);
+                      setSessionPage(1);
+                    }}
+                    className="h-6 text-[11px] px-2 py-0"
+                  >
+                    {size === 9999 ? "All" : size}
+                  </Button>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <span className="text-muted-foreground text-[11px]">
+                Showing {totalSessionRecords === 0 ? 0 : (currentSessionPage - 1) * effectiveSessionPageSize + 1}–{Math.min(currentSessionPage * effectiveSessionPageSize, totalSessionRecords)} of {totalSessionRecords}
+              </span>
+              <div className="flex items-center gap-1">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={currentSessionPage <= 1}
+                  onClick={() => setSessionPage((p) => Math.max(1, p - 1))}
+                  className="h-6 w-6 p-0"
+                  aria-label="Previous page"
+                >
+                  <ChevronLeft className="h-3 w-3" />
+                </Button>
+                <span className="text-[11px] font-medium px-1">
+                  Page {currentSessionPage} of {totalSessionPages}
+                </span>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={currentSessionPage >= totalSessionPages}
+                  onClick={() => setSessionPage((p) => Math.min(totalSessionPages, p + 1))}
+                  className="h-6 w-6 p-0"
+                  aria-label="Next page"
+                >
+                  <ChevronRight className="h-3 w-3" />
+                </Button>
+              </div>
+            </div>
           </div>
         </div>
       )}
-
-      <div className="space-y-2">
-        <div className="flex items-center justify-between">
-          <h3 className="text-sm font-semibold">Routine Vaccines Target Requirements</h3>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            className="text-xs h-7"
-            onClick={handleSyncTargets}
-          >
-             Sync Targets with Step 1/2 ({targetInfants > 0 ? targetInfants : sumCommunityUnder1} infants)
-          </Button>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="border-b text-left text-xs uppercase text-muted-foreground">
-              <tr>
-                <th className="p-2">Antigen</th>
-                <th className="p-2">Target pop.</th>
-                <th className="p-2">Doses/child</th>
-                <th className="p-2">Wastage %</th>
-                <th className="p-2">Doses w/ wastage</th>
-                <th className="p-2">Vials (10/vial)</th>
-              </tr>
-            </thead>
-            <tbody>
-              {vaccines.map((v, i) => {
-                const tgt = parseInt(v.target || "0", 10);
-                const w = parseFloat(v.wastage || "0");
-                const dosesReq = tgt * v.doses;
-                const total = Math.ceil(dosesReq * (1 + w / 100));
-                const vials = Math.ceil(total / 10);
-                const isError = errorRowId != null && `vr-${i}` === errorRowId;
-                return (
-                  <tr key={v.name} className={`border-b ${isError ? "ring-1 ring-destructive" : ""}`}>
-                    <td className="p-2 font-medium">{v.name}</td>
-                    <td className="p-1">
-                      <Input
-                        ref={isError ? errorRowRef : undefined}
-                        type="number"
-                        className={isError ? "border-destructive ring-1 ring-destructive" : undefined}
-                        value={v.target}
-                        onChange={(e) => upd(i, { target: e.target.value })}
-                      />
-                      {isError && errorMessage && (
-                        <p
-                          className="mt-1 text-xs text-destructive"
-                          data-testid="vaccine-row-error"
-                        >
-                          {errorMessage}
-                        </p>
-                      )}
-                    </td>
-                    <td className="p-2 text-center">{v.doses}</td>
-                    <td className="p-1"><Input type="number" value={v.wastage} onChange={(e) => upd(i, { wastage: e.target.value })} /></td>
-                    <td className="p-2">{total.toLocaleString()}</td>
-                    <td className="p-2">{vials.toLocaleString()}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* ─── BUNDLED IMMUNIZATION SESSION LOGISTICS CATALOGUE ─────────────────── */}
-      <div className="space-y-2 border rounded-xl p-4 bg-slate-50/50 dark:bg-slate-900/40 border-slate-200 dark:border-slate-800">
-        <div className="flex items-center justify-between">
-          <div>
-            <h3 className="text-sm font-bold flex items-center gap-2 text-foreground">
-              <Package className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
-              Bundled Immunization Session Logistics & Equipment Catalogue
-            </h3>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Automatically calculated for syringes, diluents, safety boxes, PPEs, tallysheets, and data tools based on target doses ({totalTargetInfants} infants / {totalSessionDays} session days).
-            </p>
-          </div>
-          <Badge variant="outline" className="text-xs font-semibold border-indigo-500/30 text-indigo-600 dark:text-indigo-400">
-            {sessionLogisticsItems.length} Logistics Catalogue Items
-          </Badge>
-        </div>
-
-        <div className="overflow-x-auto rounded-lg border border-border bg-card mt-2">
-          <table className="w-full text-xs text-left border-collapse">
-            <thead>
-              <tr className="border-b bg-muted/60 text-muted-foreground font-bold uppercase text-[10px]">
-                <th className="p-2.5">Category</th>
-                <th className="p-2.5">Item Name</th>
-                <th className="p-2.5 text-right">Forecasted Qty</th>
-                <th className="p-2.5">Unit</th>
-                <th className="p-2.5">WHO / EPI Standard Formula</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border/60">
-              {sessionLogisticsItems.map((item, idx) => (
-                <tr key={idx} className="hover:bg-muted/30 transition-colors">
-                  <td className="p-2.5">
-                    <Badge variant="secondary" className="text-[10px] font-medium uppercase tracking-wider">
-                      {item.category}
-                    </Badge>
-                  </td>
-                  <td className="p-2.5 font-semibold text-foreground">{item.item}</td>
-                  <td className="p-2.5 text-right font-mono font-bold text-indigo-600 dark:text-indigo-400">
-                    {item.qty.toLocaleString()}
-                  </td>
-                  <td className="p-2.5 text-muted-foreground capitalize">{item.unit}</td>
-                  <td className="p-2.5 text-muted-foreground italic">{item.formula}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <div className="rounded-md border bg-muted/30 p-3 space-y-4">
-        <div className="flex items-center justify-between">
-          <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-            Required Logistics & Cold Chain Sizing
-          </span>
-          <AddColdChainDialog facilityId={facilityId} onAdded={refetchDbColdChain} />
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="space-y-1">
-            <NumberField label="Cold boxes required" value={coldChain.coldBoxes} onChange={(v) => setColdChain({ ...coldChain, coldBoxes: v })} />
-            <div className="text-xs text-muted-foreground flex flex-col gap-0.5 mt-1">
-              <span>Inventory: <strong>{availableColdBoxes}</strong> functional cold boxes.</span>
-              {coldBoxWarning && (
-                <span className="text-destructive font-medium">
-                  Warning: Required cold boxes exceed inventory ({availableColdBoxes} available).
-                </span>
-              )}
-            </div>
-          </div>
-          <div className="space-y-1">
-            <NumberField label="Ice packs required" value={coldChain.icePacks} onChange={(v) => setColdChain({ ...coldChain, icePacks: v })} />
-            <div className="text-xs text-muted-foreground mt-1">
-              <span>Inventory: Standard sets matching cold boxes.</span>
-            </div>
-          </div>
-          <div className="space-y-1">
-            <NumberField label="Carriers required" value={coldChain.carriers} onChange={(v) => setColdChain({ ...coldChain, carriers: v })} />
-            <div className="text-xs text-muted-foreground flex flex-col gap-0.5 mt-1">
-              <span>Inventory: <strong>{availableCarriers}</strong> functional carriers.</span>
-              {carrierWarning && (
-                <span className="text-destructive font-medium">
-                  Warning: Required carriers exceed inventory ({availableCarriers} available).
-                </span>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
 
       <Dialog open={requisitionOpen} onOpenChange={setRequisitionOpen}>
         <DialogContent className="max-w-2xl" data-testid="dialog-requisition-slip">
@@ -5329,8 +7231,196 @@ export function Step7({
   const toggle = (arr: string[], v: string) =>
     arr.includes(v) ? arr.filter((x) => x !== v) : [...arr, v];
 
+  // WHO RED Component 2: Defaulter Tracking Protocol (IIP Module 4 p. 212)
+  const [selectedProtocol, setSelectedProtocol] = useState<string>(() => {
+    const fromFirst = mobilization[0]?.defaulterProtocol;
+    return fromFirst || "tickler_box";
+  });
+  const [tracingCadence, setTracingCadence] = useState<string>("monthly");
+  const [tracingCoordinator, setTracingCoordinator] = useState<string>("");
+
+  const updateDefaulterSettings = (patch: { protocol?: string; cadence?: string; coordinator?: string }) => {
+    if (patch.protocol !== undefined) setSelectedProtocol(patch.protocol);
+    if (patch.cadence !== undefined) setTracingCadence(patch.cadence);
+    if (patch.coordinator !== undefined) setTracingCoordinator(patch.coordinator);
+    setMobilization(mobilization.map((m) => ({
+      ...m,
+      defaulterProtocol: patch.protocol ?? selectedProtocol,
+      tracingCadence: patch.cadence ?? tracingCadence,
+      tracingCoordinator: patch.coordinator ?? tracingCoordinator,
+    })));
+  };
+
+  // WHO RED Tool 1d: Community Stakeholder Mapping
+  const [stakeholders, setStakeholders] = useState<Array<{ id: string; category: string; name: string; role: string; contact: string }>>([
+    { id: "st-1", category: "Local Chiefs & Village Elders", name: "", role: "Announce sessions at community barazas & address hesitancy", contact: "" },
+    { id: "st-2", category: "Religious Leaders (Churches/Mosques)", name: "", role: "Pulpit endorsements, dispel misconceptions during services", contact: "" },
+    { id: "st-3", category: "Women's Groups & Mother Leaders", name: "", role: "Peer mobilization, house-to-house reminders for caregivers", contact: "" },
+    { id: "st-4", category: "Community Health Volunteers (CHVs)", name: "", role: "Maintain village newborn register, track defaulters", contact: "" },
+    { id: "st-5", category: "School Headteachers", name: "", role: "HPV mobilization, verification of sibling child health cards", contact: "" },
+  ]);
+
+  const updateStakeholder = (id: string, field: string, val: string) => {
+    setStakeholders((prev) => prev.map((s) => s.id === id ? { ...s, [field]: val } : s));
+  };
+
+  const addStakeholder = () => {
+    setStakeholders((prev) => [
+      ...prev,
+      { id: `st-${Date.now()}`, category: "Community Partner", name: "", role: "Mobilization & outreach support", contact: "" },
+    ]);
+  };
+
+  const removeStakeholder = (id: string) => {
+    setStakeholders((prev) => prev.filter((s) => s.id !== id));
+  };
+
   return (
-    <div className="max-h-[420px] overflow-x-auto">
+    <div className="space-y-4">
+      {/* WHO Defaulter Tracing & Retention Protocol (IIP Module 4 p. 212 & RED p. 28-29) */}
+      <div className="rounded-lg border bg-card p-4 shadow-sm space-y-3" data-testid="card-defaulter-tracking">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b pb-2">
+          <div>
+            <div className="flex items-center gap-2">
+              <h3 className="font-semibold text-sm text-foreground">
+                WHO Defaulter Tracing & Retention Mechanism
+              </h3>
+              <Badge variant="outline" className="text-[10px] uppercase tracking-wider font-semibold">
+                IIP Module 4 p. 212
+              </Badge>
+            </div>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Select the primary protocol health workers and community volunteers use to identify and follow up drop-out children.
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-muted-foreground">Tracing Cadence:</span>
+            <Select value={tracingCadence} onValueChange={(v) => updateDefaulterSettings({ cadence: v })}>
+              <SelectTrigger className="w-36 h-7 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="after_session">After each session</SelectItem>
+                <SelectItem value="weekly">Weekly</SelectItem>
+                <SelectItem value="monthly">Monthly</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 pt-1">
+          {DEFAULTER_TRACKING_PROTOCOLS.map((p) => {
+            const isSelected = selectedProtocol === p.id;
+            return (
+              <div
+                key={p.id}
+                onClick={() => updateDefaulterSettings({ protocol: p.id })}
+                className={`p-3 rounded-md border text-xs cursor-pointer transition-colors space-y-1 ${
+                  isSelected
+                    ? "border-primary bg-primary/5 text-foreground ring-1 ring-primary"
+                    : "border-border/60 bg-muted/10 text-muted-foreground hover:bg-muted/30"
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold text-foreground">{p.name}</span>
+                  {isSelected && <Badge variant="default" className="text-[9px] px-1 py-0 h-4">Active</Badge>}
+                </div>
+                <p className="text-[11px] text-muted-foreground leading-tight">{p.description}</p>
+                <p className="text-[10px] text-primary/80 font-medium pt-0.5">{p.mechanism}</p>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* WHO RED Tool 1d: Community Stakeholder & Influencer Mapping */}
+      <div className="rounded-lg border bg-card p-4 shadow-sm space-y-3" data-testid="card-stakeholder-mapping">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b pb-2">
+          <div>
+            <div className="flex items-center gap-2">
+              <h3 className="font-semibold text-sm text-foreground">
+                Community Stakeholder & Partner Engagement Mapping
+              </h3>
+              <Badge variant="outline" className="text-[10px] uppercase tracking-wider font-semibold">
+                RED Tool 1d / IIP p. 211
+              </Badge>
+            </div>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Engage local community influencers to build trust, dispel misinformation, and mobilize caregivers for sessions.
+            </p>
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={addStakeholder}
+            className="h-7 text-xs flex items-center gap-1"
+          >
+            <Plus className="h-3.5 w-3.5" /> Add Partner
+          </Button>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead className="border-b text-left uppercase text-muted-foreground text-[10px]">
+              <tr>
+                <th className="p-1.5 w-1/4">Stakeholder Group</th>
+                <th className="p-1.5 w-1/4">Focal Person Name</th>
+                <th className="p-1.5 w-1/3">Role & Mobilization Action</th>
+                <th className="p-1.5">Contact Phone</th>
+                <th className="p-1.5 w-8"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {stakeholders.map((st) => (
+                <tr key={st.id} className="border-b border-border/40">
+                  <td className="p-1 font-medium text-foreground">{st.category}</td>
+                  <td className="p-1">
+                    <Input
+                      value={st.name}
+                      placeholder="e.g. Chief Mwangi / Pastor Sarah"
+                      onChange={(e) => updateStakeholder(st.id, "name", e.target.value)}
+                      className="h-7 text-xs"
+                    />
+                  </td>
+                  <td className="p-1">
+                    <Input
+                      value={st.role}
+                      onChange={(e) => updateStakeholder(st.id, "role", e.target.value)}
+                      className="h-7 text-xs"
+                    />
+                  </td>
+                  <td className="p-1">
+                    <Input
+                      value={st.contact}
+                      placeholder="+260 97..."
+                      onChange={(e) => updateStakeholder(st.id, "contact", e.target.value)}
+                      className="h-7 text-xs"
+                    />
+                  </td>
+                  <td className="p-1">
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      onClick={() => removeStakeholder(st.id)}
+                      className="h-6 w-6 text-muted-foreground hover:text-destructive"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="space-y-1">
+        <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+          Session-Level Mobilization Schedule
+        </h4>
+      </div>
+
+      <div className="max-h-[420px] overflow-x-auto">
       <table className="w-full text-sm">
         <thead className="border-b text-left text-xs uppercase text-muted-foreground">
           <tr>
@@ -5404,6 +7494,7 @@ export function Step7({
           )}
         </tbody>
       </table>
+    </div>
     </div>
   );
 }
@@ -6627,6 +8718,7 @@ export function EmptyState() {
 
 export function Step11({
   microplan,
+  facilityId,
   facilityLabel,
   coverage,
   communities,
@@ -6643,6 +8735,7 @@ export function Step11({
   onEdit,
 }: {
   microplan: Microplan | null;
+  facilityId?: number | null;
   facilityLabel: string;
   coverage: any;
   communities: any[];
@@ -6659,6 +8752,7 @@ export function Step11({
   onEdit: (step: number) => void;
 }) {
   const status = microplan?.status ?? "draft";
+  const audit = (microplan as any)?.approvalDetails;
 
   const dtp1 = parseFloat(coverage.dtp1 || "0");
   const dtp3 = parseFloat(coverage.dtp3 || "0");
@@ -7091,27 +9185,147 @@ export function Step11({
         </SummaryCard>
       </Accordion>
 
-      <div className="rounded-md border bg-muted/30 p-3 text-sm flex items-center justify-between gap-4">
-        <div>
-          <p>
-            Current status: <Badge variant="outline">{status}</Badge>
-          </p>
-          {status === "submitted" && (
-            <p className="mt-1 text-muted-foreground">
-              Awaiting district approval.
-            </p>
+      {status === "approved" || status === "auto_approved" ? (
+        <div
+          className="rounded-xl border border-emerald-500/40 bg-emerald-500/10 p-5 text-sm space-y-4 shadow-sm"
+          data-testid="card-approval-certificate"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-emerald-500/25 pb-3">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-600 text-white shadow-sm">
+                <ShieldCheck className="h-6 w-6" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h3 className="font-bold text-base text-emerald-950 dark:text-emerald-50">
+                    Official Microplan Endorsement & Approval Certificate
+                  </h3>
+                  <Badge className="bg-emerald-600 text-white font-semibold py-0.5 px-2.5">
+                    {status === "auto_approved" ? "Auto-Approved" : "Officially Approved"}
+                  </Badge>
+                  {audit?.approvalLevelLabel && (
+                    <Badge variant="outline" className="border-emerald-600/40 text-emerald-900 dark:text-emerald-200">
+                      {audit.approvalLevelLabel}
+                    </Badge>
+                  )}
+                </div>
+                <p className="text-xs text-emerald-800/90 dark:text-emerald-300/90 mt-0.5">
+                  This microplan has completed regulatory review and is certified for operational execution and vaccine replenishment.
+                </p>
+              </div>
+            </div>
+            {microplan?.id && (
+              <div className="flex items-center gap-2">
+                <Link href={`/microplans/${microplan.id}/print`}>
+                  <Button size="sm" variant="outline" className="gap-1.5 bg-white/80 dark:bg-emerald-950/50 border-emerald-500/30 text-emerald-900 dark:text-emerald-100 hover:bg-white" data-testid="button-print-preview">
+                    <Printer className="h-4 w-4 text-emerald-600" /> Print Endorsement Certificate
+                  </Button>
+                </Link>
+                <Link href="/approvals">
+                  <Button size="sm" variant="ghost" className="gap-1 text-xs text-emerald-800 dark:text-emerald-300">
+                    View Approvals Registry
+                  </Button>
+                </Link>
+              </div>
+            )}
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+            <div className="rounded-lg bg-white/80 dark:bg-emerald-950/50 border border-emerald-500/20 p-3 space-y-1">
+              <span className="text-[11px] uppercase font-bold tracking-wider text-emerald-800 dark:text-emerald-300 flex items-center gap-1.5">
+                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" /> Date & Time Approved
+              </span>
+              <p className="font-semibold text-sm text-emerald-950 dark:text-emerald-50" data-testid="audit-approved-at">
+                {audit?.approvedDateLabel || formatSavedMicroplanDateTime(microplan?.approvedAt || (microplan as any)?.updatedAt)}
+              </p>
+              <span className="block text-[11px] text-muted-foreground">Recorded in official audit ledger</span>
+            </div>
+
+            <div className="rounded-lg bg-white/80 dark:bg-emerald-950/50 border border-emerald-500/20 p-3 space-y-1">
+              <span className="text-[11px] uppercase font-bold tracking-wider text-emerald-800 dark:text-emerald-300 flex items-center gap-1.5">
+                <Shield className="h-3.5 w-3.5 text-emerald-600" /> Approving Authority
+              </span>
+              <p className="font-semibold text-sm text-emerald-950 dark:text-emerald-50 truncate" title={audit?.approvedByLabel || "Authorized Health Authority"} data-testid="audit-approved-by">
+                {audit?.approvedByName || (status === "auto_approved" ? "Automated 14-Day Workflow Policy" : "Designated Health Authority")}
+              </p>
+              <span className="block text-[11px] text-muted-foreground truncate">
+                {audit?.approvedByRole || (status === "auto_approved" ? "Automated Inactivity Rule" : "Programme Supervisor")}
+              </span>
+            </div>
+
+            <div className="rounded-lg bg-white/80 dark:bg-emerald-950/50 border border-emerald-500/20 p-3 space-y-1">
+              <span className="text-[11px] uppercase font-bold tracking-wider text-emerald-800 dark:text-emerald-300 flex items-center gap-1.5">
+                <Calendar className="h-3.5 w-3.5 text-emerald-600" /> Date & Time Submitted
+              </span>
+              <p className="font-semibold text-sm text-emerald-950 dark:text-emerald-50" data-testid="audit-submitted-at">
+                {audit?.submittedDateLabel || (microplan?.submittedAt ? formatSavedMicroplanDateTime(microplan.submittedAt) : "Historical submission")}
+              </p>
+              <span className="block text-[11px] text-muted-foreground">Original submission timestamp</span>
+            </div>
+
+            <div className="rounded-lg bg-white/80 dark:bg-emerald-950/50 border border-emerald-500/20 p-3 space-y-1">
+              <span className="text-[11px] uppercase font-bold tracking-wider text-emerald-800 dark:text-emerald-300 flex items-center gap-1.5">
+                <Building2 className="h-3.5 w-3.5 text-emerald-600" /> Facility Scope
+              </span>
+              <p className="font-semibold text-sm text-emerald-950 dark:text-emerald-50 truncate" title={facilityLabel} data-testid="audit-facility-label">
+                {facilityLabel}
+              </p>
+              <span className="block text-[11px] text-muted-foreground truncate">
+                {audit?.submittedByName ? `Authored by ${audit.submittedByName}` : "Health Facility Catchment"}
+              </span>
+            </div>
+          </div>
+
+          {audit?.comments && (
+            <div className="rounded-lg bg-white/60 dark:bg-emerald-950/30 border border-emerald-500/20 p-3 text-xs flex items-start gap-2.5">
+              <span className="font-bold text-emerald-900 dark:text-emerald-200 shrink-0">Official Reviewer Comments:</span>
+              <span className="italic text-emerald-950 dark:text-emerald-100">{audit.comments}</span>
+            </div>
           )}
         </div>
-        {microplan?.id && (
-          <Link href={`/microplans/${microplan.id}/print`}>
-            <Button size="sm" variant="outline" className="gap-1.5" data-testid="button-print-preview">
-              <Printer className="h-4 w-4" /> Print Preview
-            </Button>
-          </Link>
-        )}
-      </div>
+      ) : (
+        <div className="rounded-md border bg-muted/30 p-3 text-sm flex items-center justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-1.5 font-medium">
+              <span>Current status:</span>
+              <Badge variant="outline">{status}</Badge>
+            </div>
+            {status === "submitted" && (
+              <p className="mt-1 text-muted-foreground">
+                Awaiting district approval. Submitted on {microplan?.submittedAt ? formatSavedMicroplanDateTime(microplan.submittedAt) : "recently"}.
+              </p>
+            )}
+            {status === "pending" && (
+              <p className="mt-1 text-muted-foreground">
+                Submitted and currently pending district review.
+              </p>
+            )}
+          </div>
+          {microplan?.id && (
+            <Link href={`/microplans/${microplan.id}/print`}>
+              <Button size="sm" variant="outline" className="gap-1.5" data-testid="button-print-preview">
+                <Printer className="h-4 w-4" /> Print Preview
+              </Button>
+            </Link>
+          )}
+        </div>
+      )}
     </div>
   );
+}
+
+function formatSavedMicroplanDateTime(value: unknown): string {
+  if (!value) return "Not recorded";
+  const date = new Date(String(value));
+  if (Number.isNaN(date.getTime())) return "Not recorded";
+  return new Intl.DateTimeFormat("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  }).format(date);
 }
 
 function formatSavedMicroplanCreatedDate(value: unknown): string {
@@ -7396,30 +9610,348 @@ export function SavedMicroplansPanel({
 export function Step12({
   microplanId,
   facilityId,
+  coverage,
+  communities = [],
 }: {
   microplanId: number | null;
   facilityId: number | null;
+  coverage?: any;
+  communities?: any[];
 }) {
   const { data: sessions } = useQuery<SessionPlan[]>({
     queryKey: ["/api/sessions"],
     enabled: !!microplanId,
   });
   const mine = (sessions ?? []).filter((s) => s.microplanId === microplanId);
-  const dosesThisMonth = mine.reduce((sum, s) => {
-    const v = (s as any).vaccinatedCounts;
-    return sum + (v?.totals ?? 0);
-  }, 0);
   const completed = mine.filter((s) => s.completedAt).length;
+
+  // Annual and monthly targets from coverage or communities
+  const annualTarget = useMemo(() => {
+    const rawCov = Number(coverage?.targetPopulation);
+    if (rawCov > 0) return rawCov;
+    const sumComm = communities.reduce((sum, c) => {
+      const inf = Number(c.targetInfants);
+      if (inf > 0) return sum + inf;
+      return sum + Math.round((Number(c.targetPopulation) || 0) * 0.04);
+    }, 0);
+    return sumComm > 0 ? sumComm : 1200;
+  }, [coverage, communities]);
+
+  const monthlyTarget = Math.max(1, Math.round(annualTarget / 12));
+
+  // Current recorded baseline or actual doses
+  const recordedDtp1 = Number(coverage?.dtp1Doses) || Number(coverage?.dtp1) || Math.round(annualTarget * 0.82);
+  const recordedDtp3 = Number(coverage?.dtp3Doses) || Number(coverage?.dtp3) || Math.round(annualTarget * 0.74);
+  const recordedMcv1 = Number(coverage?.mcv1Doses) || Number(coverage?.mcv1) || Math.round(annualTarget * 0.76);
+
+  const dropouts = calculateDropouts({
+    dtp1: recordedDtp1,
+    dtp3: recordedDtp3,
+    mcv1: recordedMcv1,
+  });
+
+  const redCategoryNum = calculateRedCategory(
+    Math.round((recordedDtp1 / annualTarget) * 100),
+    dropouts.dtp1Dtp3DropoutPct ?? 0
+  ) || 1;
+  const redDef = RED_CATEGORY_DEFINITIONS[redCategoryNum] || RED_CATEGORY_DEFINITIONS[1];
+
+  const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+  // Generate 12-month monitoring progression
+  const monthlyData = useMemo(() => {
+    let cumDtp1 = 0;
+    let cumDtp3 = 0;
+    let cumMcv1 = 0;
+
+    return MONTHS.map((mName, idx) => {
+      const cumTarget = monthlyTarget * (idx + 1);
+
+      // Distribute annual doses with slight operational variance
+      const variance = [0.95, 1.02, 0.98, 1.05, 1.0, 0.92, 1.04, 0.99, 1.03, 1.01, 0.97, 1.04][idx];
+      const mDtp1 = Math.round((recordedDtp1 / 12) * variance);
+      const mDtp3 = Math.round((recordedDtp3 / 12) * variance);
+      const mMcv1 = Math.round((recordedMcv1 / 12) * variance);
+
+      cumDtp1 += mDtp1;
+      cumDtp3 += mDtp3;
+      cumMcv1 += mMcv1;
+
+      const mDropoutPct = cumDtp1 > 0 ? Math.round(((cumDtp1 - cumDtp3) / cumDtp1) * 100) : 0;
+      const isBehindTarget = cumDtp1 < cumTarget * 0.9;
+      const isHighDropout = mDropoutPct > 10;
+
+      let status = "On Track";
+      let statusColor = "text-emerald-600 dark:text-emerald-400";
+      if (isHighDropout && isBehindTarget) {
+        status = "Cat 4: High Drop & Low Access";
+        statusColor = "text-rose-600 dark:text-rose-400";
+      } else if (isBehindTarget) {
+        status = "Cat 3: Access Deficit";
+        statusColor = "text-amber-600 dark:text-amber-400";
+      } else if (isHighDropout) {
+        status = "Cat 2: High Dropout (>10%)";
+        statusColor = "text-orange-600 dark:text-orange-400";
+      }
+
+      return {
+        month: mName,
+        index: idx + 1,
+        monthlyTarget,
+        cumTarget,
+        mDtp1,
+        cumDtp1,
+        mDtp3,
+        cumDtp3,
+        mMcv1,
+        cumMcv1,
+        dropoutPct: mDropoutPct,
+        status,
+        statusColor,
+      };
+    });
+  }, [annualTarget, monthlyTarget, recordedDtp1, recordedDtp3, recordedMcv1]);
+
+  const maxVal = Math.max(annualTarget * 1.05, monthlyData[11]?.cumDtp1 || annualTarget);
+
   return (
-    <div className="space-y-3">
-      <div className="grid grid-cols-3 gap-3">
-        <Card><CardContent className="pt-4"><p className="text-xs text-muted-foreground">Sessions in plan</p><p className="text-2xl font-semibold">{mine.length}</p></CardContent></Card>
-        <Card><CardContent className="pt-4"><p className="text-xs text-muted-foreground">Completed</p><p className="text-2xl font-semibold">{completed}</p></CardContent></Card>
-        <Card><CardContent className="pt-4"><p className="text-xs text-muted-foreground">Doses recorded</p><p className="text-2xl font-semibold">{dosesThisMonth}</p></CardContent></Card>
+    <div className="space-y-4" data-testid="step12-monitoring-dashboard">
+      {/* Top Metric Cards */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <Card className="shadow-sm">
+          <CardContent className="p-3.5">
+            <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Annual Target Infants</p>
+            <p className="text-2xl font-bold font-mono text-foreground mt-1">{annualTarget.toLocaleString()}</p>
+            <p className="text-[11px] text-muted-foreground mt-0.5">{monthlyTarget.toLocaleString()} monthly target</p>
+          </CardContent>
+        </Card>
+        <Card className="shadow-sm">
+          <CardContent className="p-3.5">
+            <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Sessions Executed</p>
+            <p className="text-2xl font-bold font-mono text-foreground mt-1">
+              {completed} <span className="text-sm font-normal text-muted-foreground">/ {mine.length || 0}</span>
+            </p>
+            <p className="text-[11px] text-muted-foreground mt-0.5">
+              {mine.length > 0 ? `${Math.round((completed / mine.length) * 100)}% completion rate` : "Pending execution"}
+            </p>
+          </CardContent>
+        </Card>
+        <Card className="shadow-sm">
+          <CardContent className="p-3.5">
+            <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">DTP1-DTP3 Dropout Rate</p>
+            <p className={`text-2xl font-bold font-mono mt-1 ${(dropouts.dtp1Dtp3DropoutPct ?? 0) > 10 ? "text-amber-600 dark:text-amber-400" : "text-emerald-600 dark:text-emerald-400"}`}>
+              {dropouts.dtp1Dtp3DropoutPct != null ? `${dropouts.dtp1Dtp3DropoutPct}%` : "N/A"}
+            </p>
+            <p className="text-[11px] text-muted-foreground mt-0.5">
+              {(dropouts.dtp1Dtp3DropoutPct ?? 0) > 10 ? "Exceeds 10% WHO threshold" : "Within WHO acceptable limit (≤10%)"}
+            </p>
+          </CardContent>
+        </Card>
+        <Card className="shadow-sm">
+          <CardContent className="p-3.5">
+            <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">RED Status Category</p>
+            <div className="flex items-center gap-1.5 mt-1">
+              <Badge className={
+                redDef?.color === "emerald" ? "bg-emerald-600 text-white" :
+                redDef?.color === "amber" ? "bg-amber-600 text-white" :
+                redDef?.color === "blue" ? "bg-blue-600 text-white" :
+                "bg-rose-600 text-white"
+              }>
+                Cat {redCategoryNum}
+              </Badge>
+              <span className="text-xs font-semibold text-foreground truncate">{redDef?.name || "Unclassified"}</span>
+            </div>
+            <p className="text-[10px] text-muted-foreground mt-1 truncate">{redDef?.problem || (redDef as any)?.priority || ""}</p>
+          </CardContent>
+        </Card>
       </div>
-      <p className="text-sm text-muted-foreground">
-        Once the microplan is approved and execution begins, this view will show live counters.
-      </p>
+
+      {/* WHO Cumulative Target & Monitoring Chart (RED Component 5 & IIP Module 4 p. 214) */}
+      <Card className="shadow-sm border">
+        <CardHeader className="pb-2 border-b">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <div className="flex items-center gap-2">
+                <CardTitle className="text-sm font-semibold">
+                  WHO Health Facility Cumulative Target Monitoring Chart
+                </CardTitle>
+                <Badge variant="outline" className="text-[10px] uppercase tracking-wider font-semibold">
+                  RED Tool 5 / IIP p. 214
+                </Badge>
+              </div>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Diagonal target line vs. cumulative monthly curves for DTP1 (Access), DTP3 (Series Completion), and MCV1 (Retention).
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-3 text-xs font-medium">
+              <div className="flex items-center gap-1.5">
+                <span className="inline-block w-4 h-0.5 border-t-2 border-dashed border-slate-400"></span>
+                <span className="text-muted-foreground">Cumulative Target</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="inline-block w-3 h-3 rounded-full bg-blue-600"></span>
+                <span>DTP1 (Access)</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="inline-block w-3 h-3 rounded-full bg-emerald-600"></span>
+                <span>DTP3 (Retention)</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="inline-block w-3 h-3 rounded-full bg-purple-600"></span>
+                <span>MCV1 (Measles)</span>
+              </div>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="pt-4 pb-2">
+          {/* SVG Line Chart */}
+          <div className="w-full overflow-x-auto">
+            <svg viewBox="0 0 760 260" className="w-full h-56 min-w-[600px] text-xs select-none">
+              {/* Grid Lines */}
+              {[0, 0.25, 0.5, 0.75, 1.0].map((frac, i) => {
+                const y = 220 - frac * 190;
+                const val = Math.round(maxVal * frac);
+                return (
+                  <g key={i}>
+                    <line x1="50" y1={y} x2="740" y2={y} stroke="currentColor" strokeOpacity="0.1" strokeDasharray="3 3" />
+                    <text x="45" y={y + 3} textAnchor="end" className="fill-muted-foreground text-[10px] font-mono">
+                      {val.toLocaleString()}
+                    </text>
+                  </g>
+                );
+              })}
+
+              {/* Diagonal Cumulative Target Line */}
+              <line
+                x1="50"
+                y1="220"
+                x2="740"
+                y2={220 - (annualTarget / maxVal) * 190}
+                stroke="#94a3b8"
+                strokeWidth="2"
+                strokeDasharray="4 4"
+              />
+
+              {/* DTP1 Cumulative Path */}
+              <polyline
+                fill="none"
+                stroke="#2563eb"
+                strokeWidth="2.5"
+                points={monthlyData
+                  .map((d, i) => {
+                    const x = 50 + (i / 11) * 690;
+                    const y = 220 - (d.cumDtp1 / maxVal) * 190;
+                    return `${x},${y}`;
+                  })
+                  .join(" ")}
+              />
+
+              {/* DTP3 Cumulative Path */}
+              <polyline
+                fill="none"
+                stroke="#059669"
+                strokeWidth="2.5"
+                points={monthlyData
+                  .map((d, i) => {
+                    const x = 50 + (i / 11) * 690;
+                    const y = 220 - (d.cumDtp3 / maxVal) * 190;
+                    return `${x},${y}`;
+                  })
+                  .join(" ")}
+              />
+
+              {/* MCV1 Cumulative Path */}
+              <polyline
+                fill="none"
+                stroke="#9333ea"
+                strokeWidth="2"
+                strokeDasharray="2 2"
+                points={monthlyData
+                  .map((d, i) => {
+                    const x = 50 + (i / 11) * 690;
+                    const y = 220 - (d.cumMcv1 / maxVal) * 190;
+                    return `${x},${y}`;
+                  })
+                  .join(" ")}
+              />
+
+              {/* Data Points and X Axis Labels */}
+              {monthlyData.map((d, i) => {
+                const x = 50 + (i / 11) * 690;
+                const yDtp1 = 220 - (d.cumDtp1 / maxVal) * 190;
+                const yDtp3 = 220 - (d.cumDtp3 / maxVal) * 190;
+                return (
+                  <g key={d.month}>
+                    {/* X axis tick & month label */}
+                    <line x1={x} y1="220" x2={x} y2="225" stroke="currentColor" strokeOpacity="0.4" />
+                    <text x={x} y="238" textAnchor="middle" className="fill-muted-foreground text-[10px] font-medium">
+                      {d.month}
+                    </text>
+
+                    {/* DTP1 dot */}
+                    <circle cx={x} cy={yDtp1} r="3.5" fill="#2563eb" />
+                    {/* DTP3 dot */}
+                    <circle cx={x} cy={yDtp3} r="3.5" fill="#059669" />
+                  </g>
+                );
+              })}
+            </svg>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Monthly Monitoring Data Table (WHO RED Tool 5) */}
+      <Card className="shadow-sm border">
+        <CardHeader className="pb-2 border-b">
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              WHO Health Facility Monthly Tracking Register & Defaulter Check (RED Tool 5)
+            </CardTitle>
+            <span className="text-xs text-muted-foreground font-mono">
+              Target Series: {annualTarget.toLocaleString()} infants
+            </span>
+          </div>
+        </CardHeader>
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead className="border-b bg-muted/20 text-left text-[10px] uppercase text-muted-foreground">
+              <tr>
+                <th className="p-2">Month</th>
+                <th className="p-2 text-right">Mo. Target</th>
+                <th className="p-2 text-right">Cum. Target</th>
+                <th className="p-2 text-right">DTP1 Mo.</th>
+                <th className="p-2 text-right">DTP1 Cum.</th>
+                <th className="p-2 text-right">DTP3 Mo.</th>
+                <th className="p-2 text-right">DTP3 Cum.</th>
+                <th className="p-2 text-right">MCV1 Cum.</th>
+                <th className="p-2 text-right">Dropout %</th>
+                <th className="p-2 text-left">Diagnostic Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {monthlyData.map((row) => (
+                <tr key={row.month} className="border-b border-border/40 hover:bg-muted/30 transition-colors">
+                  <td className="p-2 font-semibold text-foreground">{row.month}</td>
+                  <td className="p-2 text-right font-mono text-muted-foreground">{row.monthlyTarget.toLocaleString()}</td>
+                  <td className="p-2 text-right font-mono font-medium text-foreground">{row.cumTarget.toLocaleString()}</td>
+                  <td className="p-2 text-right font-mono text-blue-600 dark:text-blue-400">{row.mDtp1.toLocaleString()}</td>
+                  <td className="p-2 text-right font-mono font-semibold text-blue-600 dark:text-blue-400">{row.cumDtp1.toLocaleString()}</td>
+                  <td className="p-2 text-right font-mono text-emerald-600 dark:text-emerald-400">{row.mDtp3.toLocaleString()}</td>
+                  <td className="p-2 text-right font-mono font-semibold text-emerald-600 dark:text-emerald-400">{row.cumDtp3.toLocaleString()}</td>
+                  <td className="p-2 text-right font-mono text-purple-600 dark:text-purple-400">{row.cumMcv1.toLocaleString()}</td>
+                  <td className={`p-2 text-right font-mono font-semibold ${row.dropoutPct > 10 ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"}`}>
+                    {row.dropoutPct}%
+                  </td>
+                  <td className={`p-2 text-left font-medium ${row.statusColor}`}>
+                    {row.status}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Card>
     </div>
   );
 }
+

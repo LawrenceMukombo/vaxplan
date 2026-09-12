@@ -48,6 +48,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import { canCreateData, canDeleteData } from "@/lib/permissions";
 import { PopulationDialog } from "@/components/PopulationDialog";
+import { populationRatios } from "@shared/populationDisaggregation";
 import { WorldPopExtractionDialog } from "@/components/WorldPopExtractionDialog";
 import { DeleteConfirmDialog } from "@/components/DeleteConfirmDialog";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -1085,21 +1086,25 @@ export default function Population() {
       return true;
     });
 
-    const sums: Record<string, { total: number; under1: number; under5: number; pregnant: number; count: number }> = {
-      nso: { total: 0, under1: 0, under5: 0, pregnant: 0, count: 0 },
-      hmis: { total: 0, under1: 0, under5: 0, pregnant: 0, count: 0 },
-      worldpop: { total: 0, under1: 0, under5: 0, pregnant: 0, count: 0 },
-      survey: { total: 0, under1: 0, under5: 0, pregnant: 0, count: 0 },
-      community_census: { total: 0, under1: 0, under5: 0, pregnant: 0, count: 0 },
+    const sums: Record<string, { total: number; under1: number; secondYearOfLife: number; children24to59m: number; under5: number; girls9to14: number; pregnant: number; count: number }> = {
+      nso: { total: 0, under1: 0, secondYearOfLife: 0, children24to59m: 0, under5: 0, girls9to14: 0, pregnant: 0, count: 0 },
+      hmis: { total: 0, under1: 0, secondYearOfLife: 0, children24to59m: 0, under5: 0, girls9to14: 0, pregnant: 0, count: 0 },
+      worldpop: { total: 0, under1: 0, secondYearOfLife: 0, children24to59m: 0, under5: 0, girls9to14: 0, pregnant: 0, count: 0 },
+      survey: { total: 0, under1: 0, secondYearOfLife: 0, children24to59m: 0, under5: 0, girls9to14: 0, pregnant: 0, count: 0 },
+      community_census: { total: 0, under1: 0, secondYearOfLife: 0, children24to59m: 0, under5: 0, girls9to14: 0, pregnant: 0, count: 0 },
     };
 
-    geoFiltered.forEach((record) => {
+    geoFiltered.forEach((record: any) => {
       const s = record.source;
       if (sums[s]) {
-        sums[s].total += record.totalPopulation || 0;
-        sums[s].under1 += record.under1Population || 0;
-        sums[s].under5 += record.under5Population || 0;
-        sums[s].pregnant += record.pregnantWomen || 0;
+        const tot = record.totalPopulation || 0;
+        sums[s].total += tot;
+        sums[s].under1 += record.under1Population ?? Math.round(tot * ratios.under1);
+        sums[s].secondYearOfLife += record.metadata?.secondYearOfLife ?? Math.round(tot * ratios.secondYearOfLife);
+        sums[s].children24to59m += record.metadata?.children24to59m ?? Math.round(tot * ratios.children24to59m);
+        sums[s].under5 += record.under5Population ?? Math.round(tot * ratios.under5);
+        sums[s].girls9to14 += record.metadata?.girls9to14 ?? Math.round(tot * ratios.girls9to14);
+        sums[s].pregnant += record.pregnantWomen ?? Math.round(tot * ratios.pregnant);
         sums[s].count += 1;
       }
     });
@@ -1316,33 +1321,81 @@ export default function Population() {
     },
     {
       key: "under1Population",
-      header: "Under 1",
+      header: "0–11m (Infants)",
       sortable: true,
-      render: (item: PopulationData) => (
-        <span className="font-mono">
-          {item.under1Population?.toLocaleString() || "-"}
-        </span>
-      ),
+      render: (item: PopulationData) => {
+        const val = item.under1Population ?? Math.round((item.totalPopulation || 0) * ratios.under1);
+        return (
+          <span className="font-mono font-medium text-indigo-700 dark:text-indigo-300">
+            {val ? val.toLocaleString() : "-"}
+          </span>
+        );
+      },
+    },
+    {
+      key: "secondYearOfLife",
+      header: "12–23m (2YL)",
+      sortable: true,
+      render: (item: PopulationData & { metadata?: any }) => {
+        const val = item.metadata?.secondYearOfLife ?? Math.round((item.totalPopulation || 0) * ratios.secondYearOfLife);
+        return (
+          <span className="font-mono font-medium text-sky-700 dark:text-sky-300">
+            {val ? val.toLocaleString() : "-"}
+          </span>
+        );
+      },
+    },
+    {
+      key: "children24to59m",
+      header: "24–59m (Under 5)",
+      sortable: true,
+      render: (item: PopulationData & { metadata?: any }) => {
+        const val = item.metadata?.children24to59m ?? Math.round((item.totalPopulation || 0) * ratios.children24to59m);
+        return (
+          <span className="font-mono font-medium text-teal-700 dark:text-teal-300">
+            {val ? val.toLocaleString() : "-"}
+          </span>
+        );
+      },
     },
     {
       key: "under5Population",
-      header: "Under 5",
+      header: "Total Under 5",
       sortable: true,
-      render: (item: PopulationData) => (
-        <span className="font-mono">
-          {item.under5Population?.toLocaleString() || "-"}
-        </span>
-      ),
+      render: (item: PopulationData) => {
+        const val = item.under5Population ?? Math.round((item.totalPopulation || 0) * ratios.under5);
+        return (
+          <span className="font-mono font-medium">
+            {val ? val.toLocaleString() : "-"}
+          </span>
+        );
+      },
+    },
+    {
+      key: "girls9to14",
+      header: "Girls 9–14y (HPV)",
+      sortable: true,
+      render: (item: PopulationData & { metadata?: any }) => {
+        const val = item.metadata?.girls9to14 ?? Math.round((item.totalPopulation || 0) * ratios.girls9to14);
+        return (
+          <span className="font-mono font-medium text-pink-700 dark:text-pink-300">
+            {val ? val.toLocaleString() : "-"}
+          </span>
+        );
+      },
     },
     {
       key: "pregnantWomen",
-      header: "Pregnant Women",
+      header: "Pregnant (Td)",
       sortable: true,
-      render: (item: PopulationData) => (
-        <span className="font-mono">
-          {item.pregnantWomen?.toLocaleString() || "-"}
-        </span>
-      ),
+      render: (item: PopulationData) => {
+        const val = item.pregnantWomen ?? Math.round((item.totalPopulation || 0) * ratios.pregnant);
+        return (
+          <span className="font-mono font-medium text-amber-700 dark:text-amber-300">
+            {val ? val.toLocaleString() : "-"}
+          </span>
+        );
+      },
     },
     {
       key: "approvalStatus",
@@ -1465,11 +1518,14 @@ export default function Population() {
         "Location Type": getLocationType(item),
         Year: item.year,
         "Total Population": item.totalPopulation,
+        "0-11m (Infants)": item.under1Population ?? Math.round((item.totalPopulation || 0) * ratios.under1),
+        "12-23m (2YL)": (item.metadata as any)?.secondYearOfLife ?? Math.round((item.totalPopulation || 0) * ratios.secondYearOfLife),
+        "24-59m (Under 5)": (item.metadata as any)?.children24to59m ?? Math.round((item.totalPopulation || 0) * ratios.children24to59m),
+        "Total Under 5": item.under5Population ?? Math.round((item.totalPopulation || 0) * ratios.under5),
+        "Girls 9-14y (HPV)": (item.metadata as any)?.girls9to14 ?? Math.round((item.totalPopulation || 0) * ratios.girls9to14),
+        "Pregnant Women (Td)": item.pregnantWomen ?? Math.round((item.totalPopulation || 0) * ratios.pregnant),
         Male: item.malePopulation || "",
         Female: item.femalePopulation || "",
-        "Under 1": item.under1Population || "",
-        "Under 5": item.under5Population || "",
-        "Pregnant Women": item.pregnantWomen || "",
         "Growth Rate": item.growthRate ? `${item.growthRate}%` : "",
         Confidence: item.confidenceScore ? `${item.confidenceScore}%` : "",
         Status: item.approvalStatus || "draft",
@@ -1507,9 +1563,40 @@ export default function Population() {
     setSelectedYear(CURRENT_YEAR.toString());
   };
 
-  const totalPopulation = useMemo(() => {
-    return filteredPopulationData.reduce((sum, item) => sum + (item.totalPopulation || 0), 0);
-  }, [filteredPopulationData]);
+  const ratios = useMemo(() => populationRatios(tenantInfo?.settings), [tenantInfo?.settings]);
+
+  const cohortTotals = useMemo(() => {
+    let total = 0;
+    let under1 = 0;
+    let secondYearOfLife = 0;
+    let children24to59m = 0;
+    let under5 = 0;
+    let girls9to14 = 0;
+    let pregnant = 0;
+
+    filteredPopulationData.forEach((item: any) => {
+      const tot = item.totalPopulation || 0;
+      total += tot;
+      under1 += item.under1Population ?? Math.round(tot * ratios.under1);
+      secondYearOfLife += item.metadata?.secondYearOfLife ?? Math.round(tot * ratios.secondYearOfLife);
+      children24to59m += item.metadata?.children24to59m ?? Math.round(tot * ratios.children24to59m);
+      under5 += item.under5Population ?? Math.round(tot * ratios.under5);
+      girls9to14 += item.metadata?.girls9to14 ?? Math.round(tot * ratios.girls9to14);
+      pregnant += item.pregnantWomen ?? Math.round(tot * ratios.pregnant);
+    });
+
+    return {
+      total,
+      under1,
+      secondYearOfLife,
+      children24to59m,
+      under5,
+      girls9to14,
+      pregnant,
+    };
+  }, [filteredPopulationData, ratios]);
+
+  const totalPopulation = cohortTotals.total;
 
   const recordCount = filteredPopulationData.length;
 
@@ -1947,6 +2034,67 @@ export default function Population() {
                       </div>
                     </CardHeader>
                     <CardContent>
+                      {/* Live WHO Life-Course Target Cohort Breakdown */}
+                      <div className="mb-4 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
+                        <div className="p-2.5 rounded-xl border border-border/70 bg-card/80 shadow-xs">
+                          <span className="text-[11px] font-medium text-muted-foreground block">Total Population</span>
+                          <span className="text-sm font-bold font-mono text-foreground block">
+                            {cohortTotals.total.toLocaleString()}
+                          </span>
+                          <span className="text-[10px] text-muted-foreground">Census base (100%)</span>
+                        </div>
+                        <div className="p-2.5 rounded-xl border border-indigo-500/30 bg-indigo-50/40 dark:bg-indigo-950/20 shadow-xs">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[11px] font-medium text-indigo-700 dark:text-indigo-300 block">0–11m (Infants)</span>
+                            <span className="text-[10px] font-mono text-indigo-600 dark:text-indigo-400 font-semibold">{(ratios.under1 * 100).toFixed(1)}%</span>
+                          </div>
+                          <span className="text-sm font-bold font-mono text-indigo-950 dark:text-indigo-100 block">
+                            {cohortTotals.under1.toLocaleString()}
+                          </span>
+                          <span className="text-[10px] text-muted-foreground">EPI primary</span>
+                        </div>
+                        <div className="p-2.5 rounded-xl border border-sky-500/30 bg-sky-50/40 dark:bg-sky-950/20 shadow-xs">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[11px] font-medium text-sky-700 dark:text-sky-300 block">12–23m (2YL)</span>
+                            <span className="text-[10px] font-mono text-sky-600 dark:text-sky-400 font-semibold">{(ratios.secondYearOfLife * 100).toFixed(1)}%</span>
+                          </div>
+                          <span className="text-sm font-bold font-mono text-sky-950 dark:text-sky-100 block">
+                            {cohortTotals.secondYearOfLife.toLocaleString()}
+                          </span>
+                          <span className="text-[10px] text-muted-foreground">2nd year life</span>
+                        </div>
+                        <div className="p-2.5 rounded-xl border border-teal-500/30 bg-teal-50/40 dark:bg-teal-950/20 shadow-xs">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[11px] font-medium text-teal-700 dark:text-teal-300 block">24–59m (Under 5)</span>
+                            <span className="text-[10px] font-mono text-teal-600 dark:text-teal-400 font-semibold">{(ratios.children24to59m * 100).toFixed(1)}%</span>
+                          </div>
+                          <span className="text-sm font-bold font-mono text-teal-950 dark:text-teal-100 block">
+                            {cohortTotals.children24to59m.toLocaleString()}
+                          </span>
+                          <span className="text-[10px] text-muted-foreground">Pre-school / SIA</span>
+                        </div>
+                        <div className="p-2.5 rounded-xl border border-pink-500/30 bg-pink-50/40 dark:bg-pink-950/20 shadow-xs">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[11px] font-medium text-pink-700 dark:text-pink-300 block">Girls 9–14y (HPV)</span>
+                            <span className="text-[10px] font-mono text-pink-600 dark:text-pink-400 font-semibold">{(ratios.girls9to14 * 100).toFixed(1)}%</span>
+                          </div>
+                          <span className="text-sm font-bold font-mono text-pink-950 dark:text-pink-100 block">
+                            {cohortTotals.girls9to14.toLocaleString()}
+                          </span>
+                          <span className="text-[10px] text-muted-foreground">HPV cohorts</span>
+                        </div>
+                        <div className="p-2.5 rounded-xl border border-amber-500/30 bg-amber-50/40 dark:bg-amber-950/20 shadow-xs">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[11px] font-medium text-amber-700 dark:text-amber-300 block">Pregnant (Td)</span>
+                            <span className="text-[10px] font-mono text-amber-600 dark:text-amber-400 font-semibold">{(ratios.pregnant * 100).toFixed(1)}%</span>
+                          </div>
+                          <span className="text-sm font-bold font-mono text-amber-950 dark:text-amber-100 block">
+                            {cohortTotals.pregnant.toLocaleString()}
+                          </span>
+                          <span className="text-[10px] text-muted-foreground">Maternal Td</span>
+                        </div>
+                      </div>
+
                       <DataTable
                         data={withGeoColumns(filteredPopulationData as any[], { provinceMap, districtMap, villageMap, facilityMap }) as any}
                         columns={columns}
@@ -2031,23 +2179,41 @@ export default function Population() {
 
                         {/* Demographics Metrics */}
                         <div className="space-y-2 text-xs">
-                          <p className="font-semibold text-foreground uppercase tracking-wider">Demographic Metrics</p>
-                          <div className="grid grid-cols-2 gap-2 p-3 bg-muted/30 border border-border rounded-xl font-mono">
-                            <div>
+                          <p className="font-semibold text-foreground uppercase tracking-wider">Demographic Metrics (WHO Life-Course Breakdown)</p>
+                          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 p-3 bg-muted/30 border border-border rounded-xl font-mono">
+                            <div className="p-2 rounded-lg bg-background/60 border border-border/40">
                               <span className="text-muted-foreground block text-[10px] font-sans">Total Population</span>
                               <span className="font-bold text-foreground text-sm">{selectedRecord.totalPopulation?.toLocaleString() || "—"}</span>
                             </div>
-                            <div>
-                              <span className="text-muted-foreground block text-[10px] font-sans">Under 1 Year</span>
-                              <span className="font-bold text-foreground text-sm">{selectedRecord.under1Population?.toLocaleString() || "—"}</span>
+                            <div className="p-2 rounded-lg bg-background/60 border border-border/40">
+                              <span className="text-muted-foreground block text-[10px] font-sans">0–11m (Infants)</span>
+                              <span className="font-bold text-indigo-600 dark:text-indigo-400 text-sm">
+                                {(selectedRecord.under1Population ?? Math.round((selectedRecord.totalPopulation || 0) * ratios.under1)).toLocaleString()}
+                              </span>
                             </div>
-                            <div>
-                              <span className="text-muted-foreground block text-[10px] font-sans">Under 5 Years</span>
-                              <span className="font-bold text-foreground text-sm">{selectedRecord.under5Population?.toLocaleString() || "—"}</span>
+                            <div className="p-2 rounded-lg bg-background/60 border border-border/40">
+                              <span className="text-muted-foreground block text-[10px] font-sans">12–23m (2YL)</span>
+                              <span className="font-bold text-sky-600 dark:text-sky-400 text-sm">
+                                {(selectedRecord.metadata?.secondYearOfLife ?? Math.round((selectedRecord.totalPopulation || 0) * ratios.secondYearOfLife)).toLocaleString()}
+                              </span>
                             </div>
-                            <div>
-                              <span className="text-muted-foreground block text-[10px] font-sans">Pregnant Women</span>
-                              <span className="font-bold text-foreground text-sm">{selectedRecord.pregnantWomen?.toLocaleString() || "—"}</span>
+                            <div className="p-2 rounded-lg bg-background/60 border border-border/40">
+                              <span className="text-muted-foreground block text-[10px] font-sans">24–59m (Under 5)</span>
+                              <span className="font-bold text-teal-600 dark:text-teal-400 text-sm">
+                                {(selectedRecord.metadata?.children24to59m ?? Math.round((selectedRecord.totalPopulation || 0) * ratios.children24to59m)).toLocaleString()}
+                              </span>
+                            </div>
+                            <div className="p-2 rounded-lg bg-background/60 border border-border/40">
+                              <span className="text-muted-foreground block text-[10px] font-sans">Girls 9–14y (HPV)</span>
+                              <span className="font-bold text-pink-600 dark:text-pink-400 text-sm">
+                                {(selectedRecord.metadata?.girls9to14 ?? Math.round((selectedRecord.totalPopulation || 0) * ratios.girls9to14)).toLocaleString()}
+                              </span>
+                            </div>
+                            <div className="p-2 rounded-lg bg-background/60 border border-border/40">
+                              <span className="text-muted-foreground block text-[10px] font-sans">Pregnant women (Td)</span>
+                              <span className="font-bold text-amber-600 dark:text-amber-400 text-sm">
+                                {(selectedRecord.pregnantWomen ?? Math.round((selectedRecord.totalPopulation || 0) * ratios.pregnant)).toLocaleString()}
+                              </span>
                             </div>
                           </div>
                         </div>
@@ -2332,9 +2498,11 @@ export default function Population() {
                       <tr className="border-b border-border text-muted-foreground text-xs uppercase tracking-wider">
                         <th className="pb-3 pl-2">Data Source</th>
                         <th className="pb-3 text-right">Total Population</th>
-                        <th className="pb-3 text-right">Under 1</th>
-                        <th className="pb-3 text-right">Under 5</th>
-                        <th className="pb-3 text-right">Pregnant Women</th>
+                        <th className="pb-3 text-right">0–11m (Infants)</th>
+                        <th className="pb-3 text-right">12–23m (2YL)</th>
+                        <th className="pb-3 text-right">24–59m (Under 5)</th>
+                        <th className="pb-3 text-right">Girls 9–14y (HPV)</th>
+                        <th className="pb-3 text-right">Pregnant (Td)</th>
                         <th className="pb-3 text-right">Divergence from Census</th>
                         <th className="pb-3 pr-2 text-right">Records Count</th>
                       </tr>
@@ -2362,10 +2530,12 @@ export default function Population() {
                             <td className="py-3 pl-2 font-medium flex items-center gap-2">
                               {s.label}
                             </td>
-                            <td className="py-3 text-right font-mono">{s.total.toLocaleString()}</td>
-                            <td className="py-3 text-right font-mono">{s.under1.toLocaleString()}</td>
-                            <td className="py-3 text-right font-mono">{s.under5.toLocaleString()}</td>
-                            <td className="py-3 text-right font-mono">{s.pregnant.toLocaleString()}</td>
+                            <td className="py-3 text-right font-mono font-medium">{s.total.toLocaleString()}</td>
+                            <td className="py-3 text-right font-mono text-indigo-700 dark:text-indigo-300">{s.under1.toLocaleString()}</td>
+                            <td className="py-3 text-right font-mono text-sky-700 dark:text-sky-300">{s.secondYearOfLife.toLocaleString()}</td>
+                            <td className="py-3 text-right font-mono text-teal-700 dark:text-teal-300">{s.children24to59m.toLocaleString()}</td>
+                            <td className="py-3 text-right font-mono text-pink-700 dark:text-pink-300">{s.girls9to14.toLocaleString()}</td>
+                            <td className="py-3 text-right font-mono text-amber-700 dark:text-amber-300">{s.pregnant.toLocaleString()}</td>
                             <td className="py-3 text-right">
                               {s.source === "nso" ? (
                                 <Badge className={badgeColor} variant="outline">

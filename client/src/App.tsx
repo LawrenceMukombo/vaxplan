@@ -76,6 +76,8 @@ const MissedCommunities = lazy(() => import("@/pages/MissedCommunities"));
 const MicroplanWizard = lazy(() => import("@/pages/MicroplanWizard"));
 const MicroplanList = lazy(() => import("@/pages/MicroplanList"));
 const PlanHealth = lazy(() => import("@/pages/PlanHealth"));
+const PlanningActions = lazy(() => import("@/pages/PlanningActions"));
+const PlanningEvidence = lazy(() => import("@/pages/PlanningEvidence"));
 const FieldReadiness = lazy(() => import("@/pages/FieldReadiness"));
 const Notifications = lazy(() => import("@/pages/Notifications"));
 const VgieDashboard = lazy(() => import("@/pages/vgie/Dashboard"));
@@ -106,6 +108,14 @@ const ResearchHubPage = lazy(() => import("@/pages/ResearchHub"));
 const TemporalHistory = lazy(() => import("@/pages/TemporalHistory"));
 const RiskAssessmentList = lazy(() => import("@/pages/risk/RiskAssessmentList"));
 const RiskResultsWorkspace = lazy(() => import("@/pages/risk/RiskResultsWorkspace"));
+const ChwFieldWorkspace = lazy(() => import("@/pages/ChwFieldWorkspace"));
+const DesktopOfflineHub = lazy(() => import("@/pages/DesktopOfflineHub"));
+const CampaignSummarySheets = lazy(() => import("@/pages/CampaignSummarySheets"));
+const CampaignRealTimeDashboard = lazy(() => import("@/pages/CampaignRealTimeDashboard"));
+const CampaignReadiness = lazy(() => import("@/pages/CampaignReadiness"));
+const BudgetPlanning = lazy(() => import("@/pages/BudgetPlanning"));
+const VaccineCalculator = lazy(() => import("@/pages/VaccineCalculator"));
+const SocialMobilization = lazy(() => import("@/pages/SocialMobilization"));
 import { DEFAULT_MODULES } from "@/lib/modules";
 // Task #50 - Small wrapper that reads :id from the route and passes it to
 // SessionPlanning as `lockedMicroplanId`, so the unserved-prefill auto-open
@@ -276,6 +286,12 @@ function AuthenticatedRouter({ user }: { user: User }) {
       <Route path="/facilities">
         {modules.facilities !== false ? <Facilities /> : <ModuleDisabled moduleName="Facilities" />}
       </Route>
+      <Route path="/facilities/outreach-map">
+        {modules.facilities !== false ? <Facilities initialTab="outreach-posts" initialView="map" /> : <ModuleDisabled moduleName="Facilities" />}
+      </Route>
+      <Route path="/outreach-map">
+        {modules.facilities !== false ? <Facilities initialTab="outreach-posts" initialView="map" /> : <ModuleDisabled moduleName="Facilities" />}
+      </Route>
       <Route path="/develop-microplan">
         {modules.routine !== false ? <PreserveQueryRedirect to="/microplans/routine" /> : <ModuleDisabled moduleName="Routine Microplan" />}
       </Route>
@@ -297,6 +313,18 @@ function AuthenticatedRouter({ user }: { user: User }) {
       </Route>
       <Route path="/microplans/campaigns">
         {modules.campaigns !== false ? <MicroplanList planType="campaign" /> : <ModuleDisabled moduleName="SIA Campaigns" />}
+      </Route>
+      <Route path="/campaigns/summary-sheets">
+        {modules.campaignSummaries !== false ? <CampaignSummarySheets /> : <ModuleDisabled moduleName="Campaign Summary Sheets" />}
+      </Route>
+      <Route path="/campaigns/realtime-dashboard">
+        {modules.campaignDashboard !== false ? <CampaignRealTimeDashboard /> : <ModuleDisabled moduleName="Real-Time Campaign Dashboard" />}
+      </Route>
+      <Route path="/campaigns/readiness">
+        {modules.campaignReadiness !== false ? <CampaignReadiness /> : <ModuleDisabled moduleName="Readiness Assessment" />}
+      </Route>
+      <Route path="/field-readiness">
+        {modules.campaignReadiness !== false ? <CampaignReadiness /> : <ModuleDisabled moduleName="Readiness Assessment" />}
       </Route>
       <Route path="/microplans/campaigns/:id">
         {modules.campaigns !== false ? <MicroplanWizard prePlanType="campaign" /> : <ModuleDisabled moduleName="SIA Campaigns" />}
@@ -321,6 +349,8 @@ function AuthenticatedRouter({ user }: { user: User }) {
         {modules.sessions !== false ? (canAccessSessionPlanning(user) ? <SessionsHub /> : <AccessDeniedPage moduleName="Sessions Hub" />) : <ModuleDisabled moduleName="Sessions Hub" />}
       </Route>
       <Route path="/plan-health" component={PlanHealth} />
+      <Route path="/planning-actions" component={PlanningActions} />
+      <Route path="/planning-evidence" component={PlanningEvidence} />
       <Route path="/field-readiness" component={FieldReadiness} />
       <Route path="/notifications" component={Notifications} />
       <Route path="/sessions/history">
@@ -349,17 +379,15 @@ function AuthenticatedRouter({ user }: { user: User }) {
       <Route path="/htr">
         {modules.htr !== false ? <HardToReach /> : <ModuleDisabled moduleName="Hard-to-Reach Scores" />}
       </Route>
-      {/* Budget / Vaccine Calculator / Social Mobilization are now steps inside
-          the Microplan wizard (Steps 9, 6, 7). The standalone routes redirect
-          to the wizard so bookmarks keep working. */}
+      {/* Standalone Logistics & Microplanning workspaces */}
       <Route path="/budget">
-        {modules.budget !== false ? <PreserveQueryRedirect to="/microplans/routine" /> : <ModuleDisabled moduleName="Budget Planning" />}
+        {modules.budget !== false ? <BudgetPlanning /> : <ModuleDisabled moduleName="Budget Planning" />}
       </Route>
       <Route path="/vaccines">
-        {modules.calculator !== false ? <PreserveQueryRedirect to="/microplans/routine" /> : <ModuleDisabled moduleName="Vaccine Calculator" />}
+        {modules.calculator !== false ? <VaccineCalculator /> : <ModuleDisabled moduleName="Vaccine Calculator" />}
       </Route>
       <Route path="/mobilization">
-        {modules.mobilization !== false ? <PreserveQueryRedirect to="/microplans/routine" /> : <ModuleDisabled moduleName="Social Mobilization" />}
+        {modules.mobilization !== false ? <SocialMobilization /> : <ModuleDisabled moduleName="Social Mobilization" />}
       </Route>
       <Route path="/approvals" component={Approvals} />
       <Route path="/supervision">
@@ -390,6 +418,8 @@ function AuthenticatedRouter({ user }: { user: User }) {
       <Route path="/his-integrations">
         {modules.interop !== false ? (canAccessHisIntegrations(user) ? <HisIntegrations /> : <AccessDeniedPage moduleName="HIS Integrations" />) : <ModuleDisabled moduleName="HIS Interoperability" />}
       </Route>
+      <Route path="/chw-field" component={ChwFieldWorkspace} />
+      <Route path="/desktop-hub" component={DesktopOfflineHub} />
       <Route path="/missed-communities">
         {modules.missedCommunities !== false ? <MissedCommunities /> : <ModuleDisabled moduleName="Missed Communities" />}
       </Route>

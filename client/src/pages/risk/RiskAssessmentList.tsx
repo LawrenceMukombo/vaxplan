@@ -2039,10 +2039,10 @@ export default function RiskAssessmentList() {
                       <span className="font-semibold text-xs text-foreground flex items-center gap-1.5">
                         <FileSpreadsheet className="w-4 h-4 text-blue-600" /> Subnational Aggregates Ingestion Template
                       </span>
-                      <Badge variant="outline" className="text-[10px]">Pre-populated</Badge>
+                      <Badge variant="outline" className="text-[10px] border-emerald-400 text-emerald-700 dark:text-emerald-400">Blank — Fill In</Badge>
                     </div>
                     <p className="text-xs text-muted-foreground">
-                      Pre-populated with all {totalUnitsCount} {adminLevelPlural.toLowerCase()} for {activeCountryName} (targetPopulation, mcv1Coverage, mcv2Coverage, dropout, discardedRate).
+                      District names pre-filled for all {totalUnitsCount} {adminLevelPlural.toLowerCase()} in {activeCountryName}. All numeric columns are <strong>blank</strong> — enter your real coverage, surveillance, and population data, then upload to populate the assessment.
                     </p>
                     <a href="/api/risk/templates/district-aggregates" download={`${activeCountryCode}_district_aggregates_template.csv`}>
                       <Button size="sm" variant="outline" className="text-xs gap-1.5 mt-2 w-full">

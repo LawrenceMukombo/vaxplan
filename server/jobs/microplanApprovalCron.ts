@@ -75,10 +75,11 @@ export async function runMicroplanApprovalCron(now: Date = new Date()): Promise<
               resolvedById: null,
             }).catch(() => {});
 
-            // Update microplan status and set autoApprovedAt
+            // Update microplan status and set autoApprovedAt and approvedAt
             await storage.updateMicroplan(tenant.id, mp.id, {
               status: "approved",
               autoApprovedAt: now,
+              approvedAt: now,
             } as any).catch(() => {});
 
             // Notify facility in-charge

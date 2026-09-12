@@ -18,7 +18,7 @@ import type { Express, RequestHandler } from "express";
 import connectPg from "connect-pg-simple";
 import MemoryStore from "memorystore";
 import { storage } from "./storage";
-import { db } from "./db";
+import { db, pool } from "./db";
 import { users, auditLogs } from "@shared/schema";
 import { eq } from "drizzle-orm";
 export const IS_LOCAL_DEV = process.env.NODE_ENV !== "production";
@@ -58,8 +58,8 @@ export function getSession() {
   } else {
     const PgStore = connectPg(session);
     store = new PgStore({
-      conString: process.env.DATABASE_URL,
-      createTableIfMissing: false,
+      pool,
+      createTableIfMissing: true,
       ttl: Math.floor(sessionTtl / 1000), // ttl is in seconds
       tableName: "sessions",
     });
@@ -166,12 +166,15 @@ export async function setupAuth(app: Express, sessionMiddleware: RequestHandler 
   app.post("/api/auth/user-idle-timeout", isAuthenticated, (req, res) => {
     if (req.session) {
       const { idleTimeout } = req.body;
-      const parsed = parseInt(idleTimeout, 10);
       if (idleTimeout === "default") {
         delete (req.session as any).userIdleTimeout;
-      } else if (!isNaN(parsed)) {
-        (req.session as any).userIdleTimeout = parsed;
+        return res.json({ success: true });
       }
+      const parsed = parseInt(idleTimeout, 10);
+      if (isNaN(parsed) || parsed < 1 || parsed > 1440) {
+        return res.status(400).json({ error: "Invalid idleTimeout: must be 'default' or an integer between 1 and 1440 minutes" });
+      }
+      (req.session as any).userIdleTimeout = parsed;
       res.json({ success: true });
     } else {
       res.status(400).json({ error: "No session active" });

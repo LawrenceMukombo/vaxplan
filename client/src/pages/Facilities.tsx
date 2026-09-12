@@ -181,10 +181,40 @@ function FlyToLocation({
   return null;
 }
 
-export default function Facilities() {
+export interface FacilitiesProps {
+  initialTab?: string;
+  initialView?: "table" | "map";
+}
+
+export default function Facilities({ initialTab, initialView }: FacilitiesProps = {}) {
   const { toast } = useToast();
   const [location, setLocation] = useLocation();
   const [basemap] = usePersistedBasemap("positron");
+
+  const isOutreachMapRoute = location.includes("outreach-map");
+  const queryParams = useMemo(() => {
+    if (typeof window === "undefined") return new URLSearchParams();
+    return new URLSearchParams(window.location.search);
+  }, [location]);
+
+  const defaultTab = isOutreachMapRoute
+    ? "outreach-posts"
+    : queryParams.get("tab") || initialTab || "facilities";
+
+  const [mainTab, setMainTab] = useState(defaultTab);
+
+  useEffect(() => {
+    if (isOutreachMapRoute) {
+      setMainTab("outreach-posts");
+    } else if (initialTab) {
+      setMainTab(initialTab);
+    }
+  }, [isOutreachMapRoute, initialTab]);
+
+  const effectiveOutreachView: "table" | "map" =
+    isOutreachMapRoute || queryParams.get("view") === "map" || initialView === "map"
+      ? "map"
+      : "table";
 
   // Whether the current tenant has any administrative boundary maps seeded.
   // Used to gate the "Extract Communities from Map" action — without
@@ -203,7 +233,6 @@ export default function Facilities() {
   const lockedFacDistrictId = (isDistrictStaff || isFacilityStaff) ? (user?.districtId ?? null) : null;
   const lockedCommDistrictId = isDistrictStaff ? (user?.districtId ?? null) : null;
   const populationOverlay = usePopulationOverlay();
-  const [mainTab, setMainTab] = useState("facilities");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingFacility, setEditingFacility] = useState<Facility | null>(null);
   const [deletingFacility, setDeletingFacility] = useState<Facility | null>(null);
@@ -4462,6 +4491,7 @@ export default function Facilities() {
             selectedFacilityId={selectedFacilityId}
             adminLabels={adminLabels}
             canManage={(v) => canManageCommunity(v)}
+            initialView={effectiveOutreachView}
           />
         </TabsContent>
 

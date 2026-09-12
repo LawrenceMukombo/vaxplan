@@ -855,3 +855,32 @@ export async function bulkSyncEntities<T extends { id: any; tenantId: string }>(
   if (rows.length === 0) return;
   await table.bulkPut(rows);
 }
+
+/** Retrieve cached GIS vector (GeoJSON) or raster data from Dexie IndexedDB */
+export async function getCachedGisData(key: string, tenantId: string = "global"): Promise<any | null> {
+  try {
+    const record = await offlineDb.gisCache.get([key, tenantId]);
+    return record?.geojson || record?.rasterBuffer || null;
+  } catch (e) {
+    console.warn(`[GIS Cache] Error reading cache for ${key}:`, e);
+    return null;
+  }
+}
+
+/** Store GIS vector (GeoJSON) or raster data in Dexie IndexedDB with timestamp */
+export async function setCachedGisData(
+  key: string,
+  tenantId: string = "global",
+  data: { geojson?: any; rasterBuffer?: ArrayBuffer }
+): Promise<void> {
+  try {
+    await offlineDb.gisCache.put({
+      key,
+      tenantId,
+      ...data,
+      cachedAt: Date.now(),
+    });
+  } catch (e) {
+    console.warn(`[GIS Cache] Error persisting cache for ${key}:`, e);
+  }
+}

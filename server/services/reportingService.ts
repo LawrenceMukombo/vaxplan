@@ -33,10 +33,16 @@ function intList(values?: number[]): number[] {
   return Array.from(new Set((values || []).map(Number).filter((v) => Number.isInteger(v) && v > 0)));
 }
 
+const ALLOWED_SCOPE_COLUMNS = new Set(["f.id", "d.id", "p.id", "r.id", "v.id", "villages.id", "facilities.id", "districts.id", "provinces.id"]);
+
 function idInClause(column: string, values?: number[]) {
   const ids = intList(values);
   if (ids.length === 0) return sql``;
-  return sql.raw(` AND ${column} IN (${ids.join(",")})`);
+  if (!ALLOWED_SCOPE_COLUMNS.has(column)) {
+    throw new Error(`Invalid column identifier for idInClause: ${column}`);
+  }
+  const idParams = ids.map((id) => sql`${id}`);
+  return sql` AND ${sql.raw(column)} = ANY(ARRAY[${sql.join(idParams, sql`, `)}]::int[])`;
 }
 
 function facilityScopeClause(filters: ReportFilters) {

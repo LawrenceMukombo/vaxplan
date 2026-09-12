@@ -1,3 +1,4 @@
+import { approvalEligibility } from "@shared/microplanPolicy";
 import { db } from "../db";
 import { microplans, approvalRequests, users, districts, provinces, facilities } from "@shared/schema";
 import { eq, and, lt, isNull, or, sql } from "drizzle-orm";
@@ -28,6 +29,8 @@ export async function runApprovalScheduler(): Promise<void> {
 
     for (const mp of pendingToApprove) {
       if (!mp.tenantId) continue;
+      const tenant = await storage.getTenant(mp.tenantId);
+      if (!approvalEligibility(mp.createdAt, tenant?.settings, now).allowed) continue;
       console.log(`[approval-scheduler] Auto-approving microplan ID: ${mp.id} (Tenant: ${mp.tenantId})`);
 
       // Update microplan status to 'auto_approved'
@@ -35,6 +38,8 @@ export async function runApprovalScheduler(): Promise<void> {
         .update(microplans)
         .set({
           status: "auto_approved",
+          autoApprovedAt: now,
+          approvedAt: now,
           updatedAt: now,
         })
         .where(and(eq(microplans.id, mp.id), eq(microplans.tenantId, mp.tenantId)));

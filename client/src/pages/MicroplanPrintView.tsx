@@ -117,6 +117,24 @@ export default function MicroplanPrintView() {
   });
 
   const microplan = hydration?.microplan;
+  const { data: planningAppendix = { consultations: [], barriers: [], groups: [], red: [], actions: [] } } = useQuery<any>({
+    queryKey: ["microplan-planning-appendix", microplanId, microplan?.facilityId],
+    enabled: Boolean(microplan?.facilityId),
+    queryFn: async () => {
+      const facilityId = microplan!.facilityId;
+      const read = async (kind: string) => {
+        const response = await fetch(`/api/planning-evidence?facilityId=${facilityId}&kind=${kind}`, { credentials: "include" });
+        return response.ok ? (await response.json()).records || [] : [];
+      };
+      const [consultations, barriers, groups, red, actionResponse] = await Promise.all([
+        read("consultation"), read("barrier"), read("target_group"), read("red_microplanning"),
+        fetch(`/api/planning-actions?facilityId=${facilityId}`, { credentials: "include" }),
+      ]);
+      const actions = actionResponse.ok ? (await actionResponse.json()).actions || [] : [];
+      const forPlan = (records: any[]) => records.filter(record => !record.microplanId || record.microplanId === microplanId);
+      return { consultations: forPlan(consultations), barriers: forPlan(barriers), groups: groups.filter((record: any) => record.payload?.status === "active"), red: forPlan(red), actions: actions.filter((action: any) => action.microplanId === microplanId || (action.sourceType === "microplan" && action.sourceId === microplanId)) };
+    },
+  });
 
   const isCampaign = useMemo(() => {
     return microplan ? microplan.planType === "sia_campaign" : false;
@@ -1383,10 +1401,23 @@ export default function MicroplanPrintView() {
           </table>
         </div>
 
+        <div className="print-page-break space-y-3">
+          <h3 className="text-base font-bold border-b pb-1 text-foreground">5c. Participatory Planning & RED Evidence</h3>
+          <div className="grid grid-cols-2 gap-2 text-xs">
+            <div className="border p-2"><strong>{planningAppendix.consultations.length}</strong> consultation record(s)</div>
+            <div className="border p-2"><strong>{planningAppendix.barriers.length}</strong> barrier assessment(s)</div>
+            <div className="border p-2"><strong>{planningAppendix.groups.length}</strong> active life-course group(s)</div>
+            <div className="border p-2"><strong>{planningAppendix.actions.length}</strong> linked action(s)</div>
+          </div>
+          {planningAppendix.consultations.map((record: any) => <div className="border p-2 text-xs" key={record.id}><strong>{record.payload.title}</strong><p>{record.payload.decisions}</p><p>Plan change: {record.payload.planningChanges || "None recorded"}</p></div>)}
+          {planningAppendix.barriers.map((record: any) => <div className="border p-2 text-xs" key={record.id}><strong>{record.payload.title}</strong><p>{record.payload.finding}</p><p>Response: {record.payload.proposedResponse} · {record.payload.owner} · due {record.payload.dueDate}</p></div>)}
+          {planningAppendix.red.map((record: any) => <div className="border p-2 text-xs" key={record.id}><strong>{record.payload.title}</strong><p>{record.payload.completedSteps?.length || 0}/10 RED steps marked complete · evidence revision {record.version}</p></div>)}
+        </div>
+
         {/* Section 6c: Social Mobilization Plan */}
         <div className="print-page-break space-y-3">
           <h3 className="text-base font-bold border-b pb-1 text-foreground flex items-center gap-1.5">
-            <MessageSquare className="h-5 w-5 text-primary" /> 5c. Social Mobilization & Community Engagement
+            <MessageSquare className="h-5 w-5 text-primary" /> 5d. Social Mobilization & Community Engagement
           </h3>
           <table className="w-full text-left text-xs border print-table border-collapse">
             <thead>

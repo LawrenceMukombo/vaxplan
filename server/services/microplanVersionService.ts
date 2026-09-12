@@ -1,4 +1,4 @@
-﻿import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import {
   budgetItems,
@@ -12,8 +12,11 @@ import {
   villages,
 } from "@shared/schema";
 
-type VersionEvent =
+export type VersionEvent =
   | "draft_saved"
+  | "draft_opened"
+  | "draft_edited"
+  | "draft_closed"
   | "submitted"
   | "approved"
   | "returned"
@@ -159,7 +162,9 @@ export async function restoreMicroplanVersionAsDraft(
   const sourcePlan = (source.snapshot as any)?.microplan;
   if (!sourcePlan) throw new Error("Microplan version has no plan snapshot");
 
-  await db.update(microplans).set({
+  const [current] = await db.select().from(microplans).where(and(eq(microplans.tenantId, input.tenantId), eq(microplans.id, input.microplanId)));
+  if (!current || current.status !== "draft") throw new Error("Only draft microplans can be restored. Approved plans are read-only.");
+  const restored = await db.update(microplans).set({
     name: sourcePlan.name,
     targetPopulation: sourcePlan.targetPopulation,
     budget: sourcePlan.budget,
@@ -175,7 +180,8 @@ export async function restoreMicroplanVersionAsDraft(
     districtEditReason: input.reason,
     updatedByUserId: input.userId || null,
     updatedAt: new Date(),
-  }).where(and(eq(microplans.tenantId, input.tenantId), eq(microplans.id, input.microplanId)));
+  }).where(and(eq(microplans.tenantId, input.tenantId), eq(microplans.id, input.microplanId), eq(microplans.status, "draft"))).returning({ id: microplans.id });
+  if (!restored.length) throw new Error("The plan is no longer editable.");
 
   return createMicroplanVersion(db, {
     tenantId: input.tenantId,

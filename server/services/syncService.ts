@@ -697,10 +697,13 @@ export async function batchMutate(
         }
 
       } else if (mutation.url.startsWith("/api/microplans")) {
+        if (payload?.status && payload.status !== "draft") throw new Error("Offline plan edits cannot approve or submit plans. Use the approval workflow.");
         if (mutation.method === "POST") {
           const plan = await storage.createMicroplan(tenantId, payload);
           serverId = plan.id;
         } else if ((mutation.method === "PATCH" || mutation.method === "PUT") && mutation.serverId) {
+          const current = await storage.getMicroplan(tenantId, Number(mutation.serverId));
+          if (!current || current.status !== "draft") throw new Error("Only draft microplans can be edited offline.");
           await storage.updateMicroplan(tenantId, Number(mutation.serverId), payload);
           serverId = mutation.serverId;
         } else if (mutation.method === "DELETE") {
@@ -713,6 +716,8 @@ export async function batchMutate(
             }
           }
           if (planId) {
+            const current = await storage.getMicroplan(tenantId, planId);
+            if (current && current.status !== "draft") throw new Error("Only draft microplans can be deleted offline.");
             await storage.deleteMicroplan(tenantId, planId);
             serverId = planId;
           }

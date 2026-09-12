@@ -1,5 +1,5 @@
 import { useLocation, Link } from "wouter";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { versionLabel } from "@/lib/version";
 import {
   Sidebar,
@@ -12,11 +12,14 @@ import {
   SidebarMenuItem,
   SidebarHeader,
   SidebarFooter,
+  SidebarTrigger,
+  useSidebar,
 } from "@/components/ui/sidebar";
 import {
   LayoutDashboard,
   Map,
-  Building2,
+  Building,
+  Hospital,
   Users,
   Calendar,
   CalendarDays,
@@ -46,103 +49,263 @@ import {
   BarChart3,
   Terminal,
   Activity,
-  Search,
   Home,
-  Building,
-  Hospital,
   Bell,
   Snowflake,
+  MapPin,
+  Smartphone,
+  Monitor,
+  SlidersHorizontal,
+  RotateCcw,
+  Check,
+  FileSpreadsheet,
+  DollarSign,
+  Calculator,
+  RefreshCw,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import { useQuery } from "@tanstack/react-query";
 import type { User, ApprovalRequest } from "@shared/schema";
-import { DEFAULT_MODULES } from "@/lib/modules";
-import { canAccessAdministration, canAccessClientLogbook, canAccessDefaulterList, canAccessDropoutRates, canAccessHisIntegrations, canAccessUserManagement, hasAnyPermission } from "@/lib/accessControl";
-interface TenantSummary { id: string; name: string; code: string }
+import {
+  DEFAULT_MODULES,
+  MODULE_CATEGORIES,
+  MODULE_METADATA,
+  ModuleKey,
+  getUserModulePreferences,
+  setUserModulePreference,
+  resetUserModulePreferences,
+  isModuleVisible,
+} from "@/lib/modules";
+import {
+  canAccessAdministration,
+  canAccessClientLogbook,
+  canAccessDefaulterList,
+  canAccessDropoutRates,
+  canAccessHisIntegrations,
+  canAccessUserManagement,
+  hasAnyPermission,
+} from "@/lib/accessControl";
+
+interface TenantSummary {
+  id: string;
+  name: string;
+  code: string;
+  settings?: {
+    modules?: Record<string, boolean>;
+  };
+}
+
 interface AppSidebarProps {
   user: User;
 }
-const mainNavItems = [
+
+interface NavItem {
+  title: string;
+  path: string;
+  icon: any;
+  moduleKey?: ModuleKey;
+  badge?: string | number;
+  superAdminOnly?: boolean;
+  wikiAdminOnly?: boolean;
+  reconcileOnly?: boolean;
+  permissionCheck?: (user: User) => boolean;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CATEGORIZED NAVIGATION MODULES
+// ─────────────────────────────────────────────────────────────────────────────
+
+// 1. Overview & Core GIS
+const overviewNavItems: NavItem[] = [
   { title: "Dashboard", path: "/", icon: LayoutDashboard },
-  { title: "Map View", path: "/map", icon: Map },
-  { title: "Settlements", path: "/settlements", icon: Building },
-  { title: "Facilities", path: "/facilities", icon: Hospital },
-  { title: "Recommendations", path: "/vgie/recommendations", icon: ClipboardList },
-  { title: "Research Module", path: "/research", icon: BookOpen },
-  { title: "Alerts", path: "/vgie/alerts", icon: Bell },
-  { title: "Notifications", path: "/notifications", icon: Bell },
-  { title: "Population Hub", path: "/population", icon: Users },
-  { title: "Client Logbook", path: "/clients", icon: ClipboardList },
-  { title: "Defaulter List", path: "/clients/defaulters", icon: AlertTriangle },
-  { title: "Dropout Rates", path: "/indicators/dropout", icon: TrendingUp },
-  { title: "Missed Communities", path: "/missed-communities", icon: Target },
+  { title: "Map View", path: "/map", icon: Map, moduleKey: "map" },
+  { title: "Outreach Map", path: "/facilities/outreach-map", icon: MapPin, moduleKey: "outreachMap" },
+  { title: "Settlements", path: "/settlements", icon: Building, moduleKey: "settlementIntel" },
+  { title: "Facilities", path: "/facilities", icon: Hospital, moduleKey: "facilities" },
+  { title: "Population Hub", path: "/population", icon: Users, moduleKey: "population" },
+  {
+    title: "Boundary Manager",
+    path: "/admin/boundaries",
+    icon: Map,
+    moduleKey: "boundaries",
+    permissionCheck: (u) => hasAnyPermission(u, ["manage_boundaries", "polygons.view", "polygons.create", "polygons.update"]),
+  },
 ];
-// Planning sidebar - slimmed down. Budget / Vaccine Calculator / Social
-// Mobilization used to be standalone pages but are now Steps 9, 6, and 7 of
-// the Microplan Wizard, so their sidebar entries were removed (the routes
-// now redirect to the wizard). "Microplan Builder" was a duplicate entry
-// point into the same wizard that Routine + SIA already cover.
-/* Commented out old planningNavItems definition to restructure SIA Campaigns collapsible section
-const planningNavItems = [
-  { title: "Routine Microplan", path: "/microplans/routine", icon: Calendar },
-  { title: "Plan Health", path: "/plan-health", icon: ClipboardCheck },
-  { title: "SIA Campaigns", path: "/microplans/campaigns", icon: Sparkles },
-  { title: "Supervision Tools", path: "/supervision-tools", icon: ClipboardCheck },
-  { title: "PCE", path: "/pce", icon: Activity },
-  { title: "House-to-House", path: "/house-to-house", icon: Home },
-  { title: "Sessions", path: "/all-sessions", icon: CalendarDays },
-  { title: "Stock Ledger", path: "/stock", icon: Package },
-  { title: "Hard-to-Reach", path: "/htr", icon: AlertTriangle },
-  { title: "Field Readiness", path: "/field-readiness", icon: Radio },
+
+// 2. Routine Microplanning & Sessions
+const planningNavItems: NavItem[] = [
+  { title: "Routine Microplan", path: "/microplans/routine", icon: Calendar, moduleKey: "routine" },
+  { title: "Sessions Hub", path: "/all-sessions", icon: CalendarDays, moduleKey: "sessions" },
+  { title: "Plan Health", path: "/plan-health", icon: ClipboardCheck, moduleKey: "planHealth" },
+  { title: "Planning Actions", path: "/planning-actions", icon: ClipboardList, moduleKey: "planningActions" },
+  { title: "Planning Evidence", path: "/planning-evidence", icon: FileText, moduleKey: "planningEvidence" },
+  { title: "National Plan", path: "/national-plan", icon: FileText, moduleKey: "nationalPlan" },
 ];
-*/
-const planningNavItems = [
-  { title: "Routine Microplan", path: "/microplans/routine", icon: Calendar },
-  { title: "Plan Health", path: "/plan-health", icon: ClipboardCheck },
-  { title: "Sessions", path: "/all-sessions", icon: CalendarDays },
-  { title: "Stock Ledger", path: "/stock", icon: Package },
-  { title: "Cold Chain Inventory", path: "/cold-chain", icon: Snowflake },
-  { title: "Hard-to-Reach", path: "/htr", icon: AlertTriangle },
-  { title: "Field Readiness", path: "/field-readiness", icon: Radio },
+
+// 3. SIA Campaigns (Supplementary Immunization) - EVERYTHING related to SIA campaigns in one place!
+const siaNavItems: NavItem[] = [
+  { title: "SIA Microplans", path: "/microplans/campaigns", icon: Sparkles, moduleKey: "campaigns" },
+  { title: "Readiness Assessment", path: "/campaigns/readiness", icon: Radio, moduleKey: "campaignReadiness" },
+  { title: "Supervision Checklist", path: "/supervision-tools", icon: ClipboardCheck, moduleKey: "campaignSupervision" },
+  { title: "House-to-House", path: "/house-to-house", icon: Home, moduleKey: "houseToHouse" },
+  { title: "PCE (Post-Campaign)", path: "/pce", icon: ClipboardCheck, moduleKey: "pce" },
+  { title: "Summary Sheets", path: "/campaigns/summary-sheets", icon: FileSpreadsheet, moduleKey: "campaignSummaries" },
+  { title: "Real-Time Dashboard", path: "/campaigns/realtime-dashboard", icon: Activity, moduleKey: "campaignDashboard" },
 ];
-const siaNavItems = [
-  { title: "Microplan", path: "/microplans/campaigns", icon: Sparkles },
-  { title: "Supervision Tools", path: "/supervision-tools", icon: ClipboardCheck },
-  { title: "PCE", path: "/pce", icon: Activity },
-  { title: "House-to-House", path: "/house-to-house", icon: Home },
+
+// 4. Coverage, Defaulters & EPI
+const clinicalNavItems: NavItem[] = [
+  {
+    title: "Client Logbook",
+    path: "/clients",
+    icon: ClipboardList,
+    moduleKey: "clientLogbook",
+    permissionCheck: (u) => canAccessClientLogbook(u),
+  },
+  {
+    title: "Defaulter List",
+    path: "/clients/defaulters",
+    icon: AlertTriangle,
+    moduleKey: "defaulters",
+    permissionCheck: (u) => canAccessDefaulterList(u),
+  },
+  {
+    title: "Dropout Rates",
+    path: "/indicators/dropout",
+    icon: TrendingUp,
+    moduleKey: "dropout",
+    permissionCheck: (u) => canAccessDropoutRates(u),
+  },
+  { title: "Zero-Dose Villages", path: "/zero-dose-villages", icon: Target, moduleKey: "zeroDose" },
+  { title: "Missed Communities", path: "/missed-communities", icon: AlertTriangle, moduleKey: "missedCommunities" },
+  { title: "Recommendations", path: "/vgie/recommendations", icon: ClipboardCheck, moduleKey: "recommendations" },
+  { title: "Alerts & Notices", path: "/vgie/alerts", icon: Bell, moduleKey: "recommendations" },
 ];
-const workflowNavItems = [
-  { title: "Approvals", path: "/approvals", icon: CheckCircle },
+
+// 5. Logistics & Cold Chain
+const logisticsNavItems: NavItem[] = [
+  { title: "Stock Ledger", path: "/stock", icon: Package, moduleKey: "stock" },
+  { title: "Cold Chain Inventory", path: "/cold-chain", icon: Snowflake, moduleKey: "coldChain" },
+  { title: "Hard-to-Reach", path: "/htr", icon: AlertTriangle, moduleKey: "htr" },
+  { title: "Vaccine Calculator", path: "/vaccines", icon: Calculator, moduleKey: "calculator" },
+  { title: "Operational Budget", path: "/budget", icon: DollarSign, moduleKey: "budget" },
+  { title: "Social Mobilization", path: "/mobilization", icon: Share2, moduleKey: "mobilization" },
 ];
-const adminNavItems = [
-  { title: "User Management", path: "/admin/users", icon: Users },
-  { title: "Access Requests", path: "/admin/signups", icon: UserPlus },
-  { title: "Manage Staff", path: "/admin/staff", icon: Users },
-  { title: "HIS Integrations", path: "/his-integrations", icon: Share2 },
-  { title: "Country Onboarding", path: "/admin/countries", icon: Globe, superAdminOnly: true },
-  { title: "Boundary Manager", path: "/admin/boundaries", icon: Map },
-  { title: "Custom Layers", path: "/admin/custom-layers", icon: Layers },
-  { title: "National Plan", path: "/national-plan", icon: FileText },
-  { title: "Catalogue", path: "/admin/catalogue", icon: Package },
-  { title: "Wiki / Docs", path: "/admin/wiki", icon: BookOpen, wikiAdminOnly: true },
+
+// 6. Field & Offline Tools
+const fieldNavItems: NavItem[] = [
+  { title: "CHW Mobile Workspace", path: "/chw-field", icon: Smartphone, moduleKey: "chwField" },
+  { title: "Desktop Offline Hub", path: "/desktop-hub", icon: Monitor, moduleKey: "desktopHub" },
+  {
+    title: "Field Teams",
+    path: "/field-teams",
+    icon: Radio,
+    moduleKey: "fieldTeams",
+    permissionCheck: (u) =>
+      ["district_manager", "provincial_coordinator", "national_admin", "gis_specialist"].includes(u.role || "") ||
+      Boolean((u as any).isPlatformAdmin),
+  },
+  { title: "Sync Conflicts", path: "/sync/conflicts", icon: RefreshCw, moduleKey: "syncConflicts" },
 ];
-const systemNavItems = [
-  { title: "VPD Risk Assessment", path: "/risk-assessments", icon: Activity },
-  { title: "Surveillance", path: "/surveillance", icon: ShieldCheck },
-  { title: "Supervision", path: "/supervision", icon: ClipboardCheck },
-  { title: "Standards Alignment", path: "/standards-alignment", icon: ShieldCheck },
+
+// 7. Surveillance & Supervision
+const surveillanceNavItems: NavItem[] = [
+  { title: "VPD Risk Assessment", path: "/risk-assessments", icon: Activity, moduleKey: "riskAssessment" },
+  { title: "Surveillance", path: "/surveillance", icon: ShieldCheck, moduleKey: "surveillance" },
+  { title: "Supervision Tools", path: "/supervision-tools", icon: ClipboardCheck, moduleKey: "supervisionTools" },
+  { title: "Supportive Supervision", path: "/supervision", icon: ClipboardList, moduleKey: "supervision" },
+  { title: "Research Module", path: "/research", icon: BookOpen, moduleKey: "research" },
+];
+
+// 8. Analytics & Reports
+const analyticsNavItems: NavItem[] = [
+  { title: "Reports Hub", path: "/reports", icon: BarChart3, moduleKey: "reports" },
+  { title: "Indicator Manual", path: "/indicators/manual", icon: BookOpen, moduleKey: "indicators" },
+  { title: "Temporal History", path: "/temporal-history", icon: Database, moduleKey: "history" },
+  { title: "Standards Alignment", path: "/standards-alignment", icon: ShieldCheck, moduleKey: "standards" },
+];
+
+// 9. Workflow & Approvals
+const workflowNavItems: NavItem[] = [
+  { title: "Approvals", path: "/approvals", icon: CheckCircle, moduleKey: "approvals" },
+];
+
+// 10. Administration & Governance
+const adminNavItems: NavItem[] = [
+  {
+    title: "User Management",
+    path: "/admin/users",
+    icon: Users,
+    moduleKey: "userManagement",
+    permissionCheck: (u) => canAccessUserManagement(u),
+  },
+  {
+    title: "Access Requests",
+    path: "/admin/signups",
+    icon: UserPlus,
+    moduleKey: "signups",
+    permissionCheck: (u) => hasAnyPermission(u, ["users.create", "users.update", "manage_users"]),
+  },
+  {
+    title: "Manage Staff",
+    path: "/admin/staff",
+    icon: Users,
+    moduleKey: "staffManagement",
+    permissionCheck: (u) => hasAnyPermission(u, ["users.view", "users.update", "manage_users"]),
+  },
+  {
+    title: "HIS Integrations",
+    path: "/his-integrations",
+    icon: Share2,
+    moduleKey: "interop",
+    permissionCheck: (u) => canAccessHisIntegrations(u),
+  },
+  {
+    title: "Country Onboarding",
+    path: "/admin/countries",
+    icon: Globe,
+    superAdminOnly: true,
+  },
+  {
+    title: "Custom Layers",
+    path: "/admin/custom-layers",
+    icon: Layers,
+    moduleKey: "customLayers",
+    permissionCheck: (u) => hasAnyPermission(u, ["manage_boundaries", "polygons.view", "polygons.create", "polygons.update"]),
+  },
+  {
+    title: "Catalogue",
+    path: "/admin/catalogue",
+    icon: Package,
+    moduleKey: "catalogue",
+    permissionCheck: (u) => hasAnyPermission(u, ["reference_data.view", "reference_data.manage"]),
+  },
+  {
+    title: "Wiki / Docs",
+    path: "/admin/wiki",
+    icon: BookOpen,
+    moduleKey: "wiki",
+    wikiAdminOnly: true,
+  },
   { title: "Reconcile Vaccines", path: "/admin/reconcile-vaccines", icon: Wrench, reconcileOnly: true },
-  { title: "Data Sources", path: "/data-sources", icon: Database },
-  { title: "Temporal History", path: "/temporal-history", icon: Database },
-  { title: "API Reference", path: "/api-reference", icon: Terminal },
+  { title: "Data Sources", path: "/data-sources", icon: Database, moduleKey: "dataSources" },
+  { title: "API Reference", path: "/api-reference", icon: Terminal, moduleKey: "apiReference" },
   { title: "Settings", path: "/settings", icon: Settings },
   { title: "Help", path: "/help", icon: HelpCircle },
 ];
+
 /**
- * A SidebarGroup whose label acts as a chevron toggle to collapse the
- * section vertically. When the whole sidebar is in icon-collapse mode the
- * label is hidden by the parent CSS, so this only kicks in for the
- * expanded sidebar (where users want to hide sections they aren't using).
+ * A SidebarGroup whose label acts as an interactive accordion toggle.
  */
 function CollapsibleSection({
   label,
@@ -165,24 +328,31 @@ function CollapsibleSection({
       const raw = window.localStorage.getItem(`vaxplan.sidebar.section.${storageKey}`);
       return raw === null ? true : raw === "1";
     } catch {
-      // Private mode / restricted storage - default to open.
       return true;
     }
   });
+  const { state, isMobile } = useSidebar();
+  const isCollapsed = state === "collapsed" && !isMobile;
+
   const toggle = () => {
     setOpen((prev) => {
       const next = !prev;
       try {
-        window.localStorage.setItem(
-          `vaxplan.sidebar.section.${storageKey}`,
-          next ? "1" : "0",
-        );
-      } catch {
-        /* localStorage may be disabled */
-      }
+        window.localStorage.setItem(`vaxplan.sidebar.section.${storageKey}`, next ? "1" : "0");
+      } catch {}
       return next;
     });
   };
+
+  if (isCollapsed) {
+    return (
+      <SidebarGroup className="py-1 px-1">
+        <div className="h-px my-1.5 bg-sidebar-border/60 mx-1" title={label} />
+        <SidebarGroupContent className="w-full">{children}</SidebarGroupContent>
+      </SidebarGroup>
+    );
+  }
+
   return (
     <SidebarGroup>
       <SidebarGroupLabel asChild>
@@ -190,94 +360,97 @@ function CollapsibleSection({
           type="button"
           onClick={toggle}
           aria-expanded={open}
-          className={`flex w-full items-center justify-between gap-2 transition-colors group-data-[collapsible=icon]:hidden ${bgClass ?? ""}`}
+          className={`flex w-full items-center justify-between gap-2 px-2 py-1.5 rounded-lg transition-colors text-left ${bgClass ?? ""}`}
           data-testid={`sidebar-section-toggle-${storageKey}`}
         >
           <span className={`flex items-center gap-2 font-semibold tracking-wide uppercase text-[11px] ${colorClass ?? ""}`}>
-            {open ? (
-              <ChevronDown className="h-3 w-3 shrink-0" />
-            ) : (
-              <ChevronRight className="h-3 w-3 shrink-0" />
-            )}
+            {open ? <ChevronDown className="h-3 w-3 shrink-0" /> : <ChevronRight className="h-3 w-3 shrink-0" />}
             {label}
           </span>
           {badge !== undefined && badge > 0 && (
-            <Badge variant="secondary" className="h-4 px-1.5 text-[10px]">
+            <Badge variant="secondary" className="h-4 px-1.5 text-[10px] font-bold">
               {badge > 99 ? "99+" : badge}
             </Badge>
           )}
         </button>
       </SidebarGroupLabel>
-      {/* Keep content rendered when the sidebar is in icon-collapse mode
-          (so icons stay visible there), and hide it only when the user has
-          collapsed this section while the sidebar is fully expanded. */}
-      <SidebarGroupContent
-        className={open ? "" : "hidden group-data-[collapsible=icon]:block"}
-      >
-        {children}
-      </SidebarGroupContent>
+      <SidebarGroupContent className={open ? "" : "hidden"}>{children}</SidebarGroupContent>
     </SidebarGroup>
   );
 }
+
 export function AppSidebar({ user }: AppSidebarProps) {
   const [location] = useLocation();
+  const { state, isMobile } = useSidebar();
+  const isCollapsed = state === "collapsed" && !isMobile;
+  const [customizationOpen, setCustomizationOpen] = useState(false);
+
+  // User-specific module visibility preferences
+  const [userPrefs, setUserPrefs] = useState<Record<string, boolean>>(() => getUserModulePreferences());
+
+  useEffect(() => {
+    const handleUpdate = () => setUserPrefs(getUserModulePreferences());
+    window.addEventListener("vaxplan-modules-updated", handleUpdate);
+    return () => window.removeEventListener("vaxplan-modules-updated", handleUpdate);
+  }, []);
+
   const canAccessApprovals = ["district_manager", "provincial_coordinator", "national_admin"].includes(user.role || "");
   const isNationalAdmin = user.role === "national_admin";
   const isPlatformAdmin = (user as any).isPlatformAdmin === true;
   const isFacilityStaff = user.role === "facility_clerk" || user.role === "facility_in_charge" || user.role === "facility_partner";
-  const canManageUsers = canAccessUserManagement(user);
   const canAccessAdmin = canAccessAdministration(user);
   const canEditWiki = isNationalAdmin || user.role === "gis_specialist" || isPlatformAdmin;
-  const canReconcile = user.role === "national_admin" || user.role === "district_manager";
-  // Field Teams page is available to district_manager and above (not facility-level roles)
-  const canAccessFieldTeams = ["district_manager", "provincial_coordinator", "national_admin", "gis_specialist"].includes(user.role || "") || isPlatformAdmin;
+  const canReconcile = isNationalAdmin || user.role === "district_manager";
+
   const { data: tenant } = useQuery<TenantSummary>({ queryKey: ["/api/me/tenant"], retry: false });
-  const modules = {
+  const tenantModules = {
     ...DEFAULT_MODULES,
-    ...((tenant as any)?.settings?.modules || {})
+    ...((tenant as any)?.settings?.modules || {}),
   };
-  const visibleMainNavItems = mainNavItems.filter((item) => {
-    if (item.path === "/") return true;
-    /* Commented out duplicate flow check:
-    if (item.path === "/flow") return modules.routine !== false || modules.campaigns !== false;
-    */
-    if (item.path === "/map") return modules.map !== false;
-    if (item.path === "/settlement-intelligence") return modules.settlementIntel !== false;
-    if (item.path === "/facilities") return modules.facilities !== false;
-    if (item.path === "/population") return modules.population !== false;
-    if (item.path === "/clients") return modules.clientLogbook !== false && canAccessClientLogbook(user);
-    if (item.path === "/clients/defaulters") return modules.defaulters !== false && canAccessDefaulterList(user);
-    if (item.path === "/indicators/dropout") return modules.dropout !== false && canAccessDropoutRates(user);
-    if (item.path === "/missed-communities") return modules.missedCommunities !== false;
-    return true;
-  });
-  const visiblePlanningNavItems = planningNavItems
-    .filter((item) => {
-      if (item.path === "/microplans/routine") return modules.routine !== false;
-      if (item.path === "/all-sessions") return modules.sessions !== false;
-      if (item.path === "/stock") return modules.stock !== false;
-      if (item.path === "/htr") return modules.htr !== false;
-      if (item.path === "/field-readiness") return true;
-      if (item.path === "/plan-health") return modules.routine !== false;
+
+  // Helper filter: checks both tenant/admin module enablement AND user preference AND RBAC
+  const filterNavItems = (items: NavItem[]): NavItem[] => {
+    return items.filter((item) => {
+      // 1. Module enablement check (Tenant setting takes precedence, then user preference)
+      if (item.moduleKey && !isModuleVisible(item.moduleKey, tenantModules, userPrefs)) {
+        return false;
+      }
+      // 2. Super admin constraint
+      if (item.superAdminOnly && !isPlatformAdmin) {
+        return false;
+      }
+      // 3. Wiki editor constraint
+      if (item.wikiAdminOnly && !canEditWiki) {
+        return false;
+      }
+      // 4. Reconcile constraint
+      if (item.reconcileOnly && !canReconcile) {
+        return false;
+      }
+      // 5. Facility staff restriction on developer API
+      if (item.path === "/api-reference" && isFacilityStaff) {
+        return false;
+      }
+      // 6. Custom RBAC permission check
+      if (item.permissionCheck && !item.permissionCheck(user)) {
+        return false;
+      }
       return true;
     });
-  const visibleSiaNavItems = siaNavItems.filter((item) => {
-    if (item.path === "/microplans/campaigns") return modules.campaigns !== false;
-    if (item.path === "/supervision-tools" || item.path === "/pce" || item.path === "/house-to-house") {
-      return modules.supervision !== false;
-    }
-    return true;
-  });
-  const visibleSystemNavItems = systemNavItems
-    .filter((item) => !(item as any).reconcileOnly || canReconcile)
-    .filter((item) => {
-      if (item.path === "/api-reference" && isFacilityStaff) return false;
-      if (item.path === "/supervision") return modules.supervision !== false;
-      return true;
-    });
-  // Real pending-approvals count for the Workflow section badge. Only
-  // fetched for users who can actually see the Approvals page; falls back
-  // to undefined (no badge) for everyone else.
+  };
+
+  const visibleOverview = filterNavItems(overviewNavItems);
+  const visiblePlanning = filterNavItems(planningNavItems);
+  const visibleSia = filterNavItems(siaNavItems);
+  const visibleClinical = filterNavItems(clinicalNavItems);
+  const visibleLogistics = filterNavItems(logisticsNavItems);
+  const visibleField = filterNavItems(fieldNavItems);
+  const visibleSurveillance = filterNavItems(surveillanceNavItems);
+  const visibleAnalytics = filterNavItems(analyticsNavItems);
+  const visibleWorkflow = canAccessApprovals ? filterNavItems(workflowNavItems) : [];
+  const visibleAdmin = canAccessAdmin ? filterNavItems(adminNavItems) : [];
+
+  // Real pending-approvals count
   const { data: approvalRequests } = useQuery<ApprovalRequest[]>({
     queryKey: ["/api/approvals"],
     enabled: canAccessApprovals,
@@ -286,32 +459,40 @@ export function AppSidebar({ user }: AppSidebarProps) {
   const pendingApprovalsCount = approvalRequests
     ? approvalRequests.filter((r) => r.status === "pending").length
     : undefined;
+
   return (
     <Sidebar collapsible="icon">
-      <SidebarHeader className="p-4">
-        <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-primary via-sky-600 to-sky-700 text-white shadow-md shadow-primary/30 ring-1 ring-white/20 shrink-0">
-            <HeartPulse className="h-5 w-5" />
+      <SidebarHeader className={isCollapsed ? "p-2 flex flex-col items-center justify-center gap-2" : "p-3 border-b border-sidebar-border/40"}>
+        {isCollapsed ? (
+          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-primary via-sky-600 to-sky-700 text-white shadow-md shadow-primary/30 ring-1 ring-white/20 shrink-0" title="VaxPlan">
+            <HeartPulse className="h-4 w-4" />
           </div>
-          <div className="flex flex-col min-w-0 group-data-[collapsible=icon]:hidden">
-            <span className="font-semibold text-sm truncate" data-testid="text-brand-name">VaxPlan</span>
-            <span className="text-xs text-muted-foreground truncate" data-testid="text-tenant-name">
-              {tenant?.name ?? "Health Microplanning"}
-            </span>
+        ) : (
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-primary via-sky-600 to-sky-700 text-white shadow-md shadow-primary/30 ring-1 ring-white/20 shrink-0">
+                <HeartPulse className="h-5 w-5" />
+              </div>
+              <div className="flex flex-col min-w-0">
+                <span className="font-bold text-sm truncate leading-tight tracking-tight" data-testid="text-brand-name">VaxPlan</span>
+                <span className="text-[11px] text-muted-foreground truncate leading-tight" data-testid="text-tenant-name">
+                  {tenant?.name ?? "Health Microplanning"}
+                </span>
+              </div>
+            </div>
+            <SidebarTrigger className="h-7 w-7 shrink-0 text-muted-foreground hover:text-foreground" />
           </div>
-        </div>
+        )}
       </SidebarHeader>
+
       <SidebarContent>
-        {visibleMainNavItems.length > 0 && (
-          <CollapsibleSection label="Main" storageKey="main" colorClass="text-sky-600 dark:text-sky-400" bgClass="bg-sky-500/10 hover:bg-sky-500/15 dark:bg-sky-400/10 dark:hover:bg-sky-400/15">
+        {/* 1. Overview & GIS */}
+        {visibleOverview.length > 0 && (
+          <CollapsibleSection label="Overview & GIS" storageKey="overview" colorClass="text-sky-600 dark:text-sky-400" bgClass="bg-sky-500/10 hover:bg-sky-500/15 dark:bg-sky-400/10 dark:hover:bg-sky-400/15">
             <SidebarMenu>
-              {visibleMainNavItems.map((item) => (
+              {visibleOverview.map((item) => (
                 <SidebarMenuItem key={item.path}>
-                  <SidebarMenuButton
-                    asChild
-                    isActive={location === item.path}
-                    tooltip={item.title}
-                  >
+                  <SidebarMenuButton asChild isActive={location === item.path} tooltip={item.title}>
                     <Link href={item.path} data-testid={`nav-${item.title.toLowerCase().replace(/\s+/g, "-")}`}>
                       <item.icon className="h-4 w-4" />
                       <span>{item.title}</span>
@@ -322,16 +503,14 @@ export function AppSidebar({ user }: AppSidebarProps) {
             </SidebarMenu>
           </CollapsibleSection>
         )}
-        {visiblePlanningNavItems.length > 0 && (
-          <CollapsibleSection label="Planning" storageKey="planning" colorClass="text-emerald-600 dark:text-emerald-400" bgClass="bg-emerald-500/10 hover:bg-emerald-500/15 dark:bg-emerald-400/10 dark:hover:bg-emerald-400/15">
+
+        {/* 2. Routine Microplanning & Sessions */}
+        {visiblePlanning.length > 0 && (
+          <CollapsibleSection label="Routine Microplanning & Sessions" storageKey="planning" colorClass="text-emerald-600 dark:text-emerald-400" bgClass="bg-emerald-500/10 hover:bg-emerald-500/15 dark:bg-emerald-400/10 dark:hover:bg-emerald-400/15">
             <SidebarMenu>
-              {visiblePlanningNavItems.map((item) => (
+              {visiblePlanning.map((item) => (
                 <SidebarMenuItem key={item.path}>
-                  <SidebarMenuButton
-                    asChild
-                    isActive={location === item.path}
-                    tooltip={item.title}
-                  >
+                  <SidebarMenuButton asChild isActive={location === item.path} tooltip={item.title}>
                     <Link href={item.path} data-testid={`nav-${item.title.toLowerCase().replace(/\s+/g, "-")}`}>
                       <item.icon className="h-4 w-4" />
                       <span>{item.title}</span>
@@ -342,21 +521,19 @@ export function AppSidebar({ user }: AppSidebarProps) {
             </SidebarMenu>
           </CollapsibleSection>
         )}
-        {visibleSiaNavItems.length > 0 && (
+
+        {/* 3. SIA Campaigns (Supplementary Immunization) */}
+        {visibleSia.length > 0 && (
           <CollapsibleSection
             label="SIA Campaigns"
-            storageKey="sia-campaigns"
-            colorClass="text-indigo-600 dark:text-indigo-400"
-            bgClass="bg-indigo-500/10 hover:bg-indigo-500/15 dark:bg-indigo-400/10 dark:hover:bg-indigo-400/15"
+            storageKey="sia"
+            colorClass="text-purple-600 dark:text-purple-400"
+            bgClass="bg-purple-500/10 hover:bg-purple-500/15 dark:bg-purple-400/10 dark:hover:bg-purple-400/15"
           >
             <SidebarMenu>
-              {visibleSiaNavItems.map((item) => (
+              {visibleSia.map((item) => (
                 <SidebarMenuItem key={item.path}>
-                  <SidebarMenuButton
-                    asChild
-                    isActive={location === item.path}
-                    tooltip={item.title}
-                  >
+                  <SidebarMenuButton asChild isActive={location === item.path} tooltip={item.title}>
                     <Link href={item.path} data-testid={`nav-${item.title.toLowerCase().replace(/\s+/g, "-")}`}>
                       <item.icon className="h-4 w-4" />
                       <span>{item.title}</span>
@@ -367,41 +544,99 @@ export function AppSidebar({ user }: AppSidebarProps) {
             </SidebarMenu>
           </CollapsibleSection>
         )}
-        {/* Analytics - visible to all authenticated roles (RBAC scoping happens server-side) */}
-        <CollapsibleSection
-          label="Analytics"
-          storageKey="analytics"
-          colorClass="text-violet-600 dark:text-violet-400"
-          bgClass="bg-violet-500/10 hover:bg-violet-500/15 dark:bg-violet-400/10 dark:hover:bg-violet-400/15"
-        >
-          <SidebarMenu>
-            <SidebarMenuItem>
-              <SidebarMenuButton
-                asChild
-                isActive={location.startsWith("/reports")}
-                tooltip="Reports"
-              >
-                <Link href="/reports" data-testid="nav-reports">
-                  <BarChart3 className="h-4 w-4" />
-                  <span>Reports</span>
-                </Link>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-            <SidebarMenuItem>
-              <SidebarMenuButton
-                asChild
-                isActive={location === "/indicators/manual"}
-                tooltip="Indicator Manual"
-              >
-                <Link href="/indicators/manual" data-testid="nav-indicator-manual">
-                  <BookOpen className="h-4 w-4" />
-                  <span>Indicator Manual</span>
-                </Link>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-          </SidebarMenu>
-        </CollapsibleSection>
-        {canAccessApprovals && (
+
+        {/* 3. Coverage, Defaulters & EPI */}
+        {visibleClinical.length > 0 && (
+          <CollapsibleSection label="Coverage & EPI" storageKey="clinical" colorClass="text-amber-600 dark:text-amber-400" bgClass="bg-amber-500/10 hover:bg-amber-500/15 dark:bg-amber-400/10 dark:hover:bg-amber-400/15">
+            <SidebarMenu>
+              {visibleClinical.map((item) => (
+                <SidebarMenuItem key={item.path}>
+                  <SidebarMenuButton asChild isActive={location === item.path} tooltip={item.title}>
+                    <Link href={item.path} data-testid={`nav-${item.title.toLowerCase().replace(/\s+/g, "-")}`}>
+                      <item.icon className="h-4 w-4" />
+                      <span>{item.title}</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
+            </SidebarMenu>
+          </CollapsibleSection>
+        )}
+
+        {/* 4. Logistics & Cold Chain */}
+        {visibleLogistics.length > 0 && (
+          <CollapsibleSection label="Logistics & Cold Chain" storageKey="logistics" colorClass="text-indigo-600 dark:text-indigo-400" bgClass="bg-indigo-500/10 hover:bg-indigo-500/15 dark:bg-indigo-400/10 dark:hover:bg-indigo-400/15">
+            <SidebarMenu>
+              {visibleLogistics.map((item) => (
+                <SidebarMenuItem key={item.path}>
+                  <SidebarMenuButton asChild isActive={location === item.path} tooltip={item.title}>
+                    <Link href={item.path} data-testid={`nav-${item.title.toLowerCase().replace(/\s+/g, "-")}`}>
+                      <item.icon className="h-4 w-4" />
+                      <span>{item.title}</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
+            </SidebarMenu>
+          </CollapsibleSection>
+        )}
+
+        {/* 5. Field & Offline Operations */}
+        {visibleField.length > 0 && (
+          <CollapsibleSection label="Field & Offline Tools" storageKey="field" colorClass="text-teal-600 dark:text-teal-400" bgClass="bg-teal-500/10 hover:bg-teal-500/15 dark:bg-teal-400/10 dark:hover:bg-teal-400/15">
+            <SidebarMenu>
+              {visibleField.map((item) => (
+                <SidebarMenuItem key={item.path}>
+                  <SidebarMenuButton asChild isActive={location === item.path} tooltip={item.title}>
+                    <Link href={item.path} data-testid={`nav-${item.title.toLowerCase().replace(/\s+/g, "-")}`}>
+                      <item.icon className="h-4 w-4" />
+                      <span>{item.title}</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
+            </SidebarMenu>
+          </CollapsibleSection>
+        )}
+
+        {/* 6. Surveillance & Supervision */}
+        {visibleSurveillance.length > 0 && (
+          <CollapsibleSection label="Surveillance & Supervision" storageKey="surveillance" colorClass="text-rose-600 dark:text-rose-400" bgClass="bg-rose-500/10 hover:bg-rose-500/15 dark:bg-rose-400/10 dark:hover:bg-rose-400/15">
+            <SidebarMenu>
+              {visibleSurveillance.map((item) => (
+                <SidebarMenuItem key={item.path}>
+                  <SidebarMenuButton asChild isActive={location === item.path} tooltip={item.title}>
+                    <Link href={item.path} data-testid={`nav-${item.title.toLowerCase().replace(/\s+/g, "-")}`}>
+                      <item.icon className="h-4 w-4" />
+                      <span>{item.title}</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
+            </SidebarMenu>
+          </CollapsibleSection>
+        )}
+
+        {/* 7. Analytics & Reports */}
+        {visibleAnalytics.length > 0 && (
+          <CollapsibleSection label="Analytics & Reports" storageKey="analytics" colorClass="text-violet-600 dark:text-violet-400" bgClass="bg-violet-500/10 hover:bg-violet-500/15 dark:bg-violet-400/10 dark:hover:bg-violet-400/15">
+            <SidebarMenu>
+              {visibleAnalytics.map((item) => (
+                <SidebarMenuItem key={item.path}>
+                  <SidebarMenuButton asChild isActive={location === item.path} tooltip={item.title}>
+                    <Link href={item.path} data-testid={`nav-${item.title.toLowerCase().replace(/\s+/g, "-")}`}>
+                      <item.icon className="h-4 w-4" />
+                      <span>{item.title}</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
+            </SidebarMenu>
+          </CollapsibleSection>
+        )}
+
+        {/* 8. Approvals Workflow */}
+        {visibleWorkflow.length > 0 && (
           <CollapsibleSection
             label="Workflow"
             storageKey="workflow"
@@ -410,18 +645,14 @@ export function AppSidebar({ user }: AppSidebarProps) {
             bgClass="bg-amber-500/10 hover:bg-amber-500/15 dark:bg-amber-400/10 dark:hover:bg-amber-400/15"
           >
             <SidebarMenu>
-              {workflowNavItems.map((item) => (
+              {visibleWorkflow.map((item) => (
                 <SidebarMenuItem key={item.path}>
-                  <SidebarMenuButton
-                    asChild
-                    isActive={location === item.path}
-                    tooltip={item.title}
-                  >
+                  <SidebarMenuButton asChild isActive={location === item.path} tooltip={item.title}>
                     <Link href={item.path} data-testid={`nav-${item.title.toLowerCase().replace(/\s+/g, "-")}`}>
                       <item.icon className="h-4 w-4" />
                       <span>{item.title}</span>
                       {pendingApprovalsCount !== undefined && pendingApprovalsCount > 0 && (
-                        <Badge variant="secondary" className="ml-auto text-xs">
+                        <Badge variant="secondary" className="ml-auto text-xs font-bold">
                           {pendingApprovalsCount > 99 ? "99+" : pendingApprovalsCount}
                         </Badge>
                       )}
@@ -432,91 +663,14 @@ export function AppSidebar({ user }: AppSidebarProps) {
             </SidebarMenu>
           </CollapsibleSection>
         )}
-        {canAccessAdmin && (
-          <CollapsibleSection label="Administration" storageKey="admin" colorClass="text-violet-600 dark:text-violet-400" bgClass="bg-violet-500/10 hover:bg-violet-500/15 dark:bg-violet-400/10 dark:hover:bg-violet-400/15">
+
+        {/* 9. System Administration */}
+        {visibleAdmin.length > 0 && (
+          <CollapsibleSection label="Administration" storageKey="admin" colorClass="text-slate-600 dark:text-slate-400" bgClass="bg-slate-500/10 hover:bg-slate-500/15 dark:bg-slate-400/10 dark:hover:bg-slate-400/15">
             <SidebarMenu>
-              {adminNavItems
-                .filter((item) => {
-                  // Country Onboarding is reserved for platform Super Admins -
-                  // country-specific admins can never create new countries.
-                  if ((item as any).superAdminOnly) {
-                    return isPlatformAdmin;
-                  }
-                  // Wiki editor is for national_admin / gis_specialist / platform admins.
-                  if ((item as any).wikiAdminOnly) {
-                    return canEditWiki;
-                  }
-                  /* Original gating logic commented out to restrict user management access:
-                  if (item.path === "/admin/users" || item.path === "/admin/signups" || item.path === "/admin/staff") {
-                    return true;
-                  }
-                  return isNationalAdmin;
-                  */
-                  if (item.path === "/admin/staff") {
-                    return hasAnyPermission(user, ["users.view", "users.update", "manage_users"]);
-                  }
-                  if (item.path === "/admin/users") {
-                    return canManageUsers;
-                  }
-                  if (item.path === "/admin/signups") {
-                    return hasAnyPermission(user, ["users.create", "users.update", "manage_users"]);
-                  }
-                  if (item.path === "/his-integrations") {
-                    return modules.interop !== false && canAccessHisIntegrations(user);
-                  }
-                  if (item.path === "/admin/boundaries" || item.path === "/admin/custom-layers") {
-                    return hasAnyPermission(user, ["manage_boundaries", "polygons.view", "polygons.create", "polygons.update"]);
-                  }
-                  if (item.path === "/national-plan") {
-                    return hasAnyPermission(user, ["dashboard.view", "view_reports", "microplans.view", "view_session_plans"]);
-                  }
-                  if (item.path === "/admin/catalogue") {
-                    return hasAnyPermission(user, ["reference_data.view", "reference_data.manage"]);
-                  }
-                  return false;
-                })
-                .map((item) => (
-                  <SidebarMenuItem key={item.path}>
-                    <SidebarMenuButton
-                      asChild
-                      isActive={location === item.path}
-                      tooltip={item.title}
-                    >
-                      <Link href={item.path} data-testid={`nav-${item.title.toLowerCase().replace(/\s+/g, "-")}`}>
-                        <item.icon className="h-4 w-4" />
-                        <span>{item.title}</span>
-                      </Link>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                ))}
-            </SidebarMenu>
-          </CollapsibleSection>
-        )}
-        {(visibleSystemNavItems.length > 0 || (canAccessFieldTeams && modules.fieldTeams !== false)) && (
-          <CollapsibleSection label="System" storageKey="system" colorClass="text-rose-600 dark:text-rose-400" bgClass="bg-rose-500/10 hover:bg-rose-500/15 dark:bg-rose-400/10 dark:hover:bg-rose-400/15">
-            <SidebarMenu>
-              {/* Field Teams - only visible to district_manager and above */}
-              {canAccessFieldTeams && modules.fieldTeams !== false && (
-                <SidebarMenuItem>
-                  <SidebarMenuButton
-                    asChild
-                    isActive={location === "/field-teams"}
-                    tooltip="Field Teams"
-                  >
-                    <Link href="/field-teams" data-testid="nav-field-teams">
-                      <Radio className="h-4 w-4" />
-                      <span>Field Teams</span>
-                    </Link>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              )}
-              {visibleSystemNavItems.map((item) => (
+              {visibleAdmin.map((item) => (
                 <SidebarMenuItem key={item.path}>
-                  <SidebarMenuButton
-                    asChild
-                    isActive={location === item.path}
-                    tooltip={item.title}
-                  >
+                  <SidebarMenuButton asChild isActive={location === item.path} tooltip={item.title}>
                     <Link href={item.path} data-testid={`nav-${item.title.toLowerCase().replace(/\s+/g, "-")}`}>
                       <item.icon className="h-4 w-4" />
                       <span>{item.title}</span>
@@ -528,9 +682,22 @@ export function AppSidebar({ user }: AppSidebarProps) {
           </CollapsibleSection>
         )}
       </SidebarContent>
-      <SidebarFooter className="p-4">
-        <div className="group-data-[collapsible=icon]:hidden space-y-1.5">
-          <div className="text-xs text-muted-foreground text-center">
+
+      <SidebarFooter className="p-3 border-t border-sidebar-border/40 group-data-[collapsible=icon]:p-2 group-data-[collapsible=icon]:flex group-data-[collapsible=icon]:justify-center">
+        <div className="group-data-[collapsible=icon]:hidden space-y-2">
+          {/* User Sidebar Customization Button */}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setCustomizationOpen(true)}
+            className="w-full text-xs gap-1.5 justify-center rounded-xl border-dashed hover:bg-accent/40 text-muted-foreground hover:text-foreground"
+            data-testid="button-customize-sidebar"
+          >
+            <SlidersHorizontal className="h-3.5 w-3.5" />
+            Customize Sidebar
+          </Button>
+
+          <div className="text-[11px] text-muted-foreground text-center">
             {versionLabel()}
           </div>
           <div className="flex items-center justify-center">
@@ -545,7 +712,158 @@ export function AppSidebar({ user }: AppSidebarProps) {
           </div>
         </div>
       </SidebarFooter>
+
+      {/* User Personal Sidebar Customization Modal */}
+      <SidebarCustomizationModal
+        open={customizationOpen}
+        onClose={() => setCustomizationOpen(false)}
+        tenantModules={tenantModules}
+        userPrefs={userPrefs}
+        isAdmin={isPlatformAdmin || isNationalAdmin}
+      />
     </Sidebar>
   );
 }
 
+/**
+ * Interactive dialog allowing users to toggle personal visibility of optional modules.
+ * Note: Admin/Tenant disabled modules cannot be enabled by users.
+ */
+function SidebarCustomizationModal({
+  open,
+  onClose,
+  tenantModules,
+  userPrefs,
+  isAdmin = false,
+}: {
+  open: boolean;
+  onClose: () => void;
+  tenantModules: Record<string, boolean>;
+  userPrefs: Record<string, boolean>;
+  isAdmin?: boolean;
+}) {
+  const toggleableModules = isAdmin
+    ? MODULE_METADATA
+    : MODULE_METADATA.filter((m) => m.userToggleable);
+
+  const handleToggle = (key: string, currentVal: boolean) => {
+    setUserModulePreference(key, !currentVal);
+  };
+
+  const handleReset = () => {
+    resetUserModulePreferences();
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col p-0">
+        <DialogHeader className="p-6 pb-3 border-b border-border">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="p-2 rounded-xl bg-primary/10 text-primary">
+                <SlidersHorizontal className="h-5 w-5" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <DialogTitle className="text-lg font-bold">Personal Sidebar Navigation</DialogTitle>
+                  {isAdmin && (
+                    <Badge className="bg-purple-600 hover:bg-purple-700 text-white text-[10px] px-2 py-0.5">
+                      Admin Mode: All Modules Configurable
+                    </Badge>
+                  )}
+                </div>
+                <DialogDescription className="text-xs text-muted-foreground">
+                  {isAdmin
+                    ? "As an administrator, you have full control to toggle all modules on or off for your workspace view."
+                    : "Show or hide optional modules to streamline your daily workflow. Modules disabled by your administrator are locked."}
+                </DialogDescription>
+              </div>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleReset}
+              className="gap-1.5 text-xs rounded-xl"
+              title="Reset personal toggles to organization default"
+            >
+              <RotateCcw className="h-3.5 w-3.5" />
+              Reset Defaults
+            </Button>
+          </div>
+        </DialogHeader>
+
+        <div className="flex-1 overflow-y-auto p-6 space-y-6">
+          {MODULE_CATEGORIES.map((category) => {
+            const modulesInCategory = toggleableModules.filter((m) => m.category === category.id);
+            if (modulesInCategory.length === 0) return null;
+
+            return (
+              <div key={category.id} className="space-y-3">
+                <div className="flex items-center gap-2 pb-1 border-b border-border/40">
+                  <span className={`text-xs font-bold uppercase tracking-wider ${category.color}`}>
+                    {category.name}
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                  {modulesInCategory.map((mod) => {
+                    const Icon = mod.icon;
+                    const isTenantDisabled = tenantModules[mod.key] === false;
+                    const isVisible = isTenantDisabled ? false : userPrefs[mod.key] !== false;
+
+                    return (
+                      <div
+                        key={mod.key}
+                        className={`flex items-start justify-between p-3 rounded-xl border transition-all ${
+                          isTenantDisabled
+                            ? "opacity-50 bg-muted/40 border-dashed border-border cursor-not-allowed"
+                            : "bg-card/50 hover:bg-accent/20 border-border/70 shadow-sm"
+                        }`}
+                      >
+                        <div className="flex gap-2.5 min-w-0 pr-2">
+                          <div className={`mt-0.5 h-7 w-7 rounded-lg flex items-center justify-center shrink-0 border ${
+                            isVisible && !isTenantDisabled
+                              ? `${category.bg} ${category.color} border-primary/20`
+                              : "bg-muted text-muted-foreground border-border"
+                          }`}>
+                            <Icon className="h-3.5 w-3.5" />
+                          </div>
+                          <div className="min-w-0 space-y-0.5">
+                            <div className="text-xs font-semibold truncate flex items-center gap-1.5">
+                              <span>{mod.title}</span>
+                              {isTenantDisabled && (
+                                <Badge variant="secondary" className="text-[9px] h-3.5 px-1 bg-muted text-muted-foreground">
+                                  Disabled by Admin
+                                </Badge>
+                              )}
+                            </div>
+                            <p className="text-[11px] text-muted-foreground line-clamp-2 leading-tight">
+                              {mod.description}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="shrink-0 self-center">
+                          <Switch
+                            checked={isVisible}
+                            disabled={isTenantDisabled}
+                            onCheckedChange={() => handleToggle(mod.key, isVisible)}
+                            className="data-[state=checked]:bg-primary"
+                          />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        <DialogFooter className="p-4 border-t border-border bg-muted/20">
+          <Button onClick={onClose} className="rounded-xl px-6 font-semibold">
+            <Check className="h-4 w-4 mr-1.5" /> Done
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}

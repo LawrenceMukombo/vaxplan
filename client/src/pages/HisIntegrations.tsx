@@ -311,11 +311,70 @@ export default function HisIntegrations() {
     onError: (err: Error) => toast({ title: "DHIS2 pull failed", description: err.message, variant: "destructive" }),
   });
 
+  // Population pull state & mutation (Task Layer 3)
+  const [popPullOpen, setPopPullOpen] = useState(false);
+  const [popPullIntegration, setPopPullIntegration] = useState("");
+  const [popPullYear, setPopPullYear] = useState(() => new Date().getFullYear());
+  const [popPullResult, setPopPullResult] = useState<any | null>(null);
+
+  const pullPopulationMutation = useMutation({
+    mutationFn: async (commit: boolean) => {
+      return await apiRequest<any>("POST", "/api/his/dhis2/pull-population", {
+        integrationId: popPullIntegration,
+        year: Number(popPullYear),
+        commit,
+      });
+    },
+    onSuccess: (data, commit) => {
+      setPopPullResult(data);
+      if (commit) {
+        toast({
+          title: "DHIS2 target populations committed",
+          description: `${data.committedCount} facility denominators updated${data.simulated ? " (simulation)" : ""}.`,
+        });
+      } else {
+        toast({
+          title: "DHIS2 population preview ready",
+          description: `${data.rowCount} facility denominators retrieved.`,
+        });
+      }
+    },
+    onError: (err: Error) => toast({ title: "Population pull failed", description: err.message, variant: "destructive" }),
+  });
+
+  // Bi-directional DHIS2 sync state & mutation (Task Layer 3)
+  const [syncDialogOpen, setSyncDialogOpen] = useState(false);
+  const [syncIntegration, setSyncIntegration] = useState("");
+  const [syncPeriod, setSyncPeriod] = useState(() => {
+    const d = new Date();
+    return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}`;
+  });
+  const [syncResult, setSyncResult] = useState<any | null>(null);
+
+  const syncBiDirectionalMutation = useMutation({
+    mutationFn: async () => {
+      return await apiRequest<any>("POST", "/api/his/dhis2/sync-bidirectional", {
+        integrationId: syncIntegration,
+        period: syncPeriod,
+      });
+    },
+    onSuccess: (data) => {
+      setSyncResult(data);
+      queryClient.invalidateQueries({ queryKey: ["/api/facilities"] });
+      toast({
+        title: "DHIS2 bi-directional sync complete",
+        description: `Inbound: ${data.inbound.coverageRowsCommitted} coverage + ${data.inbound.populationRowsCommitted} pop. Outbound: ${data.outbound.sessionsReported} sessions reported.`,
+      });
+    },
+    onError: (err: Error) => toast({ title: "Bi-directional sync failed", description: err.message, variant: "destructive" }),
+  });
+
   // FHIR test bundle (Patient + Encounter + Immunization + Location + Practitioner)
   const [testBundleDialog, setTestBundleDialog] = useState(false);
   const [testBundleIntegration, setTestBundleIntegration] = useState("");
   const [testBundleVaccinationId, setTestBundleVaccinationId] = useState("");
   const [testBundleResult, setTestBundleResult] = useState<any | null>(null);
+
 
   // Configuration edit states
   const [isAddConfigOpen, setIsAddConfigOpen] = useState(false);
@@ -587,6 +646,27 @@ export default function HisIntegrations() {
           >
             <Download className="h-4 w-4" />
             Pull Coverage (DHIS2)
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => { setPopPullResult(null); setPopPullOpen(true); }}
+            disabled={enabledIntegrations.filter((i) => i.type === "dhis2").length === 0}
+            className="gap-1.5"
+            id="btn-pull-population"
+          >
+            <Database className="h-4 w-4" />
+            Pull Target Pop (DHIS2)
+          </Button>
+          <Button
+            size="sm"
+            onClick={() => { setSyncResult(null); setSyncDialogOpen(true); }}
+            disabled={enabledIntegrations.filter((i) => i.type === "dhis2").length === 0}
+            className="gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white"
+            id="btn-sync-bidirectional"
+          >
+            <RefreshCw className="h-4 w-4" />
+            Bi-Directional DHIS2 Sync
           </Button>
           <Button
             size="sm"
@@ -1426,6 +1506,204 @@ export default function HisIntegrations() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* ─── DHIS2 Target Population Pull Dialog (Task Layer 3) ──────── */}
+      <Dialog open={popPullOpen} onOpenChange={setPopPullOpen}>
+        <DialogContent className="max-w-xl bg-card border border-border text-foreground rounded-3xl shadow-2xl p-6 font-sans">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-xl font-bold">
+              <Database className="h-5 w-5 text-indigo-500" />
+              Pull DHIS2 Target Population Denominators
+            </DialogTitle>
+            <DialogDescription className="text-muted-foreground">
+              Ingest official national health denominators (total population, under-1, under-5, pregnant women) by facility org unit.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label className="text-xs uppercase text-muted-foreground">DHIS2 Integration</Label>
+                <Select value={popPullIntegration} onValueChange={setPopPullIntegration}>
+                  <SelectTrigger className="bg-background border-border text-foreground rounded-xl">
+                    <SelectValue placeholder="Select DHIS2..." />
+                  </SelectTrigger>
+                  <SelectContent className="bg-card border-border text-foreground">
+                    {enabledIntegrations.filter((i) => i.type === "dhis2").map((i) => (
+                      <SelectItem key={i.id} value={i.id}>{i.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs uppercase text-muted-foreground">Calendar Year</Label>
+                <Input
+                  type="number"
+                  value={popPullYear}
+                  onChange={(e) => setPopPullYear(Number(e.target.value))}
+                  placeholder="2025"
+                  className="font-mono rounded-xl"
+                />
+              </div>
+            </div>
+
+            {popPullResult && (
+              <div className="space-y-2 border border-border rounded-xl p-3 bg-secondary/40">
+                <div className="flex flex-wrap gap-2 text-xs">
+                  <Badge variant="secondary">Facilities: {popPullResult.rowCount}</Badge>
+                  {popPullResult.simulated && (
+                    <Badge className="bg-amber-500/10 text-amber-700 border-amber-200" variant="secondary">SIMULATION MODE</Badge>
+                  )}
+                  {popPullResult.committed && (
+                    <Badge className="bg-emerald-500/10 text-emerald-700 border-emerald-200" variant="secondary">
+                      Committed: {popPullResult.committedCount}
+                    </Badge>
+                  )}
+                </div>
+                {popPullResult.warnings?.length > 0 && (
+                  <ul className="text-[11px] text-amber-700 space-y-0.5 max-h-24 overflow-auto">
+                    {popPullResult.warnings.map((w: string, i: number) => <li key={i}>⚠ {w}</li>)}
+                  </ul>
+                )}
+                {popPullResult.rows?.length > 0 && (
+                  <div className="max-h-48 overflow-auto text-[11px] bg-background rounded-lg p-2 border border-border">
+                    <div className="grid grid-cols-4 gap-2 font-semibold text-muted-foreground mb-1">
+                      <span>Facility</span><span>Total Pop</span><span>Under 1</span><span>Under 5</span>
+                    </div>
+                    {popPullResult.rows.map((r: any, i: number) => (
+                      <div key={i} className="grid grid-cols-4 gap-2 py-0.5 border-t border-border/50">
+                        <span className="font-medium truncate">{r.facilityName || r.orgUnitId}</span>
+                        <span>{r.totalPopulation.toLocaleString()}</span>
+                        <span>{r.under1Population.toLocaleString()}</span>
+                        <span>{r.under5Population.toLocaleString()}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          <DialogFooter className="border-t border-border pt-4 gap-2">
+            <Button variant="outline" onClick={() => setPopPullOpen(false)} className="rounded-xl">Close</Button>
+            <Button
+              variant="outline"
+              onClick={() => pullPopulationMutation.mutate(false)}
+              disabled={!popPullIntegration || pullPopulationMutation.isPending}
+              className="gap-2 rounded-xl"
+            >
+              <Download className="h-4 w-4" /> Preview
+            </Button>
+            <Button
+              onClick={() => pullPopulationMutation.mutate(true)}
+              disabled={!popPullIntegration || pullPopulationMutation.isPending}
+              className="gap-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl"
+            >
+              {pullPopulationMutation.isPending
+                ? <><RefreshCw className="h-4 w-4 animate-spin" /> Ingesting…</>
+                : <><CheckCircle2 className="h-4 w-4" /> Ingest & Save</>}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ─── Bi-Directional DHIS2 Synchronisation Dialog (Task Layer 3) ── */}
+      <Dialog open={syncDialogOpen} onOpenChange={setSyncDialogOpen}>
+        <DialogContent className="max-w-2xl bg-card border border-border text-foreground rounded-3xl shadow-2xl p-6 font-sans">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-xl font-bold">
+              <RefreshCw className="h-5 w-5 text-emerald-500" />
+              Bi-Directional DHIS2 Interoperability Sync
+            </DialogTitle>
+            <DialogDescription className="text-muted-foreground">
+              Orchestrates two-way data exchange: pulls national coverage statistics and target denominators into VaxPlan,
+              and transmits local microplanning achievements and administered doses back to DHIS2.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label className="text-xs uppercase text-muted-foreground">DHIS2 Instance</Label>
+                <Select value={syncIntegration} onValueChange={setSyncIntegration}>
+                  <SelectTrigger className="bg-background border-border text-foreground rounded-xl">
+                    <SelectValue placeholder="Select target..." />
+                  </SelectTrigger>
+                  <SelectContent className="bg-card border-border text-foreground">
+                    {enabledIntegrations.filter((i) => i.type === "dhis2").map((i) => (
+                      <SelectItem key={i.id} value={i.id}>{i.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs uppercase text-muted-foreground">Sync Period (YYYYMM)</Label>
+                <Input
+                  value={syncPeriod}
+                  onChange={(e) => setSyncPeriod(e.target.value)}
+                  placeholder="202504"
+                  className="font-mono rounded-xl"
+                />
+              </div>
+            </div>
+
+            {syncResult && (
+              <div className="space-y-3 border border-border rounded-xl p-4 bg-secondary/30">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-semibold flex items-center gap-1.5 text-foreground">
+                    <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                    Sync Execution Summary
+                  </span>
+                  <Badge variant="outline" className="text-xs font-mono">{syncResult.timestamp.slice(0, 19)}</Badge>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="rounded-xl border border-border bg-card p-3 space-y-1">
+                    <div className="text-xs font-semibold text-muted-foreground flex items-center gap-1">
+                      <ArrowDownLeft className="h-3.5 w-3.5 text-blue-500" /> Inbound Ingestion
+                    </div>
+                    <div className="text-lg font-bold text-foreground">
+                      {syncResult.inbound.coverageRowsCommitted + syncResult.inbound.populationRowsCommitted} records
+                    </div>
+                    <p className="text-[11px] text-muted-foreground">
+                      {syncResult.inbound.coverageRowsCommitted} coverage doses + {syncResult.inbound.populationRowsCommitted} population denominators
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-border bg-card p-3 space-y-1">
+                    <div className="text-xs font-semibold text-muted-foreground flex items-center gap-1">
+                      <ArrowUpRight className="h-3.5 w-3.5 text-emerald-500" /> Outbound Reporting
+                    </div>
+                    <div className="text-lg font-bold text-foreground">
+                      {syncResult.outbound.sessionsReported} sessions
+                    </div>
+                    <p className="text-[11px] text-muted-foreground">
+                      {syncResult.outbound.dataValuesCount} microplanning achievement data values reported to DHIS2
+                    </p>
+                  </div>
+                </div>
+                {syncResult.simulated && (
+                  <Badge className="bg-amber-500/10 text-amber-700 border-amber-200" variant="secondary">
+                    SIMULATION MODE ACTIVE (Demonstration token)
+                  </Badge>
+                )}
+              </div>
+            )}
+          </div>
+
+          <DialogFooter className="border-t border-border pt-4 gap-2">
+            <Button variant="outline" onClick={() => setSyncDialogOpen(false)} className="rounded-xl">Close</Button>
+            <Button
+              onClick={() => syncBiDirectionalMutation.mutate()}
+              disabled={!syncIntegration || syncBiDirectionalMutation.isPending}
+              className="gap-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-semibold shadow-md"
+            >
+              {syncBiDirectionalMutation.isPending
+                ? <><RefreshCw className="h-4 w-4 animate-spin" /> Synchronising…</>
+                : <><RefreshCw className="h-4 w-4" /> Run Bi-Directional Sync</>}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
+

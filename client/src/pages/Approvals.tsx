@@ -25,6 +25,7 @@ import {
   User,
   Undo2,
   History,
+  Eye,
 } from "lucide-react";
 import type {
   ApprovalRequest,
@@ -45,6 +46,7 @@ import { ChangeApprovalScreen } from "@/components/history/ChangeApprovalScreen"
 export default function Approvals() {
   const { toast } = useToast();
   const [selectedRequest, setSelectedRequest] = useState<ApprovalRequest | null>(null);
+  const [detailRequest, setDetailRequest] = useState<ApprovalRequest | null>(null);
   const [actionType, setActionType] = useState<"approve" | "reject" | "return" | null>(null);
   const [historyMicroplanId, setHistoryMicroplanId] = useState<number | null>(null);
   const [comment, setComment] = useState("");
@@ -283,12 +285,42 @@ export default function Approvals() {
       ),
     },
     {
+      key: "resolvedAt",
+      header: "Approved / Resolved",
+      sortable: true,
+      render: (item: ApprovalRequest) => (
+        item.resolvedAt ? (
+          <div className="text-xs space-y-0.5" data-testid={`approval-resolved-at-${item.id}`}>
+            <span className="font-semibold text-foreground">
+              {format(new Date(item.resolvedAt), "MMM d, yyyy HH:mm")}
+            </span>
+            {item.resolvedById && (
+              <span className="block text-[11px] text-muted-foreground truncate max-w-[140px]">
+                By: {item.resolvedById === "system" ? "Automated Policy" : item.resolvedById}
+              </span>
+            )}
+          </div>
+        ) : (
+          <span className="text-muted-foreground text-xs">—</span>
+        )
+      ),
+    },
+    {
       key: "actions",
       header: "Actions",
       render: (item: ApprovalRequest) => {
         const isMicroplan = item.entityType === "microplan";
         return (
           <div className="flex items-center gap-1">
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => setDetailRequest(item)}
+              title="View approval audit details"
+              data-testid={"button-detail-" + item.id}
+            >
+              <Eye className="h-4 w-4 text-primary" />
+            </Button>
             {isMicroplan && (
               <Button
                 size="sm"
@@ -608,6 +640,72 @@ export default function Approvals() {
               </Button>
             </div>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!detailRequest} onOpenChange={(open) => !open && setDetailRequest(null)}>
+        <DialogContent className="sm:max-w-lg" data-testid="dialog-approval-detail">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base">
+              <span>Approval Audit Record</span>
+              {detailRequest && <Badge variant="outline">#{detailRequest.id}</Badge>}
+            </DialogTitle>
+          </DialogHeader>
+          {detailRequest && (
+            <div className="space-y-4 py-2 text-xs">
+              <div className="rounded-lg bg-muted/40 p-3.5 space-y-2 border">
+                <div className="flex justify-between items-center">
+                  <span className="font-semibold text-muted-foreground uppercase text-[10px]">Entity</span>
+                  <span className="font-bold text-foreground capitalize">
+                    {detailRequest.entityType} #{detailRequest.entityId}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="font-semibold text-muted-foreground uppercase text-[10px]">Review Level</span>
+                  <Badge variant="outline" className="capitalize">{detailRequest.currentLevel}</Badge>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="font-semibold text-muted-foreground uppercase text-[10px]">Status</span>
+                  <ApprovalBadge status={detailRequest.status || "pending"} />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="rounded-lg border p-3 space-y-1">
+                  <span className="font-bold text-[10px] text-muted-foreground uppercase block">Date & Time Submitted</span>
+                  <p className="font-semibold text-foreground">
+                    {detailRequest.submittedAt ? format(new Date(detailRequest.submittedAt), "MMM d, yyyy HH:mm") : "—"}
+                  </p>
+                  <span className="text-[11px] text-muted-foreground block truncate">
+                    By: {detailRequest.requestedById}
+                  </span>
+                </div>
+
+                <div className="rounded-lg border p-3 space-y-1">
+                  <span className="font-bold text-[10px] text-muted-foreground uppercase block">Date & Time Approved / Resolved</span>
+                  <p className="font-semibold text-foreground">
+                    {detailRequest.resolvedAt ? format(new Date(detailRequest.resolvedAt), "MMM d, yyyy HH:mm") : "Pending resolution"}
+                  </p>
+                  <span className="text-[11px] text-muted-foreground block truncate">
+                    {detailRequest.resolvedById ? `By: ${detailRequest.resolvedById === "system" ? "Automated Policy" : detailRequest.resolvedById}` : "Awaiting reviewer"}
+                  </span>
+                </div>
+              </div>
+
+              {detailRequest.comments && (
+                <div className="rounded-lg border bg-muted/30 p-3 space-y-1">
+                  <span className="font-bold text-[10px] text-muted-foreground uppercase block">Reviewer Notes & Justification</span>
+                  <p className="italic text-foreground">{detailRequest.comments}</p>
+                </div>
+              )}
+
+              <div className="flex justify-end pt-2">
+                <Button variant="outline" size="sm" onClick={() => setDetailRequest(null)}>
+                  Close
+                </Button>
+              </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
 

@@ -766,7 +766,10 @@ export async function apiRequest<T = unknown>(
   try {
     res = await fetch(url, {
       method,
-      headers: data ? { "Content-Type": "application/json" } : {},
+      headers: {
+        ...(data ? { "Content-Type": "application/json" } : {}),
+        "X-Requested-With": "XMLHttpRequest",
+      },
       body: data ? JSON.stringify(data) : undefined,
       credentials: "include",
     });

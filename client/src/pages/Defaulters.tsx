@@ -29,6 +29,21 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { Switch } from "@/components/ui/switch";
+import {
+  Radio,
+  Sparkles,
+  PhoneCall,
+  Check,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -354,6 +369,7 @@ export default function Defaulters() {
     [historyRows, year, quarter],
   );
   const [pastOpen, setPastOpen] = useState(false);
+  const [recallModalOpen, setRecallModalOpen] = useState(false);
 
   const [driver1, setDriver1] = useState("");
   const [driver2, setDriver2] = useState("");
@@ -971,22 +987,34 @@ export default function Defaulters() {
               caregiver phone on file.
             </p>
           </div>
-          <Button
-            size="sm"
-            onClick={() => sendBulk.mutate(reachable)}
-            disabled={
-              sendBulk.isPending || reachable.length === 0 || isLoading
-            }
-            data-testid="button-remind-all-defaulters"
-            className="gap-1.5"
-          >
-            {sendBulk.isPending ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Send className="h-4 w-4" />
-            )}
-            Remind all ({reachable.length})
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              onClick={() => setRecallModalOpen(true)}
+              data-testid="button-open-caregiver-recall"
+              className="gap-1.5 bg-sky-600 hover:bg-sky-700 text-white"
+            >
+              <Radio className="h-4 w-4" />
+              Automated Caregiver Recall
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => sendBulk.mutate(reachable)}
+              disabled={
+                sendBulk.isPending || reachable.length === 0 || isLoading
+              }
+              data-testid="button-remind-all-defaulters"
+              className="gap-1.5"
+            >
+              {sendBulk.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Send className="h-4 w-4" />
+              )}
+              Remind all ({reachable.length})
+            </Button>
+          </div>
         </CardHeader>
         <CardContent>
           {isLoading ? (
@@ -1105,6 +1133,181 @@ export default function Defaulters() {
           )}
         </CardContent>
       </Card>
+
+      <CaregiverRecallModal
+        open={recallModalOpen}
+        onClose={() => setRecallModalOpen(false)}
+        facilityId={facilityId}
+      />
     </div>
   );
 }
+
+function CaregiverRecallModal({
+  open,
+  onClose,
+  facilityId,
+}: {
+  open: boolean;
+  onClose: () => void;
+  facilityId: number | null;
+}) {
+  const { toast } = useToast();
+  const [antigen, setAntigen] = useState("PENTA-3");
+  const [language, setLanguage] = useState<"en" | "fr" | "sw" | "pt">("en");
+  const [dryRun, setDryRun] = useState(true);
+  const [result, setResult] = useState<any>(null);
+
+  const recallMutation = useMutation({
+    mutationFn: async () => {
+      const res: any = await apiRequest("POST", "/api/messaging/schedule-defaulter-recall", {
+        facilityId: facilityId || undefined,
+        antigen,
+        dryRun,
+      });
+      return await res.json();
+    },
+    onSuccess: (data) => {
+      setResult(data);
+      toast({
+        title: dryRun ? "Recall simulation complete" : "Recall SMS dispatched",
+        description: `Processed ${data.defaultersIdentified} caregiver(s).`,
+      });
+    },
+    onError: (err: any) => {
+      toast({
+        title: "Recall dispatch failed",
+        description: err.message || "An error occurred during caregiver recall.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const languageTemplates: Record<string, string> = {
+    en: `VaxPlan recall: Your child is due for their ${antigen} vaccination dose. Please visit the health facility this week to keep your child protected.`,
+    fr: `Rappel VaxPlan : Votre enfant doit recevoir sa dose de vaccin ${antigen}. Veuillez vous présenter au centre de santé cette semaine pour protéger votre enfant.`,
+    sw: `Ukumbusho wa VaxPlan: Mtoto wako anatakiwa kupata chanjo ya ${antigen}. Tafadhali fika kituoni cha afya wiki hii ili kumlinda mtoto wako.`,
+    pt: `Lembrete VaxPlan: A sua criança deve receber a dose de vacina ${antigen}. Por favor dirija-se ao centro de saúde esta semana para proteger a sua criança.`,
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader>
+          <div className="flex items-center gap-2">
+            <Badge className="bg-sky-600 text-white hover:bg-sky-700">Roadmap Capability</Badge>
+            <DialogTitle className="flex items-center gap-2 text-xl font-bold">
+              <PhoneCall className="h-5 w-5 text-sky-600" />
+              Automated Caregiver SMS Alerts & Defaulter Recall
+            </DialogTitle>
+          </div>
+          <DialogDescription>
+            Dispatch targeted cellular SMS messages to registered caregivers of drop-out children across health facilities and outreach catchments.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4 py-2">
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold uppercase text-muted-foreground">Target Antigen</Label>
+              <Select value={antigen} onValueChange={setAntigen}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select antigen" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="BCG">BCG (Birth dose)</SelectItem>
+                  <SelectItem value="OPV-0">OPV-0 (Oral Polio Birth)</SelectItem>
+                  <SelectItem value="PENTA-1">Pentavalent 1 (DTP-HepB-Hib 1)</SelectItem>
+                  <SelectItem value="PENTA-2">Pentavalent 2 (DTP-HepB-Hib 2)</SelectItem>
+                  <SelectItem value="PENTA-3">Pentavalent 3 (DTP-HepB-Hib 3 / Defaulter Focus)</SelectItem>
+                  <SelectItem value="PCV-3">PCV 3 (Pneumococcal 3)</SelectItem>
+                  <SelectItem value="ROTA-2">Rotavirus 2</SelectItem>
+                  <SelectItem value="MR-1">Measles-Rubella 1 (MCV1 / Dropout)</SelectItem>
+                  <SelectItem value="MR-2">Measles-Rubella 2 (MCV2)</SelectItem>
+                  <SelectItem value="HPV-1">HPV 1 (Cervical Cancer Prevention)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold uppercase text-muted-foreground">Broadcast Language</Label>
+              <Select value={language} onValueChange={(val: any) => setLanguage(val)}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Language" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="en">English (Official)</SelectItem>
+                  <SelectItem value="fr">Français (French)</SelectItem>
+                  <SelectItem value="sw">Kiswahili (East Africa)</SelectItem>
+                  <SelectItem value="pt">Português (Mozambique / Angola)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          <div className="rounded-lg border bg-muted/40 p-3 space-y-2">
+            <div className="flex items-center justify-between text-xs font-semibold text-muted-foreground uppercase">
+              <span>SMS Template Preview ({language.toUpperCase()})</span>
+              <span>{languageTemplates[language]?.length || 0} characters (1 SMS segment)</span>
+            </div>
+            <div className="rounded border bg-background p-3 text-sm font-mono text-foreground leading-relaxed shadow-sm">
+              "{languageTemplates[language]}"
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between rounded-lg border p-3 bg-card shadow-sm">
+            <div className="space-y-0.5">
+              <div className="text-sm font-semibold flex items-center gap-2">
+                <span>Simulation / Dry-Run Mode</span>
+                {dryRun && <Badge variant="secondary" className="text-xs">Safe Mode</Badge>}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Simulate recipient matching and generate audit logs without consuming SMS airtime balance.
+              </p>
+            </div>
+            <Switch checked={dryRun} onCheckedChange={setDryRun} />
+          </div>
+
+          {result && (
+            <div className="rounded-lg border border-emerald-300 bg-emerald-500/10 p-4 space-y-2">
+              <div className="flex items-center gap-2 font-semibold text-emerald-800 dark:text-emerald-300">
+                <Check className="h-4 w-4 text-emerald-600" />
+                Recall Process Executed Successfully ({result.dryRun ? "Dry Run" : "Live Outbound"})
+              </div>
+              <div className="grid grid-cols-2 gap-4 text-sm pt-1">
+                <div className="rounded bg-background/80 p-2.5 border">
+                  <div className="text-xs text-muted-foreground">Caregivers Identified</div>
+                  <div className="text-xl font-bold text-foreground">{result.defaultersIdentified}</div>
+                </div>
+                <div className="rounded bg-background/80 p-2.5 border">
+                  <div className="text-xs text-muted-foreground">Messages Dispatched</div>
+                  <div className="text-xl font-bold text-emerald-600">{result.messagesDispatched}</div>
+                </div>
+              </div>
+              <div className="text-xs text-muted-foreground">
+                Sample Message: <span className="font-mono text-foreground">"{result.sampleMessage}"</span>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <DialogFooter className="gap-2">
+          <Button variant="outline" onClick={onClose}>Close</Button>
+          <Button
+            onClick={() => recallMutation.mutate()}
+            disabled={recallMutation.isPending}
+            className={dryRun ? "bg-sky-600 hover:bg-sky-700 text-white" : "bg-emerald-600 hover:bg-emerald-700 text-white"}
+          >
+            {recallMutation.isPending ? (
+              <Loader2 className="h-4 w-4 animate-spin mr-1" />
+            ) : (
+              <Send className="h-4 w-4 mr-1" />
+            )}
+            {dryRun ? "Simulate Recall (Dry Run)" : "Send Live Caregiver SMS"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+

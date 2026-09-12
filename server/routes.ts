@@ -1,8 +1,10 @@
+import { approvalEligibility, developmentDaysSchema, isApprovedPlan } from "@shared/microplanPolicy";
 import { safeErrorMessage } from "./errorUtils";
 import { DenominatorHarmonisationService } from "./services/denominatorHarmonisationService.js";
 import { EntityHistoryService } from "./services/entityHistoryService";
 import { AsOfDateService } from "./services/asOfDateService";
 import { getSupervisionPrefillBundle } from "./services/supervisionPrefillService";
+import { getMicroplanApprovalAudit } from "./services/microplanApprovalService";
 import { validateClientImportBatch, checkClientHasLinkedRecords } from "./services/clientBulkService";
 import express, { type Express, type Request } from "express";
 import { createServer, type Server } from "http";
@@ -37,6 +39,8 @@ import { dispatchNotification } from "./services/uce";
 import { surveillanceRouter } from "./routes/surveillance";
 import vgieRouter from "./routes/vgie";
 import { researchRouter } from "./routes/research";
+import { planningActionsRouter } from "./routes/planningActions";
+import { planningEvidenceRouter } from "./routes/planningEvidence";
 import { riskRouter } from "./routes/riskRoutes";
 import { registerPolygonLifecycleRoutes } from "./routes/polygonLifecycle";
 import {
@@ -46,6 +50,7 @@ import {
   listMicroplanVersions,
   restoreMicroplanVersionAsDraft,
 } from "./services/microplanVersionService";
+import { getMicroplanAggregations } from "./services/microplanAggregationService";
 import catalogueRouter from "./routes/catalogue";
 import { VgieService } from "./services/vgieService";
 import { getCountryFormat } from "@shared/countryFormats";
@@ -57,6 +62,7 @@ import {
   insertSessionPlanSchema,
   insertMicroplanSchema,
   microplans,
+  microplanVersions,
   insertBudgetItemSchema,
   insertVaccineRequirementSchema,
   insertMobilizationActivitySchema,
@@ -103,6 +109,7 @@ import {
   budgetItems,
   // [Cleaned up legacy commented-out code block, lines 82-84]
   clients,
+  planningEvidenceRecords,
   supervisionQuestionBank,
   supervisionTemplateVersions,
   clientBulkActionLogs,
@@ -120,6 +127,8 @@ import {
   insertHfcCommitteeSchema,
   facilityStaff,
   insertFacilityStaffSchema,
+  stockTransactions,
+  coldChainEquipment,
   notifications,
   users,
   userPermissions,
@@ -1342,7 +1351,8 @@ async function refreshOutsideVillagesCacheForTenant(tenantId: string) {
 
 export async function registerRoutes(
   httpServer: Server,
-  app: Express
+  app: Express,
+  sessionMiddleware?: import("express").RequestHandler
 ): Promise<Server> {
   // Initialize tenant boundary cache unless disabled for local/test startup.
   // Production warms this cache in the background so route registration and
@@ -1362,7 +1372,7 @@ export async function registerRoutes(
     });
   }
 
-  await setupAuth(app);
+  await setupAuth(app, sessionMiddleware);
   registerSsoRoutes(app);
   registerPasswordAuthRoutes(app);
 
@@ -1426,6 +1436,7 @@ export async function registerRoutes(
     try {
       const { id } = req.params;
       const { name, code, countryCode, settings } = req.body || {};
+      if (settings && "minimumPlanDevelopmentDays" in settings && !developmentDaysSchema.safeParse(settings.minimumPlanDevelopmentDays).success) return res.status(400).json({ message: "Minimum plan development days must be a whole number between 1 and 3650." });
 
       const existing = await storage.getTenant(id);
       if (!existing) {
@@ -1606,7 +1617,8 @@ export async function registerRoutes(
     child.stderr.on("data", (d) => { stderr += d.toString(); });
     child.on("close", (code) => {
       if (code !== 0 && !res.headersSent) {
-        res.status(500).json({ message: "git archive failed", stderr });
+        console.error("[release-tarball] git archive exited with error code", code, stderr);
+        res.status(500).json({ message: "git archive failed" });
       } else if (code !== 0) {
         console.error("[release-tarball] git archive exited", code, stderr);
       }
@@ -1640,9 +1652,16 @@ export async function registerRoutes(
 
     // Serve the standalone docs site under /docs/ for localhost previewing
     const docsSitePath = _path.resolve(process.cwd(), "docs-site");
+    const docsDirPath = _path.resolve(process.cwd(), "docs");
     app.use(
       "/docs",
       express.static(docsSitePath, {
+        maxAge: "5m",
+      })
+    );
+    app.use(
+      "/docs",
+      express.static(docsDirPath, {
         maxAge: "5m",
       })
     );
@@ -1714,6 +1733,8 @@ export async function registerRoutes(
   app.use("/api/vgie", ...auth, vgieRouter);
   app.use("/api/surveillance", surveillanceRouter);
   app.use("/api/research", researchRouter);
+  app.use("/api/planning-actions", planningActionsRouter);
+  app.use("/api/planning-evidence", planningEvidenceRouter);
   app.use("/api/risk", riskRouter);
   app.use("/api/catalogue", catalogueRouter);
 
@@ -3424,6 +3445,7 @@ export async function registerRoutes(
         settings: z.record(z.any()).optional(),
       });
       const data = schema.parse(req.body);
+      if (data.settings && "minimumPlanDevelopmentDays" in data.settings) developmentDaysSchema.parse(data.settings.minimumPlanDevelopmentDays);
 
       const current = await storage.getTenant(req.tenantId!);
       if (!current) return res.status(404).json({ message: "Tenant not found" });
@@ -5722,6 +5744,45 @@ export async function registerRoutes(
     }
   });
 
+  // ─── AI Predictive Stock Logistics (Task Layer 4) ────────────────────────
+  // GET /api/stock/predictive-forecast (Evaluates stock trajectories, cold chain volume, and outreach surge)
+  app.get("/api/stock/predictive-forecast", ...auth, async (req: any, res) => {
+    try {
+      const facilityId = req.query.facilityId ? parseInt(req.query.facilityId, 10) : undefined;
+      const antigen = req.query.antigen ? String(req.query.antigen) : undefined;
+      const daysAhead = req.query.daysAhead ? parseInt(req.query.daysAhead, 10) : 60;
+
+      const { getPredictiveStockForecast } = await import("./services/aiStockPredictorService");
+
+      // If facilityId specified, return detailed single-facility forecast
+      if (facilityId) {
+        const forecast = await getPredictiveStockForecast(req.tenantId, facilityId, { antigen, daysAhead });
+        if (!forecast) return res.status(404).json({ message: "Facility not found or inactive" });
+        return res.json(forecast);
+      }
+
+      // Otherwise evaluate all active tenant facilities and return summary list
+      const facRows = await db.execute(dsql`
+        SELECT id, name FROM facilities WHERE tenant_id = ${req.tenantId} AND is_active = true ORDER BY name ASC LIMIT 25
+      `);
+      const allFacs = (facRows as any).rows ?? [];
+      const reports = await Promise.all(
+        allFacs.map((f: any) => getPredictiveStockForecast(req.tenantId, f.id, { antigen, daysAhead }))
+      );
+
+      const validReports = reports.filter(Boolean);
+      res.json({
+        totalFacilitiesAnalyzed: validReports.length,
+        criticalRiskCount: validReports.filter((r: any) => r.overallRisk === "critical").length,
+        highRiskCount: validReports.filter((r: any) => r.overallRisk === "high").length,
+        facilityReports: validReports,
+      });
+    } catch (err: any) {
+      console.error("GET /api/stock/predictive-forecast error:", err);
+      res.status(500).json({ message: safeErrorMessage(err, "Failed to compute predictive stock forecast") });
+    }
+  });
+
   // ─── Cold Chain Equipment Inventory ─────────────────────────────────────
   // GET /api/cold-chain (All CCE for tenant with joined facility metadata)
   app.get("/api/cold-chain", ...auth, async (req: any, res) => {
@@ -6234,19 +6295,8 @@ export async function registerRoutes(
     if (targetIds.length === 0) return { purgedCount: 0 };
     const targetIdList = dsql.join(targetIds.map((id: number) => dsql`${id}`), dsql`, `);
 
-    const deleteTables = ["budget_items", "vaccine_requirements", "mobilization_activities", "facility_catchments", "clients", "stock_transactions", "monthly_reports", "hfc_committee", "community_health_volunteers", "cold_chain_equipment", "facility_staff", "facility_excluded_villages", "vgie_settlement_facility_links", "vgie_alerts"];
-
-    await tx.execute(dsql`DELETE FROM session_villages WHERE tenant_id = ${tenantId} AND session_id IN (SELECT id FROM session_plans WHERE tenant_id = ${tenantId} AND facility_id IN (${targetIdList}))`);
-    await tx.execute(dsql`DELETE FROM session_day_plans WHERE tenant_id = ${tenantId} AND session_plan_id IN (SELECT id FROM session_plans WHERE tenant_id = ${tenantId} AND facility_id IN (${targetIdList}))`);
-    await tx.execute(dsql`UPDATE villages SET assigned_facility_id = NULL WHERE tenant_id = ${tenantId} AND assigned_facility_id IN (${targetIdList})`);
-    await tx.execute(dsql`UPDATE population_data SET facility_id = NULL WHERE tenant_id = ${tenantId} AND facility_id IN (${targetIdList})`);
-    await tx.execute(dsql`UPDATE microplans SET facility_id = NULL WHERE tenant_id = ${tenantId} AND facility_id IN (${targetIdList})`);
-    await tx.execute(dsql`UPDATE catchment_conflicts SET conflicting_facility_id = NULL WHERE tenant_id = ${tenantId} AND conflicting_facility_id IN (${targetIdList})`);
-    for (const table of deleteTables) {
-      await tx.execute(dsql`DELETE FROM ${dsql.raw(table)} WHERE tenant_id = ${tenantId} AND facility_id IN (${targetIdList})`);
-    }
-    await tx.execute(dsql`DELETE FROM session_plans WHERE tenant_id = ${tenantId} AND facility_id IN (${targetIdList})`);
-    await tx.execute(dsql`DELETE FROM facilities WHERE tenant_id = ${tenantId} AND id IN (${targetIdList})`);
+    // Non-destructive deactivation: preserves all clinical, logistical, and demographic audit history per Rule 1 & Rule 3
+    await tx.execute(dsql`UPDATE facilities SET is_active = false, updated_at = NOW() WHERE tenant_id = ${tenantId} AND id IN (${targetIdList})`);
 
     return { purgedCount: targetIds.length };
   }
@@ -8377,9 +8427,16 @@ export async function registerRoutes(
   // GeoTIFF population gridded population data upload (raw binary stream ingestion)
   app.post("/api/resources/geotiff/upload", isAuthenticated, requireTenant, loadRole, requireAdmin, async (req: any, res) => {
     try {
-      const fileName = req.headers["x-file-name"] as string | undefined;
-      if (!fileName || (!fileName.endsWith(".tif") && !fileName.endsWith(".tiff"))) {
+      const rawFileName = req.headers["x-file-name"] as string | undefined;
+      if (!rawFileName || (!rawFileName.endsWith(".tif") && !rawFileName.endsWith(".tiff"))) {
         return res.status(400).json({ success: false, message: "Invalid GeoTIFF file. Must have .tif or .tiff extension." });
+      }
+
+      // Sanitize fileName to prevent directory traversal
+      const _path = await import("path");
+      const safeFileName = _path.basename(rawFileName).replace(/[^a-zA-Z0-9._-]/g, "_");
+      if (!safeFileName || (!safeFileName.endsWith(".tif") && !safeFileName.endsWith(".tiff"))) {
+        return res.status(400).json({ success: false, message: "Invalid GeoTIFF file name." });
       }
 
       /* Original Code commented out to support double-fallback directory path resolution:
@@ -8414,7 +8471,13 @@ export async function registerRoutes(
         return res.status(404).json({ success: false, message: "Resources directory not found." });
       }
 
-      const filePath = join(resourcesDir, fileName);
+      const filePath = _path.join(resourcesDir, safeFileName);
+      const normalizedPath = _path.resolve(filePath);
+      const normalizedDir = _path.resolve(resourcesDir);
+      if (!normalizedPath.startsWith(normalizedDir)) {
+        return res.status(400).json({ success: false, message: "Invalid file path traversal attempt." });
+      }
+
       const writeStream = createWriteStream(filePath);
 
       req.pipe(writeStream);
@@ -8430,8 +8493,8 @@ export async function registerRoutes(
       });
 
       writeStream.on("finish", async () => {
-        await logAudit(req, "upload_geotiff", "resources", fileName, null, { filePath });
-        res.json({ success: true, message: `GeoTIFF population raster ${fileName} successfully uploaded and saved.` });
+        await logAudit(req, "upload_geotiff", "resources", safeFileName, null, { filePath });
+        res.json({ success: true, message: `GeoTIFF population raster ${safeFileName} successfully uploaded and saved.` });
       });
 
     } catch (error: any) {
@@ -9802,11 +9865,11 @@ export async function registerRoutes(
         const scoped = list.filter((plan) =>
           recordInGeoScope(scope, { facilityId: (plan as any).facilityId }),
         );
-        res.set("Cache-Control", "private, max-age=60, stale-while-revalidate=30");
+        res.set("Cache-Control", "no-cache, no-store, must-revalidate");
         return res.json(scoped);
       }
 
-      res.set("Cache-Control", "private, max-age=60, stale-while-revalidate=30");
+      res.set("Cache-Control", "no-cache, no-store, must-revalidate");
       res.json(list);
     } catch (error) {
       console.error("Error fetching master microplans:", error);
@@ -9814,17 +9877,63 @@ export async function registerRoutes(
     }
   });
 
-
-
-  app.get("/api/microplans/:id", ...auth, async (req: any, res) => {
+  // Hierarchical aggregate endpoint for District, Provincial, and National managers
+  app.get("/api/microplans/aggregate", ...auth, async (req: any, res) => {
     try {
       const dbUser = req.dbUser!;
-      const plan = await storage.getMicroplan(req.tenantId, parseInt(req.params.id));
+      const tenantId = req.tenantId as string;
+
+      // Resolve user's permitted geographic scope
+      const scope = await getGeoScope(dbUser, tenantId);
+
+      const planType = (req.query.planType as "routine" | "campaign" | "all") || "all";
+      const year = req.query.year ? parseInt(req.query.year as string, 10) : undefined;
+      const quarter = req.query.quarter ? parseInt(req.query.quarter as string, 10) : undefined;
+      const requestedProvinceId = req.query.provinceId ? parseInt(req.query.provinceId as string, 10) : undefined;
+      const requestedDistrictId = req.query.districtId ? parseInt(req.query.districtId as string, 10) : undefined;
+
+      // Validate that requested geography falls within caller's allowed scope
+      if (!scope.all) {
+        if (requestedProvinceId && scope.provinceIds.size > 0 && !scope.provinceIds.has(requestedProvinceId)) {
+          return res.status(403).json({ message: "Requested province is outside your permitted geographic scope" });
+        }
+        if (requestedDistrictId && scope.districtIds.size > 0 && !scope.districtIds.has(requestedDistrictId)) {
+          return res.status(403).json({ message: "Requested district is outside your permitted geographic scope" });
+        }
+      }
+
+      const result = await getMicroplanAggregations(db, tenantId, {
+        planType,
+        year: Number.isFinite(year) ? year : undefined,
+        quarter: Number.isFinite(quarter) ? quarter : undefined,
+        provinceId: Number.isFinite(requestedProvinceId) ? requestedProvinceId : undefined,
+        districtId: Number.isFinite(requestedDistrictId) ? requestedDistrictId : undefined,
+        allowedProvinceIds: scope.provinceIds,
+        allowedDistrictIds: scope.districtIds,
+        allowedFacilityIds: scope.facilityIds,
+        allScope: scope.all,
+      });
+
+      res.set("Cache-Control", "private, max-age=30, stale-while-revalidate=30");
+      res.json(result);
+    } catch (error) {
+      console.error("Error fetching microplan aggregations:", error);
+      res.status(500).json({ message: "Failed to fetch microplan aggregations" });
+    }
+  });
+
+  app.get("/api/microplans/:id(\\d+)", ...auth, async (req: any, res, next) => {
+    try {
+      const planId = parseInt(req.params.id, 10);
+      if (Number.isNaN(planId)) return next();
+      const dbUser = req.dbUser!;
+      const plan = await storage.getMicroplan(req.tenantId, planId);
       if (!plan) return res.status(404).json({ message: "Master microplan not found" });
       if (!(await userCanAccessGeo(dbUser, req.tenantId, { facilityId: (plan as any).facilityId }))) {
         return res.status(404).json({ message: "Master microplan not found" });
       }
-      res.json(plan);
+      const approvalDetails = await getMicroplanApprovalAudit(db as any, req.tenantId, plan);
+      res.json({ ...plan, approvalDetails, approvedAt: approvalDetails?.approvedAt || (plan as any).approvedAt });
     } catch (error) {
       console.error("Error fetching master microplan:", error);
       res.status(500).json({ message: "Failed to fetch master microplan" });
@@ -9852,6 +9961,30 @@ export async function registerRoutes(
       if (!(await userCanAccessGeo(dbUser, req.tenantId, { facilityId: microplan.facilityId ?? null }))) {
         return res.status(404).json({ message: "Master microplan not found" });
       }
+
+      // Record draft_opened version snapshot when a draft microplan is opened
+      if (microplan.status === "draft") {
+        try {
+          const [latest] = await db.select({ eventType: microplanVersions.eventType, createdAt: microplanVersions.createdAt })
+            .from(microplanVersions)
+            .where(and(eq(microplanVersions.tenantId, req.tenantId), eq(microplanVersions.microplanId, microplanId)))
+            .orderBy(desc(microplanVersions.versionNumber)).limit(1);
+          const isRecentOpen = latest?.eventType === "draft_opened" && (Date.now() - new Date(latest.createdAt).getTime() < 15000);
+          if (!isRecentOpen) {
+            await createMicroplanVersion(db as any, {
+              tenantId: req.tenantId,
+              microplanId,
+              userId: req.user?.claims?.sub ?? null,
+              eventType: "draft_opened",
+              status: "draft",
+              reason: "Draft plan opened",
+            });
+          }
+        } catch (vErr) {
+          console.error("Failed to record draft_opened version:", vErr);
+        }
+      }
+
       const facilityId = microplan.facilityId ?? undefined;
       const quarter = microplan.quarter ?? undefined;
       const year = microplan.year ?? undefined;
@@ -9957,8 +10090,10 @@ export async function registerRoutes(
         visibleSessionIds.has(dp.sessionPlanId),
       );
 
+      const approvalAudit = await getMicroplanApprovalAudit(db as any, req.tenantId, microplan);
       res.json({
-        microplan,
+        microplan: { ...microplan, approvalDetails: approvalAudit, approvedAt: approvalAudit?.approvedAt || (microplan as any).approvedAt },
+        approvalDetails: approvalAudit,
         sessions,
         sessionDayPlans: visibleDayPlans,
         supervisionVisits,
@@ -9979,10 +10114,31 @@ export async function registerRoutes(
   app.post("/api/microplans", ...auth, async (req: any, res) => {
     try {
       const data = insertMicroplanSchema.parse(req.body);
+      if (data.status && data.status !== "draft") return res.status(400).json({ message: "New microplans must start in draft status." });
 
       // Enforce geographic boundaries for microplan creation
       if (data.facilityId && !(await userCanAccessGeo(req.dbUser, req.tenantId, { facilityId: Number(data.facilityId) }))) {
         return res.status(403).json({ message: "Forbidden: no access to this facility." });
+      }
+
+      // Restrict to one versioned plan per period (facilityId + planType + year + quarter)
+      if (data.facilityId && data.year && data.quarter) {
+        const existingPlans = await storage.getMicroplans(req.tenantId);
+        const duplicate = existingPlans.find(
+          (p) =>
+            Number(p.facilityId) === Number(data.facilityId) &&
+            String(p.planType ?? "").toLowerCase() === String(data.planType ?? "").toLowerCase() &&
+            Number(p.year) === Number(data.year) &&
+            Number(p.quarter) === Number(data.quarter) &&
+            !["rejected", "archived", "superseded"].includes(String(p.status ?? "").toLowerCase())
+        );
+        if (duplicate) {
+          return res.status(409).json({
+            message: `A microplan already exists for this facility and period (Q${data.quarter} ${data.year}). Only one active versioned plan is permitted per period.`,
+            existingPlanId: duplicate.id,
+            existingPlanName: duplicate.name,
+          });
+        }
       }
 
       const plan = await storage.createMicroplan(req.tenantId, data);
@@ -10008,32 +10164,51 @@ export async function registerRoutes(
         return res.status(403).json({ message: "Forbidden: no access to target facility." });
       }
 
-      if (oldPlan.status === "pending" || oldPlan.status === "locked") {
+      const requestedKeys = Object.keys(req.body).filter((k) => k !== "updatedAt");
+      const isRenameOnly = requestedKeys.length === 1 && requestedKeys[0] === "name";
+
+      if (isRenameOnly) {
+        const trimmedName = typeof req.body.name === "string" ? req.body.name.trim() : "";
+        if (!trimmedName) {
+          return res.status(400).json({ message: "Microplan name cannot be empty." });
+        }
+        req.body.name = trimmedName;
+      }
+
+      if ((oldPlan.status === "pending" || oldPlan.status === "locked") && !isRenameOnly) {
         return res.status(403).json({
           message: `Forbidden: Microplans in "${oldPlan.status}" status are read-only.`
         });
       }
 
-      if (oldPlan.status === "approved" || oldPlan.status === "auto_approved") {
-        const isDistManager = req.dbUser.role === "district_manager" || (Array.isArray(req.dbUser.roles) && req.dbUser.roles.includes("district_manager"));
-        const isAdmin = req.dbUser.role === "national_admin" || req.dbUser.isPlatformAdmin;
-
-        if (!isDistManager && !isAdmin) {
-          return res.status(403).json({
-            message: "Forbidden: Approved microplans can only be edited by district or national/platform officials."
-          });
-        }
-
-        if (!req.body.districtEditReason || req.body.districtEditReason.trim().length === 0) {
-          return res.status(400).json({
-            message: "A justification reason (districtEditReason) is required to edit an approved microplan."
-          });
-        }
+      if (isApprovedPlan(oldPlan.status) && !isRenameOnly) {
+        return res.status(403).json({ message: "Approved microplans are read-only for all users." });
+      }
+      if (req.body.status && req.body.status !== oldPlan.status) {
+        return res.status(403).json({ message: "Use the approval workflow to change plan status." });
       }
 
       const plan = await storage.updateMicroplan(req.tenantId, planId, req.body);
       if (!plan) return res.status(404).json({ message: "Master microplan not found" });
       await logAudit(req, "update", "microplan", planId, oldPlan, plan);
+
+      // Record draft version snapshot when a draft microplan is edited or saved
+      if (plan.status === "draft") {
+        try {
+          const isEdit = req.body?._eventType === "draft_edited";
+          const eventType = isEdit ? "draft_edited" : "draft_saved";
+          await createMicroplanVersion(db as any, {
+            tenantId: req.tenantId,
+            microplanId: planId,
+            userId: req.user?.claims?.sub ?? null,
+            eventType: eventType as any,
+            status: "draft",
+            reason: req.body?._reason || (isEdit ? "Draft microplan edited" : "Draft microplan saved"),
+          });
+        } catch (vErr) {
+          console.error("Failed to record draft version on update:", vErr);
+        }
+      }
 
       // Auto-seed quarterly supervisory visits when a microplan transitions into "approved".
       // Step 10 of the guided workflow goes green only when every facility with sessions has
@@ -10088,37 +10263,111 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/microplans/:id/close", ...auth, async (req: any, res) => {
+    try {
+      const planId = parseInt(req.params.id);
+      if (Number.isNaN(planId)) return res.status(400).json({ message: "Invalid plan ID" });
+      const plan = await storage.getMicroplan(req.tenantId, planId);
+      if (!plan) return res.status(404).json({ message: "Master microplan not found" });
+      if (plan.status === "draft") {
+        try {
+          await createMicroplanVersion(db as any, {
+            tenantId: req.tenantId,
+            microplanId: planId,
+            userId: req.user?.claims?.sub ?? null,
+            eventType: "draft_closed",
+            status: "draft",
+            reason: req.body?.reason || "Draft plan closed",
+          });
+        } catch (vErr) {
+          console.error("Failed to record draft_closed version:", vErr);
+        }
+      }
+      res.json({ success: true, message: "Draft closed version recorded" });
+    } catch (err: any) {
+      console.error("Error creating draft_closed version:", err);
+      res.status(500).json({ message: "Failed to record draft closed version" });
+    }
+  });
+
+  app.post("/api/microplans/:id/version-event", ...auth, async (req: any, res) => {
+    try {
+      const planId = parseInt(req.params.id);
+      if (Number.isNaN(planId)) return res.status(400).json({ message: "Invalid plan ID" });
+      const plan = await storage.getMicroplan(req.tenantId, planId);
+      if (!plan) return res.status(404).json({ message: "Master microplan not found" });
+      const eventType = req.body?.eventType || "draft_edited";
+      const reason = req.body?.reason || null;
+      const version = await createMicroplanVersion(db as any, {
+        tenantId: req.tenantId,
+        microplanId: planId,
+        userId: req.user?.claims?.sub ?? null,
+        eventType,
+        status: plan.status ?? "draft",
+        reason: req.body?.reason ? String(req.body.reason) : undefined,
+      });
+      res.json({ success: true, message: `Version event ${eventType} recorded`, version });
+    } catch (err: any) {
+      console.error("Error recording version event:", err);
+      res.status(500).json({ message: "Failed to record version event" });
+    }
+  });
+
   app.delete("/api/microplans/:id", ...auth, async (req: any, res) => {
     try {
       const planId = parseInt(req.params.id);
+      if (Number.isNaN(planId)) return res.status(400).json({ message: "Invalid plan ID" });
+
       const oldPlan = await storage.getMicroplan(req.tenantId, planId);
+
+      // Idempotent DELETE: If already deleted, return 204 immediately
+      if (!oldPlan) {
+        return res.status(204).send();
+      }
+
+      if (isApprovedPlan(oldPlan.status)) {
+        return res.status(403).json({ message: "Approved microplans cannot be deleted." });
+      }
+
+      // Clean up linked planning evidence records so FK constraint doesn't block deletion
+      try {
+        await db
+          .delete(planningEvidenceRecords)
+          .where(
+            and(
+              eq(planningEvidenceRecords.microplanId, planId),
+              eq(planningEvidenceRecords.tenantId, req.tenantId),
+            ),
+          );
+      } catch (peErr) {
+        console.warn("Failed to clear planning evidence before microplan delete:", peErr);
+      }
 
       // Cancel/clean up auto-seeded supervisory visits BEFORE deleting the
       // microplan. Once the parent is gone, supervision_visits.microplan_id is
       // set to null by the FK cascade and we can no longer match them back.
       let cancelResult: { deletedIds: number[]; cancelledIds: number[] } | null = null;
-      if (oldPlan) {
-        try {
-          cancelResult = await cancelSeededSupervisionVisitsForMicroplan(
-            req.tenantId,
-            planId,
-            `Parent microplan #${planId} was deleted.`,
-          );
-        } catch (cancelErr) {
-          console.error("Failed to auto-cancel supervision visits before microplan delete", planId, cancelErr);
-        }
+      try {
+        cancelResult = await cancelSeededSupervisionVisitsForMicroplan(
+          req.tenantId,
+          planId,
+          `Parent microplan #${planId} was deleted.`,
+        );
+      } catch (cancelErr) {
+        console.error("Failed to auto-cancel supervision visits before microplan delete", planId, cancelErr);
       }
 
       const ok = await storage.deleteMicroplan(req.tenantId, planId);
-      if (!ok) return res.status(404).json({ message: "Master microplan not found" });
-      await logAudit(req, "delete", "microplan", planId, oldPlan, null);
-      if (cancelResult && (cancelResult.deletedIds.length > 0 || cancelResult.cancelledIds.length > 0)) {
-        await logAudit(req, "auto_cancel_supervision_visits", "microplan", planId, null, {
-          microplanId: planId,
-          reason: "microplan_deleted",
-          deletedVisitIds: cancelResult.deletedIds,
-          cancelledVisitIds: cancelResult.cancelledIds,
-        });
+      if (ok) {
+        await logAudit(req, "delete", "microplan", planId, oldPlan, null);
+        if (cancelResult && (cancelResult.deletedIds.length > 0 || cancelResult.cancelledIds.length > 0)) {
+          await logAudit(req, "auto_cancel_supervision_visits", "microplan", planId, null, {
+            microplanId: planId,
+            reason: "microplan_deleted",
+            deletedVisitIds: cancelResult.deletedIds,
+            cancelledVisitIds: cancelResult.cancelledIds,
+          });
+        }
       }
       res.status(204).send();
     } catch (error) {
@@ -10315,7 +10564,7 @@ export async function registerRoutes(
       return { editable: true };
     } catch (error) {
       console.error("checkMicroplanEditableForFacility error:", error);
-      return { editable: true };
+      return { editable: false, message: "Unable to verify microplan edit permission. Try again later." };
     }
   }
 
@@ -12514,6 +12763,8 @@ export async function registerRoutes(
     try {
       const reason = String(req.body?.reason || "").trim();
       if (!reason) return res.status(400).json({ message: "A restoration reason is required" });
+      const currentPlan = await storage.getMicroplan(req.tenantId, Number(req.params.id));
+      if (currentPlan && isApprovedPlan(currentPlan.status)) return res.status(403).json({ message: "Approved microplans cannot be restored over. Create a new draft plan." });
       const version = await restoreMicroplanVersionAsDraft(db as any, {
         tenantId: req.tenantId,
         microplanId: Number(req.params.id),
@@ -12573,6 +12824,7 @@ export async function registerRoutes(
       if (data.entityType === "microplan") {
         const mp = await storage.getMicroplan(req.tenantId, data.entityId);
         if (!mp) return res.status(404).json({ message: "Microplan not found in this tenant" });
+        if (mp.status !== "draft") return res.status(403).json({ message: "Only draft microplans can be submitted. Approved plans are read-only." });
         const role = (req.user as any)?.role ?? (await storage.getUser(req.user.claims.sub))?.role;
         const allowed = role === "facility_clerk" || role === "facility_in_charge" || role === "national_admin";
         if (!allowed) {
@@ -12599,7 +12851,7 @@ export async function registerRoutes(
               reminderSentAt: null,
               updatedAt: now,
             })
-            .where(and(eq(microplans.id, data.entityId), eq(microplans.tenantId, req.tenantId)));
+            .where(and(eq(microplans.id, data.entityId), eq(microplans.tenantId, req.tenantId), eq(microplans.status, "draft")));
 
           await createMicroplanVersion(db as any, {
             tenantId: req.tenantId,
@@ -12688,6 +12940,17 @@ export async function registerRoutes(
       const entityId = parseInt(req.params.id);
       const oldRequest = await storage.getApprovalRequest(req.tenantId, entityId);
       const { status, comments } = req.body;
+      if (!oldRequest) return res.status(404).json({ message: "Approval request not found" });
+      if (oldRequest.entityType === "microplan") {
+        const mp = await storage.getMicroplan(req.tenantId, oldRequest.entityId);
+        if (!mp) return res.status(404).json({ message: "Microplan not found" });
+        if (isApprovedPlan(mp.status)) return res.status(403).json({ message: "Approved microplans are read-only." });
+        if (status === "approved") {
+          const tenant = await storage.getTenant(req.tenantId);
+          const eligibility = approvalEligibility(mp.createdAt, tenant?.settings);
+          if (!eligibility.allowed) return res.status(409).json({ message: eligibility.message, eligibleAt: eligibility.eligibleAt });
+        }
+      }
       const allowedStatuses = new Set(["approved", "rejected", "returned"]);
       if (!allowedStatuses.has(status)) {
         return res.status(400).json({ message: "Status must be approved, rejected, or returned" });
@@ -12730,7 +12993,11 @@ export async function registerRoutes(
             // visits for facilities in scope so Step 10 of the wizard can go
             // green without supervisors hunting for missing visits.
             const oldMp = await storage.getMicroplan(req.tenantId, request.entityId);
-            const updatedMp = await storage.updateMicroplan(req.tenantId, request.entityId, { status: "approved" } as any);
+            const updatedMp = await storage.updateMicroplan(req.tenantId, request.entityId, {
+              status: "approved",
+              approvedByUserId: req.user.claims.sub,
+              approvedAt: new Date(),
+            } as any);
             if (updatedMp && oldMp && oldMp.status !== "approved") {
               await createMicroplanVersion(db as any, {
                 tenantId: req.tenantId,
@@ -13006,6 +13273,29 @@ export async function registerRoutes(
       res.json(list);
     } catch (err) {
       res.status(500).json({ message: "Failed to list boundaries" });
+    }
+  });
+
+  // GET /api/gis/boundaries — return GeoJSON feature collection for offline desktop bundle
+  app.get("/api/gis/boundaries", isAuthenticated, requireTenant, async (req: any, res) => {
+    try {
+      const tenantId = req.tenantId as string;
+      const list = await storage.listAdminBoundaries(tenantId);
+      if (Array.isArray(list) && list.length > 0) {
+        // Prefer district level (2) or province level (1) or first boundary
+        const target = list.find((b: any) => b.adminLevel === 2) || list.find((b: any) => b.adminLevel === 1) || list[0];
+        if (target) {
+          const boundary = await storage.getAdminBoundary(tenantId, target.id);
+          if (boundary) {
+            const { geojson } = getOptimizedBoundaryGeoJson(boundary, false);
+            return res.json(geojson);
+          }
+        }
+      }
+      return res.json({ type: "FeatureCollection", features: [] });
+    } catch (err: any) {
+      console.warn("GET /api/gis/boundaries failed:", err?.message);
+      return res.json({ type: "FeatureCollection", features: [] });
     }
   });
 
@@ -13930,17 +14220,18 @@ export async function registerRoutes(
     const variant = (req.query.variant || req.query.type || "").toString().toLowerCase();
     const format = (req.query.format || "").toString().toLowerCase();
     const fs = await import("fs");
+    const _path = await import("path");
 
     if (variant === "short") {
       if (format === "json") {
-        const jsonPath = "c:/vaxplan/Supportive_Supervision_Short_Template.json";
+        const jsonPath = _path.resolve(process.cwd(), "Supportive_Supervision_Short_Template.json");
         if (fs.existsSync(jsonPath)) {
           res.setHeader("Content-Type", "application/json; charset=utf-8");
           res.setHeader("Content-Disposition", 'attachment; filename="Supportive_Supervision_Short_Template.json"');
           return res.status(200).send(fs.readFileSync(jsonPath, "utf-8"));
         }
       }
-      const csvPath = "c:/vaxplan/Supportive_Supervision_Short_Template.csv";
+      const csvPath = _path.resolve(process.cwd(), "Supportive_Supervision_Short_Template.csv");
       if (fs.existsSync(csvPath)) {
         res.setHeader("Content-Type", "text/csv; charset=utf-8");
         res.setHeader("Content-Disposition", 'attachment; filename="Supportive_Supervision_Short_Template.csv"');
@@ -13948,8 +14239,8 @@ export async function registerRoutes(
       }
     }
 
-    const fullCsvPath = "c:/vaxplan/Supportive_Supervision_National_Full_Template.csv";
-    const csvPath = "c:/vaxplan/Supportive_Supervision_National_Template.csv";
+    const fullCsvPath = _path.resolve(process.cwd(), "Supportive_Supervision_National_Full_Template.csv");
+    const csvPath = _path.resolve(process.cwd(), "Supportive_Supervision_National_Template.csv");
     const targetPath = fs.existsSync(fullCsvPath) ? fullCsvPath : (fs.existsSync(csvPath) ? csvPath : null);
     if (targetPath) {
       res.setHeader("Content-Type", "text/csv; charset=utf-8");
@@ -16372,6 +16663,155 @@ export async function registerRoutes(
     },
   );
 
+  // POST /api/his/dhis2/pull-coverage — direct DHIS2 coverage pull (Task Layer 3)
+  app.post(
+    "/api/his/dhis2/pull-coverage",
+    isAuthenticated,
+    requireTenant,
+    loadRole,
+    requireImportRole,
+    async (req: any, res) => {
+      try {
+        const schema = z.object({
+          integrationId: z.string().min(1),
+          period: z.string().regex(/^\d{4}-?\d{2}$/).transform((p) => p.replace("-", "")),
+          rootOrgUnit: z.string().optional(),
+          commit: z.boolean().optional().default(false),
+        });
+        const body = schema.parse(req.body);
+        const tenant = await storage.getTenant(req.tenantId);
+        if (!tenant) return res.status(404).json({ message: "Tenant not found" });
+        const integrations = parseHisIntegrations(tenant.settings as Record<string, any>);
+        const cfg = integrations.find((i) => i.id === body.integrationId && i.enabled);
+        if (!cfg) return res.status(400).json({ message: `Integration "${body.integrationId}" not found or disabled.` });
+
+        const pulled = await _coverageSvc.pullDhis2Coverage(req.tenantId, cfg as any, {
+          period: body.period,
+          rootOrgUnit: body.rootOrgUnit,
+        });
+        let importedCount = 0;
+        if (body.commit && pulled.rows.length > 0) {
+          const userId = req.user?.claims?.sub || null;
+          const result = await _coverageSvc.commitDhis2Coverage(req.tenantId, userId, cfg.id, pulled.rows);
+          importedCount = result.importedCount;
+        }
+        res.json({
+          success: true,
+          rowCount: pulled.rows.length,
+          warnings: pulled.warnings,
+          errors: pulled.errors,
+          simulated: pulled.simulated,
+          committed: body.commit,
+          importedCount,
+          rows: pulled.rows,
+        });
+      } catch (err: any) {
+        if (err?.name === "ZodError") return res.status(400).json({ message: "Invalid payload", errors: err.errors });
+        res.status(500).json({ message: safeErrorMessage(err, "Direct DHIS2 coverage pull failed") });
+      }
+    },
+  );
+
+  // POST /api/his/dhis2/pull-population — direct DHIS2 target population denominators pull (Task Layer 3)
+  app.post(
+    "/api/his/dhis2/pull-population",
+    isAuthenticated,
+    requireTenant,
+    loadRole,
+    requireImportRole,
+    async (req: any, res) => {
+      try {
+        const schema = z.object({
+          integrationId: z.string().min(1),
+          year: z.number().int().min(2020).max(2035).default(new Date().getFullYear()),
+          rootOrgUnit: z.string().optional(),
+          commit: z.boolean().optional().default(false),
+        });
+        const body = schema.parse(req.body);
+        const tenant = await storage.getTenant(req.tenantId);
+        if (!tenant) return res.status(404).json({ message: "Tenant not found" });
+        const integrations = parseHisIntegrations(tenant.settings as Record<string, any>);
+        const cfg = integrations.find((i) => i.id === body.integrationId && i.enabled);
+        if (!cfg) return res.status(400).json({ message: `Integration "${body.integrationId}" not found or disabled.` });
+
+        const pulled = await _coverageSvc.pullDhis2Population(req.tenantId, cfg as any, {
+          year: body.year,
+          rootOrgUnit: body.rootOrgUnit,
+        });
+
+        let committedCount = 0;
+        if (body.commit && pulled.rows.length > 0) {
+          const userId = req.user?.claims?.sub || null;
+          const result = await _coverageSvc.commitDhis2Population(req.tenantId, userId, body.year, pulled.rows);
+          committedCount = result.committedCount;
+        }
+
+        res.json({
+          success: true,
+          rowCount: pulled.rows.length,
+          year: body.year,
+          committed: body.commit,
+          committedCount,
+          warnings: pulled.warnings,
+          errors: pulled.errors,
+          simulated: pulled.simulated,
+          rows: pulled.rows,
+        });
+      } catch (err: any) {
+        if (err?.name === "ZodError") return res.status(400).json({ message: "Invalid payload", errors: err.errors });
+        res.status(500).json({ message: safeErrorMessage(err, "DHIS2 population pull failed") });
+      }
+    },
+  );
+
+  // POST /api/his/dhis2/sync-bidirectional — bi-directional sync (Task Layer 3)
+  app.post(
+    "/api/his/dhis2/sync-bidirectional",
+    isAuthenticated,
+    requireTenant,
+    loadRole,
+    requireImportRole,
+    async (req: any, res) => {
+      try {
+        const schema = z.object({
+          integrationId: z.string().min(1),
+          period: z.string().regex(/^\d{4}-?\d{2}$/).transform((p) => p.replace("-", "")),
+          year: z.number().int().min(2020).max(2035).optional(),
+        });
+        const body = schema.parse(req.body);
+        const year = body.year ?? parseInt(body.period.slice(0, 4), 10);
+
+        const tenant = await storage.getTenant(req.tenantId);
+        if (!tenant) return res.status(404).json({ message: "Tenant not found" });
+        const integrations = parseHisIntegrations(tenant.settings as Record<string, any>);
+        const cfg = integrations.find((i) => i.id === body.integrationId && i.enabled);
+        if (!cfg) return res.status(400).json({ message: `Integration "${body.integrationId}" not found or disabled.` });
+
+        const userId = req.user?.claims?.sub || null;
+        const result = await _coverageSvc.syncDhis2BiDirectional(req.tenantId, userId, cfg as any, {
+          period: body.period,
+          year,
+        });
+
+        await logAudit(req, "dhis2_bidirectional_sync", "his_integration", null, null, {
+          integrationId: cfg.id,
+          period: body.period,
+          year,
+          inboundCoverage: result.inbound.coverageRowsCommitted,
+          inboundPopulation: result.inbound.populationRowsCommitted,
+          outboundAchievements: result.outbound.sessionsReported,
+        });
+
+        res.json(result);
+      } catch (err: any) {
+        if (err?.name === "ZodError") return res.status(400).json({ message: "Invalid payload", errors: err.errors });
+        console.error("POST /api/his/dhis2/sync-bidirectional failed:", err);
+        res.status(500).json({ message: safeErrorMessage(err, "Bi-directional DHIS2 sync failed") });
+      }
+    },
+  );
+
+
   // GET /api/missed-communities — deterministic missedness scorer
   app.get("/api/missed-communities", ...auth, async (req: any, res) => {
     try {
@@ -17166,6 +17606,102 @@ export async function registerRoutes(
         bands: [],
         featureCollection: { type: "FeatureCollection", features: [] },
       });
+    }
+  });
+
+  // POST /api/gis/optimize-route (Dynamic multi-stop outreach route optimization with weather, road friction & river crossings)
+  app.post("/api/gis/optimize-route", isAuthenticated, requireTenant, async (req: any, res) => {
+    try {
+      const { optimizeDynamicOutreachRoute } = await import("./services/routing");
+      const schema = z.object({
+        origin: z.object({
+          name: z.string().min(1),
+          latitude: z.number(),
+          longitude: z.number(),
+        }),
+        stops: z.array(
+          z.object({
+            id: z.union([z.number(), z.string()]),
+            name: z.string(),
+            latitude: z.number(),
+            longitude: z.number(),
+            targetPopulation: z.number().optional(),
+            isOutreachPost: z.boolean().optional(),
+          })
+        ).min(1),
+        season: z.enum(["dry", "rainy"]).default("dry"),
+        weatherCondition: z.enum(["clear", "moderate_rain", "heavy_flood"]).default("clear"),
+        transportMode: z.enum(["car", "motorbike", "foot", "boat"]).default("motorbike"),
+        knownRiverCrossings: z.array(
+          z.object({
+            name: z.string(),
+            latitude: z.number(),
+            longitude: z.number(),
+            passableInRain: z.boolean().default(true),
+            requiresBoat: z.boolean().default(false),
+          })
+        ).optional(),
+      });
+
+      const body = schema.parse(req.body);
+      const result = await optimizeDynamicOutreachRoute({
+        tenantId: req.tenantId,
+        ...body,
+      });
+
+      res.json(result);
+    } catch (err: any) {
+      if (err?.name === "ZodError") {
+        return res.status(400).json({ message: "Invalid route optimization payload", errors: err.errors });
+      }
+      console.error("POST /api/gis/optimize-route failed:", err);
+      res.status(500).json({ message: safeErrorMessage(err, "Dynamic route optimization failed") });
+    }
+  });
+
+  // POST /api/messaging/broadcast-session-alerts (Automated Caregiver SMS Alerts for outreach sessions)
+  app.post("/api/messaging/broadcast-session-alerts", isAuthenticated, requireTenant, async (req: any, res) => {
+    try {
+      const { broadcastSessionAlerts } = await import("./services/messaging");
+      const schema = z.object({
+        sessionId: z.number(),
+        language: z.enum(["en", "fr", "sw", "pt"]).default("en"),
+        customMessage: z.string().optional(),
+        dryRun: z.boolean().default(false),
+      });
+
+      const body = schema.parse(req.body);
+      const result = await broadcastSessionAlerts(req.tenantId, body);
+      res.json(result);
+    } catch (err: any) {
+      if (err?.name === "ZodError") {
+        return res.status(400).json({ message: "Invalid session broadcast payload", errors: err.errors });
+      }
+      console.error("POST /api/messaging/broadcast-session-alerts failed:", err);
+      res.status(500).json({ message: safeErrorMessage(err, "Caregiver session broadcast failed") });
+    }
+  });
+
+  // POST /api/messaging/schedule-defaulter-recall (Automated Caregiver SMS Alerts for defaulter recall)
+  app.post("/api/messaging/schedule-defaulter-recall", isAuthenticated, requireTenant, async (req: any, res) => {
+    try {
+      const { scheduleDefaulterRecall } = await import("./services/messaging");
+      const schema = z.object({
+        facilityId: z.number().optional(),
+        villageId: z.number().optional(),
+        antigen: z.string().default("PENTA-3"),
+        dryRun: z.boolean().default(false),
+      });
+
+      const body = schema.parse(req.body);
+      const result = await scheduleDefaulterRecall(req.tenantId, body);
+      res.json(result);
+    } catch (err: any) {
+      if (err?.name === "ZodError") {
+        return res.status(400).json({ message: "Invalid defaulter recall payload", errors: err.errors });
+      }
+      console.error("POST /api/messaging/schedule-defaulter-recall failed:", err);
+      res.status(500).json({ message: safeErrorMessage(err, "Caregiver defaulter recall failed") });
     }
   });
 
@@ -20912,7 +21448,12 @@ Instructions:
         return res.status(400).json({ message: "facilityId query parameter is required" });
       }
 
-      const facility = await storage.getFacility(req.tenantId, parseInt(facilityId as string));
+      const parsedFacilityId = parseInt(facilityId as string, 10);
+      if (Number.isNaN(parsedFacilityId)) {
+        return res.json([]);
+      }
+
+      const facility = await storage.getFacility(req.tenantId, parsedFacilityId);
       const lat = latitude ? parseFloat(latitude as string) : (facility?.latitude ? parseFloat(facility.latitude.toString()) : null);
       const lng = longitude ? parseFloat(longitude as string) : (facility?.longitude ? parseFloat(facility.longitude.toString()) : null);
 
@@ -20920,45 +21461,78 @@ Instructions:
         return res.json([]);
       }
 
-      const resQuery = await pool.query(
-        `
-        SELECT s.id, s.name, s.population_estimate AS population, s.latitude::float AS latitude, s.longitude::float AS longitude,
-               s.dry_season_travel_time_minutes AS dry_season_travel_time,
-               s.rainy_season_travel_time_minutes AS rainy_season_travel_time,
-               s.travel_mode_planning AS travel_mode,
-               s.risk_level,
-               s.link_status,
-               (ST_Distance(
-                 ST_SetSRID(ST_MakePoint(s.longitude::float, s.latitude::float), 4326)::geography,
-                 ST_SetSRID(ST_MakePoint($3::float, $2::float), 4326)::geography
-               ) / 1000.0) AS distance_km
-        FROM settlements_master s
-        WHERE s.tenant_id = $1
-          AND s.is_active = true
-          AND s.linked_community_id IS NULL
-          AND s.name NOT IN (SELECT name FROM villages WHERE tenant_id = $1)
-          AND NOT EXISTS (
-            SELECT 1 FROM facility_catchments fc
-            WHERE fc.tenant_id = s.tenant_id
-              AND fc.is_official = true
-              AND fc.geojson IS NOT NULL
-              AND fc.geojson::text != 'null'
-              AND ST_IsValid(ST_SetSRID(ST_GeomFromGeoJSON(fc.geojson::text), 4326))
-              AND ST_Contains(
-                ST_SetSRID(ST_GeomFromGeoJSON(fc.geojson::text), 4326),
-                ST_SetSRID(ST_MakePoint(s.longitude::float, s.latitude::float), 4326)
-              )
-          )
-        ORDER BY distance_km ASC
-        LIMIT 10;
-        `,
-        [req.tenantId, lat, lng]
-      );
+      try {
+        const resQuery = await pool.query(
+          `
+          SELECT s.id, s.name, s.population_estimate AS population, s.latitude::float AS latitude, s.longitude::float AS longitude,
+                 s.dry_season_travel_time_minutes AS dry_season_travel_time,
+                 s.rainy_season_travel_time_minutes AS rainy_season_travel_time,
+                 s.travel_mode_planning AS travel_mode,
+                 s.risk_level,
+                 s.link_status,
+                 (ST_Distance(
+                   ST_SetSRID(ST_MakePoint(s.longitude::float, s.latitude::float), 4326)::geography,
+                   ST_SetSRID(ST_MakePoint($3::float, $2::float), 4326)::geography
+                 ) / 1000.0) AS distance_km
+          FROM settlements_master s
+          WHERE s.tenant_id = $1
+            AND s.is_active = true
+            AND s.latitude IS NOT NULL
+            AND s.longitude IS NOT NULL
+            AND s.linked_community_id IS NULL
+            AND s.name NOT IN (SELECT name FROM villages WHERE tenant_id = $1)
+            AND NOT EXISTS (
+              SELECT 1 FROM facility_catchments fc
+              WHERE fc.tenant_id = s.tenant_id
+                AND fc.is_official = true
+                AND fc.geojson IS NOT NULL
+                AND fc.geojson::text != 'null'
+                AND fc.geojson::text != ''
+                AND ST_IsValid(ST_SetSRID(ST_GeomFromGeoJSON(fc.geojson::text), 4326))
+                AND ST_Contains(
+                  ST_SetSRID(ST_GeomFromGeoJSON(fc.geojson::text), 4326),
+                  ST_SetSRID(ST_MakePoint(s.longitude::float, s.latitude::float), 4326)
+                )
+            )
+          ORDER BY distance_km ASC
+          LIMIT 10;
+          `,
+          [req.tenantId, lat, lng]
+        );
 
-      res.json(resQuery.rows);
+        return res.json(resQuery.rows);
+      } catch (dbErr) {
+        console.warn("Complex spatial query failed in suggest-unmapped, falling back to simple distance:", dbErr);
+        // Fallback to pure coordinate distance without catchment polygon filtering
+        const fallbackQuery = await pool.query(
+          `
+          SELECT s.id, s.name, s.population_estimate AS population, s.latitude::float AS latitude, s.longitude::float AS longitude,
+                 s.dry_season_travel_time_minutes AS dry_season_travel_time,
+                 s.rainy_season_travel_time_minutes AS rainy_season_travel_time,
+                 s.travel_mode_planning AS travel_mode,
+                 s.risk_level,
+                 s.link_status,
+                 (ST_Distance(
+                   ST_SetSRID(ST_MakePoint(s.longitude::float, s.latitude::float), 4326)::geography,
+                   ST_SetSRID(ST_MakePoint($3::float, $2::float), 4326)::geography
+                 ) / 1000.0) AS distance_km
+          FROM settlements_master s
+          WHERE s.tenant_id = $1
+            AND s.is_active = true
+            AND s.latitude IS NOT NULL
+            AND s.longitude IS NOT NULL
+            AND s.linked_community_id IS NULL
+            AND s.name NOT IN (SELECT name FROM villages WHERE tenant_id = $1)
+          ORDER BY distance_km ASC
+          LIMIT 10;
+          `,
+          [req.tenantId, lat, lng]
+        );
+        return res.json(fallbackQuery.rows);
+      }
     } catch (error: any) {
-      console.error("Error suggesting unmapped communities:", error);
-      res.status(500).json({ message: safeErrorMessage(error, "Failed to suggest unmapped communities") });
+      console.warn("Error suggesting unmapped communities (graceful empty return):", error);
+      res.json([]);
     }
   });
 
@@ -22017,6 +22591,204 @@ Instructions:
     } catch (e) {
       console.error("[Prefill API Error]", e);
       res.status(500).json({ message: "Failed to generate prefill bundle" });
+    }
+  });
+
+  // ─── Microplanning Readiness Check ───────────────────────────────────────
+  // GET /api/microplans/readiness/:facilityId?year=:year
+  // Checks reference data prerequisites: Populations, communities, stock ledger, coverage, staff, CHVs, cold chain.
+  // Flags missing items as warnings so health workers can continue planning without blocking.
+  app.get("/api/microplans/readiness/:facilityId", ...auth, async (req: any, res) => {
+    try {
+      const facilityId = parseInt(req.params.facilityId);
+      const year = parseInt(req.query.year as string) || new Date().getFullYear();
+
+      if (!facilityId || isNaN(facilityId)) {
+        return res.status(400).json({ message: "Invalid facilityId parameter" });
+      }
+
+      const tenantId = req.tenantId;
+      const { summarizeReadiness } = await import("./services/microplanPrefillService.js");
+
+      // 1. Populations check
+      const popRecords = await db
+        .select({ count: dsql<number>`count(*)` })
+        .from(populationData)
+        .where(
+          and(
+            eq(populationData.facilityId, facilityId),
+            eq(populationData.tenantId, tenantId),
+            eq(populationData.year, year)
+          )
+        );
+      const popCount = Number(popRecords[0]?.count || 0);
+
+      let anyYearPopCount = popCount;
+      if (popCount === 0) {
+        const anyYearRecords = await db
+          .select({ count: dsql<number>`count(*)` })
+          .from(populationData)
+          .where(
+            and(
+              eq(populationData.facilityId, facilityId),
+              eq(populationData.tenantId, tenantId)
+            )
+          );
+        anyYearPopCount = Number(anyYearRecords[0]?.count || 0);
+      }
+
+      // 2. Communities / Villages check
+      const villageRecords = await db
+        .select({ count: dsql<number>`count(*)` })
+        .from(villages)
+        .where(
+          and(
+            eq(villages.assignedFacilityId, facilityId),
+            eq(villages.tenantId, tenantId)
+          )
+        );
+      const villageCount = Number(villageRecords[0]?.count || 0);
+
+      // 3. Stock Ledger / Transactions check
+      const stockRecords = await db
+        .select({ count: dsql<number>`count(*)` })
+        .from(stockTransactions)
+        .where(
+          and(
+            eq(stockTransactions.facilityId, facilityId),
+            eq(stockTransactions.tenantId, tenantId)
+          )
+        );
+      const stockCount = Number(stockRecords[0]?.count || 0);
+
+      // 4. Coverage Data / Monthly Reports check
+      const coverageRecords = await db
+        .select({ count: dsql<number>`count(*)` })
+        .from(monthlyReports)
+        .where(
+          and(
+            eq(monthlyReports.facilityId, facilityId),
+            eq(monthlyReports.tenantId, tenantId)
+          )
+        );
+      const coverageCount = Number(coverageRecords[0]?.count || 0);
+
+      // 5. Staff check
+      const staffRecords = await db
+        .select({ count: dsql<number>`count(*)` })
+        .from(facilityStaff)
+        .where(
+          and(
+            eq(facilityStaff.facilityId, facilityId),
+            eq(facilityStaff.tenantId, tenantId)
+          )
+        );
+      const staffCount = Number(staffRecords[0]?.count || 0);
+
+      // 6. Community Health Volunteers (CHVs) check
+      const chvRecords = await db
+        .select({ count: dsql<number>`count(*)` })
+        .from(communityHealthVolunteers)
+        .where(
+          and(
+            eq(communityHealthVolunteers.facilityId, facilityId),
+            eq(communityHealthVolunteers.tenantId, tenantId)
+          )
+        );
+      const chvCount = Number(chvRecords[0]?.count || 0);
+
+      // 7. Cold Chain Equipment check
+      const coldChainRecords = await db
+        .select({ count: dsql<number>`count(*)` })
+        .from(coldChainEquipment)
+        .where(
+          and(
+            eq(coldChainEquipment.facilityId, facilityId),
+            eq(coldChainEquipment.tenantId, tenantId)
+          )
+        );
+      const coldChainCount = Number(coldChainRecords[0]?.count || 0);
+
+      const items = [
+        {
+          key: "populations",
+          label: "Target Population Denominator",
+          status: popCount > 0 ? "ready" : "warning",
+          message: popCount > 0
+            ? `Baseline population figures for ${year} are registered and ready.`
+            : anyYearPopCount > 0
+            ? `Population figures exist for earlier years, but not yet finalized for ${year}.`
+            : "No baseline population figures found for this facility. Target cohorts may require manual entry in Step 1.",
+          actionLabel: "Add Population Data",
+          actionHref: "/population",
+        },
+        {
+          key: "communities",
+          label: "Catchment Communities & Settlements",
+          status: villageCount > 0 ? "ready" : "warning",
+          message: villageCount > 0
+            ? `${villageCount} catchment village(s)/community(ies) mapped to this facility.`
+            : "No catchment communities or villages mapped. Session locations and target populations cannot be auto-filled in Step 2.",
+          actionLabel: "Map Communities",
+          actionHref: `/facilities?facilityId=${facilityId}`,
+        },
+        {
+          key: "stockledger",
+          label: "Stock Ledger & Vaccine Inventory",
+          status: stockCount > 0 ? "ready" : "warning",
+          message: stockCount > 0
+            ? `${stockCount} stock transaction record(s) logged in the facility ledger.`
+            : "No vaccine stock ledger transactions recorded for this facility. Vaccine requirements in Step 6 will use default estimates.",
+          actionLabel: "Update Stock Ledger",
+          actionHref: "/stock",
+        },
+        {
+          key: "coverage",
+          label: "Baseline Coverage & Historical Reports",
+          status: coverageCount > 0 ? "ready" : "warning",
+          message: coverageCount > 0
+            ? `${coverageCount} historical monthly immunization report(s) found for drop-out analysis.`
+            : "No monthly immunization reports found. Baseline drop-out rates will fall back to regional defaults in Step 1.",
+          actionLabel: "View Reports",
+          actionHref: "/reports",
+        },
+        {
+          key: "staff",
+          label: "Facility Staff Roster",
+          status: staffCount > 0 ? "ready" : "warning",
+          message: staffCount > 0
+            ? `${staffCount} active health worker(s) registered for session allocation.`
+            : "No facility health workers registered. Staff allocations in Step 5 will require manual entry.",
+          actionLabel: "Manage Staff",
+          actionHref: `/facilities?facilityId=${facilityId}`,
+        },
+        {
+          key: "chvs",
+          label: "Community Health Volunteers (CHVs)",
+          status: chvCount > 0 ? "ready" : "warning",
+          message: chvCount > 0
+            ? `${chvCount} Community Health Volunteer(s) catalogued.`
+            : "No CHVs or community mobilizers registered. Mobilization and outreach in Step 7 will need manual assignment.",
+          actionLabel: "Register CHVs",
+          actionHref: `/facilities?facilityId=${facilityId}`,
+        },
+        {
+          key: "coldchain",
+          label: "Cold Chain Storage Equipment",
+          status: coldChainCount > 0 ? "ready" : "warning",
+          message: coldChainCount > 0
+            ? `${coldChainCount} cold chain storage unit(s) catalogued.`
+            : "No cold chain refrigerators or freezers logged. Storage capacity calculations in Step 6 will use facility defaults.",
+          actionLabel: "Add Cold Chain",
+          actionHref: `/facilities?facilityId=${facilityId}`,
+        },
+      ];
+
+      const summary = summarizeReadiness(items as any);
+      res.json({ summary, items });
+    } catch (e: any) {
+      console.error("[Readiness API Error]", e);
+      res.status(500).json({ message: safeErrorMessage(e, "Failed to load microplanning readiness") });
     }
   });
 

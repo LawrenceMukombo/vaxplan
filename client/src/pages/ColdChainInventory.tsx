@@ -4,7 +4,8 @@ import { Link } from "wouter";
 import {
   Snowflake, Thermometer, Wrench, AlertTriangle, CheckCircle2,
   Plus, Download, Upload, Search, Filter, RefreshCw, Building2,
-  SlidersHorizontal, Eye, FileSpreadsheet, Lock, Loader2
+  SlidersHorizontal, Eye, FileSpreadsheet, Lock, Loader2,
+  Activity, TrendingUp, Package, Calendar, AlertOctagon, Sparkles
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -22,6 +23,7 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
   DialogFooter,
 } from "@/components/ui/dialog";
 import { FacilityCascadePicker } from "@/components/FacilityCascadePicker";
@@ -98,17 +100,17 @@ const CONDITION_CONFIG: Record<Condition, { label: string; variant: "default" | 
   needs_repair: { label: "Needs Repair", variant: "secondary", colorClass: "bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30" },
   non_functional: { label: "Non-Functional", variant: "destructive", colorClass: "bg-red-500/15 text-red-700 dark:text-red-300 border-red-500/30" },
   condemned: { label: "Condemned", variant: "destructive", colorClass: "bg-rose-900/15 text-rose-800 dark:text-rose-300 border-rose-800/30" },
-  decommissioned: { label: "Decommissioned", variant: "outline", colorClass: "bg-slate-500/15 text-slate-700 dark:text-slate-300 border-slate-500/30" },
+  decommissioned: { label: "Decommissioned", variant: "outline", colorClass: "bg-muted text-muted-foreground border-border" },
 };
 
-const POWER_SOURCE_LABELS: Record<string, string> = {
-  solar: "Solar Direct Drive (SDD)",
-  solar_dc: "Solar DC",
-  electric: "Mains Electricity",
+const POWER_SOURCE_LABELS: Record<PowerSource, string> = {
+  solar: "Solar (PV)",
+  electric: "Grid Electricity",
   gas: "Gas (LPG)",
   kerosene: "Kerosene",
-  battery: "Battery",
-  none: "Passive (Ice / Gel)",
+  battery: "Battery Bank",
+  solar_dc: "Solar Direct Drive",
+  none: "None / Passive",
 };
 
 export default function ColdChainInventory() {
@@ -142,6 +144,8 @@ export default function ColdChainInventory() {
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<ColdChainRow | null>(null);
   const [isImporting, setIsImporting] = useState(false);
+  const [isAiPredictorOpen, setIsAiPredictorOpen] = useState(false);
+  const [selectedForecastFacilityId, setSelectedForecastFacilityId] = useState<string>("");
 
   // Queries
   const { data: rawEquipment = [], isLoading, isError, refetch } = useQuery<ColdChainRow[]>({
@@ -626,6 +630,16 @@ export default function ColdChainInventory() {
               </>
             )}
           </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setIsAiPredictorOpen(true)}
+            className="gap-2 border-purple-300 bg-purple-500/10 text-purple-700 hover:bg-purple-500/20 dark:text-purple-300"
+            id="btn-ai-stock-predictor"
+          >
+            <Sparkles className="h-4 w-4 text-purple-600 dark:text-purple-400" />
+            AI Stock Logistics
+          </Button>
           <Button variant="outline" size="sm" onClick={handleExportCSV} className="gap-2">
             <Download className="h-4 w-4" />
             Export CSV
@@ -952,9 +966,20 @@ export default function ColdChainInventory() {
           }}
         />
       )}
+
+      {/* ── AI PREDICTIVE STOCK LOGISTICS MODAL (Task Layer 4) ─────── */}
+      {isAiPredictorOpen && (
+        <AiStockPredictorModal
+          open={isAiPredictorOpen}
+          onOpenChange={setIsAiPredictorOpen}
+          facilities={facilities}
+          initialFacilityId={selectedForecastFacilityId || (facilities[0]?.id ? String(facilities[0].id) : "")}
+        />
+      )}
     </div>
   );
 }
+
 
 // ─── ADD/EDIT DIALOG COMPONENT ─────────────────────────────────────────────
 function ColdChainItemDialog({
@@ -1154,3 +1179,237 @@ function ColdChainItemDialog({
     </Dialog>
   );
 }
+
+// ─── AI PREDICTIVE STOCK LOGISTICS MODAL COMPONENT (Task Layer 4) ───────────
+function AiStockPredictorModal({
+  open,
+  onOpenChange,
+  facilities,
+  initialFacilityId,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  facilities: any[];
+  initialFacilityId: string;
+}) {
+  const [selectedFacility, setSelectedFacility] = useState<string>(initialFacilityId);
+  const [selectedAntigen, setSelectedAntigen] = useState<string>("all");
+
+  const queryUrl = selectedFacility
+    ? `/api/stock/predictive-forecast?facilityId=${selectedFacility}${selectedAntigen !== "all" ? `&antigen=${selectedAntigen}` : ""}`
+    : "/api/stock/predictive-forecast";
+
+  const { data: forecastData, isLoading, refetch } = useQuery<any>({
+    queryKey: [queryUrl],
+    enabled: open,
+  });
+
+  const riskColors: Record<string, string> = {
+    critical: "bg-red-500/15 text-red-700 dark:text-red-300 border-red-500/30",
+    high: "bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30",
+    medium: "bg-yellow-500/15 text-yellow-700 dark:text-yellow-300 border-yellow-500/30",
+    low: "bg-blue-500/15 text-blue-700 dark:text-blue-300 border-blue-500/30",
+    optimal: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30",
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto bg-card border border-border text-foreground rounded-3xl shadow-2xl p-6 font-sans">
+        <DialogHeader>
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <DialogTitle className="flex items-center gap-2 text-xl font-bold">
+                <Sparkles className="h-5 w-5 text-purple-600 dark:text-purple-400" />
+                AI Predictive Stock Logistics
+              </DialogTitle>
+              <DialogDescription className="text-muted-foreground mt-1">
+                Machine learning consumption modeling & cold chain volume constraints to prevent stockouts before outreach campaigns.
+              </DialogDescription>
+            </div>
+            <Badge variant="outline" className="border-purple-300 bg-purple-500/10 text-purple-700 dark:text-purple-300 text-xs">
+              WHO PQS Engine
+            </Badge>
+          </div>
+        </DialogHeader>
+
+        {/* Controls */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 py-2 border-y border-border my-2">
+          <div className="space-y-1">
+            <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Select Facility</label>
+            <Select value={selectedFacility} onValueChange={setSelectedFacility}>
+              <SelectTrigger className="bg-background border-border rounded-xl">
+                <SelectValue placeholder="Choose health facility..." />
+              </SelectTrigger>
+              <SelectContent className="max-h-56">
+                {facilities.map((f: any) => (
+                  <SelectItem key={f.id} value={String(f.id)}>{f.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1">
+            <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Antigen Filter</label>
+            <Select value={selectedAntigen} onValueChange={setSelectedAntigen}>
+              <SelectTrigger className="bg-background border-border rounded-xl">
+                <SelectValue placeholder="All Antigens" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Antigens (EPI Basket)</SelectItem>
+                <SelectItem value="PENTA">Penta (Pentavalent)</SelectItem>
+                <SelectItem value="MR">MR (Measles-Rubella)</SelectItem>
+                <SelectItem value="BCG">BCG</SelectItem>
+                <SelectItem value="PCV">PCV (Pneumococcal)</SelectItem>
+                <SelectItem value="ROTA">Rota (Rotavirus)</SelectItem>
+                <SelectItem value="OPV">OPV (Oral Polio)</SelectItem>
+                <SelectItem value="HPV">HPV</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+
+        {isLoading ? (
+          <div className="py-16 text-center text-muted-foreground space-y-2">
+            <Loader2 className="h-8 w-8 animate-spin mx-auto text-purple-600" />
+            <p className="text-sm">Running least-squares linear trend regression & cold chain volume constraints...</p>
+          </div>
+        ) : !forecastData ? (
+          <div className="py-12 text-center text-muted-foreground">No forecast data available for this facility.</div>
+        ) : (
+          <div className="space-y-4">
+            {/* Top KPIs */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="rounded-2xl border border-border p-3.5 bg-secondary/20 space-y-1">
+                <div className="text-xs font-medium text-muted-foreground">Overall Stockout Risk</div>
+                <div className="flex items-center gap-2">
+                  <Badge variant="outline" className={`capitalize font-bold text-sm ${riskColors[forecastData.overallRisk] || ""}`}>
+                    {forecastData.overallRisk}
+                  </Badge>
+                  <span className="text-xs text-muted-foreground font-mono">
+                    {forecastData.activeOutreachCampaignsCount} campaigns scheduled
+                  </span>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-border p-3.5 bg-secondary/20 space-y-1">
+                <div className="text-xs font-medium text-muted-foreground">Cold Storage Saturation</div>
+                <div className="text-lg font-bold text-foreground">
+                  {forecastData.capacityUtilizationPercent}%
+                  <span className="text-xs font-normal text-muted-foreground ml-1.5">
+                    ({forecastData.totalColdSpaceUsedLiters}L / {forecastData.refrigeratorCapacityLiters}L)
+                  </span>
+                </div>
+                <div className="w-full bg-muted rounded-full h-1.5 overflow-hidden">
+                  <div
+                    className={`h-full rounded-full ${forecastData.capacityUtilizationPercent > 85 ? "bg-red-500" : "bg-purple-600"}`}
+                    style={{ width: `${Math.min(100, forecastData.capacityUtilizationPercent)}%` }}
+                  />
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-border p-3.5 bg-secondary/20 space-y-1">
+                <div className="text-xs font-medium text-muted-foreground">Assigned Refrigerator</div>
+                <div className="text-sm font-semibold truncate text-foreground" title={forecastData.refrigerator?.model}>
+                  {forecastData.refrigerator?.model || "Standard CCE Refrigerator"}
+                </div>
+                <div className="flex items-center gap-1.5 text-xs text-emerald-600 dark:text-emerald-400">
+                  <CheckCircle2 className="h-3.5 w-3.5" />
+                  <span>WHO PQS Certified Cold Space</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Antigens Table */}
+            <div className="border border-border rounded-2xl overflow-hidden bg-card">
+              <div className="p-3 bg-secondary/40 font-semibold text-xs text-muted-foreground uppercase tracking-wider flex items-center justify-between">
+                <span>Antigen Forecast Breakdown (Next 60 Days)</span>
+                <span className="text-[11px] font-normal normal-case text-muted-foreground">Updated {new Date(forecastData.generatedAt).toLocaleTimeString()}</span>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead className="border-b border-border bg-muted/40 text-muted-foreground">
+                    <tr>
+                      <th className="py-2.5 px-3 text-left font-semibold">Antigen</th>
+                      <th className="py-2.5 px-3 text-left font-semibold">Current Stock</th>
+                      <th className="py-2.5 px-3 text-left font-semibold">Daily Burn</th>
+                      <th className="py-2.5 px-3 text-left font-semibold">Days to Stockout</th>
+                      <th className="py-2.5 px-3 text-left font-semibold">Risk Level</th>
+                      <th className="py-2.5 px-3 text-left font-semibold">Safety Buffer</th>
+                      <th className="py-2.5 px-3 text-left font-semibold">Suggested Reorder</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border/60">
+                    {forecastData.antigens?.map((ag: any) => (
+                      <tr key={ag.antigen} className="hover:bg-muted/30 transition-colors">
+                        <td className="py-2.5 px-3 font-bold text-foreground">{ag.antigen}</td>
+                        <td className="py-2.5 px-3 font-mono">{ag.currentStockDoses.toLocaleString()} doses</td>
+                        <td className="py-2.5 px-3 font-mono">~{ag.dailyBurnRateDoses}/day</td>
+                        <td className="py-2.5 px-3">
+                          <span className={`font-mono font-bold ${ag.daysUntilStockout <= 14 ? "text-red-600" : ag.daysUntilStockout <= 30 ? "text-amber-600" : "text-emerald-600"}`}>
+                            {ag.daysUntilStockout > 900 ? "90+ days" : `${ag.daysUntilStockout} days`}
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-3">
+                          <Badge variant="outline" className={`text-[10px] font-semibold uppercase ${riskColors[ag.riskLevel] || ""}`}>
+                            {ag.riskLevel}
+                          </Badge>
+                        </td>
+                        <td className="py-2.5 px-3 font-mono text-muted-foreground">{ag.safetyStockDosesRequired} doses</td>
+                        <td className="py-2.5 px-3 font-bold text-purple-700 dark:text-purple-300 font-mono">
+                          {ag.recommendedReorderQuantity > 0 ? `+${ag.recommendedReorderQuantity.toLocaleString()} doses` : "Optimal"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* AI Synthesized Recommendations Cards */}
+            <div className="space-y-2">
+              <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                <Sparkles className="h-3.5 w-3.5 text-purple-500" />
+                AI Logistics Reorder Directives
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                {forecastData.antigens?.flatMap((a: any) => a.recommendations.map((rec: string, idx: number) => ({
+                  antigen: a.antigen,
+                  rec,
+                  risk: a.riskLevel,
+                  key: `${a.antigen}-${idx}`,
+                }))).slice(0, 4).map((item: any) => (
+                  <div
+                    key={item.key}
+                    className={`rounded-xl border p-3 text-xs leading-relaxed space-y-1 ${
+                      item.risk === "critical"
+                        ? "border-red-300 bg-red-50/50 dark:bg-red-950/20 text-red-900 dark:text-red-200"
+                        : item.risk === "high"
+                        ? "border-amber-300 bg-amber-50/50 dark:bg-amber-950/20 text-amber-900 dark:text-amber-200"
+                        : "border-border bg-secondary/30 text-muted-foreground"
+                    }`}
+                  >
+                    <div className="font-semibold flex items-center justify-between">
+                      <span>{item.antigen} Logistics Advisory</span>
+                      <Badge variant="outline" className="text-[10px] uppercase font-mono">{item.risk}</Badge>
+                    </div>
+                    <p>{item.rec}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        <DialogFooter className="border-t border-border pt-3 gap-2">
+          <Button variant="outline" onClick={() => onOpenChange(false)} className="rounded-xl">Close</Button>
+          <Button
+            onClick={() => refetch()}
+            className="gap-2 bg-purple-600 hover:bg-purple-500 text-white rounded-xl shadow-md"
+          >
+            <RefreshCw className="h-4 w-4" /> Recalculate AI Forecast
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+

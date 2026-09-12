@@ -1,6 +1,10 @@
+import { approvalEligibility } from "@shared/microplanPolicy";
+import { disaggregatePopulation, populationRatios, type PopulationRatios } from "@shared/populationDisaggregation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useRoute } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
+import { RedMicroplanningWorksheet } from "@/components/RedMicroplanningWorksheet";
+import { MicroplanGamificationBar } from "@/components/microplan/MicroplanGamificationBar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -50,6 +54,11 @@ import {
   Sparkles,
   Calendar,
   Printer,
+  Eye,
+  ShieldCheck,
+  FileSpreadsheet,
+  Clock,
+  Copy,
 } from "lucide-react";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
 import { useToast } from "@/hooks/use-toast";
@@ -111,39 +120,39 @@ export type StepDef = {
 export const STEPS: StepDef[] = [
   {
     id: 1,
-    title: "Coverage & denominators",
+    title: "Coverage, Demographics & RED Categorization",
     whatToDo: [
-      "Enter DTP1, DTP3, MCV1, MCV2 coverage % from last full year.",
-      "Confirm the denominator scenario that will drive all downstream planning fields.",
-      "Dropout from DTP1->DTP3 and DTP1->MCV1 is calculated for you.",
-      "List stockout events, AEFI cases, and sessions planned vs held.",
+      "Enter DTP1, DTP3, MCV1, MCV2, HPV, and Td coverage % and raw doses.",
+      "System computes WHO RED 4-Category diagnostic (Cat 1 to 4) & priority actions.",
+      "Track all 3 WHO dropout rates: DTP1->DTP3, DTP1->MCV1, and MCV1->MCV2 (2YL).",
+      "Quantify zero-dose unimmunized children and review VPD surveillance & stockouts.",
     ],
   },
   {
     id: 2,
-    title: "Catchment & communities",
+    title: "Catchment Mapping & Target Populations",
     whatToDo: [
-      "List every community served: village, hamlet, IDP camp, school.",
-      "Record target population and the delivery strategy (fixed / outreach / mobile).",
-      "Mark the source of the population number (NSO, HMIS, WorldPop, survey, census).",
+      "List all communities, settlements, camps, and institutions in facility catchment.",
+      "Differentiate life-course cohorts: Infants 0-11m, 12-23m, Under-5, Girls 9-14y, and Pregnant Women.",
+      "Record physical distance (km), travel time (mins), and delivery strategy (fixed/outreach/mobile).",
     ],
   },
   {
     id: 3,
-    title: "Risk scoring",
+    title: "Risk Analysis & Root-Cause Assessment (BeSD)",
     whatToDo: [
-      "Score each community 1-5 on distance, terrain, season, and insecurity.",
-      "Tick 'missed (no contact in 12 months)' for any community you have not visited.",
-      "Tick 'zero-dose hotspot' where you know unimmunised children live.",
+      "Score geospatial barriers: distance, terrain, seasonal impassability, and security.",
+      "Conduct WHO BeSD behavioural assessment across Thinking, Social, Motivation, and Practical drivers.",
+      "Assign priority rank (P1-P3) and identify primary root-cause barriers (RED Tool 1f).",
     ],
   },
   {
     id: 4,
-    title: "Session calendar",
+    title: "Session Schedule & Workload Sizing",
     whatToDo: [
-      "Plan one session per community per month for the next 12 months.",
-      "Pick the date and session type (static / outreach / mobile).",
-      "Add a catch-up row for any community marked missed in Step 3.",
+      "Calculate injection workload and recommended session frequency using WHO capacity formula (RED Tool 2a).",
+      "Schedule regular fixed, outreach, and mobile sessions with adequate lead-time.",
+      "Bundle co-delivery of integrated child survival interventions (Vit A, Deworming, MUAC, Bednets).",
     ],
   },
   {
@@ -157,20 +166,20 @@ export const STEPS: StepDef[] = [
   },
   {
     id: 6,
-    title: "Vaccine forecasting",
+    title: "Vaccines, Devices & Cold Chain Capacity",
     whatToDo: [
-      "Default wastage: BCG 40%, MR/OPV 25%, Penta/PCV 11%, IPV/Rota 5%.",
-      "Doses = target x doses per child x (1 + wastage). Vials, syringes, safety boxes follow.",
-      "Add cold-chain sizing: cold boxes, ice packs, carriers per session.",
+      "Forecast antigen doses, vials, AD/reconstitution syringes, and safety boxes with wastage buffers.",
+      "Cross-check required vaccine storage volume (Litres) against functional refrigerator net volume.",
+      "Generate printable vaccine and supply requisition slips to prevent stockouts.",
     ],
   },
   {
     id: 7,
-    title: "Demand generation",
+    title: "Community Partnerships & Defaulter Tracking",
     whatToDo: [
-      "Pick announcement channels per session day (megaphone, religious leader, SMS).",
-      "Name a focal point with a phone number for every community.",
-      "Confirm HFC and CHV readiness as supporting community-mobilization evidence.",
+      "Configure facility defaulter tracking protocol (tickler file, EIR SMS alerts, CHV tracing).",
+      "Map community stakeholders: chiefs, religious leaders, women's groups, and teachers (RED Tool 1d).",
+      "Schedule session-specific mobilization channels and IEC materials.",
     ],
   },
   {
@@ -211,13 +220,171 @@ export const STEPS: StepDef[] = [
   },
   {
     id: 12,
-    title: "Execution & review",
+    title: "Cumulative Target Monitoring & Review",
     whatToDo: [
-      "After approval, this view shows live doses given, defaulters, and missed communities.",
-      "Use quarterly review evidence to feed the next Step 1 coverage and denominator review.",
+      "Plot cumulative monthly doses against diagonal target lines on the WHO Monitoring Chart.",
+      "Track DTP1 access curve vs. DTP3 retention curve to detect dropouts in real time.",
+      "Conduct quarterly performance reviews with community stakeholders to adjust operational plans.",
     ],
   },
 ];
+
+export type PhaseDef = {
+  id: number;
+  name: string;
+  subtitle: string;
+  badge: string;
+  stepIds: number[];
+};
+
+export const PHASES: PhaseDef[] = [
+  {
+    id: 1,
+    name: "Area & Catchment",
+    subtitle: "Coverage, villages & barriers",
+    badge: "Phase 1",
+    stepIds: [1, 2, 3],
+  },
+  {
+    id: 2,
+    name: "Sessions & Teams",
+    subtitle: "Schedule & health workers",
+    badge: "Phase 2",
+    stepIds: [4, 5],
+  },
+  {
+    id: 3,
+    name: "Supplies, Transport & Budget",
+    subtitle: "Vaccines, vehicles & costs",
+    badge: "Phase 3",
+    stepIds: [6, 7, 8, 9, 10],
+  },
+  {
+    id: 4,
+    name: "Review & Monitoring",
+    subtitle: "Validation, submit & tracking",
+    badge: "Phase 4",
+    stepIds: [11, 12],
+  },
+];
+
+export const STEP_NURSE_TIPS: Record<number, { title: string; summary: string; bullets: string[] }> = {
+  1: {
+    title: "Understanding Coverage & Dropouts",
+    summary: "How well did your health post reach eligible infants in recent months?",
+    bullets: [
+      "Check your monthly immunization summary or tally sheets for DTP1, DTP3, and Measles doses.",
+      "Enter doses or percentages: VaxPlan automatically calculates your dropout rates and WHO RED category.",
+      "A high dropout rate (>10%) means children started immunization but missed their follow-up shots.",
+    ],
+  },
+  2: {
+    title: "Identifying Communities & Delivery Strategies",
+    summary: "Which villages, settlements, or mobile camps rely on your facility?",
+    bullets: [
+      "List all communities in your catchment area, including hard-to-reach or border settlements.",
+      "For each community, assign a delivery strategy: Fixed (clinic walk-in), Outreach (motorbike/4WD), or Mobile camp.",
+      "Add a local contact person or Community Health Volunteer (CHV) to help organize session mobilization.",
+    ],
+  },
+  3: {
+    title: "Overcoming Vaccination Barriers",
+    summary: "What practical challenges stop caregivers from bringing their infants?",
+    bullets: [
+      "Rate physical barriers: distance (>5 km), rugged terrain, or seasonal flooding during rainy months.",
+      "Identify community concerns: fear of side effects, religious hesitation, or clashes with market days.",
+      "Flagging high-risk or zero-dose hotspots ensures the district allocates extra outreach funds to your post.",
+    ],
+  },
+  4: {
+    title: "Scheduling Immunization Sessions",
+    summary: "When will your team hold vaccination sessions across your catchment area?",
+    bullets: [
+      "Set regular fixed clinic days and schedule dedicated dates for each outreach site.",
+      "Ensure outreach sessions are planned at least 7 days ahead so volunteers can notify caregivers.",
+      "Parallel sessions on the same day are supported if different staff or sites are involved.",
+    ],
+  },
+  5: {
+    title: "Assigning Staff & Workloads",
+    summary: "Who will administer vaccines, record logs, and supervise each session day?",
+    bullets: [
+      "Name the qualified vaccinator, tally recorder, and team supervisor for each session day.",
+      "Realistic daily targets ensure quality injection safety and avoid long caregiver wait times.",
+    ],
+  },
+  6: {
+    title: "Forecasting Vaccines & Cold Chain",
+    summary: "How many vaccine vials, syringes, and safety boxes do you need?",
+    bullets: [
+      "Doses, auto-disable syringes, and safety boxes are auto-calculated using national wastage buffers.",
+      "Verify that your functional refrigerator has adequate net volume (Litres) to prevent cold chain congestion.",
+    ],
+  },
+  7: {
+    title: "Mobilizing Communities & Tracking Defaulters",
+    summary: "How will you announce sessions and follow up on missed doses?",
+    bullets: [
+      "Engage traditional chiefs, church/mosque leaders, and women's groups to announce session dates.",
+      "Select your defaulter tracing channels: tickler box reminders, CHV home visits, or SMS alerts.",
+    ],
+  },
+  8: {
+    title: "Arranging Transport & Fuel",
+    summary: "How will your health workers travel to each outreach location?",
+    bullets: [
+      "Select the realistic mode of travel: foot walking, bicycle, motorbike, 4WD vehicle, or boat.",
+      "Estimate round-trip distance (km) and fuel consumption so travel expenses can be reimbursed accurately.",
+    ],
+  },
+  9: {
+    title: "Planning Operational Budget",
+    summary: "What operational funds are needed to execute this quarterly microplan?",
+    bullets: [
+      "Itemize real operational costs: outreach transport fuel, volunteer allowances, training, and ice packs.",
+      "Specify funding sources: Ministry of Health, Gavi, WHO, UNICEF, or local health grants.",
+    ],
+  },
+  10: {
+    title: "Supportive Supervision Schedule",
+    summary: "When will the in-charge or district mentor visit your immunization post?",
+    bullets: [
+      "Plan at least one supportive supervision visit per quarter to review technique and cold chain management.",
+      "Document the supervisor's name and planned checklist to ensure ongoing quality improvement.",
+    ],
+  },
+  11: {
+    title: "Reviewing & Submitting Your Plan",
+    summary: "Is your microplan complete and ready for district approval?",
+    bullets: [
+      "Review the automated readiness indicators below to verify session dates, vaccines, and budget items.",
+      "Submitting notifies the District Health Management Team (DHMT) for review and formal approval.",
+    ],
+  },
+  12: {
+    title: "Monitoring Quarterly Progress",
+    summary: "Track actual doses administered against your planned targets.",
+    bullets: [
+      "Plot cumulative monthly doses on the WHO Monitoring Chart to observe your performance curve.",
+      "Compare DTP1 access against DTP3 retention to proactively detect and address dropout trends.",
+    ],
+  },
+};
+
+export const STEP_RED_COMPONENTS: Record<number, { component: number; name: string; badge: string }> = {
+  1: { component: 2, name: "Reaching All Target Populations", badge: "RED Component 2" },
+  2: { component: 2, name: "Reaching All Target Populations", badge: "RED Component 2" },
+  3: { component: 2, name: "Reaching All Target Populations", badge: "RED Component 2" },
+  4: { component: 1, name: "Planning & Resource Management", badge: "RED Component 1" },
+  5: { component: 1, name: "Workforce & Operational Teams", badge: "RED Component 1" },
+  6: { component: 1, name: "Logistics & Cold Chain Bundling", badge: "RED Component 1" },
+  7: { component: 3, name: "Community Engagement & Mobilization", badge: "RED Component 3" },
+  8: { component: 1, name: "Operational Transport & Route Planning", badge: "RED Component 1" },
+  9: { component: 1, name: "Operational Budgeting & Financing", badge: "RED Component 1" },
+  10: { component: 4, name: "Supportive Supervision", badge: "RED Component 4" },
+  11: { component: 5, name: "Monitoring for Action & Endorsement", badge: "RED Component 5" },
+  12: { component: 5, name: "Regulatory Compliance & Certification", badge: "RED Component 5" },
+};
 
 export const ANTIGENS: Array<{ name: string; doses: number; wastage: number }> = [
   { name: "BCG", doses: 1, wastage: 40 },
@@ -264,6 +431,104 @@ export function WhatToDo({ bullets }: { bullets: string[] }) {
     </div>
   );
 }
+
+export function UnifiedStepGuide({
+  active,
+  stepDef,
+}: {
+  active: number;
+  stepDef: StepDef;
+}) {
+  const [isOpen, setIsOpen] = useState(true);
+  const nurseTip = STEP_NURSE_TIPS[active];
+
+  const guideTitle = nurseTip?.title || `Step ${stepDef.id}: ${stepDef.title}`;
+  const guidingQuestion = nurseTip?.summary;
+  const operationalActions = stepDef.whatToDo || [];
+  const clinicalTips = nurseTip?.bullets || [];
+
+  return (
+    <div
+      className="rounded-xl border border-blue-500/25 bg-blue-500/5 dark:border-blue-400/20 dark:bg-blue-950/20 shadow-xs transition-all text-xs text-foreground"
+      data-testid="unified-step-guide"
+    >
+      <div className="flex items-center justify-between p-3 pb-2 gap-2 border-b border-blue-500/10 dark:border-blue-400/10">
+        <div className="flex items-center gap-2 font-semibold text-blue-900 dark:text-blue-200 min-w-0">
+          <Sparkles className="h-4 w-4 text-blue-600 dark:text-blue-400 shrink-0" />
+          <span className="truncate">{guideTitle}</span>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <Badge
+            variant="outline"
+            className="text-[10px] font-medium border-blue-500/30 text-blue-800 dark:text-blue-300 bg-blue-500/10 uppercase tracking-wider py-0 h-5"
+          >
+            Step Guide
+          </Badge>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => setIsOpen(!isOpen)}
+            className="h-6 px-1.5 text-[11px] text-blue-800 hover:text-blue-950 dark:text-blue-300 dark:hover:text-blue-100 hover:bg-blue-500/10"
+            aria-label={isOpen ? "Collapse guide" : "Expand guide"}
+            data-testid="button-toggle-guide"
+          >
+            {isOpen ? (
+              <>
+                <ChevronUp className="h-3.5 w-3.5 mr-0.5" />
+                <span className="hidden sm:inline">Hide</span>
+              </>
+            ) : (
+              <>
+                <ChevronDown className="h-3.5 w-3.5 mr-0.5" />
+                <span className="hidden sm:inline">Show Guide</span>
+              </>
+            )}
+          </Button>
+        </div>
+      </div>
+
+      {isOpen && (
+        <div className="p-3 pt-2.5 space-y-2.5">
+          {guidingQuestion && (
+            <p className="font-medium text-blue-950 dark:text-blue-100 leading-snug">
+              {guidingQuestion}
+            </p>
+          )}
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-0.5">
+            {operationalActions.length > 0 && (
+              <div className="space-y-1">
+                <span className="text-[11px] font-semibold text-blue-950/80 dark:text-blue-200/80 uppercase tracking-wide flex items-center gap-1">
+                  What to do
+                </span>
+                <ul className="list-disc list-outside pl-4 space-y-1 text-muted-foreground text-[11px] leading-relaxed">
+                  {operationalActions.map((action, i) => (
+                    <li key={`action-${i}`}>{action}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {clinicalTips.length > 0 && (
+              <div className="space-y-1">
+                <span className="text-[11px] font-semibold text-blue-950/80 dark:text-blue-200/80 uppercase tracking-wide flex items-center gap-1">
+                  Clinical & Planning Tips
+                </span>
+                <ul className="list-disc list-outside pl-4 space-y-1 text-muted-foreground text-[11px] leading-relaxed">
+                  {clinicalTips.map((tip, i) => (
+                    <li key={`tip-${i}`}>{tip}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 
 // Task #101 / #130 - context the wizard needs to send the user back to a
 // village session once the microplan exists. Persisted to sessionStorage so
@@ -329,6 +594,20 @@ export type ExcludedVillageDetail = {
   reason: string | null;
 };
 
+function formatApprovalDateTime(dateVal?: string | Date | null): string {
+  if (!dateVal) return "Not recorded";
+  const d = new Date(dateVal);
+  if (isNaN(d.getTime())) return "Not recorded";
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  }).format(d);
+}
+
 // --- Page -----------------------------------------------------------------
 // Props:
 //   prePlanType: when the route already declares the intent (e.g.
@@ -344,10 +623,12 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
   const { toast } = useToast();
   const [, setLocation] = useLocation();
 
-  const [active, setActive] = useState(1);
+  const requestedStep = typeof window === "undefined" ? 1 : Math.min(12, Math.max(1, Number(new URLSearchParams(window.location.search).get("step")) || 1));
+  const [active, setActive] = useState(requestedStep);
   const [returnToSummary, setReturnToSummary] = useState(false);
   const [microplanId, setMicroplanId] = useState<number | null>(null);
   const [showConfirmation, setShowConfirmation] = useState(false);
+  const [wizardViewMode, setWizardViewMode] = useState<"guided" | "red_worksheet">("guided");
 
   // --- Plan type (routine vs SIA campaign) ------------------------------
   // The wizard is the same template for both flows; only the planType and
@@ -383,6 +664,11 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
     if (typeof window === "undefined") return null;
     return new URLSearchParams(window.location.search);
   }, []);
+  const lifeCourseTarget = {
+    groupId: initialQueryParams?.get("targetGroupId") || "",
+    population: Number(initialQueryParams?.get("targetPopulation")) || 0,
+  };
+  const consultationProposalId = initialQueryParams?.get("consultationId") || "";
   const queryFacilityId = (() => {
     const raw = initialQueryParams?.get("facilityId");
     const n = raw == null ? NaN : Number(raw);
@@ -444,8 +730,8 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
       return;
     }
     setMicroplanId(null);
-    setActive(1);
-  }, [routeIdRaw]);
+    setActive(requestedStep);
+  }, [routeIdRaw, requestedStep]);
 
   // Sync facility from user when it arrives - but never override an explicit
   // ?facilityId= prefill coming from the village pin (Task #101).
@@ -488,7 +774,77 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
     setLocation(`/sessions/microplan/${microplanId}?${qs.toString()}`);
   };
 
-  // --- Data fetches -------------------------------------------------------
+  const { data: allMicroplans } = useQuery<Microplan[]>({
+    queryKey: ["/api/microplans"],
+  });
+  const previousApprovedPlans = useMemo(() => {
+    if (!facilityId || !allMicroplans) return [];
+    return allMicroplans
+      .filter((mp) => mp.facilityId === facilityId && (mp.status === "approved" || mp.status === "auto_approved") && mp.id !== microplanId)
+      .sort((a, b) => (b.year * 10 + b.quarter) - (a.year * 10 + a.quarter));
+  }, [facilityId, allMicroplans, microplanId]);
+
+  const [copyingPrevious, setCopyingPrevious] = useState(false);
+  async function handleCopyFromPrevious(sourceId: number) {
+    setCopyingPrevious(true);
+    try {
+      const res = await fetch(`/api/microplans/${sourceId}/hydration`, { credentials: "include" });
+      if (!res.ok) throw new Error("Could not load previous microplan data");
+      const prevData: MicroplanHydration = await res.json();
+
+      // 1. Copy communities
+      if (Array.isArray(prevData.population) && prevData.population.length > 0) {
+        const mapped = prevData.population.map((p: any, idx: number) => ({
+          rowId: `community-copy-${idx + 1}-${Date.now()}`,
+          villageId: p.villageId,
+          name: p.villageName || p.name || `Community ${idx + 1}`,
+          type: (p.settlementType as any) || "village",
+          targetPopulation: String(p.targetPopulation || "0"),
+          source: (p.source as any) || "hmis",
+          strategy: (p.strategy as any) || "static",
+          focalPersonName: p.focalPersonName || "",
+          focalPersonPhone: p.focalPersonPhone || "",
+          focalChvId: p.focalChvId || null,
+          distanceToFacility: p.distanceKm || p.distanceToFacility || null,
+          communicationContactMade: true,
+          outsideFollowUpCheck: true,
+          saved: false,
+        }));
+        setCommunities(mapped);
+      }
+
+      // 2. Copy risk / HTR scores if present
+      if (Array.isArray(prevData.htrScores) && prevData.htrScores.length > 0) {
+        setRisk((prev) =>
+          prev.map((r) => {
+            const match = prevData.htrScores.find((h: any) => h.villageId === r.villageId);
+            if (!match) return r;
+            return {
+              ...r,
+              distance: match.distanceScore ?? r.distance,
+              terrain: match.terrainScore ?? r.terrain,
+              season: match.seasonalScore ?? r.season,
+              insecurity: match.insecurityScore ?? r.insecurity,
+            };
+          })
+        );
+      }
+
+      toast({
+        title: "Baseline data copied",
+        description: "Community roster, distances, and contact details copied from previous approved plan.",
+      });
+    } catch (err: any) {
+      toast({
+        title: "Could not copy previous plan",
+        description: err.message || "Failed to fetch previous plan data",
+        variant: "destructive",
+      });
+    } finally {
+      setCopyingPrevious(false);
+    }
+  }
+
   const { data: facilities } = useQuery<Facility[]>({
     queryKey: ["/api/facilities"],
   });
@@ -787,18 +1143,190 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
   }, [villages, facility, excludedVillageIds]);
 
   // --- Microplan ensure (idempotent via in-flight ref) -------------------
+  const existingPeriodPlan = useMemo(() => {
+    if (microplanId || !facilityId) return null;
+    const pt = planType === "campaign" ? "sia_campaign" : "facility_routine";
+    return (allMicroplans ?? []).find(
+      (p) =>
+        Number(p.facilityId) === Number(facilityId) &&
+        (p.planType === pt ||
+          (planType === "campaign"
+            ? String(p.planType).includes("campaign")
+            : !String(p.planType).includes("campaign"))) &&
+        Number(p.year) === Number(year) &&
+        Number(p.quarter) === Number(quarter) &&
+        !["rejected", "archived", "superseded"].includes(String(p.status ?? "").toLowerCase())
+    );
+  }, [allMicroplans, microplanId, facilityId, planType, year, quarter]);
+
+  // Calculate period status, remaining open quarters, and next-year planning availability for this facility
+  const currentCalendarYear = useMemo(() => new Date().getFullYear(), []);
+  const currentCalendarQuarter = useMemo(() => currentQuarter(), []);
+  const isQ3OrLater = currentCalendarQuarter >= 3;
+
+  const facilityPeriodAvailability = useMemo(() => {
+    const isCampaign = planType === "campaign";
+    const pt = isCampaign ? "sia_campaign" : "facility_routine";
+
+    // All active or draft plans for this facility and type
+    const facilityPlans = (allMicroplans ?? []).filter(
+      (p) =>
+        Number(p.facilityId) === Number(facilityId) &&
+        (isCampaign ? String(p.planType).includes("campaign") : !String(p.planType).includes("campaign")) &&
+        !["rejected", "archived", "superseded"].includes(String(p.status ?? "").toLowerCase())
+    );
+
+    // Available years: current year, next year (always available, especially in Q3/Q4), and previous year
+    const availableYears = [currentCalendarYear, currentCalendarYear + 1];
+
+    const quartersMeta: Record<number, { label: string; months: string }> = {
+      1: { label: "Q1", months: "Jan – Mar" },
+      2: { label: "Q2", months: "Apr – Jun" },
+      3: { label: "Q3", months: "Jul – Sep" },
+      4: { label: "Q4", months: "Oct – Dec" },
+    };
+
+    const quartersByYear: Record<
+      number,
+      Array<{
+        quarter: number;
+        label: string;
+        months: string;
+        existingPlan: Microplan | null;
+        isAvailable: boolean;
+        isRecommended: boolean;
+      }>
+    > = {};
+
+    let recommendedPeriod: { year: number; quarter: number } | null = null;
+
+    for (const y of availableYears) {
+      quartersByYear[y] = [];
+      for (let q = 1; q <= 4; q++) {
+        const plan = facilityPlans.find((p) => Number(p.year) === y && Number(p.quarter) === q) || null;
+        const isAvailable = !plan;
+
+        let isRec = false;
+        if (isAvailable && !recommendedPeriod) {
+          // If current year: prioritize upcoming quarters (>= current quarter)
+          if (y === currentCalendarYear && q >= currentCalendarQuarter) {
+            isRec = true;
+            recommendedPeriod = { year: y, quarter: q };
+          } else if (y === currentCalendarYear + 1 && isQ3OrLater) {
+            // If in Q3/Q4 or remaining quarters in current year are taken
+            isRec = true;
+            recommendedPeriod = { year: y, quarter: q };
+          }
+        }
+
+        quartersByYear[y].push({
+          quarter: q,
+          label: quartersMeta[q].label,
+          months: quartersMeta[q].months,
+          existingPlan: plan,
+          isAvailable,
+          isRecommended: isRec,
+        });
+      }
+    }
+
+    // Fallback recommendation if upcoming quarters were filled: pick earliest open quarter in available years
+    if (!recommendedPeriod) {
+      for (const y of availableYears) {
+        const firstOpen = quartersByYear[y]?.find((item) => item.isAvailable);
+        if (firstOpen) {
+          firstOpen.isRecommended = true;
+          recommendedPeriod = { year: y, quarter: firstOpen.quarter };
+          break;
+        }
+      }
+    }
+
+    return {
+      availableYears,
+      quartersByYear,
+      recommendedPeriod,
+      totalExistingPlans: facilityPlans.length,
+    };
+  }, [allMicroplans, facilityId, planType, currentCalendarYear, currentCalendarQuarter, isQ3OrLater]);
+
+  // Automatically switch to the next available period when a conflict is detected on new microplans
+  const lastResolvedConflictKey = useRef<string | null>(null);
+  useEffect(() => {
+    if (microplanId || !facilityId) return;
+    if (!existingPeriodPlan) return;
+
+    const conflictKey = `${facilityId}-${year}-${quarter}-${planType}`;
+    if (lastResolvedConflictKey.current === conflictKey) return;
+
+    if (facilityPeriodAvailability.recommendedPeriod) {
+      const { year: recY, quarter: recQ } = facilityPeriodAvailability.recommendedPeriod;
+      if (recY !== year || recQ !== quarter) {
+        lastResolvedConflictKey.current = conflictKey;
+        setYear(recY);
+        setQuarter(recQ);
+
+        const fac = facilities?.find((f) => f.id === facilityId);
+        const facName = fac?.name?.trim();
+        const isCampaign = planType === "campaign";
+        const autoName = `${facName ? `${facName} — ` : ""}${isCampaign ? "SIA" : "Routine"} microplan Q${recQ} ${recY}`;
+        if (!name || name.includes("microplan Q") || name.includes("Microplan Q")) {
+          setName(autoName);
+        }
+      }
+    }
+  }, [
+    microplanId,
+    facilityId,
+    existingPeriodPlan,
+    facilityPeriodAvailability,
+    year,
+    quarter,
+    planType,
+    facilities,
+    name,
+  ]);
+
+  const handleSelectPeriod = (newYear: number, newQuarter: number) => {
+    setYear(newYear);
+    setQuarter(newQuarter);
+    const fac = facilities?.find((f) => f.id === facilityId);
+    const facName = fac?.name?.trim();
+    const isCampaign = planType === "campaign";
+    const autoName = `${facName ? `${facName} — ` : ""}${isCampaign ? "SIA" : "Routine"} microplan Q${newQuarter} ${newYear}`;
+    if (!name || name.includes("microplan Q") || name.includes("Microplan Q")) {
+      setName(autoName);
+    }
+  };
+
   const ensureInFlight = useRef<Promise<number> | null>(null);
-  const ensureMicroplan = async (): Promise<number> => {
+  const ensureMicroplan = async (opts?: { silent?: boolean }): Promise<number> => {
     if (microplanId) return microplanId;
     if (ensureInFlight.current) return ensureInFlight.current;
     if (!facilityId) throw new Error("Pick a facility first.");
+    if (existingPeriodPlan) {
+      const err = new Error(
+        `A microplan already exists for this facility and period (Q${quarter} ${year}): "${existingPeriodPlan.name}". Only one active versioned plan is permitted per period.`
+      );
+      if (!opts?.silent) {
+        toast({
+          title: "Period conflict",
+          description: err.message,
+          variant: "destructive",
+        });
+      }
+      throw err;
+    }
     const p = (async () => {
       const isCampaign = planType === "campaign";
+      const fac = facilities?.find((f) => f.id === facilityId);
+      const facName = fac?.name?.trim();
+      const defaultPlanName = `${facName ? `${facName} — ` : ""}${isCampaign ? "SIA" : "Routine"} microplan Q${quarter} ${year}`;
       const created = await apiRequest<Microplan>("POST", "/api/microplans", {
         facilityId,
         name:
           name.trim() ||
-          `${isCampaign ? "SIA" : "Routine"} microplan Q${quarter} ${year}`,
+          defaultPlanName,
         planType: isCampaign ? "sia_campaign" : "facility_routine",
         year,
         quarter,
@@ -813,12 +1341,27 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
           : {}),
       });
       setMicroplanId(created.id);
+      try {
+        const basePath = isCampaign ? "/microplans/campaigns" : "/microplans/routine";
+        window.history.replaceState(null, "", `${basePath}/${created.id}`);
+      } catch {
+        // ignore history state error
+      }
       queryClient.invalidateQueries({ queryKey: ["/api/microplans"] });
       return created.id;
     })();
     ensureInFlight.current = p;
     try {
       return await p;
+    } catch (err: any) {
+      if ((err?.message?.includes("already exists") || err?.status === 409) && !opts?.silent) {
+        toast({
+          title: "Period conflict",
+          description: err.message || "A microplan already exists for this facility and period.",
+          variant: "destructive",
+        });
+      }
+      throw err;
     } finally {
       ensureInFlight.current = null;
     }
@@ -826,7 +1369,53 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
 
   const patchMicroplan = async (id: number, patch: Record<string, unknown>) => {
     await apiRequest("PATCH", `/api/microplans/${id}`, patch);
+    queryClient.invalidateQueries({ queryKey: ["/api/microplans"] });
     queryClient.invalidateQueries({ queryKey: ["/api/microplans", id] });
+    queryClient.invalidateQueries({ queryKey: ["/api/microplans", id, "hydration"] });
+  };
+
+  // Versioning: trigger draft_closed version snapshot when leaving/closing the draft plan
+  useEffect(() => {
+    if (!microplanId || microplan?.status !== "draft") return;
+    const handleClose = () => {
+      const url = `/api/microplans/${microplanId}/close`;
+      if (typeof navigator !== "undefined" && navigator.sendBeacon) {
+        navigator.sendBeacon(url);
+      } else {
+        fetch(url, { method: "POST", credentials: "include", keepalive: true }).catch(() => {});
+      }
+    };
+    window.addEventListener("beforeunload", handleClose);
+    return () => {
+      window.removeEventListener("beforeunload", handleClose);
+      handleClose();
+    };
+  }, [microplanId, microplan?.status]);
+
+  const [wizardRenameOpen, setWizardRenameOpen] = useState(false);
+  const [wizardRenameValue, setWizardRenameValue] = useState("");
+  const [wizardRenameBusy, setWizardRenameBusy] = useState(false);
+
+  const handleWizardRename = async () => {
+    if (!microplanId || !wizardRenameValue.trim()) return;
+    setWizardRenameBusy(true);
+    try {
+      await patchMicroplan(microplanId, { name: wizardRenameValue.trim() });
+      setName(wizardRenameValue.trim());
+      toast({
+        title: "Microplan renamed",
+        description: `Plan renamed to "${wizardRenameValue.trim()}".`,
+      });
+      setWizardRenameOpen(false);
+    } catch (e: any) {
+      toast({
+        title: "Rename failed",
+        description: e?.message ?? String(e),
+        variant: "destructive",
+      });
+    } finally {
+      setWizardRenameBusy(false);
+    }
   };
 
   const [sessionIdMap, setSessionIdMap] = useState<Record<string, number>>({});
@@ -891,6 +1480,15 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
     denominatorStatus: "draft" | "ready" | "needs_review";
     denominatorVersion: string;
     denominatorOverrideReason: string;
+    denominatorSourceName: string;
+    denominatorExtractedAt: string;
+    denominatorTotalPopulation: string;
+    denominatorUnder5Population: string;
+    denominatorPregnantWomen: string;
+    denominatorMalePopulation: string;
+    denominatorFemalePopulation: string;
+    denominatorRatios: PopulationRatios;
+    denominatorDataQualityFlags: string[];
     // SIA-specific raw counts
     vaccinated: string;    // Total vaccinated (SIA)
     targetSIA: string;     // SIA target population
@@ -918,6 +1516,15 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
     denominatorStatus: "draft",
     denominatorVersion: "v1",
     denominatorOverrideReason: "",
+    denominatorSourceName: "",
+    denominatorExtractedAt: "",
+    denominatorTotalPopulation: "",
+    denominatorUnder5Population: "",
+    denominatorPregnantWomen: "",
+    denominatorMalePopulation: "",
+    denominatorFemalePopulation: "",
+    denominatorRatios: populationRatios({}),
+    denominatorDataQualityFlags: [],
     vaccinated: "",
     targetSIA: "",
     siaVaccineCoverage: "",
@@ -976,6 +1583,12 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
     // Population columns - dual source
     gridPop?: string;          // WorldPop / gridded raster estimate (auto-fetched)
     surveyPop?: string;        // NSO / HMIS / Survey / Census (manual entry)
+    // Vaccination / Immunization Post (RED Component 2 Delivery Site)
+    outreachPostName?: string;
+    outreachLatitude?: string | number | null;
+    outreachLongitude?: string | number | null;
+    vaccinationPostType?: string;
+    vaccinationPostLandmark?: string;
   };
   const [communities, setCommunities] = useState<CommunityRow[]>([]);
   const lastCommunityBalanceSignature = useRef<string | null>(null);
@@ -1076,20 +1689,26 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
   // community population sources so Step 2 does not ask users to retype data.
   useEffect(() => {
     if (!communities.length) return;
+    const ratios = coverage.denominatorRatios ?? populationRatios({});
+    const facilityTotal = planningNumber(coverage.denominatorTotalPopulation);
+    const facilityTarget = planningNumber(coverage.targetInfants);
     setCommunities((prev) => {
       let changed = false;
       const next = prev.map((row) => {
         const target = planningNumber(row.targetPopulation);
         const sourceTotal = planningNumber(row.surveyPop ?? row.totalCatchmentPopulation ?? row.gridPop);
-        const estimatedTotal = sourceTotal || (target > 0 ? Math.round(target / 0.04) : 0);
-        const estimatedUnder5 = estimatedTotal > 0 ? Math.round(estimatedTotal * 0.17) : (target > 0 ? target * 5 : 0);
+        const allocatedTotal = facilityTotal > 0 && facilityTarget > 0 && target > 0
+          ? Math.round((target / facilityTarget) * facilityTotal)
+          : 0;
+        const estimatedTotal = sourceTotal || allocatedTotal || (target > 0 ? Math.round(target / ratios.under1) : 0);
+        const cohorts = disaggregatePopulation(estimatedTotal, ratios);
         const patch: Partial<CommunityRow> = {};
-        if ((!row.totalCatchmentPopulation || Number(row.totalCatchmentPopulation) <= 0) && estimatedTotal > 0) {
+        if ((coverage.denominatorSource === "worldpop" || !row.totalCatchmentPopulation || Number(row.totalCatchmentPopulation) <= 0) && estimatedTotal > 0 && Number(row.totalCatchmentPopulation || 0) !== cohorts.totalPopulation) {
           patch.totalCatchmentPopulation = String(estimatedTotal);
           if (!row.surveyPop && sourceTotal) patch.surveyPop = String(sourceTotal);
         }
-        if ((!row.under5Population || Number(row.under5Population) <= 0) && estimatedUnder5 > 0) {
-          patch.under5Population = String(estimatedUnder5);
+        if ((coverage.denominatorSource === "worldpop" || !row.under5Population || Number(row.under5Population) <= 0) && cohorts.under5Population > 0 && Number(row.under5Population || 0) !== cohorts.under5Population) {
+          patch.under5Population = String(cohorts.under5Population);
         }
         if (Object.keys(patch).length === 0) return row;
         changed = true;
@@ -1097,7 +1716,7 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
       });
       return changed ? next : prev;
     });
-  }, [communities.map((row) => [row.rowId, row.targetPopulation, row.surveyPop ?? "", row.gridPop ?? "", row.totalCatchmentPopulation ?? "", row.under5Population ?? ""].join(":")).join("|")]);
+  }, [coverage.denominatorSource, coverage.denominatorTotalPopulation, coverage.targetInfants, JSON.stringify(coverage.denominatorRatios), communities.map((row) => [row.rowId, row.targetPopulation, row.surveyPop ?? "", row.gridPop ?? "", row.totalCatchmentPopulation ?? "", row.under5Population ?? ""].join(":")).join("|")]);
   useEffect(() => {
     const total = communities.reduce((sum, row) => sum + (parseInt(row.targetPopulation || "0", 10) || 0), 0);
     if (total <= 0) return;
@@ -1117,15 +1736,18 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
       prev.map(c => {
         const hit = dbPopulation.find(p => p.villageId === c.villageId);
         if (!hit) return c;
+        const ratios = coverage.denominatorRatios ?? populationRatios({});
+        const cohorts = disaggregatePopulation(hit.totalPopulation, ratios);
         return {
           ...c,
-          targetPopulation: String(hit.totalPopulation ?? c.targetPopulation),
-          under5Population: hit.under5Population != null ? String(hit.under5Population) : c.under5Population,
+          targetPopulation: cohorts.totalPopulation > 0 ? String(cohorts.under1Population) : c.targetPopulation,
+          under5Population: cohorts.totalPopulation > 0 ? String(cohorts.under5Population) : c.under5Population,
           totalCatchmentPopulation: hit.totalPopulation != null ? String(hit.totalPopulation) : c.totalCatchmentPopulation,
+          gridPop: hit.source === "worldpop" && hit.totalPopulation != null ? String(hit.totalPopulation) : c.gridPop,
         };
       })
     );
-  }, [microplanId, dbPopulation, communities.length]);
+  }, [microplanId, dbPopulation, communities.length, JSON.stringify(coverage.denominatorRatios)]);
   // Initial seed from facility villages (only when there are no saved
   // communities to hydrate). Population merge happens in a later effect.
   useEffect(() => {
@@ -1169,6 +1791,12 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
         travelTimeMinutes: (v as any).travelTimeMinutes ?? undefined,
         gridPop: (v as any).griddedPopulation != null ? String((v as any).griddedPopulation) : undefined,
         surveyPop: (v as any).totalCatchmentPopulation != null ? String((v as any).totalCatchmentPopulation) : ((v as any).population != null ? String((v as any).population) : undefined),
+        // Vaccination Post (RED Component 2)
+        outreachPostName: (v as any).outreachPostName ?? undefined,
+        outreachLatitude: (v as any).outreachLatitude != null ? String((v as any).outreachLatitude) : undefined,
+        outreachLongitude: (v as any).outreachLongitude != null ? String((v as any).outreachLongitude) : undefined,
+        vaccinationPostType: (v as any).vaccinationPostType ?? ((v as any).metadata?.vaccinationPostType) ?? undefined,
+        vaccinationPostLandmark: (v as any).vaccinationPostLandmark ?? ((v as any).metadata?.vaccinationPostLandmark) ?? undefined,
       })),
     );
   }, [facilityVillages, communities.length, excludedReady]);
@@ -1195,19 +1823,29 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
         );
         if (!hit) return c;
         const meta = (hit.metadata as any) ?? {};
+        const ratios = coverage.denominatorRatios ?? populationRatios({});
+        const cohorts = disaggregatePopulation(hit.totalPopulation, ratios);
         return {
           ...c,
           id: hit.id,
-          targetPopulation: String(hit.totalPopulation ?? c.targetPopulation),
+          targetPopulation: cohorts.totalPopulation > 0 ? String(cohorts.under1Population) : c.targetPopulation,
+          totalCatchmentPopulation: cohorts.totalPopulation > 0 ? String(cohorts.totalPopulation) : c.totalCatchmentPopulation,
+          under5Population: cohorts.totalPopulation > 0 ? String(cohorts.under5Population) : c.under5Population,
+          gridPop: hit.source === "worldpop" && cohorts.totalPopulation > 0 ? String(cohorts.totalPopulation) : c.gridPop,
           source: (hit.source as any) ?? c.source,
           type: (meta.type as any) ?? c.type,
           strategy: (meta.strategy as any) ?? c.strategy,
+          outreachPostName: meta.outreachPostName ?? c.outreachPostName,
+          outreachLatitude: meta.outreachLatitude ?? c.outreachLatitude,
+          outreachLongitude: meta.outreachLongitude ?? c.outreachLongitude,
+          vaccinationPostType: meta.vaccinationPostType ?? c.vaccinationPostType,
+          vaccinationPostLandmark: meta.vaccinationPostLandmark ?? c.vaccinationPostLandmark,
           saved: true,
         };
       }),
     );
     hydratedRef.current.communities = true;
-  }, [microplanId, existingPopulation, communities.length]);
+  }, [microplanId, existingPopulation, communities.length, JSON.stringify(coverage.denominatorRatios)]);
 
   type RiskRow = {
     id?: number;
@@ -1269,6 +1907,7 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
     sessionType: "static" | "outreach" | "mobile";
     scheduledDate: string;
     catchUp?: boolean;
+    site?: string;
   };
   const [calendar, setCalendar] = useState<CalendarRow[]>([]);
 
@@ -1300,6 +1939,7 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
           name: trimmed || s.name || `Session ${idx + 1}`,
           sessionType: (s.sessionType as any) ?? "static",
           scheduledDate: date,
+          site: (s as any).site ?? undefined,
         });
         idMap[rowId] = s.id;
       });
@@ -1347,6 +1987,7 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
           villageId: c.villageId,
           sessionType: c.strategy,
           scheduledDate: dateValue,
+          site: c.outreachPostName || (c.strategy === "static" ? (facility?.name || "Health Facility") : `${c.name} Post`),
         });
       }
     });
@@ -1919,7 +2560,7 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
   // changed since the last save, on the first visit to a step (baseline only),
   // and while another save is in flight.
   useEffect(() => {
-    if (!facilityId) return;
+    if (!facilityId || (microplanId && microplan?.status !== "draft")) return;
     if (active < 1 || active > 10) return; // only steps with a persist path
     const snap = snapshotForStep(active);
     const saved = savedSnapshots.current[active];
@@ -1968,6 +2609,8 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     autoSaveTick,
+    microplan?.status,
+    microplanId,
     active,
     facilityId,
     coverage,
@@ -2277,6 +2920,7 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
     opts: { silent?: boolean } = {},
   ): Promise<boolean> {
     const { silent } = opts;
+    if (microplanId && microplan?.status !== "draft") return false;
     busyRef.current = true;
     setBusy(true);
     // A fresh save attempt clears any previously flagged field.
@@ -2302,7 +2946,18 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
         }
         return false;
       }
-      const mpId = await ensureMicroplan();
+      if (!microplanId && existingPeriodPlan) {
+        if (silent) {
+          return false;
+        }
+        toast({
+          title: "Period conflict",
+          description: `A microplan already exists for this facility and period (Q${quarter} ${year}): "${existingPeriodPlan.name}". Pick an available period or open the existing plan.`,
+          variant: "destructive",
+        });
+        return false;
+      }
+      const mpId = await ensureMicroplan(opts);
 
       if (step === 1) {
         const patch: Record<string, unknown> = {
@@ -2414,6 +3069,10 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
               if (officialPopulation !== undefined) villagePatch.totalCatchmentPopulation = officialPopulation ? parseInt(String(officialPopulation), 10) : null;
               if (row.gridPop !== undefined) villagePatch.griddedPopulation = row.gridPop ? parseInt(String(row.gridPop), 10) : null;
               if (row.under5Population !== undefined) villagePatch.under5Population = row.under5Population ? parseInt(String(row.under5Population), 10) : null;
+              // Vaccination / Immunization Post (RED Component 2)
+              if (row.outreachPostName !== undefined) villagePatch.outreachPostName = row.outreachPostName || null;
+              if (row.outreachLatitude !== undefined) villagePatch.outreachLatitude = row.outreachLatitude ? parseFloat(String(row.outreachLatitude)) : null;
+              if (row.outreachLongitude !== undefined) villagePatch.outreachLongitude = row.outreachLongitude ? parseFloat(String(row.outreachLongitude)) : null;
               if (Object.keys(villagePatch).length > 0) {
                 await apiRequest("PATCH", `/api/villages/${vid}`, villagePatch);
               }
@@ -2439,6 +3098,10 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
           if (!vid) continue;
           const target = parseInt(row.targetPopulation || "0", 10);
           if (target <= 0) continue;
+          const ratios = coverage.denominatorRatios ?? populationRatios({});
+          const recordedTotal = planningNumber(row.gridPop ?? row.surveyPop ?? row.totalCatchmentPopulation);
+          const totalPopulation = recordedTotal || Math.round(target / ratios.under1);
+          const cohorts = disaggregatePopulation(totalPopulation, ratios);
           const clientRowId = `pop-${i}`;
           popRowIndex[clientRowId] = i;
           popItems.push({
@@ -2448,9 +3111,14 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
             facilityId,
             source: row.source,
             year,
-            totalPopulation: target,
+            totalPopulation: cohorts.totalPopulation,
+            under1Population: target,
+            under5Population: cohorts.under5Population,
+            pregnantWomen: cohorts.pregnantWomen,
+            malePopulation: cohorts.malePopulation,
+            femalePopulation: cohorts.femalePopulation,
             approvalStatus: "draft",
-                        metadata: {
+            metadata: {
               strategy: row.strategy,
               type: row.type,
               focalPersonName: row.focalPersonName || null,
@@ -2462,7 +3130,14 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
               communicationContactMade: !!row.communicationContactMade,
               outsideFollowUpCheck: !!row.outsideFollowUpCheck,
               totalCatchmentPopulation: row.totalCatchmentPopulation ?? null,
-              under5Population: row.under5Population ?? null,
+              under5Population: cohorts.under5Population,
+              cohortRatios: ratios,
+              denominatorScenarioId: coverage.denominatorScenarioId || null,
+              outreachPostName: row.outreachPostName || null,
+              outreachLatitude: row.outreachLatitude != null ? String(row.outreachLatitude) : null,
+              outreachLongitude: row.outreachLongitude != null ? String(row.outreachLongitude) : null,
+              vaccinationPostType: row.vaccinationPostType || null,
+              vaccinationPostLandmark: row.vaccinationPostLandmark || null,
             },
           });
         }
@@ -3087,6 +3762,19 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
       // A per-row validation rejection isn't a thrown error, but we still
       // treat it as a failed save so callers don't advance past the problem.
       if (focusTarget) return false;
+
+      // Versioning: record draft_saved / draft_edited version snapshot
+      if (mpId && (!microplan || microplan.status === "draft")) {
+        const eventType = silent ? "draft_edited" : "draft_saved";
+        const reason = silent ? `Draft auto-save after editing Step ${step}` : `Draft saved on Step ${step}`;
+        apiRequest("POST", `/api/microplans/${mpId}/version-event`, {
+          eventType,
+          reason,
+        }).catch((err) => {
+          console.warn("Could not record microplan version:", err);
+        });
+      }
+
       return true;
     } catch (e: any) {
       if (!silent) {
@@ -3259,8 +3947,10 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
 
   // --- Render ------------------------------------------------------------
   const stepDef = STEPS.find((s) => s.id === active)!;
+  const { data: policyTenant } = useQuery<{ settings?: unknown }>({ queryKey: ["/api/me/tenant"] });
+  const approvalWindow = approvalEligibility(microplan?.createdAt, policyTenant?.settings);
   const status = microplan?.status ?? "draft";
-  const isReadOnly = status !== "draft";
+  const isReadOnly = Boolean(microplanId && !microplan) || status !== "draft";
   const facilityLabel = facility?.name ?? "No facility selected";
   // Facility staff (clerk + in-charge) author and submit microplans; higher
   // roles act as reviewers/approvers. national_admin is included so platform
@@ -3420,14 +4110,19 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
         message: "Calendar: No sessions have been scheduled in the calendar.",
       });
     } else {
-      const datesSeen = new Set<string>();
-      const duplicateDates = new Set<string>();
-      calendar.forEach((c) => {
+      // Track session conflict keys: date + sessionType + location/site
+      const sessionConflictMap = new Map<string, number>();
+      const trueConflicts = new Set<number>();
+      calendar.forEach((c, idx) => {
         if (c.scheduledDate) {
-          if (datesSeen.has(c.scheduledDate)) {
-            duplicateDates.add(c.scheduledDate);
+          const locKey = c.villageId != null ? `v-${c.villageId}` : (c.site || c.name || "default").trim().toLowerCase();
+          const conflictKey = `${c.scheduledDate}::${c.sessionType}::${locKey}`;
+          if (sessionConflictMap.has(conflictKey)) {
+            trueConflicts.add(idx);
+            trueConflicts.add(sessionConflictMap.get(conflictKey)!);
+          } else {
+            sessionConflictMap.set(conflictKey, idx);
           }
-          datesSeen.add(c.scheduledDate);
         }
       });
 
@@ -3440,11 +4135,11 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
             message: `Calendar: '${sessionName}' does not have a scheduled date.`,
           });
         } else {
-          if (duplicateDates.has(c.scheduledDate)) {
+          if (trueConflicts.has(idx)) {
             errors.push({
               step: 4,
               id: `calendar-date-overlap-${idx}`,
-              message: `Calendar: Overlap detected for '${sessionName}'. Multiple sessions are scheduled on ${c.scheduledDate}.`,
+              message: `Calendar: Conflict detected for '${sessionName}'. A duplicate ${c.sessionType} session for the same site is already scheduled on ${c.scheduledDate}.`,
             });
           }
           if (!isAtLeastDaysAhead(c.scheduledDate, 7)) {
@@ -3578,6 +4273,35 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
   const blockingReadinessItems = readiness?.items?.filter((item: any) => item.status === "blocking") ?? [];
   const warningReadinessItems = readiness?.items?.filter((item: any) => item.status === "warning") ?? [];
 
+  const currentPhase = PHASES.find((p) => p.stepIds.includes(active)) ?? PHASES[0];
+
+  // Microplanning readiness check card collapsed state
+  const [isReadinessCollapsed, setIsReadinessCollapsed] = useState(false);
+
+  // Phase cards collapsible state in the left rail
+  const [collapsedPhases, setCollapsedPhases] = useState<Record<number, boolean>>({});
+  const [isRailCollapsed, setIsRailCollapsed] = useState<boolean>(false);
+
+  const togglePhaseCollapse = (phaseId: number) => {
+    setCollapsedPhases((prev) => ({
+      ...prev,
+      [phaseId]: !prev[phaseId],
+    }));
+  };
+
+  const allPhasesCollapsed = PHASES.every((p) => Boolean(collapsedPhases[p.id]));
+  const toggleAllPhases = () => {
+    if (allPhasesCollapsed) {
+      setCollapsedPhases({});
+    } else {
+      const all: Record<number, boolean> = {};
+      PHASES.forEach((p) => {
+        all[p.id] = true;
+      });
+      setCollapsedPhases(all);
+    }
+  };
+
   return (
     <div className="flex h-full min-h-[calc(100vh-3.5rem)] flex-col">
       {/* Sticky header (Original line commented out to satisfy rule 1)
@@ -3615,17 +4339,175 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
                   )}
                 </Badge>
               </div>
-              <h1 className="truncate text-lg font-semibold" data-testid="wizard-title">
-                {name ||
-                  `${planType === "campaign" ? "SIA" : "Routine"} microplan Q${quarter} ${year}`}
-              </h1>
+              <div className="flex items-center gap-2">
+                <h1 className="truncate text-lg font-semibold" data-testid="wizard-title">
+                  {name ||
+                    `${planType === "campaign" ? "SIA" : "Routine"} microplan Q${quarter} ${year}`}
+                </h1>
+                {microplanId && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 px-2 gap-1 text-xs text-muted-foreground hover:text-foreground"
+                    onClick={() => {
+                      setWizardRenameValue(name || `${planType === "campaign" ? "SIA" : "Routine"} microplan Q${quarter} ${year}`);
+                      setWizardRenameOpen(true);
+                    }}
+                    title="Rename microplan"
+                    data-testid="button-wizard-rename"
+                  >
+                    <Pencil className="h-3 w-3" />
+                    Rename
+                  </Button>
+                )}
+              </div>
               <p className="text-xs text-muted-foreground">{facilityLabel}</p>
+              {facilityId && <div className="flex gap-3 text-sm mt-1">
+                <a href={`/planning-evidence?facilityId=${facilityId}${microplanId ? `&microplanId=${microplanId}` : ""}`} target="_blank" rel="noopener noreferrer">Planning evidence</a>
+                <a href={`/planning-actions?facilityId=${facilityId}`} target="_blank" rel="noopener noreferrer">Follow-up actions</a>
+              </div>}
             </div>
           </div>
-          <Badge variant={status === "draft" ? "outline" : "default"}>
-            {status}
-          </Badge>
+          <div className="flex items-center gap-2.5 flex-wrap">
+            {facilityId && microplanId && (
+              <div
+                className="inline-flex items-center rounded-lg border bg-muted/60 p-0.5 text-muted-foreground shadow-2xs"
+                data-testid="wizard-view-mode-toggle"
+              >
+                <Button
+                  type="button"
+                  variant={wizardViewMode === "guided" ? "default" : "ghost"}
+                  size="sm"
+                  onClick={() => setWizardViewMode("guided")}
+                  className={`h-7 text-xs font-semibold gap-1.5 px-3 rounded-md transition-all ${
+                    wizardViewMode === "guided" ? "shadow-xs" : "text-muted-foreground hover:text-foreground"
+                  }`}
+                  data-testid="tab-guided-wizard"
+                >
+                  <Sparkles className="h-3.5 w-3.5 text-amber-500 dark:text-amber-400" />
+                  Guided Digital Flow
+                </Button>
+                <Button
+                  type="button"
+                  variant={wizardViewMode === "red_worksheet" ? "default" : "ghost"}
+                  size="sm"
+                  onClick={() => setWizardViewMode("red_worksheet")}
+                  className={`h-7 text-xs font-semibold gap-1.5 px-3 rounded-md transition-all ${
+                    wizardViewMode === "red_worksheet" ? "shadow-xs" : "text-muted-foreground hover:text-foreground"
+                  }`}
+                  data-testid="tab-red-worksheet"
+                >
+                  <FileSpreadsheet className="h-3.5 w-3.5 text-blue-500 dark:text-blue-400" />
+                  WHO RED Formal Worksheet
+                </Button>
+              </div>
+            )}
+            <Badge variant={status === "draft" ? "outline" : "default"}>
+              {status}
+            </Badge>
+          </div>
         </div>
+        {(status === "approved" || status === "auto_approved") && (() => {
+          const audit = (microplan as any)?.approvalDetails || (hydration as any)?.approvalDetails;
+          const approvedTime = audit?.approvedDateLabel || formatApprovalDateTime(microplan?.approvedAt || (microplan as any)?.updatedAt);
+          const submittedTime = audit?.submittedDateLabel || (microplan?.submittedAt ? formatApprovalDateTime(microplan.submittedAt) : null);
+          const approver = audit?.approvedByLabel || (status === "auto_approved" ? "Automated 14-Day Policy Approval" : "Designated Health Authority");
+          const submitter = audit?.submittedByLabel;
+          const level = audit?.approvalLevelLabel || "District Level Approval";
+          const comments = audit?.comments || audit?.decisionReason;
+
+          return (
+            <div
+              className="mt-2.5 rounded-xl border border-emerald-500/35 bg-emerald-500/10 p-3.5 text-xs text-emerald-950 dark:text-emerald-100 shadow-xs space-y-2.5 transition-all"
+              data-testid="banner-approved-plan-locked"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-emerald-500/20 pb-2.5">
+                <div className="flex items-center gap-2.5">
+                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-emerald-600 text-white shadow-xs">
+                    <ShieldCheck className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-bold text-sm text-emerald-950 dark:text-emerald-100 tracking-tight">
+                        {status === "auto_approved" ? "Auto-Approved Microplan" : "Officially Approved Microplan"}
+                      </span>
+                      <Badge className="bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-semibold py-0 px-2 h-5">
+                        Endorsed & Locked
+                      </Badge>
+                      {level && (
+                        <Badge variant="outline" className="border-emerald-600/30 text-emerald-900 dark:text-emerald-200 text-[10px] h-5">
+                          {level}
+                        </Badge>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-emerald-800/90 dark:text-emerald-300/90">
+                      This microplan is fully ratified. All target cohorts, session calendars, staffing rosters, and budget allocations are locked for execution.
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setActive(11)}
+                    className="h-7 text-xs bg-white/85 dark:bg-emerald-950/50 border-emerald-500/30 text-emerald-900 dark:text-emerald-100 hover:bg-white gap-1.5 font-medium shadow-2xs"
+                    data-testid="button-view-approval-certificate"
+                  >
+                    <Eye className="h-3.5 w-3.5 text-emerald-600" />
+                    <span>View Endorsement Audit (Step 11)</span>
+                  </Button>
+                </div>
+              </div>
+
+              {/* Full Details Grid */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2.5 pt-0.5">
+                <div className="rounded-lg bg-white/70 dark:bg-emerald-950/40 border border-emerald-500/25 p-2.5 space-y-1">
+                  <span className="text-[10px] uppercase font-bold tracking-wider text-emerald-800 dark:text-emerald-300 flex items-center gap-1.5">
+                    <Calendar className="h-3 w-3 text-emerald-600" /> Date & Time Approved
+                  </span>
+                  <div className="font-semibold text-xs text-emerald-950 dark:text-emerald-50" data-testid="text-approved-datetime">
+                    {approvedTime || "Official approval recorded"}
+                  </div>
+                </div>
+
+                <div className="rounded-lg bg-white/70 dark:bg-emerald-950/40 border border-emerald-500/25 p-2.5 space-y-1">
+                  <span className="text-[10px] uppercase font-bold tracking-wider text-emerald-800 dark:text-emerald-300 flex items-center gap-1.5">
+                    <ShieldCheck className="h-3 w-3 text-emerald-600" /> Approved By
+                  </span>
+                  <div className="font-semibold text-xs text-emerald-950 dark:text-emerald-50 truncate" title={approver} data-testid="text-approved-by">
+                    {approver}
+                  </div>
+                </div>
+
+                <div className="rounded-lg bg-white/70 dark:bg-emerald-950/40 border border-emerald-500/25 p-2.5 space-y-1">
+                  <span className="text-[10px] uppercase font-bold tracking-wider text-emerald-800 dark:text-emerald-300 flex items-center gap-1.5">
+                    <Clock className="h-3 w-3 text-emerald-600" /> Submitted At
+                  </span>
+                  <div className="font-semibold text-xs text-emerald-950 dark:text-emerald-50" data-testid="text-submitted-datetime">
+                    {submittedTime || "Historical submission"}
+                  </div>
+                </div>
+
+                <div className="rounded-lg bg-white/70 dark:bg-emerald-950/40 border border-emerald-500/25 p-2.5 space-y-1">
+                  <span className="text-[10px] uppercase font-bold tracking-wider text-emerald-800 dark:text-emerald-300 flex items-center gap-1.5">
+                    <Sparkles className="h-3 w-3 text-emerald-600" /> Submitted By
+                  </span>
+                  <div className="font-semibold text-xs text-emerald-950 dark:text-emerald-50 truncate" title={submitter || facilityLabel} data-testid="text-submitted-by">
+                    {submitter || facilityLabel}
+                  </div>
+                </div>
+              </div>
+
+              {comments && (
+                <div className="rounded-lg bg-white/50 dark:bg-emerald-950/30 border border-emerald-500/20 px-3 py-2 text-[11px] flex items-start gap-2">
+                  <span className="font-bold text-emerald-900 dark:text-emerald-200 shrink-0">Approval Notes:</span>
+                  <span className="italic text-emerald-950 dark:text-emerald-100">{comments}</span>
+                </div>
+              )}
+            </div>
+          );
+        })()}
         {/* Task #101 - return-to-village banner */}
         {returnVillage && (
           <div
@@ -3691,85 +4573,335 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
       )}
       */}
 
+      {/* Gamification & Mission Readiness Bar */}
+      <div className="px-4 pt-3">
+        <MicroplanGamificationBar
+          activeStep={active}
+          onSelectStep={(step) => {
+            setActive(step);
+            if (wizardViewMode === "red_worksheet") {
+              setWizardViewMode("guided");
+            }
+          }}
+          planType={planType}
+          microplan={microplan}
+          communities={communities}
+          sessionPlans={calendar}
+          staffing={staffing}
+          budget={budget}
+          transport={transport}
+          supervision={supervision}
+        />
+      </div>
+
       {facilityId && readiness?.summary?.status !== "ready" && (
         <div className="px-4 pt-4">
           <Card className={blockingReadinessItems.length > 0 ? "border-destructive/40 bg-destructive/5" : "border-amber-300/60 bg-amber-50/70 dark:bg-amber-950/20"}>
             <CardHeader className="pb-2">
               <div className="flex flex-wrap items-start justify-between gap-2">
-                <div>
-                  <CardTitle className="text-base">Microplanning Readiness Check</CardTitle>
-                  <p className="mt-1 text-sm text-muted-foreground">
+                <div className="flex-1 min-w-[240px]">
+                  <div className="flex items-center gap-2">
+                    <CardTitle className="text-base">Microplanning Readiness Check</CardTitle>
+                    <Badge variant={blockingReadinessItems.length > 0 ? "destructive" : "outline"} className="text-xs">
+                      {blockingReadinessItems.length > 0 ? `${blockingReadinessItems.length} item(s) need fixing` : "Can continue with warnings"}
+                    </Badge>
+                  </div>
+                  <p className="mt-1 text-xs sm:text-sm text-muted-foreground">
                     VaxPlan checks reference data first so health workers do not have to retype information during planning.
                   </p>
                 </div>
-                <Badge variant={blockingReadinessItems.length > 0 ? "destructive" : "outline"}>
-                  {blockingReadinessItems.length > 0 ? `${blockingReadinessItems.length} item(s) need fixing` : "Can continue with warnings"}
-                </Badge>
+                <div className="flex items-center gap-1.5">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setIsReadinessCollapsed((prev) => !prev)}
+                    className="h-8 px-2 text-xs text-muted-foreground hover:text-foreground gap-1"
+                    title={isReadinessCollapsed ? "Expand readiness details" : "Collapse readiness details"}
+                  >
+                    {isReadinessCollapsed ? (
+                      <>
+                        <span>Show Warnings ({warningReadinessItems.length})</span>
+                        <ChevronDown className="h-3.5 w-3.5" />
+                      </>
+                    ) : (
+                      <>
+                        <span>Minimize</span>
+                        <ChevronUp className="h-3.5 w-3.5" />
+                      </>
+                    )}
+                  </Button>
+                </div>
               </div>
             </CardHeader>
-            <CardContent className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-              {[...blockingReadinessItems, ...warningReadinessItems].map((item: any) => (
-                <div key={item.key} className="rounded-md border bg-background p-3 text-sm">
-                  <div className="mb-1 flex items-center justify-between gap-2">
-                    <p className="font-medium">{item.label}</p>
-                    <Badge variant={item.status === "blocking" ? "destructive" : "outline"}>
-                      {item.status === "blocking" ? "Fix first" : "Review"}
-                    </Badge>
+            {!isReadinessCollapsed && (
+              <CardContent className="grid gap-2 md:grid-cols-2 xl:grid-cols-3 pt-1">
+                {[...blockingReadinessItems, ...warningReadinessItems].map((item: any) => (
+                  <div key={item.key} className="rounded-md border bg-background p-3 text-sm">
+                    <div className="mb-1 flex items-center justify-between gap-2">
+                      <p className="font-medium">{item.label}</p>
+                      <Badge variant={item.status === "blocking" ? "destructive" : "outline"}>
+                        {item.status === "blocking" ? "Fix first" : "Review"}
+                      </Badge>
+                    </div>
+                    <p className="text-xs text-muted-foreground">{item.message}</p>
+                    {item.actionHref && item.actionLabel && (
+                      <Button asChild variant="ghost" size="sm" className="mt-2 h-auto px-0 text-xs text-primary hover:text-primary">
+                        <Link href={item.actionHref}>{item.actionLabel}</Link>
+                      </Button>
+                    )}
                   </div>
-                  <p className="text-xs text-muted-foreground">{item.message}</p>
-                  {item.actionHref && item.actionLabel && (
-                    <Button asChild variant="ghost" size="sm" className="mt-2 h-auto px-0 text-xs text-primary hover:text-primary">
-                      <Link href={item.actionHref}>{item.actionLabel}</Link>
-                    </Button>
-                  )}
-                </div>
-              ))}
-            </CardContent>
+                ))}
+              </CardContent>
+            )}
           </Card>
         </div>
       )}
       {/* Body: stepper + content */}
-      <div className="flex flex-1 gap-4 overflow-hidden p-4">
-        {/* Left rail */}
-        <nav className="w-64 shrink-0 overflow-y-auto" aria-label="Microplan steps">
-          <ol className="space-y-1">
-            {STEPS.map((s) => {
-              const isActive = s.id === active;
-              const done = s.id < active;
-              return (
-                <li key={s.id}>
+      <div className="flex flex-1 gap-4 overflow-hidden p-2 sm:p-4">
+        {/* Left rail for desktop / large screens */}
+        <nav
+          className={`hidden lg:block shrink-0 overflow-y-auto pr-1 transition-all duration-200 ${
+            isRailCollapsed ? "w-14" : "w-72"
+          }`}
+          aria-label="Microplan operational phases"
+        >
+          {isRailCollapsed ? (
+            /* Sleek Collapsed Icon Rail */
+            <div className="flex flex-col items-center space-y-3 py-1" data-testid="wizard-rail-collapsed">
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                onClick={() => setIsRailCollapsed(false)}
+                className="h-8 w-8 rounded-lg shadow-xs"
+                title="Expand phases sidebar"
+                data-testid="button-expand-wizard-rail"
+              >
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+              {PHASES.map((phase) => {
+                const isCurrent = phase.stepIds.includes(active);
+                const phaseDone = phase.stepIds.every((id) => id < active);
+                return (
                   <button
+                    key={phase.id}
                     type="button"
-                    onClick={() => setActive(s.id)}
-                    className={`flex w-full items-start gap-2 rounded-md border px-3 py-2 text-left text-sm transition-colors ${
-                      isActive
-                        ? "border-primary bg-primary/10"
-                        : "border-transparent hover:bg-muted"
+                    onClick={() => {
+                      setIsRailCollapsed(false);
+                      setCollapsedPhases((prev) => ({ ...prev, [phase.id]: false }));
+                    }}
+                    title={`${phase.badge}: ${phase.name} (Click to expand)`}
+                    className={`flex flex-col items-center justify-center w-9 h-12 rounded-xl border transition-all text-center ${
+                      isCurrent
+                        ? "border-primary bg-primary text-primary-foreground font-bold shadow-xs"
+                        : phaseDone
+                        ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                        : "border-border/60 bg-muted/30 text-muted-foreground hover:bg-muted"
                     }`}
-                    data-testid={`step-button-${s.id}`}
+                    data-testid={`phase-collapsed-btn-${phase.id}`}
                   >
-                    {done ? (
-                      <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
-                    ) : (
-                      <Circle className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
-                    )}
-                    <span className="min-w-0">
-                      <span className="block text-xs text-muted-foreground">
-                        Step {s.id}
-                      </span>
-                      <span className="block font-medium leading-tight">
-                        {s.title}
-                      </span>
-                    </span>
+                    <span className="text-[10px] font-bold">{phase.badge}</span>
+                    <span className="text-[8px] opacity-80">{phase.stepIds.filter((id) => id < active).length}/{phase.stepIds.length}</span>
                   </button>
-                </li>
-              );
-            })}
-          </ol>
+                );
+              })}
+            </div>
+          ) : (
+            /* Full Phases Rail with Collapsible Phase Cards */
+            <div className="space-y-2.5">
+              {/* Controls: Header + Collapse All / Collapse Rail */}
+              <div className="flex items-center justify-between gap-1 px-1 mb-1">
+                <span className="font-semibold text-xs text-muted-foreground uppercase tracking-wider">
+                  Plan Phases
+                </span>
+                <div className="flex items-center gap-1">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={toggleAllPhases}
+                    className="h-6 text-[11px] px-1.5 text-muted-foreground hover:text-foreground"
+                    title={allPhasesCollapsed ? "Expand all phases" : "Collapse all phases"}
+                    data-testid="button-toggle-all-phases"
+                  >
+                    {allPhasesCollapsed ? "Expand All" : "Collapse All"}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => setIsRailCollapsed(true)}
+                    className="h-6 w-6 text-muted-foreground hover:text-foreground"
+                    title="Collapse sidebar rail"
+                    data-testid="button-collapse-wizard-rail"
+                  >
+                    <ChevronLeft className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              </div>
+
+              {PHASES.map((phase) => {
+                const phaseSteps = STEPS.filter((s) => phase.stepIds.includes(s.id));
+                const isCurrentPhase = phase.stepIds.includes(active);
+                const phaseDone = phase.stepIds.every((id) => id < active);
+                const phaseCompletedCount = phase.stepIds.filter((id) => id < active).length;
+                const isCollapsed = Boolean(collapsedPhases[phase.id]);
+
+                return (
+                  <div
+                    key={phase.id}
+                    className={`rounded-xl border transition-all p-2.5 ${
+                      isCurrentPhase
+                        ? "border-primary/50 bg-primary/5 shadow-xs"
+                        : "border-border/60 bg-muted/20"
+                    }`}
+                    data-testid={`phase-group-${phase.id}`}
+                  >
+                    {/* Collapsible Phase Card Header */}
+                    <button
+                      type="button"
+                      onClick={() => togglePhaseCollapse(phase.id)}
+                      className="flex w-full items-center justify-between gap-1.5 px-1 py-0.5 text-left rounded-lg transition-colors hover:bg-muted/40"
+                      aria-expanded={!isCollapsed}
+                      data-testid={`button-toggle-phase-${phase.id}`}
+                    >
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <span
+                          className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full uppercase tracking-wider ${
+                            isCurrentPhase
+                              ? "bg-primary text-primary-foreground font-semibold"
+                              : phaseDone
+                              ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
+                              : "bg-muted text-muted-foreground"
+                          }`}
+                        >
+                          {phase.badge}
+                        </span>
+                        <h4 className="font-semibold text-xs text-foreground truncate">
+                          {phase.name}
+                        </h4>
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <span className="text-[10px] text-muted-foreground font-medium">
+                          {phaseDone ? "Done" : `${phaseCompletedCount}/${phase.stepIds.length}`}
+                        </span>
+                        {isCollapsed ? (
+                          <ChevronRight className="h-3.5 w-3.5 text-muted-foreground transition-transform" />
+                        ) : (
+                          <ChevronDown className="h-3.5 w-3.5 text-muted-foreground transition-transform" />
+                        )}
+                      </div>
+                    </button>
+
+                    {/* Collapsible Steps List */}
+                    {!isCollapsed && (
+                      <ol className="space-y-1 mt-2 pt-1 border-t border-border/40">
+                        {phaseSteps.map((s) => {
+                          const isActive = s.id === active;
+                          const done = s.id < active;
+                          return (
+                            <li key={s.id}>
+                              <button
+                                type="button"
+                                onClick={() => setActive(s.id)}
+                                className={`flex w-full items-start gap-2 rounded-lg border px-2.5 py-1.5 text-left text-xs transition-colors ${
+                                  isActive
+                                    ? "border-primary bg-background shadow-xs font-semibold text-primary"
+                                    : "border-transparent hover:bg-background/80 text-muted-foreground hover:text-foreground"
+                                }`}
+                                data-testid={`step-button-${s.id}`}
+                              >
+                                {done ? (
+                                  <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                                ) : isActive ? (
+                                  <Circle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary fill-primary/20" />
+                                ) : (
+                                  <Circle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground/60" />
+                                )}
+                                <span className="min-w-0 flex-1">
+                                  <span className="block font-medium leading-tight">
+                                    Step {s.id}: {s.title}
+                                  </span>
+                                </span>
+                              </button>
+                            </li>
+                          );
+                        })}
+                      </ol>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </nav>
 
         {/* Step content */}
         <div className="flex flex-1 flex-col overflow-hidden">
+          {/* Small screens / Tablets Phase Carousel & Stepper (hidden on lg+) */}
+          <div className="lg:hidden mb-2.5 space-y-1.5" data-testid="mobile-phase-stepper">
+            <div className="flex items-center justify-between gap-1.5 overflow-x-auto pb-1 no-scrollbar">
+              {PHASES.map((p) => {
+                const isCurrent = p.stepIds.includes(active);
+                const isDone = p.stepIds.every((id) => id < active);
+                return (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => setActive(p.stepIds[0])}
+                    className={`flex items-center gap-1 shrink-0 rounded-lg px-2 py-1 text-xs font-medium border transition-colors ${
+                      isCurrent
+                        ? "border-primary bg-primary text-primary-foreground font-semibold shadow-xs"
+                        : isDone
+                        ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                        : "border-border/60 bg-muted/30 text-muted-foreground hover:bg-muted"
+                    }`}
+                  >
+                    <span>{p.badge}</span>
+                    <span className="truncate max-w-[100px]">{p.name}</span>
+                  </button>
+                );
+              })}
+            </div>
+            {/* Step selector dropdown for small screens */}
+            <div className="flex items-center justify-between gap-2 rounded-lg border bg-card p-1.5 shadow-2xs">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-7 w-7 p-0 shrink-0"
+                disabled={active <= 1}
+                onClick={() => setActive((prev) => Math.max(1, prev - 1))}
+                aria-label="Previous step"
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <Select value={String(active)} onValueChange={(v) => setActive(Number(v))}>
+                <SelectTrigger className="h-7 text-xs border-0 bg-transparent font-medium py-0 px-2 justify-center gap-1 flex-1 truncate">
+                  <span className="truncate">Step {stepDef.id}: {stepDef.title}</span>
+                </SelectTrigger>
+                <SelectContent>
+                  {STEPS.map((s) => (
+                    <SelectItem key={s.id} value={String(s.id)} className="text-xs">
+                      Step {s.id}: {s.title}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-7 w-7 p-0 shrink-0"
+                disabled={active >= 12}
+                onClick={() => setActive((prev) => Math.min(12, prev + 1))}
+                aria-label="Next step"
+              >
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
           {active === 11 && showConfirmation && status !== "draft" ? (
             <SubmissionConfirmation
               microplan={microplan ?? null}
@@ -3785,14 +4917,76 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
               onViewDetails={() => setShowConfirmation(false)}
               onClose={() => setLocation(planType === "campaign" ? "/microplans/campaigns" : "/microplans/routine")}
             />
+          ) : wizardViewMode === "red_worksheet" && facilityId && microplanId ? (
+            <Card className="flex flex-1 flex-col overflow-hidden" data-testid="card-who-red-worksheet-mode">
+              <CardHeader className="border-b p-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div>
+                    <CardTitle className="text-base flex items-center gap-2">
+                      <FileSpreadsheet className="h-4 w-4 text-primary" />
+                      WHO Reach Every District (RED) Formal Worksheet
+                    </CardTitle>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Authoritative 10-step facility microplanning tool (WHO guidelines pages 9–37). Pre-populated directly from health facility records.
+                    </p>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setWizardViewMode("guided")}
+                    className="text-xs h-8 gap-1.5 shrink-0"
+                    data-testid="button-return-to-guided"
+                  >
+                    <Sparkles className="h-3.5 w-3.5 text-primary" />
+                    Return to Guided Flow
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent className="flex-1 overflow-y-auto p-4">
+                <RedMicroplanningWorksheet
+                  key={`${facilityId}:${microplanId}`}
+                  facilityId={facilityId}
+                  microplanId={microplanId}
+                  readOnly={isReadOnly}
+                  onOpenStep={(step) => {
+                    setActive(step);
+                    setWizardViewMode("guided");
+                  }}
+                />
+              </CardContent>
+            </Card>
           ) : (
             <Card className="flex flex-1 flex-col overflow-hidden">
-            <CardHeader className="border-b">
+            <CardHeader className="border-b py-3 px-3 sm:px-4">
               <div className="flex items-center justify-between gap-2">
-                <CardTitle className="text-base">
-                  Step {stepDef.id} - {stepDef.title}
-                </CardTitle>
+                <div className="flex items-center gap-2 flex-wrap min-w-0">
+                  <Badge variant="outline" className="text-[10px] font-semibold text-primary border-primary/30 bg-primary/5 uppercase tracking-wide">
+                    {currentPhase.badge}: {currentPhase.name}
+                  </Badge>
+                  {STEP_RED_COMPONENTS[active] && (
+                    <Badge variant="secondary" className="text-[10px] font-semibold bg-blue-500/10 text-blue-700 dark:text-blue-300 border-blue-500/20 gap-1">
+                      <FileSpreadsheet className="h-3 w-3" />
+                      {STEP_RED_COMPONENTS[active].badge}
+                    </Badge>
+                  )}
+                  <CardTitle className="text-base truncate">
+                    Step {stepDef.id} - {stepDef.title}
+                  </CardTitle>
+                </div>
               <div className="flex items-center gap-2">
+                {facilityId && microplanId && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setWizardViewMode("red_worksheet")}
+                    className="text-xs h-8 gap-1.5 border-blue-500/30 text-blue-700 dark:text-blue-300 hover:bg-blue-500/10 font-medium"
+                    title="View this step inside the official WHO RED Microplanning Worksheet"
+                    data-testid="button-open-red-worksheet"
+                  >
+                    <FileSpreadsheet className="h-3.5 w-3.5" />
+                    <span className="hidden sm:inline">WHO RED Matrix</span>
+                  </Button>
+                )}
                 {returnToSummary && active !== 11 && (
                   <Button
                     size="sm"
@@ -3828,7 +5022,7 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
                     size="sm"
                     variant="outline"
                     onClick={handleNext}
-                    disabled={busy || active >= 12 || !facilityId}
+                    disabled={busy || !facilityId}
                     data-testid="button-next-top"
                   >
                     {busy ? (
@@ -3841,12 +5035,15 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
 
               </div>
             </CardHeader>
-            <CardContent className="flex-1 space-y-4 overflow-y-auto p-4">
-              <WhatToDo bullets={stepDef.whatToDo} />
+            <CardContent className="flex-1 space-y-4 overflow-y-auto p-3 sm:p-4">
+              <UnifiedStepGuide active={active} stepDef={stepDef} />
+              {microplan && !approvalWindow.allowed && status !== "approved" && status !== "auto_approved" && <p className="rounded border p-3 text-sm" role="note">{approvalWindow.message}</p>}
+              {lifeCourseTarget.groupId && lifeCourseTarget.population > 0 && [4, 6].includes(active) && <div className="rounded-md border border-primary/30 bg-primary/5 p-3 text-sm" data-testid="life-course-target-context"><strong>Life-course target context:</strong> {lifeCourseTarget.population.toLocaleString()} eligible people from target group {lifeCourseTarget.groupId}. Keep this target separate from the infant denominator and use it for the applicable session or forecast rows.</div>}
+              {consultationProposalId && [4, 9].includes(active) && <div className="rounded-md border border-primary/30 bg-primary/5 p-3 text-sm" data-testid="consultation-proposal-context"><strong>Community consultation proposal:</strong> review evidence {consultationProposalId} before applying the proposed {active === 4 ? "session" : "budget"} change. Saving here uses the existing versioned microplan workflow.</div>}
 
               {/* Facility & name (always available, drives ensureMicroplan) */}
               {!microplanId && (
-                <div className="space-y-3 rounded-md border bg-muted/30 p-3">
+                <div className="space-y-4 rounded-xl border bg-card/60 p-4 shadow-xs">
                   <div
                     className={
                       errorFocus?.field === "facility"
@@ -3854,7 +5051,7 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
                         : undefined
                     }
                   >
-                    <Label className="mb-2 block">Facility</Label>
+                    <Label className="mb-2 block font-semibold text-sm">Facility</Label>
                     <FacilityCascadePicker
                       value={facilityId}
                       onChange={(id) => {
@@ -3873,8 +5070,163 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
                       </p>
                     )}
                   </div>
+
+                  {/* Planning Period & Target Cadence Selector */}
+                  {facilityId && (
+                    <div className="space-y-3 rounded-lg border bg-background/80 p-3.5" data-testid="container-period-selector">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <Calendar className="h-4 w-4 text-primary" />
+                          <span className="font-semibold text-sm">Planning Period & Target Cadence</span>
+                        </div>
+                        {isQ3OrLater && (
+                          <Badge variant="outline" className="bg-primary/10 text-primary border-primary/20 text-xs py-0.5 px-2">
+                            Q{currentCalendarQuarter} Active • {currentCalendarYear + 1} Planning Open
+                          </Badge>
+                        )}
+                      </div>
+
+                      {/* Year Selector */}
+                      <div className="flex flex-wrap items-center gap-2 pt-1">
+                        <span className="text-xs text-muted-foreground font-medium">Target Year:</span>
+                        <div className="inline-flex rounded-lg border p-0.5 bg-muted/40">
+                          {facilityPeriodAvailability.availableYears.map((y) => (
+                            <button
+                              key={y}
+                              type="button"
+                              onClick={() => {
+                                setYear(y);
+                                handleSelectPeriod(y, quarter);
+                              }}
+                              className={`px-3 py-1 text-xs font-semibold rounded-md transition-all ${
+                                year === y
+                                  ? "bg-primary text-primary-foreground shadow-xs"
+                                  : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                              }`}
+                              data-testid={`button-select-year-${y}`}
+                            >
+                              {y} {y === currentCalendarYear ? "(Current)" : "(Next Year)"}
+                            </button>
+                          ))}
+                        </div>
+                        {year === currentCalendarYear + 1 && (
+                          <span className="text-[11px] text-primary font-medium">
+                            ★ Preparing upcoming annual planning cycle
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Quarters Grid */}
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 pt-1">
+                        {(facilityPeriodAvailability.quartersByYear[year] ?? []).map((qInfo) => {
+                          const isSelected = quarter === qInfo.quarter;
+                          const hasPlan = !!qInfo.existingPlan;
+
+                          return (
+                            <button
+                              key={qInfo.quarter}
+                              type="button"
+                              onClick={() => handleSelectPeriod(year, qInfo.quarter)}
+                              className={`flex flex-col text-left p-2.5 rounded-lg border transition-all relative ${
+                                isSelected
+                                  ? hasPlan
+                                    ? "border-amber-500 bg-amber-500/10 ring-1 ring-amber-500"
+                                    : "border-primary bg-primary/10 ring-1 ring-primary"
+                                  : hasPlan
+                                  ? "border-border/60 bg-muted/20 opacity-80 hover:opacity-100"
+                                  : "border-border/80 bg-card hover:border-primary/50 hover:bg-accent/30"
+                              }`}
+                              data-testid={`button-quarter-${qInfo.quarter}-${year}`}
+                            >
+                              <div className="flex items-center justify-between w-full mb-1">
+                                <span className="font-bold text-sm">{qInfo.label}</span>
+                                {hasPlan ? (
+                                  <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30">
+                                    Has Plan
+                                  </Badge>
+                                ) : qInfo.isRecommended ? (
+                                  <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30">
+                                    Recommended
+                                  </Badge>
+                                ) : (
+                                  <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-blue-500/10 text-blue-700 dark:text-blue-300 border-blue-500/20">
+                                    Available
+                                  </Badge>
+                                )}
+                              </div>
+                              <span className="text-[11px] text-muted-foreground">{qInfo.months}</span>
+                              {hasPlan && (
+                                <span className="text-[10px] text-amber-800 dark:text-amber-300 truncate mt-1 block">
+                                  {qInfo.existingPlan?.name || "Active plan"}
+                                </span>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      {/* Period Status Indicator */}
+                      {!existingPeriodPlan ? (
+                        <div className="flex items-center gap-2 text-xs text-emerald-700 dark:text-emerald-300 bg-emerald-500/10 border border-emerald-500/20 rounded-md p-2">
+                          <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
+                          <span>
+                            <strong>Ready for planning:</strong> Q{quarter} {year} is open and available for this facility. No duplicate period conflict.
+                          </span>
+                        </div>
+                      ) : (
+                        <div className="space-y-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-2.5 text-xs text-amber-900 dark:text-amber-200">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                            <div className="flex items-start gap-1.5">
+                              <AlertCircle className="h-3.5 w-3.5 shrink-0 text-amber-600 mt-0.5" />
+                              <div>
+                                <strong>Active plan already recorded for Q{quarter} {year}:</strong> "{existingPeriodPlan.name}" (Status: {existingPeriodPlan.status}).
+                                {facilityPeriodAvailability.recommendedPeriod && (
+                                  <div className="mt-1">
+                                    Pick an open quarter above (e.g. <strong>Q{facilityPeriodAvailability.recommendedPeriod.quarter} {facilityPeriodAvailability.recommendedPeriod.year}</strong>) or open the existing plan.
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-1.5 shrink-0 self-end sm:self-auto">
+                              {facilityPeriodAvailability.recommendedPeriod && (
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-7 text-xs border-amber-500/50 bg-background hover:bg-amber-500/10"
+                                  onClick={() =>
+                                    handleSelectPeriod(
+                                      facilityPeriodAvailability.recommendedPeriod!.year,
+                                      facilityPeriodAvailability.recommendedPeriod!.quarter
+                                    )
+                                  }
+                                >
+                                  Switch to Q{facilityPeriodAvailability.recommendedPeriod.quarter} {facilityPeriodAvailability.recommendedPeriod.year}
+                                </Button>
+                              )}
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="default"
+                                className="h-7 text-xs"
+                                onClick={() =>
+                                  setLocation(
+                                    `/microplans/${planType === "campaign" ? "campaigns" : "routine"}/${existingPeriodPlan.id}`
+                                  )
+                                }
+                              >
+                                <Eye className="h-3 w-3 mr-1" />
+                                Open Plan
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   <div>
-                    <Label>Plan name</Label>
+                    <Label className="font-semibold text-sm">Plan name</Label>
                     <Input
                       value={name}
                       onChange={(e) => setName(e.target.value)}
@@ -3882,6 +5234,39 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
                       data-testid="input-microplan-name"
                     />
                   </div>
+
+                  {previousApprovedPlans.length > 0 && !existingPeriodPlan && (
+                    <div
+                      className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-3 text-sm text-foreground flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-2xs"
+                      data-testid="banner-copy-last-approved"
+                    >
+                      <div className="space-y-0.5">
+                        <div className="flex items-center gap-1.5 font-semibold text-xs text-emerald-800 dark:text-emerald-300">
+                          <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
+                          <span>Previous Approved Plan Available</span>
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          Copy village roster, distances, and focal contacts from <strong>"{previousApprovedPlans[0].name || `Q${previousApprovedPlans[0].quarter} ${previousApprovedPlans[0].year}`}"</strong> to save repetitive typing.
+                        </p>
+                      </div>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handleCopyFromPrevious(previousApprovedPlans[0].id)}
+                        disabled={copyingPrevious}
+                        className="shrink-0 text-xs rounded-lg border-emerald-500/40 text-emerald-800 dark:text-emerald-200 hover:bg-emerald-500/10 gap-1.5"
+                        data-testid="button-copy-previous-plan"
+                      >
+                        {copyingPrevious ? (
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                        ) : (
+                          <Copy className="h-3 w-3 text-emerald-600" />
+                        )}
+                        Copy Baseline Data
+                      </Button>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -4055,6 +5440,7 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
               {active === 11 && (
                 <Step11
                   microplan={microplan ?? null}
+                  facilityId={facilityId}
                   facilityLabel={facilityLabel}
                   coverage={coverage}
                   communities={communities}
@@ -4075,7 +5461,12 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
                 />
               )}
               {active === 12 && (
-                <Step12 microplanId={microplanId} facilityId={facilityId} />
+                <Step12
+                  microplanId={microplanId}
+                  facilityId={facilityId}
+                  coverage={coverage}
+                  communities={communities}
+                />
               )}              </fieldset>
             </CardContent>
 
@@ -4224,6 +5615,59 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
               data-testid="button-confirm-removal"
             >
               {deleteBusy ? "Removing..." : "Remove from catchment"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={wizardRenameOpen}
+        onOpenChange={(open) => {
+          if (!open && !wizardRenameBusy) setWizardRenameOpen(false);
+        }}
+      >
+        <DialogContent className="sm:max-w-md" data-testid="dialog-wizard-rename">
+          <DialogHeader>
+            <DialogTitle>Rename Microplan</DialogTitle>
+            <DialogDescription>
+              Update the display name for this microplan.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-2">
+              <Label htmlFor="wizard-rename-input">Microplan Name</Label>
+              <Input
+                id="wizard-rename-input"
+                value={wizardRenameValue}
+                onChange={(e) => setWizardRenameValue(e.target.value)}
+                placeholder="Enter microplan name..."
+                disabled={wizardRenameBusy}
+                data-testid="input-wizard-rename"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && wizardRenameValue.trim() && !wizardRenameBusy) {
+                    e.preventDefault();
+                    void handleWizardRename();
+                  }
+                }}
+              />
+            </div>
+          </div>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              variant="outline"
+              onClick={() => setWizardRenameOpen(false)}
+              disabled={wizardRenameBusy}
+              data-testid="button-cancel-wizard-rename"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={() => void handleWizardRename()}
+              disabled={wizardRenameBusy || !wizardRenameValue.trim() || wizardRenameValue.trim() === name}
+              data-testid="button-confirm-wizard-rename"
+            >
+              {wizardRenameBusy ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : null}
+              Save Name
             </Button>
           </DialogFooter>
         </DialogContent>

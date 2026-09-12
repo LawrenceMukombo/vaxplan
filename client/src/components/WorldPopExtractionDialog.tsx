@@ -16,6 +16,7 @@ import { Progress } from "@/components/ui/progress";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
+import { populationRatios } from "@shared/populationDisaggregation";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import {
   Globe,
@@ -116,6 +117,13 @@ export function WorldPopExtractionDialog({
 
   // Fetch geographic registries
   const { data: tenantInfo } = useQuery<any>({ queryKey: ["/api/me/tenant"] });
+  useEffect(() => {
+    const ratios = populationRatios(tenantInfo?.settings);
+    setUnder1Percent(Number((ratios.under1 * 100).toFixed(2)));
+    setUnder5Percent(Number((ratios.under5 * 100).toFixed(2)));
+    setPregnantPercent(Number((ratios.pregnant * 100).toFixed(2)));
+    setFemalePercent(Number((ratios.female * 100).toFixed(2)));
+  }, [tenantInfo?.id, tenantInfo?.settings]);
   const { data: provinces = [] } = useQuery<Province[]>({
     queryKey: ["/api/provinces", tenantInfo?.id],
     enabled: !!tenantInfo?.id,
@@ -379,6 +387,16 @@ export function WorldPopExtractionDialog({
         pregnantWomen: row.pregnantWomen,
         growthRate: row.growthRate,
         confidenceScore: row.confidenceScore,
+        metadata: {
+          extractedTotalPopulation: row.totalPopulation,
+          extractedAt: new Date().toISOString(),
+          cohortRatios: {
+            under1: under1Percent / 100,
+            under5: under5Percent / 100,
+            pregnant: pregnantPercent / 100,
+            female: femalePercent / 100,
+          },
+        },
       });
 
       // Flush every BATCH_SIZE records

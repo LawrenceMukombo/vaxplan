@@ -21,12 +21,43 @@ export async function promoteAdminUser(): Promise<void> {
   try {
     // Check if the user exists
     const findResult = await db.execute(
-      sql.raw(`SELECT id, role, roles, is_platform_admin, is_active FROM users WHERE LOWER(email) = LOWER('${adminEmail}') LIMIT 1`)
+      sql.raw(`SELECT id, role, roles, is_platform_admin, is_active, password_hash FROM users WHERE LOWER(email) = LOWER('${adminEmail}') LIMIT 1`)
     );
 
     const row = findResult.rows[0] as any;
     if (!row) {
-      console.log(`[migration:018] Admin user '${adminEmail}' not found — skipping promotion (will apply on first login).`);
+      console.log(`[migration:018] Admin user '${adminEmail}' not found — upserting platform administrator...`);
+      // Find default tenant or Zambia/first tenant
+      const tenantResult = await db.execute(sql.raw(`SELECT id FROM tenants ORDER BY created_at ASC LIMIT 1`));
+      const defaultTenantId = (tenantResult.rows[0] as any)?.id || "4bb7abba-11cd-4c99-96c2-eedc8a4dfd06";
+
+      await db.execute(
+        sql.raw(
+          `INSERT INTO users (
+            id, tenant_id, email, first_name, last_name, role, roles, is_platform_admin, is_active, password_hash, created_at, updated_at
+          ) VALUES (
+            'user-lawrence-1779624510770',
+            '${defaultTenantId}',
+            '${adminEmail}',
+            'Lawrence',
+            'Mukombo',
+            'national_admin',
+            '["national_admin"]'::jsonb,
+            TRUE,
+            TRUE,
+            '$2b$12$SNbOjAVQ6b8ZGurd4DU23e6zGpf6X5YTXpgyjGOaapsVa/nFcvpri',
+            NOW(),
+            NOW()
+          ) ON CONFLICT (id) DO UPDATE SET
+            role = 'national_admin',
+            roles = '["national_admin"]'::jsonb,
+            is_platform_admin = TRUE,
+            is_active = TRUE,
+            password_hash = COALESCE(users.password_hash, EXCLUDED.password_hash),
+            updated_at = NOW()`
+        )
+      );
+      console.log(`[migration:018] Admin user '${adminEmail}' created successfully with platform_admin privileges.`);
       return;
     }
 
@@ -34,6 +65,7 @@ export async function promoteAdminUser(): Promise<void> {
     const currentRole = row.role;
     const currentIsPlatformAdmin = row.is_platform_admin;
     const currentIsActive = row.is_active;
+    const hasPassword = Boolean(row.password_hash);
 
     // Check current roles array
     let currentRoles: string[] = [];
@@ -51,7 +83,8 @@ export async function promoteAdminUser(): Promise<void> {
       currentRole === "national_admin" &&
       currentRoles.includes("national_admin") &&
       currentIsPlatformAdmin === true &&
-      currentIsActive !== false;
+      currentIsActive !== false &&
+      hasPassword;
 
     if (alreadyCorrect) {
       console.log(`[migration:018] Admin user '${adminEmail}' is already correctly configured — no changes needed.`);
@@ -64,6 +97,9 @@ export async function promoteAdminUser(): Promise<void> {
       : [...currentRoles, "national_admin"];
 
     const rolesJson = JSON.stringify(updatedRoles).replace(/'/g, "''");
+    const passwordClause = !hasPassword
+      ? `, password_hash = '$2b$12$SNbOjAVQ6b8ZGurd4DU23e6zGpf6X5YTXpgyjGOaapsVa/nFcvpri'`
+      : "";
 
     await db.execute(
       sql.raw(
@@ -71,7 +107,8 @@ export async function promoteAdminUser(): Promise<void> {
          SET role              = 'national_admin',
              roles             = '${rolesJson}'::jsonb,
              is_platform_admin = TRUE,
-             is_active         = TRUE,
+             is_active         = TRUE
+             ${passwordClause},
              updated_at        = NOW()
          WHERE id = '${userId}'`
       )

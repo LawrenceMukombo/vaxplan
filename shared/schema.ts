@@ -12,6 +12,9 @@ import {
   unique,
   uniqueIndex,
   pgEnum,
+  uuid,
+  check,
+  primaryKey,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema, createSelectSchema } from "drizzle-zod";
 import { z } from "zod";
@@ -600,6 +603,7 @@ export const villages = pgTable("villages", {
   isMappedInHmis: boolean("is_mapped_in_hmis").default(false),
   lastVerified: timestamp("last_verified"),
   linkedSettlementId: integer("linked_settlement_id"),
+  isActive: boolean("is_active").default(true),
 
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
@@ -811,10 +815,12 @@ export const microplans = pgTable("microplans", {
   autoApproveAt: timestamp("auto_approve_at"),
   reminderSentAt: timestamp("reminder_sent_at"),
   districtEditReason: text("district_edit_reason"),
+  autoApprovedAt: timestamp("auto_approved_at"),
 
   createdByUserId: varchar("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
   updatedByUserId: varchar("updated_by_user_id").references(() => users.id, { onDelete: "set null" }),
   approvedByUserId: varchar("approved_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  approvedAt: timestamp("approved_at"),
 
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
@@ -1787,6 +1793,8 @@ export const clients = pgTable("clients", {
   clientId: varchar("client_id", { length: 100 }),
   serialNumber: integer("serial_number"),
   registrationYear: integer("registration_year"),
+  isActive: boolean("is_active").default(true),
+  isArchived: boolean("is_archived").default(false),
 
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
@@ -1812,6 +1820,7 @@ export const clientVaccinations = pgTable("client_vaccinations", {
   administeredByUserId: varchar("administered_by_user_id").references(() => users.id, { onDelete: "set null" }),
   scheduleDoseId: integer("schedule_dose_id"),
   stockTransactionId: integer("stock_transaction_id"),
+  isArchived: boolean("is_archived").default(false),
   createdAt: timestamp("created_at").defaultNow(),
 }, (table) => ({
   tenantIdx: index("client_vac_tenant_idx").on(table.tenantId),
@@ -1891,6 +1900,8 @@ export const stockTransactions = pgTable("stock_transactions", {
   balanceAfter: integer("balance_after"),
   sourceModule: varchar("source_module", { length: 100 }),
   sourceRecordId: varchar("source_record_id", { length: 100 }),
+  isVoid: boolean("is_void").default(false),
+  voidReason: text("void_reason"),
   createdAt: timestamp("created_at").defaultNow(),
 }, (table) => ({
   tenantIdx: index("stock_txn_tenant_idx").on(table.tenantId),
@@ -4152,3 +4163,58 @@ export const selectClientImportBatchSchema = createSelectSchema(clientImportBatc
 export type ClientImportBatch = typeof clientImportBatches.$inferSelect;
 
 export * from "./riskSchema";
+
+
+// Additive planning extension tables. Keep in sync with explicit SQL migrations.
+export const planningActionRecords = pgTable("planning_actions", {
+  id: uuid("id").primaryKey(),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  facilityId: integer("facility_id").notNull().references(() => facilities.id),
+  payload: jsonb("payload").notNull(),
+  version: integer("version").notNull().default(1),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedBy: varchar("updated_by").notNull().references(() => users.id),
+}, (table) => [
+  index("planning_actions_scope_idx").on(table.tenantId, table.facilityId),
+  check("planning_actions_version_check", sql`${table.version} > 0`),
+]);
+
+export const planningActionHistory = pgTable("planning_action_history", {
+  actionId: uuid("action_id").notNull().references(() => planningActionRecords.id),
+  version: integer("version").notNull(),
+  payload: jsonb("payload").notNull(),
+  changedAt: timestamp("changed_at", { withTimezone: true }).notNull().defaultNow(),
+  changedBy: varchar("changed_by").notNull().references(() => users.id),
+}, (table) => [primaryKey({ columns: [table.actionId, table.version] })]);
+
+export const planningEvidenceRecords = pgTable("planning_evidence", {
+  id: uuid("id").primaryKey(),
+  tenantId: varchar("tenant_id").notNull().references(() => tenants.id),
+  facilityId: integer("facility_id").notNull().references(() => facilities.id),
+  kind: varchar("kind", { length: 40 }).notNull(),
+  microplanId: integer("microplan_id").references(() => microplans.id),
+  payload: jsonb("payload").notNull(),
+  version: integer("version").notNull().default(1),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedBy: varchar("updated_by").notNull().references(() => users.id),
+}, (table) => [
+  index("planning_evidence_scope_idx").on(table.tenantId, table.facilityId, table.kind),
+  check("planning_evidence_version_check", sql`${table.version} > 0`),
+  check(
+    "planning_evidence_kind_check",
+    sql`${table.kind} IN ('consultation','barrier','target_group','population_estimate','finance','household_assessment','service_review')`
+  ),
+]);
+
+export const planningEvidenceHistory = pgTable("planning_evidence_history", {
+  evidenceId: uuid("evidence_id").notNull().references(() => planningEvidenceRecords.id),
+  version: integer("version").notNull(),
+  payload: jsonb("payload").notNull(),
+  changedAt: timestamp("changed_at", { withTimezone: true }).notNull().defaultNow(),
+  changedBy: varchar("changed_by").notNull().references(() => users.id),
+}, (table) => [primaryKey({ columns: [table.evidenceId, table.version] })]);
+
+export type PlanningActionRecord = typeof planningActionRecords.$inferSelect;
+export type PlanningEvidenceRecord = typeof planningEvidenceRecords.$inferSelect;

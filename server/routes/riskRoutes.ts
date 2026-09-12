@@ -93,13 +93,26 @@ riskRouter.use(async (req: any, res: any, next: any) => {
     return res.status(401).json({ message: "Authentication required" });
   }
 
+  const userId = req.user?.claims?.sub || req.user?.id;
+  let isSuperAdmin = req.user?.isPlatformAdmin === true;
+  if (!isSuperAdmin && userId) {
+    try {
+      const { storage } = await import("../storage");
+      const u = await storage.getUser(userId);
+      isSuperAdmin = u?.isPlatformAdmin === true;
+    } catch {
+      // ignore
+    }
+  }
+
   // Robust tenant resolution
   if (!req.tenantId) {
     req.tenantId = (req.user as any)?.tenantId || req.session?.tenantId;
   }
 
+  // Tenant overrides are strictly restricted to platform super-admins
   const overrideRaw = req.headers["x-tenant-id"] || req.query["x-tenant-id"] || req.query["tenantId"];
-  if (typeof overrideRaw === "string" && overrideRaw.trim()) {
+  if (isSuperAdmin && typeof overrideRaw === "string" && overrideRaw.trim()) {
     const overrideTrimmed = overrideRaw.trim();
     const [matchedTenant] = await db
       .select({ id: tenants.id })
@@ -108,17 +121,6 @@ riskRouter.use(async (req: any, res: any, next: any) => {
       .limit(1);
     if (matchedTenant) {
       req.tenantId = matchedTenant.id;
-    }
-  }
-
-  if (!req.tenantId) {
-    const [defTenant] = await db
-      .select({ id: tenants.id })
-      .from(tenants)
-      .where(eq(tenants.countryCode, "ZAF"))
-      .limit(1);
-    if (defTenant) {
-      req.tenantId = defTenant.id;
     }
   }
 
@@ -664,6 +666,7 @@ riskRouter.get("/templates/district-aggregates", async (req: any, res) => {
       .orderBy(provinces.name, districts.name);
 
     let headers: string[] = [];
+    let instructions: string[] = [];
     let filename = "VPD_Risk_District_Aggregates_Template.csv";
 
     if (domain === "population") {
@@ -672,12 +675,25 @@ riskRouter.get("/templates/district-aggregates", async (req: any, res) => {
         "mcv1_2022", "mcv1_2023", "mcv1_2024", "mcv2_2022", "mcv2_2023", "mcv2_2024",
         "penta1_coverage_pct", "sia_coverage_pct", "sia_year", "sia_target_age_group"
       ];
+      instructions = [
+        "# WHO Measles Programmatic Risk Assessment - Domain 1: Population Immunity Template",
+        "# INSTRUCTIONS: Fill in all numeric columns with real country data. Leave no column blank after upload.",
+        "# total_population: integer (e.g. 125000). Coverage fields: percentage 0-100 (e.g. 87.5).",
+        "# sia_year: calendar year of last SIA (e.g. 2023). sia_target_age_group: WIDE | NARROW | NONE.",
+      ];
       filename = "WHO_Risk_Domain1_Population_Immunity_Template.csv";
     } else if (domain === "surveillance") {
       headers = [
         "district_id", "district_name", "province_name", "total_population",
         "suspected_cases_count", "discarded_cases", "unvaccinated_cases_pct",
         "adequate_investigation_pct", "adequate_specimen_pct", "timely_lab_results_pct"
+      ];
+      instructions = [
+        "# WHO Measles Programmatic Risk Assessment - Domain 2: Surveillance Quality Template",
+        "# INSTRUCTIONS: Fill in all numeric columns with real surveillance data.",
+        "# suspected_cases_count: integer count of suspected measles cases in the assessment year.",
+        "# discarded_cases: integer count of discarded (non-measles) cases.",
+        "# *_pct fields: percentage 0-100 (e.g. 85.0).",
       ];
       filename = "WHO_Risk_Domain2_Surveillance_Quality_Template.csv";
     } else if (domain === "threats" || domain === "vulnerabilities") {
@@ -687,6 +703,12 @@ riskRouter.get("/templates/district-aggregates", async (req: any, res) => {
         "migrant_or_underserved", "vaccine_hesitancy_or_refusal", "security_or_conflict_concerns",
         "recurrent_natural_disasters", "poor_access_or_terrain", "inadequate_political_support",
         "high_transit_hub_or_border", "mass_gatherings_or_events"
+      ];
+      instructions = [
+        "# WHO Measles Programmatic Risk Assessment - Domain 4: Threats & Vulnerabilities Template",
+        "# INSTRUCTIONS: Fill in all columns with real data.",
+        "# threat_cases_*: integer counts of qualifying threat cases by age group.",
+        "# border_case_past_year and vulnerability columns: 1 = Yes / Present, 0 = No / Absent.",
       ];
       filename = "WHO_Risk_Domain4_Threats_and_Vulnerabilities_Template.csv";
     } else {
@@ -702,48 +724,34 @@ riskRouter.get("/templates/district-aggregates", async (req: any, res) => {
         "recurrent_natural_disasters", "poor_access_or_terrain", "inadequate_political_support",
         "high_transit_hub_or_border", "mass_gatherings_or_events"
       ];
+      instructions = [
+        "# WHO Measles Programmatic Risk Assessment - 5-Domain Master District Data Template",
+        "# INSTRUCTIONS: Complete all blank numeric columns with real country data before uploading.",
+        "# district_id and district_name are pre-filled — do not change them.",
+        "# Coverage fields (mcv1_*, mcv2_*, penta1_coverage_pct, sia_coverage_pct): percentage 0-100 (e.g. 87.5).",
+        "# total_population: integer (e.g. 125000). area_km2: numeric km² (e.g. 3500).",
+        "# sia_year: calendar year of last SIA (e.g. 2023). sia_target_age_group: WIDE | NARROW | NONE.",
+        "# suspected_cases_count, discarded_cases, threat_cases_*: integer case counts.",
+        "# unvaccinated_cases_pct, adequate_*_pct, timely_lab_results_pct: percentage 0-100.",
+        "# border_case_past_year and vulnerability columns: 1 = Yes / Present, 0 = No / Absent.",
+      ];
       filename = "WHO_Measles_District_5Domain_Master_Template.csv";
     }
 
-    let csvContent = headers.join(",") + "\n";
-    for (const d of tenantDistricts) {
-      const seed = ((Number(d.id) * 9301 + 49297) % 233280) / 233280;
-      const seed2 = ((Number(d.id) * 49297 + 9301) % 233280) / 233280;
-      const mcv1_3 = Number((72 + seed * 16).toFixed(1));
-      const mcv1_2 = Number((mcv1_3 + 1.8).toFixed(1));
-      const mcv1_1 = Number((mcv1_2 + 2.1).toFixed(1));
-      const mcv2_3 = Number(Math.max(45, mcv1_3 - (7 + seed2 * 5)).toFixed(1));
-      const mcv2_2 = Number((mcv2_3 + 1.6).toFixed(1));
-      const mcv2_1 = Number((mcv2_2 + 1.9).toFixed(1));
-      const penta1 = Number(Math.min(99, mcv1_1 + 4.2).toFixed(1));
-      const pop = Math.round(60000 + seed * 180000);
-      const area = Math.round(1200 + seed2 * 3500);
+    // Build CSV: instruction comment rows first, then header, then blank data rows
+    let csvContent = instructions.map(line => line + "\n").join("");
+    csvContent += headers.join(",") + "\n";
 
-      if (domain === "population") {
-        csvContent += [
-          d.id, `"${d.name.replace(/"/g, '""')}"`, `"${(d.provinceName || "National").replace(/"/g, '""')}"`,
-          pop, mcv1_3, mcv1_2, mcv1_1, mcv2_3, mcv2_2, mcv2_1, penta1, 94.5, 2023, "WIDE"
-        ].join(",") + "\n";
-      } else if (domain === "surveillance") {
-        csvContent += [
-          d.id, `"${d.name.replace(/"/g, '""')}"`, `"${(d.provinceName || "National").replace(/"/g, '""')}"`,
-          pop, Math.round(seed2 * 8), Math.round(seed2 * 2), Math.round(15 + seed * 10), 85.0, 85.0, 85.0
-        ].join(",") + "\n";
-      } else if (domain === "threats" || domain === "vulnerabilities") {
-        csvContent += [
-          d.id, `"${d.name.replace(/"/g, '""')}"`, `"${(d.provinceName || "National").replace(/"/g, '""')}"`,
-          pop, area, Math.round(seed2 * 3), Math.round(seed * 2), Math.round(seed2 * 2), seed > 0.6 ? 1 : 0,
-          seed > 0.7 ? 1 : 0, seed > 0.8 ? 1 : 0, 0, 0, seed > 0.5 ? 1 : 0, 0, seed > 0.6 ? 1 : 0, seed > 0.75 ? 1 : 0
-        ].join(",") + "\n";
-      } else {
-        csvContent += [
-          d.id, `"${d.name.replace(/"/g, '""')}"`, `"${(d.provinceName || "National").replace(/"/g, '""')}"`,
-          pop, area, mcv1_3, mcv1_2, mcv1_1, mcv2_3, mcv2_2, mcv2_1, penta1, 94.5, 2023, "WIDE",
-          Math.round(seed2 * 8), Math.round(seed2 * 2), Math.round(15 + seed * 10), 85.0, 85.0, 85.0,
-          Math.round(seed2 * 3), Math.round(seed * 2), Math.round(seed2 * 2), seed > 0.6 ? 1 : 0,
-          seed > 0.7 ? 1 : 0, seed > 0.8 ? 1 : 0, 0, 0, seed > 0.5 ? 1 : 0, 0, seed > 0.6 ? 1 : 0, seed > 0.75 ? 1 : 0
-        ].join(",") + "\n";
-      }
+    // Emit one skeleton row per district — district identity columns only, all numeric cells blank
+    const numericColCount = headers.length - 3; // subtract district_id, district_name, province_name
+    for (const d of tenantDistricts) {
+      const identity = [
+        d.id,
+        `"${d.name.replace(/"/g, '""')}"`,
+        `"${(d.provinceName || "National").replace(/"/g, '""')}"`,
+      ];
+      const blankNumerics = Array(numericColCount).fill("");
+      csvContent += [...identity, ...blankNumerics].join(",") + "\n";
     }
 
     res.setHeader("Content-Type", "text/csv; charset=utf-8");
@@ -1821,7 +1829,7 @@ riskRouter.get("/assessments/:id/direct-entry", async (req: any, res) => {
       .from(riskAssessments)
       .where(and(eq(riskAssessments.id, requestedId), eq(riskAssessments.tenantId, req.tenantId)));
 
-    if (!assessment) {
+    if (!assessment && (req.user?.isPlatformAdmin === true || (req as any).dbUser?.isPlatformAdmin === true)) {
       const [byUuid] = await db.select().from(riskAssessments).where(eq(riskAssessments.id, requestedId));
       assessment = byUuid;
     }
@@ -1890,94 +1898,7 @@ riskRouter.get("/assessments/:id/direct-entry", async (req: any, res) => {
       .where(eq(districts.tenantId, effectiveTenantId))
       .orderBy(districts.name);
 
-    if (tenantDistricts.length === 0) {
-      return res.json({ assessment, entries: [] });
-    }
-
-    // Default seed values mirroring realistic WHO country baseline
-    const seedRows = tenantDistricts.map((d, idx) => ({
-      tenantId: effectiveTenantId,
-      assessmentId: assessment.id,
-      districtId: d.id,
-      provinceId: d.provinceId,
-      population: String(120000 + (idx % 8) * 45000),
-      areaKm2: String(2200 + (idx % 5) * 800),
-      mcv1YearMinus3: String(80 + (idx % 15)),
-      mcv1YearMinus2: String(82 + (idx % 14)),
-      mcv1YearMinus1: String(85 + (idx % 12)),
-      mcv2YearMinus3: String(68 + (idx % 15)),
-      mcv2YearMinus2: String(71 + (idx % 14)),
-      mcv2YearMinus1: String(74 + (idx % 12)),
-      penta1YearMinus1: String(88 + (idx % 10)),
-      siaCoveragePct: String(92 + (idx % 6)),
-      siaTargetAgeGroup: "WIDE",
-      siaYearsSince: 2,
-      unvaccinatedCasesPct: String(12 + (idx % 15)),
-      suspectedCases: 10 + (idx % 8),
-      discardedCases: 2 + (idx % 4),
-      adequateInvestigationPct: String(80 + (idx % 18)),
-      adequateSpecimenPct: String(80 + (idx % 18)),
-      timelyLabResultsPct: String(80 + (idx % 18)),
-      threatCasesUnder5: idx % 4 === 0 ? 2 : 0,
-      threatCases5To14: idx % 6 === 0 ? 1 : 0,
-      threatCases15Plus: idx % 8 === 0 ? 1 : 0,
-      borderCaseInPastYear: idx % 3 === 0,
-      vulnerabilities: {
-        migrantOrUnderserved: idx % 2 === 0,
-        vaccineHesitancyOrRefusal: idx % 4 === 0,
-        securityOrConflictConcerns: idx % 7 === 0,
-        recurrentNaturalDisasters: idx % 5 === 0,
-        poorAccessOrTerrain: idx % 3 === 0,
-        inadequatePoliticalSupport: idx % 6 === 0,
-        highTransitHubOrBorder: idx % 3 === 0,
-        massGatheringsOrEvents: idx % 4 === 0,
-      },
-    }));
-
-    await db.insert(riskDistrictDataEntry).values(seedRows).onConflictDoNothing();
-
-    // Re-fetch populated
-    const seeded = await db
-      .select({
-        id: riskDistrictDataEntry.id,
-        tenantId: riskDistrictDataEntry.tenantId,
-        assessmentId: riskDistrictDataEntry.assessmentId,
-        districtId: riskDistrictDataEntry.districtId,
-        districtName: districts.name,
-        provinceId: riskDistrictDataEntry.provinceId,
-        provinceName: provinces.name,
-        population: riskDistrictDataEntry.population,
-        areaKm2: riskDistrictDataEntry.areaKm2,
-        mcv1YearMinus3: riskDistrictDataEntry.mcv1YearMinus3,
-        mcv1YearMinus2: riskDistrictDataEntry.mcv1YearMinus2,
-        mcv1YearMinus1: riskDistrictDataEntry.mcv1YearMinus1,
-        mcv2YearMinus3: riskDistrictDataEntry.mcv2YearMinus3,
-        mcv2YearMinus2: riskDistrictDataEntry.mcv2YearMinus2,
-        mcv2YearMinus1: riskDistrictDataEntry.mcv2YearMinus1,
-        penta1YearMinus1: riskDistrictDataEntry.penta1YearMinus1,
-        siaCoveragePct: riskDistrictDataEntry.siaCoveragePct,
-        siaTargetAgeGroup: riskDistrictDataEntry.siaTargetAgeGroup,
-        siaYearsSince: riskDistrictDataEntry.siaYearsSince,
-        unvaccinatedCasesPct: riskDistrictDataEntry.unvaccinatedCasesPct,
-        suspectedCases: riskDistrictDataEntry.suspectedCases,
-        discardedCases: riskDistrictDataEntry.discardedCases,
-        adequateInvestigationPct: riskDistrictDataEntry.adequateInvestigationPct,
-        adequateSpecimenPct: riskDistrictDataEntry.adequateSpecimenPct,
-        timelyLabResultsPct: riskDistrictDataEntry.timelyLabResultsPct,
-        threatCasesUnder5: riskDistrictDataEntry.threatCasesUnder5,
-        threatCases5To14: riskDistrictDataEntry.threatCases5To14,
-        threatCases15Plus: riskDistrictDataEntry.threatCases15Plus,
-        borderCaseInPastYear: riskDistrictDataEntry.borderCaseInPastYear,
-        vulnerabilities: riskDistrictDataEntry.vulnerabilities,
-        updatedAt: riskDistrictDataEntry.updatedAt,
-      })
-      .from(riskDistrictDataEntry)
-      .leftJoin(districts, eq(riskDistrictDataEntry.districtId, districts.id))
-      .leftJoin(provinces, eq(riskDistrictDataEntry.provinceId, provinces.id))
-      .where(eq(riskDistrictDataEntry.assessmentId, assessment.id))
-      .orderBy(districts.name);
-
-    res.json({ assessment, entries: seeded });
+    res.json({ assessment, entries: [], districts: tenantDistricts });
   } catch (err: any) {
     res.status(500).json({ message: safeErrorMessage(err, "An unexpected error occurred") });
   }
@@ -2410,8 +2331,9 @@ riskRouter.get("/assessments/:id/export-report-docx", async (req: any, res) => {
       } catch (e) {}
 
       if (code !== 0 || !fs.existsSync(tempDocxPath)) {
+        console.error("Risk report generation failed:", stderrOutput.trim() || `Process exited with code ${code}`);
         return res.status(500).json({
-          message: `Report generation failed: ${stderrOutput.trim() || `Process exited with code ${code}`}`
+          message: "Report generation failed. Please verify assessment inputs or contact administrator."
         });
       }
 
