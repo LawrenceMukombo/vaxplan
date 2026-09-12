@@ -1332,7 +1332,7 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
       setIsDirty(false);
     } else if (data?.districts && data.districts.length > 0 && localRows.length === 0) {
       const initialDistrictRows = data.districts.map((d: any, idx: number) => ({
-        id: idx + 1,
+        id: String(idx + 1),
         tenantId: data?.assessment?.tenantId || "",
         assessmentId,
         districtId: d.id,
