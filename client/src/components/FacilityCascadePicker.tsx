@@ -331,7 +331,30 @@ export function FacilityCascadePicker({
         return Number.isFinite(fDistId) && targetDistIds.has(fDistId);
       });
     }
-    return [...list].sort((a, b) => a.name.localeCompare(b.name));
+    // Deduplicate facilities and filter out uppercase duplicates ("Ateda PHCU" vs "Ateda Phcu")
+    const map = new Map<string, Facility>();
+    const sorted = [...list].sort((a, b) => {
+      const aUpper = /\b(PHCU|PHCC|HOSPITAL)\b/.test(a.name || "");
+      const bUpper = /\b(PHCU|PHCC|HOSPITAL)\b/.test(b.name || "");
+      if (aUpper && !bUpper) return 1;
+      if (!aUpper && bUpper) return -1;
+      return a.name.localeCompare(b.name);
+    });
+
+    for (const fac of sorted) {
+      const norm = (fac.name || "")
+        .replace(/\bPHCU\b/g, "Phcu")
+        .replace(/\bPHCC\b/g, "Phcc")
+        .replace(/\bHOSPITAL\b/g, "Hospital")
+        .trim()
+        .toLowerCase();
+      const key = `${(fac as any).districtId ?? ""}:${norm}`;
+      if (!map.has(key)) {
+        map.set(key, fac);
+      }
+    }
+
+    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
   }, [facilities, districts, provinces, provinceId, districtId, isFacilityUser, user?.facilityId]);
 
   const selectedProvince = sortedProvinces.find(
@@ -340,9 +363,27 @@ export function FacilityCascadePicker({
   const selectedDistrict = filteredDistricts.find(
     (d) => Number(d.id) === Number(districtId),
   );
-  const selectedFacility = (facilities ?? []).find(
-    (f) => Number(f.id) === Number(value ?? -1),
-  );
+  const selectedFacility = useMemo(() => {
+    if (!value) return undefined;
+    const found = (facilities ?? []).find((f) => Number(f.id) === Number(value));
+    if (!found) return undefined;
+    const isUpper = /\b(PHCU|PHCC|HOSPITAL)\b/.test(found.name || "");
+    if (isUpper) {
+      const norm = (found.name || "")
+        .replace(/\bPHCU\b/g, "Phcu")
+        .replace(/\bPHCC\b/g, "Phcc")
+        .replace(/\bHOSPITAL\b/g, "Hospital")
+        .trim()
+        .toLowerCase();
+      const canon = (facilities ?? []).find((f) =>
+        f.id !== found.id &&
+        Number((f as any).districtId) === Number((found as any).districtId) &&
+        (f.name || "").trim().toLowerCase() === norm
+      );
+      if (canon) return canon;
+    }
+    return found;
+  }, [facilities, value]);
 
   const containerClass =
     layout === "row"

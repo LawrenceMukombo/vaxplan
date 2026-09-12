@@ -862,8 +862,24 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
     ];
 
     const records: CaseLinelistRow[] = [];
+    const hasDistrictCases = districts.some((dist) => {
+      const suspected = Number(dist.suspectedCases) || 0;
+      const threatTotal = (Number(dist.threatCasesUnder5) || 0) + (Number(dist.threatCases5To14) || 0) + (Number(dist.threatCases15Plus) || 0);
+      return Math.max(suspected, threatTotal) > 0;
+    });
+
     districts.forEach((dist, dIdx) => {
-      const casesCount = Math.max(1, Math.min(3, ((dist.districtId * 7) % 3) + 1));
+      let casesCount = 0;
+      if (hasDistrictCases) {
+        const directSuspected = Number(dist.suspectedCases) || 0;
+        const threatTotal = (Number(dist.threatCasesUnder5) || 0) + (Number(dist.threatCases5To14) || 0) + (Number(dist.threatCases15Plus) || 0);
+        casesCount = Math.max(directSuspected, threatTotal);
+        // Cap at 100 per district to keep UI performant
+        casesCount = Math.min(casesCount, 100);
+      } else {
+        casesCount = Math.max(1, Math.min(3, ((dist.districtId * 7) % 3) + 1));
+      }
+
       for (let c = 0; c < casesCount; c++) {
         const cYear = bYear || 2023;
         const monthNum = ((dIdx + c * 3) % 12) + 1;
@@ -941,6 +957,24 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
       }
     }
   }, [localRows, baselineYear2, data]);
+
+  const totalDistrictCasesCount = useMemo(() => {
+    return localRows.reduce((sum, d) => {
+      const suspected = Number(d.suspectedCases) || 0;
+      const threatTotal = (Number(d.threatCasesUnder5) || 0) + (Number(d.threatCases5To14) || 0) + (Number(d.threatCases15Plus) || 0);
+      return sum + Math.max(suspected, threatTotal);
+    }, 0);
+  }, [localRows]);
+
+  const handleGenerateFromDistricts = () => {
+    const fresh = generateInitialLinelist(localRows, baselineYear2);
+    setLinelistRows(fresh);
+    setIsLinelistDirty(true);
+    toast({
+      title: "Linelist Synced",
+      description: `Generated ${fresh.length} case records matching the district case counts.`,
+    });
+  };
 
   // Handle cell modification for any of the 17 raw surveillance fields (Cols 1-17)
   const handleCaseCellChange = (id: string, field: keyof CaseLinelistRow, value: any) => {
@@ -1293,11 +1327,46 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
 
   // Sync loaded data to local state
   useEffect(() => {
-    if (data?.entries) {
+    if (data?.entries && data.entries.length > 0) {
       setLocalRows(data.entries);
       setIsDirty(false);
+    } else if (data?.districts && data.districts.length > 0 && localRows.length === 0) {
+      const initialDistrictRows = data.districts.map((d: any, idx: number) => ({
+        id: idx + 1,
+        tenantId: data?.assessment?.tenantId || "",
+        assessmentId,
+        districtId: d.id,
+        districtName: d.name,
+        provinceId: d.provinceId,
+        provinceName: d.provinceName,
+        population: 100000,
+        areaKm2: 2500,
+        mcv1YearMinus3: 80,
+        mcv1YearMinus2: 82,
+        mcv1YearMinus1: 85,
+        mcv2YearMinus3: 70,
+        mcv2YearMinus2: 72,
+        mcv2YearMinus1: 75,
+        penta1YearMinus1: 90,
+        siaCoveragePct: 95,
+        siaTargetAgeGroup: "9-59m",
+        siaYearsSince: 2,
+        unvaccinatedCasesPct: 30,
+        suspectedCases: 0,
+        discardedCases: 0,
+        adequateInvestigationPct: 80,
+        adequateSpecimenPct: 80,
+        timelyLabResultsPct: 80,
+        threatCasesUnder5: 0,
+        threatCases5To14: 0,
+        threatCases15Plus: 0,
+        borderCaseInPastYear: false,
+        vulnerabilities: {},
+      }));
+      setLocalRows(initialDistrictRows);
+      setIsDirty(false);
     }
-  }, [data?.entries]);
+  }, [data?.entries, data?.districts]);
 
   // Sync assessment timeframe to local state
   useEffect(() => {

@@ -4257,7 +4257,32 @@ export async function registerRoutes(
       //   facility_clerk/in_charge → scope.facilityIds = their single facility
       const scope = await getGeoScope(dbUser, req.tenantId);
       const all = await storage.getFacilities(req.tenantId, districtId);
-      const result = scope.all ? all : all.filter((f) => scope.facilityIds.has(f.id));
+      const rawResult = scope.all ? all : all.filter((f) => scope.facilityIds.has(f.id));
+
+      // Deduplicate facilities with uppercase type suffixes (e.g. "Ateda PHCU" vs "Ateda Phcu")
+      // Prioritizing canonical titlecase entries over all-caps abbreviations
+      const normalizedMap = new Map<string, any>();
+      for (const fac of rawResult) {
+        const norm = (fac.name || "")
+          .replace(/\bPHCU\b/g, "Phcu")
+          .replace(/\bPHCC\b/g, "Phcc")
+          .replace(/\bHOSPITAL\b/g, "Hospital")
+          .trim()
+          .toLowerCase();
+        const key = `${fac.districtId ?? ""}:${norm}`;
+        const isUpper = /\b(PHCU|PHCC|HOSPITAL)\b/.test(fac.name || "");
+
+        if (!normalizedMap.has(key)) {
+          normalizedMap.set(key, fac);
+        } else if (!isUpper) {
+          const existing = normalizedMap.get(key);
+          const existingIsUpper = /\b(PHCU|PHCC|HOSPITAL)\b/.test(existing.name || "");
+          if (existingIsUpper) {
+            normalizedMap.set(key, fac);
+          }
+        }
+      }
+      const result = Array.from(normalizedMap.values());
 
       const [districtRows, provinceRows] = await Promise.all([
         db
@@ -7355,6 +7380,13 @@ export async function registerRoutes(
           props.shapeName ||
           props.name ||
           props.Name ||
+          props.adm3_name ||
+          props.adm3_ref_name ||
+          props.ADM3_EN ||
+          props.ADM3_NAME ||
+          props.payam_name ||
+          props.ward_name ||
+          props.subcounty_name ||
           ""
         ).trim();
 

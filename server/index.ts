@@ -52,6 +52,7 @@ import { realignIdentitySequences } from "./services/identitySequences";
 import { applySupervisionTemplatesSeed } from "./migrations/028-supervision-templates-seed";
 import { applyStockLedgerColumnsMigration } from "./migrations/027-stock-ledger-columns";
 import { applyClientsColumns } from "./migrations/037-clients-columns";
+import { applyCleanupUppercaseFacilities } from "./migrations/038-cleanup-uppercase-facilities";
 const app = express();
 const httpServer = createServer(app);
 const skipDbBootstrap = process.env.SKIP_DB_BOOTSTRAP === '1';
@@ -529,6 +530,7 @@ async function backfillClientIds() {
     await applyRiskAssessmentSchema(db as any);
     await applyRiskPermissionsAndSeed(db as any);
     await applyRiskDirectEntrySchema(db as any);
+    await applyCleanupUppercaseFacilities(db as any);
     log("identity sequences, templates, and all-tenant lifecycle permissions ready", "db");
   }).catch((err) => log("identity sequence and lifecycle permission warning: " + String(err?.message ?? err), "db"));
   // VGIE recommendation and alert rules for all tenants (migration 025)
