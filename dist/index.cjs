@@ -43021,12 +43021,27 @@ async function runMicroplanApprovalCron(now = /* @__PURE__ */ new Date()) {
   const tenants3 = await storage.listActiveTenants();
   for (const tenant of tenants3) {
     try {
-      const pendingMicroplans = await db.select().from(microplans).where(
-        (0, import_drizzle_orm35.and)(
-          (0, import_drizzle_orm35.eq)(microplans.tenantId, tenant.id),
-          (0, import_drizzle_orm35.eq)(microplans.status, "pending")
-        )
-      );
+      let pendingMicroplans = [];
+      try {
+        pendingMicroplans = await db.select({
+          id: microplans.id,
+          tenantId: microplans.tenantId,
+          facilityId: microplans.facilityId,
+          name: microplans.name,
+          status: microplans.status,
+          submittedAt: microplans.submittedAt,
+          reminderSentAt: microplans.reminderSentAt,
+          autoApproveAt: microplans.autoApproveAt
+        }).from(microplans).where(
+          (0, import_drizzle_orm35.and)(
+            (0, import_drizzle_orm35.eq)(microplans.tenantId, tenant.id),
+            (0, import_drizzle_orm35.eq)(microplans.status, "pending")
+          )
+        );
+      } catch (err) {
+        console.warn(`[microplan-cron] Could not query pending microplans for tenant ${tenant.id}: ${err.message}`);
+        continue;
+      }
       for (const mp of pendingMicroplans) {
         const submittedAt = mp.submittedAt ? new Date(mp.submittedAt) : null;
         if (!submittedAt) continue;
@@ -48186,26 +48201,26 @@ __export(stock_ledger_columns_exports, {
   applyStockLedgerColumnsMigration: () => applyStockLedgerColumnsMigration
 });
 async function applyStockLedgerColumnsMigration(db2) {
-  try {
-    await db2.execute(import_drizzle_orm62.sql`
-      ALTER TABLE client_vaccinations 
-      ADD COLUMN IF NOT EXISTS schedule_dose_id integer,
-      ADD COLUMN IF NOT EXISTS stock_transaction_id integer,
-      ADD COLUMN IF NOT EXISTS is_archived boolean DEFAULT false;
-    `);
-    await db2.execute(import_drizzle_orm62.sql`
-      ALTER TABLE stock_transactions 
-      DROP CONSTRAINT IF EXISTS stock_transactions_product_id_fkey,
-      DROP CONSTRAINT IF EXISTS stock_transactions_product_id_catalogue_vaccines_id_fk,
-      ADD COLUMN IF NOT EXISTS balance_before integer,
-      ADD COLUMN IF NOT EXISTS balance_after integer,
-      ADD COLUMN IF NOT EXISTS source_module varchar(100),
-      ADD COLUMN IF NOT EXISTS source_record_id varchar(100),
-      ADD COLUMN IF NOT EXISTS is_void boolean DEFAULT false,
-      ADD COLUMN IF NOT EXISTS void_reason text;
-    `);
-  } catch (err) {
-    console.error("Migration: failed to apply stock ledger columns:", err.message);
+  const statements = [
+    `ALTER TABLE client_vaccinations ADD COLUMN IF NOT EXISTS schedule_dose_id integer`,
+    `ALTER TABLE client_vaccinations ADD COLUMN IF NOT EXISTS stock_transaction_id integer`,
+    `ALTER TABLE client_vaccinations ADD COLUMN IF NOT EXISTS is_archived boolean DEFAULT false`,
+    `ALTER TABLE stock_transactions DROP CONSTRAINT IF EXISTS stock_transactions_product_id_fkey`,
+    `ALTER TABLE stock_transactions DROP CONSTRAINT IF EXISTS stock_transactions_product_id_catalogue_vaccines_id_fk`,
+    `ALTER TABLE stock_transactions ADD COLUMN IF NOT EXISTS balance_before integer`,
+    `ALTER TABLE stock_transactions ADD COLUMN IF NOT EXISTS balance_after integer`,
+    `ALTER TABLE stock_transactions ADD COLUMN IF NOT EXISTS source_module varchar(100)`,
+    `ALTER TABLE stock_transactions ADD COLUMN IF NOT EXISTS source_record_id varchar(100)`,
+    `ALTER TABLE stock_transactions ADD COLUMN IF NOT EXISTS is_void boolean DEFAULT false`,
+    `ALTER TABLE stock_transactions ADD COLUMN IF NOT EXISTS void_reason text`
+  ];
+  for (const stmt of statements) {
+    try {
+      await db2.execute(import_drizzle_orm62.sql.raw(stmt));
+      console.log(`[migration:027] Executed: ${stmt}`);
+    } catch (err) {
+      console.warn(`[migration:027] Warning on statement "${stmt}": ${err.message}`);
+    }
   }
 }
 var import_drizzle_orm62;

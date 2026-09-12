@@ -45,15 +45,30 @@ export async function runMicroplanApprovalCron(now: Date = new Date()): Promise<
   for (const tenant of tenants) {
     try {
       // Fetch all pending microplans for this tenant that have a submittedAt
-      const pendingMicroplans = await db
-        .select()
-        .from(microplans)
-        .where(
-          and(
-            eq((microplans as any).tenantId, tenant.id),
-            eq((microplans as any).status, "pending"),
-          )
-        );
+      let pendingMicroplans: any[] = [];
+      try {
+        pendingMicroplans = await db
+          .select({
+            id: (microplans as any).id,
+            tenantId: (microplans as any).tenantId,
+            facilityId: (microplans as any).facilityId,
+            name: (microplans as any).name,
+            status: (microplans as any).status,
+            submittedAt: (microplans as any).submittedAt,
+            reminderSentAt: (microplans as any).reminderSentAt,
+            autoApproveAt: (microplans as any).autoApproveAt,
+          })
+          .from(microplans)
+          .where(
+            and(
+              eq((microplans as any).tenantId, tenant.id),
+              eq((microplans as any).status, "pending"),
+            )
+          );
+      } catch (err: any) {
+        console.warn(`[microplan-cron] Could not query pending microplans for tenant ${tenant.id}: ${err.message}`);
+        continue;
+      }
 
       for (const mp of pendingMicroplans) {
         const submittedAt: Date | null = (mp as any).submittedAt ? new Date((mp as any).submittedAt) : null;
