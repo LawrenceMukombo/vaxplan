@@ -6,7 +6,8 @@ export async function applyStockLedgerColumnsMigration(db: NodePgDatabase<any>):
     await db.execute(sql`
       ALTER TABLE client_vaccinations 
       ADD COLUMN IF NOT EXISTS schedule_dose_id integer,
-      ADD COLUMN IF NOT EXISTS stock_transaction_id integer;
+      ADD COLUMN IF NOT EXISTS stock_transaction_id integer,
+      ADD COLUMN IF NOT EXISTS is_archived boolean DEFAULT false;
     `);
     await db.execute(sql`
       ALTER TABLE stock_transactions 
@@ -15,7 +16,9 @@ export async function applyStockLedgerColumnsMigration(db: NodePgDatabase<any>):
       ADD COLUMN IF NOT EXISTS balance_before integer,
       ADD COLUMN IF NOT EXISTS balance_after integer,
       ADD COLUMN IF NOT EXISTS source_module varchar(100),
-      ADD COLUMN IF NOT EXISTS source_record_id varchar(100);
+      ADD COLUMN IF NOT EXISTS source_record_id varchar(100),
+      ADD COLUMN IF NOT EXISTS is_void boolean DEFAULT false,
+      ADD COLUMN IF NOT EXISTS void_reason text;
     `);
   } catch (err: any) {
     console.error("Migration: failed to apply stock ledger columns:", err.message);

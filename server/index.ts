@@ -50,6 +50,8 @@ import { seedVgieRules } from "./migrations/025-seed-reference-data";
 import { runMigration as runCatalogueMigration } from "./migrations/020-catalogue-migration";
 import { realignIdentitySequences } from "./services/identitySequences";
 import { applySupervisionTemplatesSeed } from "./migrations/028-supervision-templates-seed";
+import { applyStockLedgerColumnsMigration } from "./migrations/027-stock-ledger-columns";
+import { applyClientsColumns } from "./migrations/037-clients-columns";
 const app = express();
 const httpServer = createServer(app);
 const skipDbBootstrap = process.env.SKIP_DB_BOOTSTRAP === '1';
@@ -400,8 +402,12 @@ async function backfillClientIds() {
       const { db } = await import("./db");
       await realignIdentitySequences(db as any);
       log("identity sequences realigned before route startup", "db");
+      await applyMicroplanApprovalColumns();
+      await applyStockLedgerColumnsMigration(db as any);
+      await applyClientsColumns();
+      log("critical table columns (microplans, stock_transactions, clients) ensured", "db");
     } catch (err: any) {
-      log(`early identity sequence realignment warning: ${err?.message ?? err}`, "db");
+      log(`early schema columns ensure warning: ${err?.message ?? err}`, "db");
     }
   }
 
