@@ -34,12 +34,13 @@ import {
 
   Search, Filter, Download, TrendingUp, TrendingDown, Minus,
 
-  FlaskConical, Clock, ShieldCheck, BarChart3, Info,
+  FlaskConical, Clock, ShieldCheck, BarChart3, Info, Eye, RotateCcw,
 
 } from "lucide-react";
 
 import { MapView } from "@/components/MapView";
 import { useAuth } from "@/hooks/useAuth";
+import { DataTable } from "@/components/DataTable";
 
 import {
 
@@ -670,6 +671,8 @@ export default function Surveillance() {
 
       name: DISEASE_LABELS[disease] ?? disease,
 
+      disease,
+
       value: count,
 
       color: DISEASE_COLORS[disease] ?? "#94a3b8",
@@ -706,43 +709,68 @@ export default function Surveillance() {
 
   }, [cases]);
 
-
+  const clearAllFilters = () => {
+    setDiseaseFilter("all");
+    setClassificationFilter("all");
+    setStatusFilter("all");
+    setSearchQuery("");
+    setProvinceFilter("all");
+    setDistrictFilter("all");
+    setFacilityFilter("all");
+    setChartDrillDisease(null);
+    setChartDrillWeek(null);
+  };
 
   const filteredCases = useMemo(() => {
-    const facDistMap = new Map((facilities as any[]).map((f: any) => [f.id, f.districtId]));
-    const distProvMap = new Map((districts as any[]).map((d: any) => [Number(d.id), Number(d.provinceId)]));
+    const facDistMap = new Map<any, number>();
+    (facilities as any[]).forEach((f: any) => {
+      if (f.districtId != null) {
+        facDistMap.set(f.id, Number(f.districtId));
+        facDistMap.set(Number(f.id), Number(f.districtId));
+        facDistMap.set(String(f.id), Number(f.districtId));
+      }
+    });
+
+    const distProvMap = new Map<any, number>();
+    (districts as any[]).forEach((d: any) => {
+      if (d.provinceId != null) {
+        distProvMap.set(Number(d.id), Number(d.provinceId));
+        distProvMap.set(String(d.id), Number(d.provinceId));
+      }
+    });
+
     return cases.filter((c: any) => {
-      if (diseaseFilter !== "all" && c.disease !== diseaseFilter) return false;
-      if (classificationFilter !== "all" && c.classification !== classificationFilter) return false;
-      if (statusFilter !== "all" && c.status !== statusFilter) return false;
+      if (diseaseFilter !== "all" && c.disease?.toLowerCase() !== diseaseFilter.toLowerCase()) return false;
+      if (classificationFilter !== "all" && c.classification?.toLowerCase() !== classificationFilter.toLowerCase()) return false;
+      if (statusFilter !== "all" && c.status?.toLowerCase() !== statusFilter.toLowerCase()) return false;
       if (searchQuery) {
         const q = searchQuery.toLowerCase();
         if (!c.patientName?.toLowerCase().includes(q) && !c.id?.toLowerCase().includes(q)) return false;
       }
-      if (facilityFilter !== "all" && Number(c.facilityId) !== Number(facilityFilter)) return false;
+      if (facilityFilter !== "all" && Number(c.facilityId) !== Number(facilityFilter) && String(c.facilityId) !== String(facilityFilter)) return false;
       if (districtFilter !== "all") {
-        const dId = facDistMap.get(c.facilityId);
-        if (Number(dId) !== Number(districtFilter)) return false;
+        const dId = facDistMap.get(c.facilityId) ?? facDistMap.get(Number(c.facilityId)) ?? facDistMap.get(String(c.facilityId));
+        if (dId == null || Number(dId) !== Number(districtFilter)) return false;
       }
       if (provinceFilter !== "all") {
-        const dId = facDistMap.get(c.facilityId);
-        const pId = distProvMap.get(Number(dId));
-        if (Number(pId) !== Number(provinceFilter)) return false;
+        const dId = facDistMap.get(c.facilityId) ?? facDistMap.get(Number(c.facilityId)) ?? facDistMap.get(String(c.facilityId));
+        const pId = dId != null ? (distProvMap.get(Number(dId)) ?? distProvMap.get(String(dId))) : undefined;
+        if (pId == null || Number(pId) !== Number(provinceFilter)) return false;
       }
       if (chartDrillDisease) {
-        const effectiveDrillDisease = ["afp","measles","nnt","yellow_fever","cholera","covid19"].includes(chartDrillDisease) ? chartDrillDisease : "other";
-        if (effectiveDrillDisease === "other") {
-          if (["afp","measles","nnt","yellow_fever","cholera","covid19"].includes(c.disease)) return false;
-        } else if (c.disease !== chartDrillDisease) return false;
+        const drillLower = chartDrillDisease.toLowerCase();
+        const normDrill = (Object.keys(DISEASE_LABELS).find(
+          (k) => DISEASE_LABELS[k]?.toLowerCase() === drillLower || k.toLowerCase() === drillLower
+        ) ?? drillLower).toLowerCase();
+        if (normDrill === "other") {
+          if (["afp", "measles", "nnt", "yellow_fever", "cholera", "covid19"].includes(c.disease?.toLowerCase())) return false;
+        } else if (c.disease?.toLowerCase() !== normDrill) {
+          return false;
+        }
       }
       if (chartDrillWeek) {
-        const getEpiWeekLabel = (d: Date) => {
-          const tmp = new Date(d); tmp.setHours(0,0,0,0); tmp.setDate(tmp.getDate() + 3 - ((tmp.getDay()+6)%7));
-          const w1 = new Date(tmp.getFullYear(),0,4);
-          const wk = 1 + Math.round(((tmp.getTime()-w1.getTime())/86400000-3+((w1.getDay()+6)%7))/7);
-          return `W${String(wk).padStart(2,"0")}/${String(tmp.getFullYear()).slice(2)}`;
-        };
-        if (getEpiWeekLabel(new Date(c.dateOfOnset)) !== chartDrillWeek) return false;
+        const caseWeek = getEpiWeekLabel(new Date(c.dateOfOnset));
+        if (caseWeek !== chartDrillWeek) return false;
       }
       return true;
     });
@@ -824,7 +852,140 @@ export default function Surveillance() {
 
   }
 
+  const openCaseDetails = (c: any) => {
+    setSelectedCase(c);
+    setCaseEditData({
+      patientName: c.patientName || "",
+      patientAgeMonths: c.patientAgeMonths ?? "",
+      dateOfOnset: c.dateOfOnset ? new Date(c.dateOfOnset).toISOString().split("T")[0] : "",
+      dateReported: c.dateReported ? new Date(c.dateReported).toISOString().split("T")[0] : "",
+      facilityId: c.facilityId ?? "",
+      classification: c.classification || "suspected",
+      patientGender: c.patientGender || "",
+      clinicalNotes: c.clinicalNotes || ""
+    });
+    setIsEditingCase(false);
+    setChecklistAnswers(c.formData || {});
+    setIsCaseWorkflowOpen(true);
+  };
 
+  const caseColumns = useMemo(() => [
+    {
+      key: "disease",
+      header: "Disease",
+      sortable: true,
+      render: (c: any) => (
+        <span
+          className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-bold uppercase"
+          style={{ background: (DISEASE_COLORS[c.disease] ?? "#94a3b8") + "20", color: DISEASE_COLORS[c.disease] ?? "#94a3b8" }}
+        >
+          <span className="w-1.5 h-1.5 rounded-full" style={{ background: DISEASE_COLORS[c.disease] ?? "#94a3b8" }} />
+          {DISEASE_LABELS[c.disease] ?? c.disease}
+        </span>
+      ),
+    },
+    {
+      key: "patientName",
+      header: "Patient Name",
+      sortable: true,
+      render: (c: any) => <span className="font-medium text-sm">{c.patientName || "—"}</span>,
+    },
+    {
+      key: "patientAgeMonths",
+      header: "Age / Sex",
+      sortable: true,
+      render: (c: any) => (
+        <span className="text-xs text-muted-foreground">
+          {c.patientAgeMonths != null ? `${c.patientAgeMonths}y` : "—"}
+          {c.patientGender ? ` / ${c.patientGender.charAt(0).toUpperCase()}` : ""}
+        </span>
+      ),
+    },
+    {
+      key: "dateOfOnset",
+      header: "Onset Date",
+      sortable: true,
+      render: (c: any) => (
+        <span className="text-xs text-muted-foreground tabular-nums">
+          {c.dateOfOnset ? new Date(c.dateOfOnset).toLocaleDateString() : "—"}
+        </span>
+      ),
+    },
+    {
+      key: "dateReported",
+      header: "Date Reported",
+      sortable: true,
+      render: (c: any) => (
+        <span className="text-xs text-muted-foreground tabular-nums">
+          {c.dateReported ? new Date(c.dateReported).toLocaleDateString() : "—"}
+        </span>
+      ),
+    },
+    {
+      key: "facilityId",
+      header: "District / Facility",
+      sortable: true,
+      render: (c: any) => {
+        const fac = (facilities as any[]).find((f: any) => Number(f.id) === Number(c.facilityId));
+        const dist = fac ? (districts as any[]).find((d: any) => Number(d.id) === Number(fac.districtId)) : null;
+        return (
+          <div className="text-xs">
+            <div className="font-medium text-foreground/80">{dist?.name ?? "—"}</div>
+            <div className="text-[10px] text-muted-foreground truncate max-w-[160px]">{fac?.name ?? `#${c.facilityId}`}</div>
+          </div>
+        );
+      },
+    },
+    {
+      key: "classification",
+      header: "Classification",
+      sortable: true,
+      render: (c: any) => (
+        <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-semibold uppercase border ${classificationBadgeClass(c.classification)}`}>
+          {c.classification}
+        </span>
+      ),
+    },
+    {
+      key: "status",
+      header: "Status",
+      sortable: true,
+      render: (c: any) => (
+        <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-semibold uppercase border ${c.status === "closed" ? "bg-muted text-muted-foreground border-border dark:bg-muted dark:text-foreground" : "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950 dark:text-emerald-400"}`}>
+          {c.status || "open"}
+        </span>
+      ),
+    },
+    {
+      key: "actions",
+      header: "Actions",
+      sortable: false,
+      render: (c: any) => (
+        <div className="flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
+            title="View / Edit Case Details"
+            onClick={() => openCaseDetails(c)}
+          >
+            <Eye className="h-3.5 w-3.5" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 w-7 p-0 text-red-500 hover:text-red-700 hover:bg-red-50"
+            title="Delete Case"
+            onClick={() => {
+              if (window.confirm("Delete this case?")) deleteCaseMutation.mutate(c.id);
+            }}
+          >
+            <Trash2 className="h-3 w-3" />
+          </Button>
+        </div>
+      ),
+    },
+  ], [facilities, districts, deleteCaseMutation]);
 
   // ── Render ───────────────────────────────────────────────────────────────────
 
@@ -1548,17 +1709,41 @@ export default function Surveillance() {
 
                 <div>
 
-                  <CardTitle className="text-sm font-semibold">Case Linelist</CardTitle>
+                  <CardTitle className="text-sm font-semibold flex items-center gap-2">
+                    <FileText className="h-4 w-4 text-primary" />
+                    Case Linelist
+                  </CardTitle>
 
-                  <CardDescription className="text-xs">All reported VPD cases · {filteredCases.length} of {cases.length} shown</CardDescription>
+                  <CardDescription className="text-xs">
+                    All reported VPD cases · {filteredCases.length} of {cases.length} shown
+                    {cases.length > 0 && filteredCases.length === 0 && (
+                      <span className="text-amber-600 dark:text-amber-400 font-medium ml-2">
+                        (Active filters are hiding all {cases.length} records)
+                      </span>
+                    )}
+                  </CardDescription>
 
                 </div>
 
-                <Button variant="outline" size="sm" className="gap-1.5 self-start">
-
-                  <Download className="h-3.5 w-3.5" /> Export CSV
-
-                </Button>
+                <div className="flex flex-wrap items-center gap-2">
+                  {(diseaseFilter !== "all" || classificationFilter !== "all" || statusFilter !== "all" || searchQuery || provinceFilter !== "all" || districtFilter !== "all" || facilityFilter !== "all" || chartDrillDisease || chartDrillWeek) && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={clearAllFilters}
+                      className="h-8 text-xs gap-1.5 text-destructive hover:bg-destructive/10 border-destructive/30"
+                    >
+                      <RotateCcw className="h-3 w-3" /> Reset All Filters
+                    </Button>
+                  )}
+                  <Button
+                    size="sm"
+                    className="h-8 text-xs gap-1.5 font-semibold"
+                    onClick={() => setIsCaseReportOpen(true)}
+                  >
+                    <Plus className="h-3.5 w-3.5" /> Report Suspected Case
+                  </Button>
+                </div>
 
               </div>
 
@@ -1693,90 +1878,54 @@ export default function Surveillance() {
                   <button
                     className="h-8 px-2.5 text-xs text-muted-foreground border border-border/50 rounded-md hover:border-destructive/50 hover:text-destructive transition-colors"
                     onClick={() => { setProvinceFilter("all"); setDistrictFilter("all"); setFacilityFilter("all"); }}
-                  >× Clear</button>
+                  >× Clear Location</button>
                 )}
               </div>
 
             </CardHeader>
 
-            <CardContent className="p-0">
+            <CardContent className="p-4 pt-0">
 
               {(chartDrillDisease || chartDrillWeek) && (
-                <div className="flex items-center gap-2 px-4 py-2 bg-primary/5 border-b text-xs">
-                  <span className="font-semibold text-primary">Drill-down active:</span>
-                  {chartDrillDisease && <span className="px-2 py-0.5 rounded-full text-[11px] font-bold uppercase" style={{ background: (DISEASE_COLORS[chartDrillDisease]??'#94a3b8')+'20', color: DISEASE_COLORS[chartDrillDisease]??'#94a3b8' }}>{DISEASE_LABELS[chartDrillDisease]??chartDrillDisease}</span>}
+                <div className="flex items-center gap-2 px-3 py-2 mb-3 bg-primary/5 border border-primary/20 rounded-lg text-xs">
+                  <span className="font-semibold text-primary">Chart drill-down active:</span>
+                  {chartDrillDisease && (
+                    <span className="px-2 py-0.5 rounded-full text-[11px] font-bold uppercase" style={{ background: (DISEASE_COLORS[chartDrillDisease]??'#94a3b8')+'20', color: DISEASE_COLORS[chartDrillDisease]??'#94a3b8' }}>
+                      {DISEASE_LABELS[chartDrillDisease] ?? chartDrillDisease}
+                    </span>
+                  )}
                   {chartDrillWeek && <span className="px-2 py-0.5 rounded-full bg-muted text-muted-foreground font-mono">{chartDrillWeek}</span>}
-                  <button className="ml-auto text-muted-foreground hover:text-foreground" onClick={() => { setChartDrillDisease(null); setChartDrillWeek(null); }}>× Clear drill</button>
+                  <button className="ml-auto text-xs text-muted-foreground hover:text-foreground font-medium underline" onClick={() => { setChartDrillDisease(null); setChartDrillWeek(null); }}>
+                    Clear drill-down
+                  </button>
                 </div>
               )}
+
               {casesLoading ? (
-
                 <div className="p-8 text-center text-sm text-muted-foreground">Loading cases...</div>
-
-              ) : (
-
-                <div className="overflow-x-auto">
-
-                  <table className="w-full text-sm min-w-[700px]">
-
-                    <thead className="border-b bg-muted/30">
-
-                      <tr>
-                        <th className="h-9 px-3 text-left text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">Disease</th>
-                        <th className="h-9 px-3 text-left text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">Patient Name</th>
-                        <th className="h-9 px-3 text-left text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">Age/Sex</th>
-                        <th className="h-9 px-3 text-left text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">Onset Date</th>
-                        <th className="h-9 px-3 text-left text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">Date Reported</th>
-                        <th className="h-9 px-3 text-left text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">District / Facility</th>
-                        <th className="h-9 px-3 text-left text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">Classification</th>
-                        <th className="h-9 px-3 text-left text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">Status</th>
-                        <th className="h-9 px-3 text-right text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">Actions</th>
-                      </tr>
-
-                    </thead>
-
-                    <tbody className="divide-y divide-border/50">
-
-                      {filteredCases.length === 0 ? (
-
-                        <tr><td colSpan={9} className="p-8 text-center text-sm text-muted-foreground">No cases match the current filters.</td></tr>
-
-                      ) : filteredCases.map((c: any) => (
-
-                        <tr key={c.id} className="hover:bg-muted/30 transition-colors cursor-pointer" onClick={() => { setSelectedCase(c); setCaseEditData({ patientName: c.patientName || "", patientAgeMonths: c.patientAgeMonths ?? "", dateOfOnset: c.dateOfOnset ? new Date(c.dateOfOnset).toISOString().split("T")[0] : "", dateReported: c.dateReported ? new Date(c.dateReported).toISOString().split("T")[0] : "", facilityId: c.facilityId ?? "", classification: c.classification || "suspected", patientGender: c.patientGender || "", clinicalNotes: c.clinicalNotes || "" }); setIsEditingCase(false); setChecklistAnswers(c.formData || {}); setIsCaseWorkflowOpen(true); }}>
-                          <td className="px-3 py-2.5">
-                            <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-bold uppercase"
-                              style={{ background: (DISEASE_COLORS[c.disease] ?? "#94a3b8") + "20", color: DISEASE_COLORS[c.disease] ?? "#94a3b8" }}>
-                              <span className="w-1.5 h-1.5 rounded-full" style={{ background: DISEASE_COLORS[c.disease] ?? "#94a3b8" }} />
-                              {DISEASE_LABELS[c.disease] ?? c.disease}
-                            </span>
-                          </td>
-                          <td className="px-3 py-2.5 font-medium text-sm">{c.patientName || "—"}</td>
-                          <td className="px-3 py-2.5 text-xs text-muted-foreground">{c.patientAgeMonths != null ? `${c.patientAgeMonths}y` : "—"}{c.patientGender ? ` / ${c.patientGender.charAt(0).toUpperCase()}` : ""}</td>
-                          <td className="px-3 py-2.5 text-xs text-muted-foreground tabular-nums">{c.dateOfOnset ? new Date(c.dateOfOnset).toLocaleDateString() : "—"}</td>
-                          <td className="px-3 py-2.5 text-xs text-muted-foreground tabular-nums">{c.dateReported ? new Date(c.dateReported).toLocaleDateString() : "—"}</td>
-                          <td className="px-3 py-2.5 text-xs">
-                            {(() => { const fac = (facilities as any[]).find((f: any) => f.id === c.facilityId); const dist = fac ? (districts as any[]).find((d: any) => Number(d.id) === Number(fac.districtId)) : null; return (<><div className="font-medium text-foreground/80">{dist?.name ?? "—"}</div><div className="text-[10px] text-muted-foreground truncate max-w-[140px]">{fac?.name ?? `#${c.facilityId}`}</div></>); })()}
-                          </td>
-                          <td className="px-3 py-2.5">
-                            <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-semibold uppercase border ${classificationBadgeClass(c.classification)}`}>{c.classification}</span>
-                          </td>
-                          <td className="px-3 py-2.5">
-                            <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-semibold uppercase border ${c.status === "closed" ? "bg-muted text-muted-foreground border-border dark:bg-muted dark:text-foreground" : "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950 dark:text-emerald-400"}`}>{c.status || "open"}</span>
-                          </td>
-                          <td className="px-3 py-2.5 text-right" onClick={(e) => e.stopPropagation()}>
-                            <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-red-500 hover:text-red-700 hover:bg-red-50" onClick={() => { if (window.confirm("Delete this case?")) deleteCaseMutation.mutate(c.id); }}><Trash2 className="h-3 w-3" /></Button>
-                          </td>
-                        </tr>
-
-                      ))}
-
-                    </tbody>
-
-                  </table>
-
+              ) : cases.length > 0 && filteredCases.length === 0 ? (
+                <div className="py-12 px-4 text-center border rounded-lg bg-muted/10 space-y-3">
+                  <AlertTriangle className="h-10 w-10 text-amber-500 mx-auto" />
+                  <div>
+                    <h3 className="text-base font-semibold">No cases match the active filters</h3>
+                    <p className="text-xs text-muted-foreground mt-1 max-w-md mx-auto">
+                      There are <strong>{cases.length} cases</strong> recorded in this system, but your active filters or chart drill-down selection are filtering them out.
+                    </p>
+                  </div>
+                  <Button size="sm" variant="outline" onClick={clearAllFilters} className="gap-1.5 text-xs font-semibold">
+                    <RotateCcw className="h-3.5 w-3.5" /> Clear All Filters &amp; Show All {cases.length} Cases
+                  </Button>
                 </div>
-
+              ) : (
+                <DataTable
+                  data={filteredCases}
+                  columns={caseColumns}
+                  searchable={false}
+                  pageSize={10}
+                  onRowClick={openCaseDetails}
+                  exportFileName="surveillance_cases_linelist"
+                  emptyMessage="No surveillance cases recorded yet"
+                />
               )}
 
             </CardContent>
