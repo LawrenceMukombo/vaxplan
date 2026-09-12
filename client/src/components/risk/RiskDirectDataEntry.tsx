@@ -1349,7 +1349,7 @@ export function RiskDirectDataEntry({ assessmentId, onCalculationSuccess }: Prop
         mcv2YearMinus1: 75,
         penta1YearMinus1: 90,
         siaCoveragePct: 95,
-        siaTargetAgeGroup: "9-59m",
+        siaTargetAgeGroup: "WIDE" as const,
         siaYearsSince: 2,
         unvaccinatedCasesPct: 30,
         suspectedCases: 0,
