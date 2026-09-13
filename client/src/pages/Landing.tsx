@@ -51,6 +51,8 @@ import { getDomainLinks } from "@/lib/navigation";
 import { saveTenantsCache, loadTenantsCache, saveActiveTenant } from "@/lib/tenantCache";
 import { clearLogoutState, recordOnlineAuthSession } from "@/lib/authSession";
 import { queryClient } from "@/lib/queryClient";
+import { useAuth } from "@/hooks/useAuth";
+import { isNationalAdmin, canAccessAdministration } from "@/lib/accessControl";
 
 interface PersonaStory {
   tag: string;
@@ -625,7 +627,20 @@ export default function Landing() {
     initials: "",
   });
 
+  const { user } = useAuth();
+  const isAdmin = Boolean(
+    user && (
+      user.isPlatformAdmin ||
+      isNationalAdmin(user) ||
+      canAccessAdministration(user) ||
+      user.role === "national_admin" ||
+      (Array.isArray((user as any).roles) &&
+        (user as any).roles.some((r: unknown) => typeof r === "string" && r.toLowerCase().includes("admin")))
+    )
+  );
+
   const handleOpenEditStory = (role: "chw" | "facility" | "manager") => {
+    if (!isAdmin) return;
     setStoryFormData({ ...personaStories[role] });
     setEditingStoryRole(role);
   };
@@ -681,98 +696,101 @@ export default function Landing() {
       <PasswordLoginDialog open={loginOpen} onOpenChange={setLoginOpen} tenants={activeTenantsList} />
 
       {/* Edit Story Dialog */}
-      <Dialog open={editingStoryRole !== null} onOpenChange={(open) => { if (!open) setEditingStoryRole(null); }}>
-        <DialogContent className="sm:max-w-[540px]">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Pencil className="h-4 w-4 text-primary" />
-              Edit Testimonial &amp; Field Story
-            </DialogTitle>
-            <DialogDescription>
-              Customize the quote, role, and location for this testimonial card. Edits are saved locally in your browser.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-2">
-            <div className="space-y-1.5">
-              <Label htmlFor="story-tag">Badge / Category Tag</Label>
-              <Input
-                id="story-tag"
-                value={storyFormData.tag}
-                onChange={(e) => setStoryFormData((prev) => ({ ...prev, tag: e.target.value }))}
-                placeholder="e.g. Voice from the Field"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="story-quote">Testimonial Quote</Label>
-              <Textarea
-                id="story-quote"
-                rows={4}
-                value={storyFormData.quote}
-                onChange={(e) => setStoryFormData((prev) => ({ ...prev, quote: e.target.value }))}
-                placeholder="Enter field quote or testimonial..."
-                className="resize-y"
-              />
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+      {isAdmin && (
+        <Dialog open={editingStoryRole !== null} onOpenChange={(open) => { if (!open) setEditingStoryRole(null); }}>
+          <DialogContent className="sm:max-w-[540px]">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Pencil className="h-4 w-4 text-primary" />
+                Edit Testimonial &amp; Field Story
+              </DialogTitle>
+              <DialogDescription>
+                Customize the quote, role, and location for this testimonial card. Edits are saved locally in your browser.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-2">
               <div className="space-y-1.5">
-                <Label htmlFor="story-role">Author Title / Role</Label>
+                <Label htmlFor="story-tag">Badge / Category Tag</Label>
                 <Input
-                  id="story-role"
-                  value={storyFormData.role}
-                  onChange={(e) => setStoryFormData((prev) => ({ ...prev, role: e.target.value }))}
-                  placeholder="e.g. Sr. Community Health Nurse"
+                  id="story-tag"
+                  value={storyFormData.tag}
+                  onChange={(e) => setStoryFormData((prev) => ({ ...prev, tag: e.target.value }))}
+                  placeholder="e.g. Voice from the Field"
                 />
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="story-initials">Avatar Initials</Label>
+                <Label htmlFor="story-quote">Testimonial Quote</Label>
+                <Textarea
+                  id="story-quote"
+                  rows={4}
+                  value={storyFormData.quote}
+                  onChange={(e) => setStoryFormData((prev) => ({ ...prev, quote: e.target.value }))}
+                  placeholder="Enter field quote or testimonial..."
+                  className="resize-y"
+                />
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label htmlFor="story-role">Author Title / Role</Label>
+                  <Input
+                    id="story-role"
+                    value={storyFormData.role}
+                    onChange={(e) => setStoryFormData((prev) => ({ ...prev, role: e.target.value }))}
+                    placeholder="e.g. Sr. Community Health Nurse"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="story-initials">Avatar Initials</Label>
+                  <Input
+                    id="story-initials"
+                    maxLength={4}
+                    value={storyFormData.initials}
+                    onChange={(e) => setStoryFormData((prev) => ({ ...prev, initials: e.target.value.toUpperCase() }))}
+                    placeholder="e.g. RN"
+                  />
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="story-location">Location / Organization</Label>
                 <Input
-                  id="story-initials"
-                  maxLength={4}
-                  value={storyFormData.initials}
-                  onChange={(e) => setStoryFormData((prev) => ({ ...prev, initials: e.target.value.toUpperCase() }))}
-                  placeholder="e.g. RN"
+                  id="story-location"
+                  value={storyFormData.location}
+                  onChange={(e) => setStoryFormData((prev) => ({ ...prev, location: e.target.value }))}
+                  placeholder="e.g. Western Highlands Province"
                 />
               </div>
             </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="story-location">Location / Organization</Label>
-              <Input
-                id="story-location"
-                value={storyFormData.location}
-                onChange={(e) => setStoryFormData((prev) => ({ ...prev, location: e.target.value }))}
-                placeholder="e.g. Western Highlands Province"
-              />
-            </div>
-          </div>
-          <div className="flex items-center justify-between pt-3 border-t mt-2">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={handleResetStory}
-              className="gap-1.5 text-muted-foreground hover:text-foreground"
-            >
-              <RotateCcw className="h-3.5 w-3.5" />
-              Reset Default
-            </Button>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center justify-between pt-3 border-t mt-2">
               <Button
                 type="button"
-                variant="ghost"
-                onClick={() => setEditingStoryRole(null)}
+                variant="outline"
+                size="sm"
+                onClick={handleResetStory}
+                className="text-muted-foreground gap-1.5"
+                title="Reset this story card to original default content"
               >
-                Cancel
+                <RotateCcw className="h-3.5 w-3.5" />
+                Reset to Default
               </Button>
-              <Button
-                type="button"
-                onClick={handleSaveStory}
-              >
-                Save Changes
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={() => setEditingStoryRole(null)}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  onClick={handleSaveStory}
+                >
+                  Save Changes
+                </Button>
+              </div>
             </div>
-          </div>
-        </DialogContent>
-      </Dialog>
+          </DialogContent>
+        </Dialog>
+      )}
       <header className="sticky top-0 z-50 border-b bg-background/95 backdrop-blur">
         <div className="container mx-auto px-4 h-16 flex items-center justify-between gap-4">
           <div className="flex items-center gap-3" data-testid="brand-header">
@@ -1029,17 +1047,19 @@ export default function Landing() {
                       <Badge variant="outline" className="bg-emerald-500/20 text-emerald-800 dark:text-emerald-200 border-none font-medium">
                         {personaStories.chw.tag}
                       </Badge>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-7 px-2.5 text-xs text-muted-foreground hover:text-foreground gap-1.5 rounded-md border border-emerald-500/20 bg-background/50 hover:bg-background shadow-xs transition-colors"
-                        onClick={() => handleOpenEditStory("chw")}
-                        title="Edit this testimonial card"
-                        data-testid="button-edit-story-chw"
-                      >
-                        <Pencil className="h-3 w-3" />
-                        <span>Edit Story</span>
-                      </Button>
+                      {isAdmin && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 px-2.5 text-xs text-muted-foreground hover:text-foreground gap-1.5 rounded-md border border-emerald-500/20 bg-background/50 hover:bg-background shadow-xs transition-colors"
+                          onClick={() => handleOpenEditStory("chw")}
+                          title="Edit this testimonial card"
+                          data-testid="button-edit-story-chw"
+                        >
+                          <Pencil className="h-3 w-3" />
+                          <span>Edit Story</span>
+                        </Button>
+                      )}
                     </div>
                     <blockquote className="text-base italic text-foreground leading-relaxed">
                       "{personaStories.chw.quote}"
@@ -1127,17 +1147,19 @@ export default function Landing() {
                       <Badge variant="outline" className="bg-blue-500/20 text-blue-800 dark:text-blue-200 border-none font-medium">
                         {personaStories.facility.tag}
                       </Badge>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-7 px-2.5 text-xs text-muted-foreground hover:text-foreground gap-1.5 rounded-md border border-blue-500/20 bg-background/50 hover:bg-background shadow-xs transition-colors"
-                        onClick={() => handleOpenEditStory("facility")}
-                        title="Edit this testimonial card"
-                        data-testid="button-edit-story-facility"
-                      >
-                        <Pencil className="h-3 w-3" />
-                        <span>Edit Story</span>
-                      </Button>
+                      {isAdmin && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 px-2.5 text-xs text-muted-foreground hover:text-foreground gap-1.5 rounded-md border border-blue-500/20 bg-background/50 hover:bg-background shadow-xs transition-colors"
+                          onClick={() => handleOpenEditStory("facility")}
+                          title="Edit this testimonial card"
+                          data-testid="button-edit-story-facility"
+                        >
+                          <Pencil className="h-3 w-3" />
+                          <span>Edit Story</span>
+                        </Button>
+                      )}
                     </div>
                     <blockquote className="text-base italic text-foreground leading-relaxed">
                       "{personaStories.facility.quote}"
@@ -1225,17 +1247,19 @@ export default function Landing() {
                       <Badge variant="outline" className="bg-purple-500/20 text-purple-800 dark:text-purple-200 border-none font-medium">
                         {personaStories.manager.tag}
                       </Badge>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-7 px-2.5 text-xs text-muted-foreground hover:text-foreground gap-1.5 rounded-md border border-purple-500/20 bg-background/50 hover:bg-background shadow-xs transition-colors"
-                        onClick={() => handleOpenEditStory("manager")}
-                        title="Edit this testimonial card"
-                        data-testid="button-edit-story-manager"
-                      >
-                        <Pencil className="h-3 w-3" />
-                        <span>Edit Story</span>
-                      </Button>
+                      {isAdmin && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 px-2.5 text-xs text-muted-foreground hover:text-foreground gap-1.5 rounded-md border border-purple-500/20 bg-background/50 hover:bg-background shadow-xs transition-colors"
+                          onClick={() => handleOpenEditStory("manager")}
+                          title="Edit this testimonial card"
+                          data-testid="button-edit-story-manager"
+                        >
+                          <Pencil className="h-3 w-3" />
+                          <span>Edit Story</span>
+                        </Button>
+                      )}
                     </div>
                     <blockquote className="text-base italic text-foreground leading-relaxed">
                       "{personaStories.manager.quote}"
