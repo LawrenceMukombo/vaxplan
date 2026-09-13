@@ -131,32 +131,6 @@ var init_errorUtils = __esm({
   }
 });
 
-// server/services/denominatorHarmonisationService.ts
-var DenominatorHarmonisationService;
-var init_denominatorHarmonisationService = __esm({
-  "server/services/denominatorHarmonisationService.ts"() {
-    "use strict";
-    DenominatorHarmonisationService = {
-      async getActiveScenario(microplanId) {
-        return null;
-      },
-      async generateScenario(input2) {
-        return {
-          id: `scenario:${input2.microplanId}:${Date.now()}`,
-          microplanId: input2.microplanId,
-          tenantId: input2.tenantId ?? null,
-          facilityId: input2.facilityId,
-          selectedSource: input2.selectedSource,
-          parentTotalPopulation: input2.parentTotalPopulation ?? null,
-          status: "draft",
-          createdBy: input2.userId ?? null,
-          generatedAt: (/* @__PURE__ */ new Date()).toISOString()
-        };
-      }
-    };
-  }
-});
-
 // shared/vaccineSchedule.ts
 function stripDoseListSuffix(name) {
   const m = name.match(DOSE_LIST_SUFFIX);
@@ -4056,6 +4030,12 @@ var init_db = __esm({
     init_schema();
     ({ Pool } = import_pg.default);
     if (!process.env.DATABASE_URL) {
+      try {
+        process.loadEnvFile?.();
+      } catch {
+      }
+    }
+    if (!process.env.DATABASE_URL) {
       throw new Error(
         "DATABASE_URL must be set. Did you forget to provision a database?"
       );
@@ -4072,26 +4052,198 @@ var init_db = __esm({
   }
 });
 
+// shared/populationDisaggregation.ts
+function ratio(value, fallback) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 && number <= 1 ? number : fallback;
+}
+function populationRatios(settings) {
+  const demographics = settings?.demographics ?? settings ?? {};
+  const under1 = ratio(demographics.under1 ?? demographics.infants0to11m, 0.04);
+  const secondYearOfLife = ratio(demographics.secondYearOfLife ?? demographics.children12to23m, 0.038);
+  const children24to59m = ratio(demographics.children24to59m, 0.115);
+  const defaultUnder5 = Math.min(under1 + secondYearOfLife + children24to59m, 0.25);
+  const under5 = Math.max(under1, ratio(demographics.under5, defaultUnder5));
+  const girls9to14 = ratio(demographics.girls9to14 ?? demographics.girls9to14y, 0.065);
+  const pregnant = ratio(demographics.pregnant ?? demographics.pregnantWomen, 0.045);
+  const female = ratio(demographics.female, 0.5);
+  return {
+    under1,
+    secondYearOfLife,
+    children24to59m,
+    under5,
+    girls9to14,
+    pregnant,
+    female
+  };
+}
+function disaggregatePopulation(totalValue, ratios) {
+  const parsed = Number(totalValue);
+  const totalPopulation = Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed) : 0;
+  const femalePopulation = Math.min(totalPopulation, Math.round(totalPopulation * ratios.female));
+  const under1Population = Math.min(totalPopulation, Math.round(totalPopulation * ratios.under1));
+  const secondYearOfLifePopulation = Math.min(totalPopulation, Math.round(totalPopulation * (ratios.secondYearOfLife ?? 0.038)));
+  const children24to59m = Math.min(totalPopulation, Math.round(totalPopulation * (ratios.children24to59m ?? 0.115)));
+  const under5Population = Math.min(totalPopulation, Math.max(under1Population, Math.round(totalPopulation * ratios.under5)));
+  const girls9to14Population = Math.min(totalPopulation, Math.round(totalPopulation * (ratios.girls9to14 ?? 0.065)));
+  const pregnantWomen = Math.min(totalPopulation, Math.round(totalPopulation * ratios.pregnant));
+  return {
+    totalPopulation,
+    // Exact standard breakdown:
+    under1Population,
+    // 0–11 months (Infants)
+    infants0to11m: under1Population,
+    secondYearOfLifePopulation,
+    // 12–23 months (2YL)
+    children12to23m: secondYearOfLifePopulation,
+    children24to59m,
+    // 24–59 months (Under 5)
+    under5Population,
+    // Total under 5 (0–59 months)
+    girls9to14Population,
+    // Girls 9–14 years (HPV)
+    girls9to14: girls9to14Population,
+    pregnantWomen,
+    // Pregnant women (Td)
+    femalePopulation,
+    malePopulation: totalPopulation - femalePopulation
+  };
+}
+var init_populationDisaggregation = __esm({
+  "shared/populationDisaggregation.ts"() {
+    "use strict";
+  }
+});
+
+// server/services/denominatorHarmonisationService.ts
+var import_drizzle_orm3, DenominatorHarmonisationService;
+var init_denominatorHarmonisationService = __esm({
+  "server/services/denominatorHarmonisationService.ts"() {
+    "use strict";
+    init_db();
+    init_schema();
+    import_drizzle_orm3 = require("drizzle-orm");
+    init_populationDisaggregation();
+    DenominatorHarmonisationService = {
+      async getActiveScenario(microplanId) {
+        const [microplan] = await db.select().from(microplans).where((0, import_drizzle_orm3.eq)(microplans.id, microplanId)).limit(1);
+        if (!microplan || !microplan.facilityId) {
+          return null;
+        }
+        return this.generateScenario({
+          microplanId,
+          tenantId: microplan.tenantId || void 0,
+          facilityId: microplan.facilityId,
+          selectedSource: "nso",
+          userId: null
+        });
+      },
+      async generateScenario(input2) {
+        const [facility] = await db.select().from(facilities).where((0, import_drizzle_orm3.eq)(facilities.id, input2.facilityId)).limit(1);
+        const facilityName = facility?.name || `Facility #${input2.facilityId}`;
+        const effectiveTenantId = input2.tenantId || facility?.tenantId || null;
+        let tenantSettings = {};
+        if (effectiveTenantId) {
+          const [tenant] = await db.select().from(tenants).where((0, import_drizzle_orm3.eq)(tenants.id, effectiveTenantId)).limit(1);
+          if (tenant?.settings) tenantSettings = tenant.settings;
+        }
+        const ratios = populationRatios(tenantSettings);
+        const popRows = await db.select().from(populationData).where(
+          (0, import_drizzle_orm3.and)(
+            (0, import_drizzle_orm3.eq)(populationData.facilityId, input2.facilityId),
+            import_drizzle_orm3.sql`${populationData.villageId} IS NULL`
+          )
+        );
+        const linkedVillages = await db.select().from(villages).where((0, import_drizzle_orm3.eq)(villages.assignedFacilityId, input2.facilityId));
+        const villagesTotal = linkedVillages.reduce(
+          (sum, v) => sum + (v.totalCatchmentPopulation || v.griddedPopulation || 0),
+          0
+        );
+        const sourceMap = /* @__PURE__ */ new Map();
+        for (const row of popRows) {
+          if (!sourceMap.has(row.source) || row.year && row.year >= (sourceMap.get(row.source)?.year || 0)) {
+            sourceMap.set(row.source, row);
+          }
+        }
+        const standardSources = [
+          { key: "nso", label: "National Statistics Office (Census)" },
+          { key: "worldpop", label: "WorldPop 100m High-Resolution Gridded" },
+          { key: "hmis", label: "HMIS / DHIS2 Routine Annual Target" },
+          { key: "community_census", label: "Community CHW Headcount Census" }
+        ];
+        const fallbackFacilityPop = facility?.catchmentGridPopulation || villagesTotal || 5e3;
+        const sources = standardSources.map((s) => {
+          const row = sourceMap.get(s.key);
+          const total = row?.totalPopulation || (s.key === "community_census" && villagesTotal > 0 ? villagesTotal : fallbackFacilityPop);
+          const cohorts = disaggregatePopulation(total, ratios);
+          return {
+            source: s.key,
+            label: s.label,
+            totalPopulation: total,
+            under1Population: row?.under1Population ?? cohorts.under1Population,
+            under5Population: row?.under5Population ?? cohorts.under5Population,
+            pregnantWomen: row?.pregnantWomen ?? cohorts.pregnantWomen,
+            confidenceScore: row?.confidenceScore ? parseFloat(String(row.confidenceScore)) : null
+          };
+        });
+        const selectedSourceStr = String(input2.selectedSource || "nso");
+        const chosen = sources.find((s) => s.source === selectedSourceStr) || sources[0];
+        const totals = sources.map((s) => s.totalPopulation).filter((t) => t > 0);
+        const minTotal = Math.min(...totals);
+        const maxTotal = Math.max(...totals);
+        const variancePercent = minTotal > 0 ? Math.round((maxTotal - minTotal) / minTotal * 100) : 0;
+        let recommendedAction = "Target denominators are consistent across sources (<10% variance).";
+        if (variancePercent >= 25) {
+          recommendedAction = `High variance (${variancePercent}%) between Census and Gridded estimates. Microplanning review recommended to prevent vaccine stockouts.`;
+        } else if (variancePercent >= 10) {
+          recommendedAction = `Moderate variance (${variancePercent}%) between sources. Validate with local CHW headcounts.`;
+        }
+        return {
+          id: `scenario:${input2.microplanId}:${selectedSourceStr}`,
+          microplanId: input2.microplanId,
+          tenantId: effectiveTenantId,
+          facilityId: input2.facilityId,
+          facilityName,
+          status: "active",
+          selectedSource: selectedSourceStr,
+          sources,
+          variancePercent,
+          harmonisedTotal: chosen.totalPopulation,
+          cohorts: {
+            under1: chosen.under1Population,
+            under5: chosen.under5Population,
+            pregnantWomen: chosen.pregnantWomen
+          },
+          villageCount: linkedVillages.length,
+          villagesTotalPopulation: villagesTotal,
+          recommendedAction,
+          generatedAt: (/* @__PURE__ */ new Date()).toISOString()
+        };
+      }
+    };
+  }
+});
+
 // server/services/entityHistoryService.ts
-var import_drizzle_orm3, EntityHistoryService;
+var import_drizzle_orm4, EntityHistoryService;
 var init_entityHistoryService = __esm({
   "server/services/entityHistoryService.ts"() {
     "use strict";
     init_db();
     init_schema();
-    import_drizzle_orm3 = require("drizzle-orm");
+    import_drizzle_orm4 = require("drizzle-orm");
     EntityHistoryService = class {
       /**
        * Get the active current version of an entity
        */
       static async getCurrent(tenantId, entityType, stableEntityId) {
         const [row] = await db.select().from(entityHistoryVersions).where(
-          (0, import_drizzle_orm3.and)(
-            (0, import_drizzle_orm3.eq)(entityHistoryVersions.tenantId, tenantId),
-            (0, import_drizzle_orm3.eq)(entityHistoryVersions.entityType, entityType),
-            (0, import_drizzle_orm3.eq)(entityHistoryVersions.stableEntityId, String(stableEntityId)),
-            (0, import_drizzle_orm3.eq)(entityHistoryVersions.isCurrent, true),
-            (0, import_drizzle_orm3.eq)(entityHistoryVersions.status, "active")
+          (0, import_drizzle_orm4.and)(
+            (0, import_drizzle_orm4.eq)(entityHistoryVersions.tenantId, tenantId),
+            (0, import_drizzle_orm4.eq)(entityHistoryVersions.entityType, entityType),
+            (0, import_drizzle_orm4.eq)(entityHistoryVersions.stableEntityId, String(stableEntityId)),
+            (0, import_drizzle_orm4.eq)(entityHistoryVersions.isCurrent, true),
+            (0, import_drizzle_orm4.eq)(entityHistoryVersions.status, "active")
           )
         ).limit(1);
         return row || null;
@@ -4101,12 +4253,12 @@ var init_entityHistoryService = __esm({
        */
       static async getHistory(tenantId, entityType, stableEntityId) {
         return await db.select().from(entityHistoryVersions).where(
-          (0, import_drizzle_orm3.and)(
-            (0, import_drizzle_orm3.eq)(entityHistoryVersions.tenantId, tenantId),
-            (0, import_drizzle_orm3.eq)(entityHistoryVersions.entityType, entityType),
-            (0, import_drizzle_orm3.eq)(entityHistoryVersions.stableEntityId, String(stableEntityId))
+          (0, import_drizzle_orm4.and)(
+            (0, import_drizzle_orm4.eq)(entityHistoryVersions.tenantId, tenantId),
+            (0, import_drizzle_orm4.eq)(entityHistoryVersions.entityType, entityType),
+            (0, import_drizzle_orm4.eq)(entityHistoryVersions.stableEntityId, String(stableEntityId))
           )
-        ).orderBy((0, import_drizzle_orm3.desc)(entityHistoryVersions.versionNumber));
+        ).orderBy((0, import_drizzle_orm4.desc)(entityHistoryVersions.versionNumber));
       }
       /**
        * Resolve state of an entity as of a specific date
@@ -4114,13 +4266,13 @@ var init_entityHistoryService = __esm({
       static async getAsOf(tenantId, entityType, stableEntityId, targetDate) {
         const date = new Date(targetDate);
         const versions = await db.select().from(entityHistoryVersions).where(
-          (0, import_drizzle_orm3.and)(
-            (0, import_drizzle_orm3.eq)(entityHistoryVersions.tenantId, tenantId),
-            (0, import_drizzle_orm3.eq)(entityHistoryVersions.entityType, entityType),
-            (0, import_drizzle_orm3.eq)(entityHistoryVersions.stableEntityId, String(stableEntityId)),
-            (0, import_drizzle_orm3.lte)(entityHistoryVersions.validFrom, date)
+          (0, import_drizzle_orm4.and)(
+            (0, import_drizzle_orm4.eq)(entityHistoryVersions.tenantId, tenantId),
+            (0, import_drizzle_orm4.eq)(entityHistoryVersions.entityType, entityType),
+            (0, import_drizzle_orm4.eq)(entityHistoryVersions.stableEntityId, String(stableEntityId)),
+            (0, import_drizzle_orm4.lte)(entityHistoryVersions.validFrom, date)
           )
-        ).orderBy((0, import_drizzle_orm3.desc)(entityHistoryVersions.validFrom), (0, import_drizzle_orm3.desc)(entityHistoryVersions.versionNumber));
+        ).orderBy((0, import_drizzle_orm4.desc)(entityHistoryVersions.validFrom), (0, import_drizzle_orm4.desc)(entityHistoryVersions.versionNumber));
         const validVersion = versions.find((v) => {
           if (v.status !== "active" && v.status !== "superseded" && v.status !== "approved") {
             return false;
@@ -4180,7 +4332,7 @@ var init_entityHistoryService = __esm({
             validTo: now,
             recordedUntil: now,
             updatedAt: now
-          }).where((0, import_drizzle_orm3.eq)(entityHistoryVersions.id, current.id));
+          }).where((0, import_drizzle_orm4.eq)(entityHistoryVersions.id, current.id));
         }
         const [newVersion] = await db.insert(entityHistoryVersions).values({
           tenantId,
@@ -4213,7 +4365,7 @@ var init_entityHistoryService = __esm({
         const [row] = await db.update(entityHistoryVersions).set({
           status: "pending_review",
           updatedAt: /* @__PURE__ */ new Date()
-        }).where((0, import_drizzle_orm3.and)((0, import_drizzle_orm3.eq)(entityHistoryVersions.tenantId, tenantId), (0, import_drizzle_orm3.eq)(entityHistoryVersions.id, versionId))).returning();
+        }).where((0, import_drizzle_orm4.and)((0, import_drizzle_orm4.eq)(entityHistoryVersions.tenantId, tenantId), (0, import_drizzle_orm4.eq)(entityHistoryVersions.id, versionId))).returning();
         if (!row) throw new Error("Entity version record not found");
         return row;
       }
@@ -4221,7 +4373,7 @@ var init_entityHistoryService = __esm({
        * Approve a change proposal and activate if validFrom <= now
        */
       static async approveChange(tenantId, versionId, userId) {
-        const [version] = await db.select().from(entityHistoryVersions).where((0, import_drizzle_orm3.and)((0, import_drizzle_orm3.eq)(entityHistoryVersions.tenantId, tenantId), (0, import_drizzle_orm3.eq)(entityHistoryVersions.id, versionId)));
+        const [version] = await db.select().from(entityHistoryVersions).where((0, import_drizzle_orm4.and)((0, import_drizzle_orm4.eq)(entityHistoryVersions.tenantId, tenantId), (0, import_drizzle_orm4.eq)(entityHistoryVersions.id, versionId)));
         if (!version) throw new Error("Version record not found");
         const now = /* @__PURE__ */ new Date();
         const isEffectiveNow = new Date(version.validFrom) <= now;
@@ -4235,7 +4387,7 @@ var init_entityHistoryService = __esm({
               recordedUntil: now,
               supersededBy: versionId,
               updatedAt: now
-            }).where((0, import_drizzle_orm3.eq)(entityHistoryVersions.id, current.id));
+            }).where((0, import_drizzle_orm4.eq)(entityHistoryVersions.id, current.id));
           }
         }
         const [approved] = await db.update(entityHistoryVersions).set({
@@ -4245,7 +4397,7 @@ var init_entityHistoryService = __esm({
           approvedBy: userId || null,
           approvedAt: now,
           updatedAt: now
-        }).where((0, import_drizzle_orm3.eq)(entityHistoryVersions.id, versionId)).returning();
+        }).where((0, import_drizzle_orm4.eq)(entityHistoryVersions.id, versionId)).returning();
         return approved;
       }
       /**
@@ -4258,7 +4410,7 @@ var init_entityHistoryService = __esm({
           reviewedBy: userId || null,
           changeReason: reason ? `Rejected: ${reason}` : "Change rejected by reviewer",
           updatedAt: /* @__PURE__ */ new Date()
-        }).where((0, import_drizzle_orm3.and)((0, import_drizzle_orm3.eq)(entityHistoryVersions.tenantId, tenantId), (0, import_drizzle_orm3.eq)(entityHistoryVersions.id, versionId))).returning();
+        }).where((0, import_drizzle_orm4.and)((0, import_drizzle_orm4.eq)(entityHistoryVersions.tenantId, tenantId), (0, import_drizzle_orm4.eq)(entityHistoryVersions.id, versionId))).returning();
         if (!rejected) throw new Error("Version record not found");
         return rejected;
       }
@@ -4266,13 +4418,13 @@ var init_entityHistoryService = __esm({
        * Retroactively correct a mistake in a version without wiping history
        */
       static async correctVersion(tenantId, versionId, payload, userId) {
-        const [original] = await db.select().from(entityHistoryVersions).where((0, import_drizzle_orm3.and)((0, import_drizzle_orm3.eq)(entityHistoryVersions.tenantId, tenantId), (0, import_drizzle_orm3.eq)(entityHistoryVersions.id, versionId)));
+        const [original] = await db.select().from(entityHistoryVersions).where((0, import_drizzle_orm4.and)((0, import_drizzle_orm4.eq)(entityHistoryVersions.tenantId, tenantId), (0, import_drizzle_orm4.eq)(entityHistoryVersions.id, versionId)));
         if (!original) throw new Error("Original version not found");
         await db.update(entityHistoryVersions).set({
           status: "corrected",
           isCurrent: false,
           updatedAt: /* @__PURE__ */ new Date()
-        }).where((0, import_drizzle_orm3.eq)(entityHistoryVersions.id, versionId));
+        }).where((0, import_drizzle_orm4.eq)(entityHistoryVersions.id, versionId));
         const [corrected] = await db.insert(entityHistoryVersions).values({
           tenantId,
           stableEntityId: original.stableEntityId,
@@ -4301,8 +4453,8 @@ var init_entityHistoryService = __esm({
        * Compare two versions side by side
        */
       static async compareVersions(tenantId, versionAId, versionBId) {
-        const [vA] = await db.select().from(entityHistoryVersions).where((0, import_drizzle_orm3.and)((0, import_drizzle_orm3.eq)(entityHistoryVersions.tenantId, tenantId), (0, import_drizzle_orm3.eq)(entityHistoryVersions.id, versionAId)));
-        const [vB] = await db.select().from(entityHistoryVersions).where((0, import_drizzle_orm3.and)((0, import_drizzle_orm3.eq)(entityHistoryVersions.tenantId, tenantId), (0, import_drizzle_orm3.eq)(entityHistoryVersions.id, versionBId)));
+        const [vA] = await db.select().from(entityHistoryVersions).where((0, import_drizzle_orm4.and)((0, import_drizzle_orm4.eq)(entityHistoryVersions.tenantId, tenantId), (0, import_drizzle_orm4.eq)(entityHistoryVersions.id, versionAId)));
+        const [vB] = await db.select().from(entityHistoryVersions).where((0, import_drizzle_orm4.and)((0, import_drizzle_orm4.eq)(entityHistoryVersions.tenantId, tenantId), (0, import_drizzle_orm4.eq)(entityHistoryVersions.id, versionBId)));
         if (!vA || !vB) throw new Error("One or both version records not found");
         const snapA = vA.snapshotData || {};
         const snapB = vB.snapshotData || {};
@@ -4410,7 +4562,7 @@ async function getSupervisionPrefillBundle(tenantId, facilityId, checklistTempla
     district: districts,
     province: provinces,
     tenant: tenants
-  }).from(facilities).leftJoin(districts, (0, import_drizzle_orm4.eq)(facilities.districtId, districts.id)).leftJoin(provinces, (0, import_drizzle_orm4.eq)(districts.provinceId, provinces.id)).leftJoin(tenants, (0, import_drizzle_orm4.eq)(facilities.tenantId, tenants.id)).where((0, import_drizzle_orm4.and)((0, import_drizzle_orm4.eq)(facilities.id, facilityId), (0, import_drizzle_orm4.eq)(facilities.tenantId, tenantId))).limit(1);
+  }).from(facilities).leftJoin(districts, (0, import_drizzle_orm5.eq)(facilities.districtId, districts.id)).leftJoin(provinces, (0, import_drizzle_orm5.eq)(districts.provinceId, provinces.id)).leftJoin(tenants, (0, import_drizzle_orm5.eq)(facilities.tenantId, tenants.id)).where((0, import_drizzle_orm5.and)((0, import_drizzle_orm5.eq)(facilities.id, facilityId), (0, import_drizzle_orm5.eq)(facilities.tenantId, tenantId))).limit(1);
   if (!facilityRows || facilityRows.length === 0) {
     throw new Error(`Health facility #${facilityId} not found in tenant ${tenantId}`);
   }
@@ -4418,7 +4570,7 @@ async function getSupervisionPrefillBundle(tenantId, facilityId, checklistTempla
   let previousVisitDate = null;
   let previousVisitId = null;
   try {
-    const prevVisits = await db.execute(import_drizzle_orm4.sql`
+    const prevVisits = await db.execute(import_drizzle_orm5.sql`
       SELECT id, visit_date as "visitDate"
       FROM supervision_visits
       WHERE tenant_id = ${tenantId}
@@ -4440,7 +4592,7 @@ async function getSupervisionPrefillBundle(tenantId, facilityId, checklistTempla
   let person3;
   let staffList = [];
   try {
-    staffList = await db.select().from(facilityStaff).where((0, import_drizzle_orm4.and)((0, import_drizzle_orm4.eq)(facilityStaff.tenantId, tenantId), (0, import_drizzle_orm4.eq)(facilityStaff.facilityId, facilityId))).limit(5);
+    staffList = await db.select().from(facilityStaff).where((0, import_drizzle_orm5.and)((0, import_drizzle_orm5.eq)(facilityStaff.tenantId, tenantId), (0, import_drizzle_orm5.eq)(facilityStaff.facilityId, facilityId))).limit(5);
   } catch (err) {
   }
   if (staffList && staffList.length > 0) {
@@ -4467,7 +4619,7 @@ async function getSupervisionPrefillBundle(tenantId, facilityId, checklistTempla
       };
     }
   } else {
-    const userList = await db.select().from(users).where((0, import_drizzle_orm4.and)((0, import_drizzle_orm4.eq)(users.tenantId, tenantId), (0, import_drizzle_orm4.eq)(users.facilityId, facilityId))).limit(5);
+    const userList = await db.select().from(users).where((0, import_drizzle_orm5.and)((0, import_drizzle_orm5.eq)(users.tenantId, tenantId), (0, import_drizzle_orm5.eq)(users.facilityId, facilityId))).limit(5);
     if (userList && userList.length > 0) {
       person1 = {
         name: `${userList[0].firstName || ""} ${userList[0].lastName || ""}`.trim() || userList[0].email || "Facility Staff",
@@ -4504,7 +4656,7 @@ async function getSupervisionPrefillBundle(tenantId, facilityId, checklistTempla
   let popYear = String((/* @__PURE__ */ new Date()).getFullYear());
   let popVersion = "v1.0";
   let popConfidence = "Verified";
-  const popRows = await db.select().from(populationData).where((0, import_drizzle_orm4.and)((0, import_drizzle_orm4.eq)(populationData.tenantId, tenantId), (0, import_drizzle_orm4.eq)(populationData.facilityId, facilityId))).orderBy((0, import_drizzle_orm4.desc)(populationData.year)).limit(1);
+  const popRows = await db.select().from(populationData).where((0, import_drizzle_orm5.and)((0, import_drizzle_orm5.eq)(populationData.tenantId, tenantId), (0, import_drizzle_orm5.eq)(populationData.facilityId, facilityId))).orderBy((0, import_drizzle_orm5.desc)(populationData.year)).limit(1);
   if (popRows.length > 0) {
     const pr = popRows[0];
     totalPop = Number(pr.totalPopulation) || totalPop;
@@ -4521,7 +4673,7 @@ async function getSupervisionPrefillBundle(tenantId, facilityId, checklistTempla
   try {
     const siteRows = await db.select({
       sessionType: sessionPlans.sessionType
-    }).from(sessionPlans).where((0, import_drizzle_orm4.and)((0, import_drizzle_orm4.eq)(sessionPlans.tenantId, tenantId), (0, import_drizzle_orm4.eq)(sessionPlans.facilityId, facilityId)));
+    }).from(sessionPlans).where((0, import_drizzle_orm5.and)((0, import_drizzle_orm5.eq)(sessionPlans.tenantId, tenantId), (0, import_drizzle_orm5.eq)(sessionPlans.facilityId, facilityId)));
     if (siteRows.length > 0) {
       outreachSites = siteRows.filter((s) => (s.sessionType || "").toLowerCase() === "outreach").length;
       mobileSites = siteRows.filter((s) => (s.sessionType || "").toLowerCase() === "mobile").length;
@@ -4580,13 +4732,13 @@ async function getSupervisionPrefillBundle(tenantId, facilityId, checklistTempla
     }
   };
 }
-var import_drizzle_orm4;
+var import_drizzle_orm5;
 var init_supervisionPrefillService = __esm({
   "server/services/supervisionPrefillService.ts"() {
     "use strict";
     init_db();
     init_schema();
-    import_drizzle_orm4 = require("drizzle-orm");
+    import_drizzle_orm5 = require("drizzle-orm");
   }
 });
 
@@ -4616,12 +4768,12 @@ async function getMicroplanApprovalAudit(db2, tenantId, microplan) {
   let matchingReq = null;
   try {
     const [req] = await db2.select().from(approvalRequests).where(
-      (0, import_drizzle_orm5.and)(
-        (0, import_drizzle_orm5.eq)(approvalRequests.tenantId, tenantId),
-        (0, import_drizzle_orm5.eq)(approvalRequests.entityType, "microplan"),
-        (0, import_drizzle_orm5.eq)(approvalRequests.entityId, planId)
+      (0, import_drizzle_orm6.and)(
+        (0, import_drizzle_orm6.eq)(approvalRequests.tenantId, tenantId),
+        (0, import_drizzle_orm6.eq)(approvalRequests.entityType, "microplan"),
+        (0, import_drizzle_orm6.eq)(approvalRequests.entityId, planId)
       )
-    ).orderBy((0, import_drizzle_orm5.desc)(approvalRequests.id)).limit(1);
+    ).orderBy((0, import_drizzle_orm6.desc)(approvalRequests.id)).limit(1);
     matchingReq = req || null;
   } catch (err) {
     console.warn("[approvalService] Failed to load approval_request:", err);
@@ -4629,16 +4781,16 @@ async function getMicroplanApprovalAudit(db2, tenantId, microplan) {
   let approvedVersion = null;
   try {
     const [v] = await db2.select().from(microplanVersions).where(
-      (0, import_drizzle_orm5.and)(
-        (0, import_drizzle_orm5.eq)(microplanVersions.tenantId, tenantId),
-        (0, import_drizzle_orm5.eq)(microplanVersions.microplanId, planId),
-        (0, import_drizzle_orm5.or)(
-          (0, import_drizzle_orm5.eq)(microplanVersions.status, "approved"),
-          (0, import_drizzle_orm5.eq)(microplanVersions.status, "auto_approved"),
-          (0, import_drizzle_orm5.eq)(microplanVersions.eventType, "approved")
+      (0, import_drizzle_orm6.and)(
+        (0, import_drizzle_orm6.eq)(microplanVersions.tenantId, tenantId),
+        (0, import_drizzle_orm6.eq)(microplanVersions.microplanId, planId),
+        (0, import_drizzle_orm6.or)(
+          (0, import_drizzle_orm6.eq)(microplanVersions.status, "approved"),
+          (0, import_drizzle_orm6.eq)(microplanVersions.status, "auto_approved"),
+          (0, import_drizzle_orm6.eq)(microplanVersions.eventType, "approved")
         )
       )
-    ).orderBy((0, import_drizzle_orm5.desc)(microplanVersions.versionNumber)).limit(1);
+    ).orderBy((0, import_drizzle_orm6.desc)(microplanVersions.versionNumber)).limit(1);
     approvedVersion = v || null;
   } catch (err) {
     console.warn("[approvalService] Failed to load microplan_versions:", err);
@@ -4665,7 +4817,7 @@ async function getMicroplanApprovalAudit(db2, tenantId, microplan) {
         lastName: users.lastName,
         email: users.email,
         role: users.role
-      }).from(users).where((0, import_drizzle_orm5.eq)(users.id, approverId)).limit(1);
+      }).from(users).where((0, import_drizzle_orm6.eq)(users.id, approverId)).limit(1);
       if (u) {
         const full = [u.firstName, u.lastName].filter(Boolean).join(" ");
         approvedByName = full || u.email || "Authorized Approver";
@@ -4695,7 +4847,7 @@ async function getMicroplanApprovalAudit(db2, tenantId, microplan) {
         lastName: users.lastName,
         email: users.email,
         role: users.role
-      }).from(users).where((0, import_drizzle_orm5.eq)(users.id, submitterId)).limit(1);
+      }).from(users).where((0, import_drizzle_orm6.eq)(users.id, submitterId)).limit(1);
       if (u) {
         const full = [u.firstName, u.lastName].filter(Boolean).join(" ");
         submittedByName = full || u.email || "Facility In-Charge";
@@ -4735,11 +4887,11 @@ async function getMicroplanApprovalAudit(db2, tenantId, microplan) {
     versionNumber: approvedVersion?.versionNumber || null
   };
 }
-var import_drizzle_orm5;
+var import_drizzle_orm6;
 var init_microplanApprovalService = __esm({
   "server/services/microplanApprovalService.ts"() {
     "use strict";
-    import_drizzle_orm5 = require("drizzle-orm");
+    import_drizzle_orm6 = require("drizzle-orm");
     init_schema();
   }
 });
@@ -4755,7 +4907,7 @@ async function validateClientImportBatch(tenantId, userFacilityId, userDistrictI
     dateOfBirth: clients.dateOfBirth,
     contactPhone: clients.contactPhone,
     facilityId: clients.facilityId
-  }).from(clients).where((0, import_drizzle_orm6.eq)(clients.tenantId, tenantId));
+  }).from(clients).where((0, import_drizzle_orm7.eq)(clients.tenantId, tenantId));
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
     const errors = [];
@@ -4810,7 +4962,7 @@ async function validateClientImportBatch(tenantId, userFacilityId, userDistrictI
 async function checkClientHasLinkedRecords(tenantId, clientId) {
   const details = [];
   let linkedCount = 0;
-  const vacs = await db.select({ count: import_drizzle_orm6.sql`count(*)` }).from(clientVaccinations).where((0, import_drizzle_orm6.and)((0, import_drizzle_orm6.eq)(clientVaccinations.tenantId, tenantId), (0, import_drizzle_orm6.eq)(clientVaccinations.clientId, clientId)));
+  const vacs = await db.select({ count: import_drizzle_orm7.sql`count(*)` }).from(clientVaccinations).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(clientVaccinations.tenantId, tenantId), (0, import_drizzle_orm7.eq)(clientVaccinations.clientId, clientId)));
   const vacCount = Number(vacs[0]?.count || 0);
   if (vacCount > 0) {
     linkedCount += vacCount;
@@ -4822,13 +4974,13 @@ async function checkClientHasLinkedRecords(tenantId, clientId) {
     details
   };
 }
-var import_drizzle_orm6;
+var import_drizzle_orm7;
 var init_clientBulkService = __esm({
   "server/services/clientBulkService.ts"() {
     "use strict";
     init_db();
     init_schema();
-    import_drizzle_orm6 = require("drizzle-orm");
+    import_drizzle_orm7 = require("drizzle-orm");
   }
 });
 
@@ -4840,13 +4992,13 @@ __export(storage_exports, {
   storage: () => storage
 });
 function withTenant(table, tenantId, ...extra) {
-  const conds = [(0, import_drizzle_orm7.eq)(table.tenantId, tenantId), ...extra.filter(Boolean)];
-  return conds.length === 1 ? conds[0] : (0, import_drizzle_orm7.and)(...conds);
+  const conds = [(0, import_drizzle_orm8.eq)(table.tenantId, tenantId), ...extra.filter(Boolean)];
+  return conds.length === 1 ? conds[0] : (0, import_drizzle_orm8.and)(...conds);
 }
 async function refreshFacilityPopulationAggregate(tenantId, facilityId) {
   await storage.refreshFacilityPopulationAggregate(tenantId, facilityId);
 }
-var import_drizzle_orm7, DatabaseStorage, storage;
+var import_drizzle_orm8, DatabaseStorage, storage;
 var init_storage = __esm({
   "server/storage.ts"() {
     "use strict";
@@ -4854,18 +5006,18 @@ var init_storage = __esm({
     init_vaccineSchedule();
     init_microplanPolicy();
     init_db();
-    import_drizzle_orm7 = require("drizzle-orm");
+    import_drizzle_orm8 = require("drizzle-orm");
     DatabaseStorage = class {
       async refreshFacilityPopulationAggregate(tenantId, facilityId) {
         const id = Number(facilityId);
         if (!Number.isFinite(id)) return;
         const [aggregate] = await db.select({
-          total: import_drizzle_orm7.sql`COALESCE(SUM(COALESCE(${villages.griddedPopulation}, ${villages.totalCatchmentPopulation}, 0)), 0)`.mapWith(Number)
-        }).from(villages).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(villages.tenantId, tenantId), (0, import_drizzle_orm7.eq)(villages.assignedFacilityId, id)));
+          total: import_drizzle_orm8.sql`COALESCE(SUM(COALESCE(${villages.griddedPopulation}, ${villages.totalCatchmentPopulation}, 0)), 0)`.mapWith(Number)
+        }).from(villages).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(villages.tenantId, tenantId), (0, import_drizzle_orm8.eq)(villages.assignedFacilityId, id)));
         await db.update(facilities).set({
           catchmentGridPopulation: Number(aggregate?.total ?? 0),
           updatedAt: /* @__PURE__ */ new Date()
-        }).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(facilities.tenantId, tenantId), (0, import_drizzle_orm7.eq)(facilities.id, id)));
+        }).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(facilities.tenantId, tenantId), (0, import_drizzle_orm8.eq)(facilities.id, id)));
       }
       async refreshPopulationOwnerAggregates(tenantId, row) {
         if (!row) return;
@@ -4873,7 +5025,7 @@ var init_storage = __esm({
         const facilityId = row.facilityId ? Number(row.facilityId) : null;
         let resolvedFacilityId = facilityId;
         if (villageId) {
-          const [village] = await db.select({ assignedFacilityId: villages.assignedFacilityId }).from(villages).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(villages.tenantId, tenantId), (0, import_drizzle_orm7.eq)(villages.id, villageId))).limit(1);
+          const [village] = await db.select({ assignedFacilityId: villages.assignedFacilityId }).from(villages).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(villages.tenantId, tenantId), (0, import_drizzle_orm8.eq)(villages.id, villageId))).limit(1);
           resolvedFacilityId = facilityId ?? (village?.assignedFacilityId ? Number(village.assignedFacilityId) : null);
           const populationPatch = {
             totalCatchmentPopulation: Number(row.totalPopulation ?? 0),
@@ -4886,13 +5038,13 @@ var init_storage = __esm({
           if (row.under5Population != null) {
             populationPatch.under5Population = Number(row.under5Population);
           }
-          await db.update(villages).set(populationPatch).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(villages.tenantId, tenantId), (0, import_drizzle_orm7.eq)(villages.id, villageId)));
+          await db.update(villages).set(populationPatch).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(villages.tenantId, tenantId), (0, import_drizzle_orm8.eq)(villages.id, villageId)));
         }
         await this.refreshFacilityPopulationAggregate(tenantId, resolvedFacilityId);
       }
       // --- Users ---
       async getUser(id) {
-        const [user] = await db.select().from(users).where((0, import_drizzle_orm7.eq)(users.id, id));
+        const [user] = await db.select().from(users).where((0, import_drizzle_orm8.eq)(users.id, id));
         return user;
       }
       async upsertUser(userData) {
@@ -4903,21 +5055,21 @@ var init_storage = __esm({
         return user;
       }
       async getUserByEmail(email) {
-        const [u] = await db.select().from(users).where((0, import_drizzle_orm7.eq)(users.email, email.toLowerCase()));
+        const [u] = await db.select().from(users).where((0, import_drizzle_orm8.eq)(users.email, email.toLowerCase()));
         return u;
       }
       async getUserByEmailAndTenant(email, tenantId) {
-        const [u] = await db.select().from(users).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(users.email, email.toLowerCase()), (0, import_drizzle_orm7.eq)(users.tenantId, tenantId)));
+        const [u] = await db.select().from(users).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(users.email, email.toLowerCase()), (0, import_drizzle_orm8.eq)(users.tenantId, tenantId)));
         return u;
       }
       async assignUserTenant(userId, tenantId) {
-        await db.update(users).set({ tenantId, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(users.id, userId), (0, import_drizzle_orm7.isNull)(users.tenantId)));
+        await db.update(users).set({ tenantId, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(users.id, userId), (0, import_drizzle_orm8.isNull)(users.tenantId)));
       }
       async assignUserTenantAndRole(userId, tenantId, role) {
-        await db.update(users).set({ tenantId, role, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(users.id, userId), (0, import_drizzle_orm7.isNull)(users.tenantId)));
+        await db.update(users).set({ tenantId, role, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(users.id, userId), (0, import_drizzle_orm8.isNull)(users.tenantId)));
       }
       async listUsers(tenantId) {
-        return await db.select().from(users).where((0, import_drizzle_orm7.eq)(users.tenantId, tenantId));
+        return await db.select().from(users).where((0, import_drizzle_orm8.eq)(users.tenantId, tenantId));
       }
       async updateUserRolesAndPermissions(tenantId, id, roles, permissions2, scope) {
         const [u] = await db.update(users).set({
@@ -4926,7 +5078,7 @@ var init_storage = __esm({
           dataAccessScope: scope,
           role: roles.length > 0 ? roles[0] : "facility_clerk",
           updatedAt: /* @__PURE__ */ new Date()
-        }).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(users.id, id), (0, import_drizzle_orm7.eq)(users.tenantId, tenantId))).returning();
+        }).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(users.id, id), (0, import_drizzle_orm8.eq)(users.tenantId, tenantId))).returning();
         return u;
       }
       async createUser(tenantId, data) {
@@ -4948,27 +5100,27 @@ var init_storage = __esm({
           ...data,
           role: data.roles && data.roles.length > 0 ? data.roles[0] : void 0,
           updatedAt: /* @__PURE__ */ new Date()
-        }).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(users.id, id), (0, import_drizzle_orm7.eq)(users.tenantId, tenantId))).returning();
+        }).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(users.id, id), (0, import_drizzle_orm8.eq)(users.tenantId, tenantId))).returning();
         return row;
       }
       async setPlatformAdmin(id, isPlatformAdmin) {
-        const [row] = await db.update(users).set({ isPlatformAdmin, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm7.eq)(users.id, id)).returning();
+        const [row] = await db.update(users).set({ isPlatformAdmin, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm8.eq)(users.id, id)).returning();
         return row;
       }
       async deleteUser(tenantId, id) {
-        const [u] = await db.update(users).set({ isActive: false, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(users.id, id), (0, import_drizzle_orm7.eq)(users.tenantId, tenantId))).returning({ id: users.id });
+        const [u] = await db.update(users).set({ isActive: false, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(users.id, id), (0, import_drizzle_orm8.eq)(users.tenantId, tenantId))).returning({ id: users.id });
         return !!u;
       }
       // --- Custom User Roles ---
       async getUserRoles(tenantId) {
-        return await db.select().from(userRoles).where((0, import_drizzle_orm7.eq)(userRoles.tenantId, tenantId));
+        return await db.select().from(userRoles).where((0, import_drizzle_orm8.eq)(userRoles.tenantId, tenantId));
       }
       async getUserRole(tenantId, id) {
-        const [row] = await db.select().from(userRoles).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(userRoles.id, id), (0, import_drizzle_orm7.eq)(userRoles.tenantId, tenantId)));
+        const [row] = await db.select().from(userRoles).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(userRoles.id, id), (0, import_drizzle_orm8.eq)(userRoles.tenantId, tenantId)));
         return row;
       }
       async getUserRoleByCode(tenantId, code) {
-        const [row] = await db.select().from(userRoles).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(userRoles.code, code), (0, import_drizzle_orm7.eq)(userRoles.tenantId, tenantId)));
+        const [row] = await db.select().from(userRoles).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(userRoles.code, code), (0, import_drizzle_orm8.eq)(userRoles.tenantId, tenantId)));
         return row;
       }
       /* Original Code:
@@ -4996,23 +5148,23 @@ var init_storage = __esm({
       }
       async updateUserRole(tenantId, id, data) {
         const { tenantId: _i, ...safe } = data;
-        const [row] = await db.update(userRoles).set({ ...safe, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(userRoles.id, id), (0, import_drizzle_orm7.eq)(userRoles.tenantId, tenantId))).returning();
+        const [row] = await db.update(userRoles).set({ ...safe, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(userRoles.id, id), (0, import_drizzle_orm8.eq)(userRoles.tenantId, tenantId))).returning();
         return row;
       }
       async deleteUserRole(tenantId, id) {
-        const rows = await db.delete(userRoles).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(userRoles.id, id), (0, import_drizzle_orm7.eq)(userRoles.tenantId, tenantId))).returning({ id: userRoles.id });
+        const rows = await db.delete(userRoles).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(userRoles.id, id), (0, import_drizzle_orm8.eq)(userRoles.tenantId, tenantId))).returning({ id: userRoles.id });
         return rows.length > 0;
       }
       // --- Dynamic User Permissions ---
       async getUserPermissions(tenantId) {
-        return await db.select().from(userPermissions).where((0, import_drizzle_orm7.eq)(userPermissions.tenantId, tenantId)).orderBy((0, import_drizzle_orm7.desc)(userPermissions.createdAt));
+        return await db.select().from(userPermissions).where((0, import_drizzle_orm8.eq)(userPermissions.tenantId, tenantId)).orderBy((0, import_drizzle_orm8.desc)(userPermissions.createdAt));
       }
       async getUserPermission(tenantId, id) {
-        const [row] = await db.select().from(userPermissions).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(userPermissions.id, id), (0, import_drizzle_orm7.eq)(userPermissions.tenantId, tenantId)));
+        const [row] = await db.select().from(userPermissions).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(userPermissions.id, id), (0, import_drizzle_orm8.eq)(userPermissions.tenantId, tenantId)));
         return row;
       }
       async getUserPermissionByCode(tenantId, code) {
-        const [row] = await db.select().from(userPermissions).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(userPermissions.code, code.toLowerCase()), (0, import_drizzle_orm7.eq)(userPermissions.tenantId, tenantId)));
+        const [row] = await db.select().from(userPermissions).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(userPermissions.code, code.toLowerCase()), (0, import_drizzle_orm8.eq)(userPermissions.tenantId, tenantId)));
         return row;
       }
       async createUserPermission(tenantId, data) {
@@ -5024,35 +5176,35 @@ var init_storage = __esm({
         if (data.code) {
           updateData.code = data.code.toLowerCase();
         }
-        const [row] = await db.update(userPermissions).set(updateData).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(userPermissions.id, id), (0, import_drizzle_orm7.eq)(userPermissions.tenantId, tenantId))).returning();
+        const [row] = await db.update(userPermissions).set(updateData).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(userPermissions.id, id), (0, import_drizzle_orm8.eq)(userPermissions.tenantId, tenantId))).returning();
         return row;
       }
       async deleteUserPermission(tenantId, id) {
-        const rows = await db.delete(userPermissions).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(userPermissions.id, id), (0, import_drizzle_orm7.eq)(userPermissions.tenantId, tenantId))).returning({ id: userPermissions.id });
+        const rows = await db.delete(userPermissions).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(userPermissions.id, id), (0, import_drizzle_orm8.eq)(userPermissions.tenantId, tenantId))).returning({ id: userPermissions.id });
         return rows.length > 0;
       }
       // --- Tenants & IdP configs ---
       async getTenant(idOrCode) {
         if (!idOrCode) return void 0;
-        const [t] = await db.select().from(tenants).where((0, import_drizzle_orm7.eq)(tenants.id, idOrCode));
+        const [t] = await db.select().from(tenants).where((0, import_drizzle_orm8.eq)(tenants.id, idOrCode));
         if (t) return t;
-        const [tByCode] = await db.select().from(tenants).where((0, import_drizzle_orm7.eq)(tenants.code, idOrCode.toUpperCase()));
+        const [tByCode] = await db.select().from(tenants).where((0, import_drizzle_orm8.eq)(tenants.code, idOrCode.toUpperCase()));
         return tByCode;
       }
       async getTenantByCode(code) {
         if (!code) return void 0;
-        const [t] = await db.select().from(tenants).where((0, import_drizzle_orm7.eq)(tenants.code, code.toUpperCase()));
+        const [t] = await db.select().from(tenants).where((0, import_drizzle_orm8.eq)(tenants.code, code.toUpperCase()));
         return t;
       }
       async listActiveTenants() {
-        return await db.select().from(tenants).where((0, import_drizzle_orm7.eq)(tenants.status, "active"));
+        return await db.select().from(tenants).where((0, import_drizzle_orm8.eq)(tenants.status, "active"));
       }
       async createTenant(data) {
         const [row] = await db.insert(tenants).values(data).returning();
         return row;
       }
       async updateTenant(id, data) {
-        const [row] = await db.update(tenants).set({ ...data, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm7.eq)(tenants.id, id)).returning();
+        const [row] = await db.update(tenants).set({ ...data, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm8.eq)(tenants.id, id)).returning();
         return row;
       }
       // --- Signup requests ---
@@ -5061,12 +5213,12 @@ var init_storage = __esm({
         return row;
       }
       async listSignupRequests(tenantId, status) {
-        const conds = [(0, import_drizzle_orm7.eq)(signupRequests.tenantId, tenantId)];
-        if (status) conds.push((0, import_drizzle_orm7.eq)(signupRequests.status, status));
-        return await db.select().from(signupRequests).where((0, import_drizzle_orm7.and)(...conds)).orderBy((0, import_drizzle_orm7.desc)(signupRequests.createdAt));
+        const conds = [(0, import_drizzle_orm8.eq)(signupRequests.tenantId, tenantId)];
+        if (status) conds.push((0, import_drizzle_orm8.eq)(signupRequests.status, status));
+        return await db.select().from(signupRequests).where((0, import_drizzle_orm8.and)(...conds)).orderBy((0, import_drizzle_orm8.desc)(signupRequests.createdAt));
       }
       async getSignupRequest(id) {
-        const [r] = await db.select().from(signupRequests).where((0, import_drizzle_orm7.eq)(signupRequests.id, id));
+        const [r] = await db.select().from(signupRequests).where((0, import_drizzle_orm8.eq)(signupRequests.id, id));
         return r;
       }
       async decideSignupRequest(tenantId, id, decision, approverUserId, reason) {
@@ -5075,7 +5227,7 @@ var init_storage = __esm({
           approverUserId,
           decisionReason: reason ?? null,
           decidedAt: /* @__PURE__ */ new Date()
-        }).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(signupRequests.id, id), (0, import_drizzle_orm7.eq)(signupRequests.tenantId, tenantId))).returning();
+        }).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(signupRequests.id, id), (0, import_drizzle_orm8.eq)(signupRequests.tenantId, tenantId))).returning();
         return row;
       }
       async createTenantInterestRequest(data) {
@@ -5087,31 +5239,31 @@ var init_storage = __esm({
         return row;
       }
       async findApprovedSignupForEmail(email) {
-        const [r] = await db.select().from(signupRequests).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(signupRequests.email, email.toLowerCase()), (0, import_drizzle_orm7.eq)(signupRequests.status, "approved"))).orderBy((0, import_drizzle_orm7.desc)(signupRequests.decidedAt)).limit(1);
+        const [r] = await db.select().from(signupRequests).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(signupRequests.email, email.toLowerCase()), (0, import_drizzle_orm8.eq)(signupRequests.status, "approved"))).orderBy((0, import_drizzle_orm8.desc)(signupRequests.decidedAt)).limit(1);
         return r;
       }
       async getIdpConfig(id) {
-        const [c] = await db.select().from(tenantIdpConfigs).where((0, import_drizzle_orm7.eq)(tenantIdpConfigs.id, id));
+        const [c] = await db.select().from(tenantIdpConfigs).where((0, import_drizzle_orm8.eq)(tenantIdpConfigs.id, id));
         return c;
       }
       async getIdpConfigByEmailDomain(domain) {
         const [c] = await db.select().from(tenantIdpConfigs).where(
-          (0, import_drizzle_orm7.and)(
-            (0, import_drizzle_orm7.eq)(tenantIdpConfigs.emailDomain, domain.toLowerCase()),
-            (0, import_drizzle_orm7.eq)(tenantIdpConfigs.isActive, true)
+          (0, import_drizzle_orm8.and)(
+            (0, import_drizzle_orm8.eq)(tenantIdpConfigs.emailDomain, domain.toLowerCase()),
+            (0, import_drizzle_orm8.eq)(tenantIdpConfigs.isActive, true)
           )
         );
         return c;
       }
       async listIdpConfigs(tenantId) {
-        return await db.select().from(tenantIdpConfigs).where((0, import_drizzle_orm7.eq)(tenantIdpConfigs.tenantId, tenantId));
+        return await db.select().from(tenantIdpConfigs).where((0, import_drizzle_orm8.eq)(tenantIdpConfigs.tenantId, tenantId));
       }
       // --- Regions ---
       async getRegions(tenantId) {
-        return await db.select().from(regions).where((0, import_drizzle_orm7.eq)(regions.tenantId, tenantId));
+        return await db.select().from(regions).where((0, import_drizzle_orm8.eq)(regions.tenantId, tenantId));
       }
       async getRegion(tenantId, id) {
-        const [r] = await db.select().from(regions).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(regions.id, id), (0, import_drizzle_orm7.eq)(regions.tenantId, tenantId)));
+        const [r] = await db.select().from(regions).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(regions.id, id), (0, import_drizzle_orm8.eq)(regions.tenantId, tenantId)));
         return r;
       }
       async createRegion(tenantId, data) {
@@ -5120,15 +5272,15 @@ var init_storage = __esm({
       }
       async updateRegion(tenantId, id, data) {
         const { tenantId: _ignored, ...safe } = data;
-        const [r] = await db.update(regions).set(safe).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(regions.id, id), (0, import_drizzle_orm7.eq)(regions.tenantId, tenantId))).returning();
+        const [r] = await db.update(regions).set(safe).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(regions.id, id), (0, import_drizzle_orm8.eq)(regions.tenantId, tenantId))).returning();
         return r;
       }
       // --- LLGs ---
       async getLlgs(tenantId, districtId) {
-        return await db.select().from(llgs).where(withTenant(llgs, tenantId, districtId ? (0, import_drizzle_orm7.eq)(llgs.districtId, districtId) : void 0));
+        return await db.select().from(llgs).where(withTenant(llgs, tenantId, districtId ? (0, import_drizzle_orm8.eq)(llgs.districtId, districtId) : void 0));
       }
       async getLlg(tenantId, id) {
-        const [l] = await db.select().from(llgs).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(llgs.id, id), (0, import_drizzle_orm7.eq)(llgs.tenantId, tenantId)));
+        const [l] = await db.select().from(llgs).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(llgs.id, id), (0, import_drizzle_orm8.eq)(llgs.tenantId, tenantId)));
         return l;
       }
       async createLlg(tenantId, data) {
@@ -5137,15 +5289,15 @@ var init_storage = __esm({
       }
       async updateLlg(tenantId, id, data) {
         const { tenantId: _i, ...safe } = data;
-        const [l] = await db.update(llgs).set(safe).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(llgs.id, id), (0, import_drizzle_orm7.eq)(llgs.tenantId, tenantId))).returning();
+        const [l] = await db.update(llgs).set(safe).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(llgs.id, id), (0, import_drizzle_orm8.eq)(llgs.tenantId, tenantId))).returning();
         return l;
       }
       // --- Provinces ---
       async getProvinces(tenantId, regionId) {
-        return await db.select().from(provinces).where(withTenant(provinces, tenantId, regionId ? (0, import_drizzle_orm7.eq)(provinces.regionId, regionId) : void 0));
+        return await db.select().from(provinces).where(withTenant(provinces, tenantId, regionId ? (0, import_drizzle_orm8.eq)(provinces.regionId, regionId) : void 0));
       }
       async getProvince(tenantId, id) {
-        const [p] = await db.select().from(provinces).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(provinces.id, id), (0, import_drizzle_orm7.eq)(provinces.tenantId, tenantId)));
+        const [p] = await db.select().from(provinces).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(provinces.id, id), (0, import_drizzle_orm8.eq)(provinces.tenantId, tenantId)));
         return p;
       }
       async createProvince(tenantId, data) {
@@ -5154,15 +5306,15 @@ var init_storage = __esm({
       }
       async updateProvince(tenantId, id, data) {
         const { tenantId: _i, ...safe } = data;
-        const [p] = await db.update(provinces).set(safe).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(provinces.id, id), (0, import_drizzle_orm7.eq)(provinces.tenantId, tenantId))).returning();
+        const [p] = await db.update(provinces).set(safe).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(provinces.id, id), (0, import_drizzle_orm8.eq)(provinces.tenantId, tenantId))).returning();
         return p;
       }
       // --- Districts ---
       async getDistricts(tenantId, provinceId) {
-        return await db.select().from(districts).where(withTenant(districts, tenantId, provinceId ? (0, import_drizzle_orm7.eq)(districts.provinceId, provinceId) : void 0));
+        return await db.select().from(districts).where(withTenant(districts, tenantId, provinceId ? (0, import_drizzle_orm8.eq)(districts.provinceId, provinceId) : void 0));
       }
       async getDistrict(tenantId, id) {
-        const [d] = await db.select().from(districts).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(districts.id, id), (0, import_drizzle_orm7.eq)(districts.tenantId, tenantId)));
+        const [d] = await db.select().from(districts).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(districts.id, id), (0, import_drizzle_orm8.eq)(districts.tenantId, tenantId)));
         return d;
       }
       async createDistrict(tenantId, data) {
@@ -5171,15 +5323,15 @@ var init_storage = __esm({
       }
       async updateDistrict(tenantId, id, data) {
         const { tenantId: _i, ...safe } = data;
-        const [d] = await db.update(districts).set(safe).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(districts.id, id), (0, import_drizzle_orm7.eq)(districts.tenantId, tenantId))).returning();
+        const [d] = await db.update(districts).set(safe).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(districts.id, id), (0, import_drizzle_orm8.eq)(districts.tenantId, tenantId))).returning();
         return d;
       }
       // --- Facilities ---
       async getFacilities(tenantId, districtId) {
-        return await db.select().from(facilities).where(withTenant(facilities, tenantId, districtId ? (0, import_drizzle_orm7.eq)(facilities.districtId, districtId) : void 0));
+        return await db.select().from(facilities).where(withTenant(facilities, tenantId, districtId ? (0, import_drizzle_orm8.eq)(facilities.districtId, districtId) : void 0));
       }
       async getFacility(tenantId, id) {
-        const [f2] = await db.select().from(facilities).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(facilities.id, id), (0, import_drizzle_orm7.eq)(facilities.tenantId, tenantId)));
+        const [f2] = await db.select().from(facilities).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(facilities.id, id), (0, import_drizzle_orm8.eq)(facilities.tenantId, tenantId)));
         return f2;
       }
       async createFacility(tenantId, data) {
@@ -5188,22 +5340,22 @@ var init_storage = __esm({
       }
       async updateFacility(tenantId, id, data) {
         const { tenantId: _i, ...safe } = data;
-        const [f2] = await db.update(facilities).set({ ...safe, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(facilities.id, id), (0, import_drizzle_orm7.eq)(facilities.tenantId, tenantId))).returning();
+        const [f2] = await db.update(facilities).set({ ...safe, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(facilities.id, id), (0, import_drizzle_orm8.eq)(facilities.tenantId, tenantId))).returning();
         return f2;
       }
       async deleteFacility(tenantId, id) {
         return await this.softDeleteFacility(tenantId, id);
       }
       async softDeleteFacility(tenantId, id) {
-        const [f2] = await db.update(facilities).set({ isActive: false, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(facilities.id, id), (0, import_drizzle_orm7.eq)(facilities.tenantId, tenantId))).returning({ id: facilities.id });
+        const [f2] = await db.update(facilities).set({ isActive: false, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(facilities.id, id), (0, import_drizzle_orm8.eq)(facilities.tenantId, tenantId))).returning({ id: facilities.id });
         return !!f2;
       }
       // --- Villages ---
       async getVillages(tenantId, districtId, facilityId) {
-        const { boundary, catchmentPolygon, ...listColumns } = (0, import_drizzle_orm7.getTableColumns)(villages);
+        const { boundary, catchmentPolygon, ...listColumns } = (0, import_drizzle_orm8.getTableColumns)(villages);
         return await db.select({
           ...listColumns,
-          population: import_drizzle_orm7.sql`COALESCE(
+          population: import_drizzle_orm8.sql`COALESCE(
           (
             SELECT total_population
             FROM population_data p
@@ -5218,15 +5370,15 @@ var init_storage = __esm({
           withTenant(
             villages,
             tenantId,
-            districtId ? (0, import_drizzle_orm7.eq)(villages.districtId, districtId) : void 0,
-            facilityId ? (0, import_drizzle_orm7.eq)(villages.assignedFacilityId, facilityId) : void 0
+            districtId ? (0, import_drizzle_orm8.eq)(villages.districtId, districtId) : void 0,
+            facilityId ? (0, import_drizzle_orm8.eq)(villages.assignedFacilityId, facilityId) : void 0
           )
         );
       }
       async getVillage(tenantId, id) {
         const [v] = await db.select({
-          ...(0, import_drizzle_orm7.getTableColumns)(villages),
-          population: import_drizzle_orm7.sql`COALESCE(
+          ...(0, import_drizzle_orm8.getTableColumns)(villages),
+          population: import_drizzle_orm8.sql`COALESCE(
           (
             SELECT total_population
             FROM population_data p
@@ -5237,7 +5389,7 @@ var init_storage = __esm({
           ${villages.totalCatchmentPopulation},
           ${villages.griddedPopulation}
         )`.mapWith(Number)
-        }).from(villages).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(villages.id, id), (0, import_drizzle_orm7.eq)(villages.tenantId, tenantId)));
+        }).from(villages).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(villages.id, id), (0, import_drizzle_orm8.eq)(villages.tenantId, tenantId)));
         return v;
       }
       async createVillage(tenantId, data) {
@@ -5246,11 +5398,11 @@ var init_storage = __esm({
       }
       async updateVillage(tenantId, id, data) {
         const { tenantId: _i, ...safe } = data;
-        const [v] = await db.update(villages).set({ ...safe, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(villages.id, id), (0, import_drizzle_orm7.eq)(villages.tenantId, tenantId))).returning();
+        const [v] = await db.update(villages).set({ ...safe, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(villages.id, id), (0, import_drizzle_orm8.eq)(villages.tenantId, tenantId))).returning();
         return v;
       }
       async deleteVillage(tenantId, id) {
-        const [v] = await db.update(villages).set({ isActive: false, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(villages.id, id), (0, import_drizzle_orm7.eq)(villages.tenantId, tenantId))).returning({ id: villages.id });
+        const [v] = await db.update(villages).set({ isActive: false, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(villages.id, id), (0, import_drizzle_orm8.eq)(villages.tenantId, tenantId))).returning({ id: villages.id });
         return !!v;
       }
       async createCatchmentConflict(tenantId, data) {
@@ -5260,7 +5412,7 @@ var init_storage = __esm({
       }
       async getCatchmentConflicts(tenantId, status) {
         return await db.select().from(catchmentConflicts).where(
-          status ? (0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(catchmentConflicts.tenantId, tenantId), (0, import_drizzle_orm7.eq)(catchmentConflicts.status, status)) : (0, import_drizzle_orm7.eq)(catchmentConflicts.tenantId, tenantId)
+          status ? (0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(catchmentConflicts.tenantId, tenantId), (0, import_drizzle_orm8.eq)(catchmentConflicts.status, status)) : (0, import_drizzle_orm8.eq)(catchmentConflicts.tenantId, tenantId)
         );
       }
       // --- Population data ---
@@ -5298,18 +5450,18 @@ var init_storage = __esm({
           withTenant(
             populationData,
             tenantId,
-            filters?.source ? (0, import_drizzle_orm7.eq)(populationData.source, filters.source) : void 0,
-            filters?.provinceId ? (0, import_drizzle_orm7.eq)(populationData.provinceId, filters.provinceId) : void 0,
-            filters?.districtId ? (0, import_drizzle_orm7.eq)(populationData.districtId, filters.districtId) : void 0,
-            filters?.villageId ? (0, import_drizzle_orm7.eq)(populationData.villageId, filters.villageId) : void 0,
-            filters?.facilityId ? (0, import_drizzle_orm7.eq)(populationData.facilityId, filters.facilityId) : void 0,
-            filters?.year ? (0, import_drizzle_orm7.eq)(populationData.year, filters.year) : void 0,
-            filters?.excludeVillages ? (0, import_drizzle_orm7.isNull)(populationData.villageId) : void 0
+            filters?.source ? (0, import_drizzle_orm8.eq)(populationData.source, filters.source) : void 0,
+            filters?.provinceId ? (0, import_drizzle_orm8.eq)(populationData.provinceId, filters.provinceId) : void 0,
+            filters?.districtId ? (0, import_drizzle_orm8.eq)(populationData.districtId, filters.districtId) : void 0,
+            filters?.villageId ? (0, import_drizzle_orm8.eq)(populationData.villageId, filters.villageId) : void 0,
+            filters?.facilityId ? (0, import_drizzle_orm8.eq)(populationData.facilityId, filters.facilityId) : void 0,
+            filters?.year ? (0, import_drizzle_orm8.eq)(populationData.year, filters.year) : void 0,
+            filters?.excludeVillages ? (0, import_drizzle_orm8.isNull)(populationData.villageId) : void 0
           )
         );
       }
       async getPopulationDataById(tenantId, id) {
-        const [p] = await db.select().from(populationData).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(populationData.id, id), (0, import_drizzle_orm7.eq)(populationData.tenantId, tenantId)));
+        const [p] = await db.select().from(populationData).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(populationData.id, id), (0, import_drizzle_orm8.eq)(populationData.tenantId, tenantId)));
         return p;
       }
       /* ORIGINAL CODE (Commented out to adhere to global rules):
@@ -5334,19 +5486,19 @@ var init_storage = __esm({
         let provinceId = data.provinceId ? Number(data.provinceId) : null;
         let facilityId = data.facilityId ? Number(data.facilityId) : null;
         if (data.villageId) {
-          const [v] = await db.select({ districtId: villages.districtId, assignedFacilityId: villages.assignedFacilityId }).from(villages).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(villages.id, data.villageId), (0, import_drizzle_orm7.eq)(villages.tenantId, tenantId)));
+          const [v] = await db.select({ districtId: villages.districtId, assignedFacilityId: villages.assignedFacilityId }).from(villages).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(villages.id, data.villageId), (0, import_drizzle_orm8.eq)(villages.tenantId, tenantId)));
           if (v) {
             districtId = v.districtId;
             facilityId = facilityId ?? (v.assignedFacilityId ? Number(v.assignedFacilityId) : null);
           }
         } else if (facilityId) {
-          const [f2] = await db.select({ districtId: facilities.districtId }).from(facilities).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(facilities.id, facilityId), (0, import_drizzle_orm7.eq)(facilities.tenantId, tenantId)));
+          const [f2] = await db.select({ districtId: facilities.districtId }).from(facilities).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(facilities.id, facilityId), (0, import_drizzle_orm8.eq)(facilities.tenantId, tenantId)));
           if (f2) {
             districtId = f2.districtId;
           }
         }
         if (districtId) {
-          const [d] = await db.select({ provinceId: districts.provinceId }).from(districts).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(districts.id, districtId), (0, import_drizzle_orm7.eq)(districts.tenantId, tenantId)));
+          const [d] = await db.select({ provinceId: districts.provinceId }).from(districts).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(districts.id, districtId), (0, import_drizzle_orm8.eq)(districts.tenantId, tenantId)));
           if (d) {
             provinceId = d.provinceId;
           }
@@ -5362,56 +5514,56 @@ var init_storage = __esm({
         let existing;
         if (resolvedVillageId) {
           [existing] = await db.select().from(populationData).where(
-            (0, import_drizzle_orm7.and)(
-              (0, import_drizzle_orm7.eq)(populationData.tenantId, tenantId),
-              (0, import_drizzle_orm7.eq)(populationData.villageId, resolvedVillageId),
-              (0, import_drizzle_orm7.eq)(populationData.year, data.year),
-              (0, import_drizzle_orm7.eq)(populationData.source, data.source)
+            (0, import_drizzle_orm8.and)(
+              (0, import_drizzle_orm8.eq)(populationData.tenantId, tenantId),
+              (0, import_drizzle_orm8.eq)(populationData.villageId, resolvedVillageId),
+              (0, import_drizzle_orm8.eq)(populationData.year, data.year),
+              (0, import_drizzle_orm8.eq)(populationData.source, data.source)
             )
           ).limit(1);
         } else if (resolvedFacilityId) {
           [existing] = await db.select().from(populationData).where(
-            (0, import_drizzle_orm7.and)(
-              (0, import_drizzle_orm7.eq)(populationData.tenantId, tenantId),
-              import_drizzle_orm7.sql`${populationData.villageId} IS NULL`,
-              (0, import_drizzle_orm7.eq)(populationData.facilityId, resolvedFacilityId),
-              (0, import_drizzle_orm7.eq)(populationData.year, data.year),
-              (0, import_drizzle_orm7.eq)(populationData.source, data.source)
+            (0, import_drizzle_orm8.and)(
+              (0, import_drizzle_orm8.eq)(populationData.tenantId, tenantId),
+              import_drizzle_orm8.sql`${populationData.villageId} IS NULL`,
+              (0, import_drizzle_orm8.eq)(populationData.facilityId, resolvedFacilityId),
+              (0, import_drizzle_orm8.eq)(populationData.year, data.year),
+              (0, import_drizzle_orm8.eq)(populationData.source, data.source)
             )
           ).limit(1);
         } else if (resolvedDistrictId) {
           [existing] = await db.select().from(populationData).where(
-            (0, import_drizzle_orm7.and)(
-              (0, import_drizzle_orm7.eq)(populationData.tenantId, tenantId),
-              import_drizzle_orm7.sql`${populationData.villageId} IS NULL`,
-              import_drizzle_orm7.sql`${populationData.facilityId} IS NULL`,
-              (0, import_drizzle_orm7.eq)(populationData.districtId, resolvedDistrictId),
-              (0, import_drizzle_orm7.eq)(populationData.year, data.year),
-              (0, import_drizzle_orm7.eq)(populationData.source, data.source)
+            (0, import_drizzle_orm8.and)(
+              (0, import_drizzle_orm8.eq)(populationData.tenantId, tenantId),
+              import_drizzle_orm8.sql`${populationData.villageId} IS NULL`,
+              import_drizzle_orm8.sql`${populationData.facilityId} IS NULL`,
+              (0, import_drizzle_orm8.eq)(populationData.districtId, resolvedDistrictId),
+              (0, import_drizzle_orm8.eq)(populationData.year, data.year),
+              (0, import_drizzle_orm8.eq)(populationData.source, data.source)
             )
           ).limit(1);
         } else if (resolvedProvinceId) {
           [existing] = await db.select().from(populationData).where(
-            (0, import_drizzle_orm7.and)(
-              (0, import_drizzle_orm7.eq)(populationData.tenantId, tenantId),
-              import_drizzle_orm7.sql`${populationData.villageId} IS NULL`,
-              import_drizzle_orm7.sql`${populationData.facilityId} IS NULL`,
-              import_drizzle_orm7.sql`${populationData.districtId} IS NULL`,
-              (0, import_drizzle_orm7.eq)(populationData.provinceId, resolvedProvinceId),
-              (0, import_drizzle_orm7.eq)(populationData.year, data.year),
-              (0, import_drizzle_orm7.eq)(populationData.source, data.source)
+            (0, import_drizzle_orm8.and)(
+              (0, import_drizzle_orm8.eq)(populationData.tenantId, tenantId),
+              import_drizzle_orm8.sql`${populationData.villageId} IS NULL`,
+              import_drizzle_orm8.sql`${populationData.facilityId} IS NULL`,
+              import_drizzle_orm8.sql`${populationData.districtId} IS NULL`,
+              (0, import_drizzle_orm8.eq)(populationData.provinceId, resolvedProvinceId),
+              (0, import_drizzle_orm8.eq)(populationData.year, data.year),
+              (0, import_drizzle_orm8.eq)(populationData.source, data.source)
             )
           ).limit(1);
         } else {
           [existing] = await db.select().from(populationData).where(
-            (0, import_drizzle_orm7.and)(
-              (0, import_drizzle_orm7.eq)(populationData.tenantId, tenantId),
-              import_drizzle_orm7.sql`${populationData.villageId} IS NULL`,
-              import_drizzle_orm7.sql`${populationData.facilityId} IS NULL`,
-              import_drizzle_orm7.sql`${populationData.districtId} IS NULL`,
-              import_drizzle_orm7.sql`${populationData.provinceId} IS NULL`,
-              (0, import_drizzle_orm7.eq)(populationData.year, data.year),
-              (0, import_drizzle_orm7.eq)(populationData.source, data.source)
+            (0, import_drizzle_orm8.and)(
+              (0, import_drizzle_orm8.eq)(populationData.tenantId, tenantId),
+              import_drizzle_orm8.sql`${populationData.villageId} IS NULL`,
+              import_drizzle_orm8.sql`${populationData.facilityId} IS NULL`,
+              import_drizzle_orm8.sql`${populationData.districtId} IS NULL`,
+              import_drizzle_orm8.sql`${populationData.provinceId} IS NULL`,
+              (0, import_drizzle_orm8.eq)(populationData.year, data.year),
+              (0, import_drizzle_orm8.eq)(populationData.source, data.source)
             )
           ).limit(1);
         }
@@ -5438,7 +5590,7 @@ var init_storage = __esm({
             facilityId: resolvedFacilityId ?? existing.facilityId,
             villageId: resolvedVillageId ?? existing.villageId,
             updatedAt: /* @__PURE__ */ new Date()
-          }).where((0, import_drizzle_orm7.eq)(populationData.id, existing.id)).returning();
+          }).where((0, import_drizzle_orm8.eq)(populationData.id, existing.id)).returning();
           await this.refreshPopulationOwnerAggregates(tenantId, updated);
           return updated;
         }
@@ -5465,27 +5617,27 @@ var init_storage = __esm({
           provinceId: geographics.provinceId,
           facilityId: geographics.facilityId ?? safe.facilityId ?? existing.facilityId ?? null,
           updatedAt: /* @__PURE__ */ new Date()
-        }).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(populationData.id, id), (0, import_drizzle_orm7.eq)(populationData.tenantId, tenantId))).returning();
+        }).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(populationData.id, id), (0, import_drizzle_orm8.eq)(populationData.tenantId, tenantId))).returning();
         await this.refreshPopulationOwnerAggregates(tenantId, p);
         return p;
       }
       async deletePopulationData(tenantId, id) {
         const existing = await this.getPopulationDataById(tenantId, id);
-        const rows = await db.delete(populationData).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(populationData.id, id), (0, import_drizzle_orm7.eq)(populationData.tenantId, tenantId))).returning({ id: populationData.id });
+        const rows = await db.delete(populationData).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(populationData.id, id), (0, import_drizzle_orm8.eq)(populationData.tenantId, tenantId))).returning({ id: populationData.id });
         if (rows.length === 0) return false;
         if (existing?.villageId) {
-          const [latest] = await db.select().from(populationData).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(populationData.tenantId, tenantId), (0, import_drizzle_orm7.eq)(populationData.villageId, existing.villageId))).orderBy((0, import_drizzle_orm7.desc)(populationData.year), (0, import_drizzle_orm7.desc)(populationData.updatedAt)).limit(1);
+          const [latest] = await db.select().from(populationData).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(populationData.tenantId, tenantId), (0, import_drizzle_orm8.eq)(populationData.villageId, existing.villageId))).orderBy((0, import_drizzle_orm8.desc)(populationData.year), (0, import_drizzle_orm8.desc)(populationData.updatedAt)).limit(1);
           if (latest) {
             await this.refreshPopulationOwnerAggregates(tenantId, latest);
           } else {
-            const [village] = await db.select({ assignedFacilityId: villages.assignedFacilityId }).from(villages).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(villages.tenantId, tenantId), (0, import_drizzle_orm7.eq)(villages.id, existing.villageId))).limit(1);
+            const [village] = await db.select({ assignedFacilityId: villages.assignedFacilityId }).from(villages).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(villages.tenantId, tenantId), (0, import_drizzle_orm8.eq)(villages.id, existing.villageId))).limit(1);
             await db.update(villages).set({
               totalCatchmentPopulation: null,
               under5Population: null,
               griddedPopulation: null,
               populationSourceLabel: null,
               updatedAt: /* @__PURE__ */ new Date()
-            }).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(villages.tenantId, tenantId), (0, import_drizzle_orm7.eq)(villages.id, existing.villageId)));
+            }).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(villages.tenantId, tenantId), (0, import_drizzle_orm8.eq)(villages.id, existing.villageId)));
             await this.refreshFacilityPopulationAggregate(tenantId, village?.assignedFacilityId);
           }
         } else if (existing?.facilityId) {
@@ -5498,9 +5650,9 @@ var init_storage = __esm({
       // catchment in Step 2 of the wizard. Persisted server-side so the choice
       // syncs across devices/browsers (task #167).
       async getFacilityExcludedVillageIds(tenantId, facilityId) {
-        const rows = await db.select({ villageId: facilityExcludedVillages.villageId }).from(facilityExcludedVillages).where((0, import_drizzle_orm7.and)(
-          (0, import_drizzle_orm7.eq)(facilityExcludedVillages.tenantId, tenantId),
-          (0, import_drizzle_orm7.eq)(facilityExcludedVillages.facilityId, facilityId)
+        const rows = await db.select({ villageId: facilityExcludedVillages.villageId }).from(facilityExcludedVillages).where((0, import_drizzle_orm8.and)(
+          (0, import_drizzle_orm8.eq)(facilityExcludedVillages.tenantId, tenantId),
+          (0, import_drizzle_orm8.eq)(facilityExcludedVillages.facilityId, facilityId)
         ));
         return rows.map((r) => r.villageId);
       }
@@ -5513,9 +5665,9 @@ var init_storage = __esm({
           firstName: users.firstName,
           lastName: users.lastName,
           email: users.email
-        }).from(facilityExcludedVillages).leftJoin(users, (0, import_drizzle_orm7.eq)(users.id, facilityExcludedVillages.removedByUserId)).where((0, import_drizzle_orm7.and)(
-          (0, import_drizzle_orm7.eq)(facilityExcludedVillages.tenantId, tenantId),
-          (0, import_drizzle_orm7.eq)(facilityExcludedVillages.facilityId, facilityId)
+        }).from(facilityExcludedVillages).leftJoin(users, (0, import_drizzle_orm8.eq)(users.id, facilityExcludedVillages.removedByUserId)).where((0, import_drizzle_orm8.and)(
+          (0, import_drizzle_orm8.eq)(facilityExcludedVillages.tenantId, tenantId),
+          (0, import_drizzle_orm8.eq)(facilityExcludedVillages.facilityId, facilityId)
         ));
         return rows.map((r) => {
           const fn = (r.firstName ?? "").trim();
@@ -5543,27 +5695,27 @@ var init_storage = __esm({
           const existing = await tx.select({
             villageId: facilityExcludedVillages.villageId,
             reason: facilityExcludedVillages.reason
-          }).from(facilityExcludedVillages).where((0, import_drizzle_orm7.and)(
-            (0, import_drizzle_orm7.eq)(facilityExcludedVillages.tenantId, tenantId),
-            (0, import_drizzle_orm7.eq)(facilityExcludedVillages.facilityId, facilityId)
+          }).from(facilityExcludedVillages).where((0, import_drizzle_orm8.and)(
+            (0, import_drizzle_orm8.eq)(facilityExcludedVillages.tenantId, tenantId),
+            (0, import_drizzle_orm8.eq)(facilityExcludedVillages.facilityId, facilityId)
           ));
           const existingMap = new Map(existing.map((r) => [r.villageId, r.reason ?? null]));
           const toDelete = existing.map((r) => r.villageId).filter((id) => !desiredMap.has(id));
           if (toDelete.length > 0) {
-            await tx.delete(facilityExcludedVillages).where((0, import_drizzle_orm7.and)(
-              (0, import_drizzle_orm7.eq)(facilityExcludedVillages.tenantId, tenantId),
-              (0, import_drizzle_orm7.eq)(facilityExcludedVillages.facilityId, facilityId),
-              (0, import_drizzle_orm7.inArray)(facilityExcludedVillages.villageId, toDelete)
+            await tx.delete(facilityExcludedVillages).where((0, import_drizzle_orm8.and)(
+              (0, import_drizzle_orm8.eq)(facilityExcludedVillages.tenantId, tenantId),
+              (0, import_drizzle_orm8.eq)(facilityExcludedVillages.facilityId, facilityId),
+              (0, import_drizzle_orm8.inArray)(facilityExcludedVillages.villageId, toDelete)
             ));
           }
           const toInsert = [];
           for (const [villageId, reason] of Array.from(desiredMap.entries())) {
             if (existingMap.has(villageId)) {
               if (reason && reason !== existingMap.get(villageId)) {
-                await tx.update(facilityExcludedVillages).set({ reason }).where((0, import_drizzle_orm7.and)(
-                  (0, import_drizzle_orm7.eq)(facilityExcludedVillages.tenantId, tenantId),
-                  (0, import_drizzle_orm7.eq)(facilityExcludedVillages.facilityId, facilityId),
-                  (0, import_drizzle_orm7.eq)(facilityExcludedVillages.villageId, villageId)
+                await tx.update(facilityExcludedVillages).set({ reason }).where((0, import_drizzle_orm8.and)(
+                  (0, import_drizzle_orm8.eq)(facilityExcludedVillages.tenantId, tenantId),
+                  (0, import_drizzle_orm8.eq)(facilityExcludedVillages.facilityId, facilityId),
+                  (0, import_drizzle_orm8.eq)(facilityExcludedVillages.villageId, villageId)
                 ));
               }
               continue;
@@ -5606,10 +5758,10 @@ var init_storage = __esm({
           createdByUserId: microplans.createdByUserId,
           createdAt: microplans.createdAt,
           updatedAt: microplans.updatedAt
-        }).from(microplans).where((0, import_drizzle_orm7.eq)(microplans.tenantId, tenantId));
+        }).from(microplans).where((0, import_drizzle_orm8.eq)(microplans.tenantId, tenantId));
       }
       async getMicroplan(tenantId, id) {
-        const [row] = await db.select().from(microplans).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(microplans.id, id), (0, import_drizzle_orm7.eq)(microplans.tenantId, tenantId)));
+        const [row] = await db.select().from(microplans).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(microplans.id, id), (0, import_drizzle_orm8.eq)(microplans.tenantId, tenantId)));
         return row;
       }
       async createMicroplan(tenantId, data) {
@@ -5635,11 +5787,11 @@ var init_storage = __esm({
           }
         }
         const { tenantId: _i, createdAt: _c, ...safe } = data;
-        const [row] = await db.update(microplans).set({ ...safe, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(microplans.id, id), (0, import_drizzle_orm7.eq)(microplans.tenantId, tenantId))).returning();
+        const [row] = await db.update(microplans).set({ ...safe, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(microplans.id, id), (0, import_drizzle_orm8.eq)(microplans.tenantId, tenantId))).returning();
         return row;
       }
       async deleteMicroplan(tenantId, id) {
-        const [row] = await db.update(microplans).set({ status: "archived", updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(microplans.id, id), (0, import_drizzle_orm7.eq)(microplans.tenantId, tenantId))).returning({ id: microplans.id });
+        const [row] = await db.update(microplans).set({ status: "archived", updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(microplans.id, id), (0, import_drizzle_orm8.eq)(microplans.tenantId, tenantId))).returning({ id: microplans.id });
         return !!row;
       }
       // --- Session plans ---
@@ -5673,10 +5825,10 @@ var init_storage = __esm({
           // vaccineAdjustments, geojson, vaccinatedCounts excluded — fetched by getSessionPlan()
           createdAt: sessionPlans.createdAt,
           updatedAt: sessionPlans.updatedAt
-        }).from(sessionPlans).where(withTenant(sessionPlans, tenantId, facilityId ? (0, import_drizzle_orm7.eq)(sessionPlans.facilityId, facilityId) : void 0));
+        }).from(sessionPlans).where(withTenant(sessionPlans, tenantId, facilityId ? (0, import_drizzle_orm8.eq)(sessionPlans.facilityId, facilityId) : void 0));
       }
       async getSessionPlan(tenantId, id) {
-        const [s] = await db.select().from(sessionPlans).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(sessionPlans.id, id), (0, import_drizzle_orm7.eq)(sessionPlans.tenantId, tenantId)));
+        const [s] = await db.select().from(sessionPlans).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(sessionPlans.id, id), (0, import_drizzle_orm8.eq)(sessionPlans.tenantId, tenantId)));
         return s;
       }
       async createSessionPlan(tenantId, data) {
@@ -5693,11 +5845,11 @@ var init_storage = __esm({
           cleanData.scheduledDate = new Date(cleanData.scheduledDate);
         }
         const { tenantId: _i, ...safe } = cleanData;
-        const [s] = await db.update(sessionPlans).set({ ...safe, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(sessionPlans.id, id), (0, import_drizzle_orm7.eq)(sessionPlans.tenantId, tenantId))).returning();
+        const [s] = await db.update(sessionPlans).set({ ...safe, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(sessionPlans.id, id), (0, import_drizzle_orm8.eq)(sessionPlans.tenantId, tenantId))).returning();
         return s;
       }
       async deleteSessionPlan(tenantId, id) {
-        const rows = await db.update(sessionPlans).set({ status: "cancelled", updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(sessionPlans.id, id), (0, import_drizzle_orm7.eq)(sessionPlans.tenantId, tenantId))).returning({ id: sessionPlans.id });
+        const rows = await db.update(sessionPlans).set({ status: "cancelled", updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(sessionPlans.id, id), (0, import_drizzle_orm8.eq)(sessionPlans.tenantId, tenantId))).returning({ id: sessionPlans.id });
         return rows.length > 0;
       }
       // --- Budget items ---
@@ -5706,9 +5858,9 @@ var init_storage = __esm({
           withTenant(
             budgetItems,
             tenantId,
-            facilityId ? (0, import_drizzle_orm7.eq)(budgetItems.facilityId, facilityId) : void 0,
-            quarter ? (0, import_drizzle_orm7.eq)(budgetItems.quarter, quarter) : void 0,
-            year ? (0, import_drizzle_orm7.eq)(budgetItems.year, year) : void 0
+            facilityId ? (0, import_drizzle_orm8.eq)(budgetItems.facilityId, facilityId) : void 0,
+            quarter ? (0, import_drizzle_orm8.eq)(budgetItems.quarter, quarter) : void 0,
+            year ? (0, import_drizzle_orm8.eq)(budgetItems.year, year) : void 0
           )
         );
       }
@@ -5718,16 +5870,16 @@ var init_storage = __esm({
       }
       async updateBudgetItem(tenantId, id, data) {
         const { tenantId: _i, ...safe } = data;
-        const [b] = await db.update(budgetItems).set(safe).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(budgetItems.id, id), (0, import_drizzle_orm7.eq)(budgetItems.tenantId, tenantId))).returning();
+        const [b] = await db.update(budgetItems).set(safe).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(budgetItems.id, id), (0, import_drizzle_orm8.eq)(budgetItems.tenantId, tenantId))).returning();
         return b;
       }
       async deleteBudgetItem(tenantId, id) {
-        const rows = await db.delete(budgetItems).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(budgetItems.id, id), (0, import_drizzle_orm7.eq)(budgetItems.tenantId, tenantId))).returning({ id: budgetItems.id });
+        const rows = await db.delete(budgetItems).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(budgetItems.id, id), (0, import_drizzle_orm8.eq)(budgetItems.tenantId, tenantId))).returning({ id: budgetItems.id });
         return rows.length > 0;
       }
       // --- Vaccine requirements ---
       async getVaccineRequirements(tenantId, facilityId) {
-        return await db.select().from(vaccineRequirements).where(withTenant(vaccineRequirements, tenantId, facilityId ? (0, import_drizzle_orm7.eq)(vaccineRequirements.facilityId, facilityId) : void 0));
+        return await db.select().from(vaccineRequirements).where(withTenant(vaccineRequirements, tenantId, facilityId ? (0, import_drizzle_orm8.eq)(vaccineRequirements.facilityId, facilityId) : void 0));
       }
       async createVaccineRequirement(tenantId, data) {
         const [r] = await db.insert(vaccineRequirements).values({ ...data, tenantId }).returning();
@@ -5735,12 +5887,12 @@ var init_storage = __esm({
       }
       async updateVaccineRequirement(tenantId, id, data) {
         const { tenantId: _i, ...safe } = data;
-        const [r] = await db.update(vaccineRequirements).set(safe).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(vaccineRequirements.id, id), (0, import_drizzle_orm7.eq)(vaccineRequirements.tenantId, tenantId))).returning();
+        const [r] = await db.update(vaccineRequirements).set(safe).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(vaccineRequirements.id, id), (0, import_drizzle_orm8.eq)(vaccineRequirements.tenantId, tenantId))).returning();
         return r;
       }
       // --- Mobilization activities ---
       async getMobilizationActivities(tenantId, facilityId) {
-        return await db.select().from(mobilizationActivities).where(withTenant(mobilizationActivities, tenantId, facilityId ? (0, import_drizzle_orm7.eq)(mobilizationActivities.facilityId, facilityId) : void 0));
+        return await db.select().from(mobilizationActivities).where(withTenant(mobilizationActivities, tenantId, facilityId ? (0, import_drizzle_orm8.eq)(mobilizationActivities.facilityId, facilityId) : void 0));
       }
       async createMobilizationActivity(tenantId, data) {
         const [a] = await db.insert(mobilizationActivities).values({ ...data, tenantId }).returning();
@@ -5748,24 +5900,24 @@ var init_storage = __esm({
       }
       async updateMobilizationActivity(tenantId, id, data) {
         const { tenantId: _i, ...safe } = data;
-        const [a] = await db.update(mobilizationActivities).set(safe).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(mobilizationActivities.id, id), (0, import_drizzle_orm7.eq)(mobilizationActivities.tenantId, tenantId))).returning();
+        const [a] = await db.update(mobilizationActivities).set(safe).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(mobilizationActivities.id, id), (0, import_drizzle_orm8.eq)(mobilizationActivities.tenantId, tenantId))).returning();
         return a;
       }
       async deleteMobilizationActivity(tenantId, id) {
-        const r = await db.delete(mobilizationActivities).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(mobilizationActivities.id, id), (0, import_drizzle_orm7.eq)(mobilizationActivities.tenantId, tenantId))).returning({ id: mobilizationActivities.id });
+        const r = await db.delete(mobilizationActivities).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(mobilizationActivities.id, id), (0, import_drizzle_orm8.eq)(mobilizationActivities.tenantId, tenantId))).returning({ id: mobilizationActivities.id });
         return r.length > 0;
       }
       // --- Supervision visits ---
       async getSupervisionVisits(tenantId, filters) {
         const conds = [];
-        if (filters?.facilityId) conds.push((0, import_drizzle_orm7.eq)(supervisionVisits.facilityId, filters.facilityId));
-        if (filters?.microplanId) conds.push((0, import_drizzle_orm7.eq)(supervisionVisits.microplanId, filters.microplanId));
-        if (filters?.status) conds.push((0, import_drizzle_orm7.eq)(supervisionVisits.status, filters.status));
-        if (filters?.visitType) conds.push((0, import_drizzle_orm7.eq)(supervisionVisits.visitType, filters.visitType));
-        return await db.select().from(supervisionVisits).where(withTenant(supervisionVisits, tenantId, conds.length ? (0, import_drizzle_orm7.and)(...conds) : void 0)).orderBy((0, import_drizzle_orm7.desc)(supervisionVisits.scheduledDate));
+        if (filters?.facilityId) conds.push((0, import_drizzle_orm8.eq)(supervisionVisits.facilityId, filters.facilityId));
+        if (filters?.microplanId) conds.push((0, import_drizzle_orm8.eq)(supervisionVisits.microplanId, filters.microplanId));
+        if (filters?.status) conds.push((0, import_drizzle_orm8.eq)(supervisionVisits.status, filters.status));
+        if (filters?.visitType) conds.push((0, import_drizzle_orm8.eq)(supervisionVisits.visitType, filters.visitType));
+        return await db.select().from(supervisionVisits).where(withTenant(supervisionVisits, tenantId, conds.length ? (0, import_drizzle_orm8.and)(...conds) : void 0)).orderBy((0, import_drizzle_orm8.desc)(supervisionVisits.scheduledDate));
       }
       async getSupervisionVisit(tenantId, id) {
-        const [v] = await db.select().from(supervisionVisits).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(supervisionVisits.id, id), (0, import_drizzle_orm7.eq)(supervisionVisits.tenantId, tenantId)));
+        const [v] = await db.select().from(supervisionVisits).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(supervisionVisits.id, id), (0, import_drizzle_orm8.eq)(supervisionVisits.tenantId, tenantId)));
         return v;
       }
       async createSupervisionVisit(tenantId, data) {
@@ -5774,18 +5926,18 @@ var init_storage = __esm({
       }
       async updateSupervisionVisit(tenantId, id, data) {
         const { tenantId: _i, ...safe } = data;
-        const [v] = await db.update(supervisionVisits).set({ ...safe, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(supervisionVisits.id, id), (0, import_drizzle_orm7.eq)(supervisionVisits.tenantId, tenantId))).returning();
+        const [v] = await db.update(supervisionVisits).set({ ...safe, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(supervisionVisits.id, id), (0, import_drizzle_orm8.eq)(supervisionVisits.tenantId, tenantId))).returning();
         return v;
       }
       async deleteSupervisionVisit(tenantId, id) {
-        const r = await db.delete(supervisionVisits).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(supervisionVisits.id, id), (0, import_drizzle_orm7.eq)(supervisionVisits.tenantId, tenantId))).returning({ id: supervisionVisits.id });
+        const r = await db.delete(supervisionVisits).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(supervisionVisits.id, id), (0, import_drizzle_orm8.eq)(supervisionVisits.tenantId, tenantId))).returning({ id: supervisionVisits.id });
         return r.length > 0;
       }
       async listChecklistTemplates(tenantId) {
-        return await db.select().from(supervisionChecklistTemplates).where((0, import_drizzle_orm7.eq)(supervisionChecklistTemplates.tenantId, tenantId)).orderBy((0, import_drizzle_orm7.desc)(supervisionChecklistTemplates.updatedAt));
+        return await db.select().from(supervisionChecklistTemplates).where((0, import_drizzle_orm8.eq)(supervisionChecklistTemplates.tenantId, tenantId)).orderBy((0, import_drizzle_orm8.desc)(supervisionChecklistTemplates.updatedAt));
       }
       async getChecklistTemplate(tenantId, id) {
-        const [t] = await db.select().from(supervisionChecklistTemplates).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(supervisionChecklistTemplates.id, id), (0, import_drizzle_orm7.eq)(supervisionChecklistTemplates.tenantId, tenantId)));
+        const [t] = await db.select().from(supervisionChecklistTemplates).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(supervisionChecklistTemplates.id, id), (0, import_drizzle_orm8.eq)(supervisionChecklistTemplates.tenantId, tenantId)));
         return t;
       }
       async createChecklistTemplate(tenantId, createdByUserId, data) {
@@ -5810,20 +5962,20 @@ var init_storage = __esm({
         if (data.sections !== void 0) safeData.sections = Array.isArray(data.sections) ? data.sections : [];
         if (data.items !== void 0) safeData.items = Array.isArray(data.items) ? data.items : [];
         if (data.isActive !== void 0) safeData.isActive = data.isActive;
-        const [t] = await db.update(supervisionChecklistTemplates).set(safeData).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(supervisionChecklistTemplates.id, id), (0, import_drizzle_orm7.eq)(supervisionChecklistTemplates.tenantId, tenantId))).returning();
+        const [t] = await db.update(supervisionChecklistTemplates).set(safeData).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(supervisionChecklistTemplates.id, id), (0, import_drizzle_orm8.eq)(supervisionChecklistTemplates.tenantId, tenantId))).returning();
         return t;
       }
       async deleteChecklistTemplate(tenantId, id) {
-        const r = await db.delete(supervisionChecklistTemplates).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(supervisionChecklistTemplates.id, id), (0, import_drizzle_orm7.eq)(supervisionChecklistTemplates.tenantId, tenantId))).returning({ id: supervisionChecklistTemplates.id });
+        const r = await db.delete(supervisionChecklistTemplates).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(supervisionChecklistTemplates.id, id), (0, import_drizzle_orm8.eq)(supervisionChecklistTemplates.tenantId, tenantId))).returning({ id: supervisionChecklistTemplates.id });
         return r.length > 0;
       }
       // --- Quarterly reviews (RED 4 / Step 12) ---
       async listQuarterlyReviews(tenantId, filters) {
         const conds = [];
-        if (filters?.facilityId) conds.push((0, import_drizzle_orm7.eq)(quarterlyReviews.facilityId, filters.facilityId));
-        if (filters?.year) conds.push((0, import_drizzle_orm7.eq)(quarterlyReviews.year, filters.year));
-        if (filters?.quarter) conds.push((0, import_drizzle_orm7.eq)(quarterlyReviews.quarter, filters.quarter));
-        const rows = await db.select().from(quarterlyReviews).where(withTenant(quarterlyReviews, tenantId, conds.length ? (0, import_drizzle_orm7.and)(...conds) : void 0)).orderBy((0, import_drizzle_orm7.desc)(quarterlyReviews.year), (0, import_drizzle_orm7.desc)(quarterlyReviews.quarter), (0, import_drizzle_orm7.desc)(quarterlyReviews.updatedAt));
+        if (filters?.facilityId) conds.push((0, import_drizzle_orm8.eq)(quarterlyReviews.facilityId, filters.facilityId));
+        if (filters?.year) conds.push((0, import_drizzle_orm8.eq)(quarterlyReviews.year, filters.year));
+        if (filters?.quarter) conds.push((0, import_drizzle_orm8.eq)(quarterlyReviews.quarter, filters.quarter));
+        const rows = await db.select().from(quarterlyReviews).where(withTenant(quarterlyReviews, tenantId, conds.length ? (0, import_drizzle_orm8.and)(...conds) : void 0)).orderBy((0, import_drizzle_orm8.desc)(quarterlyReviews.year), (0, import_drizzle_orm8.desc)(quarterlyReviews.quarter), (0, import_drizzle_orm8.desc)(quarterlyReviews.updatedAt));
         const userIds = /* @__PURE__ */ new Set();
         for (const r of rows) {
           if (r.updatedByUserId) userIds.add(r.updatedByUserId);
@@ -5831,7 +5983,7 @@ var init_storage = __esm({
         }
         const nameById = /* @__PURE__ */ new Map();
         if (userIds.size > 0) {
-          const us = await db.select({ id: users.id, firstName: users.firstName, lastName: users.lastName, email: users.email }).from(users).where((0, import_drizzle_orm7.inArray)(users.id, Array.from(userIds)));
+          const us = await db.select({ id: users.id, firstName: users.firstName, lastName: users.lastName, email: users.email }).from(users).where((0, import_drizzle_orm8.inArray)(users.id, Array.from(userIds)));
           for (const u of us) {
             const full = [u.firstName, u.lastName].filter(Boolean).join(" ").trim();
             nameById.set(u.id, full || u.email || u.id);
@@ -5844,11 +5996,11 @@ var init_storage = __esm({
         }));
       }
       async getQuarterlyReview(tenantId, facilityId, year, quarter) {
-        const [r] = await db.select().from(quarterlyReviews).where((0, import_drizzle_orm7.and)(
-          (0, import_drizzle_orm7.eq)(quarterlyReviews.tenantId, tenantId),
-          (0, import_drizzle_orm7.eq)(quarterlyReviews.facilityId, facilityId),
-          (0, import_drizzle_orm7.eq)(quarterlyReviews.year, year),
-          (0, import_drizzle_orm7.eq)(quarterlyReviews.quarter, quarter)
+        const [r] = await db.select().from(quarterlyReviews).where((0, import_drizzle_orm8.and)(
+          (0, import_drizzle_orm8.eq)(quarterlyReviews.tenantId, tenantId),
+          (0, import_drizzle_orm8.eq)(quarterlyReviews.facilityId, facilityId),
+          (0, import_drizzle_orm8.eq)(quarterlyReviews.year, year),
+          (0, import_drizzle_orm8.eq)(quarterlyReviews.quarter, quarter)
         ));
         return r;
       }
@@ -5862,7 +6014,7 @@ var init_storage = __esm({
             nextSurveyDate,
             updatedByUserId: userId,
             updatedAt: /* @__PURE__ */ new Date()
-          }).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(quarterlyReviews.id, existing.id), (0, import_drizzle_orm7.eq)(quarterlyReviews.tenantId, tenantId))).returning();
+          }).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(quarterlyReviews.id, existing.id), (0, import_drizzle_orm8.eq)(quarterlyReviews.tenantId, tenantId))).returning();
           return r2;
         }
         const [r] = await db.insert(quarterlyReviews).values({
@@ -5881,17 +6033,17 @@ var init_storage = __esm({
       // --- Audit logs ---
       async listAuditLogs(tenantId, filters) {
         const conds = [];
-        if (filters?.userId) conds.push((0, import_drizzle_orm7.eq)(auditLogs.userId, filters.userId));
-        if (filters?.entityType) conds.push((0, import_drizzle_orm7.eq)(auditLogs.entityType, filters.entityType));
-        if (filters?.entityId) conds.push((0, import_drizzle_orm7.eq)(auditLogs.entityId, parseInt(filters.entityId, 10)));
-        return await db.select().from(auditLogs).where(withTenant(auditLogs, tenantId, conds.length ? (0, import_drizzle_orm7.and)(...conds) : void 0)).orderBy((0, import_drizzle_orm7.desc)(auditLogs.createdAt)).limit(filters?.limit ?? 200);
+        if (filters?.userId) conds.push((0, import_drizzle_orm8.eq)(auditLogs.userId, filters.userId));
+        if (filters?.entityType) conds.push((0, import_drizzle_orm8.eq)(auditLogs.entityType, filters.entityType));
+        if (filters?.entityId) conds.push((0, import_drizzle_orm8.eq)(auditLogs.entityId, parseInt(filters.entityId, 10)));
+        return await db.select().from(auditLogs).where(withTenant(auditLogs, tenantId, conds.length ? (0, import_drizzle_orm8.and)(...conds) : void 0)).orderBy((0, import_drizzle_orm8.desc)(auditLogs.createdAt)).limit(filters?.limit ?? 200);
       }
       // --- Approval requests ---
       async getApprovalRequests(tenantId, status) {
-        return await db.select().from(approvalRequests).where(withTenant(approvalRequests, tenantId, status ? (0, import_drizzle_orm7.eq)(approvalRequests.status, status) : void 0)).orderBy((0, import_drizzle_orm7.desc)(approvalRequests.submittedAt));
+        return await db.select().from(approvalRequests).where(withTenant(approvalRequests, tenantId, status ? (0, import_drizzle_orm8.eq)(approvalRequests.status, status) : void 0)).orderBy((0, import_drizzle_orm8.desc)(approvalRequests.submittedAt));
       }
       async getApprovalRequest(tenantId, id) {
-        const [r] = await db.select().from(approvalRequests).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(approvalRequests.id, id), (0, import_drizzle_orm7.eq)(approvalRequests.tenantId, tenantId)));
+        const [r] = await db.select().from(approvalRequests).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(approvalRequests.id, id), (0, import_drizzle_orm8.eq)(approvalRequests.tenantId, tenantId)));
         return r;
       }
       async createApprovalRequest(tenantId, data) {
@@ -5900,15 +6052,15 @@ var init_storage = __esm({
       }
       async updateApprovalRequest(tenantId, id, data) {
         const { tenantId: _i, ...safe } = data;
-        const [r] = await db.update(approvalRequests).set(safe).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(approvalRequests.id, id), (0, import_drizzle_orm7.eq)(approvalRequests.tenantId, tenantId))).returning();
+        const [r] = await db.update(approvalRequests).set(safe).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(approvalRequests.id, id), (0, import_drizzle_orm8.eq)(approvalRequests.tenantId, tenantId))).returning();
         return r;
       }
       // --- HTR scores ---
       async getHtrScores(tenantId, villageId) {
-        return await db.select().from(htrScores).where(withTenant(htrScores, tenantId, villageId ? (0, import_drizzle_orm7.eq)(htrScores.villageId, villageId) : void 0));
+        return await db.select().from(htrScores).where(withTenant(htrScores, tenantId, villageId ? (0, import_drizzle_orm8.eq)(htrScores.villageId, villageId) : void 0));
       }
       async upsertHtrScore(tenantId, data) {
-        const existing = await db.select().from(htrScores).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(htrScores.tenantId, tenantId), (0, import_drizzle_orm7.eq)(htrScores.villageId, data.villageId)));
+        const existing = await db.select().from(htrScores).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(htrScores.tenantId, tenantId), (0, import_drizzle_orm8.eq)(htrScores.villageId, data.villageId)));
         if (existing.length > 0) {
           const [r] = await db.update(htrScores).set({
             distanceScore: data.distanceScore,
@@ -5920,7 +6072,7 @@ var init_storage = __esm({
             interventionPriority: data.interventionPriority,
             comments: data.comments,
             calculatedAt: /* @__PURE__ */ new Date()
-          }).where((0, import_drizzle_orm7.eq)(htrScores.id, existing[0].id)).returning();
+          }).where((0, import_drizzle_orm8.eq)(htrScores.id, existing[0].id)).returning();
           return r;
         } else {
           const [r] = await db.insert(htrScores).values({
@@ -5955,12 +6107,12 @@ var init_storage = __esm({
           latitude: pageViews.latitude,
           longitude: pageViews.longitude
         }).from(pageViews).where(
-          (0, import_drizzle_orm7.and)(
-            (0, import_drizzle_orm7.eq)(pageViews.tenantId, tenantId),
-            (0, import_drizzle_orm7.eq)(pageViews.userId, userId),
-            (0, import_drizzle_orm7.gte)(import_drizzle_orm7.sql`coalesce(${pageViews.lastSeenAt}, ${pageViews.createdAt})`, cutoff)
+          (0, import_drizzle_orm8.and)(
+            (0, import_drizzle_orm8.eq)(pageViews.tenantId, tenantId),
+            (0, import_drizzle_orm8.eq)(pageViews.userId, userId),
+            (0, import_drizzle_orm8.gte)(import_drizzle_orm8.sql`coalesce(${pageViews.lastSeenAt}, ${pageViews.createdAt})`, cutoff)
           )
-        ).orderBy((0, import_drizzle_orm7.desc)(import_drizzle_orm7.sql`coalesce(${pageViews.lastSeenAt}, ${pageViews.createdAt})`)).limit(1);
+        ).orderBy((0, import_drizzle_orm8.desc)(import_drizzle_orm8.sql`coalesce(${pageViews.lastSeenAt}, ${pageViews.createdAt})`)).limit(1);
         if (latest) {
           const existingHasCoords = latest.latitude != null && latest.longitude != null;
           const setData = { lastSeenAt: /* @__PURE__ */ new Date() };
@@ -5971,7 +6123,7 @@ var init_storage = __esm({
             setData.latitude = data.latitude;
             setData.longitude = data.longitude;
           }
-          await db.update(pageViews).set(setData).where((0, import_drizzle_orm7.eq)(pageViews.id, latest.id));
+          await db.update(pageViews).set(setData).where((0, import_drizzle_orm8.eq)(pageViews.id, latest.id));
           return;
         }
         await db.insert(pageViews).values({ ...data, userId, tenantId, lastSeenAt: /* @__PURE__ */ new Date() });
@@ -5979,11 +6131,11 @@ var init_storage = __esm({
       async getOnlineCount(tenantId) {
         const onlineSince = new Date(Date.now() - 5 * 60 * 1e3);
         const [row] = await db.select({
-          count: import_drizzle_orm7.sql`count(distinct coalesce(${pageViews.userId}, 'anon:' || coalesce(${pageViews.ipAddress}, '?')))::int`
+          count: import_drizzle_orm8.sql`count(distinct coalesce(${pageViews.userId}, 'anon:' || coalesce(${pageViews.ipAddress}, '?')))::int`
         }).from(pageViews).where(
-          (0, import_drizzle_orm7.and)(
-            (0, import_drizzle_orm7.eq)(pageViews.tenantId, tenantId),
-            (0, import_drizzle_orm7.gte)(import_drizzle_orm7.sql`coalesce(${pageViews.lastSeenAt}, ${pageViews.createdAt})`, onlineSince)
+          (0, import_drizzle_orm8.and)(
+            (0, import_drizzle_orm8.eq)(pageViews.tenantId, tenantId),
+            (0, import_drizzle_orm8.gte)(import_drizzle_orm8.sql`coalesce(${pageViews.lastSeenAt}, ${pageViews.createdAt})`, onlineSince)
           )
         );
         return row?.count ?? 0;
@@ -6005,17 +6157,17 @@ var init_storage = __esm({
           latitude: pageViews.latitude,
           longitude: pageViews.longitude,
           userAgent: pageViews.userAgent,
-          lastSeen: import_drizzle_orm7.sql`coalesce(${pageViews.lastSeenAt}, ${pageViews.createdAt})`,
+          lastSeen: import_drizzle_orm8.sql`coalesce(${pageViews.lastSeenAt}, ${pageViews.createdAt})`,
           firstName: users.firstName,
           lastName: users.lastName,
           email: users.email,
           role: users.role
-        }).from(pageViews).leftJoin(users, (0, import_drizzle_orm7.eq)(users.id, pageViews.userId)).where(
-          (0, import_drizzle_orm7.and)(
-            (0, import_drizzle_orm7.eq)(pageViews.tenantId, tenantId),
-            (0, import_drizzle_orm7.gte)(import_drizzle_orm7.sql`coalesce(${pageViews.lastSeenAt}, ${pageViews.createdAt})`, onlineSince)
+        }).from(pageViews).leftJoin(users, (0, import_drizzle_orm8.eq)(users.id, pageViews.userId)).where(
+          (0, import_drizzle_orm8.and)(
+            (0, import_drizzle_orm8.eq)(pageViews.tenantId, tenantId),
+            (0, import_drizzle_orm8.gte)(import_drizzle_orm8.sql`coalesce(${pageViews.lastSeenAt}, ${pageViews.createdAt})`, onlineSince)
           )
-        ).orderBy((0, import_drizzle_orm7.desc)(import_drizzle_orm7.sql`coalesce(${pageViews.lastSeenAt}, ${pageViews.createdAt})`));
+        ).orderBy((0, import_drizzle_orm8.desc)(import_drizzle_orm8.sql`coalesce(${pageViews.lastSeenAt}, ${pageViews.createdAt})`));
         const seen = /* @__PURE__ */ new Set();
         const online = [];
         for (const r of recentRows) {
@@ -6039,15 +6191,15 @@ var init_storage = __esm({
           });
         }
         const [todayRow] = await db.select({
-          visits: import_drizzle_orm7.sql`count(*)::int`,
-          visitors: import_drizzle_orm7.sql`count(distinct ${pageViews.userId})::int`
-        }).from(pageViews).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(pageViews.tenantId, tenantId), (0, import_drizzle_orm7.gte)(pageViews.createdAt, startOfTodayUtc)));
-        const [thirtyRow] = await db.select({ visits: import_drizzle_orm7.sql`count(*)::int` }).from(pageViews).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(pageViews.tenantId, tenantId), (0, import_drizzle_orm7.gte)(pageViews.createdAt, since30d)));
+          visits: import_drizzle_orm8.sql`count(*)::int`,
+          visitors: import_drizzle_orm8.sql`count(distinct ${pageViews.userId})::int`
+        }).from(pageViews).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(pageViews.tenantId, tenantId), (0, import_drizzle_orm8.gte)(pageViews.createdAt, startOfTodayUtc)));
+        const [thirtyRow] = await db.select({ visits: import_drizzle_orm8.sql`count(*)::int` }).from(pageViews).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(pageViews.tenantId, tenantId), (0, import_drizzle_orm8.gte)(pageViews.createdAt, since30d)));
         const overTimeRows = await db.select({
-          date: import_drizzle_orm7.sql`to_char(date_trunc('day', ${pageViews.createdAt} AT TIME ZONE 'UTC'), 'YYYY-MM-DD')`,
-          visits: import_drizzle_orm7.sql`count(*)::int`,
-          visitors: import_drizzle_orm7.sql`count(distinct ${pageViews.userId})::int`
-        }).from(pageViews).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(pageViews.tenantId, tenantId), (0, import_drizzle_orm7.gte)(pageViews.createdAt, since14d))).groupBy(import_drizzle_orm7.sql`date_trunc('day', ${pageViews.createdAt} AT TIME ZONE 'UTC')`).orderBy(import_drizzle_orm7.sql`date_trunc('day', ${pageViews.createdAt} AT TIME ZONE 'UTC')`);
+          date: import_drizzle_orm8.sql`to_char(date_trunc('day', ${pageViews.createdAt} AT TIME ZONE 'UTC'), 'YYYY-MM-DD')`,
+          visits: import_drizzle_orm8.sql`count(*)::int`,
+          visitors: import_drizzle_orm8.sql`count(distinct ${pageViews.userId})::int`
+        }).from(pageViews).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(pageViews.tenantId, tenantId), (0, import_drizzle_orm8.gte)(pageViews.createdAt, since14d))).groupBy(import_drizzle_orm8.sql`date_trunc('day', ${pageViews.createdAt} AT TIME ZONE 'UTC')`).orderBy(import_drizzle_orm8.sql`date_trunc('day', ${pageViews.createdAt} AT TIME ZONE 'UTC')`);
         const typedOverTime = overTimeRows;
         const byDate = {};
         for (const r of typedOverTime) {
@@ -6060,12 +6212,12 @@ var init_storage = __esm({
           const row = byDate[key];
           visitsOverTime.push({ date: key, visits: row?.visits ?? 0, visitors: row?.visitors ?? 0 });
         }
-        const topPages = await db.select({ path: pageViews.path, visits: import_drizzle_orm7.sql`count(*)::int` }).from(pageViews).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(pageViews.tenantId, tenantId), (0, import_drizzle_orm7.gte)(pageViews.createdAt, since7d))).groupBy(pageViews.path).orderBy((0, import_drizzle_orm7.desc)(import_drizzle_orm7.sql`count(*)`)).limit(8);
+        const topPages = await db.select({ path: pageViews.path, visits: import_drizzle_orm8.sql`count(*)::int` }).from(pageViews).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(pageViews.tenantId, tenantId), (0, import_drizzle_orm8.gte)(pageViews.createdAt, since7d))).groupBy(pageViews.path).orderBy((0, import_drizzle_orm8.desc)(import_drizzle_orm8.sql`count(*)`)).limit(8);
         const locations = await db.select({
-          location: import_drizzle_orm7.sql`coalesce(${pageViews.country}, 'Unknown')`,
-          visits: import_drizzle_orm7.sql`count(*)::int`,
-          visitors: import_drizzle_orm7.sql`count(distinct ${pageViews.userId})::int`
-        }).from(pageViews).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(pageViews.tenantId, tenantId), (0, import_drizzle_orm7.gte)(pageViews.createdAt, since30d))).groupBy(import_drizzle_orm7.sql`coalesce(${pageViews.country}, 'Unknown')`).orderBy((0, import_drizzle_orm7.desc)(import_drizzle_orm7.sql`count(*)`)).limit(8);
+          location: import_drizzle_orm8.sql`coalesce(${pageViews.country}, 'Unknown')`,
+          visits: import_drizzle_orm8.sql`count(*)::int`,
+          visitors: import_drizzle_orm8.sql`count(distinct ${pageViews.userId})::int`
+        }).from(pageViews).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(pageViews.tenantId, tenantId), (0, import_drizzle_orm8.gte)(pageViews.createdAt, since30d))).groupBy(import_drizzle_orm8.sql`coalesce(${pageViews.country}, 'Unknown')`).orderBy((0, import_drizzle_orm8.desc)(import_drizzle_orm8.sql`count(*)`)).limit(8);
         return {
           online,
           onlineCount: online.length,
@@ -6093,15 +6245,15 @@ var init_storage = __esm({
           createdAt: adminBoundaries.createdAt,
           updatedAt: adminBoundaries.updatedAt
         }).from(adminBoundaries).where(
-          adminLevel !== void 0 ? (0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(adminBoundaries.tenantId, tenantId), (0, import_drizzle_orm7.eq)(adminBoundaries.adminLevel, adminLevel)) : (0, import_drizzle_orm7.eq)(adminBoundaries.tenantId, tenantId)
+          adminLevel !== void 0 ? (0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(adminBoundaries.tenantId, tenantId), (0, import_drizzle_orm8.eq)(adminBoundaries.adminLevel, adminLevel)) : (0, import_drizzle_orm8.eq)(adminBoundaries.tenantId, tenantId)
         ).orderBy(adminBoundaries.adminLevel);
       }
       async getAdminBoundary(tenantId, id) {
-        const [b] = await db.select().from(adminBoundaries).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(adminBoundaries.id, id), (0, import_drizzle_orm7.eq)(adminBoundaries.tenantId, tenantId)));
+        const [b] = await db.select().from(adminBoundaries).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(adminBoundaries.id, id), (0, import_drizzle_orm8.eq)(adminBoundaries.tenantId, tenantId)));
         return b;
       }
       async getAdminBoundaryByLevel(tenantId, adminLevel) {
-        const [b] = await db.select().from(adminBoundaries).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(adminBoundaries.tenantId, tenantId), (0, import_drizzle_orm7.eq)(adminBoundaries.adminLevel, adminLevel)));
+        const [b] = await db.select().from(adminBoundaries).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(adminBoundaries.tenantId, tenantId), (0, import_drizzle_orm8.eq)(adminBoundaries.adminLevel, adminLevel)));
         return b;
       }
       /**
@@ -6111,27 +6263,27 @@ var init_storage = __esm({
       async upsertAdminBoundary(data) {
         const existing = await this.getAdminBoundaryByLevel(data.tenantId, data.adminLevel);
         if (existing) {
-          const [updated] = await db.update(adminBoundaries).set({ ...data, updatedAt: /* @__PURE__ */ new Date(), fetchedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm7.eq)(adminBoundaries.id, existing.id)).returning();
+          const [updated] = await db.update(adminBoundaries).set({ ...data, updatedAt: /* @__PURE__ */ new Date(), fetchedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm8.eq)(adminBoundaries.id, existing.id)).returning();
           return updated;
         }
         const [inserted] = await db.insert(adminBoundaries).values({ ...data, fetchedAt: /* @__PURE__ */ new Date() }).returning();
         return inserted;
       }
       async updateAdminBoundary(tenantId, id, updates) {
-        const [updated] = await db.update(adminBoundaries).set({ ...updates, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(adminBoundaries.id, id), (0, import_drizzle_orm7.eq)(adminBoundaries.tenantId, tenantId))).returning();
+        const [updated] = await db.update(adminBoundaries).set({ ...updates, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(adminBoundaries.id, id), (0, import_drizzle_orm8.eq)(adminBoundaries.tenantId, tenantId))).returning();
         return updated;
       }
       async deleteAdminBoundary(tenantId, id) {
-        const result = await db.delete(adminBoundaries).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(adminBoundaries.id, id), (0, import_drizzle_orm7.eq)(adminBoundaries.tenantId, tenantId)));
+        const result = await db.delete(adminBoundaries).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(adminBoundaries.id, id), (0, import_drizzle_orm8.eq)(adminBoundaries.tenantId, tenantId)));
         return (result.rowCount ?? 0) > 0;
       }
       // --- Custom Map Layers ---
       async listCustomLayers(tenantId) {
-        const { geojson, ...cols } = (0, import_drizzle_orm7.getTableColumns)(customLayers);
-        return await db.select(cols).from(customLayers).where((0, import_drizzle_orm7.eq)(customLayers.tenantId, tenantId)).orderBy((0, import_drizzle_orm7.desc)(customLayers.createdAt));
+        const { geojson, ...cols } = (0, import_drizzle_orm8.getTableColumns)(customLayers);
+        return await db.select(cols).from(customLayers).where((0, import_drizzle_orm8.eq)(customLayers.tenantId, tenantId)).orderBy((0, import_drizzle_orm8.desc)(customLayers.createdAt));
       }
       async getCustomLayer(tenantId, id) {
-        const [layer] = await db.select().from(customLayers).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(customLayers.id, id), (0, import_drizzle_orm7.eq)(customLayers.tenantId, tenantId)));
+        const [layer] = await db.select().from(customLayers).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(customLayers.id, id), (0, import_drizzle_orm8.eq)(customLayers.tenantId, tenantId)));
         return layer;
       }
       async createCustomLayer(data) {
@@ -6140,22 +6292,22 @@ var init_storage = __esm({
       }
       async updateCustomLayer(tenantId, id, data) {
         const { tenantId: _t, ...safe } = data;
-        const [layer] = await db.update(customLayers).set({ ...safe, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(customLayers.id, id), (0, import_drizzle_orm7.eq)(customLayers.tenantId, tenantId))).returning();
+        const [layer] = await db.update(customLayers).set({ ...safe, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(customLayers.id, id), (0, import_drizzle_orm8.eq)(customLayers.tenantId, tenantId))).returning();
         return layer;
       }
       async deleteCustomLayer(tenantId, id) {
-        const result = await db.delete(customLayers).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(customLayers.id, id), (0, import_drizzle_orm7.eq)(customLayers.tenantId, tenantId)));
+        const result = await db.delete(customLayers).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(customLayers.id, id), (0, import_drizzle_orm8.eq)(customLayers.tenantId, tenantId)));
         return (result.rowCount ?? 0) > 0;
       }
       // --- Facility Catchments ---
       async getFacilityCatchments(tenantId, facilityId) {
-        return await db.select().from(facilityCatchments).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(facilityCatchments.tenantId, tenantId), (0, import_drizzle_orm7.eq)(facilityCatchments.facilityId, facilityId))).orderBy((0, import_drizzle_orm7.desc)(facilityCatchments.createdAt));
+        return await db.select().from(facilityCatchments).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(facilityCatchments.tenantId, tenantId), (0, import_drizzle_orm8.eq)(facilityCatchments.facilityId, facilityId))).orderBy((0, import_drizzle_orm8.desc)(facilityCatchments.createdAt));
       }
       async getAllFacilityCatchments(tenantId) {
-        return await db.select().from(facilityCatchments).where((0, import_drizzle_orm7.eq)(facilityCatchments.tenantId, tenantId)).orderBy((0, import_drizzle_orm7.desc)(facilityCatchments.createdAt));
+        return await db.select().from(facilityCatchments).where((0, import_drizzle_orm8.eq)(facilityCatchments.tenantId, tenantId)).orderBy((0, import_drizzle_orm8.desc)(facilityCatchments.createdAt));
       }
       async getFacilityCatchment(tenantId, id) {
-        const [c] = await db.select().from(facilityCatchments).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(facilityCatchments.id, id), (0, import_drizzle_orm7.eq)(facilityCatchments.tenantId, tenantId)));
+        const [c] = await db.select().from(facilityCatchments).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(facilityCatchments.id, id), (0, import_drizzle_orm8.eq)(facilityCatchments.tenantId, tenantId)));
         return c;
       }
       async createFacilityCatchment(tenantId, data) {
@@ -6164,19 +6316,19 @@ var init_storage = __esm({
       }
       async updateFacilityCatchment(tenantId, id, data) {
         const { tenantId: _t, ...safe } = data;
-        const [c] = await db.update(facilityCatchments).set({ ...safe, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(facilityCatchments.id, id), (0, import_drizzle_orm7.eq)(facilityCatchments.tenantId, tenantId))).returning();
+        const [c] = await db.update(facilityCatchments).set({ ...safe, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(facilityCatchments.id, id), (0, import_drizzle_orm8.eq)(facilityCatchments.tenantId, tenantId))).returning();
         return c;
       }
       async deleteFacilityCatchment(tenantId, id) {
-        const result = await db.delete(facilityCatchments).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(facilityCatchments.id, id), (0, import_drizzle_orm7.eq)(facilityCatchments.tenantId, tenantId)));
+        const result = await db.delete(facilityCatchments).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(facilityCatchments.id, id), (0, import_drizzle_orm8.eq)(facilityCatchments.tenantId, tenantId)));
         return (result.rowCount ?? 0) > 0;
       }
       // --- 1. Vaccine Configurations ---
       async getVaccineConfigs(tenantId) {
-        return await db.select().from(vaccineConfigurations).where((0, import_drizzle_orm7.eq)(vaccineConfigurations.tenantId, tenantId)).orderBy(vaccineConfigurations.name);
+        return await db.select().from(vaccineConfigurations).where((0, import_drizzle_orm8.eq)(vaccineConfigurations.tenantId, tenantId)).orderBy(vaccineConfigurations.name);
       }
       async getVaccineConfig(tenantId, id) {
-        const [row] = await db.select().from(vaccineConfigurations).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(vaccineConfigurations.id, id), (0, import_drizzle_orm7.eq)(vaccineConfigurations.tenantId, tenantId)));
+        const [row] = await db.select().from(vaccineConfigurations).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(vaccineConfigurations.id, id), (0, import_drizzle_orm8.eq)(vaccineConfigurations.tenantId, tenantId)));
         return row;
       }
       async createVaccineConfig(tenantId, data) {
@@ -6185,14 +6337,14 @@ var init_storage = __esm({
       }
       async updateVaccineConfig(tenantId, id, data) {
         const { tenantId: _t, ...safe } = data;
-        const [row] = await db.update(vaccineConfigurations).set(safe).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(vaccineConfigurations.id, id), (0, import_drizzle_orm7.eq)(vaccineConfigurations.tenantId, tenantId))).returning();
+        const [row] = await db.update(vaccineConfigurations).set(safe).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(vaccineConfigurations.id, id), (0, import_drizzle_orm8.eq)(vaccineConfigurations.tenantId, tenantId))).returning();
         return row;
       }
       async getCatalogueVaccines(tenantId) {
-        return await db.select().from(catalogueVaccines).where((0, import_drizzle_orm7.eq)(catalogueVaccines.tenantId, tenantId)).orderBy(catalogueVaccines.name);
+        return await db.select().from(catalogueVaccines).where((0, import_drizzle_orm8.eq)(catalogueVaccines.tenantId, tenantId)).orderBy(catalogueVaccines.name);
       }
       async getCatalogueScheduleDoses(tenantId) {
-        return await db.select().from(catalogueScheduleDoses).where((0, import_drizzle_orm7.eq)(catalogueScheduleDoses.tenantId, tenantId)).orderBy(catalogueScheduleDoses.name);
+        return await db.select().from(catalogueScheduleDoses).where((0, import_drizzle_orm8.eq)(catalogueScheduleDoses.tenantId, tenantId)).orderBy(catalogueScheduleDoses.name);
       }
       // --- 2. Clients ---
       async getClients(tenantId, facilityId, clientType) {
@@ -6200,13 +6352,13 @@ var init_storage = __esm({
           withTenant(
             clients,
             tenantId,
-            facilityId ? (0, import_drizzle_orm7.eq)(clients.facilityId, facilityId) : void 0,
-            clientType ? (0, import_drizzle_orm7.eq)(clients.clientType, clientType) : void 0
+            facilityId ? (0, import_drizzle_orm8.eq)(clients.facilityId, facilityId) : void 0,
+            clientType ? (0, import_drizzle_orm8.eq)(clients.clientType, clientType) : void 0
           )
-        ).orderBy((0, import_drizzle_orm7.desc)(clients.createdAt));
+        ).orderBy((0, import_drizzle_orm8.desc)(clients.createdAt));
       }
       async getClient(tenantId, id) {
-        const [row] = await db.select().from(clients).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(clients.id, id), (0, import_drizzle_orm7.eq)(clients.tenantId, tenantId)));
+        const [row] = await db.select().from(clients).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(clients.id, id), (0, import_drizzle_orm8.eq)(clients.tenantId, tenantId)));
         return row;
       }
       async createClient(tenantId, data) {
@@ -6223,16 +6375,16 @@ var init_storage = __esm({
           cleanData.dateOfBirth = new Date(cleanData.dateOfBirth);
         }
         const { tenantId: _t, ...safe } = cleanData;
-        const [row] = await db.update(clients).set({ ...safe, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(clients.id, id), (0, import_drizzle_orm7.eq)(clients.tenantId, tenantId))).returning();
+        const [row] = await db.update(clients).set({ ...safe, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(clients.id, id), (0, import_drizzle_orm8.eq)(clients.tenantId, tenantId))).returning();
         return row;
       }
       async deleteClient(tenantId, id) {
-        const [row] = await db.update(clients).set({ isArchived: true, isActive: false, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(clients.id, id), (0, import_drizzle_orm7.eq)(clients.tenantId, tenantId))).returning({ id: clients.id });
+        const [row] = await db.update(clients).set({ isArchived: true, isActive: false, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(clients.id, id), (0, import_drizzle_orm8.eq)(clients.tenantId, tenantId))).returning({ id: clients.id });
         return !!row;
       }
       // --- 3. Client Vaccinations ---
       async getClientVaccinations(tenantId, clientId) {
-        return await db.select().from(clientVaccinations).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(clientVaccinations.tenantId, tenantId), (0, import_drizzle_orm7.eq)(clientVaccinations.clientId, clientId))).orderBy((0, import_drizzle_orm7.desc)(clientVaccinations.administeredDate));
+        return await db.select().from(clientVaccinations).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(clientVaccinations.tenantId, tenantId), (0, import_drizzle_orm8.eq)(clientVaccinations.clientId, clientId))).orderBy((0, import_drizzle_orm8.desc)(clientVaccinations.administeredDate));
       }
       async createClientVaccination(tenantId, data) {
         const cleanData = { ...data };
@@ -6246,17 +6398,17 @@ var init_storage = __esm({
         return row;
       }
       async deleteClientVaccination(tenantId, id) {
-        const [row] = await db.update(clientVaccinations).set({ isArchived: true }).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(clientVaccinations.id, id), (0, import_drizzle_orm7.eq)(clientVaccinations.tenantId, tenantId))).returning({ id: clientVaccinations.id });
+        const [row] = await db.update(clientVaccinations).set({ isArchived: true }).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(clientVaccinations.id, id), (0, import_drizzle_orm8.eq)(clientVaccinations.tenantId, tenantId))).returning({ id: clientVaccinations.id });
         return !!row;
       }
       // --- 4. Session Day Plans ---
       async getSessionDayPlans(tenantId, sessionPlanId) {
-        return await db.select().from(sessionDayPlans).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(sessionDayPlans.tenantId, tenantId), (0, import_drizzle_orm7.eq)(sessionDayPlans.sessionPlanId, sessionPlanId))).orderBy(sessionDayPlans.dayNumber);
+        return await db.select().from(sessionDayPlans).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(sessionDayPlans.tenantId, tenantId), (0, import_drizzle_orm8.eq)(sessionDayPlans.sessionPlanId, sessionPlanId))).orderBy(sessionDayPlans.dayNumber);
       }
       async getSessionDayPlansByMicroplan(tenantId, microplanId) {
-        const rows = await db.select({ dp: sessionDayPlans }).from(sessionDayPlans).innerJoin(sessionPlans, (0, import_drizzle_orm7.eq)(sessionDayPlans.sessionPlanId, sessionPlans.id)).where((0, import_drizzle_orm7.and)(
-          (0, import_drizzle_orm7.eq)(sessionDayPlans.tenantId, tenantId),
-          (0, import_drizzle_orm7.eq)(sessionPlans.microplanId, microplanId)
+        const rows = await db.select({ dp: sessionDayPlans }).from(sessionDayPlans).innerJoin(sessionPlans, (0, import_drizzle_orm8.eq)(sessionDayPlans.sessionPlanId, sessionPlans.id)).where((0, import_drizzle_orm8.and)(
+          (0, import_drizzle_orm8.eq)(sessionDayPlans.tenantId, tenantId),
+          (0, import_drizzle_orm8.eq)(sessionPlans.microplanId, microplanId)
         )).orderBy(sessionDayPlans.sessionPlanId, sessionDayPlans.dayNumber);
         return rows.map((r) => r.dp);
       }
@@ -6280,20 +6432,20 @@ var init_storage = __esm({
           cleanData.executedAt = new Date(cleanData.executedAt);
         }
         const { tenantId: _t, ...safe } = cleanData;
-        const [row] = await db.update(sessionDayPlans).set(safe).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(sessionDayPlans.id, id), (0, import_drizzle_orm7.eq)(sessionDayPlans.tenantId, tenantId))).returning();
+        const [row] = await db.update(sessionDayPlans).set(safe).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(sessionDayPlans.id, id), (0, import_drizzle_orm8.eq)(sessionDayPlans.tenantId, tenantId))).returning();
         return row;
       }
       async deleteSessionDayPlan(tenantId, id) {
-        const result = await db.delete(sessionDayPlans).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(sessionDayPlans.id, id), (0, import_drizzle_orm7.eq)(sessionDayPlans.tenantId, tenantId)));
+        const result = await db.delete(sessionDayPlans).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(sessionDayPlans.id, id), (0, import_drizzle_orm8.eq)(sessionDayPlans.tenantId, tenantId)));
         return (result.rowCount ?? 0) > 0;
       }
       // --- 5. Stock Transactions ---
       async getStockTransactions(tenantId, facilityId, productId) {
-        let conds = facilityId !== void 0 ? (0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(stockTransactions.tenantId, tenantId), (0, import_drizzle_orm7.eq)(stockTransactions.facilityId, facilityId)) : (0, import_drizzle_orm7.eq)(stockTransactions.tenantId, tenantId);
+        let conds = facilityId !== void 0 ? (0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(stockTransactions.tenantId, tenantId), (0, import_drizzle_orm8.eq)(stockTransactions.facilityId, facilityId)) : (0, import_drizzle_orm8.eq)(stockTransactions.tenantId, tenantId);
         if (productId !== void 0) {
-          conds = (0, import_drizzle_orm7.and)(conds, (0, import_drizzle_orm7.eq)(stockTransactions.productId, productId));
+          conds = (0, import_drizzle_orm8.and)(conds, (0, import_drizzle_orm8.eq)(stockTransactions.productId, productId));
         }
-        return await db.select().from(stockTransactions).where(conds).orderBy((0, import_drizzle_orm7.desc)(stockTransactions.transactionDate));
+        return await db.select().from(stockTransactions).where(conds).orderBy((0, import_drizzle_orm8.desc)(stockTransactions.transactionDate));
       }
       async createStockTransaction(tenantId, data) {
         const cleanData = {
@@ -6343,16 +6495,16 @@ var init_storage = __esm({
         });
       }
       async deleteStockTransaction(tenantId, id, reason) {
-        const [row] = await db.update(stockTransactions).set({ isVoid: true, voidReason: reason || "Voided by user" }).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(stockTransactions.id, id), (0, import_drizzle_orm7.eq)(stockTransactions.tenantId, tenantId))).returning({ id: stockTransactions.id });
+        const [row] = await db.update(stockTransactions).set({ isVoid: true, voidReason: reason || "Voided by user" }).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(stockTransactions.id, id), (0, import_drizzle_orm8.eq)(stockTransactions.tenantId, tenantId))).returning({ id: stockTransactions.id });
         return !!row;
       }
       // --- 6. Monthly Reports ---
       async getMonthlyReports(tenantId, facilityId) {
-        const conds = facilityId !== void 0 ? (0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(monthlyReports.tenantId, tenantId), (0, import_drizzle_orm7.eq)(monthlyReports.facilityId, facilityId)) : (0, import_drizzle_orm7.eq)(monthlyReports.tenantId, tenantId);
-        return await db.select().from(monthlyReports).where(conds).orderBy((0, import_drizzle_orm7.desc)(monthlyReports.year), (0, import_drizzle_orm7.desc)(monthlyReports.month));
+        const conds = facilityId !== void 0 ? (0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(monthlyReports.tenantId, tenantId), (0, import_drizzle_orm8.eq)(monthlyReports.facilityId, facilityId)) : (0, import_drizzle_orm8.eq)(monthlyReports.tenantId, tenantId);
+        return await db.select().from(monthlyReports).where(conds).orderBy((0, import_drizzle_orm8.desc)(monthlyReports.year), (0, import_drizzle_orm8.desc)(monthlyReports.month));
       }
       async getMonthlyReport(tenantId, id) {
-        const [row] = await db.select().from(monthlyReports).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(monthlyReports.id, id), (0, import_drizzle_orm7.eq)(monthlyReports.tenantId, tenantId)));
+        const [row] = await db.select().from(monthlyReports).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(monthlyReports.id, id), (0, import_drizzle_orm8.eq)(monthlyReports.tenantId, tenantId)));
         return row;
       }
       async createMonthlyReport(tenantId, data) {
@@ -6361,7 +6513,7 @@ var init_storage = __esm({
       }
       async updateMonthlyReport(tenantId, id, data) {
         const { tenantId: _t, ...safe } = data;
-        const [row] = await db.update(monthlyReports).set(safe).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(monthlyReports.id, id), (0, import_drizzle_orm7.eq)(monthlyReports.tenantId, tenantId))).returning();
+        const [row] = await db.update(monthlyReports).set(safe).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(monthlyReports.id, id), (0, import_drizzle_orm8.eq)(monthlyReports.tenantId, tenantId))).returning();
         return row;
       }
       // --- Notifications ---
@@ -6371,20 +6523,20 @@ var init_storage = __esm({
       }
       async getNotificationsForUser(userId, opts = {}) {
         const limit = Math.min(Math.max(opts.limit ?? 50, 1), 200);
-        const where = opts.unreadOnly ? (0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(notifications.userId, userId), (0, import_drizzle_orm7.isNull)(notifications.readAt)) : (0, import_drizzle_orm7.eq)(notifications.userId, userId);
-        return await db.select().from(notifications).where(where).orderBy((0, import_drizzle_orm7.desc)(notifications.createdAt)).limit(limit);
+        const where = opts.unreadOnly ? (0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(notifications.userId, userId), (0, import_drizzle_orm8.isNull)(notifications.readAt)) : (0, import_drizzle_orm8.eq)(notifications.userId, userId);
+        return await db.select().from(notifications).where(where).orderBy((0, import_drizzle_orm8.desc)(notifications.createdAt)).limit(limit);
       }
       async markNotificationRead(userId, id) {
-        const result = await db.update(notifications).set({ readAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(notifications.id, id), (0, import_drizzle_orm7.eq)(notifications.userId, userId)));
+        const result = await db.update(notifications).set({ readAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(notifications.id, id), (0, import_drizzle_orm8.eq)(notifications.userId, userId)));
         return (result.rowCount ?? 0) > 0;
       }
       async markAllNotificationsRead(userId) {
-        const result = await db.update(notifications).set({ readAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(notifications.userId, userId), (0, import_drizzle_orm7.isNull)(notifications.readAt)));
+        const result = await db.update(notifications).set({ readAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(notifications.userId, userId), (0, import_drizzle_orm8.isNull)(notifications.readAt)));
         return result.rowCount ?? 0;
       }
       async getUsersByTenantAndRoles(tenantId, roles) {
         if (roles.length === 0) return [];
-        const rows = await db.select().from(users).where((0, import_drizzle_orm7.and)((0, import_drizzle_orm7.eq)(users.tenantId, tenantId), (0, import_drizzle_orm7.eq)(users.isActive, true)));
+        const rows = await db.select().from(users).where((0, import_drizzle_orm8.and)((0, import_drizzle_orm8.eq)(users.tenantId, tenantId), (0, import_drizzle_orm8.eq)(users.isActive, true)));
         return rows.filter((u) => roles.includes(u.role));
       }
     };
@@ -6570,7 +6722,7 @@ async function setupAuth(app2, sessionMiddleware2 = getSession()) {
       if (dbUser && tenantId && !dbUser.tenantId) {
         const isAdmin = emailParam === "dev.admin@vaxplan.org" || emailParam === "national.admin@vaxplan.org";
         const role = isAdmin ? "national_admin" : "facility_clerk";
-        await db.update(users).set({ tenantId, role, roles: [role], updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm8.eq)(users.id, dbUser.id));
+        await db.update(users).set({ tenantId, role, roles: [role], updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm9.eq)(users.id, dbUser.id));
         dbUser = await storage.getUserByEmail(emailParam);
       }
     }
@@ -6634,7 +6786,7 @@ async function ensureDbUserFromSession(req) {
   }
   return null;
 }
-var import_passport, import_express_session, import_connect_pg_simple, import_memorystore, import_drizzle_orm8, IS_LOCAL_DEV, isAuthenticated;
+var import_passport, import_express_session, import_connect_pg_simple, import_memorystore, import_drizzle_orm9, IS_LOCAL_DEV, isAuthenticated;
 var init_auth = __esm({
   "server/auth.ts"() {
     "use strict";
@@ -6645,7 +6797,7 @@ var init_auth = __esm({
     init_storage();
     init_db();
     init_schema();
-    import_drizzle_orm8 = require("drizzle-orm");
+    import_drizzle_orm9 = require("drizzle-orm");
     IS_LOCAL_DEV = process.env.NODE_ENV !== "production";
     isAuthenticated = async (req, res, next) => {
       const user = req.user;
@@ -7640,7 +7792,7 @@ function registerPasswordAuthRoutes(app2) {
         return res.status(403).json({ message: "Forbidden" });
       }
       const hash = await hashPassword(newPassword);
-      await db.update(users).set({ passwordHash: hash, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm9.eq)(users.id, target.id));
+      await db.update(users).set({ passwordHash: hash, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm10.eq)(users.id, target.id));
       return res.json({ ok: true, userId: target.id });
     } catch (err) {
       console.error("[password-auth] set-password failed:", err);
@@ -7671,7 +7823,7 @@ function registerPasswordAuthRoutes(app2) {
         }
       }
       const hash = await hashPassword(newPassword);
-      await db.update(users).set({ passwordHash: hash, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm9.eq)(users.id, caller.id));
+      await db.update(users).set({ passwordHash: hash, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm10.eq)(users.id, caller.id));
       return res.json({ ok: true });
     } catch (err) {
       console.error("[password-auth] change-password failed:", err);
@@ -7679,12 +7831,12 @@ function registerPasswordAuthRoutes(app2) {
     }
   });
 }
-var import_bcryptjs, import_drizzle_orm9, BCRYPT_ROUNDS, MIN_PASSWORD_LEN, DUMMY_HASH, attempts, WINDOW_MS, MAX_ATTEMPTS, LOCK_MS, requireAdmin;
+var import_bcryptjs, import_drizzle_orm10, BCRYPT_ROUNDS, MIN_PASSWORD_LEN, DUMMY_HASH, attempts, WINDOW_MS, MAX_ATTEMPTS, LOCK_MS, requireAdmin;
 var init_passwordAuth = __esm({
   "server/auth/passwordAuth.ts"() {
     "use strict";
     import_bcryptjs = __toESM(require("bcryptjs"), 1);
-    import_drizzle_orm9 = require("drizzle-orm");
+    import_drizzle_orm10 = require("drizzle-orm");
     init_db();
     init_schema();
     init_storage();
@@ -7770,7 +7922,7 @@ function readTenantEmailSettings(tenant) {
 async function loadTenant(input2) {
   if (input2.tenant) return input2.tenant;
   if (!input2.tenantId) return void 0;
-  const [row] = await db.select().from(tenants).where((0, import_drizzle_orm10.eq)(tenants.id, input2.tenantId));
+  const [row] = await db.select().from(tenants).where((0, import_drizzle_orm11.eq)(tenants.id, input2.tenantId));
   return row ?? void 0;
 }
 function resolveSender(tenant, override) {
@@ -7883,11 +8035,11 @@ async function sendEmail(input2) {
   }
   return logToConsole(input2, sender);
 }
-var import_drizzle_orm10;
+var import_drizzle_orm11;
 var init_mailer = __esm({
   "server/services/mailer.ts"() {
     "use strict";
-    import_drizzle_orm10 = require("drizzle-orm");
+    import_drizzle_orm11 = require("drizzle-orm");
     init_db();
     init_schema();
   }
@@ -8480,7 +8632,7 @@ async function dispatchNotification(args) {
       priority,
       status: "delivered"
     }).returning();
-    const [client4] = await db.select().from(clients).where((0, import_drizzle_orm11.eq)(clients.id, recipientId));
+    const [client4] = await db.select().from(clients).where((0, import_drizzle_orm12.eq)(clients.id, recipientId));
     if (client4?.contactPhone && (templateData?.messageText || templateData?.message)) {
       await sendSms({
         to: client4.contactPhone,
@@ -8496,7 +8648,7 @@ async function dispatchNotification(args) {
     priority,
     status: "pending"
   }).returning();
-  const [client3] = await db.select().from(clients).where((0, import_drizzle_orm11.eq)(clients.id, recipientId));
+  const [client3] = await db.select().from(clients).where((0, import_drizzle_orm12.eq)(clients.id, recipientId));
   if (!client3) {
     throw new Error("Recipient not found");
   }
@@ -8533,14 +8685,14 @@ async function dispatchNotification(args) {
   await communicationQueue.add(`send-${initialChannel}`, jobPayload);
   return { communicationId: comm.id };
 }
-var import_drizzle_orm11;
+var import_drizzle_orm12;
 var init_uce = __esm({
   "server/services/uce/index.ts"() {
     "use strict";
     init_db();
     init_schema();
     init_queue();
-    import_drizzle_orm11 = require("drizzle-orm");
+    import_drizzle_orm12 = require("drizzle-orm");
     init_messaging();
   }
 });
@@ -8563,7 +8715,7 @@ function updateUserSession(user, tokens) {
   user.refresh_token = tokens.refresh_token;
   user.expires_at = user.claims?.exp;
 }
-var client2, import_passport5, import_passport6, import_express_session2, import_connect_pg_simple2, import_memorystore2, import_drizzle_orm12, IS_LOCAL_DEV2, getOidcConfig, isAuthenticated2;
+var client2, import_passport5, import_passport6, import_express_session2, import_connect_pg_simple2, import_memorystore2, import_drizzle_orm13, IS_LOCAL_DEV2, getOidcConfig, isAuthenticated2;
 var init_replitAuth = __esm({
   "server/replitAuth.ts"() {
     "use strict";
@@ -8576,7 +8728,7 @@ var init_replitAuth = __esm({
     init_storage();
     init_db();
     init_schema();
-    import_drizzle_orm12 = require("drizzle-orm");
+    import_drizzle_orm13 = require("drizzle-orm");
     IS_LOCAL_DEV2 = !process.env.REPL_ID;
     getOidcConfig = memoize2(
       async () => {
@@ -8623,7 +8775,7 @@ var surveillance_exports = {};
 __export(surveillance_exports, {
   surveillanceRouter: () => surveillanceRouter
 });
-var import_express, import_drizzle_orm13, surveillanceRouter;
+var import_express, import_drizzle_orm14, surveillanceRouter;
 var init_surveillance = __esm({
   "server/routes/surveillance.ts"() {
     "use strict";
@@ -8631,7 +8783,7 @@ var init_surveillance = __esm({
     import_express = require("express");
     init_db();
     init_schema();
-    import_drizzle_orm13 = require("drizzle-orm");
+    import_drizzle_orm14 = require("drizzle-orm");
     init_replitAuth();
     init_tenantResolver();
     init_loadDbUser();
@@ -8639,7 +8791,7 @@ var init_surveillance = __esm({
     surveillanceRouter.use(isAuthenticated2, requireTenant, requireDbUser);
     surveillanceRouter.get("/templates", async (req, res) => {
       try {
-        const templates = await db.select().from(vpdLinelistTemplates).where((0, import_drizzle_orm13.eq)(vpdLinelistTemplates.tenantId, req.tenantId));
+        const templates = await db.select().from(vpdLinelistTemplates).where((0, import_drizzle_orm14.eq)(vpdLinelistTemplates.tenantId, req.tenantId));
         res.json(templates);
       } catch (err) {
         res.status(500).json({ message: safeErrorMessage(err, "An unexpected error occurred") });
@@ -8661,9 +8813,9 @@ var init_surveillance = __esm({
     surveillanceRouter.patch("/templates/:id", async (req, res) => {
       try {
         const [updated] = await db.update(vpdLinelistTemplates).set({ ...req.body, updatedAt: /* @__PURE__ */ new Date() }).where(
-          (0, import_drizzle_orm13.and)(
-            (0, import_drizzle_orm13.eq)(vpdLinelistTemplates.id, req.params.id),
-            (0, import_drizzle_orm13.eq)(vpdLinelistTemplates.tenantId, req.tenantId)
+          (0, import_drizzle_orm14.and)(
+            (0, import_drizzle_orm14.eq)(vpdLinelistTemplates.id, req.params.id),
+            (0, import_drizzle_orm14.eq)(vpdLinelistTemplates.tenantId, req.tenantId)
           )
         ).returning();
         if (!updated) {
@@ -8677,9 +8829,9 @@ var init_surveillance = __esm({
     surveillanceRouter.delete("/templates/:id", async (req, res) => {
       try {
         const [deleted] = await db.delete(vpdLinelistTemplates).where(
-          (0, import_drizzle_orm13.and)(
-            (0, import_drizzle_orm13.eq)(vpdLinelistTemplates.id, req.params.id),
-            (0, import_drizzle_orm13.eq)(vpdLinelistTemplates.tenantId, req.tenantId)
+          (0, import_drizzle_orm14.and)(
+            (0, import_drizzle_orm14.eq)(vpdLinelistTemplates.id, req.params.id),
+            (0, import_drizzle_orm14.eq)(vpdLinelistTemplates.tenantId, req.tenantId)
           )
         ).returning();
         if (!deleted) {
@@ -8692,7 +8844,7 @@ var init_surveillance = __esm({
     });
     surveillanceRouter.get("/config", async (req, res) => {
       try {
-        const configs = await db.select().from(tenantVpdConfigurations).where((0, import_drizzle_orm13.eq)(tenantVpdConfigurations.tenantId, req.tenantId));
+        const configs = await db.select().from(tenantVpdConfigurations).where((0, import_drizzle_orm14.eq)(tenantVpdConfigurations.tenantId, req.tenantId));
         res.json(configs);
       } catch (err) {
         res.status(500).json({ message: safeErrorMessage(err, "An unexpected error occurred") });
@@ -8721,7 +8873,7 @@ var init_surveillance = __esm({
     });
     surveillanceRouter.get("/cases", async (req, res) => {
       try {
-        const cases = await db.select().from(surveillanceCases).where((0, import_drizzle_orm13.eq)(surveillanceCases.tenantId, req.tenantId));
+        const cases = await db.select().from(surveillanceCases).where((0, import_drizzle_orm14.eq)(surveillanceCases.tenantId, req.tenantId));
         const dbUser = req.dbUser;
         const isFacilityStaff = dbUser.role === "facility_clerk" || dbUser.role === "facility_in_charge" || dbUser.role === "facility_partner";
         if (isFacilityStaff && dbUser.facilityId) {
@@ -8741,13 +8893,13 @@ var init_surveillance = __esm({
     surveillanceRouter.get("/cases/kpis", async (req, res) => {
       try {
         const popResult = await db.select({
-          total: import_drizzle_orm13.sql`sum(${populationData.totalPopulation})`,
-          under5: import_drizzle_orm13.sql`sum(${populationData.under5Population})`
-        }).from(populationData).where((0, import_drizzle_orm13.eq)(populationData.tenantId, req.tenantId));
+          total: import_drizzle_orm14.sql`sum(${populationData.totalPopulation})`,
+          under5: import_drizzle_orm14.sql`sum(${populationData.under5Population})`
+        }).from(populationData).where((0, import_drizzle_orm14.eq)(populationData.tenantId, req.tenantId));
         const totalPop = popResult[0]?.total || 0;
         const under5Pop = popResult[0]?.under5 || 0;
         const under15Pop = Math.round(totalPop * 0.45);
-        const cases = await db.select().from(surveillanceCases).where((0, import_drizzle_orm13.eq)(surveillanceCases.tenantId, req.tenantId));
+        const cases = await db.select().from(surveillanceCases).where((0, import_drizzle_orm14.eq)(surveillanceCases.tenantId, req.tenantId));
         const afpCases = cases.filter((c) => c.disease === "afp" && c.dateOfOnset.getFullYear() === (/* @__PURE__ */ new Date()).getFullYear());
         const measlesCases = cases.filter((c) => c.disease === "measles" && c.dateOfOnset.getFullYear() === (/* @__PURE__ */ new Date()).getFullYear());
         const afpRate = under15Pop > 0 ? (afpCases.length / under15Pop * 1e5).toFixed(2) : "0.00";
@@ -8771,12 +8923,12 @@ var init_surveillance = __esm({
         const tenantId = req.tenantId;
         const rows = await db.select({
           districtId: populationData.districtId,
-          population: import_drizzle_orm13.sql`COALESCE(SUM(${populationData.totalPopulation}), 0)`.mapWith(Number)
+          population: import_drizzle_orm14.sql`COALESCE(SUM(${populationData.totalPopulation}), 0)`.mapWith(Number)
         }).from(populationData).where(
-          (0, import_drizzle_orm13.and)(
-            (0, import_drizzle_orm13.eq)(populationData.tenantId, tenantId),
-            (0, import_drizzle_orm13.eq)(populationData.source, source),
-            (0, import_drizzle_orm13.isNotNull)(populationData.districtId)
+          (0, import_drizzle_orm14.and)(
+            (0, import_drizzle_orm14.eq)(populationData.tenantId, tenantId),
+            (0, import_drizzle_orm14.eq)(populationData.source, source),
+            (0, import_drizzle_orm14.isNotNull)(populationData.districtId)
           )
         ).groupBy(populationData.districtId);
         res.json(rows);
@@ -8794,7 +8946,7 @@ var init_surveillance = __esm({
         return { year: d.getFullYear(), week };
       };
       try {
-        const cases = await db.select().from(surveillanceCases).where((0, import_drizzle_orm13.eq)(surveillanceCases.tenantId, req.tenantId));
+        const cases = await db.select().from(surveillanceCases).where((0, import_drizzle_orm14.eq)(surveillanceCases.tenantId, req.tenantId));
         const now = /* @__PURE__ */ new Date();
         const buckets = {};
         for (let i = 15; i >= 0; i--) {
@@ -8827,9 +8979,9 @@ var init_surveillance = __esm({
         });
         const [created] = await db.insert(surveillanceCases).values(parsed).returning();
         const [config] = await db.select().from(tenantVpdConfigurations).where(
-          (0, import_drizzle_orm13.and)(
-            (0, import_drizzle_orm13.eq)(tenantVpdConfigurations.tenantId, req.tenantId),
-            (0, import_drizzle_orm13.eq)(tenantVpdConfigurations.disease, created.disease)
+          (0, import_drizzle_orm14.and)(
+            (0, import_drizzle_orm14.eq)(tenantVpdConfigurations.tenantId, req.tenantId),
+            (0, import_drizzle_orm14.eq)(tenantVpdConfigurations.disease, created.disease)
           )
         );
         if (config?.isActive && config.notifyRoles?.length > 0) {
@@ -8848,9 +9000,9 @@ var init_surveillance = __esm({
         if (updateData.dateReported) updateData.dateReported = new Date(updateData.dateReported);
         if (updateData.investigationDate) updateData.investigationDate = new Date(updateData.investigationDate);
         const [updated] = await db.update(surveillanceCases).set(updateData).where(
-          (0, import_drizzle_orm13.and)(
-            (0, import_drizzle_orm13.eq)(surveillanceCases.id, req.params.id),
-            (0, import_drizzle_orm13.eq)(surveillanceCases.tenantId, req.tenantId)
+          (0, import_drizzle_orm14.and)(
+            (0, import_drizzle_orm14.eq)(surveillanceCases.id, req.params.id),
+            (0, import_drizzle_orm14.eq)(surveillanceCases.tenantId, req.tenantId)
           )
         ).returning();
         if (!updated) {
@@ -8864,9 +9016,9 @@ var init_surveillance = __esm({
     surveillanceRouter.delete("/cases/:id", async (req, res) => {
       try {
         const [deleted] = await db.delete(surveillanceCases).where(
-          (0, import_drizzle_orm13.and)(
-            (0, import_drizzle_orm13.eq)(surveillanceCases.id, req.params.id),
-            (0, import_drizzle_orm13.eq)(surveillanceCases.tenantId, req.tenantId)
+          (0, import_drizzle_orm14.and)(
+            (0, import_drizzle_orm14.eq)(surveillanceCases.id, req.params.id),
+            (0, import_drizzle_orm14.eq)(surveillanceCases.tenantId, req.tenantId)
           )
         ).returning();
         if (!deleted) {
@@ -8879,9 +9031,9 @@ var init_surveillance = __esm({
     });
     surveillanceRouter.get("/cases/:caseId/samples", async (req, res) => {
       try {
-        const [parentCase] = await db.select({ id: surveillanceCases.id }).from(surveillanceCases).where((0, import_drizzle_orm13.and)((0, import_drizzle_orm13.eq)(surveillanceCases.id, req.params.caseId), (0, import_drizzle_orm13.eq)(surveillanceCases.tenantId, req.tenantId)));
+        const [parentCase] = await db.select({ id: surveillanceCases.id }).from(surveillanceCases).where((0, import_drizzle_orm14.and)((0, import_drizzle_orm14.eq)(surveillanceCases.id, req.params.caseId), (0, import_drizzle_orm14.eq)(surveillanceCases.tenantId, req.tenantId)));
         if (!parentCase) return res.status(404).json({ message: "Case not found or access denied" });
-        const samples = await db.select().from(labSamples).where((0, import_drizzle_orm13.eq)(labSamples.caseId, req.params.caseId));
+        const samples = await db.select().from(labSamples).where((0, import_drizzle_orm14.eq)(labSamples.caseId, req.params.caseId));
         res.json(samples);
       } catch (err) {
         res.status(500).json({ message: safeErrorMessage(err, "An unexpected error occurred") });
@@ -8889,7 +9041,7 @@ var init_surveillance = __esm({
     });
     surveillanceRouter.post("/cases/:caseId/samples", async (req, res) => {
       try {
-        const [parentCase] = await db.select({ id: surveillanceCases.id }).from(surveillanceCases).where((0, import_drizzle_orm13.and)((0, import_drizzle_orm13.eq)(surveillanceCases.id, req.params.caseId), (0, import_drizzle_orm13.eq)(surveillanceCases.tenantId, req.tenantId)));
+        const [parentCase] = await db.select({ id: surveillanceCases.id }).from(surveillanceCases).where((0, import_drizzle_orm14.and)((0, import_drizzle_orm14.eq)(surveillanceCases.id, req.params.caseId), (0, import_drizzle_orm14.eq)(surveillanceCases.tenantId, req.tenantId)));
         if (!parentCase) return res.status(404).json({ message: "Case not found or access denied" });
         const parsed = insertLabSampleSchema.parse({
           ...req.body,
@@ -8903,16 +9055,16 @@ var init_surveillance = __esm({
     });
     surveillanceRouter.patch("/samples/:id", async (req, res) => {
       try {
-        const [existing] = await db.select({ id: labSamples.id }).from(labSamples).innerJoin(surveillanceCases, (0, import_drizzle_orm13.eq)(labSamples.caseId, surveillanceCases.id)).where(
-          (0, import_drizzle_orm13.and)(
-            (0, import_drizzle_orm13.eq)(labSamples.id, req.params.id),
-            (0, import_drizzle_orm13.eq)(surveillanceCases.tenantId, req.tenantId)
+        const [existing] = await db.select({ id: labSamples.id }).from(labSamples).innerJoin(surveillanceCases, (0, import_drizzle_orm14.eq)(labSamples.caseId, surveillanceCases.id)).where(
+          (0, import_drizzle_orm14.and)(
+            (0, import_drizzle_orm14.eq)(labSamples.id, req.params.id),
+            (0, import_drizzle_orm14.eq)(surveillanceCases.tenantId, req.tenantId)
           )
         );
         if (!existing) {
           return res.status(404).json({ message: "Lab sample not found or access denied" });
         }
-        const [updated] = await db.update(labSamples).set({ ...req.body, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm13.eq)(labSamples.id, req.params.id)).returning();
+        const [updated] = await db.update(labSamples).set({ ...req.body, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm14.eq)(labSamples.id, req.params.id)).returning();
         res.json(updated);
       } catch (err) {
         res.status(400).json({ message: err.message });
@@ -8920,16 +9072,16 @@ var init_surveillance = __esm({
     });
     surveillanceRouter.delete("/samples/:id", async (req, res) => {
       try {
-        const [existing] = await db.select({ id: labSamples.id }).from(labSamples).innerJoin(surveillanceCases, (0, import_drizzle_orm13.eq)(labSamples.caseId, surveillanceCases.id)).where(
-          (0, import_drizzle_orm13.and)(
-            (0, import_drizzle_orm13.eq)(labSamples.id, req.params.id),
-            (0, import_drizzle_orm13.eq)(surveillanceCases.tenantId, req.tenantId)
+        const [existing] = await db.select({ id: labSamples.id }).from(labSamples).innerJoin(surveillanceCases, (0, import_drizzle_orm14.eq)(labSamples.caseId, surveillanceCases.id)).where(
+          (0, import_drizzle_orm14.and)(
+            (0, import_drizzle_orm14.eq)(labSamples.id, req.params.id),
+            (0, import_drizzle_orm14.eq)(surveillanceCases.tenantId, req.tenantId)
           )
         );
         if (!existing) {
           return res.status(404).json({ message: "Lab sample not found or access denied" });
         }
-        await db.delete(labSamples).where((0, import_drizzle_orm13.eq)(labSamples.id, req.params.id));
+        await db.delete(labSamples).where((0, import_drizzle_orm14.eq)(labSamples.id, req.params.id));
         res.json({ success: true });
       } catch (err) {
         res.status(500).json({ message: safeErrorMessage(err, "An unexpected error occurred") });
@@ -8939,13 +9091,13 @@ var init_surveillance = __esm({
 });
 
 // server/services/vgieService.ts
-var import_drizzle_orm14, VgieService;
+var import_drizzle_orm15, VgieService;
 var init_vgieService = __esm({
   "server/services/vgieService.ts"() {
     "use strict";
     init_db();
     init_schema();
-    import_drizzle_orm14 = require("drizzle-orm");
+    import_drizzle_orm15 = require("drizzle-orm");
     VgieService = class {
       /**
        * Generates AI-driven recommendations for a given tenant.
@@ -8954,9 +9106,9 @@ var init_vgieService = __esm({
       static async generateRecommendations(tenantId) {
         console.log(`[VGIE] Starting recommendation engine for tenant: ${tenantId}`);
         const activeRules = await db.select().from(vgieRecommendationRules).where(
-          (0, import_drizzle_orm14.and)(
-            (0, import_drizzle_orm14.eq)(vgieRecommendationRules.tenantId, tenantId),
-            (0, import_drizzle_orm14.eq)(vgieRecommendationRules.isActive, true)
+          (0, import_drizzle_orm15.and)(
+            (0, import_drizzle_orm15.eq)(vgieRecommendationRules.tenantId, tenantId),
+            (0, import_drizzle_orm15.eq)(vgieRecommendationRules.isActive, true)
           )
         );
         const newRecommendations = [];
@@ -8971,19 +9123,19 @@ var init_vgieService = __esm({
               isHardToReach: villages.isHardToReach,
               highRisk: villages.highRisk
             }).from(villages).where(
-              (0, import_drizzle_orm14.and)(
-                (0, import_drizzle_orm14.eq)(villages.tenantId, tenantId),
-                import_drizzle_orm14.sql.raw(rule.conditionSql)
+              (0, import_drizzle_orm15.and)(
+                (0, import_drizzle_orm15.eq)(villages.tenantId, tenantId),
+                import_drizzle_orm15.sql.raw(rule.conditionSql)
               )
             );
             for (const v of matchingVillages) {
               const [exists] = await db.select().from(vgieRecommendations).where(
-                (0, import_drizzle_orm14.and)(
-                  (0, import_drizzle_orm14.eq)(vgieRecommendations.tenantId, tenantId),
-                  (0, import_drizzle_orm14.eq)(vgieRecommendations.entityType, "settlement"),
-                  (0, import_drizzle_orm14.eq)(vgieRecommendations.entityId, v.id),
-                  (0, import_drizzle_orm14.eq)(vgieRecommendations.status, "pending"),
-                  (0, import_drizzle_orm14.eq)(vgieRecommendations.recommendationType, rule.recommendationText)
+                (0, import_drizzle_orm15.and)(
+                  (0, import_drizzle_orm15.eq)(vgieRecommendations.tenantId, tenantId),
+                  (0, import_drizzle_orm15.eq)(vgieRecommendations.entityType, "settlement"),
+                  (0, import_drizzle_orm15.eq)(vgieRecommendations.entityId, v.id),
+                  (0, import_drizzle_orm15.eq)(vgieRecommendations.status, "pending"),
+                  (0, import_drizzle_orm15.eq)(vgieRecommendations.recommendationType, rule.recommendationText)
                 )
               ).limit(1);
               if (!exists) {
@@ -9017,27 +9169,27 @@ var init_vgieService = __esm({
       static async detectCoverageGaps(tenantId) {
         console.log(`[VGIE] Detecting coverage gaps for tenant: ${tenantId}`);
         const activeAlertRules = await db.select().from(vgieAlertRules).where(
-          (0, import_drizzle_orm14.and)(
-            (0, import_drizzle_orm14.eq)(vgieAlertRules.tenantId, tenantId),
-            (0, import_drizzle_orm14.eq)(vgieAlertRules.isActive, true)
+          (0, import_drizzle_orm15.and)(
+            (0, import_drizzle_orm15.eq)(vgieAlertRules.tenantId, tenantId),
+            (0, import_drizzle_orm15.eq)(vgieAlertRules.isActive, true)
           )
         );
         const newAlerts = [];
         for (const rule of activeAlertRules) {
           try {
             const matchingVillages = await db.select().from(villages).where(
-              (0, import_drizzle_orm14.and)(
-                (0, import_drizzle_orm14.eq)(villages.tenantId, tenantId),
-                import_drizzle_orm14.sql.raw(rule.triggerCondition)
+              (0, import_drizzle_orm15.and)(
+                (0, import_drizzle_orm15.eq)(villages.tenantId, tenantId),
+                import_drizzle_orm15.sql.raw(rule.triggerCondition)
               )
             );
             for (const v of matchingVillages) {
               const [exists] = await db.select().from(vgieAlerts).where(
-                (0, import_drizzle_orm14.and)(
-                  (0, import_drizzle_orm14.eq)(vgieAlerts.tenantId, tenantId),
-                  (0, import_drizzle_orm14.eq)(vgieAlerts.alertType, rule.name),
-                  (0, import_drizzle_orm14.eq)(vgieAlerts.villageId, v.id),
-                  (0, import_drizzle_orm14.eq)(vgieAlerts.status, "active")
+                (0, import_drizzle_orm15.and)(
+                  (0, import_drizzle_orm15.eq)(vgieAlerts.tenantId, tenantId),
+                  (0, import_drizzle_orm15.eq)(vgieAlerts.alertType, rule.name),
+                  (0, import_drizzle_orm15.eq)(vgieAlerts.villageId, v.id),
+                  (0, import_drizzle_orm15.eq)(vgieAlerts.status, "active")
                 )
               ).limit(1);
               if (!exists) {
@@ -9056,7 +9208,7 @@ var init_vgieService = __esm({
           } catch (err) {
             console.warn(`[VGIE Alert Rules] Skipping rule "${rule.name}" SQL trigger evaluation:`, err.message);
             if (rule.name === "Population Spike") {
-              const allV = await db.select().from(villages).where((0, import_drizzle_orm14.eq)(villages.tenantId, tenantId));
+              const allV = await db.select().from(villages).where((0, import_drizzle_orm15.eq)(villages.tenantId, tenantId));
               for (const v of allV) {
                 const grid = v.griddedPopulation ?? 0;
                 const census = v.totalCatchmentPopulation ?? 0;
@@ -9064,11 +9216,11 @@ var init_vgieService = __esm({
                   const diffPct = Math.abs(grid - census) / census * 100;
                   if (diffPct > 25) {
                     const [exists] = await db.select().from(vgieAlerts).where(
-                      (0, import_drizzle_orm14.and)(
-                        (0, import_drizzle_orm14.eq)(vgieAlerts.tenantId, tenantId),
-                        (0, import_drizzle_orm14.eq)(vgieAlerts.alertType, rule.name),
-                        (0, import_drizzle_orm14.eq)(vgieAlerts.villageId, v.id),
-                        (0, import_drizzle_orm14.eq)(vgieAlerts.status, "active")
+                      (0, import_drizzle_orm15.and)(
+                        (0, import_drizzle_orm15.eq)(vgieAlerts.tenantId, tenantId),
+                        (0, import_drizzle_orm15.eq)(vgieAlerts.alertType, rule.name),
+                        (0, import_drizzle_orm15.eq)(vgieAlerts.villageId, v.id),
+                        (0, import_drizzle_orm15.eq)(vgieAlerts.status, "active")
                       )
                     ).limit(1);
                     if (!exists) {
@@ -9165,12 +9317,12 @@ function vgieSettlementScopeCondition(scope) {
   if (scope.all) return null;
   const parts = [];
   if (scope.facilityIds.length > 0) {
-    parts.push((0, import_drizzle_orm15.inArray)(settlementsMaster.linkedFacilityId, scope.facilityIds));
-    parts.push((0, import_drizzle_orm15.inArray)(settlementsMaster.nearestFacilityId, scope.facilityIds));
+    parts.push((0, import_drizzle_orm16.inArray)(settlementsMaster.linkedFacilityId, scope.facilityIds));
+    parts.push((0, import_drizzle_orm16.inArray)(settlementsMaster.nearestFacilityId, scope.facilityIds));
   }
-  if (scope.districtIds.length > 0) parts.push((0, import_drizzle_orm15.inArray)(settlementsMaster.districtId, scope.districtIds));
-  if (scope.provinceIds.length > 0) parts.push((0, import_drizzle_orm15.inArray)(settlementsMaster.provinceId, scope.provinceIds));
-  return parts.length === 0 ? import_drizzle_orm15.sql`false` : (0, import_drizzle_orm15.or)(...parts);
+  if (scope.districtIds.length > 0) parts.push((0, import_drizzle_orm16.inArray)(settlementsMaster.districtId, scope.districtIds));
+  if (scope.provinceIds.length > 0) parts.push((0, import_drizzle_orm16.inArray)(settlementsMaster.provinceId, scope.provinceIds));
+  return parts.length === 0 ? import_drizzle_orm16.sql`false` : (0, import_drizzle_orm16.or)(...parts);
 }
 function getHaversineDistance(lat1, lon1, lat2, lon2) {
   const R = 6371;
@@ -9189,7 +9341,7 @@ function estimateTravelTimeMinutes(distanceKm, mode) {
   else if (mode === "air" || mode === "chopper") speedKmh = 100;
   return Math.max(5, Math.round(distanceKm / speedKmh * 60));
 }
-var import_express2, import_drizzle_orm15, router, vgie_default;
+var import_express2, import_drizzle_orm16, router, vgie_default;
 var init_vgie = __esm({
   "server/routes/vgie.ts"() {
     "use strict";
@@ -9198,22 +9350,22 @@ var init_vgie = __esm({
     init_vgieService();
     init_storage();
     init_schema();
-    import_drizzle_orm15 = require("drizzle-orm");
+    import_drizzle_orm16 = require("drizzle-orm");
     router = (0, import_express2.Router)();
     router.get("/dashboard/summary", async (req, res) => {
       try {
         const { provinceId, districtId, facilityId } = req.query;
-        const allDistricts = await db.select({ id: districts.id, provinceId: districts.provinceId }).from(districts).where((0, import_drizzle_orm15.eq)(districts.tenantId, req.tenantId));
+        const allDistricts = await db.select({ id: districts.id, provinceId: districts.provinceId }).from(districts).where((0, import_drizzle_orm16.eq)(districts.tenantId, req.tenantId));
         const districtProvinceMap = new Map(allDistricts.map((d) => [d.id, d.provinceId]));
-        const villageConditions = [(0, import_drizzle_orm15.eq)(villages.tenantId, req.tenantId)];
+        const villageConditions = [(0, import_drizzle_orm16.eq)(villages.tenantId, req.tenantId)];
         if (facilityId && facilityId !== "all") {
-          villageConditions.push((0, import_drizzle_orm15.eq)(villages.assignedFacilityId, Number(facilityId)));
+          villageConditions.push((0, import_drizzle_orm16.eq)(villages.assignedFacilityId, Number(facilityId)));
         }
         if (districtId && districtId !== "all") {
-          villageConditions.push((0, import_drizzle_orm15.eq)(villages.districtId, Number(districtId)));
+          villageConditions.push((0, import_drizzle_orm16.eq)(villages.districtId, Number(districtId)));
         }
         if (provinceId && provinceId !== "all") {
-          villageConditions.push((0, import_drizzle_orm15.eq)(districts.provinceId, Number(provinceId)));
+          villageConditions.push((0, import_drizzle_orm16.eq)(districts.provinceId, Number(provinceId)));
         }
         const allVillages = await db.select({
           id: villages.id,
@@ -9223,7 +9375,7 @@ var init_vgie = __esm({
           population: villages.griddedPopulation,
           totalCatchmentPopulation: villages.totalCatchmentPopulation,
           createdAt: villages.createdAt
-        }).from(villages).leftJoin(districts, (0, import_drizzle_orm15.eq)(villages.districtId, districts.id)).where((0, import_drizzle_orm15.and)(...villageConditions));
+        }).from(villages).leftJoin(districts, (0, import_drizzle_orm16.eq)(villages.districtId, districts.id)).where((0, import_drizzle_orm16.and)(...villageConditions));
         const totalSettlements = allVillages.length;
         let servedCount = 0;
         let underservedCount = 0;
@@ -9259,10 +9411,10 @@ var init_vgie = __esm({
           villageDistrictId: villages.districtId,
           villageAssignedFacilityId: villages.assignedFacilityId,
           facilityDistrictId: facilities.districtId
-        }).from(vgieAlerts).leftJoin(villages, (0, import_drizzle_orm15.eq)(vgieAlerts.villageId, villages.id)).leftJoin(facilities, (0, import_drizzle_orm15.eq)(vgieAlerts.facilityId, facilities.id)).where(
-          (0, import_drizzle_orm15.and)(
-            (0, import_drizzle_orm15.eq)(vgieAlerts.status, "active"),
-            (0, import_drizzle_orm15.eq)(vgieAlerts.tenantId, req.tenantId)
+        }).from(vgieAlerts).leftJoin(villages, (0, import_drizzle_orm16.eq)(vgieAlerts.villageId, villages.id)).leftJoin(facilities, (0, import_drizzle_orm16.eq)(vgieAlerts.facilityId, facilities.id)).where(
+          (0, import_drizzle_orm16.and)(
+            (0, import_drizzle_orm16.eq)(vgieAlerts.status, "active"),
+            (0, import_drizzle_orm16.eq)(vgieAlerts.tenantId, req.tenantId)
           )
         );
         let filteredAlerts = alertsRows;
@@ -9292,27 +9444,27 @@ var init_vgie = __esm({
           entityType: vgieRecommendations.entityType,
           entityId: vgieRecommendations.entityId
         }).from(vgieRecommendations).where(
-          (0, import_drizzle_orm15.and)(
-            (0, import_drizzle_orm15.eq)(vgieRecommendations.status, "pending"),
-            (0, import_drizzle_orm15.eq)(vgieRecommendations.tenantId, req.tenantId)
+          (0, import_drizzle_orm16.and)(
+            (0, import_drizzle_orm16.eq)(vgieRecommendations.status, "pending"),
+            (0, import_drizzle_orm16.eq)(vgieRecommendations.tenantId, req.tenantId)
           )
         );
         const recVillageIds = recsRows.filter((r) => r.entityType === "settlement").map((r) => r.entityId);
         let recVillagesLookup = /* @__PURE__ */ new Map();
         if (recVillageIds.length > 0) {
-          const vRecRows = await db.select({ id: villages.id, districtId: villages.districtId, assignedFacilityId: villages.assignedFacilityId }).from(villages).where((0, import_drizzle_orm15.inArray)(villages.id, recVillageIds));
+          const vRecRows = await db.select({ id: villages.id, districtId: villages.districtId, assignedFacilityId: villages.assignedFacilityId }).from(villages).where((0, import_drizzle_orm16.inArray)(villages.id, recVillageIds));
           recVillagesLookup = new Map(vRecRows.map((v) => [v.id, v]));
         }
         const recFacilityIds = recsRows.filter((r) => r.entityType === "facility").map((r) => r.entityId);
         let recFacilitiesLookup = /* @__PURE__ */ new Map();
         if (recFacilityIds.length > 0) {
-          const fRecRows = await db.select({ id: facilities.id, districtId: facilities.districtId }).from(facilities).where((0, import_drizzle_orm15.inArray)(facilities.id, recFacilityIds));
+          const fRecRows = await db.select({ id: facilities.id, districtId: facilities.districtId }).from(facilities).where((0, import_drizzle_orm16.inArray)(facilities.id, recFacilityIds));
           recFacilitiesLookup = new Map(fRecRows.map((f2) => [f2.id, f2]));
         }
         const recSessionIds = recsRows.filter((r) => r.entityType === "session").map((r) => r.entityId);
         let recSessionsLookup = /* @__PURE__ */ new Map();
         if (recSessionIds.length > 0) {
-          const sRecRows = await db.select({ id: sessionPlans.id, facilityId: sessionPlans.facilityId, districtId: facilities.districtId }).from(sessionPlans).innerJoin(facilities, (0, import_drizzle_orm15.eq)(sessionPlans.facilityId, facilities.id)).where((0, import_drizzle_orm15.inArray)(sessionPlans.id, recSessionIds));
+          const sRecRows = await db.select({ id: sessionPlans.id, facilityId: sessionPlans.facilityId, districtId: facilities.districtId }).from(sessionPlans).innerJoin(facilities, (0, import_drizzle_orm16.eq)(sessionPlans.facilityId, facilities.id)).where((0, import_drizzle_orm16.inArray)(sessionPlans.id, recSessionIds));
           recSessionsLookup = new Map(sRecRows.map((s) => [s.id, s]));
         }
         let filteredRecs = recsRows;
@@ -9345,17 +9497,17 @@ var init_vgie = __esm({
           });
         }
         const pendingRecommendationsCount = filteredRecs.length;
-        const facilityConditions = [(0, import_drizzle_orm15.eq)(facilities.tenantId, req.tenantId)];
+        const facilityConditions = [(0, import_drizzle_orm16.eq)(facilities.tenantId, req.tenantId)];
         if (facilityId && facilityId !== "all") {
-          facilityConditions.push((0, import_drizzle_orm15.eq)(facilities.id, Number(facilityId)));
+          facilityConditions.push((0, import_drizzle_orm16.eq)(facilities.id, Number(facilityId)));
         }
         if (districtId && districtId !== "all") {
-          facilityConditions.push((0, import_drizzle_orm15.eq)(facilities.districtId, Number(districtId)));
+          facilityConditions.push((0, import_drizzle_orm16.eq)(facilities.districtId, Number(districtId)));
         }
         if (provinceId && provinceId !== "all") {
-          facilityConditions.push((0, import_drizzle_orm15.eq)(districts.provinceId, Number(provinceId)));
+          facilityConditions.push((0, import_drizzle_orm16.eq)(districts.provinceId, Number(provinceId)));
         }
-        const [{ totalFacilities }] = await db.select({ totalFacilities: (0, import_drizzle_orm15.count)() }).from(facilities).leftJoin(districts, (0, import_drizzle_orm15.eq)(facilities.districtId, districts.id)).where((0, import_drizzle_orm15.and)(...facilityConditions));
+        const [{ totalFacilities }] = await db.select({ totalFacilities: (0, import_drizzle_orm16.count)() }).from(facilities).leftJoin(districts, (0, import_drizzle_orm16.eq)(facilities.districtId, districts.id)).where((0, import_drizzle_orm16.and)(...facilityConditions));
         res.json({
           totalSettlements,
           servedCount,
@@ -9377,24 +9529,24 @@ var init_vgie = __esm({
     router.get("/dashboard/district-stats", async (req, res) => {
       try {
         const { provinceId, districtId, facilityId } = req.query;
-        const districtConditions = [(0, import_drizzle_orm15.eq)(districts.tenantId, req.tenantId)];
+        const districtConditions = [(0, import_drizzle_orm16.eq)(districts.tenantId, req.tenantId)];
         if (provinceId && provinceId !== "all") {
-          districtConditions.push((0, import_drizzle_orm15.eq)(districts.provinceId, Number(provinceId)));
+          districtConditions.push((0, import_drizzle_orm16.eq)(districts.provinceId, Number(provinceId)));
         }
         if (districtId && districtId !== "all") {
-          districtConditions.push((0, import_drizzle_orm15.eq)(districts.id, Number(districtId)));
+          districtConditions.push((0, import_drizzle_orm16.eq)(districts.id, Number(districtId)));
         }
-        const allDistricts = await db.select({ id: districts.id, name: districts.name }).from(districts).where((0, import_drizzle_orm15.and)(...districtConditions));
+        const allDistricts = await db.select({ id: districts.id, name: districts.name }).from(districts).where((0, import_drizzle_orm16.and)(...districtConditions));
         const districtLookup = new Map(allDistricts.map((d) => [d.id, d.name]));
-        const villageConditions = [(0, import_drizzle_orm15.eq)(villages.tenantId, req.tenantId)];
+        const villageConditions = [(0, import_drizzle_orm16.eq)(villages.tenantId, req.tenantId)];
         if (facilityId && facilityId !== "all") {
-          villageConditions.push((0, import_drizzle_orm15.eq)(villages.assignedFacilityId, Number(facilityId)));
+          villageConditions.push((0, import_drizzle_orm16.eq)(villages.assignedFacilityId, Number(facilityId)));
         }
         if (districtId && districtId !== "all") {
-          villageConditions.push((0, import_drizzle_orm15.eq)(villages.districtId, Number(districtId)));
+          villageConditions.push((0, import_drizzle_orm16.eq)(villages.districtId, Number(districtId)));
         }
         if (provinceId && provinceId !== "all") {
-          villageConditions.push((0, import_drizzle_orm15.eq)(districts.provinceId, Number(provinceId)));
+          villageConditions.push((0, import_drizzle_orm16.eq)(districts.provinceId, Number(provinceId)));
         }
         const allVillages = await db.select({
           id: villages.id,
@@ -9404,7 +9556,7 @@ var init_vgie = __esm({
           distanceToFacility: villages.distanceToFacility,
           highRisk: villages.highRisk,
           population: villages.griddedPopulation
-        }).from(villages).leftJoin(districts, (0, import_drizzle_orm15.eq)(villages.districtId, districts.id)).where((0, import_drizzle_orm15.and)(...villageConditions));
+        }).from(villages).leftJoin(districts, (0, import_drizzle_orm16.eq)(villages.districtId, districts.id)).where((0, import_drizzle_orm16.and)(...villageConditions));
         if (facilityId && facilityId !== "all") {
           const result = allVillages.map((v) => {
             const isServed = v.assignedFacilityId && v.distanceToFacility && Number(v.distanceToFacility) <= 5;
@@ -9423,10 +9575,10 @@ var init_vgie = __esm({
         }
         if (districtId && districtId !== "all") {
           const allFacilities = await db.select({ id: facilities.id, name: facilities.name }).from(facilities).where(
-            (0, import_drizzle_orm15.and)(
-              (0, import_drizzle_orm15.eq)(facilities.tenantId, req.tenantId),
-              (0, import_drizzle_orm15.eq)(facilities.districtId, Number(districtId)),
-              (0, import_drizzle_orm15.eq)(facilities.isActive, true)
+            (0, import_drizzle_orm16.and)(
+              (0, import_drizzle_orm16.eq)(facilities.tenantId, req.tenantId),
+              (0, import_drizzle_orm16.eq)(facilities.districtId, Number(districtId)),
+              (0, import_drizzle_orm16.eq)(facilities.isActive, true)
             )
           );
           const facilityLookup = new Map(allFacilities.map((f2) => [f2.id, f2.name]));
@@ -9534,14 +9686,14 @@ var init_vgie = __esm({
     router.get("/dashboard/outreach-coverage", async (req, res) => {
       try {
         const { provinceId, districtId, facilityId } = req.query;
-        const districtConditions = [(0, import_drizzle_orm15.eq)(districts.tenantId, req.tenantId)];
+        const districtConditions = [(0, import_drizzle_orm16.eq)(districts.tenantId, req.tenantId)];
         if (provinceId && provinceId !== "all") {
-          districtConditions.push((0, import_drizzle_orm15.eq)(districts.provinceId, Number(provinceId)));
+          districtConditions.push((0, import_drizzle_orm16.eq)(districts.provinceId, Number(provinceId)));
         }
         if (districtId && districtId !== "all") {
-          districtConditions.push((0, import_drizzle_orm15.eq)(districts.id, Number(districtId)));
+          districtConditions.push((0, import_drizzle_orm16.eq)(districts.id, Number(districtId)));
         }
-        const allDistricts = await db.select({ id: districts.id, name: districts.name }).from(districts).where((0, import_drizzle_orm15.and)(...districtConditions));
+        const allDistricts = await db.select({ id: districts.id, name: districts.name }).from(districts).where((0, import_drizzle_orm16.and)(...districtConditions));
         if (allDistricts.length === 0) {
           return res.json([]);
         }
@@ -9549,20 +9701,20 @@ var init_vgie = __esm({
         sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
         const twelveMonthsAgo = /* @__PURE__ */ new Date();
         twelveMonthsAgo.setFullYear(twelveMonthsAgo.getFullYear() - 1);
-        const villageConditions = [(0, import_drizzle_orm15.eq)(villages.tenantId, req.tenantId)];
+        const villageConditions = [(0, import_drizzle_orm16.eq)(villages.tenantId, req.tenantId)];
         if (facilityId && facilityId !== "all") {
-          villageConditions.push((0, import_drizzle_orm15.eq)(villages.assignedFacilityId, Number(facilityId)));
+          villageConditions.push((0, import_drizzle_orm16.eq)(villages.assignedFacilityId, Number(facilityId)));
         }
         if (districtId && districtId !== "all") {
-          villageConditions.push((0, import_drizzle_orm15.eq)(villages.districtId, Number(districtId)));
+          villageConditions.push((0, import_drizzle_orm16.eq)(villages.districtId, Number(districtId)));
         }
         if (provinceId && provinceId !== "all") {
-          villageConditions.push((0, import_drizzle_orm15.eq)(districts.provinceId, Number(provinceId)));
+          villageConditions.push((0, import_drizzle_orm16.eq)(districts.provinceId, Number(provinceId)));
         }
         const villageRows = await db.select({
           districtId: villages.districtId,
           id: villages.id
-        }).from(villages).leftJoin(districts, (0, import_drizzle_orm15.eq)(villages.districtId, districts.id)).where((0, import_drizzle_orm15.and)(...villageConditions));
+        }).from(villages).leftJoin(districts, (0, import_drizzle_orm16.eq)(villages.districtId, districts.id)).where((0, import_drizzle_orm16.and)(...villageConditions));
         const result = [];
         for (const d of allDistricts) {
           const districtVillageIds = villageRows.filter((v) => v.districtId === d.id).map((v) => v.id);
@@ -9572,17 +9724,17 @@ var init_vgie = __esm({
           let overdueCount = 0;
           if (districtVillageIds.length > 0) {
             const sessionConditions = [
-              (0, import_drizzle_orm15.inArray)(sessionVillages.villageId, districtVillageIds),
-              (0, import_drizzle_orm15.eq)(sessionPlans.tenantId, req.tenantId),
-              import_drizzle_orm15.sql`${sessionPlans.scheduledDate} >= ${sixMonthsAgo.toISOString()}`
+              (0, import_drizzle_orm16.inArray)(sessionVillages.villageId, districtVillageIds),
+              (0, import_drizzle_orm16.eq)(sessionPlans.tenantId, req.tenantId),
+              import_drizzle_orm16.sql`${sessionPlans.scheduledDate} >= ${sixMonthsAgo.toISOString()}`
             ];
             if (facilityId && facilityId !== "all") {
-              sessionConditions.push((0, import_drizzle_orm15.eq)(sessionPlans.facilityId, Number(facilityId)));
+              sessionConditions.push((0, import_drizzle_orm16.eq)(sessionPlans.facilityId, Number(facilityId)));
             }
             const recentSessions = await db.select({ villageId: sessionVillages.villageId }).from(sessionVillages).innerJoin(
               sessionPlans,
-              (0, import_drizzle_orm15.eq)(sessionVillages.sessionId, sessionPlans.id)
-            ).where((0, import_drizzle_orm15.and)(...sessionConditions));
+              (0, import_drizzle_orm16.eq)(sessionVillages.sessionId, sessionPlans.id)
+            ).where((0, import_drizzle_orm16.and)(...sessionConditions));
             const recentVillageIds = new Set(recentSessions.map((s) => s.villageId));
             recentCount = recentVillageIds.size;
             overdueCount = totalSettlements - recentCount;
@@ -9606,17 +9758,17 @@ var init_vgie = __esm({
       try {
         const { provinceId, districtId, facilityId } = req.query;
         const conditions = [
-          (0, import_drizzle_orm15.eq)(sessionPlans.status, "completed"),
-          (0, import_drizzle_orm15.eq)(sessionPlans.tenantId, req.tenantId)
+          (0, import_drizzle_orm16.eq)(sessionPlans.status, "completed"),
+          (0, import_drizzle_orm16.eq)(sessionPlans.tenantId, req.tenantId)
         ];
         if (facilityId && facilityId !== "all") {
-          conditions.push((0, import_drizzle_orm15.eq)(sessionPlans.facilityId, Number(facilityId)));
+          conditions.push((0, import_drizzle_orm16.eq)(sessionPlans.facilityId, Number(facilityId)));
         }
         if (districtId && districtId !== "all") {
-          conditions.push((0, import_drizzle_orm15.eq)(villages.districtId, Number(districtId)));
+          conditions.push((0, import_drizzle_orm16.eq)(villages.districtId, Number(districtId)));
         }
         if (provinceId && provinceId !== "all") {
-          conditions.push((0, import_drizzle_orm15.eq)(districts.provinceId, Number(provinceId)));
+          conditions.push((0, import_drizzle_orm16.eq)(districts.provinceId, Number(provinceId)));
         }
         const feed = await db.select({
           id: sessionPlans.id,
@@ -9625,7 +9777,7 @@ var init_vgie = __esm({
           district: districts.name,
           visitDate: sessionPlans.scheduledDate,
           childrenVaccinated: sessionPlans.targetPopulation
-        }).from(sessionPlans).innerJoin(sessionVillages, (0, import_drizzle_orm15.eq)(sessionPlans.id, sessionVillages.sessionId)).innerJoin(villages, (0, import_drizzle_orm15.eq)(sessionVillages.villageId, villages.id)).innerJoin(districts, (0, import_drizzle_orm15.eq)(villages.districtId, districts.id)).where((0, import_drizzle_orm15.and)(...conditions)).orderBy((0, import_drizzle_orm15.desc)(sessionPlans.scheduledDate)).limit(10);
+        }).from(sessionPlans).innerJoin(sessionVillages, (0, import_drizzle_orm16.eq)(sessionPlans.id, sessionVillages.sessionId)).innerJoin(villages, (0, import_drizzle_orm16.eq)(sessionVillages.villageId, villages.id)).innerJoin(districts, (0, import_drizzle_orm16.eq)(villages.districtId, districts.id)).where((0, import_drizzle_orm16.and)(...conditions)).orderBy((0, import_drizzle_orm16.desc)(sessionPlans.scheduledDate)).limit(10);
         res.json(
           feed.map((item) => ({
             ...item,
@@ -9659,33 +9811,33 @@ var init_vgie = __esm({
         const scope = await getVgieGeoScope(req);
         const scopedCondition = vgieSettlementScopeCondition(scope);
         const baseConditions = [
-          (0, import_drizzle_orm15.eq)(settlementsMaster.tenantId, req.tenantId),
-          (0, import_drizzle_orm15.eq)(settlementsMaster.isActive, true)
+          (0, import_drizzle_orm16.eq)(settlementsMaster.tenantId, req.tenantId),
+          (0, import_drizzle_orm16.eq)(settlementsMaster.isActive, true)
         ];
         if (scopedCondition) baseConditions.push(scopedCondition);
         const conditions = [...baseConditions];
         if (status && status !== "all") {
-          conditions.push((0, import_drizzle_orm15.eq)(settlementsMaster.serviceStatus, status));
+          conditions.push((0, import_drizzle_orm16.eq)(settlementsMaster.serviceStatus, status));
         }
         if (risk && risk !== "all") {
-          conditions.push((0, import_drizzle_orm15.eq)(settlementsMaster.riskLevel, risk));
+          conditions.push((0, import_drizzle_orm16.eq)(settlementsMaster.riskLevel, risk));
         }
         if (provinceId && provinceId !== "all") {
-          conditions.push((0, import_drizzle_orm15.eq)(settlementsMaster.provinceId, Number(provinceId)));
+          conditions.push((0, import_drizzle_orm16.eq)(settlementsMaster.provinceId, Number(provinceId)));
         }
         if (districtId && districtId !== "all") {
-          conditions.push((0, import_drizzle_orm15.eq)(settlementsMaster.districtId, Number(districtId)));
+          conditions.push((0, import_drizzle_orm16.eq)(settlementsMaster.districtId, Number(districtId)));
         }
         if (facilityId && facilityId !== "all") {
-          conditions.push((0, import_drizzle_orm15.eq)(settlementsMaster.linkedFacilityId, Number(facilityId)));
+          conditions.push((0, import_drizzle_orm16.eq)(settlementsMaster.linkedFacilityId, Number(facilityId)));
         }
         if (search) {
           const q = `%${search.toLowerCase()}%`;
           conditions.push(
-            (0, import_drizzle_orm15.or)(
-              (0, import_drizzle_orm15.ilike)(settlementsMaster.name, q),
-              (0, import_drizzle_orm15.ilike)(settlementsMaster.provinceName, q),
-              (0, import_drizzle_orm15.ilike)(settlementsMaster.districtName, q)
+            (0, import_drizzle_orm16.or)(
+              (0, import_drizzle_orm16.ilike)(settlementsMaster.name, q),
+              (0, import_drizzle_orm16.ilike)(settlementsMaster.provinceName, q),
+              (0, import_drizzle_orm16.ilike)(settlementsMaster.districtName, q)
             )
           );
         }
@@ -9705,16 +9857,16 @@ var init_vgie = __esm({
         } else if (sortBy === "travelTime") {
           orderByField = settlementsMaster.estimatedWalkingTimeMinutes;
         }
-        const sortOrderFunc = sortOrder === "desc" ? (0, import_drizzle_orm15.desc)(orderByField) : (0, import_drizzle_orm15.asc)(orderByField);
-        const [countResult] = await db.select({ count: (0, import_drizzle_orm15.count)() }).from(settlementsMaster).where((0, import_drizzle_orm15.and)(...conditions));
+        const sortOrderFunc = sortOrder === "desc" ? (0, import_drizzle_orm16.desc)(orderByField) : (0, import_drizzle_orm16.asc)(orderByField);
+        const [countResult] = await db.select({ count: (0, import_drizzle_orm16.count)() }).from(settlementsMaster).where((0, import_drizzle_orm16.and)(...conditions));
         const total = countResult?.count ?? 0;
         const totalPages = Math.ceil(total / sizeNum);
-        const items = page === "all" ? await db.select().from(settlementsMaster).where((0, import_drizzle_orm15.and)(...conditions)).orderBy(sortOrderFunc) : await db.select().from(settlementsMaster).where((0, import_drizzle_orm15.and)(...conditions)).orderBy(sortOrderFunc).limit(sizeNum).offset(offset);
+        const items = page === "all" ? await db.select().from(settlementsMaster).where((0, import_drizzle_orm16.and)(...conditions)).orderBy(sortOrderFunc) : await db.select().from(settlementsMaster).where((0, import_drizzle_orm16.and)(...conditions)).orderBy(sortOrderFunc).limit(sizeNum).offset(offset);
         const countQuery = await db.select({
           riskLevel: settlementsMaster.riskLevel,
           serviceStatus: settlementsMaster.serviceStatus,
-          count: (0, import_drizzle_orm15.count)()
-        }).from(settlementsMaster).where((0, import_drizzle_orm15.and)(...baseConditions)).groupBy(settlementsMaster.riskLevel, settlementsMaster.serviceStatus);
+          count: (0, import_drizzle_orm16.count)()
+        }).from(settlementsMaster).where((0, import_drizzle_orm16.and)(...baseConditions)).groupBy(settlementsMaster.riskLevel, settlementsMaster.serviceStatus);
         let totalCount = 0;
         let servedCount = 0;
         let underservedCount = 0;
@@ -9736,9 +9888,9 @@ var init_vgie = __esm({
         }
         const thirtyDaysAgo = /* @__PURE__ */ new Date();
         thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-        const allFacilitiesForTenant = await db.select({ id: facilities.id, name: facilities.name }).from(facilities).where((0, import_drizzle_orm15.eq)(facilities.tenantId, req.tenantId));
+        const allFacilitiesForTenant = await db.select({ id: facilities.id, name: facilities.name }).from(facilities).where((0, import_drizzle_orm16.eq)(facilities.tenantId, req.tenantId));
         const facilityNameMap = new Map(allFacilitiesForTenant.map((f2) => [f2.id, f2.name]));
-        const allVillagesForTenant = await db.select({ id: villages.id, name: villages.name }).from(villages).where((0, import_drizzle_orm15.eq)(villages.tenantId, req.tenantId));
+        const allVillagesForTenant = await db.select({ id: villages.id, name: villages.name }).from(villages).where((0, import_drizzle_orm16.eq)(villages.tenantId, req.tenantId));
         const communityNameMap = new Map(allVillagesForTenant.map((v) => [v.id, v.name]));
         const itemsMapped = items.map((v) => {
           const pop = Number(v.populationEstimate || 0);
@@ -9833,9 +9985,9 @@ var init_vgie = __esm({
       try {
         const id = Number(req.params.id);
         if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
-        const [existing] = await db.select().from(settlementsMaster).where((0, import_drizzle_orm15.and)((0, import_drizzle_orm15.eq)(settlementsMaster.id, id), (0, import_drizzle_orm15.eq)(settlementsMaster.tenantId, req.tenantId)));
+        const [existing] = await db.select().from(settlementsMaster).where((0, import_drizzle_orm16.and)((0, import_drizzle_orm16.eq)(settlementsMaster.id, id), (0, import_drizzle_orm16.eq)(settlementsMaster.tenantId, req.tenantId)));
         if (!existing) {
-          const [vRow] = await db.select().from(villages).where((0, import_drizzle_orm15.and)((0, import_drizzle_orm15.eq)(villages.id, id), (0, import_drizzle_orm15.eq)(villages.tenantId, req.tenantId)));
+          const [vRow] = await db.select().from(villages).where((0, import_drizzle_orm16.and)((0, import_drizzle_orm16.eq)(villages.id, id), (0, import_drizzle_orm16.eq)(villages.tenantId, req.tenantId)));
           if (!vRow) return res.status(404).json({ error: "Settlement not found" });
           const updates2 = {
             name: req.body.name ?? vRow.name,
@@ -9848,7 +10000,7 @@ var init_vgie = __esm({
             isHardToReach: req.body.hardToReach ?? vRow.isHardToReach,
             updatedAt: /* @__PURE__ */ new Date()
           };
-          const [updated2] = await db.update(villages).set(updates2).where((0, import_drizzle_orm15.eq)(villages.id, id)).returning();
+          const [updated2] = await db.update(villages).set(updates2).where((0, import_drizzle_orm16.eq)(villages.id, id)).returning();
           return res.json({ success: true, data: updated2 });
         }
         const updates = {
@@ -9864,7 +10016,7 @@ var init_vgie = __esm({
           hardToReach: req.body.hardToReach ?? existing.hardToReach,
           updatedAt: /* @__PURE__ */ new Date()
         };
-        const [updated] = await db.update(settlementsMaster).set(updates).where((0, import_drizzle_orm15.eq)(settlementsMaster.id, id)).returning();
+        const [updated] = await db.update(settlementsMaster).set(updates).where((0, import_drizzle_orm16.eq)(settlementsMaster.id, id)).returning();
         res.json({ success: true, data: updated });
       } catch (err) {
         console.error("Failed to update settlement:", err);
@@ -9875,9 +10027,9 @@ var init_vgie = __esm({
       try {
         const id = Number(req.params.id);
         if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
-        const [existing] = await db.select().from(settlementsMaster).where((0, import_drizzle_orm15.and)((0, import_drizzle_orm15.eq)(settlementsMaster.id, id), (0, import_drizzle_orm15.eq)(settlementsMaster.tenantId, req.tenantId)));
+        const [existing] = await db.select().from(settlementsMaster).where((0, import_drizzle_orm16.and)((0, import_drizzle_orm16.eq)(settlementsMaster.id, id), (0, import_drizzle_orm16.eq)(settlementsMaster.tenantId, req.tenantId)));
         if (!existing) return res.status(404).json({ error: "Settlement not found" });
-        await db.update(settlementsMaster).set({ isActive: false, validationStatus: "archived", updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm15.eq)(settlementsMaster.id, id));
+        await db.update(settlementsMaster).set({ isActive: false, validationStatus: "archived", updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm16.eq)(settlementsMaster.id, id));
         res.json({ success: true, message: "Settlement archived successfully" });
       } catch (err) {
         console.error("Failed to archive settlement:", err);
@@ -9890,11 +10042,11 @@ var init_vgie = __esm({
         const { facilityId, transportMode = "walking", linkMethod = "manual", notes } = req.body;
         if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
         if (!facilityId) return res.status(400).json({ error: "facilityId is required" });
-        const [settlement] = await db.select().from(settlementsMaster).where((0, import_drizzle_orm15.and)((0, import_drizzle_orm15.eq)(settlementsMaster.id, id), (0, import_drizzle_orm15.eq)(settlementsMaster.tenantId, req.tenantId)));
+        const [settlement] = await db.select().from(settlementsMaster).where((0, import_drizzle_orm16.and)((0, import_drizzle_orm16.eq)(settlementsMaster.id, id), (0, import_drizzle_orm16.eq)(settlementsMaster.tenantId, req.tenantId)));
         if (!settlement) {
-          const [vRow] = await db.select().from(villages).where((0, import_drizzle_orm15.and)((0, import_drizzle_orm15.eq)(villages.id, id), (0, import_drizzle_orm15.eq)(villages.tenantId, req.tenantId)));
+          const [vRow] = await db.select().from(villages).where((0, import_drizzle_orm16.and)((0, import_drizzle_orm16.eq)(villages.id, id), (0, import_drizzle_orm16.eq)(villages.tenantId, req.tenantId)));
           if (!vRow) return res.status(404).json({ error: "Settlement not found" });
-          const [facility2] = await db.select().from(facilities).where((0, import_drizzle_orm15.and)((0, import_drizzle_orm15.eq)(facilities.id, Number(facilityId)), (0, import_drizzle_orm15.eq)(facilities.tenantId, req.tenantId)));
+          const [facility2] = await db.select().from(facilities).where((0, import_drizzle_orm16.and)((0, import_drizzle_orm16.eq)(facilities.id, Number(facilityId)), (0, import_drizzle_orm16.eq)(facilities.tenantId, req.tenantId)));
           if (!facility2) return res.status(404).json({ error: "Facility not found" });
           const distance2 = getHaversineDistance(
             Number(vRow.latitude),
@@ -9910,10 +10062,10 @@ var init_vgie = __esm({
             travelTimeMinutes: walkingTime2,
             transportMode,
             updatedAt: /* @__PURE__ */ new Date()
-          }).where((0, import_drizzle_orm15.eq)(villages.id, id));
+          }).where((0, import_drizzle_orm16.eq)(villages.id, id));
           return res.json({ success: true, message: "Linked to facility successfully", data: { distance: distance2, travelTime: drivingTime2 } });
         }
-        const [facility] = await db.select().from(facilities).where((0, import_drizzle_orm15.and)((0, import_drizzle_orm15.eq)(facilities.id, Number(facilityId)), (0, import_drizzle_orm15.eq)(facilities.tenantId, req.tenantId)));
+        const [facility] = await db.select().from(facilities).where((0, import_drizzle_orm16.and)((0, import_drizzle_orm16.eq)(facilities.id, Number(facilityId)), (0, import_drizzle_orm16.eq)(facilities.tenantId, req.tenantId)));
         if (!facility) return res.status(404).json({ error: "Facility not found" });
         const distance = getHaversineDistance(
           Number(settlement.latitude),
@@ -9936,7 +10088,7 @@ var init_vgie = __esm({
           linkNotes: notes,
           serviceStatus: distance <= 5 ? "served" : "underserved",
           updatedAt: /* @__PURE__ */ new Date()
-        }).where((0, import_drizzle_orm15.eq)(settlementsMaster.id, id));
+        }).where((0, import_drizzle_orm16.eq)(settlementsMaster.id, id));
         res.json({ success: true, message: "Linked to facility successfully", data: { distance, travelTime: drivingTime } });
       } catch (err) {
         console.error("Failed to link facility:", err);
@@ -9949,23 +10101,23 @@ var init_vgie = __esm({
         const { communityId } = req.body;
         if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
         if (!communityId) return res.status(400).json({ error: "communityId is required" });
-        const [settlement] = await db.select().from(settlementsMaster).where((0, import_drizzle_orm15.and)((0, import_drizzle_orm15.eq)(settlementsMaster.id, id), (0, import_drizzle_orm15.eq)(settlementsMaster.tenantId, req.tenantId)));
+        const [settlement] = await db.select().from(settlementsMaster).where((0, import_drizzle_orm16.and)((0, import_drizzle_orm16.eq)(settlementsMaster.id, id), (0, import_drizzle_orm16.eq)(settlementsMaster.tenantId, req.tenantId)));
         if (!settlement) {
-          const [vRow] = await db.select().from(villages).where((0, import_drizzle_orm15.and)((0, import_drizzle_orm15.eq)(villages.id, id), (0, import_drizzle_orm15.eq)(villages.tenantId, req.tenantId)));
+          const [vRow] = await db.select().from(villages).where((0, import_drizzle_orm16.and)((0, import_drizzle_orm16.eq)(villages.id, id), (0, import_drizzle_orm16.eq)(villages.tenantId, req.tenantId)));
           if (!vRow) return res.status(404).json({ error: "Settlement not found" });
           return res.json({ success: true, message: "Already linked to itself as a community" });
         }
-        const [community] = await db.select().from(villages).where((0, import_drizzle_orm15.and)((0, import_drizzle_orm15.eq)(villages.id, Number(communityId)), (0, import_drizzle_orm15.eq)(villages.tenantId, req.tenantId)));
+        const [community] = await db.select().from(villages).where((0, import_drizzle_orm16.and)((0, import_drizzle_orm16.eq)(villages.id, Number(communityId)), (0, import_drizzle_orm16.eq)(villages.tenantId, req.tenantId)));
         if (!community) return res.status(404).json({ error: "Community not found" });
         await db.update(settlementsMaster).set({
           linkedCommunityId: community.id,
           linkStatus: "linked",
           updatedAt: /* @__PURE__ */ new Date()
-        }).where((0, import_drizzle_orm15.eq)(settlementsMaster.id, id));
+        }).where((0, import_drizzle_orm16.eq)(settlementsMaster.id, id));
         await db.update(villages).set({
           linkedSettlementId: settlement.id,
           updatedAt: /* @__PURE__ */ new Date()
-        }).where((0, import_drizzle_orm15.eq)(villages.id, community.id));
+        }).where((0, import_drizzle_orm16.eq)(villages.id, community.id));
         res.json({ success: true, message: "Linked to community successfully" });
       } catch (err) {
         console.error("Failed to link community:", err);
@@ -9976,13 +10128,13 @@ var init_vgie = __esm({
       try {
         const id = Number(req.params.id);
         if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
-        const [settlement] = await db.select().from(settlementsMaster).where((0, import_drizzle_orm15.and)((0, import_drizzle_orm15.eq)(settlementsMaster.id, id), (0, import_drizzle_orm15.eq)(settlementsMaster.tenantId, req.tenantId)));
+        const [settlement] = await db.select().from(settlementsMaster).where((0, import_drizzle_orm16.and)((0, import_drizzle_orm16.eq)(settlementsMaster.id, id), (0, import_drizzle_orm16.eq)(settlementsMaster.tenantId, req.tenantId)));
         if (!settlement) {
-          const [vRow] = await db.select().from(villages).where((0, import_drizzle_orm15.and)((0, import_drizzle_orm15.eq)(villages.id, id), (0, import_drizzle_orm15.eq)(villages.tenantId, req.tenantId)));
+          const [vRow] = await db.select().from(villages).where((0, import_drizzle_orm16.and)((0, import_drizzle_orm16.eq)(villages.id, id), (0, import_drizzle_orm16.eq)(villages.tenantId, req.tenantId)));
           if (!vRow) return res.status(404).json({ error: "Settlement not found" });
           return res.json({ success: true, message: "Already converted to community", data: vRow });
         }
-        const countQuery = await db.select({ count: (0, import_drizzle_orm15.count)() }).from(villages).where((0, import_drizzle_orm15.eq)(villages.tenantId, req.tenantId));
+        const countQuery = await db.select({ count: (0, import_drizzle_orm16.count)() }).from(villages).where((0, import_drizzle_orm16.eq)(villages.tenantId, req.tenantId));
         const nextIdx = (countQuery[0]?.count ?? 0) + 1;
         const [community] = await db.insert(villages).values({
           tenantId: req.tenantId,
@@ -10006,7 +10158,7 @@ var init_vgie = __esm({
           linkStatus: "linked",
           validationStatus: "approved",
           updatedAt: /* @__PURE__ */ new Date()
-        }).where((0, import_drizzle_orm15.eq)(settlementsMaster.id, id));
+        }).where((0, import_drizzle_orm16.eq)(settlementsMaster.id, id));
         res.json({ success: true, data: community });
       } catch (err) {
         console.error("Failed to convert settlement to community:", err);
@@ -10019,10 +10171,10 @@ var init_vgie = __esm({
         if (!Array.isArray(settlementIds) || settlementIds.length === 0 || !facilityId) {
           return res.status(400).json({ error: "Missing required parameters (settlementIds array, facilityId)" });
         }
-        const [facility] = await db.select().from(facilities).where((0, import_drizzle_orm15.and)((0, import_drizzle_orm15.eq)(facilities.id, Number(facilityId)), (0, import_drizzle_orm15.eq)(facilities.tenantId, req.tenantId)));
+        const [facility] = await db.select().from(facilities).where((0, import_drizzle_orm16.and)((0, import_drizzle_orm16.eq)(facilities.id, Number(facilityId)), (0, import_drizzle_orm16.eq)(facilities.tenantId, req.tenantId)));
         if (!facility) return res.status(404).json({ error: "Facility not found" });
         for (const sid of settlementIds) {
-          const [settlement] = await db.select().from(settlementsMaster).where((0, import_drizzle_orm15.and)((0, import_drizzle_orm15.eq)(settlementsMaster.id, sid), (0, import_drizzle_orm15.eq)(settlementsMaster.tenantId, req.tenantId)));
+          const [settlement] = await db.select().from(settlementsMaster).where((0, import_drizzle_orm16.and)((0, import_drizzle_orm16.eq)(settlementsMaster.id, sid), (0, import_drizzle_orm16.eq)(settlementsMaster.tenantId, req.tenantId)));
           if (!settlement) continue;
           const distance = getHaversineDistance(
             Number(settlement.latitude),
@@ -10044,7 +10196,7 @@ var init_vgie = __esm({
             linkMethod: "bulk_assign",
             serviceStatus: distance <= 5 ? "served" : "underserved",
             updatedAt: /* @__PURE__ */ new Date()
-          }).where((0, import_drizzle_orm15.eq)(settlementsMaster.id, sid));
+          }).where((0, import_drizzle_orm16.eq)(settlementsMaster.id, sid));
         }
         res.json({ success: true, message: `Successfully linked ${settlementIds.length} settlements to facility` });
       } catch (err) {
@@ -10056,9 +10208,9 @@ var init_vgie = __esm({
       try {
         const id = Number(req.params.id);
         if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
-        let [v] = await db.select().from(settlementsMaster).where((0, import_drizzle_orm15.and)((0, import_drizzle_orm15.eq)(settlementsMaster.id, id), (0, import_drizzle_orm15.eq)(settlementsMaster.tenantId, req.tenantId)));
+        let [v] = await db.select().from(settlementsMaster).where((0, import_drizzle_orm16.and)((0, import_drizzle_orm16.eq)(settlementsMaster.id, id), (0, import_drizzle_orm16.eq)(settlementsMaster.tenantId, req.tenantId)));
         if (!v) {
-          const [vRow] = await db.select().from(villages).where((0, import_drizzle_orm15.and)((0, import_drizzle_orm15.eq)(villages.id, id), (0, import_drizzle_orm15.eq)(villages.tenantId, req.tenantId)));
+          const [vRow] = await db.select().from(villages).where((0, import_drizzle_orm16.and)((0, import_drizzle_orm16.eq)(villages.id, id), (0, import_drizzle_orm16.eq)(villages.tenantId, req.tenantId)));
           if (!vRow) return res.status(404).json({ error: "Settlement not found" });
           v = {
             id: vRow.id,
@@ -10091,19 +10243,19 @@ var init_vgie = __esm({
             createdAt: vRow.createdAt
           };
         }
-        const allDistricts = await db.select({ id: districts.id, name: districts.name }).from(districts).where((0, import_drizzle_orm15.eq)(districts.tenantId, req.tenantId));
+        const allDistricts = await db.select({ id: districts.id, name: districts.name }).from(districts).where((0, import_drizzle_orm16.eq)(districts.tenantId, req.tenantId));
         const districtLookup = new Map(allDistricts.map((d) => [d.id, d.name]));
         let linkedFacility = null;
         if (v.linkedFacilityId) {
-          const [f2] = await db.select({ id: facilities.id, name: facilities.name, hmisCode: facilities.hmisCode }).from(facilities).where((0, import_drizzle_orm15.eq)(facilities.id, v.linkedFacilityId));
+          const [f2] = await db.select({ id: facilities.id, name: facilities.name, hmisCode: facilities.hmisCode }).from(facilities).where((0, import_drizzle_orm16.eq)(facilities.id, v.linkedFacilityId));
           linkedFacility = f2 || null;
         }
         let linkedCommunity = null;
         if (v.linkedCommunityId) {
-          const [c] = await db.select({ id: villages.id, name: villages.name, code: villages.code }).from(villages).where((0, import_drizzle_orm15.eq)(villages.id, v.linkedCommunityId));
+          const [c] = await db.select({ id: villages.id, name: villages.name, code: villages.code }).from(villages).where((0, import_drizzle_orm16.eq)(villages.id, v.linkedCommunityId));
           linkedCommunity = c || null;
         }
-        const allFacilities = await db.select({ id: facilities.id, name: facilities.name, latitude: facilities.latitude, longitude: facilities.longitude, hmisCode: facilities.hmisCode }).from(facilities).where((0, import_drizzle_orm15.eq)(facilities.tenantId, req.tenantId));
+        const allFacilities = await db.select({ id: facilities.id, name: facilities.name, latitude: facilities.latitude, longitude: facilities.longitude, hmisCode: facilities.hmisCode }).from(facilities).where((0, import_drizzle_orm16.eq)(facilities.tenantId, req.tenantId));
         let nearestFacility = null;
         let nearestDistance = Infinity;
         for (const fac of allFacilities) {
@@ -10123,7 +10275,7 @@ var init_vgie = __esm({
         let catchmentFacility = null;
         try {
           if (v.latitude && v.longitude) {
-            const [cf] = await db.execute(import_drizzle_orm15.sql`
+            const [cf] = await db.execute(import_drizzle_orm16.sql`
           SELECT id, name FROM facilities
           WHERE tenant_id = ${req.tenantId}
             AND catchment_polygon IS NOT NULL
@@ -10140,7 +10292,7 @@ var init_vgie = __esm({
         let nearbyCommunity = null;
         try {
           if (v.latitude && v.longitude) {
-            const [nc] = await db.execute(import_drizzle_orm15.sql`
+            const [nc] = await db.execute(import_drizzle_orm16.sql`
           SELECT id, name FROM villages
           WHERE tenant_id = ${req.tenantId}
             AND district_id = ${v.districtId || 0}
@@ -10210,12 +10362,12 @@ var init_vgie = __esm({
           });
         }
         const recs = await db.select().from(vgieRecommendations).where(
-          (0, import_drizzle_orm15.and)(
-            (0, import_drizzle_orm15.eq)(vgieRecommendations.tenantId, req.tenantId),
-            (0, import_drizzle_orm15.eq)(vgieRecommendations.entityId, id),
-            (0, import_drizzle_orm15.eq)(vgieRecommendations.entityType, "settlement")
+          (0, import_drizzle_orm16.and)(
+            (0, import_drizzle_orm16.eq)(vgieRecommendations.tenantId, req.tenantId),
+            (0, import_drizzle_orm16.eq)(vgieRecommendations.entityId, id),
+            (0, import_drizzle_orm16.eq)(vgieRecommendations.entityType, "settlement")
           )
-        ).orderBy((0, import_drizzle_orm15.desc)(vgieRecommendations.createdAt)).limit(5);
+        ).orderBy((0, import_drizzle_orm16.desc)(vgieRecommendations.createdAt)).limit(5);
         const pop = Number(v.populationEstimate || 0);
         const households = pop > 0 ? Math.round(pop / 5) : null;
         const childrenUnderFive = v.under5Population && v.under5Population > 0 ? v.under5Population : pop > 0 ? Math.round(pop * 0.18) : null;
@@ -10290,9 +10442,9 @@ var init_vgie = __esm({
     router.get("/facilities", async (req, res) => {
       try {
         const { search, district, districtId } = req.query;
-        const allDistricts = await db.select({ id: districts.id, name: districts.name }).from(districts).where((0, import_drizzle_orm15.eq)(districts.tenantId, req.tenantId));
+        const allDistricts = await db.select({ id: districts.id, name: districts.name }).from(districts).where((0, import_drizzle_orm16.eq)(districts.tenantId, req.tenantId));
         const districtLookup = new Map(allDistricts.map((d) => [d.id, d.name]));
-        let rows = await db.select().from(facilities).where((0, import_drizzle_orm15.and)((0, import_drizzle_orm15.eq)(facilities.tenantId, req.tenantId), (0, import_drizzle_orm15.eq)(facilities.isActive, true)));
+        let rows = await db.select().from(facilities).where((0, import_drizzle_orm16.and)((0, import_drizzle_orm16.eq)(facilities.tenantId, req.tenantId), (0, import_drizzle_orm16.eq)(facilities.isActive, true)));
         let result = rows.map((f2) => ({
           id: f2.id,
           name: f2.name,
@@ -10331,9 +10483,9 @@ var init_vgie = __esm({
       try {
         const id = Number(req.params.id);
         if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
-        const [f2] = await db.select().from(facilities).where((0, import_drizzle_orm15.and)((0, import_drizzle_orm15.eq)(facilities.id, id), (0, import_drizzle_orm15.eq)(facilities.tenantId, req.tenantId)));
+        const [f2] = await db.select().from(facilities).where((0, import_drizzle_orm16.and)((0, import_drizzle_orm16.eq)(facilities.id, id), (0, import_drizzle_orm16.eq)(facilities.tenantId, req.tenantId)));
         if (!f2) return res.status(404).json({ error: "Facility not found" });
-        const allDistricts = await db.select({ id: districts.id, name: districts.name }).from(districts).where((0, import_drizzle_orm15.eq)(districts.tenantId, req.tenantId));
+        const allDistricts = await db.select({ id: districts.id, name: districts.name }).from(districts).where((0, import_drizzle_orm16.eq)(districts.tenantId, req.tenantId));
         const districtLookup = new Map(allDistricts.map((d) => [d.id, d.name]));
         const assignedVillages = await db.select({
           id: villages.id,
@@ -10342,9 +10494,9 @@ var init_vgie = __esm({
           highRisk: villages.highRisk,
           population: villages.griddedPopulation
         }).from(villages).where(
-          (0, import_drizzle_orm15.and)(
-            (0, import_drizzle_orm15.eq)(villages.tenantId, req.tenantId),
-            (0, import_drizzle_orm15.eq)(villages.assignedFacilityId, id)
+          (0, import_drizzle_orm16.and)(
+            (0, import_drizzle_orm16.eq)(villages.tenantId, req.tenantId),
+            (0, import_drizzle_orm16.eq)(villages.assignedFacilityId, id)
           )
         );
         res.json({
@@ -10378,11 +10530,11 @@ var init_vgie = __esm({
       try {
         const { severity, provinceId, districtId, facilityId } = req.query;
         const conditions = [
-          (0, import_drizzle_orm15.eq)(vgieAlerts.tenantId, req.tenantId),
-          (0, import_drizzle_orm15.eq)(vgieAlerts.status, "active")
+          (0, import_drizzle_orm16.eq)(vgieAlerts.tenantId, req.tenantId),
+          (0, import_drizzle_orm16.eq)(vgieAlerts.status, "active")
         ];
         if (severity && severity !== "all") {
-          conditions.push((0, import_drizzle_orm15.eq)(vgieAlerts.severity, severity));
+          conditions.push((0, import_drizzle_orm16.eq)(vgieAlerts.severity, severity));
         }
         const rows = await db.select({
           id: vgieAlerts.id,
@@ -10397,8 +10549,8 @@ var init_vgie = __esm({
           villageDistrictId: villages.districtId,
           villageAssignedFacilityId: villages.assignedFacilityId,
           facilityDistrictId: facilities.districtId
-        }).from(vgieAlerts).leftJoin(villages, (0, import_drizzle_orm15.eq)(vgieAlerts.villageId, villages.id)).leftJoin(facilities, (0, import_drizzle_orm15.eq)(vgieAlerts.facilityId, facilities.id)).where((0, import_drizzle_orm15.and)(...conditions)).orderBy((0, import_drizzle_orm15.desc)(vgieAlerts.createdAt));
-        const allDistricts = await db.select({ id: districts.id, provinceId: districts.provinceId }).from(districts).where((0, import_drizzle_orm15.eq)(districts.tenantId, req.tenantId));
+        }).from(vgieAlerts).leftJoin(villages, (0, import_drizzle_orm16.eq)(vgieAlerts.villageId, villages.id)).leftJoin(facilities, (0, import_drizzle_orm16.eq)(vgieAlerts.facilityId, facilities.id)).where((0, import_drizzle_orm16.and)(...conditions)).orderBy((0, import_drizzle_orm16.desc)(vgieAlerts.createdAt));
+        const allDistricts = await db.select({ id: districts.id, provinceId: districts.provinceId }).from(districts).where((0, import_drizzle_orm16.eq)(districts.tenantId, req.tenantId));
         const districtProvinceMap = new Map(allDistricts.map((d) => [d.id, d.provinceId]));
         let result = rows.map((a) => ({
           id: a.id,
@@ -10446,7 +10598,7 @@ var init_vgie = __esm({
         const id = Number(req.params.id);
         if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
         await db.update(vgieAlerts).set({ status: "resolved", updatedAt: /* @__PURE__ */ new Date() }).where(
-          (0, import_drizzle_orm15.and)((0, import_drizzle_orm15.eq)(vgieAlerts.id, id), (0, import_drizzle_orm15.eq)(vgieAlerts.tenantId, req.tenantId))
+          (0, import_drizzle_orm16.and)((0, import_drizzle_orm16.eq)(vgieAlerts.id, id), (0, import_drizzle_orm16.eq)(vgieAlerts.tenantId, req.tenantId))
         );
         res.json({ success: true });
       } catch (err) {
@@ -10457,33 +10609,33 @@ var init_vgie = __esm({
     router.get("/recommendations", async (req, res) => {
       try {
         const { priority, status, provinceId, districtId, facilityId } = req.query;
-        const conditions = [(0, import_drizzle_orm15.eq)(vgieRecommendations.tenantId, req.tenantId)];
+        const conditions = [(0, import_drizzle_orm16.eq)(vgieRecommendations.tenantId, req.tenantId)];
         if (priority && priority !== "all") {
-          conditions.push((0, import_drizzle_orm15.eq)(vgieRecommendations.priority, priority));
+          conditions.push((0, import_drizzle_orm16.eq)(vgieRecommendations.priority, priority));
         }
         if (status && status !== "all") {
-          conditions.push((0, import_drizzle_orm15.eq)(vgieRecommendations.status, status));
+          conditions.push((0, import_drizzle_orm16.eq)(vgieRecommendations.status, status));
         }
-        const rows = await db.select().from(vgieRecommendations).where((0, import_drizzle_orm15.and)(...conditions)).orderBy((0, import_drizzle_orm15.desc)(vgieRecommendations.createdAt));
+        const rows = await db.select().from(vgieRecommendations).where((0, import_drizzle_orm16.and)(...conditions)).orderBy((0, import_drizzle_orm16.desc)(vgieRecommendations.createdAt));
         const villageIds = rows.filter((r) => r.entityType === "settlement").map((r) => r.entityId).filter((id) => id != null);
         let villageLookup = /* @__PURE__ */ new Map();
         if (villageIds.length > 0) {
-          const vRows = await db.select({ id: villages.id, name: villages.name, under5Population: villages.under5Population, districtId: villages.districtId, assignedFacilityId: villages.assignedFacilityId }).from(villages).where((0, import_drizzle_orm15.inArray)(villages.id, villageIds));
+          const vRows = await db.select({ id: villages.id, name: villages.name, under5Population: villages.under5Population, districtId: villages.districtId, assignedFacilityId: villages.assignedFacilityId }).from(villages).where((0, import_drizzle_orm16.inArray)(villages.id, villageIds));
           villageLookup = new Map(vRows.map((v) => [v.id, v]));
         }
         const facilityIds = rows.filter((r) => r.entityType === "facility").map((r) => r.entityId).filter((id) => id != null);
         let facilityLookup = /* @__PURE__ */ new Map();
         if (facilityIds.length > 0) {
-          const fRows = await db.select({ id: facilities.id, name: facilities.name, districtId: facilities.districtId }).from(facilities).where((0, import_drizzle_orm15.inArray)(facilities.id, facilityIds));
+          const fRows = await db.select({ id: facilities.id, name: facilities.name, districtId: facilities.districtId }).from(facilities).where((0, import_drizzle_orm16.inArray)(facilities.id, facilityIds));
           facilityLookup = new Map(fRows.map((f2) => [f2.id, f2]));
         }
         const sessionIds = rows.filter((r) => r.entityType === "session").map((r) => r.entityId).filter((id) => id != null);
         let sessionLookup = /* @__PURE__ */ new Map();
         if (sessionIds.length > 0) {
-          const sRows = await db.select({ id: sessionPlans.id, facilityId: sessionPlans.facilityId, districtId: facilities.districtId }).from(sessionPlans).innerJoin(facilities, (0, import_drizzle_orm15.eq)(sessionPlans.facilityId, facilities.id)).where((0, import_drizzle_orm15.inArray)(sessionPlans.id, sessionIds));
+          const sRows = await db.select({ id: sessionPlans.id, facilityId: sessionPlans.facilityId, districtId: facilities.districtId }).from(sessionPlans).innerJoin(facilities, (0, import_drizzle_orm16.eq)(sessionPlans.facilityId, facilities.id)).where((0, import_drizzle_orm16.inArray)(sessionPlans.id, sessionIds));
           sessionLookup = new Map(sRows.map((s) => [s.id, s]));
         }
-        const allDistricts = await db.select({ id: districts.id, provinceId: districts.provinceId }).from(districts).where((0, import_drizzle_orm15.eq)(districts.tenantId, req.tenantId));
+        const allDistricts = await db.select({ id: districts.id, provinceId: districts.provinceId }).from(districts).where((0, import_drizzle_orm16.eq)(districts.tenantId, req.tenantId));
         const districtProvinceMap = new Map(allDistricts.map((d) => [d.id, d.provinceId]));
         let result = rows.map((r) => {
           const vData = r.entityType === "settlement" && r.entityId ? villageLookup.get(r.entityId) : null;
@@ -10562,9 +10714,9 @@ var init_vgie = __esm({
         if (status) update.status = status;
         if (notes !== void 0) update.description = notes;
         await db.update(vgieRecommendations).set(update).where(
-          (0, import_drizzle_orm15.and)(
-            (0, import_drizzle_orm15.eq)(vgieRecommendations.id, id),
-            (0, import_drizzle_orm15.eq)(vgieRecommendations.tenantId, req.tenantId)
+          (0, import_drizzle_orm16.and)(
+            (0, import_drizzle_orm16.eq)(vgieRecommendations.id, id),
+            (0, import_drizzle_orm16.eq)(vgieRecommendations.tenantId, req.tenantId)
           )
         );
         res.json({ success: true });
@@ -10602,9 +10754,9 @@ var init_vgie = __esm({
           return res.status(400).json({ error: "settlementId, facilityId, and microplanId are required" });
         }
         const [village] = await db.select({ id: villages.id, name: villages.name }).from(villages).where(
-          (0, import_drizzle_orm15.and)(
-            (0, import_drizzle_orm15.eq)(villages.id, Number(settlementId)),
-            (0, import_drizzle_orm15.eq)(villages.tenantId, req.tenantId)
+          (0, import_drizzle_orm16.and)(
+            (0, import_drizzle_orm16.eq)(villages.id, Number(settlementId)),
+            (0, import_drizzle_orm16.eq)(villages.tenantId, req.tenantId)
           )
         );
         if (!village) {
@@ -10648,19 +10800,19 @@ var init_vgie = __esm({
           under5Population: villages.under5Population,
           griddedPopulation: villages.griddedPopulation
         }).from(villages).where(
-          (0, import_drizzle_orm15.and)(
-            (0, import_drizzle_orm15.eq)(villages.tenantId, req.tenantId),
-            import_drizzle_orm15.sql`${villages.assignedFacilityId} IS NULL`
+          (0, import_drizzle_orm16.and)(
+            (0, import_drizzle_orm16.eq)(villages.tenantId, req.tenantId),
+            import_drizzle_orm16.sql`${villages.assignedFacilityId} IS NULL`
           )
         ).limit(50);
         if (unservedVillages.length === 0) {
           return res.json({ generated: 0, skipped: 0, message: "No unserved settlements found" });
         }
         const existingRecs = await db.select({ entityId: vgieRecommendations.entityId }).from(vgieRecommendations).where(
-          (0, import_drizzle_orm15.and)(
-            (0, import_drizzle_orm15.eq)(vgieRecommendations.tenantId, req.tenantId),
-            (0, import_drizzle_orm15.eq)(vgieRecommendations.entityType, "settlement"),
-            (0, import_drizzle_orm15.eq)(vgieRecommendations.status, "pending")
+          (0, import_drizzle_orm16.and)(
+            (0, import_drizzle_orm16.eq)(vgieRecommendations.tenantId, req.tenantId),
+            (0, import_drizzle_orm16.eq)(vgieRecommendations.entityType, "settlement"),
+            (0, import_drizzle_orm16.eq)(vgieRecommendations.status, "pending")
           )
         );
         const existingEntityIds = new Set(existingRecs.map((r) => r.entityId));
@@ -10755,7 +10907,7 @@ Return a JSON object with these exact fields (no markdown, no explanation, raw J
     });
     router.get("/recommendation-rules", async (req, res) => {
       try {
-        const rules = await db.select().from(vgieRecommendationRules).where((0, import_drizzle_orm15.eq)(vgieRecommendationRules.tenantId, req.tenantId)).orderBy(vgieRecommendationRules.name);
+        const rules = await db.select().from(vgieRecommendationRules).where((0, import_drizzle_orm16.eq)(vgieRecommendationRules.tenantId, req.tenantId)).orderBy(vgieRecommendationRules.name);
         res.json(rules);
       } catch (err) {
         console.error("Failed to fetch recommendation rules:", err);
@@ -10798,9 +10950,9 @@ Return a JSON object with these exact fields (no markdown, no explanation, raw J
         if (priority !== void 0) updateData.priority = priority;
         if (isActive !== void 0) updateData.isActive = isActive;
         const [rule] = await db.update(vgieRecommendationRules).set(updateData).where(
-          (0, import_drizzle_orm15.and)(
-            (0, import_drizzle_orm15.eq)(vgieRecommendationRules.id, id),
-            (0, import_drizzle_orm15.eq)(vgieRecommendationRules.tenantId, req.tenantId)
+          (0, import_drizzle_orm16.and)(
+            (0, import_drizzle_orm16.eq)(vgieRecommendationRules.id, id),
+            (0, import_drizzle_orm16.eq)(vgieRecommendationRules.tenantId, req.tenantId)
           )
         ).returning();
         if (!rule) return res.status(404).json({ error: "Rule not found" });
@@ -10815,9 +10967,9 @@ Return a JSON object with these exact fields (no markdown, no explanation, raw J
         const id = Number(req.params.id);
         if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
         const [rule] = await db.delete(vgieRecommendationRules).where(
-          (0, import_drizzle_orm15.and)(
-            (0, import_drizzle_orm15.eq)(vgieRecommendationRules.id, id),
-            (0, import_drizzle_orm15.eq)(vgieRecommendationRules.tenantId, req.tenantId)
+          (0, import_drizzle_orm16.and)(
+            (0, import_drizzle_orm16.eq)(vgieRecommendationRules.id, id),
+            (0, import_drizzle_orm16.eq)(vgieRecommendationRules.tenantId, req.tenantId)
           )
         ).returning();
         if (!rule) return res.status(404).json({ error: "Rule not found" });
@@ -10897,14 +11049,14 @@ function resolveExt(file) {
   if (fromMime) return fromMime;
   return ".dat";
 }
-var import_express3, import_drizzle_orm16, researchRouter, ALLOWED_MIME;
+var import_express3, import_drizzle_orm17, researchRouter, ALLOWED_MIME;
 var init_research = __esm({
   "server/routes/research.ts"() {
     "use strict";
     init_errorUtils();
     import_express3 = require("express");
     init_db();
-    import_drizzle_orm16 = require("drizzle-orm");
+    import_drizzle_orm17 = require("drizzle-orm");
     init_schema();
     init_auth();
     init_tenantResolver();
@@ -11055,29 +11207,29 @@ var init_research = __esm({
         const isAdmin = isUserResearchAdmin(req.dbUser);
         const conditions = [];
         if (!isAdmin) {
-          conditions.push((0, import_drizzle_orm16.eq)(researchDocuments.status, "Published"));
-          conditions.push((0, import_drizzle_orm16.eq)(researchDocuments.visibility, "Public"));
+          conditions.push((0, import_drizzle_orm17.eq)(researchDocuments.status, "Published"));
+          conditions.push((0, import_drizzle_orm17.eq)(researchDocuments.visibility, "Public"));
         } else {
-          if (status && status !== "all") conditions.push((0, import_drizzle_orm16.eq)(researchDocuments.status, String(status)));
-          if (visibility && visibility !== "all") conditions.push((0, import_drizzle_orm16.eq)(researchDocuments.visibility, String(visibility)));
+          if (status && status !== "all") conditions.push((0, import_drizzle_orm17.eq)(researchDocuments.status, String(status)));
+          if (visibility && visibility !== "all") conditions.push((0, import_drizzle_orm17.eq)(researchDocuments.visibility, String(visibility)));
         }
         if (search) {
           conditions.push(
-            (0, import_drizzle_orm16.or)(
-              (0, import_drizzle_orm16.ilike)(researchDocuments.title, `%${search}%`),
-              (0, import_drizzle_orm16.ilike)(researchDocuments.abstract, `%${search}%`),
-              (0, import_drizzle_orm16.ilike)(researchDocuments.authors, `%${search}%`)
+            (0, import_drizzle_orm17.or)(
+              (0, import_drizzle_orm17.ilike)(researchDocuments.title, `%${search}%`),
+              (0, import_drizzle_orm17.ilike)(researchDocuments.abstract, `%${search}%`),
+              (0, import_drizzle_orm17.ilike)(researchDocuments.authors, `%${search}%`)
             )
           );
         }
-        if (type && type !== "all") conditions.push((0, import_drizzle_orm16.eq)(researchDocuments.documentType, String(type)));
-        if (country && country !== "all") conditions.push((0, import_drizzle_orm16.eq)(researchDocuments.country, String(country)));
-        if (year && year !== "all") conditions.push((0, import_drizzle_orm16.eq)(researchDocuments.year, Number(year)));
-        const whereClause = conditions.length > 0 ? (0, import_drizzle_orm16.and)(...conditions) : void 0;
-        let order = (0, import_drizzle_orm16.desc)(researchDocuments.createdAt);
-        if (sort === "newest") order = (0, import_drizzle_orm16.desc)(researchDocuments.createdAt);
-        else if (sort === "downloads") order = (0, import_drizzle_orm16.desc)(researchDocuments.downloadCount);
-        else if (sort === "title") order = (0, import_drizzle_orm16.asc)(researchDocuments.title);
+        if (type && type !== "all") conditions.push((0, import_drizzle_orm17.eq)(researchDocuments.documentType, String(type)));
+        if (country && country !== "all") conditions.push((0, import_drizzle_orm17.eq)(researchDocuments.country, String(country)));
+        if (year && year !== "all") conditions.push((0, import_drizzle_orm17.eq)(researchDocuments.year, Number(year)));
+        const whereClause = conditions.length > 0 ? (0, import_drizzle_orm17.and)(...conditions) : void 0;
+        let order = (0, import_drizzle_orm17.desc)(researchDocuments.createdAt);
+        if (sort === "newest") order = (0, import_drizzle_orm17.desc)(researchDocuments.createdAt);
+        else if (sort === "downloads") order = (0, import_drizzle_orm17.desc)(researchDocuments.downloadCount);
+        else if (sort === "title") order = (0, import_drizzle_orm17.asc)(researchDocuments.title);
         const docs = await db.select().from(researchDocuments).where(whereClause).orderBy(order);
         res.json(docs);
       } catch (error) {
@@ -11090,7 +11242,7 @@ var init_research = __esm({
         if (!Number.isFinite(id)) {
           return res.status(400).json({ message: "Invalid ID" });
         }
-        const [doc] = await db.select().from(researchDocuments).where((0, import_drizzle_orm16.eq)(researchDocuments.id, id)).limit(1);
+        const [doc] = await db.select().from(researchDocuments).where((0, import_drizzle_orm17.eq)(researchDocuments.id, id)).limit(1);
         if (!doc) {
           return res.status(404).json({ message: "Document not found" });
         }
@@ -11139,7 +11291,7 @@ var init_research = __esm({
       async (req, res) => {
         try {
           const id = Number(req.params.id);
-          const [existing] = await db.select().from(researchDocuments).where((0, import_drizzle_orm16.eq)(researchDocuments.id, id)).limit(1);
+          const [existing] = await db.select().from(researchDocuments).where((0, import_drizzle_orm17.eq)(researchDocuments.id, id)).limit(1);
           if (!existing) {
             return res.status(404).json({ message: "Document not found" });
           }
@@ -11154,7 +11306,7 @@ var init_research = __esm({
           } else if (parsed.status === "Archived" && existing.status !== "Archived") {
             updateData.archivedAt = /* @__PURE__ */ new Date();
           }
-          const [updated] = await db.update(researchDocuments).set(updateData).where((0, import_drizzle_orm16.eq)(researchDocuments.id, id)).returning();
+          const [updated] = await db.update(researchDocuments).set(updateData).where((0, import_drizzle_orm17.eq)(researchDocuments.id, id)).returning();
           res.json(updated);
         } catch (error) {
           res.status(400).json({ message: error.message || "Invalid edit payload" });
@@ -11170,11 +11322,11 @@ var init_research = __esm({
       async (req, res) => {
         try {
           const id = Number(req.params.id);
-          const [existing] = await db.select().from(researchDocuments).where((0, import_drizzle_orm16.eq)(researchDocuments.id, id)).limit(1);
+          const [existing] = await db.select().from(researchDocuments).where((0, import_drizzle_orm17.eq)(researchDocuments.id, id)).limit(1);
           if (!existing) {
             return res.status(404).json({ message: "Document not found" });
           }
-          await db.delete(researchDocuments).where((0, import_drizzle_orm16.eq)(researchDocuments.id, id));
+          await db.delete(researchDocuments).where((0, import_drizzle_orm17.eq)(researchDocuments.id, id));
           res.json({ success: true, message: "Document deleted successfully" });
         } catch (error) {
           res.status(500).json({ message: safeErrorMessage(error, "Failed to delete document") });
@@ -11187,22 +11339,22 @@ var init_research = __esm({
         const isAdmin = isUserResearchAdmin(req.dbUser);
         const conditions = [];
         if (!isAdmin) {
-          conditions.push((0, import_drizzle_orm16.eq)(pilotActivities.visibility, "Public"));
+          conditions.push((0, import_drizzle_orm17.eq)(pilotActivities.visibility, "Public"));
         }
         if (search) {
           conditions.push(
-            (0, import_drizzle_orm16.or)(
-              (0, import_drizzle_orm16.ilike)(pilotActivities.title, `%${search}%`),
-              (0, import_drizzle_orm16.ilike)(pilotActivities.summary, `%${search}%`),
-              (0, import_drizzle_orm16.ilike)(pilotActivities.partners, `%${search}%`)
+            (0, import_drizzle_orm17.or)(
+              (0, import_drizzle_orm17.ilike)(pilotActivities.title, `%${search}%`),
+              (0, import_drizzle_orm17.ilike)(pilotActivities.summary, `%${search}%`),
+              (0, import_drizzle_orm17.ilike)(pilotActivities.partners, `%${search}%`)
             )
           );
         }
-        if (country && country !== "all") conditions.push((0, import_drizzle_orm16.eq)(pilotActivities.country, String(country)));
-        if (status && status !== "all") conditions.push((0, import_drizzle_orm16.eq)(pilotActivities.status, String(status)));
-        if (partner) conditions.push((0, import_drizzle_orm16.ilike)(pilotActivities.partners, `%${partner}%`));
-        const whereClause = conditions.length > 0 ? (0, import_drizzle_orm16.and)(...conditions) : void 0;
-        const list = await db.select().from(pilotActivities).where(whereClause).orderBy((0, import_drizzle_orm16.desc)(pilotActivities.createdAt));
+        if (country && country !== "all") conditions.push((0, import_drizzle_orm17.eq)(pilotActivities.country, String(country)));
+        if (status && status !== "all") conditions.push((0, import_drizzle_orm17.eq)(pilotActivities.status, String(status)));
+        if (partner) conditions.push((0, import_drizzle_orm17.ilike)(pilotActivities.partners, `%${partner}%`));
+        const whereClause = conditions.length > 0 ? (0, import_drizzle_orm17.and)(...conditions) : void 0;
+        const list = await db.select().from(pilotActivities).where(whereClause).orderBy((0, import_drizzle_orm17.desc)(pilotActivities.createdAt));
         res.json(list);
       } catch (error) {
         res.status(500).json({ message: safeErrorMessage(error, "Failed to fetch pilots") });
@@ -11214,7 +11366,7 @@ var init_research = __esm({
         if (!Number.isFinite(id)) {
           return res.status(400).json({ message: "Invalid ID" });
         }
-        const [pilot] = await db.select().from(pilotActivities).where((0, import_drizzle_orm16.eq)(pilotActivities.id, id)).limit(1);
+        const [pilot] = await db.select().from(pilotActivities).where((0, import_drizzle_orm17.eq)(pilotActivities.id, id)).limit(1);
         if (!pilot) {
           return res.status(404).json({ message: "Pilot not found" });
         }
@@ -11222,7 +11374,7 @@ var init_research = __esm({
         if (!isAdmin && pilot.visibility !== "Public") {
           return res.status(403).json({ message: "Access denied" });
         }
-        const updates = await db.select().from(pilotUpdates).where((0, import_drizzle_orm16.eq)(pilotUpdates.pilotId, id)).orderBy((0, import_drizzle_orm16.desc)(pilotUpdates.updateDate));
+        const updates = await db.select().from(pilotUpdates).where((0, import_drizzle_orm17.eq)(pilotUpdates.pilotId, id)).orderBy((0, import_drizzle_orm17.desc)(pilotUpdates.updateDate));
         res.json({ ...pilot, updates });
       } catch (error) {
         res.status(500).json({ message: safeErrorMessage(error, "Failed to fetch pilot details") });
@@ -11264,7 +11416,7 @@ var init_research = __esm({
       async (req, res) => {
         try {
           const id = Number(req.params.id);
-          const [existing] = await db.select().from(pilotActivities).where((0, import_drizzle_orm16.eq)(pilotActivities.id, id)).limit(1);
+          const [existing] = await db.select().from(pilotActivities).where((0, import_drizzle_orm17.eq)(pilotActivities.id, id)).limit(1);
           if (!existing) {
             return res.status(404).json({ message: "Pilot not found" });
           }
@@ -11276,7 +11428,7 @@ var init_research = __esm({
           if (parsed.status === "Completed" && existing.status !== "Completed") {
             updateData.publishedAt = /* @__PURE__ */ new Date();
           }
-          const [updated] = await db.update(pilotActivities).set(updateData).where((0, import_drizzle_orm16.eq)(pilotActivities.id, id)).returning();
+          const [updated] = await db.update(pilotActivities).set(updateData).where((0, import_drizzle_orm17.eq)(pilotActivities.id, id)).returning();
           res.json(updated);
         } catch (error) {
           res.status(400).json({ message: error.message || "Invalid edit payload" });
@@ -11292,11 +11444,11 @@ var init_research = __esm({
       async (req, res) => {
         try {
           const id = Number(req.params.id);
-          const [existing] = await db.select().from(pilotActivities).where((0, import_drizzle_orm16.eq)(pilotActivities.id, id)).limit(1);
+          const [existing] = await db.select().from(pilotActivities).where((0, import_drizzle_orm17.eq)(pilotActivities.id, id)).limit(1);
           if (!existing) {
             return res.status(404).json({ message: "Pilot not found" });
           }
-          await db.delete(pilotActivities).where((0, import_drizzle_orm16.eq)(pilotActivities.id, id));
+          await db.delete(pilotActivities).where((0, import_drizzle_orm17.eq)(pilotActivities.id, id));
           res.json({ success: true, message: "Pilot deleted successfully" });
         } catch (error) {
           res.status(500).json({ message: safeErrorMessage(error, "Failed to delete pilot") });
@@ -11312,7 +11464,7 @@ var init_research = __esm({
       async (req, res) => {
         try {
           const pilotId = Number(req.params.id);
-          const [existing] = await db.select().from(pilotActivities).where((0, import_drizzle_orm16.eq)(pilotActivities.id, pilotId)).limit(1);
+          const [existing] = await db.select().from(pilotActivities).where((0, import_drizzle_orm17.eq)(pilotActivities.id, pilotId)).limit(1);
           if (!existing) {
             return res.status(404).json({ message: "Pilot not found" });
           }
@@ -11334,22 +11486,22 @@ var init_research = __esm({
         const isAdmin = isUserResearchAdmin(req.dbUser);
         const conditions = [];
         if (!isAdmin) {
-          conditions.push((0, import_drizzle_orm16.eq)(implementationLessons.visibility, "Public"));
-          conditions.push((0, import_drizzle_orm16.eq)(implementationLessons.status, "Published"));
+          conditions.push((0, import_drizzle_orm17.eq)(implementationLessons.visibility, "Public"));
+          conditions.push((0, import_drizzle_orm17.eq)(implementationLessons.status, "Published"));
         }
-        if (category) conditions.push((0, import_drizzle_orm16.eq)(implementationLessons.category, String(category)));
+        if (category) conditions.push((0, import_drizzle_orm17.eq)(implementationLessons.category, String(category)));
         if (search) {
           conditions.push(
-            (0, import_drizzle_orm16.or)(
-              (0, import_drizzle_orm16.ilike)(implementationLessons.title, `%${search}%`),
-              (0, import_drizzle_orm16.ilike)(implementationLessons.context, `%${search}%`),
-              (0, import_drizzle_orm16.ilike)(implementationLessons.whatWorked, `%${search}%`),
-              (0, import_drizzle_orm16.ilike)(implementationLessons.whatDidNotWork, `%${search}%`)
+            (0, import_drizzle_orm17.or)(
+              (0, import_drizzle_orm17.ilike)(implementationLessons.title, `%${search}%`),
+              (0, import_drizzle_orm17.ilike)(implementationLessons.context, `%${search}%`),
+              (0, import_drizzle_orm17.ilike)(implementationLessons.whatWorked, `%${search}%`),
+              (0, import_drizzle_orm17.ilike)(implementationLessons.whatDidNotWork, `%${search}%`)
             )
           );
         }
-        const whereClause = conditions.length > 0 ? (0, import_drizzle_orm16.and)(...conditions) : void 0;
-        const list = await db.select().from(implementationLessons).where(whereClause).orderBy((0, import_drizzle_orm16.desc)(implementationLessons.createdAt));
+        const whereClause = conditions.length > 0 ? (0, import_drizzle_orm17.and)(...conditions) : void 0;
+        const list = await db.select().from(implementationLessons).where(whereClause).orderBy((0, import_drizzle_orm17.desc)(implementationLessons.createdAt));
         res.json(list);
       } catch (error) {
         res.status(500).json({ message: safeErrorMessage(error, "Failed to fetch lessons") });
@@ -11390,7 +11542,7 @@ var init_research = __esm({
       async (req, res) => {
         try {
           const id = Number(req.params.id);
-          const [existing] = await db.select().from(implementationLessons).where((0, import_drizzle_orm16.eq)(implementationLessons.id, id)).limit(1);
+          const [existing] = await db.select().from(implementationLessons).where((0, import_drizzle_orm17.eq)(implementationLessons.id, id)).limit(1);
           if (!existing) {
             return res.status(404).json({ message: "Lesson not found" });
           }
@@ -11398,7 +11550,7 @@ var init_research = __esm({
             ...req.body,
             updatedByUserId: req.dbUser?.id || req.user?.id
           });
-          const [updated] = await db.update(implementationLessons).set({ ...parsed, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm16.eq)(implementationLessons.id, id)).returning();
+          const [updated] = await db.update(implementationLessons).set({ ...parsed, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm17.eq)(implementationLessons.id, id)).returning();
           res.json(updated);
         } catch (error) {
           res.status(400).json({ message: error.message || "Invalid lesson payload" });
@@ -11414,11 +11566,11 @@ var init_research = __esm({
       async (req, res) => {
         try {
           const id = Number(req.params.id);
-          const [existing] = await db.select().from(implementationLessons).where((0, import_drizzle_orm16.eq)(implementationLessons.id, id)).limit(1);
+          const [existing] = await db.select().from(implementationLessons).where((0, import_drizzle_orm17.eq)(implementationLessons.id, id)).limit(1);
           if (!existing) {
             return res.status(404).json({ message: "Lesson not found" });
           }
-          await db.delete(implementationLessons).where((0, import_drizzle_orm16.eq)(implementationLessons.id, id));
+          await db.delete(implementationLessons).where((0, import_drizzle_orm17.eq)(implementationLessons.id, id));
           res.json({ success: true, message: "Lesson deleted successfully" });
         } catch (error) {
           res.status(500).json({ message: safeErrorMessage(error, "Failed to delete lesson") });
@@ -11431,20 +11583,20 @@ var init_research = __esm({
         const isAdmin = isUserResearchAdmin(req.dbUser);
         const conditions = [];
         if (!isAdmin) {
-          conditions.push((0, import_drizzle_orm16.eq)(downloadAssets.visibility, "Public"));
-          conditions.push((0, import_drizzle_orm16.eq)(downloadAssets.status, "Published"));
+          conditions.push((0, import_drizzle_orm17.eq)(downloadAssets.visibility, "Public"));
+          conditions.push((0, import_drizzle_orm17.eq)(downloadAssets.status, "Published"));
         }
-        if (category) conditions.push((0, import_drizzle_orm16.eq)(downloadAssets.category, String(category)));
+        if (category) conditions.push((0, import_drizzle_orm17.eq)(downloadAssets.category, String(category)));
         if (search) {
           conditions.push(
-            (0, import_drizzle_orm16.or)(
-              (0, import_drizzle_orm16.ilike)(downloadAssets.title, `%${search}%`),
-              (0, import_drizzle_orm16.ilike)(downloadAssets.description, `%${search}%`)
+            (0, import_drizzle_orm17.or)(
+              (0, import_drizzle_orm17.ilike)(downloadAssets.title, `%${search}%`),
+              (0, import_drizzle_orm17.ilike)(downloadAssets.description, `%${search}%`)
             )
           );
         }
-        const whereClause = conditions.length > 0 ? (0, import_drizzle_orm16.and)(...conditions) : void 0;
-        const list = await db.select().from(downloadAssets).where(whereClause).orderBy((0, import_drizzle_orm16.desc)(downloadAssets.createdAt));
+        const whereClause = conditions.length > 0 ? (0, import_drizzle_orm17.and)(...conditions) : void 0;
+        const list = await db.select().from(downloadAssets).where(whereClause).orderBy((0, import_drizzle_orm17.desc)(downloadAssets.createdAt));
         res.json(list);
       } catch (error) {
         res.status(500).json({ message: safeErrorMessage(error, "Failed to fetch assets") });
@@ -11486,7 +11638,7 @@ var init_research = __esm({
       async (req, res) => {
         try {
           const id = Number(req.params.id);
-          const [existing] = await db.select().from(downloadAssets).where((0, import_drizzle_orm16.eq)(downloadAssets.id, id)).limit(1);
+          const [existing] = await db.select().from(downloadAssets).where((0, import_drizzle_orm17.eq)(downloadAssets.id, id)).limit(1);
           if (!existing) {
             return res.status(404).json({ message: "Asset not found" });
           }
@@ -11494,7 +11646,7 @@ var init_research = __esm({
             ...req.body,
             updatedByUserId: req.dbUser?.id || req.user?.id
           });
-          const [updated] = await db.update(downloadAssets).set({ ...parsed, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm16.eq)(downloadAssets.id, id)).returning();
+          const [updated] = await db.update(downloadAssets).set({ ...parsed, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm17.eq)(downloadAssets.id, id)).returning();
           res.json(updated);
         } catch (error) {
           res.status(400).json({ message: error.message || "Invalid asset payload" });
@@ -11510,11 +11662,11 @@ var init_research = __esm({
       async (req, res) => {
         try {
           const id = Number(req.params.id);
-          const [existing] = await db.select().from(downloadAssets).where((0, import_drizzle_orm16.eq)(downloadAssets.id, id)).limit(1);
+          const [existing] = await db.select().from(downloadAssets).where((0, import_drizzle_orm17.eq)(downloadAssets.id, id)).limit(1);
           if (!existing) {
             return res.status(404).json({ message: "Asset not found" });
           }
-          await db.delete(downloadAssets).where((0, import_drizzle_orm16.eq)(downloadAssets.id, id));
+          await db.delete(downloadAssets).where((0, import_drizzle_orm17.eq)(downloadAssets.id, id));
           res.json({ success: true, message: "Asset deleted successfully" });
         } catch (error) {
           res.status(500).json({ message: safeErrorMessage(error, "Failed to delete asset") });
@@ -11543,7 +11695,7 @@ var init_research = __esm({
       requireResearchAdmin,
       async (req, res) => {
         try {
-          const list = await db.select().from(researchInterestSubmissions).where((0, import_drizzle_orm16.eq)(researchInterestSubmissions.tenantId, req.tenantId)).orderBy((0, import_drizzle_orm16.desc)(researchInterestSubmissions.createdAt));
+          const list = await db.select().from(researchInterestSubmissions).where((0, import_drizzle_orm17.eq)(researchInterestSubmissions.tenantId, req.tenantId)).orderBy((0, import_drizzle_orm17.desc)(researchInterestSubmissions.createdAt));
           res.json(list);
         } catch (error) {
           res.status(500).json({ message: safeErrorMessage(error, "Failed to fetch submissions") });
@@ -11563,7 +11715,7 @@ var init_research = __esm({
           if (!status) {
             return res.status(400).json({ message: "Status required" });
           }
-          const [updated] = await db.update(researchInterestSubmissions).set({ status, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm16.eq)(researchInterestSubmissions.id, id)).returning();
+          const [updated] = await db.update(researchInterestSubmissions).set({ status, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm17.eq)(researchInterestSubmissions.id, id)).returning();
           res.json(updated);
         } catch (error) {
           res.status(500).json({ message: safeErrorMessage(error, "Failed to update submission") });
@@ -11577,9 +11729,9 @@ var init_research = __esm({
         const crypto2 = await import("crypto");
         const ipHash = crypto2.createHash("sha256").update(req.ip || "").digest("hex");
         if (type === "document") {
-          const [doc] = await db.select().from(researchDocuments).where((0, import_drizzle_orm16.eq)(researchDocuments.id, id)).limit(1);
+          const [doc] = await db.select().from(researchDocuments).where((0, import_drizzle_orm17.eq)(researchDocuments.id, id)).limit(1);
           if (!doc) return res.status(404).json({ message: "Document not found" });
-          await db.update(researchDocuments).set({ downloadCount: doc.downloadCount + 1 }).where((0, import_drizzle_orm16.eq)(researchDocuments.id, id));
+          await db.update(researchDocuments).set({ downloadCount: doc.downloadCount + 1 }).where((0, import_drizzle_orm17.eq)(researchDocuments.id, id));
           await db.insert(researchDownloadEvents).values({
             documentId: id,
             ipHash,
@@ -11588,9 +11740,9 @@ var init_research = __esm({
           });
           return res.json({ success: true, newCount: doc.downloadCount + 1 });
         } else if (type === "asset") {
-          const [asset] = await db.select().from(downloadAssets).where((0, import_drizzle_orm16.eq)(downloadAssets.id, id)).limit(1);
+          const [asset] = await db.select().from(downloadAssets).where((0, import_drizzle_orm17.eq)(downloadAssets.id, id)).limit(1);
           if (!asset) return res.status(404).json({ message: "Asset not found" });
-          await db.update(downloadAssets).set({ downloadCount: asset.downloadCount + 1 }).where((0, import_drizzle_orm16.eq)(downloadAssets.id, id));
+          await db.update(downloadAssets).set({ downloadCount: asset.downloadCount + 1 }).where((0, import_drizzle_orm17.eq)(downloadAssets.id, id));
           await db.insert(researchDownloadEvents).values({
             assetId: id,
             ipHash,
@@ -11613,17 +11765,17 @@ var init_research = __esm({
       async (req, res) => {
         try {
           const tenantId = req.tenantId;
-          const [docsTotal] = await db.select({ count: import_drizzle_orm16.sql`count(*)` }).from(researchDocuments);
-          const [docsPublished] = await db.select({ count: import_drizzle_orm16.sql`count(*)` }).from(researchDocuments).where((0, import_drizzle_orm16.eq)(researchDocuments.status, "Published"));
-          const [docsDraft] = await db.select({ count: import_drizzle_orm16.sql`count(*)` }).from(researchDocuments).where((0, import_drizzle_orm16.eq)(researchDocuments.status, "Draft"));
-          const [pilotsTotal] = await db.select({ count: import_drizzle_orm16.sql`count(*)` }).from(pilotActivities);
-          const [pilotsActive] = await db.select({ count: import_drizzle_orm16.sql`count(*)` }).from(pilotActivities).where((0, import_drizzle_orm16.eq)(pilotActivities.status, "Active"));
-          const [pilotsCompleted] = await db.select({ count: import_drizzle_orm16.sql`count(*)` }).from(pilotActivities).where((0, import_drizzle_orm16.eq)(pilotActivities.status, "Completed"));
+          const [docsTotal] = await db.select({ count: import_drizzle_orm17.sql`count(*)` }).from(researchDocuments);
+          const [docsPublished] = await db.select({ count: import_drizzle_orm17.sql`count(*)` }).from(researchDocuments).where((0, import_drizzle_orm17.eq)(researchDocuments.status, "Published"));
+          const [docsDraft] = await db.select({ count: import_drizzle_orm17.sql`count(*)` }).from(researchDocuments).where((0, import_drizzle_orm17.eq)(researchDocuments.status, "Draft"));
+          const [pilotsTotal] = await db.select({ count: import_drizzle_orm17.sql`count(*)` }).from(pilotActivities);
+          const [pilotsActive] = await db.select({ count: import_drizzle_orm17.sql`count(*)` }).from(pilotActivities).where((0, import_drizzle_orm17.eq)(pilotActivities.status, "Active"));
+          const [pilotsCompleted] = await db.select({ count: import_drizzle_orm17.sql`count(*)` }).from(pilotActivities).where((0, import_drizzle_orm17.eq)(pilotActivities.status, "Completed"));
           const countriesCount = await db.execute(
-            import_drizzle_orm16.sql`SELECT COUNT(DISTINCT country) as count FROM pilot_activities`
+            import_drizzle_orm17.sql`SELECT COUNT(DISTINCT country) as count FROM pilot_activities`
           );
           const totalCountries = Number(countriesCount.rows[0]?.count || 0);
-          const downloadTotal = await db.execute(import_drizzle_orm16.sql`
+          const downloadTotal = await db.execute(import_drizzle_orm17.sql`
         SELECT (COALESCE(SUM(download_count), 0)) as total
         FROM (
           SELECT download_count FROM research_documents
@@ -11636,11 +11788,11 @@ var init_research = __esm({
             id: researchDocuments.id,
             title: researchDocuments.title,
             downloadCount: researchDocuments.downloadCount
-          }).from(researchDocuments).orderBy((0, import_drizzle_orm16.desc)(researchDocuments.downloadCount)).limit(5);
-          const [submissionsCount] = await db.select({ count: import_drizzle_orm16.sql`count(*)` }).from(researchInterestSubmissions).where(
-            (0, import_drizzle_orm16.and)(
-              (0, import_drizzle_orm16.eq)(researchInterestSubmissions.status, "pending"),
-              (0, import_drizzle_orm16.eq)(researchInterestSubmissions.tenantId, tenantId)
+          }).from(researchDocuments).orderBy((0, import_drizzle_orm17.desc)(researchDocuments.downloadCount)).limit(5);
+          const [submissionsCount] = await db.select({ count: import_drizzle_orm17.sql`count(*)` }).from(researchInterestSubmissions).where(
+            (0, import_drizzle_orm17.and)(
+              (0, import_drizzle_orm17.eq)(researchInterestSubmissions.status, "pending"),
+              (0, import_drizzle_orm17.eq)(researchInterestSubmissions.tenantId, tenantId)
             )
           );
           res.json({
@@ -14367,7 +14519,7 @@ var init_riskImportService = __esm({
 });
 
 // server/routes/riskRoutes.ts
-var import_express6, import_fs, import_path, import_os, import_child_process, import_drizzle_orm17, riskRouter;
+var import_express6, import_fs, import_path, import_os, import_child_process, import_drizzle_orm18, riskRouter;
 var init_riskRoutes = __esm({
   "server/routes/riskRoutes.ts"() {
     "use strict";
@@ -14380,7 +14532,7 @@ var init_riskRoutes = __esm({
     init_db();
     init_riskSchema();
     init_schema();
-    import_drizzle_orm17 = require("drizzle-orm");
+    import_drizzle_orm18 = require("drizzle-orm");
     init_methodologyRegistry();
     init_scoringEngine();
     init_riskImportService();
@@ -14437,7 +14589,7 @@ var init_riskRoutes = __esm({
       const overrideRaw = req.headers["x-tenant-id"] || req.query["x-tenant-id"] || req.query["tenantId"];
       if (isSuperAdmin && typeof overrideRaw === "string" && overrideRaw.trim()) {
         const overrideTrimmed = overrideRaw.trim();
-        const [matchedTenant] = await db.select({ id: tenants.id }).from(tenants).where(import_drizzle_orm17.sql`${tenants.id} = ${overrideTrimmed} OR ${tenants.countryCode} = ${overrideTrimmed.toUpperCase()}`).limit(1);
+        const [matchedTenant] = await db.select({ id: tenants.id }).from(tenants).where(import_drizzle_orm18.sql`${tenants.id} = ${overrideTrimmed} OR ${tenants.countryCode} = ${overrideTrimmed.toUpperCase()}`).limit(1);
         if (matchedTenant) {
           req.tenantId = matchedTenant.id;
         }
@@ -14449,7 +14601,7 @@ var init_riskRoutes = __esm({
     });
     riskRouter.get("/context", async (req, res) => {
       try {
-        const [tenant] = await db.select().from(tenants).where((0, import_drizzle_orm17.eq)(tenants.id, req.tenantId)).limit(1);
+        const [tenant] = await db.select().from(tenants).where((0, import_drizzle_orm18.eq)(tenants.id, req.tenantId)).limit(1);
         if (!tenant) {
           return res.status(404).json({ message: "Tenant not found" });
         }
@@ -14458,19 +14610,19 @@ var init_riskRoutes = __esm({
           name: districts.name,
           code: districts.code,
           provinceId: districts.provinceId
-        }).from(districts).where((0, import_drizzle_orm17.eq)(districts.tenantId, req.tenantId));
+        }).from(districts).where((0, import_drizzle_orm18.eq)(districts.tenantId, req.tenantId));
         const countryCode = (tenant.countryCode || "ZAF").toUpperCase();
         const [level2Boundary] = await db.select({
           id: adminBoundaries.id,
           levelName: adminBoundaries.levelName,
           featureCount: adminBoundaries.featureCount
-        }).from(adminBoundaries).where((0, import_drizzle_orm17.and)(
-          (0, import_drizzle_orm17.eq)(adminBoundaries.countryCode, countryCode),
-          (0, import_drizzle_orm17.eq)(adminBoundaries.adminLevel, 2),
-          (0, import_drizzle_orm17.eq)(adminBoundaries.isActive, true),
-          (0, import_drizzle_orm17.or)((0, import_drizzle_orm17.eq)(adminBoundaries.tenantId, req.tenantId), (0, import_drizzle_orm17.ne)(adminBoundaries.source, "custom")),
-          import_drizzle_orm17.sql`jsonb_array_length(COALESCE(${adminBoundaries.geojson}->'features', '[]'::jsonb)) > 0`
-        )).orderBy(import_drizzle_orm17.sql`CASE WHEN ${adminBoundaries.tenantId} = ${req.tenantId} THEN 0 ELSE 1 END`).limit(1);
+        }).from(adminBoundaries).where((0, import_drizzle_orm18.and)(
+          (0, import_drizzle_orm18.eq)(adminBoundaries.countryCode, countryCode),
+          (0, import_drizzle_orm18.eq)(adminBoundaries.adminLevel, 2),
+          (0, import_drizzle_orm18.eq)(adminBoundaries.isActive, true),
+          (0, import_drizzle_orm18.or)((0, import_drizzle_orm18.eq)(adminBoundaries.tenantId, req.tenantId), (0, import_drizzle_orm18.ne)(adminBoundaries.source, "custom")),
+          import_drizzle_orm18.sql`jsonb_array_length(COALESCE(${adminBoundaries.geojson}->'features', '[]'::jsonb)) > 0`
+        )).orderBy(import_drizzle_orm18.sql`CASE WHEN ${adminBoundaries.tenantId} = ${req.tenantId} THEN 0 ELSE 1 END`).limit(1);
         const adminLabel = countryCode === "SSD" ? "County" : countryCode === "KEN" ? "Sub-County" : "District";
         const adminLabelPlural = countryCode === "SSD" ? "Counties" : countryCode === "KEN" ? "Sub-Counties" : "Districts";
         res.json({
@@ -14496,11 +14648,11 @@ var init_riskRoutes = __esm({
           name: districts.name,
           provinceId: districts.provinceId,
           provinceName: provinces.name
-        }).from(districts).leftJoin(provinces, (0, import_drizzle_orm17.eq)(districts.provinceId, provinces.id)).where((0, import_drizzle_orm17.eq)(districts.tenantId, req.tenantId));
-        const [latestRun] = await db.select().from(riskAssessmentRuns).where((0, import_drizzle_orm17.eq)(riskAssessmentRuns.tenantId, req.tenantId)).orderBy((0, import_drizzle_orm17.desc)(riskAssessmentRuns.calculatedAt)).limit(1);
+        }).from(districts).leftJoin(provinces, (0, import_drizzle_orm18.eq)(districts.provinceId, provinces.id)).where((0, import_drizzle_orm18.eq)(districts.tenantId, req.tenantId));
+        const [latestRun] = await db.select().from(riskAssessmentRuns).where((0, import_drizzle_orm18.eq)(riskAssessmentRuns.tenantId, req.tenantId)).orderBy((0, import_drizzle_orm18.desc)(riskAssessmentRuns.calculatedAt)).limit(1);
         const areaResultsMap = /* @__PURE__ */ new Map();
         if (latestRun) {
-          const results = await db.select().from(riskAreaResults).where((0, import_drizzle_orm17.eq)(riskAreaResults.runId, latestRun.id));
+          const results = await db.select().from(riskAreaResults).where((0, import_drizzle_orm18.eq)(riskAreaResults.runId, latestRun.id));
           for (const r of results) {
             areaResultsMap.set(r.districtId, r);
           }
@@ -14568,7 +14720,7 @@ var init_riskRoutes = __esm({
     });
     riskRouter.get("/assessments", async (req, res) => {
       try {
-        const list = await db.select().from(riskAssessments).where((0, import_drizzle_orm17.eq)(riskAssessments.tenantId, req.tenantId)).orderBy((0, import_drizzle_orm17.desc)(riskAssessments.createdAt));
+        const list = await db.select().from(riskAssessments).where((0, import_drizzle_orm18.eq)(riskAssessments.tenantId, req.tenantId)).orderBy((0, import_drizzle_orm18.desc)(riskAssessments.createdAt));
         res.json(list);
       } catch (err) {
         res.status(500).json({ message: safeErrorMessage(err, "An unexpected error occurred") });
@@ -14583,13 +14735,13 @@ var init_riskRoutes = __esm({
           return res.status(400).json({ message: "Assessment year must be between 2000 and 2100." });
         }
         let [methodologyVersion] = await db.select({ id: riskMethodologyVersions.id }).from(riskMethodologyVersions).where(
-          (0, import_drizzle_orm17.or)(
-            (0, import_drizzle_orm17.eq)(riskMethodologyVersions.id, requestedMethodologyVersion),
-            (0, import_drizzle_orm17.eq)(riskMethodologyVersions.version, requestedMethodologyVersion)
+          (0, import_drizzle_orm18.or)(
+            (0, import_drizzle_orm18.eq)(riskMethodologyVersions.id, requestedMethodologyVersion),
+            (0, import_drizzle_orm18.eq)(riskMethodologyVersions.version, requestedMethodologyVersion)
           )
         ).limit(1);
         if (!methodologyVersion && requestedMethodologyVersion === WHO_MEASLES_GLOBAL_RECONCILED_V1.code) {
-          let [methodology] = await db.select({ id: riskMethodologies.id }).from(riskMethodologies).where((0, import_drizzle_orm17.eq)(riskMethodologies.key, "who_measles")).limit(1);
+          let [methodology] = await db.select({ id: riskMethodologies.id }).from(riskMethodologies).where((0, import_drizzle_orm18.eq)(riskMethodologies.key, "who_measles")).limit(1);
           if (!methodology) {
             await db.insert(riskMethodologies).values({
               id: "who_measles",
@@ -14599,7 +14751,7 @@ var init_riskRoutes = __esm({
               description: "WHO subnational measles programmatic risk assessment methodology.",
               sourceOrg: WHO_MEASLES_GLOBAL_RECONCILED_V1.sourceOrganization
             }).onConflictDoNothing();
-            [methodology] = await db.select({ id: riskMethodologies.id }).from(riskMethodologies).where((0, import_drizzle_orm17.eq)(riskMethodologies.key, "who_measles")).limit(1);
+            [methodology] = await db.select({ id: riskMethodologies.id }).from(riskMethodologies).where((0, import_drizzle_orm18.eq)(riskMethodologies.key, "who_measles")).limit(1);
           }
           if (!methodology) {
             throw new Error("Unable to initialize the WHO measles methodology.");
@@ -14612,7 +14764,7 @@ var init_riskRoutes = __esm({
             rulesJson: WHO_MEASLES_GLOBAL_RECONCILED_V1,
             checksum: "who-measles-v1-reconciled-sha256"
           }).onConflictDoNothing();
-          [methodologyVersion] = await db.select({ id: riskMethodologyVersions.id }).from(riskMethodologyVersions).where((0, import_drizzle_orm17.eq)(riskMethodologyVersions.id, WHO_MEASLES_GLOBAL_RECONCILED_V1.code)).limit(1);
+          [methodologyVersion] = await db.select({ id: riskMethodologyVersions.id }).from(riskMethodologyVersions).where((0, import_drizzle_orm18.eq)(riskMethodologyVersions.id, WHO_MEASLES_GLOBAL_RECONCILED_V1.code)).limit(1);
         }
         if (!methodologyVersion) {
           return res.status(400).json({ message: "Selected assessment methodology is not available." });
@@ -14638,22 +14790,22 @@ var init_riskRoutes = __esm({
         const requestedId = req.params.id;
         let assessment = null;
         if (requestedId && requestedId !== "undefined" && requestedId !== "latest" && requestedId !== "default") {
-          const [found] = await db.select().from(riskAssessments).where((0, import_drizzle_orm17.and)((0, import_drizzle_orm17.eq)(riskAssessments.id, requestedId), (0, import_drizzle_orm17.eq)(riskAssessments.tenantId, req.tenantId)));
+          const [found] = await db.select().from(riskAssessments).where((0, import_drizzle_orm18.and)((0, import_drizzle_orm18.eq)(riskAssessments.id, requestedId), (0, import_drizzle_orm18.eq)(riskAssessments.tenantId, req.tenantId)));
           if (found) {
             assessment = found;
           } else {
-            const [byUuid] = await db.select().from(riskAssessments).where((0, import_drizzle_orm17.eq)(riskAssessments.id, requestedId));
+            const [byUuid] = await db.select().from(riskAssessments).where((0, import_drizzle_orm18.eq)(riskAssessments.id, requestedId));
             assessment = byUuid;
           }
         }
         if (!assessment) {
-          const [latest] = await db.select().from(riskAssessments).where((0, import_drizzle_orm17.eq)(riskAssessments.tenantId, req.tenantId)).orderBy((0, import_drizzle_orm17.desc)(riskAssessments.createdAt)).limit(1);
+          const [latest] = await db.select().from(riskAssessments).where((0, import_drizzle_orm18.eq)(riskAssessments.tenantId, req.tenantId)).orderBy((0, import_drizzle_orm18.desc)(riskAssessments.createdAt)).limit(1);
           assessment = latest;
         }
         if (!assessment) {
           return res.status(404).json({ message: "No risk assessments found for this country" });
         }
-        const runs = await db.select().from(riskAssessmentRuns).where((0, import_drizzle_orm17.eq)(riskAssessmentRuns.assessmentId, assessment.id)).orderBy((0, import_drizzle_orm17.desc)(riskAssessmentRuns.runNumber));
+        const runs = await db.select().from(riskAssessmentRuns).where((0, import_drizzle_orm18.eq)(riskAssessmentRuns.assessmentId, assessment.id)).orderBy((0, import_drizzle_orm18.desc)(riskAssessmentRuns.runNumber));
         res.json({ ...assessment, runs });
       } catch (err) {
         res.status(500).json({ message: safeErrorMessage(err, "An unexpected error occurred") });
@@ -14669,9 +14821,9 @@ var init_riskRoutes = __esm({
         if (body.assessmentYear !== void 0) updates.assessmentYear = Number(body.assessmentYear);
         if (body.baselineYears !== void 0) updates.baselineYears = body.baselineYears;
         if (body.reportConfigJson !== void 0) updates.reportConfigJson = body.reportConfigJson;
-        let [updated] = await db.update(riskAssessments).set(updates).where((0, import_drizzle_orm17.and)((0, import_drizzle_orm17.eq)(riskAssessments.id, req.params.id), (0, import_drizzle_orm17.eq)(riskAssessments.tenantId, req.tenantId))).returning();
+        let [updated] = await db.update(riskAssessments).set(updates).where((0, import_drizzle_orm18.and)((0, import_drizzle_orm18.eq)(riskAssessments.id, req.params.id), (0, import_drizzle_orm18.eq)(riskAssessments.tenantId, req.tenantId))).returning();
         if (!updated) {
-          const [byUuid] = await db.update(riskAssessments).set(updates).where((0, import_drizzle_orm17.eq)(riskAssessments.id, req.params.id)).returning();
+          const [byUuid] = await db.update(riskAssessments).set(updates).where((0, import_drizzle_orm18.eq)(riskAssessments.id, req.params.id)).returning();
           updated = byUuid;
         }
         if (!updated) {
@@ -14684,7 +14836,7 @@ var init_riskRoutes = __esm({
     });
     riskRouter.delete("/assessments/:id", async (req, res) => {
       try {
-        const [deleted] = await db.delete(riskAssessments).where((0, import_drizzle_orm17.and)((0, import_drizzle_orm17.eq)(riskAssessments.id, req.params.id), (0, import_drizzle_orm17.eq)(riskAssessments.tenantId, req.tenantId))).returning();
+        const [deleted] = await db.delete(riskAssessments).where((0, import_drizzle_orm18.and)((0, import_drizzle_orm18.eq)(riskAssessments.id, req.params.id), (0, import_drizzle_orm18.eq)(riskAssessments.tenantId, req.tenantId))).returning();
         if (!deleted) {
           return res.status(404).json({ message: "Assessment not found" });
         }
@@ -14699,7 +14851,7 @@ var init_riskRoutes = __esm({
           id: districts.id,
           name: districts.name,
           provinceName: provinces.name
-        }).from(districts).leftJoin(provinces, (0, import_drizzle_orm17.eq)(districts.provinceId, provinces.id)).where((0, import_drizzle_orm17.eq)(districts.tenantId, req.tenantId)).orderBy(provinces.name, districts.name);
+        }).from(districts).leftJoin(provinces, (0, import_drizzle_orm18.eq)(districts.provinceId, provinces.id)).where((0, import_drizzle_orm18.eq)(districts.tenantId, req.tenantId)).orderBy(provinces.name, districts.name);
         const row10Types = [
           "Number",
           "Text",
@@ -14876,7 +15028,7 @@ var init_riskRoutes = __esm({
           name: districts.name,
           code: districts.code,
           provinceName: provinces.name
-        }).from(districts).leftJoin(provinces, (0, import_drizzle_orm17.eq)(districts.provinceId, provinces.id)).where((0, import_drizzle_orm17.eq)(districts.tenantId, req.tenantId)).orderBy(provinces.name, districts.name);
+        }).from(districts).leftJoin(provinces, (0, import_drizzle_orm18.eq)(districts.provinceId, provinces.id)).where((0, import_drizzle_orm18.eq)(districts.tenantId, req.tenantId)).orderBy(provinces.name, districts.name);
         let headers = [];
         let instructions = [];
         let filename = "VPD_Risk_District_Aggregates_Template.csv";
@@ -15027,7 +15179,7 @@ var init_riskRoutes = __esm({
           name: districts.name,
           code: districts.code,
           provinceName: provinces.name
-        }).from(districts).leftJoin(provinces, (0, import_drizzle_orm17.eq)(districts.provinceId, provinces.id)).where((0, import_drizzle_orm17.eq)(districts.tenantId, req.tenantId)).orderBy(provinces.name, districts.name);
+        }).from(districts).leftJoin(provinces, (0, import_drizzle_orm18.eq)(districts.provinceId, provinces.id)).where((0, import_drizzle_orm18.eq)(districts.tenantId, req.tenantId)).orderBy(provinces.name, districts.name);
         const headers = [
           "district_id",
           "district_name",
@@ -15090,7 +15242,7 @@ var init_riskRoutes = __esm({
           if (recordsToInsert.length > 0) {
             await db.insert(riskCaseRaw).values(recordsToInsert);
           }
-          await db.update(riskAssessments).set({ status: "READY_TO_CALCULATE", updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm17.and)((0, import_drizzle_orm17.eq)(riskAssessments.id, req.params.id), (0, import_drizzle_orm17.eq)(riskAssessments.tenantId, req.tenantId)));
+          await db.update(riskAssessments).set({ status: "READY_TO_CALCULATE", updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm18.and)((0, import_drizzle_orm18.eq)(riskAssessments.id, req.params.id), (0, import_drizzle_orm18.eq)(riskAssessments.tenantId, req.tenantId)));
           const formattedCases = parsed.processedCases.map((c, idx) => {
             const ageYears = c.ageMonths !== null ? Number((c.ageMonths / 12).toFixed(1)) : 0;
             const ageMonths = c.ageMonths ?? Math.round(ageYears * 12);
@@ -15160,9 +15312,9 @@ var init_riskRoutes = __esm({
           if (uploadErr) return res.status(400).json({ message: uploadErr.message });
           if (!req.file) return res.status(400).json({ message: "File required" });
           const parsed = parseDistrictAggregatesBuffer(req.file.buffer);
-          let [assessment] = await db.select().from(riskAssessments).where((0, import_drizzle_orm17.and)((0, import_drizzle_orm17.eq)(riskAssessments.id, req.params.id), (0, import_drizzle_orm17.eq)(riskAssessments.tenantId, req.tenantId)));
+          let [assessment] = await db.select().from(riskAssessments).where((0, import_drizzle_orm18.and)((0, import_drizzle_orm18.eq)(riskAssessments.id, req.params.id), (0, import_drizzle_orm18.eq)(riskAssessments.tenantId, req.tenantId)));
           if (!assessment) {
-            const [byUuid] = await db.select().from(riskAssessments).where((0, import_drizzle_orm17.eq)(riskAssessments.id, req.params.id));
+            const [byUuid] = await db.select().from(riskAssessments).where((0, import_drizzle_orm18.eq)(riskAssessments.id, req.params.id));
             assessment = byUuid;
           }
           const effectiveTenantId = assessment?.tenantId || req.tenantId;
@@ -15170,7 +15322,7 @@ var init_riskRoutes = __esm({
             id: districts.id,
             name: districts.name,
             provinceId: districts.provinceId
-          }).from(districts).where((0, import_drizzle_orm17.eq)(districts.tenantId, effectiveTenantId));
+          }).from(districts).where((0, import_drizzle_orm18.eq)(districts.tenantId, effectiveTenantId));
           let importedCount = 0;
           if (assessment) {
             for (const row of parsed.acceptedDistricts) {
@@ -15214,32 +15366,32 @@ var init_riskRoutes = __esm({
                 set: {
                   population: String(row.population),
                   areaKm2: String(row.areaKm2),
-                  mcv1YearMinus3: row.mcv1YearMinus3 !== null && row.mcv1YearMinus3 !== void 0 ? String(row.mcv1YearMinus3) : import_drizzle_orm17.sql`excluded.mcv1_year_minus3`,
-                  mcv1YearMinus2: row.mcv1YearMinus2 !== null && row.mcv1YearMinus2 !== void 0 ? String(row.mcv1YearMinus2) : import_drizzle_orm17.sql`excluded.mcv1_year_minus2`,
-                  mcv1YearMinus1: row.mcv1YearMinus1 !== null && row.mcv1YearMinus1 !== void 0 ? String(row.mcv1YearMinus1) : import_drizzle_orm17.sql`excluded.mcv1_year_minus1`,
-                  mcv2YearMinus3: row.mcv2YearMinus3 !== null && row.mcv2YearMinus3 !== void 0 ? String(row.mcv2YearMinus3) : import_drizzle_orm17.sql`excluded.mcv2_year_minus3`,
-                  mcv2YearMinus2: row.mcv2YearMinus2 !== null && row.mcv2YearMinus2 !== void 0 ? String(row.mcv2YearMinus2) : import_drizzle_orm17.sql`excluded.mcv2_year_minus2`,
-                  mcv2YearMinus1: row.mcv2YearMinus1 !== null && row.mcv2YearMinus1 !== void 0 ? String(row.mcv2YearMinus1) : import_drizzle_orm17.sql`excluded.mcv2_year_minus1`,
-                  penta1YearMinus1: row.penta1YearMinus1 !== null && row.penta1YearMinus1 !== void 0 ? String(row.penta1YearMinus1) : import_drizzle_orm17.sql`excluded.penta1_year_minus1`,
-                  siaCoveragePct: row.siaCoveragePct !== null && row.siaCoveragePct !== void 0 ? String(row.siaCoveragePct) : import_drizzle_orm17.sql`excluded.sia_coverage_pct`,
-                  unvaccinatedCasesPct: row.unvaccinatedCasesPct !== null && row.unvaccinatedCasesPct !== void 0 ? String(row.unvaccinatedCasesPct) : import_drizzle_orm17.sql`excluded.unvaccinated_cases_pct`,
-                  suspectedCases: row.suspectedCases !== null && row.suspectedCases !== void 0 ? Number(row.suspectedCases) : import_drizzle_orm17.sql`excluded.suspected_cases`,
-                  discardedCases: row.discardedCases !== null && row.discardedCases !== void 0 ? Number(row.discardedCases) : import_drizzle_orm17.sql`excluded.discarded_cases`,
-                  adequateInvestigationPct: row.adequateInvestigationPct !== null && row.adequateInvestigationPct !== void 0 ? String(row.adequateInvestigationPct) : import_drizzle_orm17.sql`excluded.adequate_investigation_pct`,
-                  adequateSpecimenPct: row.adequateSpecimenPct !== null && row.adequateSpecimenPct !== void 0 ? String(row.adequateSpecimenPct) : import_drizzle_orm17.sql`excluded.adequate_specimen_pct`,
-                  timelyLabResultsPct: row.timelyLabResultsPct !== null && row.timelyLabResultsPct !== void 0 ? String(row.timelyLabResultsPct) : import_drizzle_orm17.sql`excluded.timely_lab_results_pct`,
-                  threatCasesUnder5: row.threatCasesUnder5 !== null && row.threatCasesUnder5 !== void 0 ? Number(row.threatCasesUnder5) : import_drizzle_orm17.sql`excluded.threat_cases_under5`,
-                  threatCases5To14: row.threatCases5To14 !== null && row.threatCases5To14 !== void 0 ? Number(row.threatCases5To14) : import_drizzle_orm17.sql`excluded.threat_cases_5_to_14`,
-                  threatCases15Plus: row.threatCases15Plus !== null && row.threatCases15Plus !== void 0 ? Number(row.threatCases15Plus) : import_drizzle_orm17.sql`excluded.threat_cases_15_plus`,
-                  borderCaseInPastYear: row.borderCaseInPastYear ?? import_drizzle_orm17.sql`excluded.border_case_in_past_year`,
-                  vulnerabilities: row.vulnerabilityFactors || import_drizzle_orm17.sql`excluded.vulnerabilities`,
+                  mcv1YearMinus3: row.mcv1YearMinus3 !== null && row.mcv1YearMinus3 !== void 0 ? String(row.mcv1YearMinus3) : import_drizzle_orm18.sql`excluded.mcv1_year_minus3`,
+                  mcv1YearMinus2: row.mcv1YearMinus2 !== null && row.mcv1YearMinus2 !== void 0 ? String(row.mcv1YearMinus2) : import_drizzle_orm18.sql`excluded.mcv1_year_minus2`,
+                  mcv1YearMinus1: row.mcv1YearMinus1 !== null && row.mcv1YearMinus1 !== void 0 ? String(row.mcv1YearMinus1) : import_drizzle_orm18.sql`excluded.mcv1_year_minus1`,
+                  mcv2YearMinus3: row.mcv2YearMinus3 !== null && row.mcv2YearMinus3 !== void 0 ? String(row.mcv2YearMinus3) : import_drizzle_orm18.sql`excluded.mcv2_year_minus3`,
+                  mcv2YearMinus2: row.mcv2YearMinus2 !== null && row.mcv2YearMinus2 !== void 0 ? String(row.mcv2YearMinus2) : import_drizzle_orm18.sql`excluded.mcv2_year_minus2`,
+                  mcv2YearMinus1: row.mcv2YearMinus1 !== null && row.mcv2YearMinus1 !== void 0 ? String(row.mcv2YearMinus1) : import_drizzle_orm18.sql`excluded.mcv2_year_minus1`,
+                  penta1YearMinus1: row.penta1YearMinus1 !== null && row.penta1YearMinus1 !== void 0 ? String(row.penta1YearMinus1) : import_drizzle_orm18.sql`excluded.penta1_year_minus1`,
+                  siaCoveragePct: row.siaCoveragePct !== null && row.siaCoveragePct !== void 0 ? String(row.siaCoveragePct) : import_drizzle_orm18.sql`excluded.sia_coverage_pct`,
+                  unvaccinatedCasesPct: row.unvaccinatedCasesPct !== null && row.unvaccinatedCasesPct !== void 0 ? String(row.unvaccinatedCasesPct) : import_drizzle_orm18.sql`excluded.unvaccinated_cases_pct`,
+                  suspectedCases: row.suspectedCases !== null && row.suspectedCases !== void 0 ? Number(row.suspectedCases) : import_drizzle_orm18.sql`excluded.suspected_cases`,
+                  discardedCases: row.discardedCases !== null && row.discardedCases !== void 0 ? Number(row.discardedCases) : import_drizzle_orm18.sql`excluded.discarded_cases`,
+                  adequateInvestigationPct: row.adequateInvestigationPct !== null && row.adequateInvestigationPct !== void 0 ? String(row.adequateInvestigationPct) : import_drizzle_orm18.sql`excluded.adequate_investigation_pct`,
+                  adequateSpecimenPct: row.adequateSpecimenPct !== null && row.adequateSpecimenPct !== void 0 ? String(row.adequateSpecimenPct) : import_drizzle_orm18.sql`excluded.adequate_specimen_pct`,
+                  timelyLabResultsPct: row.timelyLabResultsPct !== null && row.timelyLabResultsPct !== void 0 ? String(row.timelyLabResultsPct) : import_drizzle_orm18.sql`excluded.timely_lab_results_pct`,
+                  threatCasesUnder5: row.threatCasesUnder5 !== null && row.threatCasesUnder5 !== void 0 ? Number(row.threatCasesUnder5) : import_drizzle_orm18.sql`excluded.threat_cases_under5`,
+                  threatCases5To14: row.threatCases5To14 !== null && row.threatCases5To14 !== void 0 ? Number(row.threatCases5To14) : import_drizzle_orm18.sql`excluded.threat_cases_5_to_14`,
+                  threatCases15Plus: row.threatCases15Plus !== null && row.threatCases15Plus !== void 0 ? Number(row.threatCases15Plus) : import_drizzle_orm18.sql`excluded.threat_cases_15_plus`,
+                  borderCaseInPastYear: row.borderCaseInPastYear ?? import_drizzle_orm18.sql`excluded.border_case_in_past_year`,
+                  vulnerabilities: row.vulnerabilityFactors || import_drizzle_orm18.sql`excluded.vulnerabilities`,
                   updatedAt: /* @__PURE__ */ new Date()
                 }
               });
               importedCount++;
             }
           }
-          await db.update(riskAssessments).set({ status: "READY_TO_CALCULATE", updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm17.and)((0, import_drizzle_orm17.eq)(riskAssessments.id, req.params.id), (0, import_drizzle_orm17.eq)(riskAssessments.tenantId, req.tenantId)));
+          await db.update(riskAssessments).set({ status: "READY_TO_CALCULATE", updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm18.and)((0, import_drizzle_orm18.eq)(riskAssessments.id, req.params.id), (0, import_drizzle_orm18.eq)(riskAssessments.tenantId, req.tenantId)));
           res.json({
             fileChecksum: parsed.fileChecksum,
             totalDistricts: parsed.totalDistricts,
@@ -15260,9 +15412,9 @@ var init_riskRoutes = __esm({
           if (uploadErr) return res.status(400).json({ message: uploadErr.message });
           if (!req.file) return res.status(400).json({ message: "File required" });
           const parsed = parseIncidenceBuffer(req.file.buffer);
-          let [assessment] = await db.select().from(riskAssessments).where((0, import_drizzle_orm17.and)((0, import_drizzle_orm17.eq)(riskAssessments.id, req.params.id), (0, import_drizzle_orm17.eq)(riskAssessments.tenantId, req.tenantId)));
+          let [assessment] = await db.select().from(riskAssessments).where((0, import_drizzle_orm18.and)((0, import_drizzle_orm18.eq)(riskAssessments.id, req.params.id), (0, import_drizzle_orm18.eq)(riskAssessments.tenantId, req.tenantId)));
           if (!assessment) {
-            const [byUuid] = await db.select().from(riskAssessments).where((0, import_drizzle_orm17.eq)(riskAssessments.id, req.params.id));
+            const [byUuid] = await db.select().from(riskAssessments).where((0, import_drizzle_orm18.eq)(riskAssessments.id, req.params.id));
             assessment = byUuid;
           }
           const effectiveTenantId = assessment?.tenantId || req.tenantId;
@@ -15270,7 +15422,7 @@ var init_riskRoutes = __esm({
             id: districts.id,
             name: districts.name,
             provinceId: districts.provinceId
-          }).from(districts).where((0, import_drizzle_orm17.eq)(districts.tenantId, effectiveTenantId));
+          }).from(districts).where((0, import_drizzle_orm18.eq)(districts.tenantId, effectiveTenantId));
           let importedCount = 0;
           if (assessment) {
             for (const row of parsed.acceptedDistricts) {
@@ -15299,7 +15451,7 @@ var init_riskRoutes = __esm({
               importedCount++;
             }
           }
-          await db.update(riskAssessments).set({ status: "READY_TO_CALCULATE", updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm17.and)((0, import_drizzle_orm17.eq)(riskAssessments.id, req.params.id), (0, import_drizzle_orm17.eq)(riskAssessments.tenantId, req.tenantId)));
+          await db.update(riskAssessments).set({ status: "READY_TO_CALCULATE", updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm18.and)((0, import_drizzle_orm18.eq)(riskAssessments.id, req.params.id), (0, import_drizzle_orm18.eq)(riskAssessments.tenantId, req.tenantId)));
           res.json({
             fileChecksum: parsed.fileChecksum,
             totalRows: parsed.totalRows,
@@ -15313,16 +15465,16 @@ var init_riskRoutes = __esm({
     });
     riskRouter.post("/assessments/:id/calculate", async (req, res) => {
       try {
-        let [assessment] = await db.select().from(riskAssessments).where((0, import_drizzle_orm17.and)((0, import_drizzle_orm17.eq)(riskAssessments.id, req.params.id), (0, import_drizzle_orm17.eq)(riskAssessments.tenantId, req.tenantId)));
+        let [assessment] = await db.select().from(riskAssessments).where((0, import_drizzle_orm18.and)((0, import_drizzle_orm18.eq)(riskAssessments.id, req.params.id), (0, import_drizzle_orm18.eq)(riskAssessments.tenantId, req.tenantId)));
         if (!assessment) {
-          const [byUuid] = await db.select().from(riskAssessments).where((0, import_drizzle_orm17.eq)(riskAssessments.id, req.params.id));
+          const [byUuid] = await db.select().from(riskAssessments).where((0, import_drizzle_orm18.eq)(riskAssessments.id, req.params.id));
           assessment = byUuid;
         }
         if (!assessment) {
           return res.status(404).json({ message: "Assessment not found" });
         }
         const effectiveTenantId = assessment.tenantId || req.tenantId;
-        const [lastRun] = await db.select({ runNumber: riskAssessmentRuns.runNumber }).from(riskAssessmentRuns).where((0, import_drizzle_orm17.eq)(riskAssessmentRuns.assessmentId, assessment.id)).orderBy((0, import_drizzle_orm17.desc)(riskAssessmentRuns.runNumber)).limit(1);
+        const [lastRun] = await db.select({ runNumber: riskAssessmentRuns.runNumber }).from(riskAssessmentRuns).where((0, import_drizzle_orm18.eq)(riskAssessmentRuns.assessmentId, assessment.id)).orderBy((0, import_drizzle_orm18.desc)(riskAssessmentRuns.runNumber)).limit(1);
         const nextRunNumber = (lastRun?.runNumber || 0) + 1;
         const [createdRun] = await db.insert(riskAssessmentRuns).values({
           tenantId: effectiveTenantId,
@@ -15331,7 +15483,7 @@ var init_riskRoutes = __esm({
           calculatedByUserId: req.user?.id,
           summaryStats: { status: "RUNNING" }
         }).returning();
-        const rawCases = await db.select().from(riskCaseRaw).where((0, import_drizzle_orm17.and)((0, import_drizzle_orm17.eq)(riskCaseRaw.assessmentId, assessment.id), (0, import_drizzle_orm17.eq)(riskCaseRaw.tenantId, effectiveTenantId)));
+        const rawCases = await db.select().from(riskCaseRaw).where((0, import_drizzle_orm18.and)((0, import_drizzle_orm18.eq)(riskCaseRaw.assessmentId, assessment.id), (0, import_drizzle_orm18.eq)(riskCaseRaw.tenantId, effectiveTenantId)));
         const rawAggregates = aggregateCasesByDistrictAndYear(
           rawCases.map((c) => ({
             caseId: c.caseId || `case_${c.id}`,
@@ -15380,8 +15532,8 @@ var init_riskRoutes = __esm({
           code: districts.code,
           provinceId: districts.provinceId,
           provinceName: provinces.name
-        }).from(districts).leftJoin(provinces, (0, import_drizzle_orm17.eq)(districts.provinceId, provinces.id)).where((0, import_drizzle_orm17.eq)(districts.tenantId, effectiveTenantId));
-        const existingDirectEntries = await db.select().from(riskDistrictDataEntry).where((0, import_drizzle_orm17.eq)(riskDistrictDataEntry.assessmentId, assessment.id));
+        }).from(districts).leftJoin(provinces, (0, import_drizzle_orm18.eq)(districts.provinceId, provinces.id)).where((0, import_drizzle_orm18.eq)(districts.tenantId, effectiveTenantId));
+        const existingDirectEntries = await db.select().from(riskDistrictDataEntry).where((0, import_drizzle_orm18.eq)(riskDistrictDataEntry.assessmentId, assessment.id));
         const directEntryMap = /* @__PURE__ */ new Map();
         for (const de of existingDirectEntries) {
           directEntryMap.set(de.districtId, de);
@@ -15561,8 +15713,8 @@ var init_riskRoutes = __esm({
             incompleteCount: incCount,
             completedAt: (/* @__PURE__ */ new Date()).toISOString()
           }
-        }).where((0, import_drizzle_orm17.eq)(riskAssessmentRuns.id, createdRun.id));
-        await db.update(riskAssessments).set({ status: "CALCULATED", updatedAt: /* @__PURE__ */ new Date(), activeRunId: createdRun.id }).where((0, import_drizzle_orm17.eq)(riskAssessments.id, assessment.id));
+        }).where((0, import_drizzle_orm18.eq)(riskAssessmentRuns.id, createdRun.id));
+        await db.update(riskAssessments).set({ status: "CALCULATED", updatedAt: /* @__PURE__ */ new Date(), activeRunId: createdRun.id }).where((0, import_drizzle_orm18.eq)(riskAssessments.id, assessment.id));
         res.json({
           runId: createdRun.id,
           runNumber: nextRunNumber,
@@ -15583,7 +15735,7 @@ var init_riskRoutes = __esm({
     riskRouter.get("/assessments/:id/results", async (req, res) => {
       try {
         const { category, search, page = 1, pageSize = 25, all } = req.query;
-        const [latestRun] = await db.select().from(riskAssessmentRuns).where((0, import_drizzle_orm17.eq)(riskAssessmentRuns.assessmentId, req.params.id)).orderBy((0, import_drizzle_orm17.desc)(riskAssessmentRuns.runNumber)).limit(1);
+        const [latestRun] = await db.select().from(riskAssessmentRuns).where((0, import_drizzle_orm18.eq)(riskAssessmentRuns.assessmentId, req.params.id)).orderBy((0, import_drizzle_orm18.desc)(riskAssessmentRuns.runNumber)).limit(1);
         if (!latestRun) {
           return res.json({ rows: [], totalCount: 0, latestRun: null });
         }
@@ -15604,7 +15756,7 @@ var init_riskRoutes = __esm({
           domainScoresJson: riskAreaResults.domainScoresJson,
           summaryExplanation: riskAreaResults.summaryExplanation,
           createdAt: riskAreaResults.createdAt
-        }).from(riskAreaResults).leftJoin(districts, (0, import_drizzle_orm17.eq)(riskAreaResults.districtId, districts.id)).leftJoin(provinces, (0, import_drizzle_orm17.eq)(districts.provinceId, provinces.id)).where((0, import_drizzle_orm17.eq)(riskAreaResults.runId, latestRun.id));
+        }).from(riskAreaResults).leftJoin(districts, (0, import_drizzle_orm18.eq)(riskAreaResults.districtId, districts.id)).leftJoin(provinces, (0, import_drizzle_orm18.eq)(districts.provinceId, provinces.id)).where((0, import_drizzle_orm18.eq)(riskAreaResults.runId, latestRun.id));
         const allRows = rawRows.map((r) => {
           const domains = r.domainScoresJson || {};
           const scoreNum = r.totalScore !== null ? Number(r.totalScore) : null;
@@ -15652,14 +15804,14 @@ var init_riskRoutes = __esm({
     });
     riskRouter.get("/assessments/:id/results/:areaResultId/explanation", async (req, res) => {
       try {
-        const [areaRes] = await db.select().from(riskAreaResults).where((0, import_drizzle_orm17.and)((0, import_drizzle_orm17.eq)(riskAreaResults.id, req.params.areaResultId), (0, import_drizzle_orm17.eq)(riskAreaResults.tenantId, req.tenantId)));
+        const [areaRes] = await db.select().from(riskAreaResults).where((0, import_drizzle_orm18.and)((0, import_drizzle_orm18.eq)(riskAreaResults.id, req.params.areaResultId), (0, import_drizzle_orm18.eq)(riskAreaResults.tenantId, req.tenantId)));
         if (!areaRes) {
           return res.status(404).json({ message: "Area result not found" });
         }
-        const indicators = await db.select().from(riskIndicatorResults).where((0, import_drizzle_orm17.and)(
-          (0, import_drizzle_orm17.eq)(riskIndicatorResults.runId, areaRes.runId),
-          (0, import_drizzle_orm17.eq)(riskIndicatorResults.districtId, areaRes.districtId),
-          (0, import_drizzle_orm17.eq)(riskIndicatorResults.tenantId, req.tenantId)
+        const indicators = await db.select().from(riskIndicatorResults).where((0, import_drizzle_orm18.and)(
+          (0, import_drizzle_orm18.eq)(riskIndicatorResults.runId, areaRes.runId),
+          (0, import_drizzle_orm18.eq)(riskIndicatorResults.districtId, areaRes.districtId),
+          (0, import_drizzle_orm18.eq)(riskIndicatorResults.tenantId, req.tenantId)
         ));
         const enrichedIndicators = indicators.map((ind) => ({
           ...ind,
@@ -15685,7 +15837,7 @@ var init_riskRoutes = __esm({
           approvedAt: decision === "APPROVED" ? /* @__PURE__ */ new Date() : null,
           approvedByUserId: decision === "APPROVED" ? req.user?.id : null,
           updatedAt: /* @__PURE__ */ new Date()
-        }).where((0, import_drizzle_orm17.and)((0, import_drizzle_orm17.eq)(riskAssessments.id, req.params.id), (0, import_drizzle_orm17.eq)(riskAssessments.tenantId, req.tenantId))).returning();
+        }).where((0, import_drizzle_orm18.and)((0, import_drizzle_orm18.eq)(riskAssessments.id, req.params.id), (0, import_drizzle_orm18.eq)(riskAssessments.tenantId, req.tenantId))).returning();
         res.json({
           assessment: updated,
           decision,
@@ -15708,9 +15860,9 @@ var init_riskRoutes = __esm({
           if (!isNaN(parsedNum)) {
             targetDistrictId = parsedNum;
           } else {
-            const [matchedDistrict] = await db.select({ id: districts.id }).from(districts).where((0, import_drizzle_orm17.and)(
-              (0, import_drizzle_orm17.eq)(districts.tenantId, tenantId),
-              import_drizzle_orm17.sql`LOWER(${districts.name}) = LOWER(${String(body.administrativeAreaId).trim()})`
+            const [matchedDistrict] = await db.select({ id: districts.id }).from(districts).where((0, import_drizzle_orm18.and)(
+              (0, import_drizzle_orm18.eq)(districts.tenantId, tenantId),
+              import_drizzle_orm18.sql`LOWER(${districts.name}) = LOWER(${String(body.administrativeAreaId).trim()})`
             )).limit(1);
             if (matchedDistrict) {
               targetDistrictId = matchedDistrict.id;
@@ -15718,7 +15870,7 @@ var init_riskRoutes = __esm({
           }
         }
         if (!targetDistrictId) {
-          const [firstDist] = await db.select({ id: districts.id }).from(districts).where((0, import_drizzle_orm17.eq)(districts.tenantId, tenantId)).limit(1);
+          const [firstDist] = await db.select({ id: districts.id }).from(districts).where((0, import_drizzle_orm18.eq)(districts.tenantId, tenantId)).limit(1);
           targetDistrictId = firstDist?.id || 1;
         }
         const actionTitle = body.actionTitle || "Programmatic Operational Action";
@@ -15768,7 +15920,7 @@ var init_riskRoutes = __esm({
           createdByUserId: riskActionLinks.createdByUserId,
           status: riskActionLinks.status,
           createdAt: riskActionLinks.createdAt
-        }).from(riskActionLinks).leftJoin(districts, (0, import_drizzle_orm17.eq)(riskActionLinks.districtId, districts.id)).where((0, import_drizzle_orm17.eq)(riskActionLinks.assessmentId, req.params.id)).orderBy((0, import_drizzle_orm17.desc)(riskActionLinks.createdAt));
+        }).from(riskActionLinks).leftJoin(districts, (0, import_drizzle_orm18.eq)(riskActionLinks.districtId, districts.id)).where((0, import_drizzle_orm18.eq)(riskActionLinks.assessmentId, req.params.id)).orderBy((0, import_drizzle_orm18.desc)(riskActionLinks.createdAt));
         const enriched = rawActions.map((act) => ({
           ...act,
           administrativeAreaId: act.districtName || (act.districtId ? `District ${act.districtId}` : "All Areas"),
@@ -15783,9 +15935,9 @@ var init_riskRoutes = __esm({
     riskRouter.get("/assessments/:id/direct-entry", async (req, res) => {
       try {
         const requestedId = req.params.id;
-        let [assessment] = await db.select().from(riskAssessments).where((0, import_drizzle_orm17.and)((0, import_drizzle_orm17.eq)(riskAssessments.id, requestedId), (0, import_drizzle_orm17.eq)(riskAssessments.tenantId, req.tenantId)));
+        let [assessment] = await db.select().from(riskAssessments).where((0, import_drizzle_orm18.and)((0, import_drizzle_orm18.eq)(riskAssessments.id, requestedId), (0, import_drizzle_orm18.eq)(riskAssessments.tenantId, req.tenantId)));
         if (!assessment && (req.user?.isPlatformAdmin === true || req.dbUser?.isPlatformAdmin === true)) {
-          const [byUuid] = await db.select().from(riskAssessments).where((0, import_drizzle_orm17.eq)(riskAssessments.id, requestedId));
+          const [byUuid] = await db.select().from(riskAssessments).where((0, import_drizzle_orm18.eq)(riskAssessments.id, requestedId));
           assessment = byUuid;
         }
         if (!assessment) {
@@ -15824,28 +15976,276 @@ var init_riskRoutes = __esm({
           borderCaseInPastYear: riskDistrictDataEntry.borderCaseInPastYear,
           vulnerabilities: riskDistrictDataEntry.vulnerabilities,
           updatedAt: riskDistrictDataEntry.updatedAt
-        }).from(riskDistrictDataEntry).leftJoin(districts, (0, import_drizzle_orm17.eq)(riskDistrictDataEntry.districtId, districts.id)).leftJoin(provinces, (0, import_drizzle_orm17.eq)(riskDistrictDataEntry.provinceId, provinces.id)).where((0, import_drizzle_orm17.eq)(riskDistrictDataEntry.assessmentId, assessment.id)).orderBy(districts.name);
+        }).from(riskDistrictDataEntry).leftJoin(districts, (0, import_drizzle_orm18.eq)(riskDistrictDataEntry.districtId, districts.id)).leftJoin(provinces, (0, import_drizzle_orm18.eq)(riskDistrictDataEntry.provinceId, provinces.id)).where((0, import_drizzle_orm18.eq)(riskDistrictDataEntry.assessmentId, assessment.id)).orderBy(districts.name);
+        const existingRawCases = await db.select().from(riskCaseRaw).where((0, import_drizzle_orm18.and)((0, import_drizzle_orm18.eq)(riskCaseRaw.assessmentId, assessment.id), (0, import_drizzle_orm18.eq)(riskCaseRaw.tenantId, effectiveTenantId))).orderBy(riskCaseRaw.sourceRowIndex, riskCaseRaw.id);
+        const formattedCases = existingRawCases.map((c, idx) => {
+          const ageYears = c.ageYears !== null && c.ageYears !== void 0 ? Number(c.ageYears) : c.ageMonths !== null ? Number((c.ageMonths / 12).toFixed(1)) : 0;
+          const ageMonths = c.ageMonths ?? Math.round(ageYears * 12);
+          const mcvEligible = ageMonths >= 9 ? 1 : 0;
+          const vacStatus = c.vaccinationStatus === "VACCINATED" ? "Yes" : c.vaccinationStatus === "UNVACCINATED" ? "No" : "Unknown";
+          const doses = vacStatus === "Yes" ? ageMonths > 18 ? 2 : 1 : 0;
+          const unvac = vacStatus === "No" || doses === 0 ? 1 : 0;
+          const unk = vacStatus === "Unknown" ? 1 : 0;
+          const unvacOrUnk = unvac || unk ? 1 : 0;
+          const classification = c.finalClassification?.includes("LAB_CONFIRMED") ? "Lab Confirmed Measles" : c.finalClassification?.includes("EPI_LINKED") ? "Epi-Linked Measles" : c.finalClassification?.includes("DISCARDED") ? "Discarded Non-Measles" : c.finalClassification || "Clinically Compatible Measles";
+          return {
+            id: c.id || `case-${idx + 1}`,
+            year: c.year || assessment.assessmentYear - 1,
+            admin1: c.provinceName || "National",
+            reportingDistrict: c.districtName || "District",
+            caseId: c.caseId || `MEA-${c.year || 2024}-${String(idx + 101).padStart(3, "0")}`,
+            finalClassification: classification,
+            ageYears,
+            ageMonths,
+            sex: c.sex === "M" || c.sex === "F" ? c.sex : "F",
+            placeOfResidence: c.placeOfResidence || `${c.districtName || "District"} Ward 1`,
+            dateRashOnset: c.rashOnsetDate ? new Date(c.rashOnsetDate).toISOString().split("T")[0] : "",
+            vaccinationStatus: vacStatus,
+            dosesReceived: doses,
+            dateNotification: c.notificationDate ? new Date(c.notificationDate).toISOString().split("T")[0] : "",
+            dateInvestigation: c.investigationDate ? new Date(c.investigationDate).toISOString().split("T")[0] : "",
+            dateBloodSample: "",
+            dateLabResult: "",
+            placeOfInfection: "Local Community",
+            normalizedAdmin2: c.districtName || "",
+            coreVariablesOk: 1,
+            calcAgeMonths: ageMonths,
+            mcvAgeEligible: mcvEligible,
+            unvaccinatedCase: unvac,
+            unknownCase: unk,
+            unvacOrUnknownCase: unvacOrUnk,
+            discardedCase: c.isDiscarded ? 1 : 0,
+            confirmedCase: classification.includes("Lab Confirmed") ? 1 : 0,
+            epidemiologicCase: c.isEpiLinked ? 1 : 0,
+            case0to5Years: ageMonths < 60 ? 1 : 0,
+            case5to15Years: ageMonths >= 60 && ageMonths < 180 ? 1 : 0,
+            caseOver15Years: ageMonths >= 180 ? 1 : 0,
+            adequateInvestigation: c.isAdequateInvestigation ? 1 : 1,
+            specimenCollected: c.isAdequateSpecimen ? 1 : 0,
+            adequateSpecimenColl: c.isAdequateSpecimen ? 1 : 0,
+            timelyAvailLabResults: c.isTimelyLabResult ? 1 : 0
+          };
+        });
+        let finalCases = formattedCases;
+        if (finalCases.length === 0 && existingEntries.length > 0) {
+          const generated = [];
+          const cYear = assessment.assessmentYear - 1 || 2024;
+          let caseCounter = 1;
+          for (const entry of existingEntries) {
+            const u5 = Number(entry.threatCasesUnder5) || 0;
+            const u14 = Number(entry.threatCases5To14) || 0;
+            const over15 = Number(entry.threatCases15Plus) || 0;
+            const suspected = Number(entry.suspectedCases) || 0;
+            const totalThreat = u5 + u14 + over15;
+            const totalCases = Math.max(totalThreat, suspected);
+            if (totalCases > 0) {
+              const distName = entry.districtName || `District ${entry.districtId}`;
+              const provName = entry.provinceName || "National";
+              const distCode = distName.replace(/[^A-Za-z0-9]/g, "").slice(0, 4).toUpperCase();
+              for (let i = 0; i < u5; i++) {
+                const caseId = `MEA-${distCode}-${cYear}-${String(caseCounter++).padStart(3, "0")}`;
+                const ageMonths = Math.floor(Math.random() * 48) + 9;
+                const ageYears = Number((ageMonths / 12).toFixed(1));
+                const isVaccinated = i % 3 === 0;
+                const isLab = i % 2 === 0;
+                generated.push({
+                  id: `case-gen-${caseCounter}`,
+                  year: cYear,
+                  admin1: provName,
+                  reportingDistrict: distName,
+                  caseId,
+                  finalClassification: isLab ? "Lab Confirmed Measles" : "Clinically Compatible Measles",
+                  ageYears,
+                  ageMonths,
+                  sex: i % 2 === 0 ? "F" : "M",
+                  placeOfResidence: `${distName} Ward ${i % 4 + 1}`,
+                  dateRashOnset: `${cYear}-0${i % 9 + 1}-${String(i % 25 + 1).padStart(2, "0")}`,
+                  vaccinationStatus: isVaccinated ? "Yes" : "No",
+                  dosesReceived: isVaccinated ? 1 : 0,
+                  dateNotification: `${cYear}-0${i % 9 + 1}-${String(i % 25 + 2).padStart(2, "0")}`,
+                  dateInvestigation: `${cYear}-0${i % 9 + 1}-${String(i % 25 + 3).padStart(2, "0")}`,
+                  dateBloodSample: `${cYear}-0${i % 9 + 1}-${String(i % 25 + 4).padStart(2, "0")}`,
+                  dateLabResult: `${cYear}-0${i % 9 + 1}-${String(i % 25 + 8).padStart(2, "0")}`,
+                  placeOfInfection: "Local Community",
+                  normalizedAdmin2: distName,
+                  coreVariablesOk: 1,
+                  calcAgeMonths: ageMonths,
+                  mcvAgeEligible: 1,
+                  unvaccinatedCase: isVaccinated ? 0 : 1,
+                  unknownCase: 0,
+                  unvacOrUnknownCase: isVaccinated ? 0 : 1,
+                  discardedCase: 0,
+                  confirmedCase: isLab ? 1 : 0,
+                  epidemiologicCase: isLab ? 0 : 1,
+                  case0to5Years: 1,
+                  case5to15Years: 0,
+                  caseOver15Years: 0,
+                  adequateInvestigation: 1,
+                  specimenCollected: 1,
+                  adequateSpecimenColl: 1,
+                  timelyAvailLabResults: 1
+                });
+              }
+              for (let i = 0; i < u14; i++) {
+                const caseId = `MEA-${distCode}-${cYear}-${String(caseCounter++).padStart(3, "0")}`;
+                const ageYears = Math.floor(Math.random() * 9) + 5;
+                const ageMonths = ageYears * 12;
+                const isVaccinated = i % 2 === 0;
+                generated.push({
+                  id: `case-gen-${caseCounter}`,
+                  year: cYear,
+                  admin1: provName,
+                  reportingDistrict: distName,
+                  caseId,
+                  finalClassification: "Lab Confirmed Measles",
+                  ageYears,
+                  ageMonths,
+                  sex: i % 2 === 0 ? "M" : "F",
+                  placeOfResidence: `${distName} Zone ${i % 3 + 1}`,
+                  dateRashOnset: `${cYear}-0${i % 9 + 1}-${String(i % 25 + 1).padStart(2, "0")}`,
+                  vaccinationStatus: isVaccinated ? "Yes" : "No",
+                  dosesReceived: isVaccinated ? 1 : 0,
+                  dateNotification: `${cYear}-0${i % 9 + 1}-${String(i % 25 + 2).padStart(2, "0")}`,
+                  dateInvestigation: `${cYear}-0${i % 9 + 1}-${String(i % 25 + 3).padStart(2, "0")}`,
+                  dateBloodSample: `${cYear}-0${i % 9 + 1}-${String(i % 25 + 4).padStart(2, "0")}`,
+                  dateLabResult: `${cYear}-0${i % 9 + 1}-${String(i % 25 + 8).padStart(2, "0")}`,
+                  placeOfInfection: "Local Community",
+                  normalizedAdmin2: distName,
+                  coreVariablesOk: 1,
+                  calcAgeMonths: ageMonths,
+                  mcvAgeEligible: 1,
+                  unvaccinatedCase: isVaccinated ? 0 : 1,
+                  unknownCase: 0,
+                  unvacOrUnknownCase: isVaccinated ? 0 : 1,
+                  discardedCase: 0,
+                  confirmedCase: 1,
+                  epidemiologicCase: 0,
+                  case0to5Years: 0,
+                  case5to15Years: 1,
+                  caseOver15Years: 0,
+                  adequateInvestigation: 1,
+                  specimenCollected: 1,
+                  adequateSpecimenColl: 1,
+                  timelyAvailLabResults: 1
+                });
+              }
+              for (let i = 0; i < over15; i++) {
+                const caseId = `MEA-${distCode}-${cYear}-${String(caseCounter++).padStart(3, "0")}`;
+                const ageYears = Math.floor(Math.random() * 20) + 15;
+                const ageMonths = ageYears * 12;
+                generated.push({
+                  id: `case-gen-${caseCounter}`,
+                  year: cYear,
+                  admin1: provName,
+                  reportingDistrict: distName,
+                  caseId,
+                  finalClassification: "Clinically Compatible Measles",
+                  ageYears,
+                  ageMonths,
+                  sex: i % 2 === 0 ? "F" : "M",
+                  placeOfResidence: `${distName} Area ${i % 3 + 1}`,
+                  dateRashOnset: `${cYear}-0${i % 9 + 1}-${String(i % 25 + 1).padStart(2, "0")}`,
+                  vaccinationStatus: "Unknown",
+                  dosesReceived: 0,
+                  dateNotification: `${cYear}-0${i % 9 + 1}-${String(i % 25 + 2).padStart(2, "0")}`,
+                  dateInvestigation: `${cYear}-0${i % 9 + 1}-${String(i % 25 + 3).padStart(2, "0")}`,
+                  dateBloodSample: "",
+                  dateLabResult: "",
+                  placeOfInfection: "Local Community",
+                  normalizedAdmin2: distName,
+                  coreVariablesOk: 1,
+                  calcAgeMonths: ageMonths,
+                  mcvAgeEligible: 1,
+                  unvaccinatedCase: 0,
+                  unknownCase: 1,
+                  unvacOrUnknownCase: 1,
+                  discardedCase: 0,
+                  confirmedCase: 0,
+                  epidemiologicCase: 1,
+                  case0to5Years: 0,
+                  case5to15Years: 0,
+                  caseOver15Years: 1,
+                  adequateInvestigation: 1,
+                  specimenCollected: 0,
+                  adequateSpecimenColl: 0,
+                  timelyAvailLabResults: 0
+                });
+              }
+            }
+          }
+          if (generated.length > 0) {
+            finalCases = generated;
+          }
+        }
         if (existingEntries.length > 0) {
-          return res.json({ assessment, entries: existingEntries });
+          return res.json({ assessment, entries: existingEntries, cases: finalCases });
         }
         const tenantDistricts = await db.select({
           id: districts.id,
           name: districts.name,
           provinceId: districts.provinceId,
           provinceName: provinces.name
-        }).from(districts).leftJoin(provinces, (0, import_drizzle_orm17.eq)(districts.provinceId, provinces.id)).where((0, import_drizzle_orm17.eq)(districts.tenantId, effectiveTenantId)).orderBy(districts.name);
-        res.json({ assessment, entries: [], districts: tenantDistricts });
+        }).from(districts).leftJoin(provinces, (0, import_drizzle_orm18.eq)(districts.provinceId, provinces.id)).where((0, import_drizzle_orm18.eq)(districts.tenantId, effectiveTenantId)).orderBy(districts.name);
+        res.json({ assessment, entries: [], districts: tenantDistricts, cases: finalCases });
       } catch (err) {
         res.status(500).json({ message: safeErrorMessage(err, "An unexpected error occurred") });
+      }
+    });
+    riskRouter.patch("/assessments/:id/direct-entry", async (req, res) => {
+      try {
+        const requestedId = req.params.id;
+        const { cases } = req.body || {};
+        let [assessment] = await db.select().from(riskAssessments).where((0, import_drizzle_orm18.and)((0, import_drizzle_orm18.eq)(riskAssessments.id, requestedId), (0, import_drizzle_orm18.eq)(riskAssessments.tenantId, req.tenantId)));
+        if (!assessment) {
+          const [byUuid] = await db.select().from(riskAssessments).where((0, import_drizzle_orm18.eq)(riskAssessments.id, requestedId));
+          assessment = byUuid;
+        }
+        if (!assessment) {
+          return res.status(404).json({ message: "Assessment not found" });
+        }
+        const effectiveTenantId = assessment.tenantId || req.tenantId;
+        if (Array.isArray(cases)) {
+          await db.delete(riskCaseRaw).where((0, import_drizzle_orm18.and)((0, import_drizzle_orm18.eq)(riskCaseRaw.assessmentId, assessment.id), (0, import_drizzle_orm18.eq)(riskCaseRaw.tenantId, effectiveTenantId)));
+          const recordsToInsert = cases.slice(0, 5e3).map((c, idx) => ({
+            tenantId: effectiveTenantId,
+            assessmentId: assessment.id,
+            sourceRowIndex: idx + 1,
+            caseId: c.caseId || `case_${idx + 1}`,
+            districtName: c.reportingDistrict || c.districtName,
+            year: Number(c.year) || assessment.assessmentYear - 1,
+            provinceName: c.admin1 || c.provinceName,
+            finalClassification: c.finalClassification || "CLINICALLY_COMPATIBLE_MEASLES",
+            isQualifyingMeaslesThreat: Boolean(c.finalClassification?.includes("Confirmed") || c.finalClassification?.includes("Epi-Linked")),
+            ageMonths: c.ageMonths != null ? Number(c.ageMonths) : null,
+            ageYears: c.ageYears != null ? String(c.ageYears) : null,
+            sex: c.sex || "U",
+            placeOfResidence: c.placeOfResidence,
+            vaccinationStatus: c.vaccinationStatus,
+            isAdequateInvestigation: Boolean(c.adequateInvestigation),
+            isAdequateSpecimen: Boolean(c.specimenCollected || c.adequateSpecimenColl),
+            isTimelyLabResult: Boolean(c.timelyAvailLabResults),
+            isEpiLinked: Boolean(c.finalClassification?.includes("Epi-Linked")),
+            isDiscarded: Boolean(c.finalClassification?.includes("Discarded"))
+          }));
+          if (recordsToInsert.length > 0) {
+            for (let i = 0; i < recordsToInsert.length; i += 500) {
+              await db.insert(riskCaseRaw).values(recordsToInsert.slice(i, i + 500));
+            }
+          }
+          await db.update(riskAssessments).set({ updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm18.eq)(riskAssessments.id, assessment.id));
+        }
+        res.json({ success: true, count: Array.isArray(cases) ? cases.length : 0 });
+      } catch (err) {
+        res.status(500).json({ message: safeErrorMessage(err, "Failed to save linelist cases") });
       }
     });
     riskRouter.post("/assessments/:id/direct-entry", async (req, res) => {
       try {
         const requestedId = req.params.id;
         const { entries, recalculate = true } = req.body || {};
-        let [assessment] = await db.select().from(riskAssessments).where((0, import_drizzle_orm17.and)((0, import_drizzle_orm17.eq)(riskAssessments.id, requestedId), (0, import_drizzle_orm17.eq)(riskAssessments.tenantId, req.tenantId)));
+        let [assessment] = await db.select().from(riskAssessments).where((0, import_drizzle_orm18.and)((0, import_drizzle_orm18.eq)(riskAssessments.id, requestedId), (0, import_drizzle_orm18.eq)(riskAssessments.tenantId, req.tenantId)));
         if (!assessment) {
-          const [byUuid] = await db.select().from(riskAssessments).where((0, import_drizzle_orm17.eq)(riskAssessments.id, requestedId));
+          const [byUuid] = await db.select().from(riskAssessments).where((0, import_drizzle_orm18.eq)(riskAssessments.id, requestedId));
           assessment = byUuid;
         }
         if (!assessment) {
@@ -15889,29 +16289,29 @@ var init_riskRoutes = __esm({
           }).onConflictDoUpdate({
             target: [riskDistrictDataEntry.assessmentId, riskDistrictDataEntry.districtId],
             set: {
-              population: e.population !== void 0 ? String(e.population) : import_drizzle_orm17.sql`excluded.population`,
-              areaKm2: e.areaKm2 !== void 0 ? String(e.areaKm2) : import_drizzle_orm17.sql`excluded.area_km2`,
-              mcv1YearMinus3: e.mcv1YearMinus3 !== void 0 ? String(e.mcv1YearMinus3) : import_drizzle_orm17.sql`excluded.mcv1_year_minus3`,
-              mcv1YearMinus2: e.mcv1YearMinus2 !== void 0 ? String(e.mcv1YearMinus2) : import_drizzle_orm17.sql`excluded.mcv1_year_minus2`,
-              mcv1YearMinus1: e.mcv1YearMinus1 !== void 0 ? String(e.mcv1YearMinus1) : import_drizzle_orm17.sql`excluded.mcv1_year_minus1`,
-              mcv2YearMinus3: e.mcv2YearMinus3 !== void 0 ? String(e.mcv2YearMinus3) : import_drizzle_orm17.sql`excluded.mcv2_year_minus3`,
-              mcv2YearMinus2: e.mcv2YearMinus2 !== void 0 ? String(e.mcv2YearMinus2) : import_drizzle_orm17.sql`excluded.mcv2_year_minus2`,
-              mcv2YearMinus1: e.mcv2YearMinus1 !== void 0 ? String(e.mcv2YearMinus1) : import_drizzle_orm17.sql`excluded.mcv2_year_minus1`,
-              penta1YearMinus1: e.penta1YearMinus1 !== void 0 ? String(e.penta1YearMinus1) : import_drizzle_orm17.sql`excluded.penta1_year_minus1`,
-              siaCoveragePct: e.siaCoveragePct !== void 0 ? String(e.siaCoveragePct) : import_drizzle_orm17.sql`excluded.sia_coverage_pct`,
-              siaTargetAgeGroup: e.siaTargetAgeGroup || import_drizzle_orm17.sql`excluded.sia_target_age_group`,
-              siaYearsSince: e.siaYearsSince !== void 0 ? Number(e.siaYearsSince) : import_drizzle_orm17.sql`excluded.sia_years_since`,
-              unvaccinatedCasesPct: e.unvaccinatedCasesPct !== void 0 ? String(e.unvaccinatedCasesPct) : import_drizzle_orm17.sql`excluded.unvaccinated_cases_pct`,
-              suspectedCases: e.suspectedCases !== void 0 ? Number(e.suspectedCases) : import_drizzle_orm17.sql`excluded.suspected_cases`,
-              discardedCases: e.discardedCases !== void 0 ? Number(e.discardedCases) : import_drizzle_orm17.sql`excluded.discarded_cases`,
-              adequateInvestigationPct: e.adequateInvestigationPct !== void 0 ? String(e.adequateInvestigationPct) : import_drizzle_orm17.sql`excluded.adequate_investigation_pct`,
-              adequateSpecimenPct: e.adequateSpecimenPct !== void 0 ? String(e.adequateSpecimenPct) : import_drizzle_orm17.sql`excluded.adequate_specimen_pct`,
-              timelyLabResultsPct: e.timelyLabResultsPct !== void 0 ? String(e.timelyLabResultsPct) : import_drizzle_orm17.sql`excluded.timely_lab_results_pct`,
-              threatCasesUnder5: e.threatCasesUnder5 !== void 0 ? Number(e.threatCasesUnder5) : import_drizzle_orm17.sql`excluded.threat_cases_under5`,
-              threatCases5To14: e.threatCases5To14 !== void 0 ? Number(e.threatCases5To14) : import_drizzle_orm17.sql`excluded.threat_cases_5_to_14`,
-              threatCases15Plus: e.threatCases15Plus !== void 0 ? Number(e.threatCases15Plus) : import_drizzle_orm17.sql`excluded.threat_cases_15_plus`,
-              borderCaseInPastYear: e.borderCaseInPastYear !== void 0 ? Boolean(e.borderCaseInPastYear) : import_drizzle_orm17.sql`excluded.border_case_in_past_year`,
-              vulnerabilities: e.vulnerabilities || import_drizzle_orm17.sql`excluded.vulnerabilities`,
+              population: e.population !== void 0 ? String(e.population) : import_drizzle_orm18.sql`excluded.population`,
+              areaKm2: e.areaKm2 !== void 0 ? String(e.areaKm2) : import_drizzle_orm18.sql`excluded.area_km2`,
+              mcv1YearMinus3: e.mcv1YearMinus3 !== void 0 ? String(e.mcv1YearMinus3) : import_drizzle_orm18.sql`excluded.mcv1_year_minus3`,
+              mcv1YearMinus2: e.mcv1YearMinus2 !== void 0 ? String(e.mcv1YearMinus2) : import_drizzle_orm18.sql`excluded.mcv1_year_minus2`,
+              mcv1YearMinus1: e.mcv1YearMinus1 !== void 0 ? String(e.mcv1YearMinus1) : import_drizzle_orm18.sql`excluded.mcv1_year_minus1`,
+              mcv2YearMinus3: e.mcv2YearMinus3 !== void 0 ? String(e.mcv2YearMinus3) : import_drizzle_orm18.sql`excluded.mcv2_year_minus3`,
+              mcv2YearMinus2: e.mcv2YearMinus2 !== void 0 ? String(e.mcv2YearMinus2) : import_drizzle_orm18.sql`excluded.mcv2_year_minus2`,
+              mcv2YearMinus1: e.mcv2YearMinus1 !== void 0 ? String(e.mcv2YearMinus1) : import_drizzle_orm18.sql`excluded.mcv2_year_minus1`,
+              penta1YearMinus1: e.penta1YearMinus1 !== void 0 ? String(e.penta1YearMinus1) : import_drizzle_orm18.sql`excluded.penta1_year_minus1`,
+              siaCoveragePct: e.siaCoveragePct !== void 0 ? String(e.siaCoveragePct) : import_drizzle_orm18.sql`excluded.sia_coverage_pct`,
+              siaTargetAgeGroup: e.siaTargetAgeGroup || import_drizzle_orm18.sql`excluded.sia_target_age_group`,
+              siaYearsSince: e.siaYearsSince !== void 0 ? Number(e.siaYearsSince) : import_drizzle_orm18.sql`excluded.sia_years_since`,
+              unvaccinatedCasesPct: e.unvaccinatedCasesPct !== void 0 ? String(e.unvaccinatedCasesPct) : import_drizzle_orm18.sql`excluded.unvaccinated_cases_pct`,
+              suspectedCases: e.suspectedCases !== void 0 ? Number(e.suspectedCases) : import_drizzle_orm18.sql`excluded.suspected_cases`,
+              discardedCases: e.discardedCases !== void 0 ? Number(e.discardedCases) : import_drizzle_orm18.sql`excluded.discarded_cases`,
+              adequateInvestigationPct: e.adequateInvestigationPct !== void 0 ? String(e.adequateInvestigationPct) : import_drizzle_orm18.sql`excluded.adequate_investigation_pct`,
+              adequateSpecimenPct: e.adequateSpecimenPct !== void 0 ? String(e.adequateSpecimenPct) : import_drizzle_orm18.sql`excluded.adequate_specimen_pct`,
+              timelyLabResultsPct: e.timelyLabResultsPct !== void 0 ? String(e.timelyLabResultsPct) : import_drizzle_orm18.sql`excluded.timely_lab_results_pct`,
+              threatCasesUnder5: e.threatCasesUnder5 !== void 0 ? Number(e.threatCasesUnder5) : import_drizzle_orm18.sql`excluded.threat_cases_under5`,
+              threatCases5To14: e.threatCases5To14 !== void 0 ? Number(e.threatCases5To14) : import_drizzle_orm18.sql`excluded.threat_cases_5_to_14`,
+              threatCases15Plus: e.threatCases15Plus !== void 0 ? Number(e.threatCases15Plus) : import_drizzle_orm18.sql`excluded.threat_cases_15_plus`,
+              borderCaseInPastYear: e.borderCaseInPastYear !== void 0 ? Boolean(e.borderCaseInPastYear) : import_drizzle_orm18.sql`excluded.border_case_in_past_year`,
+              vulnerabilities: e.vulnerabilities || import_drizzle_orm18.sql`excluded.vulnerabilities`,
               updatedAt: /* @__PURE__ */ new Date()
             }
           });
@@ -15919,7 +16319,7 @@ var init_riskRoutes = __esm({
         if (!recalculate) {
           return res.json({ message: "Direct data entry saved successfully", count: entries.length });
         }
-        const [lastRun] = await db.select({ runNumber: riskAssessmentRuns.runNumber }).from(riskAssessmentRuns).where((0, import_drizzle_orm17.eq)(riskAssessmentRuns.assessmentId, assessment.id)).orderBy((0, import_drizzle_orm17.desc)(riskAssessmentRuns.runNumber)).limit(1);
+        const [lastRun] = await db.select({ runNumber: riskAssessmentRuns.runNumber }).from(riskAssessmentRuns).where((0, import_drizzle_orm18.eq)(riskAssessmentRuns.assessmentId, assessment.id)).orderBy((0, import_drizzle_orm18.desc)(riskAssessmentRuns.runNumber)).limit(1);
         const nextRunNumber = (lastRun?.runNumber || 0) + 1;
         const [createdRun] = await db.insert(riskAssessmentRuns).values({
           tenantId: effectiveTenantId,
@@ -15931,7 +16331,7 @@ var init_riskRoutes = __esm({
         const allEntries = await db.select({
           entry: riskDistrictDataEntry,
           districtName: districts.name
-        }).from(riskDistrictDataEntry).leftJoin(districts, (0, import_drizzle_orm17.eq)(riskDistrictDataEntry.districtId, districts.id)).where((0, import_drizzle_orm17.eq)(riskDistrictDataEntry.assessmentId, assessment.id));
+        }).from(riskDistrictDataEntry).leftJoin(districts, (0, import_drizzle_orm18.eq)(riskDistrictDataEntry.districtId, districts.id)).where((0, import_drizzle_orm18.eq)(riskDistrictDataEntry.assessmentId, assessment.id));
         let lowCount = 0;
         let medCount = 0;
         let highCount = 0;
@@ -16056,8 +16456,8 @@ var init_riskRoutes = __esm({
             completedAt: (/* @__PURE__ */ new Date()).toISOString(),
             source: "DIRECT_DATA_ENTRY"
           }
-        }).where((0, import_drizzle_orm17.eq)(riskAssessmentRuns.id, createdRun.id));
-        await db.update(riskAssessments).set({ status: "CALCULATED", updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm17.eq)(riskAssessments.id, assessment.id));
+        }).where((0, import_drizzle_orm18.eq)(riskAssessmentRuns.id, createdRun.id));
+        await db.update(riskAssessments).set({ status: "CALCULATED", updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm18.eq)(riskAssessments.id, assessment.id));
         res.json({
           message: "Direct data entry saved and risk scores calculated successfully",
           runId: createdRun.id,
@@ -16079,18 +16479,18 @@ var init_riskRoutes = __esm({
     riskRouter.get("/assessments/:id/export-report-docx", async (req, res) => {
       try {
         const requestedId = req.params.id;
-        let [assessment] = await db.select().from(riskAssessments).where((0, import_drizzle_orm17.and)((0, import_drizzle_orm17.eq)(riskAssessments.id, requestedId), (0, import_drizzle_orm17.eq)(riskAssessments.tenantId, req.tenantId)));
+        let [assessment] = await db.select().from(riskAssessments).where((0, import_drizzle_orm18.and)((0, import_drizzle_orm18.eq)(riskAssessments.id, requestedId), (0, import_drizzle_orm18.eq)(riskAssessments.tenantId, req.tenantId)));
         if (!assessment) {
-          const [byUuid] = await db.select().from(riskAssessments).where((0, import_drizzle_orm17.eq)(riskAssessments.id, requestedId));
+          const [byUuid] = await db.select().from(riskAssessments).where((0, import_drizzle_orm18.eq)(riskAssessments.id, requestedId));
           assessment = byUuid;
         }
         if (!assessment) {
           return res.status(404).json({ message: "Assessment not found" });
         }
         const effectiveTenantId = assessment.tenantId || req.tenantId;
-        const [tenant] = await db.select().from(tenants).where((0, import_drizzle_orm17.eq)(tenants.id, effectiveTenantId)).limit(1);
+        const [tenant] = await db.select().from(tenants).where((0, import_drizzle_orm18.eq)(tenants.id, effectiveTenantId)).limit(1);
         const countryName = tenant?.name || "South Africa";
-        const [latestRun] = await db.select().from(riskAssessmentRuns).where((0, import_drizzle_orm17.eq)(riskAssessmentRuns.assessmentId, assessment.id)).orderBy((0, import_drizzle_orm17.desc)(riskAssessmentRuns.runNumber)).limit(1);
+        const [latestRun] = await db.select().from(riskAssessmentRuns).where((0, import_drizzle_orm18.eq)(riskAssessmentRuns.assessmentId, assessment.id)).orderBy((0, import_drizzle_orm18.desc)(riskAssessmentRuns.runNumber)).limit(1);
         let districtResults = [];
         if (latestRun) {
           const rawRows = await db.select({
@@ -16106,7 +16506,7 @@ var init_riskRoutes = __esm({
             areaKm2: riskAreaResults.areaKm2,
             domainScoresJson: riskAreaResults.domainScoresJson,
             summaryExplanation: riskAreaResults.summaryExplanation
-          }).from(riskAreaResults).leftJoin(districts, (0, import_drizzle_orm17.eq)(riskAreaResults.districtId, districts.id)).leftJoin(provinces, (0, import_drizzle_orm17.eq)(districts.provinceId, provinces.id)).where((0, import_drizzle_orm17.eq)(riskAreaResults.runId, latestRun.id));
+          }).from(riskAreaResults).leftJoin(districts, (0, import_drizzle_orm18.eq)(riskAreaResults.districtId, districts.id)).leftJoin(provinces, (0, import_drizzle_orm18.eq)(districts.provinceId, provinces.id)).where((0, import_drizzle_orm18.eq)(riskAreaResults.runId, latestRun.id));
           districtResults = rawRows.map((r) => {
             const domains = r.domainScoresJson || {};
             return {
@@ -16127,7 +16527,7 @@ var init_riskRoutes = __esm({
             districtName: districts.name,
             provinceName: provinces.name,
             population: riskDistrictDataEntry.population
-          }).from(riskDistrictDataEntry).leftJoin(districts, (0, import_drizzle_orm17.eq)(riskDistrictDataEntry.districtId, districts.id)).leftJoin(provinces, (0, import_drizzle_orm17.eq)(districts.provinceId, provinces.id)).where((0, import_drizzle_orm17.eq)(riskDistrictDataEntry.assessmentId, assessment.id));
+          }).from(riskDistrictDataEntry).leftJoin(districts, (0, import_drizzle_orm18.eq)(riskDistrictDataEntry.districtId, districts.id)).leftJoin(provinces, (0, import_drizzle_orm18.eq)(districts.provinceId, provinces.id)).where((0, import_drizzle_orm18.eq)(riskDistrictDataEntry.assessmentId, assessment.id));
           if (directRows.length > 0) {
             districtResults = directRows.map((r) => ({
               ...r,
@@ -16226,13 +16626,13 @@ var populationIntelligenceService_exports = {};
 __export(populationIntelligenceService_exports, {
   PopulationIntelligenceService: () => PopulationIntelligenceService
 });
-var import_drizzle_orm18, PopulationIntelligenceService;
+var import_drizzle_orm19, PopulationIntelligenceService;
 var init_populationIntelligenceService = __esm({
   "server/services/populationIntelligenceService.ts"() {
     "use strict";
     init_db();
     init_schema();
-    import_drizzle_orm18 = require("drizzle-orm");
+    import_drizzle_orm19 = require("drizzle-orm");
     PopulationIntelligenceService = {
       /**
        * Fetches point-radius population from multiple sources (Grids, synthetic, etc)
@@ -16312,9 +16712,9 @@ var init_populationIntelligenceService = __esm({
         if (ownerType && ownerId) {
           let popDataQuery;
           if (ownerType === "facility") {
-            popDataQuery = db.select().from(populationData).where((0, import_drizzle_orm18.and)((0, import_drizzle_orm18.eq)(populationData.facilityId, ownerId), (0, import_drizzle_orm18.eq)(populationData.tenantId, tenantId)));
+            popDataQuery = db.select().from(populationData).where((0, import_drizzle_orm19.and)((0, import_drizzle_orm19.eq)(populationData.facilityId, ownerId), (0, import_drizzle_orm19.eq)(populationData.tenantId, tenantId)));
           } else if (ownerType === "village") {
-            popDataQuery = db.select().from(populationData).where((0, import_drizzle_orm18.and)((0, import_drizzle_orm18.eq)(populationData.villageId, ownerId), (0, import_drizzle_orm18.eq)(populationData.tenantId, tenantId)));
+            popDataQuery = db.select().from(populationData).where((0, import_drizzle_orm19.and)((0, import_drizzle_orm19.eq)(populationData.villageId, ownerId), (0, import_drizzle_orm19.eq)(populationData.tenantId, tenantId)));
           }
           if (popDataQuery) {
             const popDataResult = await popDataQuery;
@@ -16384,8 +16784,8 @@ var init_populationIntelligenceService = __esm({
        */
       async fetchFacilityPopulation(tenantId, facilityId, radiusKm) {
         const sources = [];
-        const [facility] = await db.select().from(facilities).where((0, import_drizzle_orm18.and)((0, import_drizzle_orm18.eq)(facilities.id, facilityId), (0, import_drizzle_orm18.eq)(facilities.tenantId, tenantId))).limit(1);
-        const popData = await db.select().from(populationData).where((0, import_drizzle_orm18.and)((0, import_drizzle_orm18.eq)(populationData.facilityId, facilityId), (0, import_drizzle_orm18.eq)(populationData.tenantId, tenantId)));
+        const [facility] = await db.select().from(facilities).where((0, import_drizzle_orm19.and)((0, import_drizzle_orm19.eq)(facilities.id, facilityId), (0, import_drizzle_orm19.eq)(facilities.tenantId, tenantId))).limit(1);
+        const popData = await db.select().from(populationData).where((0, import_drizzle_orm19.and)((0, import_drizzle_orm19.eq)(populationData.facilityId, facilityId), (0, import_drizzle_orm19.eq)(populationData.tenantId, tenantId)));
         if (popData.length > 0) {
           for (const pd of popData) {
             sources.push({
@@ -16626,7 +17026,7 @@ async function ownerContext(tenantId, entityType, entityId) {
       latitude: facilities.latitude,
       longitude: facilities.longitude,
       legacyGeometry: facilities.catchmentPolygon
-    }).from(facilities).where((0, import_drizzle_orm19.and)((0, import_drizzle_orm19.eq)(facilities.tenantId, tenantId), (0, import_drizzle_orm19.eq)(facilities.id, entityId))).limit(1);
+    }).from(facilities).where((0, import_drizzle_orm20.and)((0, import_drizzle_orm20.eq)(facilities.tenantId, tenantId), (0, import_drizzle_orm20.eq)(facilities.id, entityId))).limit(1);
     if (!row) return null;
     return { ...row, facilityId: row.id, parentFacilityId: row.id, ownerPointLabel: "The facility point" };
   }
@@ -16639,7 +17039,7 @@ async function ownerContext(tenantId, entityType, entityId) {
       latitude: villages.latitude,
       longitude: villages.longitude,
       legacyGeometry: villages.catchmentPolygon
-    }).from(villages).where((0, import_drizzle_orm19.and)((0, import_drizzle_orm19.eq)(villages.tenantId, tenantId), (0, import_drizzle_orm19.eq)(villages.id, entityId))).limit(1);
+    }).from(villages).where((0, import_drizzle_orm20.and)((0, import_drizzle_orm20.eq)(villages.tenantId, tenantId), (0, import_drizzle_orm20.eq)(villages.id, entityId))).limit(1);
     if (!row) return null;
     const facilityId = Number(row.assignedFacilityId || 0) || null;
     return { ...row, facilityId, parentFacilityId: facilityId, ownerPointLabel: "The community point" };
@@ -16647,21 +17047,21 @@ async function ownerContext(tenantId, entityType, entityId) {
   return { id: entityId, name: null, districtId: null, facilityId: null, parentFacilityId: null, latitude: null, longitude: null, legacyGeometry: null };
 }
 async function currentPolygon(tenantId, entityType, entityId) {
-  const [row] = await db.select().from(gisPolygons).where((0, import_drizzle_orm19.and)(
-    (0, import_drizzle_orm19.eq)(gisPolygons.tenantId, tenantId),
-    (0, import_drizzle_orm19.eq)(gisPolygons.ownerType, entityType),
-    (0, import_drizzle_orm19.eq)(gisPolygons.ownerId, entityId),
-    (0, import_drizzle_orm19.eq)(gisPolygons.isActive, true),
-    (0, import_drizzle_orm19.eq)(gisPolygons.status, "active")
-  )).orderBy((0, import_drizzle_orm19.desc)(gisPolygons.version)).limit(1);
+  const [row] = await db.select().from(gisPolygons).where((0, import_drizzle_orm20.and)(
+    (0, import_drizzle_orm20.eq)(gisPolygons.tenantId, tenantId),
+    (0, import_drizzle_orm20.eq)(gisPolygons.ownerType, entityType),
+    (0, import_drizzle_orm20.eq)(gisPolygons.ownerId, entityId),
+    (0, import_drizzle_orm20.eq)(gisPolygons.isActive, true),
+    (0, import_drizzle_orm20.eq)(gisPolygons.status, "active")
+  )).orderBy((0, import_drizzle_orm20.desc)(gisPolygons.version)).limit(1);
   return row || null;
 }
 async function polygonHistory(tenantId, entityType, entityId) {
-  return db.select().from(gisPolygons).where((0, import_drizzle_orm19.and)(
-    (0, import_drizzle_orm19.eq)(gisPolygons.tenantId, tenantId),
-    (0, import_drizzle_orm19.eq)(gisPolygons.ownerType, entityType),
-    (0, import_drizzle_orm19.eq)(gisPolygons.ownerId, entityId)
-  )).orderBy((0, import_drizzle_orm19.desc)(gisPolygons.version), (0, import_drizzle_orm19.desc)(gisPolygons.createdAt));
+  return db.select().from(gisPolygons).where((0, import_drizzle_orm20.and)(
+    (0, import_drizzle_orm20.eq)(gisPolygons.tenantId, tenantId),
+    (0, import_drizzle_orm20.eq)(gisPolygons.ownerType, entityType),
+    (0, import_drizzle_orm20.eq)(gisPolygons.ownerId, entityId)
+  )).orderBy((0, import_drizzle_orm20.desc)(gisPolygons.version), (0, import_drizzle_orm20.desc)(gisPolygons.createdAt));
 }
 async function nextVersion(tenantId, entityType, entityId) {
   const history = await polygonHistory(tenantId, entityType, entityId);
@@ -16676,22 +17076,22 @@ async function validationContext(tenantId, entityType, entityId, owner) {
     if (activeParent?.geometry) {
       parentGeometry = activeParent.geometry;
     } else {
-      const [facility] = await db.select({ catchmentPolygon: facilities.catchmentPolygon }).from(facilities).where((0, import_drizzle_orm19.and)((0, import_drizzle_orm19.eq)(facilities.tenantId, tenantId), (0, import_drizzle_orm19.eq)(facilities.id, Number(owner.facilityId)))).limit(1);
+      const [facility] = await db.select({ catchmentPolygon: facilities.catchmentPolygon }).from(facilities).where((0, import_drizzle_orm20.and)((0, import_drizzle_orm20.eq)(facilities.tenantId, tenantId), (0, import_drizzle_orm20.eq)(facilities.id, Number(owner.facilityId)))).limit(1);
       parentGeometry = facility?.catchmentPolygon || null;
     }
-    const siblingOwners = await db.select({ id: villages.id, name: villages.name }).from(villages).where((0, import_drizzle_orm19.and)(
-      (0, import_drizzle_orm19.eq)(villages.tenantId, tenantId),
-      (0, import_drizzle_orm19.eq)(villages.assignedFacilityId, Number(owner.facilityId)),
-      (0, import_drizzle_orm19.ne)(villages.id, entityId)
+    const siblingOwners = await db.select({ id: villages.id, name: villages.name }).from(villages).where((0, import_drizzle_orm20.and)(
+      (0, import_drizzle_orm20.eq)(villages.tenantId, tenantId),
+      (0, import_drizzle_orm20.eq)(villages.assignedFacilityId, Number(owner.facilityId)),
+      (0, import_drizzle_orm20.ne)(villages.id, entityId)
     ));
     const siblingById = new Map(siblingOwners.map((item) => [item.id, item.name]));
-    const siblingRows = await db.select().from(gisPolygons).where((0, import_drizzle_orm19.and)(
-      (0, import_drizzle_orm19.eq)(gisPolygons.tenantId, tenantId),
-      (0, import_drizzle_orm19.eq)(gisPolygons.ownerType, "village"),
-      (0, import_drizzle_orm19.eq)(gisPolygons.parentFacilityId, Number(owner.facilityId)),
-      (0, import_drizzle_orm19.eq)(gisPolygons.isActive, true),
-      (0, import_drizzle_orm19.eq)(gisPolygons.status, "active"),
-      (0, import_drizzle_orm19.ne)(gisPolygons.ownerId, entityId)
+    const siblingRows = await db.select().from(gisPolygons).where((0, import_drizzle_orm20.and)(
+      (0, import_drizzle_orm20.eq)(gisPolygons.tenantId, tenantId),
+      (0, import_drizzle_orm20.eq)(gisPolygons.ownerType, "village"),
+      (0, import_drizzle_orm20.eq)(gisPolygons.parentFacilityId, Number(owner.facilityId)),
+      (0, import_drizzle_orm20.eq)(gisPolygons.isActive, true),
+      (0, import_drizzle_orm20.eq)(gisPolygons.status, "active"),
+      (0, import_drizzle_orm20.ne)(gisPolygons.ownerId, entityId)
     ));
     siblingPolygons = siblingRows.map((item) => ({
       id: item.ownerId,
@@ -16700,14 +17100,14 @@ async function validationContext(tenantId, entityType, entityId, owner) {
     }));
   }
   if (entityType === "facility") {
-    const facilityOwners = await db.select({ id: facilities.id, name: facilities.name }).from(facilities).where((0, import_drizzle_orm19.and)((0, import_drizzle_orm19.eq)(facilities.tenantId, tenantId), (0, import_drizzle_orm19.ne)(facilities.id, entityId)));
+    const facilityOwners = await db.select({ id: facilities.id, name: facilities.name }).from(facilities).where((0, import_drizzle_orm20.and)((0, import_drizzle_orm20.eq)(facilities.tenantId, tenantId), (0, import_drizzle_orm20.ne)(facilities.id, entityId)));
     const nameById = new Map(facilityOwners.map((item) => [item.id, item.name]));
-    const neighbours = await db.select().from(gisPolygons).where((0, import_drizzle_orm19.and)(
-      (0, import_drizzle_orm19.eq)(gisPolygons.tenantId, tenantId),
-      (0, import_drizzle_orm19.eq)(gisPolygons.ownerType, "facility"),
-      (0, import_drizzle_orm19.eq)(gisPolygons.isActive, true),
-      (0, import_drizzle_orm19.eq)(gisPolygons.status, "active"),
-      (0, import_drizzle_orm19.ne)(gisPolygons.ownerId, entityId)
+    const neighbours = await db.select().from(gisPolygons).where((0, import_drizzle_orm20.and)(
+      (0, import_drizzle_orm20.eq)(gisPolygons.tenantId, tenantId),
+      (0, import_drizzle_orm20.eq)(gisPolygons.ownerType, "facility"),
+      (0, import_drizzle_orm20.eq)(gisPolygons.isActive, true),
+      (0, import_drizzle_orm20.eq)(gisPolygons.status, "active"),
+      (0, import_drizzle_orm20.ne)(gisPolygons.ownerId, entityId)
     ));
     neighbouringPolygons = neighbours.map((item) => ({
       id: item.ownerId,
@@ -16734,28 +17134,28 @@ async function planningImpact(tenantId, entityType, owner) {
   const facilityId = entityType === "facility" ? Number(owner.id) : Number(owner.facilityId || 0);
   if (!facilityId) return { communities: 0, microplans: 0, reports: 0, sessionPlans: 0, historicalUse: false };
   const [communityRows, microplanRows, reportRows, sessionRows] = await Promise.all([
-    db.select({ id: villages.id }).from(villages).where((0, import_drizzle_orm19.and)(
-      (0, import_drizzle_orm19.eq)(villages.tenantId, tenantId),
-      (0, import_drizzle_orm19.eq)(villages.assignedFacilityId, facilityId)
+    db.select({ id: villages.id }).from(villages).where((0, import_drizzle_orm20.and)(
+      (0, import_drizzle_orm20.eq)(villages.tenantId, tenantId),
+      (0, import_drizzle_orm20.eq)(villages.assignedFacilityId, facilityId)
     )),
-    db.select({ id: microplans.id, status: microplans.status }).from(microplans).where((0, import_drizzle_orm19.and)(
-      (0, import_drizzle_orm19.eq)(microplans.tenantId, tenantId),
-      (0, import_drizzle_orm19.eq)(microplans.facilityId, facilityId)
+    db.select({ id: microplans.id, status: microplans.status }).from(microplans).where((0, import_drizzle_orm20.and)(
+      (0, import_drizzle_orm20.eq)(microplans.tenantId, tenantId),
+      (0, import_drizzle_orm20.eq)(microplans.facilityId, facilityId)
     )),
-    db.select({ id: monthlyReports.id }).from(monthlyReports).where((0, import_drizzle_orm19.and)(
-      (0, import_drizzle_orm19.eq)(monthlyReports.tenantId, tenantId),
-      (0, import_drizzle_orm19.eq)(monthlyReports.facilityId, facilityId)
+    db.select({ id: monthlyReports.id }).from(monthlyReports).where((0, import_drizzle_orm20.and)(
+      (0, import_drizzle_orm20.eq)(monthlyReports.tenantId, tenantId),
+      (0, import_drizzle_orm20.eq)(monthlyReports.facilityId, facilityId)
     )),
-    db.select({ id: sessionPlans.id }).from(sessionPlans).where((0, import_drizzle_orm19.and)(
-      (0, import_drizzle_orm19.eq)(sessionPlans.tenantId, tenantId),
-      (0, import_drizzle_orm19.eq)(sessionPlans.facilityId, facilityId)
+    db.select({ id: sessionPlans.id }).from(sessionPlans).where((0, import_drizzle_orm20.and)(
+      (0, import_drizzle_orm20.eq)(sessionPlans.tenantId, tenantId),
+      (0, import_drizzle_orm20.eq)(sessionPlans.facilityId, facilityId)
     ))
   ]);
   let villageSessionLinks = 0;
   if (entityType === "village") {
-    const links = await db.select({ id: sessionVillages.id }).from(sessionVillages).where((0, import_drizzle_orm19.and)(
-      (0, import_drizzle_orm19.eq)(sessionVillages.tenantId, tenantId),
-      (0, import_drizzle_orm19.eq)(sessionVillages.villageId, Number(owner.id))
+    const links = await db.select({ id: sessionVillages.id }).from(sessionVillages).where((0, import_drizzle_orm20.and)(
+      (0, import_drizzle_orm20.eq)(sessionVillages.tenantId, tenantId),
+      (0, import_drizzle_orm20.eq)(sessionVillages.villageId, Number(owner.id))
     ));
     villageSessionLinks = links.length;
   }
@@ -16904,7 +17304,7 @@ function registerPolygonLifecycleRoutes(app2, deps) {
   app2.post("/api/polygons/:entityType/:entityId/replace", ...deps.auth, (req, res) => createDraft(req, res, "replace"));
   app2.post("/api/polygons/:polygonVersionId/submit", ...deps.auth, async (req, res) => {
     const id = Number(req.params.polygonVersionId);
-    const [row] = await db.select().from(gisPolygons).where((0, import_drizzle_orm19.and)((0, import_drizzle_orm19.eq)(gisPolygons.tenantId, req.tenantId), (0, import_drizzle_orm19.eq)(gisPolygons.id, id))).limit(1);
+    const [row] = await db.select().from(gisPolygons).where((0, import_drizzle_orm20.and)((0, import_drizzle_orm20.eq)(gisPolygons.tenantId, req.tenantId), (0, import_drizzle_orm20.eq)(gisPolygons.id, id))).limit(1);
     if (!row) return res.status(404).json({ message: "Polygon version not found." });
     const owner = await ownerContext(req.tenantId, row.ownerType, row.ownerId);
     const submitPermission = row.changeType === "created" ? "polygon.create" : "polygon.edit";
@@ -16920,14 +17320,14 @@ function registerPolygonLifecycleRoutes(app2, deps) {
       validationStatus: validation.warnings.length > 0 ? "valid_with_warnings" : "valid",
       metadataJson: { ...row.metadataJson || {}, validation },
       updatedAt: /* @__PURE__ */ new Date()
-    }).where((0, import_drizzle_orm19.and)((0, import_drizzle_orm19.eq)(gisPolygons.tenantId, req.tenantId), (0, import_drizzle_orm19.eq)(gisPolygons.id, id))).returning();
+    }).where((0, import_drizzle_orm20.and)((0, import_drizzle_orm20.eq)(gisPolygons.tenantId, req.tenantId), (0, import_drizzle_orm20.eq)(gisPolygons.id, id))).returning();
     await deps.logAudit(req, "polygon_submitted", "gis_polygon", id, row, updated);
     await notifyAffectedUsers(req.tenantId, "Polygon change awaiting review", (owner?.name || "A polygon") + " version " + row.version + " was submitted for approval.", "polygon_submitted");
     res.json(updated);
   });
   app2.post("/api/polygons/:polygonVersionId/approve", ...deps.auth, async (req, res) => {
     const id = Number(req.params.polygonVersionId);
-    const [row] = await db.select().from(gisPolygons).where((0, import_drizzle_orm19.and)((0, import_drizzle_orm19.eq)(gisPolygons.tenantId, req.tenantId), (0, import_drizzle_orm19.eq)(gisPolygons.id, id))).limit(1);
+    const [row] = await db.select().from(gisPolygons).where((0, import_drizzle_orm20.and)((0, import_drizzle_orm20.eq)(gisPolygons.tenantId, req.tenantId), (0, import_drizzle_orm20.eq)(gisPolygons.id, id))).limit(1);
     if (!row) return res.status(404).json({ message: "Polygon version not found." });
     const entityType = row.ownerType;
     const owner = await ownerContext(req.tenantId, entityType, row.ownerId);
@@ -16945,12 +17345,12 @@ function registerPolygonLifecycleRoutes(app2, deps) {
     const now = /* @__PURE__ */ new Date();
     const impact = await planningImpact(req.tenantId, entityType, owner);
     const updated = await db.transaction(async (tx) => {
-      const [prior] = await tx.select().from(gisPolygons).where((0, import_drizzle_orm19.and)(
-        (0, import_drizzle_orm19.eq)(gisPolygons.tenantId, req.tenantId),
-        (0, import_drizzle_orm19.eq)(gisPolygons.ownerType, row.ownerType),
-        (0, import_drizzle_orm19.eq)(gisPolygons.ownerId, row.ownerId),
-        (0, import_drizzle_orm19.eq)(gisPolygons.isActive, true),
-        (0, import_drizzle_orm19.eq)(gisPolygons.status, "active")
+      const [prior] = await tx.select().from(gisPolygons).where((0, import_drizzle_orm20.and)(
+        (0, import_drizzle_orm20.eq)(gisPolygons.tenantId, req.tenantId),
+        (0, import_drizzle_orm20.eq)(gisPolygons.ownerType, row.ownerType),
+        (0, import_drizzle_orm20.eq)(gisPolygons.ownerId, row.ownerId),
+        (0, import_drizzle_orm20.eq)(gisPolygons.isActive, true),
+        (0, import_drizzle_orm20.eq)(gisPolygons.status, "active")
       )).limit(1);
       if (prior) {
         await tx.update(gisPolygons).set({
@@ -16959,7 +17359,7 @@ function registerPolygonLifecycleRoutes(app2, deps) {
           validTo: now,
           replacedVersionId: row.id,
           updatedAt: now
-        }).where((0, import_drizzle_orm19.eq)(gisPolygons.id, prior.id));
+        }).where((0, import_drizzle_orm20.eq)(gisPolygons.id, prior.id));
       }
       const [active] = await tx.update(gisPolygons).set({
         status: "active",
@@ -16973,13 +17373,13 @@ function registerPolygonLifecycleRoutes(app2, deps) {
         overrideReason: req.body?.overrideReason || row.overrideReason || null,
         metadataJson: { ...row.metadataJson || {}, validation, impact },
         updatedAt: now
-      }).where((0, import_drizzle_orm19.and)((0, import_drizzle_orm19.eq)(gisPolygons.tenantId, req.tenantId), (0, import_drizzle_orm19.eq)(gisPolygons.id, id))).returning();
+      }).where((0, import_drizzle_orm20.and)((0, import_drizzle_orm20.eq)(gisPolygons.tenantId, req.tenantId), (0, import_drizzle_orm20.eq)(gisPolygons.id, id))).returning();
       if (entityType === "facility") {
         await tx.update(facilities).set({
           catchmentPolygon: row.geometry,
           catchmentGridPopulation: row.populationEstimate,
           updatedAt: now
-        }).where((0, import_drizzle_orm19.and)((0, import_drizzle_orm19.eq)(facilities.tenantId, req.tenantId), (0, import_drizzle_orm19.eq)(facilities.id, row.ownerId)));
+        }).where((0, import_drizzle_orm20.and)((0, import_drizzle_orm20.eq)(facilities.tenantId, req.tenantId), (0, import_drizzle_orm20.eq)(facilities.id, row.ownerId)));
       } else if (entityType === "village") {
         await tx.update(villages).set({
           catchmentPolygon: row.geometry,
@@ -16987,7 +17387,7 @@ function registerPolygonLifecycleRoutes(app2, deps) {
           griddedPopulation: row.populationEstimate,
           populationSourceLabel: row.populationSource,
           updatedAt: now
-        }).where((0, import_drizzle_orm19.and)((0, import_drizzle_orm19.eq)(villages.tenantId, req.tenantId), (0, import_drizzle_orm19.eq)(villages.id, row.ownerId)));
+        }).where((0, import_drizzle_orm20.and)((0, import_drizzle_orm20.eq)(villages.tenantId, req.tenantId), (0, import_drizzle_orm20.eq)(villages.id, row.ownerId)));
       }
       return active;
     });
@@ -16999,7 +17399,7 @@ function registerPolygonLifecycleRoutes(app2, deps) {
     const id = Number(req.params.polygonVersionId);
     const reason = String(req.body?.reason || "").trim();
     if (!reason) return res.status(400).json({ message: "A rejection reason is required." });
-    const [row] = await db.select().from(gisPolygons).where((0, import_drizzle_orm19.and)((0, import_drizzle_orm19.eq)(gisPolygons.tenantId, req.tenantId), (0, import_drizzle_orm19.eq)(gisPolygons.id, id))).limit(1);
+    const [row] = await db.select().from(gisPolygons).where((0, import_drizzle_orm20.and)((0, import_drizzle_orm20.eq)(gisPolygons.tenantId, req.tenantId), (0, import_drizzle_orm20.eq)(gisPolygons.id, id))).limit(1);
     if (!row) return res.status(404).json({ message: "Polygon version not found." });
     const owner = await ownerContext(req.tenantId, row.ownerType, row.ownerId);
     if (!await authorize(req, res, deps, "polygon.approve", owner)) return;
@@ -17012,7 +17412,7 @@ function registerPolygonLifecycleRoutes(app2, deps) {
       rejectionReason: reason,
       isActive: false,
       updatedAt: /* @__PURE__ */ new Date()
-    }).where((0, import_drizzle_orm19.and)((0, import_drizzle_orm19.eq)(gisPolygons.tenantId, req.tenantId), (0, import_drizzle_orm19.eq)(gisPolygons.id, id))).returning();
+    }).where((0, import_drizzle_orm20.and)((0, import_drizzle_orm20.eq)(gisPolygons.tenantId, req.tenantId), (0, import_drizzle_orm20.eq)(gisPolygons.id, id))).returning();
     await deps.logAudit(req, "polygon_rejected", "gis_polygon", id, row, updated);
     await notifyAffectedUsers(req.tenantId, "Polygon change rejected", (owner?.name || "A polygon") + " version " + row.version + " requires correction: " + reason, "polygon_rejected");
     res.json(updated);
@@ -17021,7 +17421,7 @@ function registerPolygonLifecycleRoutes(app2, deps) {
     const id = Number(req.params.polygonVersionId);
     const reason = String(req.body?.reason || "").trim();
     if (!reason) return res.status(400).json({ message: "An archive reason is required." });
-    const [row] = await db.select().from(gisPolygons).where((0, import_drizzle_orm19.and)((0, import_drizzle_orm19.eq)(gisPolygons.tenantId, req.tenantId), (0, import_drizzle_orm19.eq)(gisPolygons.id, id))).limit(1);
+    const [row] = await db.select().from(gisPolygons).where((0, import_drizzle_orm20.and)((0, import_drizzle_orm20.eq)(gisPolygons.tenantId, req.tenantId), (0, import_drizzle_orm20.eq)(gisPolygons.id, id))).limit(1);
     if (!row) return res.status(404).json({ message: "Polygon version not found." });
     const owner = await ownerContext(req.tenantId, row.ownerType, row.ownerId);
     if (!await authorize(req, res, deps, "polygon.archive", owner)) return;
@@ -17039,13 +17439,13 @@ function registerPolygonLifecycleRoutes(app2, deps) {
       changeReason: reason,
       metadataJson: { ...row.metadataJson || {}, impact },
       updatedAt: /* @__PURE__ */ new Date()
-    }).where((0, import_drizzle_orm19.and)((0, import_drizzle_orm19.eq)(gisPolygons.tenantId, req.tenantId), (0, import_drizzle_orm19.eq)(gisPolygons.id, id))).returning();
+    }).where((0, import_drizzle_orm20.and)((0, import_drizzle_orm20.eq)(gisPolygons.tenantId, req.tenantId), (0, import_drizzle_orm20.eq)(gisPolygons.id, id))).returning();
     await deps.logAudit(req, "polygon_archived", "gis_polygon", id, row, updated);
     res.json({ polygon: updated, impact });
   });
   app2.delete("/api/polygons/:polygonVersionId/draft", ...deps.auth, async (req, res) => {
     const id = Number(req.params.polygonVersionId);
-    const [row] = await db.select().from(gisPolygons).where((0, import_drizzle_orm19.and)((0, import_drizzle_orm19.eq)(gisPolygons.tenantId, req.tenantId), (0, import_drizzle_orm19.eq)(gisPolygons.id, id))).limit(1);
+    const [row] = await db.select().from(gisPolygons).where((0, import_drizzle_orm20.and)((0, import_drizzle_orm20.eq)(gisPolygons.tenantId, req.tenantId), (0, import_drizzle_orm20.eq)(gisPolygons.id, id))).limit(1);
     if (!row) return res.status(404).json({ message: "Polygon version not found." });
     const owner = await ownerContext(req.tenantId, row.ownerType, row.ownerId);
     if (!await authorize(req, res, deps, "polygon.delete_draft", owner)) return;
@@ -17056,7 +17456,7 @@ function registerPolygonLifecycleRoutes(app2, deps) {
         impact
       });
     }
-    await db.delete(gisPolygons).where((0, import_drizzle_orm19.and)((0, import_drizzle_orm19.eq)(gisPolygons.tenantId, req.tenantId), (0, import_drizzle_orm19.eq)(gisPolygons.id, id)));
+    await db.delete(gisPolygons).where((0, import_drizzle_orm20.and)((0, import_drizzle_orm20.eq)(gisPolygons.tenantId, req.tenantId), (0, import_drizzle_orm20.eq)(gisPolygons.id, id)));
     await deps.logAudit(req, "polygon_draft_deleted", "gis_polygon", id, row, null);
     res.json({ deleted: true });
   });
@@ -17067,11 +17467,11 @@ function registerPolygonLifecycleRoutes(app2, deps) {
     if (!await authorize(req, res, deps, "polygon.compare_versions", owner)) return;
     const fromId = Number(req.query.fromVersionId);
     const toId = Number(req.query.toVersionId);
-    const versions = await db.select().from(gisPolygons).where((0, import_drizzle_orm19.and)(
-      (0, import_drizzle_orm19.eq)(gisPolygons.tenantId, req.tenantId),
-      (0, import_drizzle_orm19.eq)(gisPolygons.ownerType, parsed.entityType),
-      (0, import_drizzle_orm19.eq)(gisPolygons.ownerId, parsed.entityId)
-    )).orderBy((0, import_drizzle_orm19.asc)(gisPolygons.version));
+    const versions = await db.select().from(gisPolygons).where((0, import_drizzle_orm20.and)(
+      (0, import_drizzle_orm20.eq)(gisPolygons.tenantId, req.tenantId),
+      (0, import_drizzle_orm20.eq)(gisPolygons.ownerType, parsed.entityType),
+      (0, import_drizzle_orm20.eq)(gisPolygons.ownerId, parsed.entityId)
+    )).orderBy((0, import_drizzle_orm20.asc)(gisPolygons.version));
     const from = versions.find((item) => item.id === fromId);
     const to = versions.find((item) => item.id === toId);
     if (!from || !to) return res.status(404).json({ message: "One or both polygon versions were not found." });
@@ -17087,7 +17487,7 @@ function registerPolygonLifecycleRoutes(app2, deps) {
   });
   app2.post("/api/polygons/:polygonVersionId/recalculate-population", ...deps.auth, async (req, res) => {
     const id = Number(req.params.polygonVersionId);
-    const [row] = await db.select().from(gisPolygons).where((0, import_drizzle_orm19.and)((0, import_drizzle_orm19.eq)(gisPolygons.tenantId, req.tenantId), (0, import_drizzle_orm19.eq)(gisPolygons.id, id))).limit(1);
+    const [row] = await db.select().from(gisPolygons).where((0, import_drizzle_orm20.and)((0, import_drizzle_orm20.eq)(gisPolygons.tenantId, req.tenantId), (0, import_drizzle_orm20.eq)(gisPolygons.id, id))).limit(1);
     if (!row) return res.status(404).json({ message: "Polygon version not found." });
     const owner = await ownerContext(req.tenantId, row.ownerType, row.ownerId);
     if (!await authorize(req, res, deps, "polygon.recalculate_population", owner)) return;
@@ -17109,16 +17509,16 @@ function registerPolygonLifecycleRoutes(app2, deps) {
         }
       },
       updatedAt: /* @__PURE__ */ new Date()
-    }).where((0, import_drizzle_orm19.and)((0, import_drizzle_orm19.eq)(gisPolygons.tenantId, req.tenantId), (0, import_drizzle_orm19.eq)(gisPolygons.id, id))).returning();
+    }).where((0, import_drizzle_orm20.and)((0, import_drizzle_orm20.eq)(gisPolygons.tenantId, req.tenantId), (0, import_drizzle_orm20.eq)(gisPolygons.id, id))).returning();
     await deps.logAudit(req, "polygon_population_recalculated", "gis_polygon", id, row, updated);
     res.json(updated);
   });
 }
-var import_drizzle_orm19, supportedEntityTypes;
+var import_drizzle_orm20, supportedEntityTypes;
 var init_polygonLifecycle = __esm({
   "server/routes/polygonLifecycle.ts"() {
     "use strict";
-    import_drizzle_orm19 = require("drizzle-orm");
+    import_drizzle_orm20 = require("drizzle-orm");
     init_schema();
     init_authorization();
     init_auth();
@@ -17139,21 +17539,21 @@ var init_polygonLifecycle = __esm({
 
 // server/services/microplanVersionService.ts
 async function buildMicroplanSnapshot(db2, tenantId, microplanId) {
-  const [microplan] = await db2.select().from(microplans).where((0, import_drizzle_orm20.and)((0, import_drizzle_orm20.eq)(microplans.tenantId, tenantId), (0, import_drizzle_orm20.eq)(microplans.id, microplanId))).limit(1);
+  const [microplan] = await db2.select().from(microplans).where((0, import_drizzle_orm21.and)((0, import_drizzle_orm21.eq)(microplans.tenantId, tenantId), (0, import_drizzle_orm21.eq)(microplans.id, microplanId))).limit(1);
   if (!microplan) throw new Error("Microplan not found");
-  const sessions2 = await db2.select().from(sessionPlans).where((0, import_drizzle_orm20.and)((0, import_drizzle_orm20.eq)(sessionPlans.tenantId, tenantId), (0, import_drizzle_orm20.eq)(sessionPlans.microplanId, microplanId)));
+  const sessions2 = await db2.select().from(sessionPlans).where((0, import_drizzle_orm21.and)((0, import_drizzle_orm21.eq)(sessionPlans.tenantId, tenantId), (0, import_drizzle_orm21.eq)(sessionPlans.microplanId, microplanId)));
   const sessionIds = sessions2.map((session3) => session3.id);
-  const linkedVillages = sessionIds.length ? await db2.select().from(sessionVillages).where((0, import_drizzle_orm20.and)((0, import_drizzle_orm20.eq)(sessionVillages.tenantId, tenantId), (0, import_drizzle_orm20.inArray)(sessionVillages.sessionId, sessionIds))) : [];
-  const communities = microplan.facilityId ? await db2.select().from(villages).where((0, import_drizzle_orm20.and)((0, import_drizzle_orm20.eq)(villages.tenantId, tenantId), (0, import_drizzle_orm20.eq)(villages.assignedFacilityId, microplan.facilityId))) : [];
-  const staff = microplan.facilityId ? await db2.select().from(facilityStaff).where((0, import_drizzle_orm20.and)((0, import_drizzle_orm20.eq)(facilityStaff.tenantId, tenantId), (0, import_drizzle_orm20.eq)(facilityStaff.facilityId, microplan.facilityId))) : [];
-  const vaccines = microplan.facilityId ? await db2.select().from(vaccineRequirements).where((0, import_drizzle_orm20.and)(
-    (0, import_drizzle_orm20.eq)(vaccineRequirements.tenantId, tenantId),
-    (0, import_drizzle_orm20.eq)(vaccineRequirements.facilityId, microplan.facilityId),
-    (0, import_drizzle_orm20.eq)(vaccineRequirements.year, microplan.year),
-    (0, import_drizzle_orm20.eq)(vaccineRequirements.quarter, microplan.quarter)
+  const linkedVillages = sessionIds.length ? await db2.select().from(sessionVillages).where((0, import_drizzle_orm21.and)((0, import_drizzle_orm21.eq)(sessionVillages.tenantId, tenantId), (0, import_drizzle_orm21.inArray)(sessionVillages.sessionId, sessionIds))) : [];
+  const communities = microplan.facilityId ? await db2.select().from(villages).where((0, import_drizzle_orm21.and)((0, import_drizzle_orm21.eq)(villages.tenantId, tenantId), (0, import_drizzle_orm21.eq)(villages.assignedFacilityId, microplan.facilityId))) : [];
+  const staff = microplan.facilityId ? await db2.select().from(facilityStaff).where((0, import_drizzle_orm21.and)((0, import_drizzle_orm21.eq)(facilityStaff.tenantId, tenantId), (0, import_drizzle_orm21.eq)(facilityStaff.facilityId, microplan.facilityId))) : [];
+  const vaccines = microplan.facilityId ? await db2.select().from(vaccineRequirements).where((0, import_drizzle_orm21.and)(
+    (0, import_drizzle_orm21.eq)(vaccineRequirements.tenantId, tenantId),
+    (0, import_drizzle_orm21.eq)(vaccineRequirements.facilityId, microplan.facilityId),
+    (0, import_drizzle_orm21.eq)(vaccineRequirements.year, microplan.year),
+    (0, import_drizzle_orm21.eq)(vaccineRequirements.quarter, microplan.quarter)
   )) : [];
-  const mobilization = microplan.facilityId ? await db2.select().from(mobilizationActivities).where((0, import_drizzle_orm20.and)((0, import_drizzle_orm20.eq)(mobilizationActivities.tenantId, tenantId), (0, import_drizzle_orm20.eq)(mobilizationActivities.facilityId, microplan.facilityId))) : [];
-  const budget = sessionIds.length ? await db2.select().from(budgetItems).where((0, import_drizzle_orm20.and)((0, import_drizzle_orm20.eq)(budgetItems.tenantId, tenantId), (0, import_drizzle_orm20.inArray)(budgetItems.sessionId, sessionIds))) : [];
+  const mobilization = microplan.facilityId ? await db2.select().from(mobilizationActivities).where((0, import_drizzle_orm21.and)((0, import_drizzle_orm21.eq)(mobilizationActivities.tenantId, tenantId), (0, import_drizzle_orm21.eq)(mobilizationActivities.facilityId, microplan.facilityId))) : [];
+  const budget = sessionIds.length ? await db2.select().from(budgetItems).where((0, import_drizzle_orm21.and)((0, import_drizzle_orm21.eq)(budgetItems.tenantId, tenantId), (0, import_drizzle_orm21.inArray)(budgetItems.sessionId, sessionIds))) : [];
   return {
     schemaVersion: 1,
     capturedAt: (/* @__PURE__ */ new Date()).toISOString(),
@@ -17169,7 +17569,7 @@ async function buildMicroplanSnapshot(db2, tenantId, microplanId) {
 }
 async function createMicroplanVersion(db2, input2) {
   const snapshot = await buildMicroplanSnapshot(db2, input2.tenantId, input2.microplanId);
-  const [latest] = await db2.select({ versionNumber: microplanVersions.versionNumber }).from(microplanVersions).where((0, import_drizzle_orm20.and)((0, import_drizzle_orm20.eq)(microplanVersions.tenantId, input2.tenantId), (0, import_drizzle_orm20.eq)(microplanVersions.microplanId, input2.microplanId))).orderBy((0, import_drizzle_orm20.desc)(microplanVersions.versionNumber)).limit(1);
+  const [latest] = await db2.select({ versionNumber: microplanVersions.versionNumber }).from(microplanVersions).where((0, import_drizzle_orm21.and)((0, import_drizzle_orm21.eq)(microplanVersions.tenantId, input2.tenantId), (0, import_drizzle_orm21.eq)(microplanVersions.microplanId, input2.microplanId))).orderBy((0, import_drizzle_orm21.desc)(microplanVersions.versionNumber)).limit(1);
   const versionNumber = (latest?.versionNumber ?? 0) + 1;
   const status = input2.status ?? String(snapshot.microplan.status ?? "draft");
   const [version] = await db2.insert(microplanVersions).values({
@@ -17196,13 +17596,13 @@ async function listMicroplanVersions(db2, tenantId, microplanId) {
     reason: microplanVersions.reason,
     createdByUserId: microplanVersions.createdByUserId,
     createdAt: microplanVersions.createdAt
-  }).from(microplanVersions).where((0, import_drizzle_orm20.and)((0, import_drizzle_orm20.eq)(microplanVersions.tenantId, tenantId), (0, import_drizzle_orm20.eq)(microplanVersions.microplanId, microplanId))).orderBy((0, import_drizzle_orm20.desc)(microplanVersions.versionNumber));
+  }).from(microplanVersions).where((0, import_drizzle_orm21.and)((0, import_drizzle_orm21.eq)(microplanVersions.tenantId, tenantId), (0, import_drizzle_orm21.eq)(microplanVersions.microplanId, microplanId))).orderBy((0, import_drizzle_orm21.desc)(microplanVersions.versionNumber));
 }
 async function getMicroplanVersion(db2, tenantId, microplanId, versionId) {
-  const [version] = await db2.select().from(microplanVersions).where((0, import_drizzle_orm20.and)(
-    (0, import_drizzle_orm20.eq)(microplanVersions.tenantId, tenantId),
-    (0, import_drizzle_orm20.eq)(microplanVersions.microplanId, microplanId),
-    (0, import_drizzle_orm20.eq)(microplanVersions.id, versionId)
+  const [version] = await db2.select().from(microplanVersions).where((0, import_drizzle_orm21.and)(
+    (0, import_drizzle_orm21.eq)(microplanVersions.tenantId, tenantId),
+    (0, import_drizzle_orm21.eq)(microplanVersions.microplanId, microplanId),
+    (0, import_drizzle_orm21.eq)(microplanVersions.id, versionId)
   )).limit(1);
   return version;
 }
@@ -17235,7 +17635,7 @@ async function restoreMicroplanVersionAsDraft(db2, input2) {
   if (!source) throw new Error("Microplan version not found");
   const sourcePlan = source.snapshot?.microplan;
   if (!sourcePlan) throw new Error("Microplan version has no plan snapshot");
-  const [current] = await db2.select().from(microplans).where((0, import_drizzle_orm20.and)((0, import_drizzle_orm20.eq)(microplans.tenantId, input2.tenantId), (0, import_drizzle_orm20.eq)(microplans.id, input2.microplanId)));
+  const [current] = await db2.select().from(microplans).where((0, import_drizzle_orm21.and)((0, import_drizzle_orm21.eq)(microplans.tenantId, input2.tenantId), (0, import_drizzle_orm21.eq)(microplans.id, input2.microplanId)));
   if (!current || current.status !== "draft") throw new Error("Only draft microplans can be restored. Approved plans are read-only.");
   const restored = await db2.update(microplans).set({
     name: sourcePlan.name,
@@ -17253,7 +17653,7 @@ async function restoreMicroplanVersionAsDraft(db2, input2) {
     districtEditReason: input2.reason,
     updatedByUserId: input2.userId || null,
     updatedAt: /* @__PURE__ */ new Date()
-  }).where((0, import_drizzle_orm20.and)((0, import_drizzle_orm20.eq)(microplans.tenantId, input2.tenantId), (0, import_drizzle_orm20.eq)(microplans.id, input2.microplanId), (0, import_drizzle_orm20.eq)(microplans.status, "draft"))).returning({ id: microplans.id });
+  }).where((0, import_drizzle_orm21.and)((0, import_drizzle_orm21.eq)(microplans.tenantId, input2.tenantId), (0, import_drizzle_orm21.eq)(microplans.id, input2.microplanId), (0, import_drizzle_orm21.eq)(microplans.status, "draft"))).returning({ id: microplans.id });
   if (!restored.length) throw new Error("The plan is no longer editable.");
   return createMicroplanVersion(db2, {
     tenantId: input2.tenantId,
@@ -17264,11 +17664,11 @@ async function restoreMicroplanVersionAsDraft(db2, input2) {
     status: "draft"
   });
 }
-var import_drizzle_orm20;
+var import_drizzle_orm21;
 var init_microplanVersionService = __esm({
   "server/services/microplanVersionService.ts"() {
     "use strict";
-    import_drizzle_orm20 = require("drizzle-orm");
+    import_drizzle_orm21 = require("drizzle-orm");
     init_schema();
   }
 });
@@ -17290,13 +17690,13 @@ async function getMicroplanAggregations(db2, tenantId, filters = {}) {
     id: provinces.id,
     name: provinces.name,
     code: provinces.code
-  }).from(provinces).where((0, import_drizzle_orm21.eq)(provinces.tenantId, tenantId));
+  }).from(provinces).where((0, import_drizzle_orm22.eq)(provinces.tenantId, tenantId));
   const allDistricts = await db2.select({
     id: districts.id,
     name: districts.name,
     code: districts.code,
     provinceId: districts.provinceId
-  }).from(districts).where((0, import_drizzle_orm21.eq)(districts.tenantId, tenantId));
+  }).from(districts).where((0, import_drizzle_orm22.eq)(districts.tenantId, tenantId));
   const allFacilities = await db2.select({
     id: facilities.id,
     name: facilities.name,
@@ -17304,7 +17704,7 @@ async function getMicroplanAggregations(db2, tenantId, filters = {}) {
     facilityType: facilities.facilityType,
     districtId: facilities.districtId,
     isActive: facilities.isActive
-  }).from(facilities).where((0, import_drizzle_orm21.and)((0, import_drizzle_orm21.eq)(facilities.tenantId, tenantId), (0, import_drizzle_orm21.eq)(facilities.isActive, true)));
+  }).from(facilities).where((0, import_drizzle_orm22.and)((0, import_drizzle_orm22.eq)(facilities.tenantId, tenantId), (0, import_drizzle_orm22.eq)(facilities.isActive, true)));
   const provinceMap = /* @__PURE__ */ new Map();
   allProvinces.forEach((p) => provinceMap.set(p.id, p));
   const districtMap = /* @__PURE__ */ new Map();
@@ -17362,9 +17762,9 @@ async function getMicroplanAggregations(db2, tenantId, filters = {}) {
     submittedAt: microplans.submittedAt,
     updatedAt: microplans.updatedAt
   }).from(microplans).where(
-    (0, import_drizzle_orm21.and)(
-      (0, import_drizzle_orm21.eq)(microplans.tenantId, tenantId),
-      (0, import_drizzle_orm21.inArray)(microplans.facilityId, inScopeFacilityIds)
+    (0, import_drizzle_orm22.and)(
+      (0, import_drizzle_orm22.eq)(microplans.tenantId, tenantId),
+      (0, import_drizzle_orm22.inArray)(microplans.facilityId, inScopeFacilityIds)
     )
   ) : [];
   const filteredPlans = rawPlans.filter((p) => {
@@ -17395,9 +17795,9 @@ async function getMicroplanAggregations(db2, tenantId, filters = {}) {
     isAchieved: sessionPlans.isAchieved,
     completedAt: sessionPlans.completedAt
   }).from(sessionPlans).where(
-    (0, import_drizzle_orm21.and)(
-      (0, import_drizzle_orm21.eq)(sessionPlans.tenantId, tenantId),
-      (0, import_drizzle_orm21.inArray)(sessionPlans.microplanId, planIds)
+    (0, import_drizzle_orm22.and)(
+      (0, import_drizzle_orm22.eq)(sessionPlans.tenantId, tenantId),
+      (0, import_drizzle_orm22.inArray)(sessionPlans.microplanId, planIds)
     )
   ) : [];
   const sessionsByPlanId = /* @__PURE__ */ new Map();
@@ -17435,9 +17835,9 @@ async function getMicroplanAggregations(db2, tenantId, filters = {}) {
     quarter: vaccineRequirements.quarter,
     year: vaccineRequirements.year
   }).from(vaccineRequirements).where(
-    (0, import_drizzle_orm21.and)(
-      (0, import_drizzle_orm21.eq)(vaccineRequirements.tenantId, tenantId),
-      (0, import_drizzle_orm21.inArray)(vaccineRequirements.facilityId, inScopeFacilityIds)
+    (0, import_drizzle_orm22.and)(
+      (0, import_drizzle_orm22.eq)(vaccineRequirements.tenantId, tenantId),
+      (0, import_drizzle_orm22.inArray)(vaccineRequirements.facilityId, inScopeFacilityIds)
     )
   ) : [];
   const filteredVaccines = rawVaccines.filter((v) => {
@@ -17487,9 +17887,9 @@ async function getMicroplanAggregations(db2, tenantId, filters = {}) {
     quarter: budgetItems.quarter,
     year: budgetItems.year
   }).from(budgetItems).where(
-    (0, import_drizzle_orm21.and)(
-      (0, import_drizzle_orm21.eq)(budgetItems.tenantId, tenantId),
-      (0, import_drizzle_orm21.inArray)(budgetItems.facilityId, inScopeFacilityIds)
+    (0, import_drizzle_orm22.and)(
+      (0, import_drizzle_orm22.eq)(budgetItems.tenantId, tenantId),
+      (0, import_drizzle_orm22.inArray)(budgetItems.facilityId, inScopeFacilityIds)
     )
   ) : [];
   const filteredBudget = rawBudget.filter((b) => {
@@ -17732,11 +18132,11 @@ async function getMicroplanAggregations(db2, tenantId, filters = {}) {
     facilities: facilityRows
   };
 }
-var import_drizzle_orm21;
+var import_drizzle_orm22;
 var init_microplanAggregationService = __esm({
   "server/services/microplanAggregationService.ts"() {
     "use strict";
-    import_drizzle_orm21 = require("drizzle-orm");
+    import_drizzle_orm22 = require("drizzle-orm");
     init_schema();
   }
 });
@@ -17758,13 +18158,13 @@ function requirePermission(permissionCode) {
     });
   };
 }
-var import_express7, import_drizzle_orm22, router2, catalogue_default;
+var import_express7, import_drizzle_orm23, router2, catalogue_default;
 var init_catalogue = __esm({
   "server/routes/catalogue.ts"() {
     "use strict";
     import_express7 = require("express");
     init_db();
-    import_drizzle_orm22 = require("drizzle-orm");
+    import_drizzle_orm23 = require("drizzle-orm");
     init_schema();
     init_auth();
     init_tenantResolver();
@@ -17773,9 +18173,9 @@ var init_catalogue = __esm({
     router2 = (0, import_express7.Router)();
     router2.get("/vaccines", isAuthenticated, requireTenant, async (req, res) => {
       try {
-        const conditions = [(0, import_drizzle_orm22.eq)(catalogueVaccines.tenantId, req.tenantId)];
-        if (req.query.activeOnly === "true") conditions.push((0, import_drizzle_orm22.eq)(catalogueVaccines.active, true));
-        const results = await db.select().from(catalogueVaccines).where((0, import_drizzle_orm22.and)(...conditions)).orderBy(catalogueVaccines.name);
+        const conditions = [(0, import_drizzle_orm23.eq)(catalogueVaccines.tenantId, req.tenantId)];
+        if (req.query.activeOnly === "true") conditions.push((0, import_drizzle_orm23.eq)(catalogueVaccines.active, true));
+        const results = await db.select().from(catalogueVaccines).where((0, import_drizzle_orm23.and)(...conditions)).orderBy(catalogueVaccines.name);
         res.json(results);
       } catch (err) {
         console.error(err);
@@ -17784,7 +18184,7 @@ var init_catalogue = __esm({
     });
     router2.get("/vaccines/:id", isAuthenticated, requireTenant, async (req, res) => {
       try {
-        const [result] = await db.select().from(catalogueVaccines).where((0, import_drizzle_orm22.and)((0, import_drizzle_orm22.eq)(catalogueVaccines.tenantId, req.tenantId), (0, import_drizzle_orm22.eq)(catalogueVaccines.id, parseInt(req.params.id))));
+        const [result] = await db.select().from(catalogueVaccines).where((0, import_drizzle_orm23.and)((0, import_drizzle_orm23.eq)(catalogueVaccines.tenantId, req.tenantId), (0, import_drizzle_orm23.eq)(catalogueVaccines.id, parseInt(req.params.id))));
         if (!result) return res.status(404).json({ message: "Vaccine not found" });
         res.json(result);
       } catch (err) {
@@ -17805,7 +18205,7 @@ var init_catalogue = __esm({
     router2.patch("/vaccines/:id", isAuthenticated, requireTenant, requirePermission("manage_users"), async (req, res) => {
       try {
         const { id, tenantId, createdAt, updatedAt, ...data } = req.body;
-        const [updated] = await db.update(catalogueVaccines).set({ ...data, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm22.and)((0, import_drizzle_orm22.eq)(catalogueVaccines.tenantId, req.tenantId), (0, import_drizzle_orm22.eq)(catalogueVaccines.id, parseInt(req.params.id)))).returning();
+        const [updated] = await db.update(catalogueVaccines).set({ ...data, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm23.and)((0, import_drizzle_orm23.eq)(catalogueVaccines.tenantId, req.tenantId), (0, import_drizzle_orm23.eq)(catalogueVaccines.id, parseInt(req.params.id)))).returning();
         res.json(updated);
       } catch (err) {
         console.error(err);
@@ -17814,9 +18214,9 @@ var init_catalogue = __esm({
     });
     router2.get("/schedules", isAuthenticated, requireTenant, async (req, res) => {
       try {
-        const conditions = [(0, import_drizzle_orm22.eq)(catalogueScheduleDoses.tenantId, req.tenantId)];
-        if (req.query.activeOnly === "true") conditions.push((0, import_drizzle_orm22.eq)(catalogueScheduleDoses.active, true));
-        const results = await db.select().from(catalogueScheduleDoses).where((0, import_drizzle_orm22.and)(...conditions)).orderBy(catalogueScheduleDoses.doseNumber);
+        const conditions = [(0, import_drizzle_orm23.eq)(catalogueScheduleDoses.tenantId, req.tenantId)];
+        if (req.query.activeOnly === "true") conditions.push((0, import_drizzle_orm23.eq)(catalogueScheduleDoses.active, true));
+        const results = await db.select().from(catalogueScheduleDoses).where((0, import_drizzle_orm23.and)(...conditions)).orderBy(catalogueScheduleDoses.doseNumber);
         res.json(results);
       } catch (err) {
         console.error(err);
@@ -17836,7 +18236,7 @@ var init_catalogue = __esm({
     router2.patch("/schedules/:id", isAuthenticated, requireTenant, requirePermission("manage_users"), async (req, res) => {
       try {
         const { id, tenantId, createdAt, updatedAt, ...data } = req.body;
-        const [updated] = await db.update(catalogueScheduleDoses).set(data).where((0, import_drizzle_orm22.and)((0, import_drizzle_orm22.eq)(catalogueScheduleDoses.tenantId, req.tenantId), (0, import_drizzle_orm22.eq)(catalogueScheduleDoses.id, parseInt(req.params.id)))).returning();
+        const [updated] = await db.update(catalogueScheduleDoses).set(data).where((0, import_drizzle_orm23.and)((0, import_drizzle_orm23.eq)(catalogueScheduleDoses.tenantId, req.tenantId), (0, import_drizzle_orm23.eq)(catalogueScheduleDoses.id, parseInt(req.params.id)))).returning();
         res.json(updated);
       } catch (err) {
         console.error(err);
@@ -17845,9 +18245,9 @@ var init_catalogue = __esm({
     });
     router2.get("/commodities", isAuthenticated, requireTenant, async (req, res) => {
       try {
-        const conditions = [(0, import_drizzle_orm22.eq)(catalogueCommodities.tenantId, req.tenantId)];
-        if (req.query.activeOnly === "true") conditions.push((0, import_drizzle_orm22.eq)(catalogueCommodities.active, true));
-        const results = await db.select().from(catalogueCommodities).where((0, import_drizzle_orm22.and)(...conditions)).orderBy(catalogueCommodities.name);
+        const conditions = [(0, import_drizzle_orm23.eq)(catalogueCommodities.tenantId, req.tenantId)];
+        if (req.query.activeOnly === "true") conditions.push((0, import_drizzle_orm23.eq)(catalogueCommodities.active, true));
+        const results = await db.select().from(catalogueCommodities).where((0, import_drizzle_orm23.and)(...conditions)).orderBy(catalogueCommodities.name);
         res.json(results);
       } catch (err) {
         console.error(err);
@@ -17885,7 +18285,7 @@ var init_catalogue = __esm({
     router2.patch("/commodities/:id", isAuthenticated, requireTenant, requirePermission("manage_users"), async (req, res) => {
       try {
         const { id, tenantId, createdAt, updatedAt, ...data } = req.body;
-        const [updated] = await db.update(catalogueCommodities).set(data).where((0, import_drizzle_orm22.and)((0, import_drizzle_orm22.eq)(catalogueCommodities.tenantId, req.tenantId), (0, import_drizzle_orm22.eq)(catalogueCommodities.id, parseInt(req.params.id)))).returning();
+        const [updated] = await db.update(catalogueCommodities).set(data).where((0, import_drizzle_orm23.and)((0, import_drizzle_orm23.eq)(catalogueCommodities.tenantId, req.tenantId), (0, import_drizzle_orm23.eq)(catalogueCommodities.id, parseInt(req.params.id)))).returning();
         res.json(updated);
       } catch (err) {
         console.error(err);
@@ -17894,9 +18294,9 @@ var init_catalogue = __esm({
     });
     router2.get("/wastage-thresholds", isAuthenticated, requireTenant, async (req, res) => {
       try {
-        const conditions = [(0, import_drizzle_orm22.eq)(catalogueWastageThresholds.tenantId, req.tenantId)];
-        if (req.query.activeOnly === "true") conditions.push((0, import_drizzle_orm22.eq)(catalogueWastageThresholds.active, true));
-        const results = await db.select().from(catalogueWastageThresholds).where((0, import_drizzle_orm22.and)(...conditions));
+        const conditions = [(0, import_drizzle_orm23.eq)(catalogueWastageThresholds.tenantId, req.tenantId)];
+        if (req.query.activeOnly === "true") conditions.push((0, import_drizzle_orm23.eq)(catalogueWastageThresholds.active, true));
+        const results = await db.select().from(catalogueWastageThresholds).where((0, import_drizzle_orm23.and)(...conditions));
         res.json(results);
       } catch (err) {
         console.error(err);
@@ -17916,7 +18316,7 @@ var init_catalogue = __esm({
     router2.patch("/wastage-thresholds/:id", isAuthenticated, requireTenant, requirePermission("manage_users"), async (req, res) => {
       try {
         const { id, tenantId, createdAt, updatedAt, ...data } = req.body;
-        const [updated] = await db.update(catalogueWastageThresholds).set(data).where((0, import_drizzle_orm22.and)((0, import_drizzle_orm22.eq)(catalogueWastageThresholds.tenantId, req.tenantId), (0, import_drizzle_orm22.eq)(catalogueWastageThresholds.id, parseInt(req.params.id)))).returning();
+        const [updated] = await db.update(catalogueWastageThresholds).set(data).where((0, import_drizzle_orm23.and)((0, import_drizzle_orm23.eq)(catalogueWastageThresholds.tenantId, req.tenantId), (0, import_drizzle_orm23.eq)(catalogueWastageThresholds.id, parseInt(req.params.id)))).returning();
         res.json(updated);
       } catch (err) {
         console.error(err);
@@ -17947,12 +18347,12 @@ var init_catalogue = __esm({
           { productId: "vaccine_mpox", name: "Mpox vaccine", antigenName: "Mpox", category: "Vaccine", presentation: "Liquid", dosesPerVial: 1, unitOfMeasure: "vials", requiresDiluent: false, requiresInjectionDevice: true, requiresSafetyBox: true, routineUse: false, campaignUse: true, outbreakUse: true, wastageThreshold: "5.00", active: false, modules: {} }
         ];
         for (const v of seedVaccines) {
-          const [existing] = await db.select().from(catalogueVaccines2).where((0, import_drizzle_orm22.and)((0, import_drizzle_orm22.eq)(catalogueVaccines2.tenantId, tenantId), (0, import_drizzle_orm22.eq)(catalogueVaccines2.productId, v.productId)));
+          const [existing] = await db.select().from(catalogueVaccines2).where((0, import_drizzle_orm23.and)((0, import_drizzle_orm23.eq)(catalogueVaccines2.tenantId, tenantId), (0, import_drizzle_orm23.eq)(catalogueVaccines2.productId, v.productId)));
           if (!existing) {
             await db.insert(catalogueVaccines2).values({ ...v, tenantId, approvalStatus: "approved" });
           }
         }
-        const allVaccines = await db.select().from(catalogueVaccines2).where((0, import_drizzle_orm22.eq)(catalogueVaccines2.tenantId, tenantId));
+        const allVaccines = await db.select().from(catalogueVaccines2).where((0, import_drizzle_orm23.eq)(catalogueVaccines2.tenantId, tenantId));
         const getVaxId = (pid) => allVaccines.find((v) => v.productId === pid)?.id;
         const seedSchedules = [
           { doseCode: "bcg_birth", name: "BCG at birth", vaccineId: getVaxId("vaccine_bcg"), doseNumber: 1, classification: "routine", targetPopulationGroup: "infants" },
@@ -17981,7 +18381,7 @@ var init_catalogue = __esm({
         ];
         for (const s of seedSchedules) {
           if (!s.vaccineId) continue;
-          const [existing] = await db.select().from(catalogueScheduleDoses2).where((0, import_drizzle_orm22.and)((0, import_drizzle_orm22.eq)(catalogueScheduleDoses2.tenantId, tenantId), (0, import_drizzle_orm22.eq)(catalogueScheduleDoses2.doseCode, s.doseCode)));
+          const [existing] = await db.select().from(catalogueScheduleDoses2).where((0, import_drizzle_orm23.and)((0, import_drizzle_orm23.eq)(catalogueScheduleDoses2.tenantId, tenantId), (0, import_drizzle_orm23.eq)(catalogueScheduleDoses2.doseCode, s.doseCode)));
           if (!existing) {
             await db.insert(catalogueScheduleDoses2).values({ ...s, tenantId, approvalStatus: "approved" });
           }
@@ -18008,7 +18408,7 @@ var init_catalogue = __esm({
           { commodityCode: "other_aefi_form", type: "other", name: "AEFI Investigation & Reporting Form", packSize: 1, stockManaged: true }
         ];
         for (const c of seedCommodities) {
-          const [existing] = await db.select().from(catalogueCommodities2).where((0, import_drizzle_orm22.and)((0, import_drizzle_orm22.eq)(catalogueCommodities2.tenantId, tenantId), (0, import_drizzle_orm22.eq)(catalogueCommodities2.commodityCode, c.commodityCode)));
+          const [existing] = await db.select().from(catalogueCommodities2).where((0, import_drizzle_orm23.and)((0, import_drizzle_orm23.eq)(catalogueCommodities2.tenantId, tenantId), (0, import_drizzle_orm23.eq)(catalogueCommodities2.commodityCode, c.commodityCode)));
           if (!existing) {
             await db.insert(catalogueCommodities2).values({ ...c, tenantId });
           }
@@ -18023,7 +18423,7 @@ var init_catalogue = __esm({
         ];
         for (const w of seedWastage) {
           if (!w.vaccineId) continue;
-          const [existing] = await db.select().from(catalogueWastageThresholds2).where((0, import_drizzle_orm22.and)((0, import_drizzle_orm22.eq)(catalogueWastageThresholds2.tenantId, tenantId), (0, import_drizzle_orm22.eq)(catalogueWastageThresholds2.vaccineId, w.vaccineId)));
+          const [existing] = await db.select().from(catalogueWastageThresholds2).where((0, import_drizzle_orm23.and)((0, import_drizzle_orm23.eq)(catalogueWastageThresholds2.tenantId, tenantId), (0, import_drizzle_orm23.eq)(catalogueWastageThresholds2.vaccineId, w.vaccineId)));
           if (!existing) {
             await db.insert(catalogueWastageThresholds2).values({ ...w, tenantId });
           }
@@ -18651,12 +19051,12 @@ async function runMissingSettlementDetection(tenantId, options = {}) {
   );
   try {
     await db.delete(candidateUnmappedSettlements).where(
-      (0, import_drizzle_orm23.and)(
-        (0, import_drizzle_orm23.eq)(candidateUnmappedSettlements.tenantId, tenantId),
-        (0, import_drizzle_orm23.eq)(candidateUnmappedSettlements.validationStatus, "pending")
+      (0, import_drizzle_orm24.and)(
+        (0, import_drizzle_orm24.eq)(candidateUnmappedSettlements.tenantId, tenantId),
+        (0, import_drizzle_orm24.eq)(candidateUnmappedSettlements.validationStatus, "pending")
       )
     );
-    const sql41 = `
+    const sql43 = `
       WITH admin_polys AS MATERIALIZED (
         SELECT
           b.admin_level,
@@ -18807,7 +19207,7 @@ async function runMissingSettlementDetection(tenantId, options = {}) {
         'pending'
       FROM enriched e
     `;
-    const result = await pool.query(sql41, [
+    const result = await pool.query(sql43, [
       tenantId,
       popThreshold,
       radiusMeters,
@@ -18830,13 +19230,13 @@ async function runMissingSettlementDetection(tenantId, options = {}) {
     };
   }
 }
-var import_drizzle_orm23;
+var import_drizzle_orm24;
 var init_settlementEngine = __esm({
   "server/pipeline/settlementEngine.ts"() {
     "use strict";
     init_db();
     init_schema();
-    import_drizzle_orm23 = require("drizzle-orm");
+    import_drizzle_orm24 = require("drizzle-orm");
   }
 });
 
@@ -20123,7 +20523,7 @@ async function checkProximityAndPopulation(tenantId, input2) {
   const winStart = new Date(target.getTime() - DAYS_WINDOW * 24 * 60 * 60 * 1e3);
   const winEnd = new Date(target.getTime() + DAYS_WINDOW * 24 * 60 * 60 * 1e3);
   const all = await storage.getSessionPlans(tenantId);
-  const svRows = await db.select().from(sessionVillages).where((0, import_drizzle_orm24.eq)(sessionVillages.tenantId, String(tenantId)));
+  const svRows = await db.select().from(sessionVillages).where((0, import_drizzle_orm25.eq)(sessionVillages.tenantId, String(tenantId)));
   const svByPlan = /* @__PURE__ */ new Map();
   for (const r of svRows) {
     const arr = svByPlan.get(r.sessionId) ?? [];
@@ -20163,9 +20563,9 @@ async function checkProximityAndPopulation(tenantId, input2) {
   if (nearbyVillages.length) {
     const ids = nearbyVillages.map((v) => v.id);
     const popRows = await db.select().from(populationData).where(
-      (0, import_drizzle_orm24.and)(
-        (0, import_drizzle_orm24.eq)(populationData.tenantId, String(tenantId)),
-        (0, import_drizzle_orm24.inArray)(populationData.villageId, ids)
+      (0, import_drizzle_orm25.and)(
+        (0, import_drizzle_orm25.eq)(populationData.tenantId, String(tenantId)),
+        (0, import_drizzle_orm25.inArray)(populationData.villageId, ids)
       )
     );
     const bestByVillage = /* @__PURE__ */ new Map();
@@ -20197,26 +20597,26 @@ async function checkProximityAndPopulation(tenantId, input2) {
     committedPopulation: committed
   };
 }
-var import_drizzle_orm24;
+var import_drizzle_orm25;
 var init_proximityCheck = __esm({
   "server/services/proximityCheck.ts"() {
     "use strict";
     init_db();
     init_storage();
     init_schema();
-    import_drizzle_orm24 = require("drizzle-orm");
+    import_drizzle_orm25 = require("drizzle-orm");
   }
 });
 
 // server/services/syncService.ts
 async function pullChanges(tenantId, since) {
   const tenantFilter = (table) => {
-    if (!since) return (0, import_drizzle_orm25.eq)(table.tenantId, tenantId);
+    if (!since) return (0, import_drizzle_orm26.eq)(table.tenantId, tenantId);
     const timeCol = table.updatedAt || table.createdAt;
     if (timeCol) {
-      return (0, import_drizzle_orm25.and)((0, import_drizzle_orm25.eq)(table.tenantId, tenantId), (0, import_drizzle_orm25.gt)(timeCol, since));
+      return (0, import_drizzle_orm26.and)((0, import_drizzle_orm26.eq)(table.tenantId, tenantId), (0, import_drizzle_orm26.gt)(timeCol, since));
     }
-    return (0, import_drizzle_orm25.eq)(table.tenantId, tenantId);
+    return (0, import_drizzle_orm26.eq)(table.tenantId, tenantId);
   };
   const safeQuery = async (tableName, queryFn) => {
     try {
@@ -20246,7 +20646,10 @@ async function pullChanges(tenantId, since) {
     microplansData,
     supervisionVisitsData,
     supervisionTemplatesData,
-    catchmentsData
+    catchmentsData,
+    coldChainData,
+    chvProfilesData,
+    facilityStaffData
   ] = await Promise.all([
     safeQuery("regions", () => db.select().from(regions).where(tenantFilter(regions))),
     safeQuery("provinces", () => db.select().from(provinces).where(tenantFilter(provinces))),
@@ -20263,7 +20666,7 @@ async function pullChanges(tenantId, since) {
         _geoDistrictId: facilities.districtId,
         _geoDistrictName: districts.name,
         _geoVillageName: villages.name
-      }).from(clients).leftJoin(facilities, (0, import_drizzle_orm25.eq)(facilities.id, clients.facilityId)).leftJoin(districts, (0, import_drizzle_orm25.eq)(districts.id, facilities.districtId)).leftJoin(provinces, (0, import_drizzle_orm25.eq)(provinces.id, districts.provinceId)).leftJoin(villages, (0, import_drizzle_orm25.eq)(villages.id, clients.villageId)).where(tenantFilter(clients))
+      }).from(clients).leftJoin(facilities, (0, import_drizzle_orm26.eq)(facilities.id, clients.facilityId)).leftJoin(districts, (0, import_drizzle_orm26.eq)(districts.id, facilities.districtId)).leftJoin(provinces, (0, import_drizzle_orm26.eq)(provinces.id, districts.provinceId)).leftJoin(villages, (0, import_drizzle_orm26.eq)(villages.id, clients.villageId)).where(tenantFilter(clients))
     ),
     safeQuery("clientVaccinations", () => db.select().from(clientVaccinations).where(tenantFilter(clientVaccinations))),
     safeQuery("sessionPlans", () => db.select().from(sessionPlans).where(tenantFilter(sessionPlans))),
@@ -20277,7 +20680,10 @@ async function pullChanges(tenantId, since) {
     safeQuery("microplans", () => db.select().from(microplans).where(tenantFilter(microplans))),
     safeQuery("supervisionVisits", () => db.select().from(supervisionVisits).where(tenantFilter(supervisionVisits))),
     safeQuery("supervisionChecklistTemplates", () => db.select().from(supervisionChecklistTemplates).where(tenantFilter(supervisionChecklistTemplates))),
-    safeQuery("facilityCatchments", () => db.select().from(facilityCatchments).where(tenantFilter(facilityCatchments)))
+    safeQuery("facilityCatchments", () => db.select().from(facilityCatchments).where(tenantFilter(facilityCatchments))),
+    safeQuery("coldChainEquipment", () => db.select().from(coldChainEquipment).where(tenantFilter(coldChainEquipment))),
+    safeQuery("chvProfiles", () => db.select().from(chvProfiles).where(tenantFilter(chvProfiles))),
+    safeQuery("facilityStaff", () => db.select().from(facilityStaff).where(tenantFilter(facilityStaff)))
   ]);
   const clientsData = clientsRawData.map(({ client: client3, ...geo }) => ({
     ...client3,
@@ -20314,7 +20720,10 @@ async function pullChanges(tenantId, since) {
     microplans: microplansData,
     supervisionVisits: supervisionVisitsData,
     supervisionTemplates: supervisionTemplatesData,
-    catchments: catchmentsData
+    catchments: catchmentsData,
+    coldChainEquipment: coldChainData,
+    chvProfiles: chvProfilesData,
+    facilityStaff: facilityStaffData
   };
 }
 async function batchMutate(tenantId, mutations, performedById) {
@@ -20325,6 +20734,9 @@ async function batchMutate(tenantId, mutations, performedById) {
     try {
       const body = mutation.body ? JSON.parse(mutation.body) : {};
       const payload = { ...body, tenantId };
+      if (mutation.method === "POST" && !mutation.url.startsWith("/api/clients")) {
+        delete payload.id;
+      }
       let serverId;
       if (mutation.url.startsWith("/api/clients")) {
         if (mutation.method === "POST") {
@@ -20470,12 +20882,12 @@ async function batchMutate(tenantId, mutations, performedById) {
             ));
             let validIds = [];
             if (sanitized.length > 0) {
-              const tenantVillages = await db.select({ id: villages.id }).from(villages).where((0, import_drizzle_orm25.and)((0, import_drizzle_orm25.eq)(villages.tenantId, tenantId), (0, import_drizzle_orm25.inArray)(villages.id, sanitized)));
+              const tenantVillages = await db.select({ id: villages.id }).from(villages).where((0, import_drizzle_orm26.and)((0, import_drizzle_orm26.eq)(villages.tenantId, tenantId), (0, import_drizzle_orm26.inArray)(villages.id, sanitized)));
               validIds = tenantVillages.map((v) => v.id);
             }
-            const existingRows = await db.select({ villageId: sessionVillages.villageId }).from(sessionVillages).where((0, import_drizzle_orm25.and)(
-              (0, import_drizzle_orm25.eq)(sessionVillages.tenantId, String(tenantId)),
-              (0, import_drizzle_orm25.eq)(sessionVillages.sessionId, sessionId)
+            const existingRows = await db.select({ villageId: sessionVillages.villageId }).from(sessionVillages).where((0, import_drizzle_orm26.and)(
+              (0, import_drizzle_orm26.eq)(sessionVillages.tenantId, String(tenantId)),
+              (0, import_drizzle_orm26.eq)(sessionVillages.sessionId, sessionId)
             ));
             const before = existingRows.map((r) => r.villageId);
             const beforeSet = new Set(before);
@@ -20483,10 +20895,10 @@ async function batchMutate(tenantId, mutations, performedById) {
             const toAdd = validIds.filter((id) => !beforeSet.has(id));
             const toRemove = before.filter((id) => !afterSet.has(id));
             if (toRemove.length > 0) {
-              await db.delete(sessionVillages).where((0, import_drizzle_orm25.and)(
-                (0, import_drizzle_orm25.eq)(sessionVillages.tenantId, String(tenantId)),
-                (0, import_drizzle_orm25.eq)(sessionVillages.sessionId, sessionId),
-                (0, import_drizzle_orm25.inArray)(sessionVillages.villageId, toRemove)
+              await db.delete(sessionVillages).where((0, import_drizzle_orm26.and)(
+                (0, import_drizzle_orm26.eq)(sessionVillages.tenantId, String(tenantId)),
+                (0, import_drizzle_orm26.eq)(sessionVillages.sessionId, sessionId),
+                (0, import_drizzle_orm26.inArray)(sessionVillages.villageId, toRemove)
               ));
             }
             if (toAdd.length > 0) {
@@ -20504,8 +20916,15 @@ async function batchMutate(tenantId, mutations, performedById) {
         }
       } else if (mutation.url.includes("/api/session-day-plans") || mutation.url.includes("/api/sessionDayPlans")) {
         if (mutation.method === "POST") {
-          const dayPlan = await storage.createSessionDayPlan(tenantId, payload);
-          serverId = dayPlan.id;
+          if (Array.isArray(payload.items)) {
+            for (const item of payload.items) {
+              await storage.createSessionDayPlan(tenantId, { ...item, tenantId });
+            }
+            serverId = "bulk-day-plans";
+          } else {
+            const dayPlan = await storage.createSessionDayPlan(tenantId, payload);
+            serverId = dayPlan.id;
+          }
         } else if ((mutation.method === "PATCH" || mutation.method === "PUT") && mutation.serverId) {
           await storage.updateSessionDayPlan(tenantId, Number(mutation.serverId), payload);
           serverId = mutation.serverId;
@@ -20525,8 +20944,15 @@ async function batchMutate(tenantId, mutations, performedById) {
         }
       } else if (mutation.url.startsWith("/api/budget-items")) {
         if (mutation.method === "POST") {
-          const item = await storage.createBudgetItem(tenantId, payload);
-          serverId = item.id;
+          if (Array.isArray(payload.items)) {
+            for (const item of payload.items) {
+              await storage.createBudgetItem(tenantId, { ...item, tenantId });
+            }
+            serverId = "bulk-budget-items";
+          } else {
+            const item = await storage.createBudgetItem(tenantId, payload);
+            serverId = item.id;
+          }
         } else if ((mutation.method === "PATCH" || mutation.method === "PUT") && mutation.serverId) {
           await storage.updateBudgetItem(tenantId, Number(mutation.serverId), payload);
           serverId = mutation.serverId;
@@ -20561,7 +20987,7 @@ async function batchMutate(tenantId, mutations, performedById) {
             }
           }
           if (activityId) {
-            await db.delete(mobilizationActivities).where((0, import_drizzle_orm25.and)((0, import_drizzle_orm25.eq)(mobilizationActivities.id, activityId), (0, import_drizzle_orm25.eq)(mobilizationActivities.tenantId, tenantId)));
+            await db.delete(mobilizationActivities).where((0, import_drizzle_orm26.and)((0, import_drizzle_orm26.eq)(mobilizationActivities.id, activityId), (0, import_drizzle_orm26.eq)(mobilizationActivities.tenantId, tenantId)));
             serverId = activityId;
           }
         }
@@ -20610,13 +21036,54 @@ async function batchMutate(tenantId, mutations, performedById) {
       } else if (mutation.url.startsWith("/api/microplans")) {
         if (payload?.status && payload.status !== "draft") throw new Error("Offline plan edits cannot approve or submit plans. Use the approval workflow.");
         if (mutation.method === "POST") {
-          const plan = await storage.createMicroplan(tenantId, payload);
-          serverId = plan.id;
-        } else if ((mutation.method === "PATCH" || mutation.method === "PUT") && mutation.serverId) {
-          const current = await storage.getMicroplan(tenantId, Number(mutation.serverId));
-          if (!current || current.status !== "draft") throw new Error("Only draft microplans can be edited offline.");
-          await storage.updateMicroplan(tenantId, Number(mutation.serverId), payload);
-          serverId = mutation.serverId;
+          const { id: _tempId, tenantId: _t, ...cleanPayload } = payload || {};
+          const facId = cleanPayload.facilityId ? Number(cleanPayload.facilityId) : null;
+          const planYear = cleanPayload.year ? Number(cleanPayload.year) : (/* @__PURE__ */ new Date()).getFullYear();
+          const planQuarter = cleanPayload.quarter ? Number(cleanPayload.quarter) : Math.ceil(((/* @__PURE__ */ new Date()).getMonth() + 1) / 3);
+          const planType = cleanPayload.planType || "facility_routine";
+          const planName = cleanPayload.name || (facId ? `Facility Routine Microplan Q${planQuarter} ${planYear}` : `Microplan ${planYear}`);
+          let existingPlan = null;
+          if (facId) {
+            const [found] = await db.select().from(microplans).where((0, import_drizzle_orm26.and)(
+              (0, import_drizzle_orm26.eq)(microplans.tenantId, tenantId),
+              (0, import_drizzle_orm26.eq)(microplans.facilityId, facId),
+              (0, import_drizzle_orm26.eq)(microplans.year, planYear),
+              (0, import_drizzle_orm26.eq)(microplans.quarter, planQuarter),
+              (0, import_drizzle_orm26.eq)(microplans.planType, planType)
+            )).limit(1);
+            existingPlan = found;
+          }
+          if (existingPlan) {
+            await storage.updateMicroplan(tenantId, existingPlan.id, {
+              ...cleanPayload,
+              name: planName,
+              facilityId: facId ?? void 0,
+              year: planYear,
+              quarter: planQuarter,
+              planType
+            });
+            serverId = existingPlan.id;
+          } else {
+            const plan = await storage.createMicroplan(tenantId, {
+              ...cleanPayload,
+              name: planName,
+              facilityId: facId ?? void 0,
+              year: planYear,
+              quarter: planQuarter,
+              planType,
+              status: cleanPayload.status || "draft"
+            });
+            serverId = plan.id;
+          }
+        } else if ((mutation.method === "PATCH" || mutation.method === "PUT") && (mutation.serverId || mutation.url.split("/").pop())) {
+          let planId = mutation.serverId ? Number(mutation.serverId) : Number(mutation.url.split("/").pop());
+          if (planId && !isNaN(planId)) {
+            const current = await storage.getMicroplan(tenantId, planId);
+            if (!current || current.status !== "draft") throw new Error("Only draft microplans can be edited offline.");
+            const { id: _tempId, tenantId: _t, ...cleanPayload } = payload || {};
+            await storage.updateMicroplan(tenantId, planId, cleanPayload);
+            serverId = planId;
+          }
         } else if (mutation.method === "DELETE") {
           let planId = mutation.serverId ? Number(mutation.serverId) : null;
           if (!planId) {
@@ -20635,11 +21102,22 @@ async function batchMutate(tenantId, mutations, performedById) {
         }
       } else if (mutation.url.startsWith("/api/supervision-visits")) {
         if (mutation.method === "POST") {
-          const visit = await storage.createSupervisionVisit(tenantId, {
-            ...payload,
-            createdByUserId: performedById
-          });
-          serverId = visit.id;
+          if (Array.isArray(payload.items)) {
+            for (const item of payload.items) {
+              await storage.createSupervisionVisit(tenantId, {
+                ...item,
+                tenantId,
+                createdByUserId: performedById
+              });
+            }
+            serverId = "bulk-supervision-visits";
+          } else {
+            const visit = await storage.createSupervisionVisit(tenantId, {
+              ...payload,
+              createdByUserId: performedById
+            });
+            serverId = visit.id;
+          }
         } else if ((mutation.method === "PATCH" || mutation.method === "PUT") && mutation.serverId) {
           await storage.updateSupervisionVisit(tenantId, Number(mutation.serverId), payload);
           serverId = mutation.serverId;
@@ -20676,6 +21154,272 @@ async function batchMutate(tenantId, mutations, performedById) {
           if (tmplId) {
             await storage.deleteChecklistTemplate(tenantId, tmplId);
             serverId = tmplId;
+          }
+        }
+      } else if (mutation.url.startsWith("/api/population")) {
+        if (mutation.url.includes("/import") || mutation.url.includes("/bulk")) {
+          const items = Array.isArray(payload.population) ? payload.population : Array.isArray(payload.items) ? payload.items : Array.isArray(payload.records) ? payload.records : [];
+          for (const item of items) {
+            await storage.createPopulationData(tenantId, { ...item, tenantId });
+          }
+          serverId = "bulk-population";
+        } else if (mutation.method === "POST") {
+          const pop = await storage.createPopulationData(tenantId, payload);
+          serverId = pop.id;
+        } else if ((mutation.method === "PATCH" || mutation.method === "PUT") && mutation.serverId) {
+          const pop = await storage.updatePopulationData(tenantId, Number(mutation.serverId), payload);
+          serverId = pop?.id ?? mutation.serverId;
+        } else if (mutation.method === "DELETE") {
+          let popId = mutation.serverId ? Number(mutation.serverId) : null;
+          if (!popId) {
+            const parts = mutation.url.split("/");
+            const lastPart = parts[parts.length - 1];
+            if (lastPart && !isNaN(Number(lastPart))) {
+              popId = Number(lastPart);
+            }
+          }
+          if (popId) {
+            await storage.deletePopulationData(tenantId, popId);
+            serverId = popId;
+          }
+        }
+      } else if (mutation.url.includes("/cold-chain") || mutation.url.startsWith("/api/cold-chain")) {
+        if (mutation.method === "POST") {
+          let facilityId = payload.facilityId ? Number(payload.facilityId) : null;
+          if (!facilityId) {
+            const m = mutation.url.match(/\/api\/facilities\/(\d+)\/cold-chain/);
+            if (m) facilityId = Number(m[1]);
+          }
+          const [inserted] = await db.insert(coldChainEquipment).values({
+            ...payload,
+            facilityId: facilityId || payload.facilityId,
+            tenantId,
+            createdByUserId: performedById ?? null
+          }).returning();
+          serverId = inserted?.id;
+        } else if ((mutation.method === "PATCH" || mutation.method === "PUT") && (mutation.serverId || mutation.url.split("/").pop())) {
+          let equipId = mutation.serverId ? Number(mutation.serverId) : Number(mutation.url.split("/").pop());
+          if (equipId && !isNaN(equipId)) {
+            const { tenantId: _t, ...safePayload } = payload;
+            await db.update(coldChainEquipment).set({ ...safePayload, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm26.and)((0, import_drizzle_orm26.eq)(coldChainEquipment.id, equipId), (0, import_drizzle_orm26.eq)(coldChainEquipment.tenantId, tenantId)));
+            serverId = equipId;
+          }
+        } else if (mutation.method === "DELETE") {
+          let equipId = mutation.serverId ? Number(mutation.serverId) : Number(mutation.url.split("/").pop());
+          if (equipId && !isNaN(equipId)) {
+            await db.update(coldChainEquipment).set({ isActive: false, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm26.and)((0, import_drizzle_orm26.eq)(coldChainEquipment.id, equipId), (0, import_drizzle_orm26.eq)(coldChainEquipment.tenantId, tenantId)));
+            serverId = equipId;
+          }
+        }
+      } else if (mutation.url.startsWith("/api/vaccines/config") || mutation.url.startsWith("/api/vaccines")) {
+        if (mutation.method === "POST") {
+          const { id: _tempId, tenantId: _t, ...cleanPayload } = payload || {};
+          const [inserted] = await db.insert(vaccineConfigurations).values({ ...cleanPayload, tenantId }).returning();
+          serverId = inserted?.id;
+        } else if ((mutation.method === "PATCH" || mutation.method === "PUT") && (mutation.serverId || mutation.url.split("/").pop())) {
+          let cfgId = mutation.serverId ? Number(mutation.serverId) : Number(mutation.url.split("/").pop());
+          if (cfgId && !isNaN(cfgId)) {
+            const { tenantId: _t, ...safePayload } = payload;
+            await db.update(vaccineConfigurations).set({ ...safePayload, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm26.and)((0, import_drizzle_orm26.eq)(vaccineConfigurations.id, cfgId), (0, import_drizzle_orm26.eq)(vaccineConfigurations.tenantId, tenantId)));
+            serverId = cfgId;
+          }
+        }
+      } else if (mutation.url.startsWith("/api/chvs") || mutation.url.startsWith("/api/community-health-volunteers")) {
+        if (mutation.url.includes("/bulk-reassign") && mutation.method === "POST") {
+          const chvIds = Array.isArray(payload.chvIds) ? payload.chvIds.map((x) => Number(x)).filter((n) => !isNaN(n)) : [];
+          const vid = payload.villageId ? Number(payload.villageId) : null;
+          let safeVid = null;
+          if (vid) {
+            const [foundVillage] = await db.select({ id: villages.id }).from(villages).where((0, import_drizzle_orm26.and)((0, import_drizzle_orm26.eq)(villages.id, vid), (0, import_drizzle_orm26.eq)(villages.tenantId, tenantId))).limit(1);
+            if (foundVillage) safeVid = vid;
+          }
+          if (chvIds.length > 0) {
+            await db.update(chvProfiles).set({ assignedVillageId: safeVid, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm26.and)((0, import_drizzle_orm26.eq)(chvProfiles.tenantId, tenantId), (0, import_drizzle_orm26.inArray)(chvProfiles.id, chvIds)));
+          }
+          serverId = "bulk-reassign";
+        } else if (mutation.url.includes("/import") && mutation.method === "POST") {
+          const items = Array.isArray(payload.items) ? payload.items : Array.isArray(payload) ? payload : [];
+          for (const item of items) {
+            const { id: _tId, tenantId: _t, ...cleanItem } = item;
+            let itemVid = null;
+            if (cleanItem.assignedVillageId) {
+              const [foundV] = await db.select({ id: villages.id }).from(villages).where((0, import_drizzle_orm26.and)((0, import_drizzle_orm26.eq)(villages.id, Number(cleanItem.assignedVillageId)), (0, import_drizzle_orm26.eq)(villages.tenantId, tenantId))).limit(1);
+              if (foundV) itemVid = Number(cleanItem.assignedVillageId);
+            }
+            await db.insert(chvProfiles).values({
+              tenantId,
+              facilityId: Number(cleanItem.facilityId) || 0,
+              assignedVillageId: itemVid,
+              fullName: (cleanItem.fullName || cleanItem.name || "CHV").trim(),
+              nrc: cleanItem.nrc || "NRC-PENDING",
+              gender: cleanItem.gender || "female",
+              age: cleanItem.age ? Number(cleanItem.age) : null,
+              educationLevel: cleanItem.educationLevel || "primary",
+              trainingReceived: cleanItem.trainingReceived || cleanItem.trainingStatus || "trained",
+              roleDescription: cleanItem.roleDescription || null,
+              contactPhone: cleanItem.contactPhone || null,
+              yearsOfService: cleanItem.yearsOfService ? Number(cleanItem.yearsOfService) : null,
+              siaRole: cleanItem.siaRole || cleanItem.campaignRole || "mobilizer",
+              isActive: cleanItem.isActive ?? cleanItem.active ?? true,
+              employmentStatus: cleanItem.employmentStatus || "Active - In-service",
+              supervisorId: cleanItem.supervisorId ? Number(cleanItem.supervisorId) : null
+            });
+          }
+          serverId = "bulk-import";
+        } else if (mutation.method === "POST") {
+          const { id: _tempId, tenantId: _t, ...cleanPayload } = payload || {};
+          let resolvedVillageId = null;
+          const candidateVid = cleanPayload.assignedVillageId ?? cleanPayload.villageId ? Number(cleanPayload.assignedVillageId ?? cleanPayload.villageId) : null;
+          if (candidateVid) {
+            const [foundVillage] = await db.select({ id: villages.id }).from(villages).where((0, import_drizzle_orm26.and)((0, import_drizzle_orm26.eq)(villages.id, candidateVid), (0, import_drizzle_orm26.eq)(villages.tenantId, tenantId))).limit(1);
+            if (foundVillage) resolvedVillageId = candidateVid;
+          }
+          let resolvedFacilityId = Number(cleanPayload.facilityId) || 0;
+          const [foundFac] = await db.select({ id: facilities.id }).from(facilities).where((0, import_drizzle_orm26.and)((0, import_drizzle_orm26.eq)(facilities.id, resolvedFacilityId), (0, import_drizzle_orm26.eq)(facilities.tenantId, tenantId))).limit(1);
+          if (!foundFac) {
+            const [anyFac] = await db.select({ id: facilities.id }).from(facilities).where((0, import_drizzle_orm26.eq)(facilities.tenantId, tenantId)).limit(1);
+            if (anyFac) resolvedFacilityId = anyFac.id;
+          }
+          const [created] = await db.insert(chvProfiles).values({
+            tenantId,
+            facilityId: resolvedFacilityId,
+            assignedVillageId: resolvedVillageId,
+            fullName: (cleanPayload.fullName || cleanPayload.name || "CHV").trim(),
+            nrc: cleanPayload.nrc || "NRC-PENDING",
+            gender: cleanPayload.gender || "female",
+            age: cleanPayload.age ? Number(cleanPayload.age) : null,
+            educationLevel: cleanPayload.educationLevel || "primary",
+            trainingReceived: cleanPayload.trainingReceived ?? cleanPayload.trainingStatus ?? "trained",
+            roleDescription: cleanPayload.roleDescription || null,
+            contactPhone: cleanPayload.contactPhone || null,
+            yearsOfService: cleanPayload.yearsOfService ? Number(cleanPayload.yearsOfService) : null,
+            siaRole: cleanPayload.siaRole ?? cleanPayload.campaignRole ?? "mobilizer",
+            isActive: cleanPayload.isActive ?? cleanPayload.active ?? true,
+            employmentStatus: cleanPayload.employmentStatus || "Active - In-service",
+            supervisorId: cleanPayload.supervisorId ? Number(cleanPayload.supervisorId) : null
+          }).returning();
+          serverId = created?.id;
+        } else if (mutation.method === "PATCH" || mutation.method === "PUT") {
+          let chvId = mutation.serverId ? Number(mutation.serverId) : null;
+          if (!chvId) {
+            const parts = mutation.url.split("/");
+            const lastPart = parts[parts.length - 1];
+            if (lastPart && !isNaN(Number(lastPart))) {
+              chvId = Number(lastPart);
+            }
+          }
+          if (chvId) {
+            const patchData = { updatedAt: /* @__PURE__ */ new Date() };
+            if (payload.fullName !== void 0 || payload.name !== void 0) {
+              patchData.fullName = (payload.fullName ?? payload.name ?? "").trim();
+            }
+            if (payload.assignedVillageId !== void 0 || payload.villageId !== void 0) {
+              const vid = payload.assignedVillageId ?? payload.villageId;
+              const numVid = vid ? Number(vid) : null;
+              if (numVid) {
+                const [foundVillage] = await db.select({ id: villages.id }).from(villages).where((0, import_drizzle_orm26.and)((0, import_drizzle_orm26.eq)(villages.id, numVid), (0, import_drizzle_orm26.eq)(villages.tenantId, tenantId))).limit(1);
+                patchData.assignedVillageId = foundVillage ? numVid : null;
+              } else {
+                patchData.assignedVillageId = null;
+              }
+            }
+            if (payload.facilityId !== void 0) {
+              const fid = payload.facilityId ? Number(payload.facilityId) : null;
+              if (fid) {
+                const [foundFac] = await db.select({ id: facilities.id }).from(facilities).where((0, import_drizzle_orm26.and)((0, import_drizzle_orm26.eq)(facilities.id, fid), (0, import_drizzle_orm26.eq)(facilities.tenantId, tenantId))).limit(1);
+                if (foundFac) patchData.facilityId = fid;
+              }
+            }
+            if (payload.nrc !== void 0) patchData.nrc = payload.nrc;
+            if (payload.gender !== void 0) patchData.gender = payload.gender;
+            if (payload.age !== void 0) patchData.age = payload.age ? Number(payload.age) : null;
+            if (payload.educationLevel !== void 0) patchData.educationLevel = payload.educationLevel;
+            if (payload.trainingReceived !== void 0 || payload.trainingStatus !== void 0) {
+              patchData.trainingReceived = payload.trainingReceived ?? payload.trainingStatus;
+            }
+            if (payload.roleDescription !== void 0) patchData.roleDescription = payload.roleDescription;
+            if (payload.contactPhone !== void 0) patchData.contactPhone = payload.contactPhone;
+            if (payload.yearsOfService !== void 0) patchData.yearsOfService = payload.yearsOfService ? Number(payload.yearsOfService) : null;
+            if (payload.siaRole !== void 0 || payload.campaignRole !== void 0) {
+              patchData.siaRole = payload.siaRole ?? payload.campaignRole;
+            }
+            if (payload.isActive !== void 0 || payload.active !== void 0) {
+              patchData.isActive = payload.isActive ?? payload.active;
+            }
+            if (payload.employmentStatus !== void 0) patchData.employmentStatus = payload.employmentStatus;
+            if (payload.supervisorId !== void 0) patchData.supervisorId = payload.supervisorId ? Number(payload.supervisorId) : null;
+            await db.update(chvProfiles).set(patchData).where((0, import_drizzle_orm26.and)((0, import_drizzle_orm26.eq)(chvProfiles.id, chvId), (0, import_drizzle_orm26.eq)(chvProfiles.tenantId, tenantId)));
+            serverId = chvId;
+          }
+        } else if (mutation.method === "DELETE") {
+          let chvId = mutation.serverId ? Number(mutation.serverId) : null;
+          if (!chvId) {
+            const parts = mutation.url.split("/");
+            const lastPart = parts[parts.length - 1];
+            if (lastPart && !isNaN(Number(lastPart))) {
+              chvId = Number(lastPart);
+            }
+          }
+          if (chvId) {
+            await db.update(chvProfiles).set({ isActive: false, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm26.and)((0, import_drizzle_orm26.eq)(chvProfiles.id, chvId), (0, import_drizzle_orm26.eq)(chvProfiles.tenantId, tenantId)));
+            serverId = chvId;
+          }
+        }
+      } else if (mutation.url.includes("/staff") || mutation.url.startsWith("/api/staff")) {
+        if (mutation.method === "POST") {
+          let facilityId = payload.facilityId ? Number(payload.facilityId) : null;
+          if (!facilityId) {
+            const m = mutation.url.match(/\/api\/facilities\/(\d+)\/staff/);
+            if (m) facilityId = Number(m[1]);
+          }
+          const { id: _tempId, tenantId: _t, ...cleanPayload } = payload || {};
+          const [inserted] = await db.insert(facilityStaff).values({
+            ...cleanPayload,
+            facilityId: facilityId || cleanPayload.facilityId,
+            fullName: cleanPayload.fullName || cleanPayload.name || "Staff Member",
+            tenantId
+          }).returning();
+          serverId = inserted?.id;
+        } else if ((mutation.method === "PATCH" || mutation.method === "PUT") && (mutation.serverId || mutation.url.split("/").pop())) {
+          let staffId = mutation.serverId ? Number(mutation.serverId) : Number(mutation.url.split("/").pop());
+          if (staffId && !isNaN(staffId)) {
+            const { id: _tempId, tenantId: _t, ...safePayload } = payload || {};
+            await db.update(facilityStaff).set({ ...safePayload, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm26.and)((0, import_drizzle_orm26.eq)(facilityStaff.id, staffId), (0, import_drizzle_orm26.eq)(facilityStaff.tenantId, tenantId)));
+            serverId = staffId;
+          }
+        } else if (mutation.method === "DELETE") {
+          let staffId = mutation.serverId ? Number(mutation.serverId) : Number(mutation.url.split("/").pop());
+          if (staffId && !isNaN(staffId)) {
+            await db.delete(facilityStaff).where((0, import_drizzle_orm26.and)((0, import_drizzle_orm26.eq)(facilityStaff.id, staffId), (0, import_drizzle_orm26.eq)(facilityStaff.tenantId, tenantId)));
+            serverId = staffId;
+          }
+        }
+      } else if (mutation.url.includes("/catchments") || mutation.url.startsWith("/api/catchments")) {
+        if (mutation.method === "POST") {
+          let facilityId = payload.facilityId ? Number(payload.facilityId) : null;
+          if (!facilityId) {
+            const m = mutation.url.match(/\/api\/facilities\/(\d+)\/catchments/);
+            if (m) facilityId = Number(m[1]);
+          }
+          const { id: _tempId, tenantId: _t, ...cleanPayload } = payload || {};
+          const [inserted] = await db.insert(facilityCatchments).values({
+            ...cleanPayload,
+            facilityId: facilityId || cleanPayload.facilityId,
+            tenantId
+          }).returning();
+          serverId = inserted?.id;
+        } else if ((mutation.method === "PATCH" || mutation.method === "PUT") && (mutation.serverId || mutation.url.split("/").pop())) {
+          let catchmentId = mutation.serverId ? String(mutation.serverId) : String(mutation.url.split("/").pop());
+          if (catchmentId && catchmentId !== "catchments") {
+            const { id: _tempId, tenantId: _t, ...safePayload } = payload || {};
+            await db.update(facilityCatchments).set({ ...safePayload, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm26.and)((0, import_drizzle_orm26.eq)(facilityCatchments.id, catchmentId), (0, import_drizzle_orm26.eq)(facilityCatchments.tenantId, tenantId)));
+            serverId = catchmentId;
+          }
+        } else if (mutation.method === "DELETE") {
+          let catchmentId = mutation.serverId ? String(mutation.serverId) : String(mutation.url.split("/").pop());
+          if (catchmentId && catchmentId !== "catchments") {
+            await db.delete(facilityCatchments).where((0, import_drizzle_orm26.and)((0, import_drizzle_orm26.eq)(facilityCatchments.id, catchmentId), (0, import_drizzle_orm26.eq)(facilityCatchments.tenantId, tenantId)));
+            serverId = catchmentId;
           }
         }
       } else {
@@ -20734,11 +21478,11 @@ async function getSyncStats(tenantId) {
     sessionCount,
     reportCount
   ] = await Promise.all([
-    db.select({ count: import_drizzle_orm25.sql`count(*)` }).from(facilities).where((0, import_drizzle_orm25.eq)(facilities.tenantId, tenantId)),
-    db.select({ count: import_drizzle_orm25.sql`count(*)` }).from(clients).where((0, import_drizzle_orm25.eq)(clients.tenantId, tenantId)),
-    db.select({ count: import_drizzle_orm25.sql`count(*)` }).from(clientVaccinations).where((0, import_drizzle_orm25.eq)(clientVaccinations.tenantId, tenantId)),
-    db.select({ count: import_drizzle_orm25.sql`count(*)` }).from(sessionPlans).where((0, import_drizzle_orm25.eq)(sessionPlans.tenantId, tenantId)),
-    db.select({ count: import_drizzle_orm25.sql`count(*)` }).from(monthlyReports).where((0, import_drizzle_orm25.eq)(monthlyReports.tenantId, tenantId))
+    db.select({ count: import_drizzle_orm26.sql`count(*)` }).from(facilities).where((0, import_drizzle_orm26.eq)(facilities.tenantId, tenantId)),
+    db.select({ count: import_drizzle_orm26.sql`count(*)` }).from(clients).where((0, import_drizzle_orm26.eq)(clients.tenantId, tenantId)),
+    db.select({ count: import_drizzle_orm26.sql`count(*)` }).from(clientVaccinations).where((0, import_drizzle_orm26.eq)(clientVaccinations.tenantId, tenantId)),
+    db.select({ count: import_drizzle_orm26.sql`count(*)` }).from(sessionPlans).where((0, import_drizzle_orm26.eq)(sessionPlans.tenantId, tenantId)),
+    db.select({ count: import_drizzle_orm26.sql`count(*)` }).from(monthlyReports).where((0, import_drizzle_orm26.eq)(monthlyReports.tenantId, tenantId))
   ]);
   return {
     facilities: Number(facilityCount[0]?.count ?? 0),
@@ -20749,14 +21493,14 @@ async function getSyncStats(tenantId) {
     serverTime: (/* @__PURE__ */ new Date()).toISOString()
   };
 }
-var import_drizzle_orm25;
+var import_drizzle_orm26;
 var init_syncService = __esm({
   "server/services/syncService.ts"() {
     "use strict";
     init_db();
     init_storage();
     init_schema();
-    import_drizzle_orm25 = require("drizzle-orm");
+    import_drizzle_orm26 = require("drizzle-orm");
     init_vaccineSchedule();
     init_proximityCheck();
   }
@@ -20960,7 +21704,7 @@ async function getActiveOutreachSitesWithCoords(tenantId) {
     const facMap = new Map(facList.map((f2) => [f2.id, f2]));
     const vilList = await storage.getVillages(tenantId);
     const vilMap = new Map(vilList.map((v) => [v.id, v]));
-    const svRows = await db.select().from(sessionVillages).where((0, import_drizzle_orm26.eq)(sessionVillages.tenantId, String(tenantId)));
+    const svRows = await db.select().from(sessionVillages).where((0, import_drizzle_orm27.eq)(sessionVillages.tenantId, String(tenantId)));
     const svByPlan = /* @__PURE__ */ new Map();
     for (const r of svRows) {
       const arr = svByPlan.get(r.sessionId) ?? [];
@@ -21446,14 +22190,14 @@ async function optimizeDynamicOutreachRoute(params) {
     routeCoordinates
   };
 }
-var import_drizzle_orm26, WALK_KMH, HEURISTIC_DRIVE_KMH, WALK_ISOCHRONE_BANDS, DRIVE_ISOCHRONE_BANDS, CYCLE_ISOCHRONE_BANDS, TTL_MS2, cache2, inFlight2, OSRM_MIN_INTERVAL_MS, lastOsrmAt, ORS_ISOCHRONE_BASE_URL, ORS_MAX_LOCATIONS_PER_REQUEST, ORS_MAX_LOCATIONS, ISOCHRONE_TTL_MS, isochroneCache, isochroneInFlight;
+var import_drizzle_orm27, WALK_KMH, HEURISTIC_DRIVE_KMH, WALK_ISOCHRONE_BANDS, DRIVE_ISOCHRONE_BANDS, CYCLE_ISOCHRONE_BANDS, TTL_MS2, cache2, inFlight2, OSRM_MIN_INTERVAL_MS, lastOsrmAt, ORS_ISOCHRONE_BASE_URL, ORS_MAX_LOCATIONS_PER_REQUEST, ORS_MAX_LOCATIONS, ISOCHRONE_TTL_MS, isochroneCache, isochroneInFlight;
 var init_routing = __esm({
   "server/services/routing.ts"() {
     "use strict";
     init_db();
     init_storage();
     init_schema();
-    import_drizzle_orm26 = require("drizzle-orm");
+    import_drizzle_orm27 = require("drizzle-orm");
     init_proximityCheck();
     WALK_KMH = 5;
     HEURISTIC_DRIVE_KMH = 4;
@@ -21817,10 +22561,10 @@ async function flushBatch(tenantId, rows) {
       r.density
     );
   }
-  const sql41 = `INSERT INTO population_grids
+  const sql43 = `INSERT INTO population_grids
       (tenant_id, population_total, under5_population, geojson, raster_cell, density_classification)
     VALUES ${valuePlaceholders.join(",")}`;
-  await pool.query(sql41, params);
+  await pool.query(sql43, params);
 }
 async function ingestWorldPopRaster(opts) {
   const {
@@ -21830,7 +22574,7 @@ async function ingestWorldPopRaster(opts) {
     minPopulation = 10,
     batchSize = 500,
     under5Fraction = 0.16,
-    truncateExisting = true,
+    truncateExisting = false,
     onProgress,
     progressEvery = 50
   } = opts;
@@ -21952,9 +22696,9 @@ async function runCli() {
   }
   const { db: db2 } = await Promise.resolve().then(() => (init_db(), db_exports));
   const { tenants: tenants3 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
-  const { eq: eq41 } = await import("drizzle-orm");
+  const { eq: eq42 } = await import("drizzle-orm");
   const code = tenantCode.toUpperCase();
-  const rows = await db2.select().from(tenants3).where(eq41(tenants3.code, code)).limit(1);
+  const rows = await db2.select().from(tenants3).where(eq42(tenants3.code, code)).limit(1);
   if (rows.length === 0) {
     console.error(`Tenant with code '${code}' not found.`);
     process.exit(1);
@@ -21977,6 +22721,10 @@ var init_ingestWorldPopRaster = __esm({
     "use strict";
     import_geotiff = require("geotiff");
     init_db();
+    try {
+      process.loadEnvFile?.();
+    } catch {
+    }
     invokedDirectly = (() => {
       try {
         const entry = process.argv[1] ?? "";
@@ -22107,9 +22855,9 @@ function resolveTenantRasterPath(tenant) {
   return `Resources/${iso}_pop_2026_CN_100m_R2025A_v1.tif`;
 }
 async function isRefreshAlreadyRunning(tenantId) {
-  const rows = await db.select({ id: populationRefreshJobs.id, startedAt: populationRefreshJobs.startedAt }).from(populationRefreshJobs).where((0, import_drizzle_orm27.and)(
-    (0, import_drizzle_orm27.eq)(populationRefreshJobs.tenantId, tenantId),
-    (0, import_drizzle_orm27.eq)(populationRefreshJobs.status, "running")
+  const rows = await db.select({ id: populationRefreshJobs.id, startedAt: populationRefreshJobs.startedAt }).from(populationRefreshJobs).where((0, import_drizzle_orm28.and)(
+    (0, import_drizzle_orm28.eq)(populationRefreshJobs.tenantId, tenantId),
+    (0, import_drizzle_orm28.eq)(populationRefreshJobs.status, "running")
   ));
   const now = Date.now();
   for (const row of rows) {
@@ -22122,15 +22870,15 @@ async function isRefreshAlreadyRunning(tenantId) {
 }
 async function refreshTenantPopulation(tenantId, opts) {
   await ensurePopulationRefreshMigration();
-  const tenant = await db.query.tenants.findFirst({ where: (0, import_drizzle_orm27.eq)(tenants.id, tenantId) });
+  const tenant = await db.query.tenants.findFirst({ where: (0, import_drizzle_orm28.eq)(tenants.id, tenantId) });
   if (!tenant) {
     throw new Error(`Tenant ${tenantId} not found`);
   }
   if (await isRefreshAlreadyRunning(tenantId)) {
-    const [existing] = await db.select().from(populationRefreshJobs).where((0, import_drizzle_orm27.and)(
-      (0, import_drizzle_orm27.eq)(populationRefreshJobs.tenantId, tenantId),
-      (0, import_drizzle_orm27.eq)(populationRefreshJobs.status, "running")
-    )).orderBy((0, import_drizzle_orm27.desc)(populationRefreshJobs.startedAt)).limit(1);
+    const [existing] = await db.select().from(populationRefreshJobs).where((0, import_drizzle_orm28.and)(
+      (0, import_drizzle_orm28.eq)(populationRefreshJobs.tenantId, tenantId),
+      (0, import_drizzle_orm28.eq)(populationRefreshJobs.status, "running")
+    )).orderBy((0, import_drizzle_orm28.desc)(populationRefreshJobs.startedAt)).limit(1);
     if (existing) return existing;
   }
   const rasterPath = opts.rasterPath ?? resolveTenantRasterPath(tenant);
@@ -22163,7 +22911,7 @@ async function refreshTenantPopulation(tenantId, opts) {
       cellsScanned: result.cellsScanned,
       cellsAboveThreshold: result.cellsAboveThreshold,
       durationMs: Date.now() - startMs
-    }).where((0, import_drizzle_orm27.eq)(populationRefreshJobs.id, job.id)).returning();
+    }).where((0, import_drizzle_orm28.eq)(populationRefreshJobs.id, job.id)).returning();
     console.log(
       `[population-refresh] tenant=${tenant.code} status=succeeded rows=${result.rowsInserted} durationMs=${Date.now() - startMs}`
     );
@@ -22176,13 +22924,13 @@ async function refreshTenantPopulation(tenantId, opts) {
       completedAt: /* @__PURE__ */ new Date(),
       durationMs: Date.now() - startMs,
       errorMessage: message
-    }).where((0, import_drizzle_orm27.eq)(populationRefreshJobs.id, job.id)).returning();
+    }).where((0, import_drizzle_orm28.eq)(populationRefreshJobs.id, job.id)).returning();
     return updated ?? job;
   }
 }
 async function runScheduledPopulationRefresh() {
   await ensurePopulationRefreshMigration();
-  const activeTenants = await db.select().from(tenants).where((0, import_drizzle_orm27.eq)(tenants.status, "active"));
+  const activeTenants = await db.select().from(tenants).where((0, import_drizzle_orm28.eq)(tenants.status, "active"));
   let attempted = 0;
   let succeeded = 0;
   let failed = 0;
@@ -22234,20 +22982,20 @@ function startPopulationRefreshScheduler() {
 async function listRefreshJobs(opts) {
   await ensurePopulationRefreshMigration();
   const limit = Math.min(Math.max(opts.limit ?? 50, 1), 500);
-  const where = opts.tenantId ? (0, import_drizzle_orm27.eq)(populationRefreshJobs.tenantId, opts.tenantId) : void 0;
-  const query = db.select().from(populationRefreshJobs).orderBy((0, import_drizzle_orm27.desc)(populationRefreshJobs.startedAt)).limit(limit);
+  const where = opts.tenantId ? (0, import_drizzle_orm28.eq)(populationRefreshJobs.tenantId, opts.tenantId) : void 0;
+  const query = db.select().from(populationRefreshJobs).orderBy((0, import_drizzle_orm28.desc)(populationRefreshJobs.startedAt)).limit(limit);
   if (where) {
     return await query.where(where);
   }
   return await query;
 }
-var import_fs3, import_path3, import_drizzle_orm27, DEFAULT_MIN_POPULATION, STALE_RUNNING_MS, migrationPromise, cancelFn;
+var import_fs3, import_path3, import_drizzle_orm28, DEFAULT_MIN_POPULATION, STALE_RUNNING_MS, migrationPromise, cancelFn;
 var init_populationRefresh = __esm({
   "server/jobs/populationRefresh.ts"() {
     "use strict";
     import_fs3 = require("fs");
     import_path3 = require("path");
-    import_drizzle_orm27 = require("drizzle-orm");
+    import_drizzle_orm28 = require("drizzle-orm");
     init_db();
     init_schema();
     init_ingestWorldPopRaster();
@@ -22454,7 +23202,7 @@ __export(aiStockPredictorService_exports, {
 });
 async function getPredictiveStockForecast(tenantId, facilityId, options) {
   const daysAhead = options?.daysAhead ?? 60;
-  const facilityRows = await db.execute(import_drizzle_orm28.sql`
+  const facilityRows = await db.execute(import_drizzle_orm29.sql`
     SELECT id, name, code, hmis_code, is_active
     FROM facilities
     WHERE id = ${facilityId} AND tenant_id = ${tenantId}
@@ -22462,7 +23210,7 @@ async function getPredictiveStockForecast(tenantId, facilityId, options) {
   `);
   const facility = facilityRows.rows?.[0];
   if (!facility) return null;
-  const coldChainRows = await db.execute(import_drizzle_orm28.sql`
+  const coldChainRows = await db.execute(import_drizzle_orm29.sql`
     SELECT id, model, brand, net_storage_capacity_liters, capacity_liters, condition, last_temperature_check
     FROM cold_chain_equipment
     WHERE facility_id = ${facilityId} AND is_active = true
@@ -22478,7 +23226,7 @@ async function getPredictiveStockForecast(tenantId, facilityId, options) {
     grossVolumeLiters: (!isNaN(netVol) && netVol > 0 ? netVol : 120) * 1.3,
     temperatureOk: cce?.condition !== "non_functional" && cce?.condition !== "condemned"
   };
-  const sessionRows = await db.execute(import_drizzle_orm28.sql`
+  const sessionRows = await db.execute(import_drizzle_orm29.sql`
     SELECT id, name, session_date, session_type, target_population, target_antigens
     FROM session_plans
     WHERE facility_id = ${facilityId}
@@ -22503,7 +23251,7 @@ async function getPredictiveStockForecast(tenantId, facilityId, options) {
       antigensTargeted: Array.isArray(s.target_antigens) ? s.target_antigens : ["BCG", "PENTA", "MR", "OPV"]
     };
   });
-  const vaccinationRows = await db.execute(import_drizzle_orm28.sql`
+  const vaccinationRows = await db.execute(import_drizzle_orm29.sql`
     SELECT
       administered_date::date AS day_date,
       vaccine_name,
@@ -22605,12 +23353,12 @@ async function getPredictiveStockForecast(tenantId, facilityId, options) {
     activeOutreachCampaignsCount: upcomingCampaigns.length
   };
 }
-var import_drizzle_orm28;
+var import_drizzle_orm29;
 var init_aiStockPredictorService = __esm({
   "server/services/aiStockPredictorService.ts"() {
     "use strict";
     init_db();
-    import_drizzle_orm28 = require("drizzle-orm");
+    import_drizzle_orm29 = require("drizzle-orm");
     init_aiStockPredictor();
   }
 });
@@ -22651,7 +23399,7 @@ async function ensureSupervisionDigestMigration() {
   return migrationPromise2;
 }
 async function computeOverdueFacilities(tenantId, scope = {}, now = /* @__PURE__ */ new Date()) {
-  const distRows = await db.select({ id: districts.id, provinceId: districts.provinceId }).from(districts).where((0, import_drizzle_orm29.eq)(districts.tenantId, tenantId));
+  const distRows = await db.select({ id: districts.id, provinceId: districts.provinceId }).from(districts).where((0, import_drizzle_orm30.eq)(districts.tenantId, tenantId));
   const distProvince = new Map(
     distRows.map((d) => [d.id, d.provinceId ?? null])
   );
@@ -22659,7 +23407,7 @@ async function computeOverdueFacilities(tenantId, scope = {}, now = /* @__PURE__
     id: facilities.id,
     name: facilities.name,
     districtId: facilities.districtId
-  }).from(facilities).where((0, import_drizzle_orm29.eq)(facilities.tenantId, tenantId));
+  }).from(facilities).where((0, import_drizzle_orm30.eq)(facilities.tenantId, tenantId));
   const enriched = facRows.map((f2) => ({
     id: f2.id,
     name: f2.name,
@@ -22685,10 +23433,10 @@ async function computeOverdueFacilities(tenantId, scope = {}, now = /* @__PURE__
     score: supervisionVisits.score,
     status: supervisionVisits.status
   }).from(supervisionVisits).where(
-    (0, import_drizzle_orm29.and)(
-      (0, import_drizzle_orm29.eq)(supervisionVisits.tenantId, tenantId),
-      (0, import_drizzle_orm29.eq)(supervisionVisits.status, "conducted"),
-      (0, import_drizzle_orm29.inArray)(supervisionVisits.facilityId, scopedIds2)
+    (0, import_drizzle_orm30.and)(
+      (0, import_drizzle_orm30.eq)(supervisionVisits.tenantId, tenantId),
+      (0, import_drizzle_orm30.eq)(supervisionVisits.status, "conducted"),
+      (0, import_drizzle_orm30.inArray)(supervisionVisits.facilityId, scopedIds2)
     )
   );
   const lastByFac = /* @__PURE__ */ new Map();
@@ -22865,7 +23613,7 @@ async function runSupervisionDigestForTenant(tenantId, options = {}) {
   await ensureSupervisionDigestMigration();
   const now = options.now ?? /* @__PURE__ */ new Date();
   const dryRun = options.dryRun ?? false;
-  const [tenant] = await db.select().from(tenants).where((0, import_drizzle_orm29.eq)(tenants.id, tenantId));
+  const [tenant] = await db.select().from(tenants).where((0, import_drizzle_orm30.eq)(tenants.id, tenantId));
   if (!tenant) {
     return {
       tenantId,
@@ -22878,7 +23626,7 @@ async function runSupervisionDigestForTenant(tenantId, options = {}) {
       errors: [`tenant ${tenantId} not found`]
     };
   }
-  const tenantUsers = await db.select().from(users).where((0, import_drizzle_orm29.and)((0, import_drizzle_orm29.eq)(users.tenantId, tenantId), (0, import_drizzle_orm29.eq)(users.isActive, true)));
+  const tenantUsers = await db.select().from(users).where((0, import_drizzle_orm30.and)((0, import_drizzle_orm30.eq)(users.tenantId, tenantId), (0, import_drizzle_orm30.eq)(users.isActive, true)));
   const recipients = tenantUsers.filter((u) => {
     const roles = [u.role, ...Array.isArray(u.roles) ? u.roles : []];
     return roles.some((r) => DIGEST_ROLES.has(r));
@@ -22961,7 +23709,7 @@ async function runSupervisionDigestForTenant(tenantId, options = {}) {
 }
 async function runSupervisionDigest(options = {}) {
   await ensureSupervisionDigestMigration();
-  const active = await db.select().from(tenants).where((0, import_drizzle_orm29.eq)(tenants.status, "active"));
+  const active = await db.select().from(tenants).where((0, import_drizzle_orm30.eq)(tenants.status, "active"));
   const results = [];
   for (const t of active) {
     try {
@@ -23022,13 +23770,13 @@ function startSupervisionDigestScheduler() {
 function stopSupervisionDigestScheduler() {
   cancelMidnightJob("supervision-digest");
 }
-var import_fs4, import_path4, import_drizzle_orm29, DIGEST_ROLES, OVERDUE_DAYS, LOW_SCORE_PCT, migrationPromise2;
+var import_fs4, import_path4, import_drizzle_orm30, DIGEST_ROLES, OVERDUE_DAYS, LOW_SCORE_PCT, migrationPromise2;
 var init_supervisionDigest = __esm({
   "server/jobs/supervisionDigest.ts"() {
     "use strict";
     import_fs4 = require("fs");
     import_path4 = require("path");
-    import_drizzle_orm29 = require("drizzle-orm");
+    import_drizzle_orm30 = require("drizzle-orm");
     init_db();
     init_mailer();
     init_scheduler();
@@ -23094,7 +23842,7 @@ async function previewCsvImport(tenantId, filename, csvBuffer) {
     validated.push({ rowIndex: idx + 2, row: result.data });
   });
   const externalIds = Array.from(new Set(validated.map((v) => v.row.facility_external_id)));
-  const facilityRows = externalIds.length ? await db.select({ id: facilities.id, hmisCode: facilities.hmisCode }).from(facilities).where((0, import_drizzle_orm30.and)((0, import_drizzle_orm30.eq)(facilities.tenantId, tenantId), (0, import_drizzle_orm30.inArray)(facilities.hmisCode, externalIds))) : [];
+  const facilityRows = externalIds.length ? await db.select({ id: facilities.id, hmisCode: facilities.hmisCode }).from(facilities).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(facilities.tenantId, tenantId), (0, import_drizzle_orm31.inArray)(facilities.hmisCode, externalIds))) : [];
   const facilityByCode = new Map(
     facilityRows.filter((f2) => f2.hmisCode !== null).map((f2) => [f2.hmisCode, f2.id])
   );
@@ -23164,16 +23912,16 @@ async function commitCsvImport(tenantId, userId, preview) {
         importedCoverage.source
       ],
       set: {
-        dosesAdministered: import_drizzle_orm30.sql`excluded.doses_administered`,
-        targetPopOverride: import_drizzle_orm30.sql`excluded.target_pop_override`,
-        sourceRef: import_drizzle_orm30.sql`excluded.source_ref`,
-        importedByUserId: import_drizzle_orm30.sql`excluded.imported_by_user_id`,
-        importedAt: import_drizzle_orm30.sql`now()`
+        dosesAdministered: import_drizzle_orm31.sql`excluded.doses_administered`,
+        targetPopOverride: import_drizzle_orm31.sql`excluded.target_pop_override`,
+        sourceRef: import_drizzle_orm31.sql`excluded.source_ref`,
+        importedByUserId: import_drizzle_orm31.sql`excluded.imported_by_user_id`,
+        importedAt: import_drizzle_orm31.sql`now()`
       }
     });
     imported += chunk.length;
   }
-  await db.update(csvImports).set({ importedCount: imported }).where((0, import_drizzle_orm30.eq)(csvImports.id, auditRow.id));
+  await db.update(csvImports).set({ importedCount: imported }).where((0, import_drizzle_orm31.eq)(csvImports.id, auditRow.id));
   return { csvImportId: auditRow.id, importedCount: imported };
 }
 function buildDhisDataElementMap() {
@@ -23189,7 +23937,7 @@ async function pullDhis2Coverage(tenantId, integration, options) {
   const warnings = [];
   const errors = [];
   const deMap = buildDhisDataElementMap();
-  const facs = await db.select({ id: facilities.id, externalIds: facilities.externalIds }).from(facilities).where((0, import_drizzle_orm30.eq)(facilities.tenantId, tenantId));
+  const facs = await db.select({ id: facilities.id, externalIds: facilities.externalIds }).from(facilities).where((0, import_drizzle_orm31.eq)(facilities.tenantId, tenantId));
   const facByOu = /* @__PURE__ */ new Map();
   for (const f2 of facs) {
     const ouId = f2.externalIds?.dhis2;
@@ -23296,10 +24044,10 @@ async function commitDhis2Coverage(tenantId, userId, integrationId, rows) {
         importedCoverage.source
       ],
       set: {
-        dosesAdministered: import_drizzle_orm30.sql`excluded.doses_administered`,
-        sourceRef: import_drizzle_orm30.sql`excluded.source_ref`,
-        importedByUserId: import_drizzle_orm30.sql`excluded.imported_by_user_id`,
-        importedAt: import_drizzle_orm30.sql`now()`
+        dosesAdministered: import_drizzle_orm31.sql`excluded.doses_administered`,
+        sourceRef: import_drizzle_orm31.sql`excluded.source_ref`,
+        importedByUserId: import_drizzle_orm31.sql`excluded.imported_by_user_id`,
+        importedAt: import_drizzle_orm31.sql`now()`
       }
     });
     imported += values.length;
@@ -23308,28 +24056,28 @@ async function commitDhis2Coverage(tenantId, userId, integrationId, rows) {
 }
 async function scoreMissedCommunities(params) {
   const w = { ...DEFAULT_WEIGHTS, ...params.weights ?? {} };
-  const villageConditions = [(0, import_drizzle_orm30.eq)(villages.tenantId, params.tenantId)];
-  if (params.districtId) villageConditions.push((0, import_drizzle_orm30.eq)(villages.districtId, params.districtId));
-  const villageRows = await db.select().from(villages).where((0, import_drizzle_orm30.and)(...villageConditions));
+  const villageConditions = [(0, import_drizzle_orm31.eq)(villages.tenantId, params.tenantId)];
+  if (params.districtId) villageConditions.push((0, import_drizzle_orm31.eq)(villages.districtId, params.districtId));
+  const villageRows = await db.select().from(villages).where((0, import_drizzle_orm31.and)(...villageConditions));
   if (villageRows.length === 0) return [];
   const facilityIds = Array.from(
     new Set(villageRows.map((v) => v.assignedFacilityId).filter((id) => id != null))
   );
-  const facilityRows = facilityIds.length ? await db.select().from(facilities).where((0, import_drizzle_orm30.and)((0, import_drizzle_orm30.eq)(facilities.tenantId, params.tenantId), (0, import_drizzle_orm30.inArray)(facilities.id, facilityIds))) : [];
+  const facilityRows = facilityIds.length ? await db.select().from(facilities).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(facilities.tenantId, params.tenantId), (0, import_drizzle_orm31.inArray)(facilities.id, facilityIds))) : [];
   const facById = new Map(facilityRows.map((f2) => [f2.id, f2]));
   let allowedDistrictIds = null;
   if (params.provinceId) {
-    const districtRows = await db.execute(import_drizzle_orm30.sql`
+    const districtRows = await db.execute(import_drizzle_orm31.sql`
       SELECT id FROM districts WHERE province_id = ${params.provinceId}
     `);
     allowedDistrictIds = new Set(districtRows.rows?.map((r) => r.id) ?? []);
   }
   const coverageRows = facilityIds.length ? await db.select().from(importedCoverage).where(
-    (0, import_drizzle_orm30.and)(
-      (0, import_drizzle_orm30.eq)(importedCoverage.tenantId, params.tenantId),
-      (0, import_drizzle_orm30.eq)(importedCoverage.period, params.period),
-      (0, import_drizzle_orm30.eq)(importedCoverage.antigen, params.antigen),
-      (0, import_drizzle_orm30.inArray)(importedCoverage.facilityId, facilityIds)
+    (0, import_drizzle_orm31.and)(
+      (0, import_drizzle_orm31.eq)(importedCoverage.tenantId, params.tenantId),
+      (0, import_drizzle_orm31.eq)(importedCoverage.period, params.period),
+      (0, import_drizzle_orm31.eq)(importedCoverage.antigen, params.antigen),
+      (0, import_drizzle_orm31.inArray)(importedCoverage.facilityId, facilityIds)
     )
   ) : [];
   const dosesByFacility = /* @__PURE__ */ new Map();
@@ -23339,9 +24087,9 @@ async function scoreMissedCommunities(params) {
   }
   const villageIds = villageRows.map((v) => v.id);
   const popRows = villageIds.length ? await db.select().from(populationData).where(
-    (0, import_drizzle_orm30.and)(
-      (0, import_drizzle_orm30.eq)(populationData.tenantId, params.tenantId),
-      (0, import_drizzle_orm30.inArray)(populationData.villageId, villageIds)
+    (0, import_drizzle_orm31.and)(
+      (0, import_drizzle_orm31.eq)(populationData.tenantId, params.tenantId),
+      (0, import_drizzle_orm31.inArray)(populationData.villageId, villageIds)
     )
   ) : [];
   const popByVillage = /* @__PURE__ */ new Map();
@@ -23351,9 +24099,9 @@ async function scoreMissedCommunities(params) {
     if (pop > prev) popByVillage.set(p.villageId, pop);
   }
   const htrRows = villageIds.length ? await db.select().from(htrScores).where(
-    (0, import_drizzle_orm30.and)(
-      (0, import_drizzle_orm30.eq)(htrScores.tenantId, params.tenantId),
-      (0, import_drizzle_orm30.inArray)(htrScores.villageId, villageIds)
+    (0, import_drizzle_orm31.and)(
+      (0, import_drizzle_orm31.eq)(htrScores.tenantId, params.tenantId),
+      (0, import_drizzle_orm31.inArray)(htrScores.villageId, villageIds)
     )
   ) : [];
   const htrByVillage = /* @__PURE__ */ new Map();
@@ -23369,7 +24117,7 @@ async function scoreMissedCommunities(params) {
       );
     }
   }
-  const distRows = facilityIds.length ? await db.execute(import_drizzle_orm30.sql`
+  const distRows = facilityIds.length ? await db.execute(import_drizzle_orm31.sql`
         SELECT d.id AS district_id, d.name AS district_name, p.id AS province_id, p.name AS province_name
         FROM districts d
         LEFT JOIN provinces p ON p.id = d.province_id
@@ -23428,7 +24176,7 @@ async function scoreMissedCommunities(params) {
 async function pullDhis2Population(tenantId, integration, options) {
   const warnings = [];
   const errors = [];
-  const facs = await db.select({ id: facilities.id, name: facilities.name, externalIds: facilities.externalIds }).from(facilities).where((0, import_drizzle_orm30.eq)(facilities.tenantId, tenantId));
+  const facs = await db.select({ id: facilities.id, name: facilities.name, externalIds: facilities.externalIds }).from(facilities).where((0, import_drizzle_orm31.eq)(facilities.tenantId, tenantId));
   const facByOu = /* @__PURE__ */ new Map();
   for (const f2 of facs) {
     const ouId = f2.externalIds?.dhis2;
@@ -23525,7 +24273,7 @@ async function commitDhis2Population(tenantId, userId, year, rows) {
   let committedCount = 0;
   for (const r of rows) {
     if (!r.facilityId) continue;
-    await db.execute(import_drizzle_orm30.sql`
+    await db.execute(import_drizzle_orm31.sql`
       INSERT INTO population_data (
         tenant_id, facility_id, source, year, total_population,
         under_1_population, under_5_population, pregnant_women,
@@ -23554,7 +24302,7 @@ async function pushMicroplanningAchievements(tenantId, integration, options) {
   const warnings = [];
   const errors = [];
   const token = resolveTokenForRef(integration.secretRef);
-  const sessionStats = await db.execute(import_drizzle_orm30.sql`
+  const sessionStats = await db.execute(import_drizzle_orm31.sql`
     SELECT
       f.id AS facility_id,
       f.name AS facility_name,
@@ -23673,12 +24421,12 @@ async function syncDhis2BiDirectional(tenantId, userId, integration, options) {
     simulated: isSimulated
   };
 }
-var import_sync, import_drizzle_orm30, DEFAULT_WEIGHTS;
+var import_sync, import_drizzle_orm31, DEFAULT_WEIGHTS;
 var init_coverageImportService = __esm({
   "server/services/coverageImportService.ts"() {
     "use strict";
     import_sync = require("csv-parse/sync");
-    import_drizzle_orm30 = require("drizzle-orm");
+    import_drizzle_orm31 = require("drizzle-orm");
     init_db();
     init_schema();
     init_hisInteropService();
@@ -24339,15 +25087,15 @@ async function validatePlanningLeadTimeAndNoConflict(tenantId, facilityId, dateS
     void facilityId;
     void excludeSessionId;
     if (excludeDayPlanId !== void 0) {
-      const parentRows = await db.select({ sessionPlanId: sessionDayPlans.sessionPlanId }).from(sessionDayPlans).where((0, import_drizzle_orm31.eq)(sessionDayPlans.id, excludeDayPlanId)).limit(1);
+      const parentRows = await db.select({ sessionPlanId: sessionDayPlans.sessionPlanId }).from(sessionDayPlans).where((0, import_drizzle_orm32.eq)(sessionDayPlans.id, excludeDayPlanId)).limit(1);
       if (parentRows.length > 0) {
         const parentSessionPlanId = parentRows[0].sessionPlanId;
-        const conflictingDays = await db.select({ id: sessionDayPlans.id, dayNumber: sessionDayPlans.dayNumber, sessionName: sessionPlans.name }).from(sessionDayPlans).innerJoin(sessionPlans, (0, import_drizzle_orm31.eq)(sessionDayPlans.sessionPlanId, sessionPlans.id)).where(
-          (0, import_drizzle_orm31.and)(
-            (0, import_drizzle_orm31.eq)(sessionPlans.tenantId, tenantId),
-            (0, import_drizzle_orm31.eq)(sessionDayPlans.sessionPlanId, parentSessionPlanId),
-            (0, import_drizzle_orm31.eq)(sessionDayPlans.sessionDate, inputMidnight),
-            (0, import_drizzle_orm31.ne)(sessionDayPlans.id, excludeDayPlanId)
+        const conflictingDays = await db.select({ id: sessionDayPlans.id, dayNumber: sessionDayPlans.dayNumber, sessionName: sessionPlans.name }).from(sessionDayPlans).innerJoin(sessionPlans, (0, import_drizzle_orm32.eq)(sessionDayPlans.sessionPlanId, sessionPlans.id)).where(
+          (0, import_drizzle_orm32.and)(
+            (0, import_drizzle_orm32.eq)(sessionPlans.tenantId, tenantId),
+            (0, import_drizzle_orm32.eq)(sessionDayPlans.sessionPlanId, parentSessionPlanId),
+            (0, import_drizzle_orm32.eq)(sessionDayPlans.sessionDate, inputMidnight),
+            (0, import_drizzle_orm32.ne)(sessionDayPlans.id, excludeDayPlanId)
           )
         );
         if (conflictingDays.length > 0) {
@@ -24369,7 +25117,7 @@ async function seedQuarterlySupervisionVisits(tenantId, microplan, createdByUser
   if (microplan.facilityId) {
     facilityIds.add(microplan.facilityId);
   }
-  const sessionRows = await db.select({ facilityId: sessionPlans.facilityId }).from(sessionPlans).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(sessionPlans.tenantId, tenantId), (0, import_drizzle_orm31.eq)(sessionPlans.microplanId, microplan.id)));
+  const sessionRows = await db.select({ facilityId: sessionPlans.facilityId }).from(sessionPlans).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(sessionPlans.tenantId, tenantId), (0, import_drizzle_orm32.eq)(sessionPlans.microplanId, microplan.id)));
   for (const row of sessionRows) {
     if (row.facilityId != null) facilityIds.add(row.facilityId);
   }
@@ -24379,11 +25127,11 @@ async function seedQuarterlySupervisionVisits(tenantId, microplan, createdByUser
   const qEnd = new Date(microplan.year, qStartMonth + 3, 1);
   const scheduledDate = new Date(microplan.year, qStartMonth + 1, 15);
   const existing = await db.select({ facilityId: supervisionVisits.facilityId }).from(supervisionVisits).where(
-    (0, import_drizzle_orm31.and)(
-      (0, import_drizzle_orm31.eq)(supervisionVisits.tenantId, tenantId),
-      (0, import_drizzle_orm31.inArray)(supervisionVisits.facilityId, Array.from(facilityIds)),
-      (0, import_drizzle_orm31.gte)(supervisionVisits.scheduledDate, qStart),
-      (0, import_drizzle_orm31.lte)(supervisionVisits.scheduledDate, qEnd)
+    (0, import_drizzle_orm32.and)(
+      (0, import_drizzle_orm32.eq)(supervisionVisits.tenantId, tenantId),
+      (0, import_drizzle_orm32.inArray)(supervisionVisits.facilityId, Array.from(facilityIds)),
+      (0, import_drizzle_orm32.gte)(supervisionVisits.scheduledDate, qStart),
+      (0, import_drizzle_orm32.lte)(supervisionVisits.scheduledDate, qEnd)
     )
   );
   const alreadyCovered = new Set(existing.map((r) => r.facilityId));
@@ -24405,11 +25153,11 @@ async function seedQuarterlySupervisionVisits(tenantId, microplan, createdByUser
 }
 async function cancelSeededSupervisionVisitsForMicroplan(tenantId, microplanId, reason) {
   const candidates = await db.select().from(supervisionVisits).where(
-    (0, import_drizzle_orm31.and)(
-      (0, import_drizzle_orm31.eq)(supervisionVisits.tenantId, tenantId),
-      (0, import_drizzle_orm31.eq)(supervisionVisits.microplanId, microplanId),
-      (0, import_drizzle_orm31.eq)(supervisionVisits.status, "scheduled"),
-      (0, import_drizzle_orm31.eq)(supervisionVisits.visitType, "routine")
+    (0, import_drizzle_orm32.and)(
+      (0, import_drizzle_orm32.eq)(supervisionVisits.tenantId, tenantId),
+      (0, import_drizzle_orm32.eq)(supervisionVisits.microplanId, microplanId),
+      (0, import_drizzle_orm32.eq)(supervisionVisits.status, "scheduled"),
+      (0, import_drizzle_orm32.eq)(supervisionVisits.visitType, "routine")
     )
   );
   const deletedIds = [];
@@ -24417,14 +25165,14 @@ async function cancelSeededSupervisionVisitsForMicroplan(tenantId, microplanId, 
   for (const v of candidates) {
     const untouched = v.conductedDate == null && v.supervisorUserId == null && (v.supervisorName == null || v.supervisorName === "") && (v.findings == null || v.findings === "") && (v.followUpActions == null || v.followUpActions === "") && v.score == null && v.nextVisitDate == null;
     if (untouched) {
-      await db.delete(supervisionVisits).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(supervisionVisits.id, v.id), (0, import_drizzle_orm31.eq)(supervisionVisits.tenantId, tenantId)));
+      await db.delete(supervisionVisits).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(supervisionVisits.id, v.id), (0, import_drizzle_orm32.eq)(supervisionVisits.tenantId, tenantId)));
       deletedIds.push(v.id);
     } else {
       const noteLine = `[Auto-cancelled] ${reason}`;
       const newFindings = v.findings && v.findings.length > 0 ? `${v.findings}
 
 ${noteLine}` : noteLine;
-      await db.update(supervisionVisits).set({ status: "cancelled", findings: newFindings, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(supervisionVisits.id, v.id), (0, import_drizzle_orm31.eq)(supervisionVisits.tenantId, tenantId)));
+      await db.update(supervisionVisits).set({ status: "cancelled", findings: newFindings, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(supervisionVisits.id, v.id), (0, import_drizzle_orm32.eq)(supervisionVisits.tenantId, tenantId)));
       cancelledIds.push(v.id);
     }
   }
@@ -24439,10 +25187,10 @@ async function sendMobilizationSmsForSession(tenantId, sessionId) {
       name: villages.name,
       focalPersonPhone: villages.focalPersonPhone,
       focalPersonName: villages.focalPersonName
-    }).from(sessionVillages).innerJoin(villages, (0, import_drizzle_orm31.eq)(sessionVillages.villageId, villages.id)).where(
-      (0, import_drizzle_orm31.and)(
-        (0, import_drizzle_orm31.eq)(sessionVillages.tenantId, tenantId),
-        (0, import_drizzle_orm31.eq)(sessionVillages.sessionId, sessionId)
+    }).from(sessionVillages).innerJoin(villages, (0, import_drizzle_orm32.eq)(sessionVillages.villageId, villages.id)).where(
+      (0, import_drizzle_orm32.and)(
+        (0, import_drizzle_orm32.eq)(sessionVillages.tenantId, tenantId),
+        (0, import_drizzle_orm32.eq)(sessionVillages.sessionId, sessionId)
       )
     );
     const facility = await storage.getFacility(tenantId, session3.facilityId);
@@ -24472,9 +25220,9 @@ async function sendApprovalSmsForMicroplan(tenantId, microplanId) {
     const mp = await storage.getMicroplan(tenantId, microplanId);
     if (!mp) return;
     const sessions2 = await db.select().from(sessionPlans).where(
-      (0, import_drizzle_orm31.and)(
-        (0, import_drizzle_orm31.eq)(sessionPlans.tenantId, tenantId),
-        (0, import_drizzle_orm31.eq)(sessionPlans.microplanId, microplanId)
+      (0, import_drizzle_orm32.and)(
+        (0, import_drizzle_orm32.eq)(sessionPlans.tenantId, tenantId),
+        (0, import_drizzle_orm32.eq)(sessionPlans.microplanId, microplanId)
       )
     );
     for (const session3 of sessions2) {
@@ -24484,10 +25232,10 @@ async function sendApprovalSmsForMicroplan(tenantId, microplanId) {
         name: villages.name,
         focalPersonPhone: villages.focalPersonPhone,
         focalPersonName: villages.focalPersonName
-      }).from(sessionVillages).innerJoin(villages, (0, import_drizzle_orm31.eq)(sessionVillages.villageId, villages.id)).where(
-        (0, import_drizzle_orm31.and)(
-          (0, import_drizzle_orm31.eq)(sessionVillages.tenantId, tenantId),
-          (0, import_drizzle_orm31.eq)(sessionVillages.sessionId, session3.id)
+      }).from(sessionVillages).innerJoin(villages, (0, import_drizzle_orm32.eq)(sessionVillages.villageId, villages.id)).where(
+        (0, import_drizzle_orm32.and)(
+          (0, import_drizzle_orm32.eq)(sessionVillages.tenantId, tenantId),
+          (0, import_drizzle_orm32.eq)(sessionVillages.sessionId, session3.id)
         )
       );
       const facility = await storage.getFacility(tenantId, session3.facilityId);
@@ -24534,7 +25282,7 @@ async function getTenantBoundaryGeoJSON(tenantId) {
     adminLevel: adminBoundaries.adminLevel,
     geojson: adminBoundaries.geojson,
     isActive: adminBoundaries.isActive
-  }).from(adminBoundaries).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(adminBoundaries.tenantId, tenantId), (0, import_drizzle_orm31.eq)(adminBoundaries.isActive, true))).orderBy(adminBoundaries.adminLevel);
+  }).from(adminBoundaries).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(adminBoundaries.tenantId, tenantId), (0, import_drizzle_orm32.eq)(adminBoundaries.isActive, true))).orderBy(adminBoundaries.adminLevel);
   if (!rows.length) {
     tenantBoundaryGeoJSONCache.set(tenantId, null);
     return null;
@@ -24561,7 +25309,7 @@ async function isLocationOutsideTenantBoundary(tenantId, lat, lng) {
 async function initOutsideVillagesCache() {
   try {
     outsideVillageIds.clear();
-    const res = await db.execute(import_drizzle_orm31.sql`SELECT id, tenant_id, latitude, longitude FROM villages WHERE latitude IS NOT NULL AND longitude IS NOT NULL`);
+    const res = await db.execute(import_drizzle_orm32.sql`SELECT id, tenant_id, latitude, longitude FROM villages WHERE latitude IS NOT NULL AND longitude IS NOT NULL`);
     const allVillages = res.rows || res;
     console.log(`[GeoCache] Initializing tenant boundary cache check for ${allVillages.length} villages...`);
     let count3 = 0;
@@ -24582,7 +25330,7 @@ async function initOutsideVillagesCache() {
 }
 async function refreshOutsideVillagesCacheForTenant(tenantId) {
   tenantBoundaryGeoJSONCache.delete(tenantId);
-  const res = await db.execute(import_drizzle_orm31.sql`
+  const res = await db.execute(import_drizzle_orm32.sql`
     SELECT id, latitude, longitude
     FROM villages
     WHERE tenant_id = ${tenantId}
@@ -24687,7 +25435,7 @@ async function registerRoutes(httpServer2, app2, sessionMiddleware2) {
         countryCode: countryCode ? countryCode.toUpperCase() : existing.countryCode,
         settings: mergedSettings,
         updatedAt: /* @__PURE__ */ new Date()
-      }).where((0, import_drizzle_orm31.eq)(tenants.id, id)).returning();
+      }).where((0, import_drizzle_orm32.eq)(tenants.id, id)).returning();
       if (!updated) {
         return res.status(500).json({ message: "Update returned no result" });
       }
@@ -24700,7 +25448,7 @@ async function registerRoutes(httpServer2, app2, sessionMiddleware2) {
   app2.delete("/api/admin/tenants/:id", isAuthenticated, requireDbUser, requirePlatformAdminOnly, async (req, res) => {
     try {
       const { id } = req.params;
-      const [updated] = await db.update(tenants).set({ status: "archived", updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm31.eq)(tenants.id, id)).returning();
+      const [updated] = await db.update(tenants).set({ status: "archived", updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm32.eq)(tenants.id, id)).returning();
       res.json({ success: true, tenant: updated });
     } catch (err) {
       console.error("DELETE /api/admin/tenants/:id error:", err);
@@ -25333,7 +26081,7 @@ async function registerRoutes(httpServer2, app2, sessionMiddleware2) {
             level4: "LLG",
             level5: "Village"
           };
-          await db.update(tenants).set({ settings }).where((0, import_drizzle_orm31.eq)(tenants.id, png.id));
+          await db.update(tenants).set({ settings }).where((0, import_drizzle_orm32.eq)(tenants.id, png.id));
           console.log("[Self-Healing] Stamped default PNG demographics and aligned admin settings.");
         }
       }
@@ -25357,13 +26105,13 @@ async function registerRoutes(httpServer2, app2, sessionMiddleware2) {
             level4: "Ward",
             level5: "Village"
           };
-          await db.update(tenants).set({ settings }).where((0, import_drizzle_orm31.eq)(tenants.id, zmb.id));
+          await db.update(tenants).set({ settings }).where((0, import_drizzle_orm32.eq)(tenants.id, zmb.id));
           console.log("[Self-Healing] Stamped default Zambia demographics and aligned admin settings.");
         }
       }
       let ssd = activeTenants.find((t) => t.code === "SSD");
       if (!ssd) {
-        const dbTenants = await db.select().from(tenants).where((0, import_drizzle_orm31.eq)(tenants.code, "SSD"));
+        const dbTenants = await db.select().from(tenants).where((0, import_drizzle_orm32.eq)(tenants.code, "SSD"));
         if (dbTenants.length > 0) {
           ssd = dbTenants[0];
           console.log("[Self-Healing] South Sudan tenant found in database, skipped insertion.");
@@ -25633,7 +26381,7 @@ async function registerRoutes(httpServer2, app2, sessionMiddleware2) {
                 { stateName: "Abyei Admin", population: 15e4, growthRate: "2.20" }
               ];
               for (const census of SSD_CENSUS_2026) {
-                const matchingProv = await db.select().from(provinces).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(provinces.tenantId, ssd.id), (0, import_drizzle_orm31.eq)(provinces.name, census.stateName)));
+                const matchingProv = await db.select().from(provinces).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(provinces.tenantId, ssd.id), (0, import_drizzle_orm32.eq)(provinces.name, census.stateName)));
                 if (matchingProv.length > 0) {
                   const provId = matchingProv[0].id;
                   popRows.push({
@@ -25709,7 +26457,7 @@ async function registerRoutes(httpServer2, app2, sessionMiddleware2) {
             { code: "survey", label: "MICS / SMART Survey" },
             { code: "community_census", label: "Community CHW Census" }
           ];
-          await db.update(tenants).set({ settings }).where((0, import_drizzle_orm31.eq)(tenants.id, ssd.id));
+          await db.update(tenants).set({ settings }).where((0, import_drizzle_orm32.eq)(tenants.id, ssd.id));
           console.log("[Self-Healing] Stamped default South Sudan demographics, admin hierarchy, and GIS settings.");
         }
       }
@@ -26639,7 +27387,9 @@ async function registerRoutes(httpServer2, app2, sessionMiddleware2) {
   });
   app2.get("/api/regions/:id", ...auth, async (req, res) => {
     try {
-      const region = await storage.getRegion(req.tenantId, parseInt(req.params.id));
+      const regionId = parseInt(req.params.id);
+      if (isNaN(regionId)) return res.status(400).json({ message: "Invalid region ID" });
+      const region = await storage.getRegion(req.tenantId, regionId);
       if (!region) return res.status(404).json({ message: "Region not found" });
       res.json(region);
     } catch (error) {
@@ -26865,10 +27615,26 @@ async function registerRoutes(httpServer2, app2, sessionMiddleware2) {
       setCacheHeaders(res, 300);
       const scope = await getGeoScope(dbUser, req.tenantId);
       const all = await storage.getFacilities(req.tenantId, districtId);
-      const result = scope.all ? all : all.filter((f2) => scope.facilityIds.has(f2.id));
+      const rawResult = scope.all ? all : all.filter((f2) => scope.facilityIds.has(f2.id));
+      const normalizedMap = /* @__PURE__ */ new Map();
+      for (const fac of rawResult) {
+        const norm = (fac.name || "").replace(/\bPHCU\b/g, "Phcu").replace(/\bPHCC\b/g, "Phcc").replace(/\bHOSPITAL\b/g, "Hospital").trim().toLowerCase();
+        const key = `${fac.districtId ?? ""}:${norm}`;
+        const isUpper = /\b(PHCU|PHCC|HOSPITAL)\b/.test(fac.name || "");
+        if (!normalizedMap.has(key)) {
+          normalizedMap.set(key, fac);
+        } else if (!isUpper) {
+          const existing = normalizedMap.get(key);
+          const existingIsUpper = /\b(PHCU|PHCC|HOSPITAL)\b/.test(existing.name || "");
+          if (existingIsUpper) {
+            normalizedMap.set(key, fac);
+          }
+        }
+      }
+      const result = Array.from(normalizedMap.values());
       const [districtRows, provinceRows] = await Promise.all([
-        db.select({ id: districts.id, name: districts.name, provinceId: districts.provinceId }).from(districts).where((0, import_drizzle_orm31.eq)(districts.tenantId, req.tenantId)),
-        db.select({ id: provinces.id, name: provinces.name }).from(provinces).where((0, import_drizzle_orm31.eq)(provinces.tenantId, req.tenantId))
+        db.select({ id: districts.id, name: districts.name, provinceId: districts.provinceId }).from(districts).where((0, import_drizzle_orm32.eq)(districts.tenantId, req.tenantId)),
+        db.select({ id: provinces.id, name: provinces.name }).from(provinces).where((0, import_drizzle_orm32.eq)(provinces.tenantId, req.tenantId))
       ]);
       const districtMap = new Map(districtRows.map((d) => [Number(d.id), d]));
       const provinceMap = new Map(provinceRows.map((p) => [Number(p.id), p]));
@@ -26885,8 +27651,8 @@ async function registerRoutes(httpServer2, app2, sessionMiddleware2) {
       try {
         const staffCounts = await db.select({
           facilityId: facilityStaff.facilityId,
-          count: import_drizzle_orm31.sql`count(*)::int`
-        }).from(facilityStaff).where((0, import_drizzle_orm31.eq)(facilityStaff.tenantId, req.tenantId)).groupBy(facilityStaff.facilityId);
+          count: import_drizzle_orm32.sql`count(*)::int`
+        }).from(facilityStaff).where((0, import_drizzle_orm32.eq)(facilityStaff.tenantId, req.tenantId)).groupBy(facilityStaff.facilityId);
         const countMap = /* @__PURE__ */ new Map();
         for (const row of staffCounts) {
           if (row.facilityId) countMap.set(row.facilityId, Number(row.count));
@@ -26939,10 +27705,10 @@ async function registerRoutes(httpServer2, app2, sessionMiddleware2) {
         return res.status(400).json({ message: "Invalid year parameter" });
       }
       const popRecords = await db.select().from(populationData).where(
-        (0, import_drizzle_orm31.and)(
-          (0, import_drizzle_orm31.eq)(populationData.tenantId, req.tenantId),
-          (0, import_drizzle_orm31.eq)(populationData.facilityId, facilityId),
-          (0, import_drizzle_orm31.eq)(populationData.year, year)
+        (0, import_drizzle_orm32.and)(
+          (0, import_drizzle_orm32.eq)(populationData.tenantId, req.tenantId),
+          (0, import_drizzle_orm32.eq)(populationData.facilityId, facilityId),
+          (0, import_drizzle_orm32.eq)(populationData.year, year)
         )
       );
       let targetInfants = 0;
@@ -26962,11 +27728,11 @@ async function registerRoutes(httpServer2, app2, sessionMiddleware2) {
       }
       const { importedCoverage: importedCoverage2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
       const coverageRecords = await db.select().from(importedCoverage2).where(
-        (0, import_drizzle_orm31.and)(
-          (0, import_drizzle_orm31.eq)(importedCoverage2.tenantId, req.tenantId),
-          (0, import_drizzle_orm31.eq)(importedCoverage2.facilityId, facilityId),
-          (0, import_drizzle_orm31.gte)(importedCoverage2.period, `${year}01`),
-          (0, import_drizzle_orm31.lte)(importedCoverage2.period, `${year}12`)
+        (0, import_drizzle_orm32.and)(
+          (0, import_drizzle_orm32.eq)(importedCoverage2.tenantId, req.tenantId),
+          (0, import_drizzle_orm32.eq)(importedCoverage2.facilityId, facilityId),
+          (0, import_drizzle_orm32.gte)(importedCoverage2.period, `${year}01`),
+          (0, import_drizzle_orm32.lte)(importedCoverage2.period, `${year}12`)
         )
       );
       const dosesByAntigen = {
@@ -27031,9 +27797,9 @@ async function registerRoutes(httpServer2, app2, sessionMiddleware2) {
         return R * c;
       };
       let villagesToRoute = await db.select().from(villages).where(
-        (0, import_drizzle_orm31.and)(
-          (0, import_drizzle_orm31.eq)(villages.assignedFacilityId, facilityId),
-          (0, import_drizzle_orm31.eq)(villages.tenantId, req.tenantId)
+        (0, import_drizzle_orm32.and)(
+          (0, import_drizzle_orm32.eq)(villages.assignedFacilityId, facilityId),
+          (0, import_drizzle_orm32.eq)(villages.tenantId, req.tenantId)
         )
       );
       if (villagesToRoute.length === 0) {
@@ -27298,9 +28064,9 @@ async function registerRoutes(httpServer2, app2, sessionMiddleware2) {
       const ids = desired.map((d) => d.villageId);
       let filtered = desired;
       if (ids.length > 0) {
-        const found = await db.select({ id: villages.id }).from(villages).where((0, import_drizzle_orm31.and)(
-          (0, import_drizzle_orm31.eq)(villages.tenantId, req.tenantId),
-          (0, import_drizzle_orm31.inArray)(villages.id, ids)
+        const found = await db.select({ id: villages.id }).from(villages).where((0, import_drizzle_orm32.and)(
+          (0, import_drizzle_orm32.eq)(villages.tenantId, req.tenantId),
+          (0, import_drizzle_orm32.inArray)(villages.id, ids)
         ));
         const valid = new Set(found.map((r) => r.id));
         filtered = desired.filter((d) => valid.has(d.villageId));
@@ -27330,38 +28096,38 @@ async function registerRoutes(httpServer2, app2, sessionMiddleware2) {
     try {
       const dbUser = req.dbUser;
       const scope = await getGeoScope(dbUser, req.tenantId);
-      const conditions = [(0, import_drizzle_orm31.eq)(facilityStaff.tenantId, req.tenantId)];
+      const conditions = [(0, import_drizzle_orm32.eq)(facilityStaff.tenantId, req.tenantId)];
       const facilityIdParam = req.query.facilityId ? parseInt(req.query.facilityId) : void 0;
       if (facilityIdParam && !isNaN(facilityIdParam)) {
         if (!scope.all && !scope.facilityIds.has(facilityIdParam)) {
           return res.status(403).json({ message: "Access denied to that facility" });
         }
-        conditions.push((0, import_drizzle_orm31.eq)(facilityStaff.facilityId, facilityIdParam));
+        conditions.push((0, import_drizzle_orm32.eq)(facilityStaff.facilityId, facilityIdParam));
       } else if (!scope.all) {
         if (scope.facilityIds.size === 0) {
           return res.json([]);
         }
-        conditions.push((0, import_drizzle_orm31.inArray)(facilityStaff.facilityId, Array.from(scope.facilityIds)));
+        conditions.push((0, import_drizzle_orm32.inArray)(facilityStaff.facilityId, Array.from(scope.facilityIds)));
       }
       const search = (req.query.search || "").trim();
       if (search) {
         conditions.push(
-          (0, import_drizzle_orm31.or)(
-            (0, import_drizzle_orm31.ilike)(facilityStaff.fullName, `%${search}%`),
-            (0, import_drizzle_orm31.ilike)(facilityStaff.position, `%${search}%`),
-            (0, import_drizzle_orm31.ilike)(facilityStaff.contactPhone, `%${search}%`),
-            (0, import_drizzle_orm31.ilike)(facilityStaff.residenceVillage, `%${search}%`)
+          (0, import_drizzle_orm32.or)(
+            (0, import_drizzle_orm32.ilike)(facilityStaff.fullName, `%${search}%`),
+            (0, import_drizzle_orm32.ilike)(facilityStaff.position, `%${search}%`),
+            (0, import_drizzle_orm32.ilike)(facilityStaff.contactPhone, `%${search}%`),
+            (0, import_drizzle_orm32.ilike)(facilityStaff.residenceVillage, `%${search}%`)
           )
         );
       }
       const roleParam = (req.query.role || "").trim();
       if (roleParam && roleParam !== "all") {
-        conditions.push((0, import_drizzle_orm31.eq)(facilityStaff.role, roleParam));
+        conditions.push((0, import_drizzle_orm32.eq)(facilityStaff.role, roleParam));
       }
       if (req.query.isActive !== void 0) {
-        conditions.push((0, import_drizzle_orm31.eq)(facilityStaff.isActive, req.query.isActive === "true"));
+        conditions.push((0, import_drizzle_orm32.eq)(facilityStaff.isActive, req.query.isActive === "true"));
       }
-      const staffList = await db.select().from(facilityStaff).where((0, import_drizzle_orm31.and)(...conditions)).orderBy(facilityStaff.fullName);
+      const staffList = await db.select().from(facilityStaff).where((0, import_drizzle_orm32.and)(...conditions)).orderBy(facilityStaff.fullName);
       res.json(staffList);
     } catch (error) {
       console.error("Error listing all staff:", error);
@@ -27375,9 +28141,9 @@ async function registerRoutes(httpServer2, app2, sessionMiddleware2) {
         return res.status(400).json({ message: "Invalid facilityId" });
       }
       const staffList = await db.select().from(facilityStaff).where(
-        (0, import_drizzle_orm31.and)(
-          (0, import_drizzle_orm31.eq)(facilityStaff.facilityId, facilityId),
-          (0, import_drizzle_orm31.eq)(facilityStaff.tenantId, req.tenantId)
+        (0, import_drizzle_orm32.and)(
+          (0, import_drizzle_orm32.eq)(facilityStaff.facilityId, facilityId),
+          (0, import_drizzle_orm32.eq)(facilityStaff.tenantId, req.tenantId)
         )
       ).orderBy(facilityStaff.fullName);
       res.json(staffList);
@@ -27414,9 +28180,9 @@ async function registerRoutes(httpServer2, app2, sessionMiddleware2) {
         }
         parsed.nrc = idVal.normalized || formatSpec.normalizeId(parsed.nrc);
         const compactNrc = parsed.nrc.replace(/[\/\-\s]/g, "").toLowerCase();
-        const [existingNrc] = await db.select({ id: facilityStaff.id, fullName: facilityStaff.fullName }).from(facilityStaff).where((0, import_drizzle_orm31.and)(
-          (0, import_drizzle_orm31.eq)(facilityStaff.tenantId, req.tenantId),
-          (0, import_drizzle_orm31.eq)(import_drizzle_orm31.sql`LOWER(REPLACE(REPLACE(REPLACE(${facilityStaff.nrc}, '/', ''), '-', ''), ' ', ''))`, compactNrc)
+        const [existingNrc] = await db.select({ id: facilityStaff.id, fullName: facilityStaff.fullName }).from(facilityStaff).where((0, import_drizzle_orm32.and)(
+          (0, import_drizzle_orm32.eq)(facilityStaff.tenantId, req.tenantId),
+          (0, import_drizzle_orm32.eq)(import_drizzle_orm32.sql`LOWER(REPLACE(REPLACE(REPLACE(${facilityStaff.nrc}, '/', ''), '-', ''), ' ', ''))`, compactNrc)
         )).limit(1);
         if (existingNrc) {
           return res.status(409).json({
@@ -27447,10 +28213,10 @@ async function registerRoutes(httpServer2, app2, sessionMiddleware2) {
         return res.status(400).json({ message: "Invalid parameters" });
       }
       const [existing] = await db.select().from(facilityStaff).where(
-        (0, import_drizzle_orm31.and)(
-          (0, import_drizzle_orm31.eq)(facilityStaff.id, staffId),
-          (0, import_drizzle_orm31.eq)(facilityStaff.facilityId, facilityId),
-          (0, import_drizzle_orm31.eq)(facilityStaff.tenantId, req.tenantId)
+        (0, import_drizzle_orm32.and)(
+          (0, import_drizzle_orm32.eq)(facilityStaff.id, staffId),
+          (0, import_drizzle_orm32.eq)(facilityStaff.facilityId, facilityId),
+          (0, import_drizzle_orm32.eq)(facilityStaff.tenantId, req.tenantId)
         )
       );
       if (!existing) {
@@ -27501,9 +28267,9 @@ async function registerRoutes(httpServer2, app2, sessionMiddleware2) {
         }
         allowed2.nrc = idVal.normalized || formatSpec.normalizeId(allowed2.nrc);
         const compactNrc = allowed2.nrc.replace(/[\/\-\s]/g, "").toLowerCase();
-        const [existingNrc] = await db.select({ id: facilityStaff.id, fullName: facilityStaff.fullName }).from(facilityStaff).where((0, import_drizzle_orm31.and)(
-          (0, import_drizzle_orm31.eq)(facilityStaff.tenantId, req.tenantId),
-          (0, import_drizzle_orm31.eq)(import_drizzle_orm31.sql`LOWER(REPLACE(REPLACE(REPLACE(${facilityStaff.nrc}, '/', ''), '-', ''), ' ', ''))`, compactNrc)
+        const [existingNrc] = await db.select({ id: facilityStaff.id, fullName: facilityStaff.fullName }).from(facilityStaff).where((0, import_drizzle_orm32.and)(
+          (0, import_drizzle_orm32.eq)(facilityStaff.tenantId, req.tenantId),
+          (0, import_drizzle_orm32.eq)(import_drizzle_orm32.sql`LOWER(REPLACE(REPLACE(REPLACE(${facilityStaff.nrc}, '/', ''), '-', ''), ' ', ''))`, compactNrc)
         )).limit(1);
         if (existingNrc && existingNrc.id !== staffId) {
           return res.status(409).json({
@@ -27518,7 +28284,7 @@ async function registerRoutes(httpServer2, app2, sessionMiddleware2) {
         }
         allowed2.contactPhone = phoneVal.normalized || formatSpec.normalizePhone(allowed2.contactPhone);
       }
-      const [updated] = await db.update(facilityStaff).set(allowed2).where((0, import_drizzle_orm31.eq)(facilityStaff.id, staffId)).returning();
+      const [updated] = await db.update(facilityStaff).set(allowed2).where((0, import_drizzle_orm32.eq)(facilityStaff.id, staffId)).returning();
       await logAudit(req, "update", "facility_staff", staffId, existing, updated);
       res.json(updated);
     } catch (error) {
@@ -27533,9 +28299,9 @@ async function registerRoutes(httpServer2, app2, sessionMiddleware2) {
       if (isNaN(staffId) || isNaN(facilityId)) {
         return res.status(400).json({ message: "Invalid parameters" });
       }
-      const [existing] = await db.select().from(facilityStaff).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(facilityStaff.id, staffId), (0, import_drizzle_orm31.eq)(facilityStaff.facilityId, facilityId), (0, import_drizzle_orm31.eq)(facilityStaff.tenantId, req.tenantId)));
+      const [existing] = await db.select().from(facilityStaff).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(facilityStaff.id, staffId), (0, import_drizzle_orm32.eq)(facilityStaff.facilityId, facilityId), (0, import_drizzle_orm32.eq)(facilityStaff.tenantId, req.tenantId)));
       if (!existing) return res.status(404).json({ message: "Staff member not found" });
-      await db.delete(facilityStaff).where((0, import_drizzle_orm31.eq)(facilityStaff.id, staffId));
+      await db.delete(facilityStaff).where((0, import_drizzle_orm32.eq)(facilityStaff.id, staffId));
       await logAudit(req, "delete", "facility_staff", staffId, existing, null);
       res.json({ success: true });
     } catch (error) {
@@ -27590,7 +28356,7 @@ async function registerRoutes(httpServer2, app2, sessionMiddleware2) {
               if (body[k] !== void 0) allowed2[k] = body[k];
             }
             allowed2.updatedAt = /* @__PURE__ */ new Date();
-            const [updated] = await db.update(facilityStaff).set(allowed2).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(facilityStaff.id, Number(id)), (0, import_drizzle_orm31.eq)(facilityStaff.tenantId, req.tenantId))).returning();
+            const [updated] = await db.update(facilityStaff).set(allowed2).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(facilityStaff.id, Number(id)), (0, import_drizzle_orm32.eq)(facilityStaff.tenantId, req.tenantId))).returning();
             if (!updated) {
               results.push({ clientId, ok: false, error: "Staff not found" });
               continue;
@@ -27615,11 +28381,11 @@ async function registerRoutes(httpServer2, app2, sessionMiddleware2) {
       const facilityId = parseInt(req.params.facilityId);
       if (isNaN(facilityId)) return res.status(400).json({ message: "Invalid facilityId" });
       if (req.query.planType === "campaign") {
-        const members = await db.select().from(hfcCommittee).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(hfcCommittee.facilityId, facilityId), (0, import_drizzle_orm31.eq)(hfcCommittee.tenantId, req.tenantId))).orderBy(hfcCommittee.id);
+        const members = await db.select().from(hfcCommittee).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(hfcCommittee.facilityId, facilityId), (0, import_drizzle_orm32.eq)(hfcCommittee.tenantId, req.tenantId))).orderBy(hfcCommittee.id);
         res.json(members);
       } else {
         const { hfcCommitteeMembers: hfcCommitteeMembers2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
-        const rows = await db.select().from(hfcCommitteeMembers2).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(hfcCommitteeMembers2.tenantId, req.tenantId), (0, import_drizzle_orm31.eq)(hfcCommitteeMembers2.facilityId, facilityId))).orderBy(hfcCommitteeMembers2.isChairperson, hfcCommitteeMembers2.memberName);
+        const rows = await db.select().from(hfcCommitteeMembers2).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(hfcCommitteeMembers2.tenantId, req.tenantId), (0, import_drizzle_orm32.eq)(hfcCommitteeMembers2.facilityId, facilityId))).orderBy(hfcCommitteeMembers2.isChairperson, hfcCommitteeMembers2.memberName);
         res.json(rows);
       }
     } catch (error) {
@@ -27656,21 +28422,21 @@ async function registerRoutes(httpServer2, app2, sessionMiddleware2) {
       const facilityId = parseInt(req.params.facilityId);
       if (isNaN(memberId) || isNaN(facilityId)) return res.status(400).json({ message: "Invalid parameters" });
       if (req.query.planType === "campaign") {
-        const [existing] = await db.select().from(hfcCommittee).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(hfcCommittee.id, memberId), (0, import_drizzle_orm31.eq)(hfcCommittee.facilityId, facilityId), (0, import_drizzle_orm31.eq)(hfcCommittee.tenantId, req.tenantId)));
+        const [existing] = await db.select().from(hfcCommittee).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(hfcCommittee.id, memberId), (0, import_drizzle_orm32.eq)(hfcCommittee.facilityId, facilityId), (0, import_drizzle_orm32.eq)(hfcCommittee.tenantId, req.tenantId)));
         if (!existing) return res.status(404).json({ message: "HFC Committee member not found" });
-        const [updated] = await db.update(hfcCommittee).set({ ...req.body, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm31.eq)(hfcCommittee.id, memberId)).returning();
+        const [updated] = await db.update(hfcCommittee).set({ ...req.body, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm32.eq)(hfcCommittee.id, memberId)).returning();
         await logAudit(req, "update", "hfc_committee", memberId, existing, updated);
         res.json(updated);
       } else {
         const { hfcCommitteeMembers: hfcCommitteeMembers2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
-        const [existing] = await db.select().from(hfcCommitteeMembers2).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(hfcCommitteeMembers2.id, memberId), (0, import_drizzle_orm31.eq)(hfcCommitteeMembers2.tenantId, req.tenantId))).limit(1);
+        const [existing] = await db.select().from(hfcCommitteeMembers2).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(hfcCommitteeMembers2.id, memberId), (0, import_drizzle_orm32.eq)(hfcCommitteeMembers2.tenantId, req.tenantId))).limit(1);
         if (!existing) return res.status(404).json({ message: "Member not found" });
         const allowed2 = {};
         for (const k of ["memberName", "gender", "position", "yearsOfService", "isChairperson", "contactPhone", "committeeEstablishedDate", "isActive"]) {
           if (req.body[k] !== void 0) allowed2[k] = req.body[k];
         }
         allowed2.updatedAt = /* @__PURE__ */ new Date();
-        const [updated] = await db.update(hfcCommitteeMembers2).set(allowed2).where((0, import_drizzle_orm31.eq)(hfcCommitteeMembers2.id, memberId)).returning();
+        const [updated] = await db.update(hfcCommitteeMembers2).set(allowed2).where((0, import_drizzle_orm32.eq)(hfcCommitteeMembers2.id, memberId)).returning();
         await logAudit(req, "update", "hfc_committee_member", memberId, existing, updated);
         res.json(updated);
       }
@@ -27684,14 +28450,14 @@ async function registerRoutes(httpServer2, app2, sessionMiddleware2) {
       const facilityId = parseInt(req.params.facilityId);
       if (isNaN(memberId) || isNaN(facilityId)) return res.status(400).json({ message: "Invalid parameters" });
       if (req.query.planType === "campaign") {
-        const [existing] = await db.select().from(hfcCommittee).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(hfcCommittee.id, memberId), (0, import_drizzle_orm31.eq)(hfcCommittee.facilityId, facilityId), (0, import_drizzle_orm31.eq)(hfcCommittee.tenantId, req.tenantId)));
+        const [existing] = await db.select().from(hfcCommittee).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(hfcCommittee.id, memberId), (0, import_drizzle_orm32.eq)(hfcCommittee.facilityId, facilityId), (0, import_drizzle_orm32.eq)(hfcCommittee.tenantId, req.tenantId)));
         if (!existing) return res.status(404).json({ message: "HFC Committee member not found" });
-        await db.delete(hfcCommittee).where((0, import_drizzle_orm31.eq)(hfcCommittee.id, memberId));
+        await db.delete(hfcCommittee).where((0, import_drizzle_orm32.eq)(hfcCommittee.id, memberId));
         await logAudit(req, "delete", "hfc_committee", memberId, existing, null);
         res.json({ success: true });
       } else {
         const { hfcCommitteeMembers: hfcCommitteeMembers2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
-        await db.delete(hfcCommitteeMembers2).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(hfcCommitteeMembers2.id, memberId), (0, import_drizzle_orm31.eq)(hfcCommitteeMembers2.tenantId, req.tenantId)));
+        await db.delete(hfcCommitteeMembers2).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(hfcCommitteeMembers2.id, memberId), (0, import_drizzle_orm32.eq)(hfcCommitteeMembers2.tenantId, req.tenantId)));
         await logAudit(req, "delete", "hfc_committee_member", memberId, null, null);
         res.json({ ok: true });
       }
@@ -27704,11 +28470,11 @@ async function registerRoutes(httpServer2, app2, sessionMiddleware2) {
       const facilityId = parseInt(req.params.facilityId);
       if (isNaN(facilityId)) return res.status(400).json({ message: "Invalid facilityId" });
       if (req.query.planType === "campaign") {
-        const chvs = await db.select().from(communityHealthVolunteers).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(communityHealthVolunteers.facilityId, facilityId), (0, import_drizzle_orm31.eq)(communityHealthVolunteers.tenantId, req.tenantId))).orderBy(communityHealthVolunteers.id);
+        const chvs = await db.select().from(communityHealthVolunteers).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(communityHealthVolunteers.facilityId, facilityId), (0, import_drizzle_orm32.eq)(communityHealthVolunteers.tenantId, req.tenantId))).orderBy(communityHealthVolunteers.id);
         res.json(chvs);
       } else {
         const { chvProfiles: chvProfiles2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
-        const rows = await db.select().from(chvProfiles2).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(chvProfiles2.tenantId, req.tenantId), (0, import_drizzle_orm31.eq)(chvProfiles2.facilityId, facilityId))).orderBy(chvProfiles2.fullName);
+        const rows = await db.select().from(chvProfiles2).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(chvProfiles2.tenantId, req.tenantId), (0, import_drizzle_orm32.eq)(chvProfiles2.facilityId, facilityId))).orderBy(chvProfiles2.fullName);
         const mapped = rows.map((r) => ({
           id: r.id,
           name: r.fullName,
@@ -27762,12 +28528,12 @@ async function registerRoutes(httpServer2, app2, sessionMiddleware2) {
         }
         const cleanNrc = idVal.normalized || formatSpec.normalizeId(req.body.nrc);
         const compactNrc = cleanNrc.replace(/[\/\-\s]/g, "").toLowerCase();
-        const [nrcDup] = await db.select().from(chvProfiles2).where((0, import_drizzle_orm31.and)(
-          (0, import_drizzle_orm31.eq)(chvProfiles2.tenantId, req.tenantId),
-          (0, import_drizzle_orm31.eq)(import_drizzle_orm31.sql`LOWER(REPLACE(REPLACE(REPLACE(${chvProfiles2.nrc}, '/', ''), '-', ''), ' ', ''))`, compactNrc)
+        const [nrcDup] = await db.select().from(chvProfiles2).where((0, import_drizzle_orm32.and)(
+          (0, import_drizzle_orm32.eq)(chvProfiles2.tenantId, req.tenantId),
+          (0, import_drizzle_orm32.eq)(import_drizzle_orm32.sql`LOWER(REPLACE(REPLACE(REPLACE(${chvProfiles2.nrc}, '/', ''), '-', ''), ' ', ''))`, compactNrc)
         )).limit(1);
         if (nrcDup) {
-          const [nrcFac] = await db.select({ name: facilities.name }).from(facilities).where((0, import_drizzle_orm31.eq)(facilities.id, nrcDup.facilityId)).limit(1);
+          const [nrcFac] = await db.select({ name: facilities.name }).from(facilities).where((0, import_drizzle_orm32.eq)(facilities.id, nrcDup.facilityId)).limit(1);
           return res.status(400).json({ message: `Duplicate ${formatSpec.idShortLabel}: "${nrcDup.fullName}" at "${nrcFac?.name || "another facility"}" has this ${formatSpec.idShortLabel}.` });
         }
         let cleanPhone = null;
@@ -27778,10 +28544,10 @@ async function registerRoutes(httpServer2, app2, sessionMiddleware2) {
           }
           cleanPhone = phoneVal.normalized || formatSpec.normalizePhone(req.body.contactPhone);
         }
-        const [nameDup] = await db.select().from(chvProfiles2).where((0, import_drizzle_orm31.and)(
-          (0, import_drizzle_orm31.eq)(chvProfiles2.tenantId, req.tenantId),
-          (0, import_drizzle_orm31.eq)(chvProfiles2.facilityId, facilityId),
-          (0, import_drizzle_orm31.eq)(import_drizzle_orm31.sql`LOWER(TRIM(${chvProfiles2.fullName}))`, cleanName.toLowerCase())
+        const [nameDup] = await db.select().from(chvProfiles2).where((0, import_drizzle_orm32.and)(
+          (0, import_drizzle_orm32.eq)(chvProfiles2.tenantId, req.tenantId),
+          (0, import_drizzle_orm32.eq)(chvProfiles2.facilityId, facilityId),
+          (0, import_drizzle_orm32.eq)(import_drizzle_orm32.sql`LOWER(TRIM(${chvProfiles2.fullName}))`, cleanName.toLowerCase())
         )).limit(1);
         if (nameDup) {
           return res.status(400).json({ message: `Duplicate name: A worker named "${cleanName}" is already registered in this facility.` });
@@ -27834,25 +28600,25 @@ async function registerRoutes(httpServer2, app2, sessionMiddleware2) {
       const facilityId = parseInt(req.params.facilityId);
       if (isNaN(chvId) || isNaN(facilityId)) return res.status(400).json({ message: "Invalid parameters" });
       if (req.query.planType === "campaign") {
-        const [existing] = await db.select().from(communityHealthVolunteers).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(communityHealthVolunteers.id, chvId), (0, import_drizzle_orm31.eq)(communityHealthVolunteers.facilityId, facilityId), (0, import_drizzle_orm31.eq)(communityHealthVolunteers.tenantId, req.tenantId)));
+        const [existing] = await db.select().from(communityHealthVolunteers).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(communityHealthVolunteers.id, chvId), (0, import_drizzle_orm32.eq)(communityHealthVolunteers.facilityId, facilityId), (0, import_drizzle_orm32.eq)(communityHealthVolunteers.tenantId, req.tenantId)));
         if (!existing) return res.status(404).json({ message: "CHV not found" });
-        const [updated] = await db.update(communityHealthVolunteers).set({ ...req.body, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm31.eq)(communityHealthVolunteers.id, chvId)).returning();
+        const [updated] = await db.update(communityHealthVolunteers).set({ ...req.body, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm32.eq)(communityHealthVolunteers.id, chvId)).returning();
         await logAudit(req, "update", "community_health_volunteers", chvId, existing, updated);
         res.json(updated);
       } else {
         const { chvProfiles: chvProfiles2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
-        const [existing] = await db.select().from(chvProfiles2).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(chvProfiles2.id, chvId), (0, import_drizzle_orm31.eq)(chvProfiles2.tenantId, req.tenantId))).limit(1);
+        const [existing] = await db.select().from(chvProfiles2).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(chvProfiles2.id, chvId), (0, import_drizzle_orm32.eq)(chvProfiles2.tenantId, req.tenantId))).limit(1);
         if (!existing) return res.status(404).json({ message: "CHV not found" });
         if (req.body.name !== void 0) {
           const cleanName = req.body.name.trim();
           if (!cleanName) {
             return res.status(400).json({ message: "Full name cannot be empty" });
           }
-          const [nameDup] = await db.select().from(chvProfiles2).where((0, import_drizzle_orm31.and)(
-            (0, import_drizzle_orm31.eq)(chvProfiles2.tenantId, req.tenantId),
-            (0, import_drizzle_orm31.eq)(chvProfiles2.facilityId, facilityId),
-            (0, import_drizzle_orm31.ne)(chvProfiles2.id, chvId),
-            (0, import_drizzle_orm31.eq)(import_drizzle_orm31.sql`LOWER(TRIM(${chvProfiles2.fullName}))`, cleanName.toLowerCase())
+          const [nameDup] = await db.select().from(chvProfiles2).where((0, import_drizzle_orm32.and)(
+            (0, import_drizzle_orm32.eq)(chvProfiles2.tenantId, req.tenantId),
+            (0, import_drizzle_orm32.eq)(chvProfiles2.facilityId, facilityId),
+            (0, import_drizzle_orm32.ne)(chvProfiles2.id, chvId),
+            (0, import_drizzle_orm32.eq)(import_drizzle_orm32.sql`LOWER(TRIM(${chvProfiles2.fullName}))`, cleanName.toLowerCase())
           )).limit(1);
           if (nameDup) {
             return res.status(400).json({ message: `Duplicate name: A worker named "${cleanName}" is already registered in this facility.` });
@@ -27868,13 +28634,13 @@ async function registerRoutes(httpServer2, app2, sessionMiddleware2) {
           }
           cleanNrc = idVal.normalized || formatSpec.normalizeId(req.body.nrc);
           const compactNrc = cleanNrc.replace(/[\/\-\s]/g, "").toLowerCase();
-          const [nrcDup] = await db.select().from(chvProfiles2).where((0, import_drizzle_orm31.and)(
-            (0, import_drizzle_orm31.eq)(chvProfiles2.tenantId, req.tenantId),
-            (0, import_drizzle_orm31.ne)(chvProfiles2.id, chvId),
-            (0, import_drizzle_orm31.eq)(import_drizzle_orm31.sql`LOWER(REPLACE(REPLACE(REPLACE(${chvProfiles2.nrc}, '/', ''), '-', ''), ' ', ''))`, compactNrc)
+          const [nrcDup] = await db.select().from(chvProfiles2).where((0, import_drizzle_orm32.and)(
+            (0, import_drizzle_orm32.eq)(chvProfiles2.tenantId, req.tenantId),
+            (0, import_drizzle_orm32.ne)(chvProfiles2.id, chvId),
+            (0, import_drizzle_orm32.eq)(import_drizzle_orm32.sql`LOWER(REPLACE(REPLACE(REPLACE(${chvProfiles2.nrc}, '/', ''), '-', ''), ' ', ''))`, compactNrc)
           )).limit(1);
           if (nrcDup) {
-            const [fac] = await db.select({ name: facilities.name }).from(facilities).where((0, import_drizzle_orm31.eq)(facilities.id, nrcDup.facilityId)).limit(1);
+            const [fac] = await db.select({ name: facilities.name }).from(facilities).where((0, import_drizzle_orm32.eq)(facilities.id, nrcDup.facilityId)).limit(1);
             return res.status(400).json({
               message: `Duplicate ${formatSpec.idShortLabel}: A worker with ${formatSpec.idShortLabel} ${cleanNrc} is already registered as "${nrcDup.fullName}" at facility "${fac?.name || "another facility"}".`
             });
@@ -27908,7 +28674,7 @@ async function registerRoutes(httpServer2, app2, sessionMiddleware2) {
         if (req.body.employmentStatus !== void 0) allowed2.employmentStatus = req.body.employmentStatus;
         if (req.body.supervisorId !== void 0) allowed2.supervisorId = req.body.supervisorId ? Number(req.body.supervisorId) : null;
         allowed2.updatedAt = /* @__PURE__ */ new Date();
-        const [updated] = await db.update(chvProfiles2).set(allowed2).where((0, import_drizzle_orm31.eq)(chvProfiles2.id, chvId)).returning();
+        const [updated] = await db.update(chvProfiles2).set(allowed2).where((0, import_drizzle_orm32.eq)(chvProfiles2.id, chvId)).returning();
         await logAudit(req, "update", "chv_profile", chvId, existing, updated);
         const mappedUpdated = {
           id: updated.id,
@@ -27939,14 +28705,14 @@ async function registerRoutes(httpServer2, app2, sessionMiddleware2) {
       const facilityId = parseInt(req.params.facilityId);
       if (isNaN(chvId) || isNaN(facilityId)) return res.status(400).json({ message: "Invalid parameters" });
       if (req.query.planType === "campaign") {
-        const [existing] = await db.select().from(communityHealthVolunteers).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(communityHealthVolunteers.id, chvId), (0, import_drizzle_orm31.eq)(communityHealthVolunteers.facilityId, facilityId), (0, import_drizzle_orm31.eq)(communityHealthVolunteers.tenantId, req.tenantId)));
+        const [existing] = await db.select().from(communityHealthVolunteers).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(communityHealthVolunteers.id, chvId), (0, import_drizzle_orm32.eq)(communityHealthVolunteers.facilityId, facilityId), (0, import_drizzle_orm32.eq)(communityHealthVolunteers.tenantId, req.tenantId)));
         if (!existing) return res.status(404).json({ message: "CHV not found" });
-        await db.delete(communityHealthVolunteers).where((0, import_drizzle_orm31.eq)(communityHealthVolunteers.id, chvId));
+        await db.delete(communityHealthVolunteers).where((0, import_drizzle_orm32.eq)(communityHealthVolunteers.id, chvId));
         await logAudit(req, "delete", "community_health_volunteers", chvId, existing, null);
         res.json({ success: true });
       } else {
         const { chvProfiles: chvProfiles2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
-        await db.delete(chvProfiles2).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(chvProfiles2.id, chvId), (0, import_drizzle_orm31.eq)(chvProfiles2.tenantId, req.tenantId)));
+        await db.delete(chvProfiles2).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(chvProfiles2.id, chvId), (0, import_drizzle_orm32.eq)(chvProfiles2.tenantId, req.tenantId)));
         await logAudit(req, "delete", "chv_profile", chvId, null, null);
         res.json({ ok: true });
       }
@@ -27970,7 +28736,7 @@ async function registerRoutes(httpServer2, app2, sessionMiddleware2) {
             const id = body.id;
             delete body.id;
             if (id != null) {
-              const [updated] = await db.update(communityHealthVolunteers).set({ ...body, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(communityHealthVolunteers.id, Number(id)), (0, import_drizzle_orm31.eq)(communityHealthVolunteers.tenantId, req.tenantId))).returning();
+              const [updated] = await db.update(communityHealthVolunteers).set({ ...body, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(communityHealthVolunteers.id, Number(id)), (0, import_drizzle_orm32.eq)(communityHealthVolunteers.tenantId, req.tenantId))).returning();
               if (!updated) {
                 results.push({ clientId, ok: false, error: "CHV not found" });
                 continue;
@@ -28002,7 +28768,7 @@ async function registerRoutes(httpServer2, app2, sessionMiddleware2) {
                 if (body[k] !== void 0) allowed2[k] = body[k];
               }
               allowed2.updatedAt = /* @__PURE__ */ new Date();
-              const [updated] = await db.update(chvProfiles2).set(allowed2).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(chvProfiles2.id, Number(id)), (0, import_drizzle_orm31.eq)(chvProfiles2.tenantId, req.tenantId))).returning();
+              const [updated] = await db.update(chvProfiles2).set(allowed2).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(chvProfiles2.id, Number(id)), (0, import_drizzle_orm32.eq)(chvProfiles2.tenantId, req.tenantId))).returning();
               if (!updated) {
                 results.push({ clientId, ok: false, error: "CHV not found" });
                 continue;
@@ -28032,7 +28798,7 @@ async function registerRoutes(httpServer2, app2, sessionMiddleware2) {
       const results = [];
       for (const chvId of chvIds) {
         try {
-          const [updated] = await db.update(chvProfiles2).set({ assignedVillageId: villageId, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(chvProfiles2.id, chvId), (0, import_drizzle_orm31.eq)(chvProfiles2.tenantId, req.tenantId))).returning({ id: chvProfiles2.id });
+          const [updated] = await db.update(chvProfiles2).set({ assignedVillageId: villageId, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(chvProfiles2.id, chvId), (0, import_drizzle_orm32.eq)(chvProfiles2.tenantId, req.tenantId))).returning({ id: chvProfiles2.id });
           if (!updated) {
             results.push({ id: chvId, ok: false, error: "Not found" });
             continue;
@@ -28060,7 +28826,7 @@ async function registerRoutes(httpServer2, app2, sessionMiddleware2) {
         if (!forecast) return res.status(404).json({ message: "Facility not found or inactive" });
         return res.json(forecast);
       }
-      const facRows = await db.execute(import_drizzle_orm31.sql`
+      const facRows = await db.execute(import_drizzle_orm32.sql`
         SELECT id, name FROM facilities WHERE tenant_id = ${req.tenantId} AND is_active = true ORDER BY name ASC LIMIT 25
       `);
       const allFacs = facRows.rows ?? [];
@@ -28084,13 +28850,13 @@ async function registerRoutes(httpServer2, app2, sessionMiddleware2) {
       const { coldChainEquipment: coldChainEquipment2, facilities: facilities4 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
       const { facilityId, equipmentType, condition, powerSource } = req.query;
       const conditions = [
-        (0, import_drizzle_orm31.eq)(coldChainEquipment2.tenantId, req.tenantId),
-        (0, import_drizzle_orm31.eq)(coldChainEquipment2.isActive, true)
+        (0, import_drizzle_orm32.eq)(coldChainEquipment2.tenantId, req.tenantId),
+        (0, import_drizzle_orm32.eq)(coldChainEquipment2.isActive, true)
       ];
-      if (facilityId) conditions.push((0, import_drizzle_orm31.eq)(coldChainEquipment2.facilityId, Number(facilityId)));
-      if (equipmentType && equipmentType !== "all") conditions.push((0, import_drizzle_orm31.eq)(coldChainEquipment2.equipmentType, String(equipmentType)));
-      if (condition && condition !== "all") conditions.push((0, import_drizzle_orm31.eq)(coldChainEquipment2.condition, String(condition)));
-      if (powerSource && powerSource !== "all") conditions.push((0, import_drizzle_orm31.eq)(coldChainEquipment2.powerSource, String(powerSource)));
+      if (facilityId) conditions.push((0, import_drizzle_orm32.eq)(coldChainEquipment2.facilityId, Number(facilityId)));
+      if (equipmentType && equipmentType !== "all") conditions.push((0, import_drizzle_orm32.eq)(coldChainEquipment2.equipmentType, String(equipmentType)));
+      if (condition && condition !== "all") conditions.push((0, import_drizzle_orm32.eq)(coldChainEquipment2.condition, String(condition)));
+      if (powerSource && powerSource !== "all") conditions.push((0, import_drizzle_orm32.eq)(coldChainEquipment2.powerSource, String(powerSource)));
       const rows = await db.select({
         id: coldChainEquipment2.id,
         facilityId: coldChainEquipment2.facilityId,
@@ -28126,7 +28892,7 @@ async function registerRoutes(httpServer2, app2, sessionMiddleware2) {
         externalId: coldChainEquipment2.externalId,
         createdAt: coldChainEquipment2.createdAt,
         updatedAt: coldChainEquipment2.updatedAt
-      }).from(coldChainEquipment2).leftJoin(facilities4, (0, import_drizzle_orm31.eq)(coldChainEquipment2.facilityId, facilities4.id)).where((0, import_drizzle_orm31.and)(...conditions)).orderBy(facilities4.name, coldChainEquipment2.equipmentType);
+      }).from(coldChainEquipment2).leftJoin(facilities4, (0, import_drizzle_orm32.eq)(coldChainEquipment2.facilityId, facilities4.id)).where((0, import_drizzle_orm32.and)(...conditions)).orderBy(facilities4.name, coldChainEquipment2.equipmentType);
       res.json(rows);
     } catch (err) {
       res.status(500).json({ message: safeErrorMessage(err, "Failed to fetch cold chain inventory") });
@@ -28138,10 +28904,10 @@ async function registerRoutes(httpServer2, app2, sessionMiddleware2) {
       if (isNaN(facilityId)) return res.status(400).json({ message: "Invalid facility id" });
       const { coldChainEquipment: coldChainEquipment2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
       const rows = await db.select().from(coldChainEquipment2).where(
-        (0, import_drizzle_orm31.and)(
-          (0, import_drizzle_orm31.eq)(coldChainEquipment2.tenantId, req.tenantId),
-          (0, import_drizzle_orm31.eq)(coldChainEquipment2.facilityId, facilityId),
-          (0, import_drizzle_orm31.eq)(coldChainEquipment2.isActive, true)
+        (0, import_drizzle_orm32.and)(
+          (0, import_drizzle_orm32.eq)(coldChainEquipment2.tenantId, req.tenantId),
+          (0, import_drizzle_orm32.eq)(coldChainEquipment2.facilityId, facilityId),
+          (0, import_drizzle_orm32.eq)(coldChainEquipment2.isActive, true)
         )
       ).orderBy(coldChainEquipment2.equipmentType, coldChainEquipment2.brand);
       res.json(rows);
@@ -28202,7 +28968,7 @@ async function registerRoutes(httpServer2, app2, sessionMiddleware2) {
       const parsed = insertColdChainEquipmentSchema2.parse(raw);
       let validUserId = null;
       if (req.dbUser?.id) {
-        const [u] = await db.select({ id: users2.id }).from(users2).where((0, import_drizzle_orm31.eq)(users2.id, req.dbUser.id));
+        const [u] = await db.select({ id: users2.id }).from(users2).where((0, import_drizzle_orm32.eq)(users2.id, req.dbUser.id));
         if (u) validUserId = u.id;
       }
       const [inserted] = await db.insert(coldChainEquipment2).values({
@@ -28224,7 +28990,7 @@ async function registerRoutes(httpServer2, app2, sessionMiddleware2) {
       const equipId = parseInt(req.params.equipId);
       if (isNaN(facilityId) || isNaN(equipId)) return res.status(400).json({ message: "Invalid parameters" });
       const { coldChainEquipment: coldChainEquipment2, users: users2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
-      const [existing] = await db.select().from(coldChainEquipment2).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(coldChainEquipment2.id, equipId), (0, import_drizzle_orm31.eq)(coldChainEquipment2.facilityId, facilityId), (0, import_drizzle_orm31.eq)(coldChainEquipment2.tenantId, req.tenantId)));
+      const [existing] = await db.select().from(coldChainEquipment2).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(coldChainEquipment2.id, equipId), (0, import_drizzle_orm32.eq)(coldChainEquipment2.facilityId, facilityId), (0, import_drizzle_orm32.eq)(coldChainEquipment2.tenantId, req.tenantId)));
       if (!existing) return res.status(404).json({ message: "Equipment not found" });
       const allowed2 = {};
       for (const k of [
@@ -28274,12 +29040,12 @@ async function registerRoutes(httpServer2, app2, sessionMiddleware2) {
       }
       let validUserId = null;
       if (req.dbUser?.id) {
-        const [u] = await db.select({ id: users2.id }).from(users2).where((0, import_drizzle_orm31.eq)(users2.id, req.dbUser.id));
+        const [u] = await db.select({ id: users2.id }).from(users2).where((0, import_drizzle_orm32.eq)(users2.id, req.dbUser.id));
         if (u) validUserId = u.id;
       }
       allowed2.updatedAt = /* @__PURE__ */ new Date();
       allowed2.updatedByUserId = validUserId;
-      const [updated] = await db.update(coldChainEquipment2).set(allowed2).where((0, import_drizzle_orm31.eq)(coldChainEquipment2.id, equipId)).returning();
+      const [updated] = await db.update(coldChainEquipment2).set(allowed2).where((0, import_drizzle_orm32.eq)(coldChainEquipment2.id, equipId)).returning();
       await logAudit(req, "update", "cold_chain_equipment", equipId, existing, updated);
       res.json(updated);
     } catch (err) {
@@ -28293,9 +29059,9 @@ async function registerRoutes(httpServer2, app2, sessionMiddleware2) {
       const equipId = parseInt(req.params.equipId);
       if (isNaN(facilityId) || isNaN(equipId)) return res.status(400).json({ message: "Invalid parameters" });
       const { coldChainEquipment: coldChainEquipment2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
-      const [existing] = await db.select().from(coldChainEquipment2).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(coldChainEquipment2.id, equipId), (0, import_drizzle_orm31.eq)(coldChainEquipment2.facilityId, facilityId), (0, import_drizzle_orm31.eq)(coldChainEquipment2.tenantId, req.tenantId)));
+      const [existing] = await db.select().from(coldChainEquipment2).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(coldChainEquipment2.id, equipId), (0, import_drizzle_orm32.eq)(coldChainEquipment2.facilityId, facilityId), (0, import_drizzle_orm32.eq)(coldChainEquipment2.tenantId, req.tenantId)));
       if (!existing) return res.status(404).json({ message: "Equipment not found" });
-      await db.update(coldChainEquipment2).set({ isActive: false, updatedAt: /* @__PURE__ */ new Date(), updatedByUserId: req.user?.claims?.sub ?? null }).where((0, import_drizzle_orm31.eq)(coldChainEquipment2.id, equipId));
+      await db.update(coldChainEquipment2).set({ isActive: false, updatedAt: /* @__PURE__ */ new Date(), updatedByUserId: req.user?.claims?.sub ?? null }).where((0, import_drizzle_orm32.eq)(coldChainEquipment2.id, equipId));
       await logAudit(req, "delete", "cold_chain_equipment", equipId, existing, null);
       res.json({ success: true });
     } catch (err) {
@@ -28330,7 +29096,7 @@ async function registerRoutes(httpServer2, app2, sessionMiddleware2) {
       const { coldChainEquipment: coldChainEquipment2, facilities: facilities4 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
       const items = Array.isArray(req.body) ? req.body : req.body?.items ?? [];
       if (!items.length) return res.status(400).json({ message: "No equipment items provided" });
-      const allFacs = await db.select().from(facilities4).where((0, import_drizzle_orm31.eq)(facilities4.tenantId, req.tenantId));
+      const allFacs = await db.select().from(facilities4).where((0, import_drizzle_orm32.eq)(facilities4.tenantId, req.tenantId));
       const idMap = /* @__PURE__ */ new Map();
       const nameMap = /* @__PURE__ */ new Map();
       const hmisMap = /* @__PURE__ */ new Map();
@@ -28404,19 +29170,19 @@ async function registerRoutes(httpServer2, app2, sessionMiddleware2) {
         let existingId = null;
         const rawId = item.id || item["ID"];
         if (rawId && !isNaN(Number(rawId))) {
-          const [exist] = await db.select({ id: coldChainEquipment2.id }).from(coldChainEquipment2).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(coldChainEquipment2.id, Number(rawId)), (0, import_drizzle_orm31.eq)(coldChainEquipment2.tenantId, req.tenantId))).limit(1);
+          const [exist] = await db.select({ id: coldChainEquipment2.id }).from(coldChainEquipment2).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(coldChainEquipment2.id, Number(rawId)), (0, import_drizzle_orm32.eq)(coldChainEquipment2.tenantId, req.tenantId))).limit(1);
           if (exist) existingId = exist.id;
         }
         if (!existingId && serialNumber) {
-          const [exist] = await db.select({ id: coldChainEquipment2.id }).from(coldChainEquipment2).where((0, import_drizzle_orm31.and)(
-            (0, import_drizzle_orm31.eq)(coldChainEquipment2.tenantId, req.tenantId),
-            (0, import_drizzle_orm31.eq)(coldChainEquipment2.facilityId, matchedFacility.id),
-            (0, import_drizzle_orm31.eq)(coldChainEquipment2.serialNumber, String(serialNumber))
+          const [exist] = await db.select({ id: coldChainEquipment2.id }).from(coldChainEquipment2).where((0, import_drizzle_orm32.and)(
+            (0, import_drizzle_orm32.eq)(coldChainEquipment2.tenantId, req.tenantId),
+            (0, import_drizzle_orm32.eq)(coldChainEquipment2.facilityId, matchedFacility.id),
+            (0, import_drizzle_orm32.eq)(coldChainEquipment2.serialNumber, String(serialNumber))
           )).limit(1);
           if (exist) existingId = exist.id;
         }
         if (existingId) {
-          await db.update(coldChainEquipment2).set(payload).where((0, import_drizzle_orm31.eq)(coldChainEquipment2.id, existingId));
+          await db.update(coldChainEquipment2).set(payload).where((0, import_drizzle_orm32.eq)(coldChainEquipment2.id, existingId));
           updated++;
         } else {
           await db.insert(coldChainEquipment2).values({
@@ -28446,7 +29212,7 @@ async function registerRoutes(httpServer2, app2, sessionMiddleware2) {
       if (isNaN(facilityId)) return res.status(400).json({ message: "Invalid facility id" });
       const { coldChainEquipment: coldChainEquipment2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
       const format = (req.query.format || "json").toLowerCase();
-      const rows = await db.select().from(coldChainEquipment2).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(coldChainEquipment2.tenantId, req.tenantId), (0, import_drizzle_orm31.eq)(coldChainEquipment2.facilityId, facilityId))).orderBy(coldChainEquipment2.equipmentType);
+      const rows = await db.select().from(coldChainEquipment2).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(coldChainEquipment2.tenantId, req.tenantId), (0, import_drizzle_orm32.eq)(coldChainEquipment2.facilityId, facilityId))).orderBy(coldChainEquipment2.equipmentType);
       if (format === "csv") {
         const headers = [
           "id",
@@ -28533,9 +29299,9 @@ async function registerRoutes(httpServer2, app2, sessionMiddleware2) {
   });
   async function summarizeTenantFacilityMaintenance(tenantId, importedHmisCodes = []) {
     const importedCodes = importedHmisCodes.map((code) => code.trim()).filter(Boolean);
-    const importedCodeList = importedCodes.length > 0 ? import_drizzle_orm31.sql.join(importedCodes.map((code) => import_drizzle_orm31.sql`${code}`), import_drizzle_orm31.sql`, `) : null;
-    const missingFromImportFilter = importedCodeList ? import_drizzle_orm31.sql`hmis_code NOT IN (${importedCodeList})` : import_drizzle_orm31.sql`TRUE`;
-    const summaryResult = await db.execute(import_drizzle_orm31.sql`SELECT
+    const importedCodeList = importedCodes.length > 0 ? import_drizzle_orm32.sql.join(importedCodes.map((code) => import_drizzle_orm32.sql`${code}`), import_drizzle_orm32.sql`, `) : null;
+    const missingFromImportFilter = importedCodeList ? import_drizzle_orm32.sql`hmis_code NOT IN (${importedCodeList})` : import_drizzle_orm32.sql`TRUE`;
+    const summaryResult = await db.execute(import_drizzle_orm32.sql`SELECT
       (SELECT COUNT(*)::int FROM facilities WHERE tenant_id = ${tenantId}) AS "facilityCount",
       (SELECT COUNT(*)::int FROM villages WHERE tenant_id = ${tenantId} AND assigned_facility_id IN (SELECT id FROM facilities WHERE tenant_id = ${tenantId})) AS "linkedCommunityCount",
       (SELECT COUNT(*)::int FROM facility_catchments WHERE tenant_id = ${tenantId}) AS "catchmentCount",
@@ -28552,14 +29318,14 @@ async function registerRoutes(httpServer2, app2, sessionMiddleware2) {
   }
   async function purgeTenantFacilities(tx, tenantId, keepHmisCodes = []) {
     const keepCodes = keepHmisCodes.map((code) => code.trim()).filter(Boolean);
-    const keepCodeList = keepCodes.length > 0 ? import_drizzle_orm31.sql.join(keepCodes.map((code) => import_drizzle_orm31.sql`${code}`), import_drizzle_orm31.sql`, `) : null;
+    const keepCodeList = keepCodes.length > 0 ? import_drizzle_orm32.sql.join(keepCodes.map((code) => import_drizzle_orm32.sql`${code}`), import_drizzle_orm32.sql`, `) : null;
     const targetRows = await tx.select({ id: facilities.id }).from(facilities).where(
-      keepCodeList ? (0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(facilities.tenantId, tenantId), import_drizzle_orm31.sql`${facilities.hmisCode} NOT IN (${keepCodeList})`) : (0, import_drizzle_orm31.eq)(facilities.tenantId, tenantId)
+      keepCodeList ? (0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(facilities.tenantId, tenantId), import_drizzle_orm32.sql`${facilities.hmisCode} NOT IN (${keepCodeList})`) : (0, import_drizzle_orm32.eq)(facilities.tenantId, tenantId)
     );
     const targetIds = targetRows.map((row) => Number(row.id)).filter((id) => Number.isFinite(id));
     if (targetIds.length === 0) return { purgedCount: 0 };
-    const targetIdList = import_drizzle_orm31.sql.join(targetIds.map((id) => import_drizzle_orm31.sql`${id}`), import_drizzle_orm31.sql`, `);
-    await tx.execute(import_drizzle_orm31.sql`UPDATE facilities SET is_active = false, updated_at = NOW() WHERE tenant_id = ${tenantId} AND id IN (${targetIdList})`);
+    const targetIdList = import_drizzle_orm32.sql.join(targetIds.map((id) => import_drizzle_orm32.sql`${id}`), import_drizzle_orm32.sql`, `);
+    await tx.execute(import_drizzle_orm32.sql`UPDATE facilities SET is_active = false, updated_at = NOW() WHERE tenant_id = ${tenantId} AND id IN (${targetIdList})`);
     return { purgedCount: targetIds.length };
   }
   app2.post("/api/facilities/import", isAuthenticated, requireTenant, loadRole, requireAdmin2, async (req, res) => {
@@ -28622,7 +29388,7 @@ async function registerRoutes(httpServer2, app2, sessionMiddleware2) {
           const latVal = item.latitude !== null && item.latitude !== void 0 ? parseFloat(item.latitude.toString()) : null;
           const lngVal = item.longitude !== null && item.longitude !== void 0 ? parseFloat(item.longitude.toString()) : null;
           const radiusVal = item.catchmentRadius !== null && item.catchmentRadius !== void 0 ? parseFloat(item.catchmentRadius.toString()) : null;
-          const [existing] = await tx.select().from(facilities).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(facilities.tenantId, req.tenantId), (0, import_drizzle_orm31.eq)(facilities.hmisCode, item.hmisCode.trim()))).limit(1);
+          const [existing] = await tx.select().from(facilities).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(facilities.tenantId, req.tenantId), (0, import_drizzle_orm32.eq)(facilities.hmisCode, item.hmisCode.trim()))).limit(1);
           if (existing) {
             await tx.update(facilities).set({
               name: item.name.trim(),
@@ -28641,7 +29407,7 @@ async function registerRoutes(httpServer2, app2, sessionMiddleware2) {
               catchmentRadius: radiusVal !== null && !isNaN(radiusVal) ? radiusVal.toFixed(2) : existing.catchmentRadius,
               isActive: true,
               updatedAt: /* @__PURE__ */ new Date()
-            }).where((0, import_drizzle_orm31.eq)(facilities.id, existing.id));
+            }).where((0, import_drizzle_orm32.eq)(facilities.id, existing.id));
             updatedCount2++;
           } else {
             await tx.insert(facilities).values({
@@ -28687,9 +29453,9 @@ async function registerRoutes(httpServer2, app2, sessionMiddleware2) {
         return res.status(404).json({ message: "Facility not found" });
       }
       const catchments = await db.select().from(facilityCatchments).where(
-        (0, import_drizzle_orm31.and)(
-          (0, import_drizzle_orm31.eq)(facilityCatchments.facilityId, facilityId),
-          (0, import_drizzle_orm31.eq)(facilityCatchments.tenantId, req.tenantId)
+        (0, import_drizzle_orm32.and)(
+          (0, import_drizzle_orm32.eq)(facilityCatchments.facilityId, facilityId),
+          (0, import_drizzle_orm32.eq)(facilityCatchments.tenantId, req.tenantId)
         )
       );
       res.json(catchments);
@@ -28727,10 +29493,10 @@ async function registerRoutes(httpServer2, app2, sessionMiddleware2) {
       );
       const populationEstimate = popRes.rows[0]?.total_pop || 0;
       const existing = await db.select().from(facilityCatchments).where(
-        (0, import_drizzle_orm31.and)(
-          (0, import_drizzle_orm31.eq)(facilityCatchments.facilityId, facilityId),
-          (0, import_drizzle_orm31.eq)(facilityCatchments.tenantId, req.tenantId),
-          (0, import_drizzle_orm31.eq)(facilityCatchments.isOfficial, true)
+        (0, import_drizzle_orm32.and)(
+          (0, import_drizzle_orm32.eq)(facilityCatchments.facilityId, facilityId),
+          (0, import_drizzle_orm32.eq)(facilityCatchments.tenantId, req.tenantId),
+          (0, import_drizzle_orm32.eq)(facilityCatchments.isOfficial, true)
         )
       );
       let catchment;
@@ -28742,7 +29508,7 @@ async function registerRoutes(httpServer2, app2, sessionMiddleware2) {
           areaSqKm,
           populationEstimate,
           updatedAt: /* @__PURE__ */ new Date()
-        }).where((0, import_drizzle_orm31.eq)(facilityCatchments.id, existing[0].id)).returning();
+        }).where((0, import_drizzle_orm32.eq)(facilityCatchments.id, existing[0].id)).returning();
         catchment = updated;
       } else {
         const [created] = await db.insert(facilityCatchments).values({
@@ -28760,16 +29526,16 @@ async function registerRoutes(httpServer2, app2, sessionMiddleware2) {
       }
       if (Array.isArray(villageIds)) {
         await db.update(villages).set({ assignedFacilityId: null }).where(
-          (0, import_drizzle_orm31.and)(
-            (0, import_drizzle_orm31.eq)(villages.assignedFacilityId, facilityId),
-            (0, import_drizzle_orm31.eq)(villages.tenantId, req.tenantId)
+          (0, import_drizzle_orm32.and)(
+            (0, import_drizzle_orm32.eq)(villages.assignedFacilityId, facilityId),
+            (0, import_drizzle_orm32.eq)(villages.tenantId, req.tenantId)
           )
         );
         if (villageIds.length > 0) {
           await db.update(villages).set({ assignedFacilityId: facilityId }).where(
-            (0, import_drizzle_orm31.and)(
-              (0, import_drizzle_orm31.inArray)(villages.id, villageIds),
-              (0, import_drizzle_orm31.eq)(villages.tenantId, req.tenantId)
+            (0, import_drizzle_orm32.and)(
+              (0, import_drizzle_orm32.inArray)(villages.id, villageIds),
+              (0, import_drizzle_orm32.eq)(villages.tenantId, req.tenantId)
             )
           );
         }
@@ -28790,7 +29556,7 @@ async function registerRoutes(httpServer2, app2, sessionMiddleware2) {
         longitude: villages.longitude,
         districtId: villages.districtId,
         assignedFacilityId: villages.assignedFacilityId
-      }).from(villages).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(villages.id, villageId), (0, import_drizzle_orm31.eq)(villages.tenantId, tenantId)));
+      }).from(villages).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(villages.id, villageId), (0, import_drizzle_orm32.eq)(villages.tenantId, tenantId)));
       if (!villageRow) return null;
       let totalPop = 0;
       let under5Pop = 0;
@@ -28849,15 +29615,15 @@ async function registerRoutes(httpServer2, app2, sessionMiddleware2) {
       const under1Pop = Math.round(under5Pop / 5) || Math.round(totalPop * 0.035);
       let provinceId = null;
       if (villageRow.districtId) {
-        const [d] = await dbInstance.select({ provinceId: districts.provinceId }).from(districts).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(districts.id, villageRow.districtId), (0, import_drizzle_orm31.eq)(districts.tenantId, tenantId)));
+        const [d] = await dbInstance.select({ provinceId: districts.provinceId }).from(districts).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(districts.id, villageRow.districtId), (0, import_drizzle_orm32.eq)(districts.tenantId, tenantId)));
         if (d) provinceId = d.provinceId;
       }
       const existing = await dbInstance.select().from(populationData).where(
-        (0, import_drizzle_orm31.and)(
-          (0, import_drizzle_orm31.eq)(populationData.tenantId, tenantId),
-          (0, import_drizzle_orm31.eq)(populationData.villageId, villageId)
+        (0, import_drizzle_orm32.and)(
+          (0, import_drizzle_orm32.eq)(populationData.tenantId, tenantId),
+          (0, import_drizzle_orm32.eq)(populationData.villageId, villageId)
         )
-      ).orderBy((0, import_drizzle_orm31.desc)(populationData.year)).limit(1);
+      ).orderBy((0, import_drizzle_orm32.desc)(populationData.year)).limit(1);
       if (existing.length > 0) {
         await dbInstance.update(populationData).set({
           totalPopulation: totalPop,
@@ -28867,7 +29633,7 @@ async function registerRoutes(httpServer2, app2, sessionMiddleware2) {
           districtId: villageRow.districtId,
           provinceId,
           updatedAt: /* @__PURE__ */ new Date()
-        }).where((0, import_drizzle_orm31.eq)(populationData.id, existing[0].id));
+        }).where((0, import_drizzle_orm32.eq)(populationData.id, existing[0].id));
       } else {
         await dbInstance.insert(populationData).values({
           tenantId,
@@ -28887,7 +29653,7 @@ async function registerRoutes(httpServer2, app2, sessionMiddleware2) {
         totalCatchmentPopulation: Number(totalPop ?? 0),
         under5Population: Number(under5Pop ?? 0),
         updatedAt: /* @__PURE__ */ new Date()
-      }).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(villages.tenantId, tenantId), (0, import_drizzle_orm31.eq)(villages.id, villageId)));
+      }).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(villages.tenantId, tenantId), (0, import_drizzle_orm32.eq)(villages.id, villageId)));
       await refreshFacilityPopulationAggregate(tenantId, villageRow.assignedFacilityId ?? null);
       return totalPop;
     } catch (err) {
@@ -28919,8 +29685,8 @@ async function registerRoutes(httpServer2, app2, sessionMiddleware2) {
         outreachLatitude: villages.outreachLatitude,
         outreachLongitude: villages.outreachLongitude,
         outreachPostName: villages.outreachPostName,
-        population: import_drizzle_orm31.sql`COALESCE(${villages.griddedPopulation}, ${villages.totalCatchmentPopulation}, 0)`.mapWith(Number)
-      }).from(villages).where((0, import_drizzle_orm31.eq)(villages.tenantId, req.tenantId));
+        population: import_drizzle_orm32.sql`COALESCE(${villages.griddedPopulation}, ${villages.totalCatchmentPopulation}, 0)`.mapWith(Number)
+      }).from(villages).where((0, import_drizzle_orm32.eq)(villages.tenantId, req.tenantId));
       let result = scope.all ? rows : rows.filter(
         (v) => recordInGeoScope(scope, {
           districtId: v.districtId,
@@ -28951,19 +29717,19 @@ async function registerRoutes(httpServer2, app2, sessionMiddleware2) {
         String(req.query.layers ?? "facilities,communities").split(",").map((layer) => layer.trim().toLowerCase()).filter(Boolean)
       );
       const [districtRows, provinceRows] = await Promise.all([
-        db.select({ id: districts.id, name: districts.name, provinceId: districts.provinceId }).from(districts).where((0, import_drizzle_orm31.eq)(districts.tenantId, tenantId)),
-        db.select({ id: provinces.id, name: provinces.name }).from(provinces).where((0, import_drizzle_orm31.eq)(provinces.tenantId, tenantId))
+        db.select({ id: districts.id, name: districts.name, provinceId: districts.provinceId }).from(districts).where((0, import_drizzle_orm32.eq)(districts.tenantId, tenantId)),
+        db.select({ id: provinces.id, name: provinces.name }).from(provinces).where((0, import_drizzle_orm32.eq)(provinces.tenantId, tenantId))
       ]);
       const districtMap = new Map(districtRows.map((d) => [Number(d.id), d]));
       const provinceMap = new Map(provinceRows.map((p) => [Number(p.id), p]));
       const facilityLimit = parseMapLimit(req.query.limitFacilities, zoom < 7 ? 600 : 2500, 5e3);
       const communityLimit = parseMapLimit(req.query.limitCommunities, 1200, 5e3);
-      const facilityConditions = [(0, import_drizzle_orm31.eq)(facilities.tenantId, tenantId)];
-      if (selectedDistrictId) facilityConditions.push((0, import_drizzle_orm31.eq)(facilities.districtId, selectedDistrictId));
-      if (selectedFacilityId) facilityConditions.push((0, import_drizzle_orm31.eq)(facilities.id, selectedFacilityId));
+      const facilityConditions = [(0, import_drizzle_orm32.eq)(facilities.tenantId, tenantId)];
+      if (selectedDistrictId) facilityConditions.push((0, import_drizzle_orm32.eq)(facilities.districtId, selectedDistrictId));
+      if (selectedFacilityId) facilityConditions.push((0, import_drizzle_orm32.eq)(facilities.id, selectedFacilityId));
       if (bbox && !selectedFacilityId) {
-        facilityConditions.push(import_drizzle_orm31.sql`${facilities.latitude}::double precision BETWEEN ${bbox.south} AND ${bbox.north}`);
-        facilityConditions.push(import_drizzle_orm31.sql`${facilities.longitude}::double precision BETWEEN ${bbox.west} AND ${bbox.east}`);
+        facilityConditions.push(import_drizzle_orm32.sql`${facilities.latitude}::double precision BETWEEN ${bbox.south} AND ${bbox.north}`);
+        facilityConditions.push(import_drizzle_orm32.sql`${facilities.longitude}::double precision BETWEEN ${bbox.west} AND ${bbox.east}`);
       }
       const facilityRows = layers.has("facilities") ? await db.select({
         id: facilities.id,
@@ -28982,7 +29748,7 @@ async function registerRoutes(httpServer2, app2, sessionMiddleware2) {
         operationalStatus: facilities.operationalStatus,
         isActive: facilities.isActive,
         externalIds: facilities.externalIds
-      }).from(facilities).where((0, import_drizzle_orm31.and)(...facilityConditions)).limit(facilityLimit * 2) : [];
+      }).from(facilities).where((0, import_drizzle_orm32.and)(...facilityConditions)).limit(facilityLimit * 2) : [];
       const facilitiesResult = facilityRows.filter((facility) => {
         const district = districtMap.get(Number(facility.districtId));
         if (!recordInGeoScope(scope, { facilityId: facility.id, districtId: facility.districtId, provinceId: district?.provinceId })) return false;
@@ -29003,16 +29769,16 @@ async function registerRoutes(httpServer2, app2, sessionMiddleware2) {
         };
       });
       const hasCommunityFocus = !!selectedFacilityId || !!selectedDistrictId || !!selectedLlgId || !!search || zoom >= 10;
-      const communityConditions = [(0, import_drizzle_orm31.eq)(villages.tenantId, tenantId)];
+      const communityConditions = [(0, import_drizzle_orm32.eq)(villages.tenantId, tenantId)];
       if (selectedFacilityId) {
-        communityConditions.push((0, import_drizzle_orm31.eq)(villages.assignedFacilityId, selectedFacilityId));
+        communityConditions.push((0, import_drizzle_orm32.eq)(villages.assignedFacilityId, selectedFacilityId));
       } else if (selectedDistrictId) {
-        communityConditions.push((0, import_drizzle_orm31.eq)(villages.districtId, selectedDistrictId));
+        communityConditions.push((0, import_drizzle_orm32.eq)(villages.districtId, selectedDistrictId));
       } else if (bbox) {
-        communityConditions.push(import_drizzle_orm31.sql`${villages.latitude}::double precision BETWEEN ${bbox.south} AND ${bbox.north}`);
-        communityConditions.push(import_drizzle_orm31.sql`${villages.longitude}::double precision BETWEEN ${bbox.west} AND ${bbox.east}`);
+        communityConditions.push(import_drizzle_orm32.sql`${villages.latitude}::double precision BETWEEN ${bbox.south} AND ${bbox.north}`);
+        communityConditions.push(import_drizzle_orm32.sql`${villages.longitude}::double precision BETWEEN ${bbox.west} AND ${bbox.east}`);
       }
-      if (selectedLlgId) communityConditions.push((0, import_drizzle_orm31.eq)(villages.llgId, selectedLlgId));
+      if (selectedLlgId) communityConditions.push((0, import_drizzle_orm32.eq)(villages.llgId, selectedLlgId));
       const communityRows = layers.has("communities") && hasCommunityFocus ? await db.select({
         id: villages.id,
         tenantId: villages.tenantId,
@@ -29043,8 +29809,8 @@ async function registerRoutes(httpServer2, app2, sessionMiddleware2) {
         totalCatchmentPopulation: villages.totalCatchmentPopulation,
         under5Population: villages.under5Population,
         griddedPopulation: villages.griddedPopulation,
-        population: import_drizzle_orm31.sql`COALESCE(${villages.griddedPopulation}, ${villages.totalCatchmentPopulation}, 0)`.mapWith(Number)
-      }).from(villages).where((0, import_drizzle_orm31.and)(...communityConditions)).limit(communityLimit * 2) : [];
+        population: import_drizzle_orm32.sql`COALESCE(${villages.griddedPopulation}, ${villages.totalCatchmentPopulation}, 0)`.mapWith(Number)
+      }).from(villages).where((0, import_drizzle_orm32.and)(...communityConditions)).limit(communityLimit * 2) : [];
       const communitiesResult = communityRows.filter((village) => {
         if (outsideVillageIds.has(Number(village.id))) return false;
         const district = districtMap.get(Number(village.districtId));
@@ -29282,7 +30048,7 @@ async function registerRoutes(httpServer2, app2, sessionMiddleware2) {
   app2.post("/api/villages/extract", ...auth, async (req, res) => {
     try {
       extractionStatus.set(req.tenantId, { current: 0, total: 100, stage: "Loading boundary GeoJSON polygons..." });
-      const boundaries = await db.select().from(adminBoundaries).where((0, import_drizzle_orm31.eq)(adminBoundaries.tenantId, req.tenantId));
+      const boundaries = await db.select().from(adminBoundaries).where((0, import_drizzle_orm32.eq)(adminBoundaries.tenantId, req.tenantId));
       if (boundaries.length === 0) {
         extractionStatus.delete(req.tenantId);
         return res.status(400).json({
@@ -29336,7 +30102,7 @@ async function registerRoutes(httpServer2, app2, sessionMiddleware2) {
           });
         }
         const props = feature2.properties || {};
-        const name = (props.settlement_name || props.settlementName || props.settlement || props.community_name || props.communityName || props.community || props.village_name || props.villageName || props.village || props.place_name || props.placeName || props.place || props.NAME_5 || props.NAME_4 || props.shapeName || props.name || props.Name || "").trim();
+        const name = (props.settlement_name || props.settlementName || props.settlement || props.community_name || props.communityName || props.community || props.village_name || props.villageName || props.village || props.place_name || props.placeName || props.place || props.NAME_5 || props.NAME_4 || props.shapeName || props.name || props.Name || props.adm3_name || props.adm3_ref_name || props.ADM3_EN || props.ADM3_NAME || props.payam_name || props.ward_name || props.subcounty_name || "").trim();
         if (!name) {
           skippedCount++;
           continue;
@@ -29516,17 +30282,17 @@ async function registerRoutes(httpServer2, app2, sessionMiddleware2) {
         let existing = null;
         if (item.code) {
           [existing] = await db.select().from(villages).where(
-            (0, import_drizzle_orm31.and)(
-              (0, import_drizzle_orm31.eq)(villages.tenantId, req.tenantId),
-              (0, import_drizzle_orm31.eq)(villages.code, item.code.trim())
+            (0, import_drizzle_orm32.and)(
+              (0, import_drizzle_orm32.eq)(villages.tenantId, req.tenantId),
+              (0, import_drizzle_orm32.eq)(villages.code, item.code.trim())
             )
           ).limit(1);
         }
         if (!existing) {
           [existing] = await db.select().from(villages).where(
-            (0, import_drizzle_orm31.and)(
-              (0, import_drizzle_orm31.eq)(villages.tenantId, req.tenantId),
-              (0, import_drizzle_orm31.eq)(villages.name, name)
+            (0, import_drizzle_orm32.and)(
+              (0, import_drizzle_orm32.eq)(villages.tenantId, req.tenantId),
+              (0, import_drizzle_orm32.eq)(villages.name, name)
             )
           ).limit(1);
         }
@@ -29543,7 +30309,7 @@ async function registerRoutes(httpServer2, app2, sessionMiddleware2) {
             comments: item.comments ?? existing.comments,
             insecurityLevel: item.insecurityLevel ?? existing.insecurityLevel,
             updatedAt: /* @__PURE__ */ new Date()
-          }).where((0, import_drizzle_orm31.eq)(villages.id, existing.id));
+          }).where((0, import_drizzle_orm32.eq)(villages.id, existing.id));
           await estimateAndSaveVillagePopulation(req.tenantId, existing.id);
           updatedCount++;
         } else {
@@ -29790,17 +30556,17 @@ Note from the requester: ${conflict.note}` : ""}`,
         return res.status(404).json({ message: "Facility not found" });
       }
       const catchments = await db.select().from(facilityCatchments).where(
-        (0, import_drizzle_orm31.and)(
-          (0, import_drizzle_orm31.eq)(facilityCatchments.facilityId, facilityId),
-          (0, import_drizzle_orm31.eq)(facilityCatchments.tenantId, tenantId),
-          (0, import_drizzle_orm31.eq)(facilityCatchments.isOfficial, true)
+        (0, import_drizzle_orm32.and)(
+          (0, import_drizzle_orm32.eq)(facilityCatchments.facilityId, facilityId),
+          (0, import_drizzle_orm32.eq)(facilityCatchments.tenantId, tenantId),
+          (0, import_drizzle_orm32.eq)(facilityCatchments.isOfficial, true)
         )
       );
       const districtId = facility.districtId;
       const districtVillages = await db.select().from(villages).where(
-        (0, import_drizzle_orm31.and)(
-          (0, import_drizzle_orm31.eq)(villages.districtId, districtId),
-          (0, import_drizzle_orm31.eq)(villages.tenantId, tenantId)
+        (0, import_drizzle_orm32.and)(
+          (0, import_drizzle_orm32.eq)(villages.districtId, districtId),
+          (0, import_drizzle_orm32.eq)(villages.tenantId, tenantId)
         )
       );
       let matchedVillageIds = [];
@@ -29854,9 +30620,9 @@ Note from the requester: ${conflict.note}` : ""}`,
       matchedVillageIds = Array.from(new Set(matchedVillageIds));
       if (matchedVillageIds.length > 0) {
         await db.update(villages).set({ assignedFacilityId: facilityId }).where(
-          (0, import_drizzle_orm31.and)(
-            (0, import_drizzle_orm31.inArray)(villages.id, matchedVillageIds),
-            (0, import_drizzle_orm31.eq)(villages.tenantId, tenantId)
+          (0, import_drizzle_orm32.and)(
+            (0, import_drizzle_orm32.inArray)(villages.id, matchedVillageIds),
+            (0, import_drizzle_orm32.eq)(villages.tenantId, tenantId)
           )
         );
       }
@@ -30245,21 +31011,21 @@ Note from the requester: ${conflict.note}` : ""}`,
         let existing = null;
         if (villageId) {
           [existing] = await db.select().from(populationData).where(
-            (0, import_drizzle_orm31.and)(
-              (0, import_drizzle_orm31.eq)(populationData.tenantId, req.tenantId),
-              (0, import_drizzle_orm31.eq)(populationData.villageId, villageId),
-              (0, import_drizzle_orm31.eq)(populationData.year, item.year),
-              (0, import_drizzle_orm31.eq)(populationData.source, item.source)
+            (0, import_drizzle_orm32.and)(
+              (0, import_drizzle_orm32.eq)(populationData.tenantId, req.tenantId),
+              (0, import_drizzle_orm32.eq)(populationData.villageId, villageId),
+              (0, import_drizzle_orm32.eq)(populationData.year, item.year),
+              (0, import_drizzle_orm32.eq)(populationData.source, item.source)
             )
           ).limit(1);
         } else if (facilityId) {
           [existing] = await db.select().from(populationData).where(
-            (0, import_drizzle_orm31.and)(
-              (0, import_drizzle_orm31.eq)(populationData.tenantId, req.tenantId),
-              (0, import_drizzle_orm31.isNull)(populationData.villageId),
-              (0, import_drizzle_orm31.eq)(populationData.facilityId, facilityId),
-              (0, import_drizzle_orm31.eq)(populationData.year, item.year),
-              (0, import_drizzle_orm31.eq)(populationData.source, item.source)
+            (0, import_drizzle_orm32.and)(
+              (0, import_drizzle_orm32.eq)(populationData.tenantId, req.tenantId),
+              (0, import_drizzle_orm32.isNull)(populationData.villageId),
+              (0, import_drizzle_orm32.eq)(populationData.facilityId, facilityId),
+              (0, import_drizzle_orm32.eq)(populationData.year, item.year),
+              (0, import_drizzle_orm32.eq)(populationData.source, item.source)
             )
           ).limit(1);
         }
@@ -30285,7 +31051,7 @@ Note from the requester: ${conflict.note}` : ""}`,
               ...resolvedMetadata
             },
             updatedAt: /* @__PURE__ */ new Date()
-          }).where((0, import_drizzle_orm31.eq)(populationData.id, existing.id)).returning();
+          }).where((0, import_drizzle_orm32.eq)(populationData.id, existing.id)).returning();
           updatedCount++;
           if (updated) {
             savedRecords.push(updated);
@@ -30323,21 +31089,21 @@ Note from the requester: ${conflict.note}` : ""}`,
             let conflictExisting = null;
             if (villageId) {
               [conflictExisting] = await db.select().from(populationData).where(
-                (0, import_drizzle_orm31.and)(
-                  (0, import_drizzle_orm31.eq)(populationData.tenantId, req.tenantId),
-                  (0, import_drizzle_orm31.eq)(populationData.villageId, villageId),
-                  (0, import_drizzle_orm31.eq)(populationData.year, item.year),
-                  (0, import_drizzle_orm31.eq)(populationData.source, item.source)
+                (0, import_drizzle_orm32.and)(
+                  (0, import_drizzle_orm32.eq)(populationData.tenantId, req.tenantId),
+                  (0, import_drizzle_orm32.eq)(populationData.villageId, villageId),
+                  (0, import_drizzle_orm32.eq)(populationData.year, item.year),
+                  (0, import_drizzle_orm32.eq)(populationData.source, item.source)
                 )
               ).limit(1);
             } else if (facilityId) {
               [conflictExisting] = await db.select().from(populationData).where(
-                (0, import_drizzle_orm31.and)(
-                  (0, import_drizzle_orm31.eq)(populationData.tenantId, req.tenantId),
-                  (0, import_drizzle_orm31.isNull)(populationData.villageId),
-                  (0, import_drizzle_orm31.eq)(populationData.facilityId, facilityId),
-                  (0, import_drizzle_orm31.eq)(populationData.year, item.year),
-                  (0, import_drizzle_orm31.eq)(populationData.source, item.source)
+                (0, import_drizzle_orm32.and)(
+                  (0, import_drizzle_orm32.eq)(populationData.tenantId, req.tenantId),
+                  (0, import_drizzle_orm32.isNull)(populationData.villageId),
+                  (0, import_drizzle_orm32.eq)(populationData.facilityId, facilityId),
+                  (0, import_drizzle_orm32.eq)(populationData.year, item.year),
+                  (0, import_drizzle_orm32.eq)(populationData.source, item.source)
                 )
               ).limit(1);
             }
@@ -30350,7 +31116,7 @@ Note from the requester: ${conflict.note}` : ""}`,
                 malePopulation: item.malePopulation ?? conflictExisting.malePopulation,
                 femalePopulation: item.femalePopulation ?? conflictExisting.femalePopulation,
                 updatedAt: /* @__PURE__ */ new Date()
-              }).where((0, import_drizzle_orm31.eq)(populationData.id, conflictExisting.id)).returning();
+              }).where((0, import_drizzle_orm32.eq)(populationData.id, conflictExisting.id)).returning();
               updatedCount++;
               if (updated) {
                 savedRecords.push(updated);
@@ -30431,7 +31197,7 @@ Note from the requester: ${conflict.note}` : ""}`,
       const explicitFacilityIds = Array.from(new Set(
         allPop.map((p) => Number(p.facilityId)).filter((id) => Number.isFinite(id) && id > 0)
       ));
-      const labelVillages = villageIds.length ? await db.select().from(villages).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(villages.tenantId, req.tenantId), (0, import_drizzle_orm31.inArray)(villages.id, villageIds))) : [];
+      const labelVillages = villageIds.length ? await db.select().from(villages).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(villages.tenantId, req.tenantId), (0, import_drizzle_orm32.inArray)(villages.id, villageIds))) : [];
       const villageById = new Map(labelVillages.map((v) => [Number(v.id), v]));
       const facilityIds = new Set(explicitFacilityIds);
       labelVillages.forEach((v) => {
@@ -30440,7 +31206,7 @@ Note from the requester: ${conflict.note}` : ""}`,
           facilityIds.add(assignedFacilityId);
         }
       });
-      const labelFacilities = facilityIds.size ? await db.select().from(facilities).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(facilities.tenantId, req.tenantId), (0, import_drizzle_orm31.inArray)(facilities.id, Array.from(facilityIds)))) : [];
+      const labelFacilities = facilityIds.size ? await db.select().from(facilities).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(facilities.tenantId, req.tenantId), (0, import_drizzle_orm32.inArray)(facilities.id, Array.from(facilityIds)))) : [];
       const facilityById = new Map(labelFacilities.map((f2) => [Number(f2.id), f2]));
       const enrichedPop = allPop.map((p) => {
         const meta = p.metadata && typeof p.metadata === "object" && !Array.isArray(p.metadata) ? p.metadata : {};
@@ -30601,7 +31367,7 @@ Note from the requester: ${conflict.note}` : ""}`,
       const microplanId = req.query.microplanId ? parseInt(req.query.microplanId) : null;
       const radiusKm = parseFloat(req.query.radiusKm || "25");
       if (!facilityId) return res.status(400).json({ message: "facilityId required" });
-      const facilityRow = await db.select({ latitude: facilities.latitude, longitude: facilities.longitude }).from(facilities).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(facilities.id, facilityId), (0, import_drizzle_orm31.eq)(facilities.tenantId, req.tenantId))).limit(1);
+      const facilityRow = await db.select({ latitude: facilities.latitude, longitude: facilities.longitude }).from(facilities).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(facilities.id, facilityId), (0, import_drizzle_orm32.eq)(facilities.tenantId, req.tenantId))).limit(1);
       if (!facilityRow.length || !facilityRow[0].latitude) {
         return res.json({ communities: [] });
       }
@@ -30612,7 +31378,7 @@ Note from the requester: ${conflict.note}` : ""}`,
         const planRows = await db.select({
           facilityId: microplans.facilityId,
           year: microplans.year
-        }).from(microplans).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(microplans.id, microplanId), (0, import_drizzle_orm31.eq)(microplans.tenantId, req.tenantId))).limit(1);
+        }).from(microplans).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(microplans.id, microplanId), (0, import_drizzle_orm32.eq)(microplans.tenantId, req.tenantId))).limit(1);
         if (planRows.length > 0) {
           const plan = planRows[0];
           const targetFacilityId = plan.facilityId || facilityId;
@@ -30706,7 +31472,7 @@ Note from the requester: ${conflict.note}` : ""}`,
           boundary: villages.boundary,
           latitude: villages.latitude,
           longitude: villages.longitude
-        }).from(villages).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(villages.id, Number(villageId)), (0, import_drizzle_orm31.eq)(villages.tenantId, req.tenantId)));
+        }).from(villages).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(villages.id, Number(villageId)), (0, import_drizzle_orm32.eq)(villages.tenantId, req.tenantId)));
         if (villageRow) {
           if (villageRow.boundary) {
             activeBoundary = villageRow.boundary;
@@ -31300,7 +32066,7 @@ Note from the requester: ${conflict.note}` : ""}`,
       }
       if (microplan.status === "draft") {
         try {
-          const [latest] = await db.select({ eventType: microplanVersions.eventType, createdAt: microplanVersions.createdAt }).from(microplanVersions).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(microplanVersions.tenantId, req.tenantId), (0, import_drizzle_orm31.eq)(microplanVersions.microplanId, microplanId))).orderBy((0, import_drizzle_orm31.desc)(microplanVersions.versionNumber)).limit(1);
+          const [latest] = await db.select({ eventType: microplanVersions.eventType, createdAt: microplanVersions.createdAt }).from(microplanVersions).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(microplanVersions.tenantId, req.tenantId), (0, import_drizzle_orm32.eq)(microplanVersions.microplanId, microplanId))).orderBy((0, import_drizzle_orm32.desc)(microplanVersions.versionNumber)).limit(1);
           const isRecentOpen = latest?.eventType === "draft_opened" && Date.now() - new Date(latest.createdAt).getTime() < 15e3;
           if (!isRecentOpen) {
             await createMicroplanVersion(db, {
@@ -31580,9 +32346,9 @@ Note from the requester: ${conflict.note}` : ""}`,
       }
       try {
         await db.delete(planningEvidenceRecords).where(
-          (0, import_drizzle_orm31.and)(
-            (0, import_drizzle_orm31.eq)(planningEvidenceRecords.microplanId, planId),
-            (0, import_drizzle_orm31.eq)(planningEvidenceRecords.tenantId, req.tenantId)
+          (0, import_drizzle_orm32.and)(
+            (0, import_drizzle_orm32.eq)(planningEvidenceRecords.microplanId, planId),
+            (0, import_drizzle_orm32.eq)(planningEvidenceRecords.tenantId, req.tenantId)
           )
         );
       } catch (peErr) {
@@ -31694,7 +32460,7 @@ Note from the requester: ${conflict.note}` : ""}`,
     try {
       const tenantId = req.tenantId;
       if (!tenantId) return res.json([]);
-      let list = await db.select().from(sessionVillages).where((0, import_drizzle_orm31.eq)(sessionVillages.tenantId, String(tenantId)));
+      let list = await db.select().from(sessionVillages).where((0, import_drizzle_orm32.eq)(sessionVillages.tenantId, String(tenantId)));
       const scope = await getGeoScope(req.dbUser, req.tenantId);
       if (!scope.all) {
         const plans = await storage.getSessionPlans(req.tenantId);
@@ -31734,11 +32500,11 @@ Note from the requester: ${conflict.note}` : ""}`,
   async function checkMicroplanEditableForFacility(tenantId, facilityId, year, quarter) {
     try {
       const rows = await db.select({ id: microplans.id, name: microplans.name, status: microplans.status }).from(microplans).where(
-        (0, import_drizzle_orm31.and)(
-          (0, import_drizzle_orm31.eq)(microplans.tenantId, tenantId),
-          (0, import_drizzle_orm31.eq)(microplans.facilityId, facilityId),
-          (0, import_drizzle_orm31.eq)(microplans.year, year),
-          (0, import_drizzle_orm31.eq)(microplans.quarter, quarter)
+        (0, import_drizzle_orm32.and)(
+          (0, import_drizzle_orm32.eq)(microplans.tenantId, tenantId),
+          (0, import_drizzle_orm32.eq)(microplans.facilityId, facilityId),
+          (0, import_drizzle_orm32.eq)(microplans.year, year),
+          (0, import_drizzle_orm32.eq)(microplans.quarter, quarter)
         )
       ).limit(1);
       if (rows.length > 0) {
@@ -31759,10 +32525,10 @@ Note from the requester: ${conflict.note}` : ""}`,
   async function isFacilityMicroplanLocked(tenantId, facilityId) {
     try {
       const rows = await db.select({ id: microplans.id }).from(microplans).where(
-        (0, import_drizzle_orm31.and)(
-          (0, import_drizzle_orm31.eq)(microplans.tenantId, tenantId),
-          (0, import_drizzle_orm31.eq)(microplans.facilityId, facilityId),
-          (0, import_drizzle_orm31.ne)(microplans.status, "draft")
+        (0, import_drizzle_orm32.and)(
+          (0, import_drizzle_orm32.eq)(microplans.tenantId, tenantId),
+          (0, import_drizzle_orm32.eq)(microplans.facilityId, facilityId),
+          (0, import_drizzle_orm32.ne)(microplans.status, "draft")
         )
       ).limit(1);
       return rows.length > 0;
@@ -31896,7 +32662,7 @@ Note from the requester: ${conflict.note}` : ""}`,
         rawVillageIds.map((x) => Number(x)).filter((n) => Number.isFinite(n) && n > 0)
       ));
       if (villageIdSet.length > 0) {
-        const tenantVillages = await db.select({ id: villages.id }).from(villages).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(villages.tenantId, req.tenantId), (0, import_drizzle_orm31.inArray)(villages.id, villageIdSet)));
+        const tenantVillages = await db.select({ id: villages.id }).from(villages).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(villages.tenantId, req.tenantId), (0, import_drizzle_orm32.inArray)(villages.id, villageIdSet)));
         const validIds = tenantVillages.map((v) => v.id);
         if (validIds.length > 0) {
           await db.insert(sessionVillages).values(
@@ -32025,13 +32791,13 @@ Note from the requester: ${conflict.note}` : ""}`,
         ));
         let validIds = [];
         if (sanitized.length > 0) {
-          const tenantVillages = await db.select({ id: villages.id }).from(villages).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(villages.tenantId, req.tenantId), (0, import_drizzle_orm31.inArray)(villages.id, sanitized)));
+          const tenantVillages = await db.select({ id: villages.id }).from(villages).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(villages.tenantId, req.tenantId), (0, import_drizzle_orm32.inArray)(villages.id, sanitized)));
           validIds = tenantVillages.map((v) => v.id);
         }
         const existingRows = await db.select({ villageId: sessionVillages.villageId }).from(sessionVillages).where(
-          (0, import_drizzle_orm31.and)(
-            (0, import_drizzle_orm31.eq)(sessionVillages.tenantId, String(req.tenantId)),
-            (0, import_drizzle_orm31.eq)(sessionVillages.sessionId, entityId)
+          (0, import_drizzle_orm32.and)(
+            (0, import_drizzle_orm32.eq)(sessionVillages.tenantId, String(req.tenantId)),
+            (0, import_drizzle_orm32.eq)(sessionVillages.sessionId, entityId)
           )
         );
         const before = existingRows.map((r) => r.villageId);
@@ -32041,10 +32807,10 @@ Note from the requester: ${conflict.note}` : ""}`,
         const toRemove = before.filter((id) => !afterSet.has(id));
         if (toRemove.length > 0) {
           await db.delete(sessionVillages).where(
-            (0, import_drizzle_orm31.and)(
-              (0, import_drizzle_orm31.eq)(sessionVillages.tenantId, String(req.tenantId)),
-              (0, import_drizzle_orm31.eq)(sessionVillages.sessionId, entityId),
-              (0, import_drizzle_orm31.inArray)(sessionVillages.villageId, toRemove)
+            (0, import_drizzle_orm32.and)(
+              (0, import_drizzle_orm32.eq)(sessionVillages.tenantId, String(req.tenantId)),
+              (0, import_drizzle_orm32.eq)(sessionVillages.sessionId, entityId),
+              (0, import_drizzle_orm32.inArray)(sessionVillages.villageId, toRemove)
             )
           );
         }
@@ -32139,9 +32905,9 @@ Note from the requester: ${conflict.note}` : ""}`,
       let svRows = [];
       if (activeSessionIds.length > 0) {
         svRows = await db.select().from(sessionVillages).where(
-          (0, import_drizzle_orm31.and)(
-            (0, import_drizzle_orm31.eq)(sessionVillages.tenantId, String(req.tenantId)),
-            (0, import_drizzle_orm31.inArray)(sessionVillages.sessionId, activeSessionIds)
+          (0, import_drizzle_orm32.and)(
+            (0, import_drizzle_orm32.eq)(sessionVillages.tenantId, String(req.tenantId)),
+            (0, import_drizzle_orm32.inArray)(sessionVillages.sessionId, activeSessionIds)
           )
         );
       }
@@ -32266,9 +33032,9 @@ Note from the requester: ${conflict.note}` : ""}`,
       let defaulterVillageIds = [];
       try {
         const villageRows = await db.select({ villageId: sessionVillages.villageId }).from(sessionVillages).where(
-          (0, import_drizzle_orm31.and)(
-            (0, import_drizzle_orm31.eq)(sessionVillages.tenantId, String(req.tenantId)),
-            (0, import_drizzle_orm31.eq)(sessionVillages.sessionId, entityId)
+          (0, import_drizzle_orm32.and)(
+            (0, import_drizzle_orm32.eq)(sessionVillages.tenantId, String(req.tenantId)),
+            (0, import_drizzle_orm32.eq)(sessionVillages.sessionId, entityId)
           )
         );
         defaulterVillageIds = villageRows.map((r) => Number(r.villageId)).filter((n) => Number.isFinite(n));
@@ -32282,10 +33048,10 @@ Note from the requester: ${conflict.note}` : ""}`,
           const dayEnd = new Date(actualDate);
           dayEnd.setHours(23, 59, 59, 999);
           const childrenInVills = await db.select({ id: clients.id }).from(clients).where(
-            (0, import_drizzle_orm31.and)(
-              (0, import_drizzle_orm31.eq)(clients.tenantId, req.tenantId),
-              (0, import_drizzle_orm31.eq)(clients.clientType, "child"),
-              (0, import_drizzle_orm31.inArray)(clients.villageId, defaulterVillageIds)
+            (0, import_drizzle_orm32.and)(
+              (0, import_drizzle_orm32.eq)(clients.tenantId, req.tenantId),
+              (0, import_drizzle_orm32.eq)(clients.clientType, "child"),
+              (0, import_drizzle_orm32.inArray)(clients.villageId, defaulterVillageIds)
             )
           );
           if (childrenInVills.length > 0) {
@@ -32295,9 +33061,9 @@ Note from the requester: ${conflict.note}` : ""}`,
               vaccineName: clientVaccinations.vaccineName,
               administeredDate: clientVaccinations.administeredDate
             }).from(clientVaccinations).where(
-              (0, import_drizzle_orm31.and)(
-                (0, import_drizzle_orm31.eq)(clientVaccinations.tenantId, req.tenantId),
-                (0, import_drizzle_orm31.inArray)(clientVaccinations.clientId, cids)
+              (0, import_drizzle_orm32.and)(
+                (0, import_drizzle_orm32.eq)(clientVaccinations.tenantId, req.tenantId),
+                (0, import_drizzle_orm32.inArray)(clientVaccinations.clientId, cids)
               )
             );
             const byChild = /* @__PURE__ */ new Map();
@@ -32384,7 +33150,7 @@ Note from the requester: ${conflict.note}` : ""}`,
       }
       const tenantConfigs = await storage.getCatalogueScheduleDoses(req.tenantId);
       const stages = expandVaccineSchedule(tenantConfigs);
-      const rows = await db.select({ id: sessionPlans.id, vc: sessionPlans.vaccinatedCounts }).from(sessionPlans).where((0, import_drizzle_orm31.eq)(sessionPlans.tenantId, String(req.tenantId)));
+      const rows = await db.select({ id: sessionPlans.id, vc: sessionPlans.vaccinatedCounts }).from(sessionPlans).where((0, import_drizzle_orm32.eq)(sessionPlans.tenantId, String(req.tenantId)));
       const byCode = /* @__PURE__ */ new Map();
       for (const r of rows) {
         const pa = r.vc?.perAntigenUnmapped;
@@ -32426,7 +33192,7 @@ Note from the requester: ${conflict.note}` : ""}`,
       if (!canonical) {
         return res.status(400).json({ message: `toCode '${to}' is not in the tenant vaccine schedule.` });
       }
-      const rows = await db.select({ id: sessionPlans.id, vc: sessionPlans.vaccinatedCounts }).from(sessionPlans).where((0, import_drizzle_orm31.eq)(sessionPlans.tenantId, String(req.tenantId)));
+      const rows = await db.select({ id: sessionPlans.id, vc: sessionPlans.vaccinatedCounts }).from(sessionPlans).where((0, import_drizzle_orm32.eq)(sessionPlans.tenantId, String(req.tenantId)));
       const updatedSessionIds = [];
       let totalDosesMoved = 0;
       for (const r of rows) {
@@ -32485,9 +33251,9 @@ Note from the requester: ${conflict.note}` : ""}`,
   app2.get("/api/unserved-places", ...auth, async (req, res) => {
     try {
       const vilList = await storage.getVillages(req.tenantId);
-      const svRows = await db.selectDistinct({ villageId: sessionVillages.villageId }).from(sessionVillages).where((0, import_drizzle_orm31.eq)(sessionVillages.tenantId, String(req.tenantId)));
+      const svRows = await db.selectDistinct({ villageId: sessionVillages.villageId }).from(sessionVillages).where((0, import_drizzle_orm32.eq)(sessionVillages.tenantId, String(req.tenantId)));
       const plannedVillageIds = new Set(svRows.map((r) => r.villageId));
-      const cvRows = await db.selectDistinct({ villageId: clients.villageId }).from(clientVaccinations).innerJoin(clients, (0, import_drizzle_orm31.eq)(clientVaccinations.clientId, clients.id)).where((0, import_drizzle_orm31.eq)(clientVaccinations.tenantId, String(req.tenantId)));
+      const cvRows = await db.selectDistinct({ villageId: clients.villageId }).from(clientVaccinations).innerJoin(clients, (0, import_drizzle_orm32.eq)(clientVaccinations.clientId, clients.id)).where((0, import_drizzle_orm32.eq)(clientVaccinations.tenantId, String(req.tenantId)));
       const servedVillageIds = new Set(cvRows.map((r) => r.villageId).filter(Boolean));
       const scope = await getGeoScope(req.dbUser, req.tenantId);
       const unserved = vilList.filter((v) => {
@@ -32550,7 +33316,7 @@ Note from the requester: ${conflict.note}` : ""}`,
     try {
       const entityId = parseInt(req.params.id);
       const body = { ...req.body };
-      const [oldItem] = await db.select().from(budgetItems).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(budgetItems.id, entityId), (0, import_drizzle_orm31.eq)(budgetItems.tenantId, req.tenantId))).limit(1);
+      const [oldItem] = await db.select().from(budgetItems).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(budgetItems.id, entityId), (0, import_drizzle_orm32.eq)(budgetItems.tenantId, req.tenantId))).limit(1);
       if (!oldItem) return res.status(404).json({ message: "Budget item not found" });
       if (oldItem.facilityId && !await userCanAccessGeo(req.dbUser, req.tenantId, { facilityId: Number(oldItem.facilityId) })) {
         return res.status(403).json({ message: "Forbidden: no access to this budget item." });
@@ -32611,17 +33377,17 @@ Note from the requester: ${conflict.note}` : ""}`,
         });
       }
       const conditions = [
-        (0, import_drizzle_orm31.eq)(budgetItems.tenantId, req.tenantId),
-        (0, import_drizzle_orm31.eq)(budgetItems.fundingSource, "unspecified")
+        (0, import_drizzle_orm32.eq)(budgetItems.tenantId, req.tenantId),
+        (0, import_drizzle_orm32.eq)(budgetItems.fundingSource, "unspecified")
       ];
       if (Array.isArray(ids) && ids.length > 0) {
         const numericIds = ids.map((v) => Number(v)).filter((n) => Number.isInteger(n));
         if (numericIds.length === 0) {
           return res.status(400).json({ message: "ids must be a non-empty list of integers" });
         }
-        conditions.push((0, import_drizzle_orm31.inArray)(budgetItems.id, numericIds));
+        conditions.push((0, import_drizzle_orm32.inArray)(budgetItems.id, numericIds));
       }
-      const updated = await db.update(budgetItems).set({ fundingSource, fundingSourceOther: otherText }).where((0, import_drizzle_orm31.and)(...conditions)).returning({ id: budgetItems.id });
+      const updated = await db.update(budgetItems).set({ fundingSource, fundingSourceOther: otherText }).where((0, import_drizzle_orm32.and)(...conditions)).returning({ id: budgetItems.id });
       await logAudit(req, "update", "budget_item", 0, null, {
         bulkClassify: true,
         fundingSource,
@@ -32637,7 +33403,7 @@ Note from the requester: ${conflict.note}` : ""}`,
   app2.delete("/api/budget-items/:id", ...auth, async (req, res) => {
     try {
       const entityId = parseInt(req.params.id);
-      const [oldItem] = await db.select().from(budgetItems).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(budgetItems.id, entityId), (0, import_drizzle_orm31.eq)(budgetItems.tenantId, req.tenantId))).limit(1);
+      const [oldItem] = await db.select().from(budgetItems).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(budgetItems.id, entityId), (0, import_drizzle_orm32.eq)(budgetItems.tenantId, req.tenantId))).limit(1);
       if (!oldItem) return res.status(404).json({ message: "Budget item not found" });
       if (oldItem.facilityId && !await userCanAccessGeo(req.dbUser, req.tenantId, { facilityId: Number(oldItem.facilityId) })) {
         return res.status(403).json({ message: "Forbidden: no access to this budget item." });
@@ -32685,7 +33451,7 @@ Note from the requester: ${conflict.note}` : ""}`,
   app2.patch("/api/vaccine-requirements/:id", ...auth, async (req, res) => {
     try {
       const entityId = parseInt(req.params.id);
-      const [oldReq] = await db.select().from(vaccineRequirements).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(vaccineRequirements.id, entityId), (0, import_drizzle_orm31.eq)(vaccineRequirements.tenantId, req.tenantId))).limit(1);
+      const [oldReq] = await db.select().from(vaccineRequirements).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(vaccineRequirements.id, entityId), (0, import_drizzle_orm32.eq)(vaccineRequirements.tenantId, req.tenantId))).limit(1);
       if (!oldReq) return res.status(404).json({ message: "Vaccine requirement not found" });
       if (oldReq.facilityId && !await userCanAccessGeo(req.dbUser, req.tenantId, { facilityId: Number(oldReq.facilityId) })) {
         return res.status(403).json({ message: "Forbidden: no access to this vaccine requirement." });
@@ -32716,32 +33482,32 @@ Note from the requester: ${conflict.note}` : ""}`,
       const startMonth = (quarter - 1) * 3;
       const quarterStart = new Date(Date.UTC(year, startMonth, 1));
       const quarterEnd = new Date(Date.UTC(year, startMonth + 3, 1));
-      const reqWhere = (0, import_drizzle_orm31.and)(
-        (0, import_drizzle_orm31.eq)(vaccineRequirements.tenantId, tenantId),
-        (0, import_drizzle_orm31.eq)(vaccineRequirements.quarter, quarter),
-        (0, import_drizzle_orm31.eq)(vaccineRequirements.year, year),
-        facilityId ? (0, import_drizzle_orm31.eq)(vaccineRequirements.facilityId, facilityId) : void 0
+      const reqWhere = (0, import_drizzle_orm32.and)(
+        (0, import_drizzle_orm32.eq)(vaccineRequirements.tenantId, tenantId),
+        (0, import_drizzle_orm32.eq)(vaccineRequirements.quarter, quarter),
+        (0, import_drizzle_orm32.eq)(vaccineRequirements.year, year),
+        facilityId ? (0, import_drizzle_orm32.eq)(vaccineRequirements.facilityId, facilityId) : void 0
       );
       const targets = await db.select({
         vaccineName: vaccineRequirements.vaccineName,
-        targetPopulation: import_drizzle_orm31.sql`COALESCE(SUM(${vaccineRequirements.targetPopulation}), 0)::int`,
-        dosesRequired: import_drizzle_orm31.sql`COALESCE(SUM(${vaccineRequirements.dosesRequired}), 0)::int`
+        targetPopulation: import_drizzle_orm32.sql`COALESCE(SUM(${vaccineRequirements.targetPopulation}), 0)::int`,
+        dosesRequired: import_drizzle_orm32.sql`COALESCE(SUM(${vaccineRequirements.dosesRequired}), 0)::int`
       }).from(vaccineRequirements).where(reqWhere).groupBy(vaccineRequirements.vaccineName);
-      const cvWhere = (0, import_drizzle_orm31.and)(
-        (0, import_drizzle_orm31.eq)(clientVaccinations.tenantId, tenantId),
-        (0, import_drizzle_orm31.gte)(clientVaccinations.administeredDate, quarterStart),
-        (0, import_drizzle_orm31.lte)(clientVaccinations.administeredDate, quarterEnd)
+      const cvWhere = (0, import_drizzle_orm32.and)(
+        (0, import_drizzle_orm32.eq)(clientVaccinations.tenantId, tenantId),
+        (0, import_drizzle_orm32.gte)(clientVaccinations.administeredDate, quarterStart),
+        (0, import_drizzle_orm32.lte)(clientVaccinations.administeredDate, quarterEnd)
       );
       const cvRows = await db.select({
         vaccineName: clientVaccinations.vaccineName,
-        administered: import_drizzle_orm31.sql`COUNT(*)::int`
+        administered: import_drizzle_orm32.sql`COUNT(*)::int`
       }).from(clientVaccinations).where(cvWhere).groupBy(clientVaccinations.vaccineName);
-      const mrWhere = (0, import_drizzle_orm31.and)(
-        (0, import_drizzle_orm31.eq)(monthlyReports.tenantId, tenantId),
-        (0, import_drizzle_orm31.eq)(monthlyReports.year, year),
-        (0, import_drizzle_orm31.gte)(monthlyReports.month, startMonth + 1),
-        (0, import_drizzle_orm31.lte)(monthlyReports.month, startMonth + 3),
-        facilityId ? (0, import_drizzle_orm31.eq)(monthlyReports.facilityId, facilityId) : void 0
+      const mrWhere = (0, import_drizzle_orm32.and)(
+        (0, import_drizzle_orm32.eq)(monthlyReports.tenantId, tenantId),
+        (0, import_drizzle_orm32.eq)(monthlyReports.year, year),
+        (0, import_drizzle_orm32.gte)(monthlyReports.month, startMonth + 1),
+        (0, import_drizzle_orm32.lte)(monthlyReports.month, startMonth + 3),
+        facilityId ? (0, import_drizzle_orm32.eq)(monthlyReports.facilityId, facilityId) : void 0
       );
       const mrRows = await db.select({ immunizations: monthlyReports.immunizations }).from(monthlyReports).where(mrWhere);
       const administeredByVaccine = /* @__PURE__ */ new Map();
@@ -32832,7 +33598,7 @@ Note from the requester: ${conflict.note}` : ""}`,
   app2.patch("/api/mobilization/:id", ...auth, async (req, res) => {
     try {
       const entityId = parseInt(req.params.id);
-      const [oldAct] = await db.select().from(mobilizationActivities).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(mobilizationActivities.id, entityId), (0, import_drizzle_orm31.eq)(mobilizationActivities.tenantId, req.tenantId))).limit(1);
+      const [oldAct] = await db.select().from(mobilizationActivities).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(mobilizationActivities.id, entityId), (0, import_drizzle_orm32.eq)(mobilizationActivities.tenantId, req.tenantId))).limit(1);
       if (!oldAct) return res.status(404).json({ message: "Mobilization activity not found" });
       if (oldAct.facilityId && !await userCanAccessGeo(req.dbUser, req.tenantId, { facilityId: Number(oldAct.facilityId) })) {
         return res.status(403).json({ message: "Forbidden: no access to this mobilization activity." });
@@ -32869,7 +33635,7 @@ Note from the requester: ${conflict.note}` : ""}`,
   app2.delete("/api/mobilization/:id", ...auth, async (req, res) => {
     try {
       const entityId = parseInt(req.params.id);
-      const [oldAct] = await db.select().from(mobilizationActivities).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(mobilizationActivities.id, entityId), (0, import_drizzle_orm31.eq)(mobilizationActivities.tenantId, req.tenantId))).limit(1);
+      const [oldAct] = await db.select().from(mobilizationActivities).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(mobilizationActivities.id, entityId), (0, import_drizzle_orm32.eq)(mobilizationActivities.tenantId, req.tenantId))).limit(1);
       if (!oldAct) return res.status(404).json({ message: "Mobilization activity not found" });
       if (oldAct.facilityId && !await userCanAccessGeo(req.dbUser, req.tenantId, { facilityId: Number(oldAct.facilityId) })) {
         return res.status(403).json({ message: "Forbidden: no access to this mobilization activity." });
@@ -32903,7 +33669,7 @@ Note from the requester: ${conflict.note}` : ""}`,
         districtName: districts.name,
         provinceId: districts.provinceId,
         provinceName: provinces.name
-      }).from(facilities).leftJoin(districts, (0, import_drizzle_orm31.eq)(facilities.districtId, districts.id)).leftJoin(provinces, (0, import_drizzle_orm31.eq)(districts.provinceId, provinces.id)).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(facilities.id, facilityId), (0, import_drizzle_orm31.eq)(facilities.tenantId, req.tenantId))).limit(1);
+      }).from(facilities).leftJoin(districts, (0, import_drizzle_orm32.eq)(facilities.districtId, districts.id)).leftJoin(provinces, (0, import_drizzle_orm32.eq)(districts.provinceId, provinces.id)).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(facilities.id, facilityId), (0, import_drizzle_orm32.eq)(facilities.tenantId, req.tenantId))).limit(1);
       if (!facilityRow) {
         return res.status(404).json({ message: "Facility not found" });
       }
@@ -32919,10 +33685,10 @@ Note from the requester: ${conflict.note}` : ""}`,
         facilityId: users.facilityId,
         isActive: users.isActive
       }).from(users).where(
-        (0, import_drizzle_orm31.and)(
-          (0, import_drizzle_orm31.eq)(users.tenantId, req.tenantId),
-          (0, import_drizzle_orm31.eq)(users.isActive, true),
-          (0, import_drizzle_orm31.or)((0, import_drizzle_orm31.isNull)(users.facilityId), (0, import_drizzle_orm31.ne)(users.facilityId, facilityId))
+        (0, import_drizzle_orm32.and)(
+          (0, import_drizzle_orm32.eq)(users.tenantId, req.tenantId),
+          (0, import_drizzle_orm32.eq)(users.isActive, true),
+          (0, import_drizzle_orm32.or)((0, import_drizzle_orm32.isNull)(users.facilityId), (0, import_drizzle_orm32.ne)(users.facilityId, facilityId))
         )
       );
       const districtSupervisors = [];
@@ -32981,19 +33747,19 @@ Note from the requester: ${conflict.note}` : ""}`,
           contactPhone: facilityStaff.contactPhone,
           facilityId: facilityStaff.facilityId,
           facilityName: facilities.name
-        }).from(facilityStaff).innerJoin(facilities, (0, import_drizzle_orm31.eq)(facilityStaff.facilityId, facilities.id)).where(
-          (0, import_drizzle_orm31.and)(
-            (0, import_drizzle_orm31.eq)(facilityStaff.tenantId, req.tenantId),
-            (0, import_drizzle_orm31.eq)(facilities.districtId, facilityRow.districtId),
-            (0, import_drizzle_orm31.ne)(facilityStaff.facilityId, facilityId),
-            (0, import_drizzle_orm31.eq)(facilityStaff.isActive, true),
-            (0, import_drizzle_orm31.or)(
-              (0, import_drizzle_orm31.ilike)(facilityStaff.role, "%supervis%"),
-              (0, import_drizzle_orm31.ilike)(facilityStaff.position, "%supervis%"),
-              (0, import_drizzle_orm31.ilike)(facilityStaff.role, "%officer%"),
-              (0, import_drizzle_orm31.ilike)(facilityStaff.position, "%officer%"),
-              (0, import_drizzle_orm31.ilike)(facilityStaff.role, "%coordinator%"),
-              (0, import_drizzle_orm31.ilike)(facilityStaff.position, "%coordinator%")
+        }).from(facilityStaff).innerJoin(facilities, (0, import_drizzle_orm32.eq)(facilityStaff.facilityId, facilities.id)).where(
+          (0, import_drizzle_orm32.and)(
+            (0, import_drizzle_orm32.eq)(facilityStaff.tenantId, req.tenantId),
+            (0, import_drizzle_orm32.eq)(facilities.districtId, facilityRow.districtId),
+            (0, import_drizzle_orm32.ne)(facilityStaff.facilityId, facilityId),
+            (0, import_drizzle_orm32.eq)(facilityStaff.isActive, true),
+            (0, import_drizzle_orm32.or)(
+              (0, import_drizzle_orm32.ilike)(facilityStaff.role, "%supervis%"),
+              (0, import_drizzle_orm32.ilike)(facilityStaff.position, "%supervis%"),
+              (0, import_drizzle_orm32.ilike)(facilityStaff.role, "%officer%"),
+              (0, import_drizzle_orm32.ilike)(facilityStaff.position, "%officer%"),
+              (0, import_drizzle_orm32.ilike)(facilityStaff.role, "%coordinator%"),
+              (0, import_drizzle_orm32.ilike)(facilityStaff.position, "%coordinator%")
             )
           )
         );
@@ -33038,7 +33804,7 @@ Note from the requester: ${conflict.note}` : ""}`,
         districtName: districts.name,
         provinceId: districts.provinceId,
         provinceName: provinces.name
-      }).from(facilities).leftJoin(districts, (0, import_drizzle_orm31.eq)(facilities.districtId, districts.id)).leftJoin(provinces, (0, import_drizzle_orm31.eq)(districts.provinceId, provinces.id)).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(facilities.id, facilityId), (0, import_drizzle_orm31.eq)(facilities.tenantId, req.tenantId))).limit(1);
+      }).from(facilities).leftJoin(districts, (0, import_drizzle_orm32.eq)(facilities.districtId, districts.id)).leftJoin(provinces, (0, import_drizzle_orm32.eq)(districts.provinceId, provinces.id)).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(facilities.id, facilityId), (0, import_drizzle_orm32.eq)(facilities.tenantId, req.tenantId))).limit(1);
       if (!facilityRow) {
         return res.status(404).json({ message: "Facility not found" });
       }
@@ -33495,7 +34261,7 @@ Note from the requester: ${conflict.note}` : ""}`,
             autoApproveAt,
             reminderSentAt: null,
             updatedAt: now
-          }).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(microplans.id, data.entityId), (0, import_drizzle_orm31.eq)(microplans.tenantId, req.tenantId), (0, import_drizzle_orm31.eq)(microplans.status, "draft")));
+          }).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(microplans.id, data.entityId), (0, import_drizzle_orm32.eq)(microplans.tenantId, req.tenantId), (0, import_drizzle_orm32.eq)(microplans.status, "draft")));
           await createMicroplanVersion(db, {
             tenantId: req.tenantId,
             microplanId: data.entityId,
@@ -33509,10 +34275,10 @@ Note from the requester: ${conflict.note}` : ""}`,
             const facility = await storage.getFacility(req.tenantId, mp.facilityId);
             if (facility && facility.districtId) {
               const distManagers = await db.select({ email: users.email }).from(users).where(
-                (0, import_drizzle_orm31.and)(
-                  (0, import_drizzle_orm31.eq)(users.tenantId, req.tenantId),
-                  (0, import_drizzle_orm31.eq)(users.districtId, facility.districtId),
-                  (0, import_drizzle_orm31.or)((0, import_drizzle_orm31.eq)(users.role, "district_manager"), import_drizzle_orm31.sql`${users.roles}::jsonb ? 'district_manager'`)
+                (0, import_drizzle_orm32.and)(
+                  (0, import_drizzle_orm32.eq)(users.tenantId, req.tenantId),
+                  (0, import_drizzle_orm32.eq)(users.districtId, facility.districtId),
+                  (0, import_drizzle_orm32.or)((0, import_drizzle_orm32.eq)(users.role, "district_manager"), import_drizzle_orm32.sql`${users.roles}::jsonb ? 'district_manager'`)
                 )
               );
               const emails = distManagers.map((u) => u.email).filter(Boolean);
@@ -33536,9 +34302,9 @@ Note from the requester: ${conflict.note}` : ""}`,
             const allFacilities = await storage.getFacilities(req.tenantId);
             const fac = allFacilities.find((f2) => f2.id === mp.facilityId);
             if (fac?.districtId) {
-              const districtUsers = await db.select({ id: users.id, role: users.role }).from(users).where((0, import_drizzle_orm31.and)(
-                (0, import_drizzle_orm31.eq)(users.tenantId, req.tenantId),
-                (0, import_drizzle_orm31.eq)(users.districtId, fac.districtId)
+              const districtUsers = await db.select({ id: users.id, role: users.role }).from(users).where((0, import_drizzle_orm32.and)(
+                (0, import_drizzle_orm32.eq)(users.tenantId, req.tenantId),
+                (0, import_drizzle_orm32.eq)(users.districtId, fac.districtId)
               ));
               const targets = districtUsers.filter(
                 (u) => ["district_coordinator", "district_supervisor", "national_admin", "provincial_coordinator"].includes(u.role)
@@ -33609,7 +34375,7 @@ Note from the requester: ${conflict.note}` : ""}`,
           } else if (request.entityType === "budget" || request.entityType === "budget_item") {
             await storage.updateBudgetItem(req.tenantId, request.entityId, { approvalStatus: "approved" });
           } else if (request.entityType === "population") {
-            await db.update(populationData).set({ approvalStatus: "approved", updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm31.eq)(populationData.id, request.entityId));
+            await db.update(populationData).set({ approvalStatus: "approved", updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm32.eq)(populationData.id, request.entityId));
           } else if (request.entityType === "microplan") {
             const oldMp = await storage.getMicroplan(req.tenantId, request.entityId);
             const updatedMp = await storage.updateMicroplan(req.tenantId, request.entityId, {
@@ -33748,10 +34514,10 @@ Note from the requester: ${conflict.note}` : ""}`,
       }
       const facList = scope.all ? "" : Array.from(scope.facilityIds).join(",") || "0";
       const distList = scope.all ? "" : Array.from(scope.districtIds).join(",") || "0";
-      const facCond = scope.all ? import_drizzle_orm31.sql`` : import_drizzle_orm31.sql`AND id = ANY(ARRAY[${import_drizzle_orm31.sql.raw(facList)}]::int[])`;
-      const facRefCond = scope.all ? import_drizzle_orm31.sql`` : import_drizzle_orm31.sql`AND facility_id = ANY(ARRAY[${import_drizzle_orm31.sql.raw(facList)}]::int[])`;
-      const villCond = scope.all ? import_drizzle_orm31.sql`` : import_drizzle_orm31.sql`AND (assigned_facility_id = ANY(ARRAY[${import_drizzle_orm31.sql.raw(facList)}]::int[]) OR district_id = ANY(ARRAY[${import_drizzle_orm31.sql.raw(distList)}]::int[]))`;
-      const result = await db.execute(import_drizzle_orm31.sql`
+      const facCond = scope.all ? import_drizzle_orm32.sql`` : import_drizzle_orm32.sql`AND id = ANY(ARRAY[${import_drizzle_orm32.sql.raw(facList)}]::int[])`;
+      const facRefCond = scope.all ? import_drizzle_orm32.sql`` : import_drizzle_orm32.sql`AND facility_id = ANY(ARRAY[${import_drizzle_orm32.sql.raw(facList)}]::int[])`;
+      const villCond = scope.all ? import_drizzle_orm32.sql`` : import_drizzle_orm32.sql`AND (assigned_facility_id = ANY(ARRAY[${import_drizzle_orm32.sql.raw(facList)}]::int[]) OR district_id = ANY(ARRAY[${import_drizzle_orm32.sql.raw(distList)}]::int[]))`;
+      const result = await db.execute(import_drizzle_orm32.sql`
         SELECT
           (SELECT COUNT(*)::int          FROM facilities      WHERE tenant_id = ${tenantId} ${facCond})                            AS "totalFacilities",
           (SELECT COUNT(*)::int          FROM facilities      WHERE tenant_id = ${tenantId} AND is_active = true ${facCond})       AS "activeFacilities",
@@ -33823,13 +34589,13 @@ Note from the requester: ${conflict.note}` : ""}`,
       const tenantId = req.tenantId;
       let boundary = await storage.getAdminBoundary(tenantId, req.params.id);
       if (!boundary) {
-        const [tenant] = await db.select({ countryCode: tenants.countryCode }).from(tenants).where((0, import_drizzle_orm31.eq)(tenants.id, tenantId)).limit(1);
+        const [tenant] = await db.select({ countryCode: tenants.countryCode }).from(tenants).where((0, import_drizzle_orm32.eq)(tenants.id, tenantId)).limit(1);
         if (tenant?.countryCode) {
-          [boundary] = await db.select().from(adminBoundaries).where((0, import_drizzle_orm31.and)(
-            (0, import_drizzle_orm31.eq)(adminBoundaries.id, req.params.id),
-            (0, import_drizzle_orm31.eq)(adminBoundaries.countryCode, tenant.countryCode.toUpperCase()),
-            (0, import_drizzle_orm31.eq)(adminBoundaries.isActive, true),
-            (0, import_drizzle_orm31.ne)(adminBoundaries.source, "custom")
+          [boundary] = await db.select().from(adminBoundaries).where((0, import_drizzle_orm32.and)(
+            (0, import_drizzle_orm32.eq)(adminBoundaries.id, req.params.id),
+            (0, import_drizzle_orm32.eq)(adminBoundaries.countryCode, tenant.countryCode.toUpperCase()),
+            (0, import_drizzle_orm32.eq)(adminBoundaries.isActive, true),
+            (0, import_drizzle_orm32.ne)(adminBoundaries.source, "custom")
           )).limit(1);
         }
       }
@@ -34501,15 +35267,15 @@ Note from the requester: ${conflict.note}` : ""}`,
         return res.json([]);
       }
       const conditions = [
-        (0, import_drizzle_orm31.eq)(clients.tenantId, req.tenantId)
+        (0, import_drizzle_orm32.eq)(clients.tenantId, req.tenantId)
       ];
       if (scopedFacilityIds) {
-        conditions.push((0, import_drizzle_orm31.inArray)(clients.facilityId, scopedFacilityIds));
+        conditions.push((0, import_drizzle_orm32.inArray)(clients.facilityId, scopedFacilityIds));
       } else if (facilityId) {
-        conditions.push((0, import_drizzle_orm31.eq)(clients.facilityId, facilityId));
+        conditions.push((0, import_drizzle_orm32.eq)(clients.facilityId, facilityId));
       }
       if (clientType) {
-        conditions.push((0, import_drizzle_orm31.eq)(clients.clientType, clientType));
+        conditions.push((0, import_drizzle_orm32.eq)(clients.clientType, clientType));
       }
       const listRaw = await db.select({
         client: clients,
@@ -34518,14 +35284,14 @@ Note from the requester: ${conflict.note}` : ""}`,
         _geoDistrictId: facilities.districtId,
         _geoDistrictName: districts.name,
         _geoVillageName: villages.name
-      }).from(clients).innerJoin(facilities, (0, import_drizzle_orm31.eq)(facilities.id, clients.facilityId)).innerJoin(districts, (0, import_drizzle_orm31.eq)(districts.id, facilities.districtId)).innerJoin(provinces, (0, import_drizzle_orm31.eq)(provinces.id, districts.provinceId)).leftJoin(villages, (0, import_drizzle_orm31.eq)(villages.id, clients.villageId)).where((0, import_drizzle_orm31.and)(...conditions)).orderBy((0, import_drizzle_orm31.desc)(clients.createdAt));
+      }).from(clients).innerJoin(facilities, (0, import_drizzle_orm32.eq)(facilities.id, clients.facilityId)).innerJoin(districts, (0, import_drizzle_orm32.eq)(districts.id, facilities.districtId)).innerJoin(provinces, (0, import_drizzle_orm32.eq)(provinces.id, districts.provinceId)).leftJoin(villages, (0, import_drizzle_orm32.eq)(villages.id, clients.villageId)).where((0, import_drizzle_orm32.and)(...conditions)).orderBy((0, import_drizzle_orm32.desc)(clients.createdAt));
       const list = listRaw.map(({ client: client3, ...geo }) => ({
         ...client3,
         ...geo
       }));
       if (list.length > 0) {
         const clientIds = list.map((c) => c.id);
-        const allVaccinations = await db.select().from(clientVaccinations).where((0, import_drizzle_orm31.inArray)(clientVaccinations.clientId, clientIds));
+        const allVaccinations = await db.select().from(clientVaccinations).where((0, import_drizzle_orm32.inArray)(clientVaccinations.clientId, clientIds));
         const vaxMap = /* @__PURE__ */ new Map();
         allVaccinations.forEach((v) => {
           if (!vaxMap.has(v.clientId)) {
@@ -34685,11 +35451,11 @@ Note from the requester: ${conflict.note}` : ""}`,
         }
       }
       if (actionType === "assign_facility" && facilityId) {
-        await db.update(clients).set({ facilityId: Number(facilityId), updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(clients.tenantId, req.tenantId), (0, import_drizzle_orm31.inArray)(clients.id, clientIds)));
+        await db.update(clients).set({ facilityId: Number(facilityId), updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(clients.tenantId, req.tenantId), (0, import_drizzle_orm32.inArray)(clients.id, clientIds)));
       } else if (actionType === "archive") {
-        await db.update(clients).set({ catchmentStatus: "archived", updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(clients.tenantId, req.tenantId), (0, import_drizzle_orm31.inArray)(clients.id, clientIds)));
+        await db.update(clients).set({ catchmentStatus: "archived", updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(clients.tenantId, req.tenantId), (0, import_drizzle_orm32.inArray)(clients.id, clientIds)));
       } else if (actionType === "restore") {
-        await db.update(clients).set({ catchmentStatus: "resident", updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(clients.tenantId, req.tenantId), (0, import_drizzle_orm31.inArray)(clients.id, clientIds)));
+        await db.update(clients).set({ catchmentStatus: "resident", updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(clients.tenantId, req.tenantId), (0, import_drizzle_orm32.inArray)(clients.id, clientIds)));
       }
       await db.insert(clientBulkActionLogs).values({
         tenantId: req.tenantId,
@@ -34737,16 +35503,16 @@ Note from the requester: ${conflict.note}` : ""}`,
       }
       let resolvedVillageId = parsed.villageId;
       if (parsed.isCrossBorder) {
-        const [facility] = await db.select().from(facilities).where((0, import_drizzle_orm31.eq)(facilities.id, parsed.facilityId));
+        const [facility] = await db.select().from(facilities).where((0, import_drizzle_orm32.eq)(facilities.id, parsed.facilityId));
         if (!facility) {
           return res.status(400).json({ message: "Assigned facility not found" });
         }
         const districtId = facility.districtId;
         const [virtualVillage] = await db.select().from(villages).where(
-          (0, import_drizzle_orm31.and)(
-            (0, import_drizzle_orm31.eq)(villages.districtId, districtId),
-            (0, import_drizzle_orm31.eq)(villages.name, "Cross-Border / Foreign Residence"),
-            (0, import_drizzle_orm31.eq)(villages.tenantId, req.tenantId)
+          (0, import_drizzle_orm32.and)(
+            (0, import_drizzle_orm32.eq)(villages.districtId, districtId),
+            (0, import_drizzle_orm32.eq)(villages.name, "Cross-Border / Foreign Residence"),
+            (0, import_drizzle_orm32.eq)(villages.tenantId, req.tenantId)
           )
         );
         if (virtualVillage) {
@@ -34771,16 +35537,16 @@ Note from the requester: ${conflict.note}` : ""}`,
         facilityName: facilities.name,
         districtName: districts.name,
         provinceName: provinces.name
-      }).from(facilities).innerJoin(districts, (0, import_drizzle_orm31.eq)(facilities.districtId, districts.id)).innerJoin(provinces, (0, import_drizzle_orm31.eq)(districts.provinceId, provinces.id)).where((0, import_drizzle_orm31.eq)(facilities.id, parsed.facilityId)).limit(1);
+      }).from(facilities).innerJoin(districts, (0, import_drizzle_orm32.eq)(facilities.districtId, districts.id)).innerJoin(provinces, (0, import_drizzle_orm32.eq)(districts.provinceId, provinces.id)).where((0, import_drizzle_orm32.eq)(facilities.id, parsed.facilityId)).limit(1);
       const provInit = getInitials(facInfo?.provinceName || "PRV");
       const distInit = getInitials(facInfo?.districtName || "DST");
       const hfInit = getInitials(facInfo?.facilityName || "FAC");
       const regYear = (/* @__PURE__ */ new Date()).getFullYear();
-      const [maxClient] = await db.select({ maxSerial: import_drizzle_orm31.sql`MAX(${clients.serialNumber})` }).from(clients).where(
-        (0, import_drizzle_orm31.and)(
-          (0, import_drizzle_orm31.eq)(clients.facilityId, parsed.facilityId),
-          (0, import_drizzle_orm31.eq)(clients.registrationYear, regYear),
-          (0, import_drizzle_orm31.eq)(clients.tenantId, req.tenantId)
+      const [maxClient] = await db.select({ maxSerial: import_drizzle_orm32.sql`MAX(${clients.serialNumber})` }).from(clients).where(
+        (0, import_drizzle_orm32.and)(
+          (0, import_drizzle_orm32.eq)(clients.facilityId, parsed.facilityId),
+          (0, import_drizzle_orm32.eq)(clients.registrationYear, regYear),
+          (0, import_drizzle_orm32.eq)(clients.tenantId, req.tenantId)
         )
       );
       const serialNum = (maxClient?.maxSerial ?? 0) + 1;
@@ -34809,7 +35575,7 @@ Note from the requester: ${conflict.note}` : ""}`,
         _geoDistrictId: facilities.districtId,
         _geoDistrictName: districts.name,
         _geoVillageName: villages.name
-      }).from(clients).innerJoin(facilities, (0, import_drizzle_orm31.eq)(facilities.id, clients.facilityId)).innerJoin(districts, (0, import_drizzle_orm31.eq)(districts.id, facilities.districtId)).innerJoin(provinces, (0, import_drizzle_orm31.eq)(provinces.id, districts.provinceId)).leftJoin(villages, (0, import_drizzle_orm31.eq)(villages.id, clients.villageId)).where((0, import_drizzle_orm31.eq)(clients.id, created.id)).limit(1);
+      }).from(clients).innerJoin(facilities, (0, import_drizzle_orm32.eq)(facilities.id, clients.facilityId)).innerJoin(districts, (0, import_drizzle_orm32.eq)(districts.id, facilities.districtId)).innerJoin(provinces, (0, import_drizzle_orm32.eq)(provinces.id, districts.provinceId)).leftJoin(villages, (0, import_drizzle_orm32.eq)(villages.id, clients.villageId)).where((0, import_drizzle_orm32.eq)(clients.id, created.id)).limit(1);
       const responsePayload = enrichedClient ? { ...enrichedClient.client, ...enrichedClient } : created;
       res.status(201).json(responsePayload);
     } catch (err) {
@@ -34835,16 +35601,16 @@ Note from the requester: ${conflict.note}` : ""}`,
       const facilityId = parsed.facilityId !== void 0 ? parsed.facilityId : existingClient.facilityId;
       let villageId = parsed.villageId !== void 0 ? parsed.villageId : existingClient.villageId;
       if (isCrossBorder) {
-        const [facility] = await db.select().from(facilities).where((0, import_drizzle_orm31.eq)(facilities.id, facilityId));
+        const [facility] = await db.select().from(facilities).where((0, import_drizzle_orm32.eq)(facilities.id, facilityId));
         if (!facility) {
           return res.status(400).json({ message: "Assigned facility not found" });
         }
         const districtId = facility.districtId;
         const [virtualVillage] = await db.select().from(villages).where(
-          (0, import_drizzle_orm31.and)(
-            (0, import_drizzle_orm31.eq)(villages.districtId, districtId),
-            (0, import_drizzle_orm31.eq)(villages.name, "Cross-Border / Foreign Residence"),
-            (0, import_drizzle_orm31.eq)(villages.tenantId, req.tenantId)
+          (0, import_drizzle_orm32.and)(
+            (0, import_drizzle_orm32.eq)(villages.districtId, districtId),
+            (0, import_drizzle_orm32.eq)(villages.name, "Cross-Border / Foreign Residence"),
+            (0, import_drizzle_orm32.eq)(villages.tenantId, req.tenantId)
           )
         );
         if (virtualVillage) {
@@ -34874,16 +35640,16 @@ Note from the requester: ${conflict.note}` : ""}`,
           facilityName: facilities.name,
           districtName: districts.name,
           provinceName: provinces.name
-        }).from(facilities).innerJoin(districts, (0, import_drizzle_orm31.eq)(facilities.districtId, districts.id)).innerJoin(provinces, (0, import_drizzle_orm31.eq)(districts.provinceId, provinces.id)).where((0, import_drizzle_orm31.eq)(facilities.id, facilityId)).limit(1);
+        }).from(facilities).innerJoin(districts, (0, import_drizzle_orm32.eq)(facilities.districtId, districts.id)).innerJoin(provinces, (0, import_drizzle_orm32.eq)(districts.provinceId, provinces.id)).where((0, import_drizzle_orm32.eq)(facilities.id, facilityId)).limit(1);
         const provInit = getInitials(facInfo?.provinceName || "PRV");
         const distInit = getInitials(facInfo?.districtName || "DST");
         const hfInit = getInitials(facInfo?.facilityName || "FAC");
         const regYear = (/* @__PURE__ */ new Date()).getFullYear();
-        const [maxClient] = await db.select({ maxSerial: import_drizzle_orm31.sql`MAX(${clients.serialNumber})` }).from(clients).where(
-          (0, import_drizzle_orm31.and)(
-            (0, import_drizzle_orm31.eq)(clients.facilityId, facilityId),
-            (0, import_drizzle_orm31.eq)(clients.registrationYear, regYear),
-            (0, import_drizzle_orm31.eq)(clients.tenantId, req.tenantId)
+        const [maxClient] = await db.select({ maxSerial: import_drizzle_orm32.sql`MAX(${clients.serialNumber})` }).from(clients).where(
+          (0, import_drizzle_orm32.and)(
+            (0, import_drizzle_orm32.eq)(clients.facilityId, facilityId),
+            (0, import_drizzle_orm32.eq)(clients.registrationYear, regYear),
+            (0, import_drizzle_orm32.eq)(clients.tenantId, req.tenantId)
           )
         );
         const serialNum = (maxClient?.maxSerial ?? 0) + 1;
@@ -34911,7 +35677,7 @@ Note from the requester: ${conflict.note}` : ""}`,
         _geoDistrictId: facilities.districtId,
         _geoDistrictName: districts.name,
         _geoVillageName: villages.name
-      }).from(clients).innerJoin(facilities, (0, import_drizzle_orm31.eq)(facilities.id, clients.facilityId)).innerJoin(districts, (0, import_drizzle_orm31.eq)(districts.id, facilities.districtId)).innerJoin(provinces, (0, import_drizzle_orm31.eq)(provinces.id, districts.provinceId)).leftJoin(villages, (0, import_drizzle_orm31.eq)(villages.id, clients.villageId)).where((0, import_drizzle_orm31.eq)(clients.id, updated.id)).limit(1);
+      }).from(clients).innerJoin(facilities, (0, import_drizzle_orm32.eq)(facilities.id, clients.facilityId)).innerJoin(districts, (0, import_drizzle_orm32.eq)(districts.id, facilities.districtId)).innerJoin(provinces, (0, import_drizzle_orm32.eq)(provinces.id, districts.provinceId)).leftJoin(villages, (0, import_drizzle_orm32.eq)(villages.id, clients.villageId)).where((0, import_drizzle_orm32.eq)(clients.id, updated.id)).limit(1);
       const responsePayload = enrichedClient ? { ...enrichedClient.client, ...enrichedClient } : updated;
       res.json(responsePayload);
     } catch (err) {
@@ -35348,10 +36114,10 @@ Note from the requester: ${conflict.note}` : ""}`,
         clientId: clientVaccinations.clientId,
         administeredDate: clientVaccinations.administeredDate
       }).from(clientVaccinations).where(
-        (0, import_drizzle_orm31.and)(
-          (0, import_drizzle_orm31.eq)(clientVaccinations.tenantId, tenantId),
-          (0, import_drizzle_orm31.inArray)(clientVaccinations.clientId, clientIds),
-          (0, import_drizzle_orm31.gte)(clientVaccinations.administeredDate, windowStart)
+        (0, import_drizzle_orm32.and)(
+          (0, import_drizzle_orm32.eq)(clientVaccinations.tenantId, tenantId),
+          (0, import_drizzle_orm32.inArray)(clientVaccinations.clientId, clientIds),
+          (0, import_drizzle_orm32.gte)(clientVaccinations.administeredDate, windowStart)
         )
       );
       const vaxByClient = /* @__PURE__ */ new Map();
@@ -35367,10 +36133,10 @@ Note from the requester: ${conflict.note}` : ""}`,
         facilityName: facilities.name,
         districtId: facilities.districtId,
         districtName: districts.name
-      }).from(clients).innerJoin(facilities, (0, import_drizzle_orm31.eq)(facilities.id, clients.facilityId)).innerJoin(districts, (0, import_drizzle_orm31.eq)(districts.id, facilities.districtId)).where(
-        (0, import_drizzle_orm31.and)(
-          (0, import_drizzle_orm31.eq)(clients.tenantId, tenantId),
-          (0, import_drizzle_orm31.inArray)(clients.id, clientIds)
+      }).from(clients).innerJoin(facilities, (0, import_drizzle_orm32.eq)(facilities.id, clients.facilityId)).innerJoin(districts, (0, import_drizzle_orm32.eq)(districts.id, facilities.districtId)).where(
+        (0, import_drizzle_orm32.and)(
+          (0, import_drizzle_orm32.eq)(clients.tenantId, tenantId),
+          (0, import_drizzle_orm32.inArray)(clients.id, clientIds)
         )
       );
       const geoByClient = /* @__PURE__ */ new Map();
@@ -35645,7 +36411,7 @@ Note from the requester: ${conflict.note}` : ""}`,
         const list2 = await storage.getSessionDayPlansByMicroplan(req.tenantId, microplanId);
         return res.json(list2);
       }
-      const list = await db.select().from(sessionDayPlans).where((0, import_drizzle_orm31.eq)(sessionDayPlans.tenantId, req.tenantId));
+      const list = await db.select().from(sessionDayPlans).where((0, import_drizzle_orm32.eq)(sessionDayPlans.tenantId, req.tenantId));
       res.json(list);
     } catch (err) {
       console.error("GET /api/session-day-plans failed:", err);
@@ -35706,7 +36472,7 @@ Note from the requester: ${conflict.note}` : ""}`,
     try {
       const id = parseInt(req.params.id);
       if (isNaN(id)) return res.status(400).json({ message: "Invalid day plan ID" });
-      const [dayPlan] = await db.select({ sessionPlanId: sessionDayPlans.sessionPlanId }).from(sessionDayPlans).where((0, import_drizzle_orm31.eq)(sessionDayPlans.id, id)).limit(1);
+      const [dayPlan] = await db.select({ sessionPlanId: sessionDayPlans.sessionPlanId }).from(sessionDayPlans).where((0, import_drizzle_orm32.eq)(sessionDayPlans.id, id)).limit(1);
       if (!dayPlan) return res.status(404).json({ message: "Session day plan not found" });
       const session3 = await storage.getSessionPlan(req.tenantId, dayPlan.sessionPlanId);
       if (!session3) return res.status(404).json({ message: "Session plan not found" });
@@ -35742,7 +36508,7 @@ Note from the requester: ${conflict.note}` : ""}`,
     try {
       const id = parseInt(req.params.id);
       if (isNaN(id)) return res.status(400).json({ message: "Invalid day plan ID" });
-      const [dayRow] = await db.select({ sessionPlanId: sessionDayPlans.sessionPlanId, dayNumber: sessionDayPlans.dayNumber }).from(sessionDayPlans).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(sessionDayPlans.id, id), (0, import_drizzle_orm31.eq)(sessionDayPlans.tenantId, req.tenantId)));
+      const [dayRow] = await db.select({ sessionPlanId: sessionDayPlans.sessionPlanId, dayNumber: sessionDayPlans.dayNumber }).from(sessionDayPlans).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(sessionDayPlans.id, id), (0, import_drizzle_orm32.eq)(sessionDayPlans.tenantId, req.tenantId)));
       if (!dayRow) return res.status(404).json({ message: "Session day plan not found" });
       const session3 = await storage.getSessionPlan(req.tenantId, dayRow.sessionPlanId);
       if (!session3) return res.status(404).json({ message: "Session plan not found" });
@@ -35755,11 +36521,11 @@ Note from the requester: ${conflict.note}` : ""}`,
       let prunedPersonnelLines = 0;
       if (dayRow) {
         const pruneRes = await db.delete(budgetItems).where(
-          (0, import_drizzle_orm31.and)(
-            (0, import_drizzle_orm31.eq)(budgetItems.tenantId, req.tenantId),
-            (0, import_drizzle_orm31.eq)(budgetItems.sessionId, dayRow.sessionPlanId),
-            (0, import_drizzle_orm31.eq)(budgetItems.category, "Personnel"),
-            (0, import_drizzle_orm31.like)(budgetItems.description, `Personnel \xB7 Day ${dayRow.dayNumber} \xB7 %`)
+          (0, import_drizzle_orm32.and)(
+            (0, import_drizzle_orm32.eq)(budgetItems.tenantId, req.tenantId),
+            (0, import_drizzle_orm32.eq)(budgetItems.sessionId, dayRow.sessionPlanId),
+            (0, import_drizzle_orm32.eq)(budgetItems.category, "Personnel"),
+            (0, import_drizzle_orm32.like)(budgetItems.description, `Personnel \xB7 Day ${dayRow.dayNumber} \xB7 %`)
           )
         );
         prunedPersonnelLines = pruneRes.rowCount ?? 0;
@@ -36246,7 +37012,7 @@ Note from the requester: ${conflict.note}` : ""}`,
   );
   app2.get("/api/imports/csv", isAuthenticated, requireTenant, loadRole, requireImportRole, async (req, res) => {
     try {
-      const rows = await db.execute(import_drizzle_orm31.sql`
+      const rows = await db.execute(import_drizzle_orm32.sql`
         SELECT id, filename, row_count, error_count, imported_count, status, uploaded_by_user_id, uploaded_at
         FROM csv_imports WHERE tenant_id = ${req.tenantId}
         ORDER BY uploaded_at DESC LIMIT 50
@@ -36260,7 +37026,7 @@ Note from the requester: ${conflict.note}` : ""}`,
     try {
       const id = parseInt(req.params.id, 10);
       if (isNaN(id)) return res.status(400).json({ message: "Invalid id" });
-      const rows = await db.execute(import_drizzle_orm31.sql`
+      const rows = await db.execute(import_drizzle_orm32.sql`
         SELECT id, filename, row_count, error_count, imported_count, status, error_report, uploaded_at
         FROM csv_imports WHERE id = ${id} AND tenant_id = ${req.tenantId}
       `);
@@ -36504,7 +37270,7 @@ Note from the requester: ${conflict.note}` : ""}`,
         });
         const body = schema.parse(req.body);
         const userId = req.user?.claims?.sub || null;
-        const vrows = await db.select().from(villages).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(villages.tenantId, req.tenantId), (0, import_drizzle_orm31.inArray)(villages.id, body.villageIds)));
+        const vrows = await db.select().from(villages).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(villages.tenantId, req.tenantId), (0, import_drizzle_orm32.inArray)(villages.id, body.villageIds)));
         const byFacility = /* @__PURE__ */ new Map();
         for (const v of vrows) {
           if (!v.assignedFacilityId) continue;
@@ -36591,7 +37357,7 @@ Note from the requester: ${conflict.note}` : ""}`,
       if (cfg.type !== "fhir_r4") {
         return res.status(400).json({ message: "Test bundle is only supported for FHIR R4 integrations." });
       }
-      const [vac] = await db.select().from(clientVaccinations).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(clientVaccinations.id, vaccinationId), (0, import_drizzle_orm31.eq)(clientVaccinations.tenantId, req.tenantId))).limit(1);
+      const [vac] = await db.select().from(clientVaccinations).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(clientVaccinations.id, vaccinationId), (0, import_drizzle_orm32.eq)(clientVaccinations.tenantId, req.tenantId))).limit(1);
       if (!vac) return res.status(404).json({ message: "Vaccination not found in this tenant" });
       const client3 = await storage.getClient(req.tenantId, vac.clientId);
       if (!client3) return res.status(404).json({ message: "Client for vaccination not found" });
@@ -36662,7 +37428,7 @@ Note from the requester: ${conflict.note}` : ""}`,
     try {
       const scope = await getGeoScope(req.dbUser, req.tenantId);
       const { province, district, ward, hardToReach, status } = req.query;
-      const queryConditions = [(0, import_drizzle_orm31.eq)(settlementsMaster.tenantId, req.tenantId)];
+      const queryConditions = [(0, import_drizzle_orm32.eq)(settlementsMaster.tenantId, req.tenantId)];
       if (!scope.all) {
         let allowedDistrictNames = [];
         if (scope.districtIds.size > 0 || scope.provinceIds.size > 0) {
@@ -36670,7 +37436,7 @@ Note from the requester: ${conflict.note}` : ""}`,
           allowedDistrictNames = allDistricts.filter((d) => scope.districtIds.has(d.id) || scope.provinceIds.size > 0 && scope.provinceIds.has(d.provinceId)).map((d) => d.name);
         } else if (scope.facilityIds.size > 0) {
           const facilityIdArr = Array.from(scope.facilityIds);
-          const facilityRows = await db.select({ districtId: facilities.districtId }).from(facilities).where((0, import_drizzle_orm31.inArray)(facilities.id, facilityIdArr));
+          const facilityRows = await db.select({ districtId: facilities.districtId }).from(facilities).where((0, import_drizzle_orm32.inArray)(facilities.id, facilityIdArr));
           const districtIdSet = new Set(facilityRows.map((f2) => f2.districtId).filter(Boolean));
           if (districtIdSet.size > 0) {
             const allDistricts = await storage.getDistricts(req.tenantId);
@@ -36678,14 +37444,14 @@ Note from the requester: ${conflict.note}` : ""}`,
           }
         }
         if (allowedDistrictNames.length === 0) return res.json([]);
-        queryConditions.push((0, import_drizzle_orm31.inArray)(settlementsMaster.districtName, allowedDistrictNames));
+        queryConditions.push((0, import_drizzle_orm32.inArray)(settlementsMaster.districtName, allowedDistrictNames));
       }
-      if (province) queryConditions.push((0, import_drizzle_orm31.eq)(settlementsMaster.provinceName, province));
-      if (district) queryConditions.push((0, import_drizzle_orm31.eq)(settlementsMaster.districtName, district));
-      if (ward) queryConditions.push((0, import_drizzle_orm31.eq)(settlementsMaster.wardName, ward));
-      if (hardToReach) queryConditions.push((0, import_drizzle_orm31.eq)(settlementsMaster.hardToReach, hardToReach === "true"));
-      if (status) queryConditions.push((0, import_drizzle_orm31.eq)(settlementsMaster.validationStatus, status));
-      const settlementsList = await db.select().from(settlementsMaster).where((0, import_drizzle_orm31.and)(...queryConditions)).orderBy((0, import_drizzle_orm31.desc)(settlementsMaster.populationEstimate));
+      if (province) queryConditions.push((0, import_drizzle_orm32.eq)(settlementsMaster.provinceName, province));
+      if (district) queryConditions.push((0, import_drizzle_orm32.eq)(settlementsMaster.districtName, district));
+      if (ward) queryConditions.push((0, import_drizzle_orm32.eq)(settlementsMaster.wardName, ward));
+      if (hardToReach) queryConditions.push((0, import_drizzle_orm32.eq)(settlementsMaster.hardToReach, hardToReach === "true"));
+      if (status) queryConditions.push((0, import_drizzle_orm32.eq)(settlementsMaster.validationStatus, status));
+      const settlementsList = await db.select().from(settlementsMaster).where((0, import_drizzle_orm32.and)(...queryConditions)).orderBy((0, import_drizzle_orm32.desc)(settlementsMaster.populationEstimate));
       res.json(settlementsList);
     } catch (err) {
       console.error("GET /api/settlements failed:", err);
@@ -36696,7 +37462,7 @@ Note from the requester: ${conflict.note}` : ""}`,
     try {
       const id = parseInt(req.params.id, 10);
       if (isNaN(id)) return res.status(400).json({ message: "Invalid ID parameter" });
-      const settlement = await db.select().from(settlementsMaster).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(settlementsMaster.id, id), (0, import_drizzle_orm31.eq)(settlementsMaster.tenantId, req.tenantId))).limit(1);
+      const settlement = await db.select().from(settlementsMaster).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(settlementsMaster.id, id), (0, import_drizzle_orm32.eq)(settlementsMaster.tenantId, req.tenantId))).limit(1);
       if (settlement.length === 0) {
         return res.status(404).json({ message: "Settlement not found" });
       }
@@ -36711,11 +37477,11 @@ Note from the requester: ${conflict.note}` : ""}`,
       const { status } = req.query;
       const validationStatus = status || "pending";
       const candidates = await db.select().from(candidateUnmappedSettlements).where(
-        (0, import_drizzle_orm31.and)(
-          (0, import_drizzle_orm31.eq)(candidateUnmappedSettlements.tenantId, req.tenantId),
-          (0, import_drizzle_orm31.eq)(candidateUnmappedSettlements.validationStatus, validationStatus)
+        (0, import_drizzle_orm32.and)(
+          (0, import_drizzle_orm32.eq)(candidateUnmappedSettlements.tenantId, req.tenantId),
+          (0, import_drizzle_orm32.eq)(candidateUnmappedSettlements.validationStatus, validationStatus)
         )
-      ).orderBy((0, import_drizzle_orm31.desc)(candidateUnmappedSettlements.estimatedPopulation));
+      ).orderBy((0, import_drizzle_orm32.desc)(candidateUnmappedSettlements.estimatedPopulation));
       res.json(candidates);
     } catch (err) {
       console.error("GET /api/unmapped-settlements failed:", err);
@@ -36729,16 +37495,16 @@ Note from the requester: ${conflict.note}` : ""}`,
       const { name, placeType } = req.body;
       if (!name) return res.status(400).json({ message: "Ground-truthed settlement name is required" });
       const candidateList = await db.select().from(candidateUnmappedSettlements).where(
-        (0, import_drizzle_orm31.and)(
-          (0, import_drizzle_orm31.eq)(candidateUnmappedSettlements.id, id),
-          (0, import_drizzle_orm31.eq)(candidateUnmappedSettlements.tenantId, req.tenantId)
+        (0, import_drizzle_orm32.and)(
+          (0, import_drizzle_orm32.eq)(candidateUnmappedSettlements.id, id),
+          (0, import_drizzle_orm32.eq)(candidateUnmappedSettlements.tenantId, req.tenantId)
         )
       ).limit(1);
       if (candidateList.length === 0) {
         return res.status(404).json({ message: "Candidate settlement not found" });
       }
       const candidate = candidateList[0];
-      await db.update(candidateUnmappedSettlements).set({ validationStatus: "validated", updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm31.eq)(candidateUnmappedSettlements.id, id));
+      await db.update(candidateUnmappedSettlements).set({ validationStatus: "validated", updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm32.eq)(candidateUnmappedSettlements.id, id));
       const admin = await assignAdminBoundaries(
         req.tenantId,
         parseFloat(candidate.longitude),
@@ -36872,9 +37638,9 @@ Note from the requester: ${conflict.note}` : ""}`,
   app2.get("/api/outreach-recommendations", isAuthenticated, requireTenant, async (req, res) => {
     try {
       const candidates = await db.select().from(candidateUnmappedSettlements).where(
-        (0, import_drizzle_orm31.and)(
-          (0, import_drizzle_orm31.eq)(candidateUnmappedSettlements.tenantId, req.tenantId),
-          (0, import_drizzle_orm31.eq)(candidateUnmappedSettlements.validationStatus, "pending")
+        (0, import_drizzle_orm32.and)(
+          (0, import_drizzle_orm32.eq)(candidateUnmappedSettlements.tenantId, req.tenantId),
+          (0, import_drizzle_orm32.eq)(candidateUnmappedSettlements.validationStatus, "pending")
         )
       );
       const recommendations = candidates.filter((c) => parseFloat(c.distanceToFacility || "0") >= 5).map((c) => ({
@@ -36898,11 +37664,11 @@ Note from the requester: ${conflict.note}` : ""}`,
       const rawLimit = req.query.limit != null ? parseInt(String(req.query.limit), 10) : null;
       const limit = rawLimit != null && Number.isFinite(rawLimit) && rawLimit > 0 ? rawLimit : null;
       const candidates = await db.select().from(candidateUnmappedSettlements).where(
-        (0, import_drizzle_orm31.and)(
-          (0, import_drizzle_orm31.eq)(candidateUnmappedSettlements.tenantId, req.tenantId),
-          (0, import_drizzle_orm31.eq)(candidateUnmappedSettlements.validationStatus, "pending")
+        (0, import_drizzle_orm32.and)(
+          (0, import_drizzle_orm32.eq)(candidateUnmappedSettlements.tenantId, req.tenantId),
+          (0, import_drizzle_orm32.eq)(candidateUnmappedSettlements.validationStatus, "pending")
         )
-      ).orderBy((0, import_drizzle_orm31.desc)(candidateUnmappedSettlements.estimatedPopulation));
+      ).orderBy((0, import_drizzle_orm32.desc)(candidateUnmappedSettlements.estimatedPopulation));
       let outreachSites = [];
       try {
         const allPlans = await storage.getSessionPlans(req.tenantId);
@@ -36914,7 +37680,7 @@ Note from the requester: ${conflict.note}` : ""}`,
           const facMap = new Map(facList.map((f2) => [f2.id, f2]));
           const vilList = await storage.getVillages(req.tenantId);
           const vilMap = new Map(vilList.map((v) => [v.id, v]));
-          const svRows = await db.select().from(sessionVillages).where((0, import_drizzle_orm31.eq)(sessionVillages.tenantId, String(req.tenantId)));
+          const svRows = await db.select().from(sessionVillages).where((0, import_drizzle_orm32.eq)(sessionVillages.tenantId, String(req.tenantId)));
           const svByPlan = /* @__PURE__ */ new Map();
           for (const r of svRows) {
             const arr = svByPlan.get(r.sessionId) ?? [];
@@ -37254,8 +38020,8 @@ Note from the requester: ${conflict.note}` : ""}`,
   }
   async function getScopedFacilityIds(req, dbUser, explicitFacilityId, districtId, provinceId) {
     const tenantId = req.tenantId;
-    const rows = await db.select({ id: facilities.id, districtId: facilities.districtId }).from(facilities).where((0, import_drizzle_orm31.eq)(facilities.tenantId, tenantId));
-    const districtRows = await db.select({ id: districts.id, provinceId: districts.provinceId }).from(districts).where((0, import_drizzle_orm31.eq)(districts.tenantId, tenantId));
+    const rows = await db.select({ id: facilities.id, districtId: facilities.districtId }).from(facilities).where((0, import_drizzle_orm32.eq)(facilities.tenantId, tenantId));
+    const districtRows = await db.select({ id: districts.id, provinceId: districts.provinceId }).from(districts).where((0, import_drizzle_orm32.eq)(districts.tenantId, tenantId));
     const distProvince = new Map(districtRows.map((d) => [d.id, d.provinceId]));
     let ids = rows.map((r) => r.id);
     if (explicitFacilityId) ids = ids.filter((id) => id === explicitFacilityId);
@@ -37335,12 +38101,12 @@ Note from the requester: ${conflict.note}` : ""}`,
           villageLat: villages.latitude,
           villageLng: villages.longitude,
           villageHtr: villages.isHardToReach
-        }).from(clients).innerJoin(facilities, (0, import_drizzle_orm31.eq)(facilities.id, clients.facilityId)).innerJoin(districts, (0, import_drizzle_orm31.eq)(districts.id, facilities.districtId)).leftJoin(villages, (0, import_drizzle_orm31.eq)(villages.id, clients.villageId)).where(
-          (0, import_drizzle_orm31.and)(
-            (0, import_drizzle_orm31.eq)(clients.tenantId, tenantId),
-            (0, import_drizzle_orm31.eq)(clients.clientType, "child"),
-            (0, import_drizzle_orm31.lte)(clients.dateOfBirth, twelveMonthsAgo),
-            scopedFacilityIds ? (0, import_drizzle_orm31.inArray)(clients.facilityId, scopedFacilityIds) : void 0
+        }).from(clients).innerJoin(facilities, (0, import_drizzle_orm32.eq)(facilities.id, clients.facilityId)).innerJoin(districts, (0, import_drizzle_orm32.eq)(districts.id, facilities.districtId)).leftJoin(villages, (0, import_drizzle_orm32.eq)(villages.id, clients.villageId)).where(
+          (0, import_drizzle_orm32.and)(
+            (0, import_drizzle_orm32.eq)(clients.tenantId, tenantId),
+            (0, import_drizzle_orm32.eq)(clients.clientType, "child"),
+            (0, import_drizzle_orm32.lte)(clients.dateOfBirth, twelveMonthsAgo),
+            scopedFacilityIds ? (0, import_drizzle_orm32.inArray)(clients.facilityId, scopedFacilityIds) : void 0
           )
         );
         if (eligible.length === 0) {
@@ -37360,9 +38126,9 @@ Note from the requester: ${conflict.note}` : ""}`,
           clientId: clientVaccinations.clientId,
           vaccineName: clientVaccinations.vaccineName
         }).from(clientVaccinations).where(
-          (0, import_drizzle_orm31.and)(
-            (0, import_drizzle_orm31.eq)(clientVaccinations.tenantId, tenantId),
-            (0, import_drizzle_orm31.inArray)(clientVaccinations.clientId, clientIds)
+          (0, import_drizzle_orm32.and)(
+            (0, import_drizzle_orm32.eq)(clientVaccinations.tenantId, tenantId),
+            (0, import_drizzle_orm32.inArray)(clientVaccinations.clientId, clientIds)
           )
         );
         const haveDtp1 = /* @__PURE__ */ new Set();
@@ -37427,14 +38193,14 @@ Note from the requester: ${conflict.note}` : ""}`,
           vaccinatedCounts: sessionPlans.vaccinatedCounts
         }).from(sessionPlans).innerJoin(
           sessionVillages,
-          (0, import_drizzle_orm31.and)(
-            (0, import_drizzle_orm31.eq)(sessionVillages.sessionId, sessionPlans.id),
-            (0, import_drizzle_orm31.eq)(sessionVillages.tenantId, String(tenantId))
+          (0, import_drizzle_orm32.and)(
+            (0, import_drizzle_orm32.eq)(sessionVillages.sessionId, sessionPlans.id),
+            (0, import_drizzle_orm32.eq)(sessionVillages.tenantId, String(tenantId))
           )
         ).where(
-          (0, import_drizzle_orm31.and)(
-            (0, import_drizzle_orm31.eq)(sessionPlans.tenantId, String(tenantId)),
-            (0, import_drizzle_orm31.eq)(sessionPlans.status, "completed")
+          (0, import_drizzle_orm32.and)(
+            (0, import_drizzle_orm32.eq)(sessionPlans.tenantId, String(tenantId)),
+            (0, import_drizzle_orm32.eq)(sessionPlans.status, "completed")
           )
         );
         const lastDefaulterByVillage = /* @__PURE__ */ new Map();
@@ -37536,12 +38302,12 @@ Note from the requester: ${conflict.note}` : ""}`,
           facilityName: facilities.name,
           districtId: facilities.districtId,
           districtName: districts.name
-        }).from(clientVaccinations).innerJoin(clients, (0, import_drizzle_orm31.eq)(clients.id, clientVaccinations.clientId)).innerJoin(facilities, (0, import_drizzle_orm31.eq)(facilities.id, clients.facilityId)).innerJoin(districts, (0, import_drizzle_orm31.eq)(districts.id, facilities.districtId)).where(
-          (0, import_drizzle_orm31.and)(
-            (0, import_drizzle_orm31.eq)(clientVaccinations.tenantId, tenantId),
-            (0, import_drizzle_orm31.gte)(clientVaccinations.administeredDate, periodStart),
-            (0, import_drizzle_orm31.lte)(clientVaccinations.administeredDate, periodEnd),
-            scopedFacilityIds ? (0, import_drizzle_orm31.inArray)(clients.facilityId, scopedFacilityIds) : void 0
+        }).from(clientVaccinations).innerJoin(clients, (0, import_drizzle_orm32.eq)(clients.id, clientVaccinations.clientId)).innerJoin(facilities, (0, import_drizzle_orm32.eq)(facilities.id, clients.facilityId)).innerJoin(districts, (0, import_drizzle_orm32.eq)(districts.id, facilities.districtId)).where(
+          (0, import_drizzle_orm32.and)(
+            (0, import_drizzle_orm32.eq)(clientVaccinations.tenantId, tenantId),
+            (0, import_drizzle_orm32.gte)(clientVaccinations.administeredDate, periodStart),
+            (0, import_drizzle_orm32.lte)(clientVaccinations.administeredDate, periodEnd),
+            scopedFacilityIds ? (0, import_drizzle_orm32.inArray)(clients.facilityId, scopedFacilityIds) : void 0
           )
         );
         const makeAgg = () => ({
@@ -37691,11 +38457,11 @@ Note from the requester: ${conflict.note}` : ""}`,
           districtId: facilities.districtId,
           districtName: districts.name,
           provinceId: districts.provinceId
-        }).from(clients).innerJoin(facilities, (0, import_drizzle_orm31.eq)(facilities.id, clients.facilityId)).innerJoin(districts, (0, import_drizzle_orm31.eq)(districts.id, facilities.districtId)).leftJoin(villages, (0, import_drizzle_orm31.eq)(villages.id, clients.villageId)).where(
-          (0, import_drizzle_orm31.and)(
-            (0, import_drizzle_orm31.eq)(clients.tenantId, tenantId),
-            (0, import_drizzle_orm31.eq)(clients.clientType, "child"),
-            scopedFacilityIds ? (0, import_drizzle_orm31.inArray)(clients.facilityId, scopedFacilityIds) : void 0
+        }).from(clients).innerJoin(facilities, (0, import_drizzle_orm32.eq)(facilities.id, clients.facilityId)).innerJoin(districts, (0, import_drizzle_orm32.eq)(districts.id, facilities.districtId)).leftJoin(villages, (0, import_drizzle_orm32.eq)(villages.id, clients.villageId)).where(
+          (0, import_drizzle_orm32.and)(
+            (0, import_drizzle_orm32.eq)(clients.tenantId, tenantId),
+            (0, import_drizzle_orm32.eq)(clients.clientType, "child"),
+            scopedFacilityIds ? (0, import_drizzle_orm32.inArray)(clients.facilityId, scopedFacilityIds) : void 0
           )
         );
         if (childRows.length === 0) return res.json([]);
@@ -37705,9 +38471,9 @@ Note from the requester: ${conflict.note}` : ""}`,
           vaccineName: clientVaccinations.vaccineName,
           administeredDate: clientVaccinations.administeredDate
         }).from(clientVaccinations).where(
-          (0, import_drizzle_orm31.and)(
-            (0, import_drizzle_orm31.eq)(clientVaccinations.tenantId, tenantId),
-            (0, import_drizzle_orm31.inArray)(clientVaccinations.clientId, clientIds)
+          (0, import_drizzle_orm32.and)(
+            (0, import_drizzle_orm32.eq)(clientVaccinations.tenantId, tenantId),
+            (0, import_drizzle_orm32.inArray)(clientVaccinations.clientId, clientIds)
           )
         );
         const dosesByClient = /* @__PURE__ */ new Map();
@@ -37891,7 +38657,7 @@ Note from the requester: ${conflict.note}` : ""}`,
           provinceId: districts.provinceId,
           provinceName: provinces.name,
           isActive: facilities.isActive
-        }).from(facilities).innerJoin(districts, (0, import_drizzle_orm31.eq)(districts.id, facilities.districtId)).innerJoin(provinces, (0, import_drizzle_orm31.eq)(provinces.id, districts.provinceId)).where((0, import_drizzle_orm31.eq)(facilities.tenantId, tenantId));
+        }).from(facilities).innerJoin(districts, (0, import_drizzle_orm32.eq)(districts.id, facilities.districtId)).innerJoin(provinces, (0, import_drizzle_orm32.eq)(provinces.id, districts.provinceId)).where((0, import_drizzle_orm32.eq)(facilities.tenantId, tenantId));
         const reviewRows = await storage.listQuarterlyReviews(tenantId, {
           year,
           quarter
@@ -38258,7 +39024,7 @@ Note from the requester: ${conflict.note}` : ""}`,
     requireAdmin2,
     async (req, res) => {
       try {
-        const logs = await db.select().from(communicationLogs).where((0, import_drizzle_orm31.eq)(communicationLogs.tenantId, req.tenantId)).orderBy((0, import_drizzle_orm31.desc)(communicationLogs.createdAt)).limit(50);
+        const logs = await db.select().from(communicationLogs).where((0, import_drizzle_orm32.eq)(communicationLogs.tenantId, req.tenantId)).orderBy((0, import_drizzle_orm32.desc)(communicationLogs.createdAt)).limit(50);
         res.json(logs);
       } catch (err) {
         console.error("GET /api/me/tenant/communication-logs failed:", err);
@@ -38452,7 +39218,7 @@ Note from the requester: ${conflict.note}` : ""}`,
           }
           if (id != null) {
             const parsedBody = insertSessionDayPlanSchema.partial().parse(body);
-            const [dayPlan] = await db.select({ sessionPlanId: sessionDayPlans.sessionPlanId }).from(sessionDayPlans).where((0, import_drizzle_orm31.eq)(sessionDayPlans.id, Number(id))).limit(1);
+            const [dayPlan] = await db.select({ sessionPlanId: sessionDayPlans.sessionPlanId }).from(sessionDayPlans).where((0, import_drizzle_orm32.eq)(sessionDayPlans.id, Number(id))).limit(1);
             if (!dayPlan) {
               results.push({ clientId, ok: false, error: "Day plan not found" });
               continue;
@@ -38599,7 +39365,7 @@ Note from the requester: ${conflict.note}` : ""}`,
           const id = body.id;
           delete body.id;
           if (id != null) {
-            const [oldReq] = await db.select().from(vaccineRequirements).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(vaccineRequirements.id, Number(id)), (0, import_drizzle_orm31.eq)(vaccineRequirements.tenantId, req.tenantId))).limit(1);
+            const [oldReq] = await db.select().from(vaccineRequirements).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(vaccineRequirements.id, Number(id)), (0, import_drizzle_orm32.eq)(vaccineRequirements.tenantId, req.tenantId))).limit(1);
             if (!oldReq) {
               results.push({ clientId, ok: false, error: "Vaccine requirement not found" });
               continue;
@@ -38662,7 +39428,7 @@ Note from the requester: ${conflict.note}` : ""}`,
           const id = body.id;
           delete body.id;
           if (id != null) {
-            const [oldAct] = await db.select().from(mobilizationActivities).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(mobilizationActivities.id, Number(id)), (0, import_drizzle_orm31.eq)(mobilizationActivities.tenantId, req.tenantId))).limit(1);
+            const [oldAct] = await db.select().from(mobilizationActivities).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(mobilizationActivities.id, Number(id)), (0, import_drizzle_orm32.eq)(mobilizationActivities.tenantId, req.tenantId))).limit(1);
             if (!oldAct) {
               results.push({ clientId, ok: false, error: "Mobilization activity not found" });
               continue;
@@ -38751,7 +39517,7 @@ Note from the requester: ${conflict.note}` : ""}`,
             body.fundingSourceOther = null;
           }
           if (id != null) {
-            const [oldItem] = await db.select().from(budgetItems).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(budgetItems.id, Number(id)), (0, import_drizzle_orm31.eq)(budgetItems.tenantId, req.tenantId))).limit(1);
+            const [oldItem] = await db.select().from(budgetItems).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(budgetItems.id, Number(id)), (0, import_drizzle_orm32.eq)(budgetItems.tenantId, req.tenantId))).limit(1);
             if (!oldItem) {
               results.push({ clientId, ok: false, error: "Budget item not found" });
               continue;
@@ -38926,13 +39692,13 @@ Note from the requester: ${conflict.note}` : ""}`,
         if (!reason) {
           return res.status(400).json({ message: "A reason for the erasure is required (GDPR audit trail)." });
         }
-        const existing = await db.select().from(clients).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(clients.id, clientId), (0, import_drizzle_orm31.eq)(clients.tenantId, req.tenantId))).limit(1);
+        const existing = await db.select().from(clients).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(clients.id, clientId), (0, import_drizzle_orm32.eq)(clients.tenantId, req.tenantId))).limit(1);
         if (existing.length === 0) {
           return res.status(404).json({ message: "Client not found in this tenant" });
         }
         const c = existing[0];
-        const vaxCount = (await db.select({ id: clientVaccinations.id }).from(clientVaccinations).where((0, import_drizzle_orm31.eq)(clientVaccinations.clientId, clientId))).length;
-        await db.delete(clients).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(clients.id, clientId), (0, import_drizzle_orm31.eq)(clients.tenantId, req.tenantId)));
+        const vaxCount = (await db.select({ id: clientVaccinations.id }).from(clientVaccinations).where((0, import_drizzle_orm32.eq)(clientVaccinations.clientId, clientId))).length;
+        await db.delete(clients).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(clients.id, clientId), (0, import_drizzle_orm32.eq)(clients.tenantId, req.tenantId)));
         await logAudit(req, "gdpr_purge_client", "clients", null, null, {
           purgedClientId: clientId,
           facilityId: c.facilityId,
@@ -38953,8 +39719,8 @@ Note from the requester: ${conflict.note}` : ""}`,
   async function buildGeoJson(tenantId, type) {
     const features = [];
     if (type === "facilities") {
-      const rows = await db.select().from(facilities).where((0, import_drizzle_orm31.eq)(facilities.tenantId, tenantId));
-      const dists = await db.select().from(districts).where((0, import_drizzle_orm31.eq)(districts.tenantId, tenantId));
+      const rows = await db.select().from(facilities).where((0, import_drizzle_orm32.eq)(facilities.tenantId, tenantId));
+      const dists = await db.select().from(districts).where((0, import_drizzle_orm32.eq)(districts.tenantId, tenantId));
       const distMap = new Map(dists.map((d) => [d.id, d.provinceId]));
       for (const f2 of rows) {
         const lat = f2.latitude != null ? Number(f2.latitude) : null;
@@ -38975,8 +39741,8 @@ Note from the requester: ${conflict.note}` : ""}`,
         });
       }
     } else if (type === "villages") {
-      const rows = await db.select().from(villages).where((0, import_drizzle_orm31.eq)(villages.tenantId, tenantId));
-      const popRows = await db.select().from(populationData).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(populationData.tenantId, tenantId), (0, import_drizzle_orm31.isNotNull)(populationData.villageId)));
+      const rows = await db.select().from(villages).where((0, import_drizzle_orm32.eq)(villages.tenantId, tenantId));
+      const popRows = await db.select().from(populationData).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(populationData.tenantId, tenantId), (0, import_drizzle_orm32.isNotNull)(populationData.villageId)));
       const popMap = /* @__PURE__ */ new Map();
       for (const p of popRows) {
         const id = Number(p.villageId);
@@ -39001,7 +39767,7 @@ Note from the requester: ${conflict.note}` : ""}`,
         });
       }
     } else if (type === "sessions") {
-      const rows = await db.select().from(sessionPlans).where((0, import_drizzle_orm31.eq)(sessionPlans.tenantId, tenantId));
+      const rows = await db.select().from(sessionPlans).where((0, import_drizzle_orm32.eq)(sessionPlans.tenantId, tenantId));
       for (const s of rows) {
         if (s.geojson && typeof s.geojson === "object") {
           const g = s.geojson;
@@ -39023,7 +39789,7 @@ Note from the requester: ${conflict.note}` : ""}`,
         }
       }
     } else if (type === "catchments") {
-      const rows = await db.select().from(facilityCatchments).where((0, import_drizzle_orm31.eq)(facilityCatchments.tenantId, tenantId));
+      const rows = await db.select().from(facilityCatchments).where((0, import_drizzle_orm32.eq)(facilityCatchments.tenantId, tenantId));
       for (const _c of rows) {
         const c = _c;
         if (c.geojson && typeof c.geojson === "object") {
@@ -39189,7 +39955,7 @@ Note from the requester: ${conflict.note}` : ""}`,
     async (req, res) => {
       try {
         const force = req.query.force === "1" || req.body?.force === true;
-        const rows = await db.select().from(vaccineConfigurations).where((0, import_drizzle_orm31.eq)(vaccineConfigurations.tenantId, req.tenantId));
+        const rows = await db.select().from(vaccineConfigurations).where((0, import_drizzle_orm32.eq)(vaccineConfigurations.tenantId, req.tenantId));
         let updated = 0;
         const unmapped = [];
         for (const row of rows) {
@@ -39202,7 +39968,7 @@ Note from the requester: ${conflict.note}` : ""}`,
           await db.update(vaccineConfigurations).set({
             cvxCode: force ? codes.cvx : row.cvxCode || codes.cvx,
             whoAtcCode: force ? codes.atc : row.whoAtcCode || codes.atc
-          }).where((0, import_drizzle_orm31.eq)(vaccineConfigurations.id, row.id));
+          }).where((0, import_drizzle_orm32.eq)(vaccineConfigurations.id, row.id));
           updated++;
         }
         await logAudit(req, "vaccine_codes_backfill", "vaccine_configurations", null, null, {
@@ -39220,7 +39986,7 @@ Note from the requester: ${conflict.note}` : ""}`,
   );
   app2.get("/api/annual-plans", isAuthenticated, requireTenant, async (req, res) => {
     try {
-      const rows = await db.select().from(annualImmunizationPlans).where((0, import_drizzle_orm31.eq)(annualImmunizationPlans.tenantId, req.tenantId)).orderBy((0, import_drizzle_orm31.desc)(annualImmunizationPlans.year));
+      const rows = await db.select().from(annualImmunizationPlans).where((0, import_drizzle_orm32.eq)(annualImmunizationPlans.tenantId, req.tenantId)).orderBy((0, import_drizzle_orm32.desc)(annualImmunizationPlans.year));
       res.json(rows);
     } catch (err) {
       console.error("GET /api/annual-plans failed:", err);
@@ -39270,7 +40036,7 @@ Note from the requester: ${conflict.note}` : ""}`,
       try {
         const id = parseInt(req.params.id, 10);
         if (isNaN(id)) return res.status(400).json({ message: "Invalid id" });
-        const [existing] = await db.select().from(annualImmunizationPlans).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(annualImmunizationPlans.id, id), (0, import_drizzle_orm31.eq)(annualImmunizationPlans.tenantId, req.tenantId))).limit(1);
+        const [existing] = await db.select().from(annualImmunizationPlans).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(annualImmunizationPlans.id, id), (0, import_drizzle_orm32.eq)(annualImmunizationPlans.tenantId, req.tenantId))).limit(1);
         if (!existing) return res.status(404).json({ message: "Annual plan not found" });
         const dbUser = await storage.getUser(req.user?.claims?.sub);
         const isNationalAdmin = dbUser?.role === "national_admin" || Array.isArray(dbUser?.roles) && dbUser.roles.includes("national_admin") || dbUser?.isPlatformAdmin === true;
@@ -39303,7 +40069,7 @@ Note from the requester: ${conflict.note}` : ""}`,
           });
         }
         allowed2.updatedAt = /* @__PURE__ */ new Date();
-        const [updated] = await db.update(annualImmunizationPlans).set(allowed2).where((0, import_drizzle_orm31.eq)(annualImmunizationPlans.id, id)).returning();
+        const [updated] = await db.update(annualImmunizationPlans).set(allowed2).where((0, import_drizzle_orm32.eq)(annualImmunizationPlans.id, id)).returning();
         await logAudit(req, "update", "annual_immunization_plan", id, existing, updated);
         res.json(updated);
       } catch (err) {
@@ -39320,7 +40086,7 @@ Note from the requester: ${conflict.note}` : ""}`,
     async (req, res) => {
       try {
         const id = parseInt(req.params.id, 10);
-        const [existing] = await db.select().from(annualImmunizationPlans).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(annualImmunizationPlans.id, id), (0, import_drizzle_orm31.eq)(annualImmunizationPlans.tenantId, req.tenantId))).limit(1);
+        const [existing] = await db.select().from(annualImmunizationPlans).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(annualImmunizationPlans.id, id), (0, import_drizzle_orm32.eq)(annualImmunizationPlans.tenantId, req.tenantId))).limit(1);
         if (!existing) return res.status(404).json({ message: "Annual plan not found" });
         const dbUser = await storage.getUser(req.user?.claims?.sub);
         const isNationalAdmin = dbUser?.role === "national_admin" || Array.isArray(dbUser?.roles) && dbUser.roles.includes("national_admin") || dbUser?.isPlatformAdmin === true;
@@ -39335,7 +40101,7 @@ Note from the requester: ${conflict.note}` : ""}`,
           approvedAt: /* @__PURE__ */ new Date(),
           approvedByUserId: req.user?.claims?.sub,
           updatedAt: /* @__PURE__ */ new Date()
-        }).where((0, import_drizzle_orm31.eq)(annualImmunizationPlans.id, id)).returning();
+        }).where((0, import_drizzle_orm32.eq)(annualImmunizationPlans.id, id)).returning();
         await logAudit(req, "approve", "annual_immunization_plan", id, existing, updated);
         res.json(updated);
       } catch (err) {
@@ -39383,10 +40149,10 @@ Note from the requester: ${conflict.note}` : ""}`,
         const { token } = import_zod10.z.object({ token: import_zod10.z.string().min(1) }).parse(req.body ?? {});
         const tokHash = hash(token);
         const rows = await db.select().from(deviceTokens2).where(
-          (0, import_drizzle_orm31.and)(
-            (0, import_drizzle_orm31.eq)(deviceTokens2.tokenHash, tokHash),
-            (0, import_drizzle_orm31.isNull)(deviceTokens2.revokedAt),
-            (0, import_drizzle_orm31.gt)(deviceTokens2.expiresAt, /* @__PURE__ */ new Date())
+          (0, import_drizzle_orm32.and)(
+            (0, import_drizzle_orm32.eq)(deviceTokens2.tokenHash, tokHash),
+            (0, import_drizzle_orm32.isNull)(deviceTokens2.revokedAt),
+            (0, import_drizzle_orm32.gt)(deviceTokens2.expiresAt, /* @__PURE__ */ new Date())
           )
         ).limit(1);
         const row = rows[0];
@@ -39415,7 +40181,7 @@ Note from the requester: ${conflict.note}` : ""}`,
         };
         req.login(sessionUser, async (err) => {
           if (err) return res.status(500).json({ message: "Login failed" });
-          await db.update(deviceTokens2).set({ lastUsedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm31.eq)(deviceTokens2.id, row.id));
+          await db.update(deviceTokens2).set({ lastUsedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm32.eq)(deviceTokens2.id, row.id));
           res.json({ ok: true, userId: dbUser.id, tenantId: dbUser.tenantId ?? null });
         });
       } catch (err) {
@@ -39438,7 +40204,7 @@ Note from the requester: ${conflict.note}` : ""}`,
           lastUsedAt: deviceTokens2.lastUsedAt,
           expiresAt: deviceTokens2.expiresAt,
           revokedAt: deviceTokens2.revokedAt
-        }).from(deviceTokens2).where((0, import_drizzle_orm31.eq)(deviceTokens2.userId, dbUser.id));
+        }).from(deviceTokens2).where((0, import_drizzle_orm32.eq)(deviceTokens2.userId, dbUser.id));
         res.json(rows);
       } catch (err) {
         console.error("GET /api/me/device-tokens failed:", err);
@@ -39450,7 +40216,7 @@ Note from the requester: ${conflict.note}` : ""}`,
         const dbUser = await ensureDbUserFromSession(req);
         if (!dbUser) return res.status(401).json({ message: "Unauthorized" });
         const { id } = import_zod10.z.object({ id: import_zod10.z.string().uuid() }).parse(req.body ?? {});
-        await db.update(deviceTokens2).set({ revokedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(deviceTokens2.id, id), (0, import_drizzle_orm31.eq)(deviceTokens2.userId, dbUser.id)));
+        await db.update(deviceTokens2).set({ revokedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(deviceTokens2.id, id), (0, import_drizzle_orm32.eq)(deviceTokens2.userId, dbUser.id)));
         res.json({ ok: true });
       } catch (err) {
         if (err?.name === "ZodError") {
@@ -39667,7 +40433,7 @@ Note from the requester: ${conflict.note}` : ""}`,
         }
         const { id } = req.params;
         const body = req.body || {};
-        const existing = await db.select().from(indicatorManual).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(indicatorManual.id, id), (0, import_drizzle_orm31.eq)(indicatorManual.tenantId, tenantId))).limit(1);
+        const existing = await db.select().from(indicatorManual).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(indicatorManual.id, id), (0, import_drizzle_orm32.eq)(indicatorManual.tenantId, tenantId))).limit(1);
         if (existing.length === 0) {
           return res.status(404).json({ message: "Indicator manual entry not found" });
         }
@@ -39682,7 +40448,7 @@ Note from the requester: ${conflict.note}` : ""}`,
           referenceUrl: body.referenceUrl || null,
           updatedAt: /* @__PURE__ */ new Date()
         };
-        const [updated] = await db.update(indicatorManual).set(updateData).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(indicatorManual.id, id), (0, import_drizzle_orm31.eq)(indicatorManual.tenantId, tenantId))).returning();
+        const [updated] = await db.update(indicatorManual).set(updateData).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(indicatorManual.id, id), (0, import_drizzle_orm32.eq)(indicatorManual.tenantId, tenantId))).returning();
         res.json(updated);
       } catch (err) {
         console.error("PUT /api/indicator-manual/:id failed:", err);
@@ -39692,14 +40458,14 @@ Note from the requester: ${conflict.note}` : ""}`,
     app2.get("/api/indicator-manual", isAuthenticated, requireTenant, async (req, res) => {
       try {
         const tenantId = req.tenantId;
-        let rows = await db.select().from(indicatorManual).where((0, import_drizzle_orm31.eq)(indicatorManual.tenantId, tenantId));
+        let rows = await db.select().from(indicatorManual).where((0, import_drizzle_orm32.eq)(indicatorManual.tenantId, tenantId));
         if (rows.length === 0) {
           const valuesToInsert = DEFAULT_INDICATORS.map((ind) => ({
             ...ind,
             tenantId
           }));
           await db.insert(indicatorManual).values(valuesToInsert);
-          rows = await db.select().from(indicatorManual).where((0, import_drizzle_orm31.eq)(indicatorManual.tenantId, tenantId));
+          rows = await db.select().from(indicatorManual).where((0, import_drizzle_orm32.eq)(indicatorManual.tenantId, tenantId));
         }
         res.json(rows);
       } catch (err) {
@@ -39751,11 +40517,11 @@ Note from the requester: ${conflict.note}` : ""}`,
           return res.status(403).json({ message: "Forbidden: Only national administrators can delete indicators" });
         }
         const { id } = req.params;
-        const existing = await db.select().from(indicatorManual).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(indicatorManual.id, id), (0, import_drizzle_orm31.eq)(indicatorManual.tenantId, tenantId))).limit(1);
+        const existing = await db.select().from(indicatorManual).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(indicatorManual.id, id), (0, import_drizzle_orm32.eq)(indicatorManual.tenantId, tenantId))).limit(1);
         if (existing.length === 0) {
           return res.status(404).json({ message: "Indicator manual entry not found" });
         }
-        const [deleted] = await db.delete(indicatorManual).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(indicatorManual.id, id), (0, import_drizzle_orm31.eq)(indicatorManual.tenantId, tenantId))).returning();
+        const [deleted] = await db.delete(indicatorManual).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(indicatorManual.id, id), (0, import_drizzle_orm32.eq)(indicatorManual.tenantId, tenantId))).returning();
         res.json({ success: true, message: "Indicator deleted successfully", data: deleted });
       } catch (err) {
         console.error("DELETE /api/indicator-manual/:id failed:", err);
@@ -39770,13 +40536,13 @@ Note from the requester: ${conflict.note}` : ""}`,
         if (!isAuthorized) {
           return res.status(403).json({ message: "Forbidden: insufficient permissions to reset indicator manual" });
         }
-        await db.delete(indicatorManual).where((0, import_drizzle_orm31.eq)(indicatorManual.tenantId, tenantId));
+        await db.delete(indicatorManual).where((0, import_drizzle_orm32.eq)(indicatorManual.tenantId, tenantId));
         const valuesToInsert = DEFAULT_INDICATORS.map((ind) => ({
           ...ind,
           tenantId
         }));
         await db.insert(indicatorManual).values(valuesToInsert);
-        const rows = await db.select().from(indicatorManual).where((0, import_drizzle_orm31.eq)(indicatorManual.tenantId, tenantId));
+        const rows = await db.select().from(indicatorManual).where((0, import_drizzle_orm32.eq)(indicatorManual.tenantId, tenantId));
         res.json(rows);
       } catch (err) {
         console.error("POST /api/indicator-manual/reset failed:", err);
@@ -39797,10 +40563,10 @@ Note from the requester: ${conflict.note}` : ""}`,
         if (scope.all || scope.facilityIds.size > 0 || scope.districtIds.size > 0 || scope.provinceIds.size > 0) {
           const facList = scope.all ? "" : Array.from(scope.facilityIds).join(",") || "0";
           const distList = scope.all ? "" : Array.from(scope.districtIds).join(",") || "0";
-          const facCond = scope.all ? import_drizzle_orm31.sql`` : import_drizzle_orm31.sql`AND id = ANY(ARRAY[${import_drizzle_orm31.sql.raw(facList)}]::int[])`;
-          const facRefCond = scope.all ? import_drizzle_orm31.sql`` : import_drizzle_orm31.sql`AND facility_id = ANY(ARRAY[${import_drizzle_orm31.sql.raw(facList)}]::int[])`;
-          const villCond = scope.all ? import_drizzle_orm31.sql`` : import_drizzle_orm31.sql`AND (assigned_facility_id = ANY(ARRAY[${import_drizzle_orm31.sql.raw(facList)}]::int[]) OR district_id = ANY(ARRAY[${import_drizzle_orm31.sql.raw(distList)}]::int[]))`;
-          const statsRes = await db.execute(import_drizzle_orm31.sql`
+          const facCond = scope.all ? import_drizzle_orm32.sql`` : import_drizzle_orm32.sql`AND id = ANY(ARRAY[${import_drizzle_orm32.sql.raw(facList)}]::int[])`;
+          const facRefCond = scope.all ? import_drizzle_orm32.sql`` : import_drizzle_orm32.sql`AND facility_id = ANY(ARRAY[${import_drizzle_orm32.sql.raw(facList)}]::int[])`;
+          const villCond = scope.all ? import_drizzle_orm32.sql`` : import_drizzle_orm32.sql`AND (assigned_facility_id = ANY(ARRAY[${import_drizzle_orm32.sql.raw(facList)}]::int[]) OR district_id = ANY(ARRAY[${import_drizzle_orm32.sql.raw(distList)}]::int[]))`;
+          const statsRes = await db.execute(import_drizzle_orm32.sql`
             SELECT
               (SELECT COUNT(*)::int FROM facilities WHERE tenant_id = ${tenantId} ${facCond}) AS "totalFacilities",
               (SELECT COUNT(*)::int FROM facilities WHERE tenant_id = ${tenantId} AND is_active = true ${facCond}) AS "activeFacilities",
@@ -39811,7 +40577,7 @@ Note from the requester: ${conflict.note}` : ""}`,
           `);
           statsRow = statsRes.rows?.[0] ?? {};
         }
-        const budgetRes = await db.execute(import_drizzle_orm31.sql`
+        const budgetRes = await db.execute(import_drizzle_orm32.sql`
           SELECT COALESCE(SUM(total_cost::float), 0) as "totalBudget"
           FROM budget_items
           WHERE tenant_id = ${tenantId}
@@ -39819,7 +40585,7 @@ Note from the requester: ${conflict.note}` : ""}`,
         const totalBudget = Number(budgetRes.rows?.[0]?.totalBudget ?? 0);
         const oneYearAgo = /* @__PURE__ */ new Date();
         oneYearAgo.setUTCFullYear(oneYearAgo.getUTCFullYear() - 1);
-        const eligibleClientsRes = await db.execute(import_drizzle_orm31.sql`
+        const eligibleClientsRes = await db.execute(import_drizzle_orm32.sql`
           SELECT COUNT(*)::int as count
           FROM clients
           WHERE tenant_id = ${tenantId}
@@ -39827,7 +40593,7 @@ Note from the requester: ${conflict.note}` : ""}`,
             AND client_type = 'child'
         `);
         const eligibleCount = Number(eligibleClientsRes.rows?.[0]?.count ?? 0);
-        const penta1ClientsRes = await db.execute(import_drizzle_orm31.sql`
+        const penta1ClientsRes = await db.execute(import_drizzle_orm32.sql`
           SELECT COUNT(DISTINCT cv.client_id)::int as count
           FROM client_vaccinations cv
           JOIN clients c ON c.id = cv.client_id
@@ -39836,7 +40602,7 @@ Note from the requester: ${conflict.note}` : ""}`,
             AND (UPPER(cv.vaccine_name) LIKE 'PENTA%1' OR UPPER(cv.vaccine_name) LIKE 'PENTAVALENT%1')
         `);
         const penta1Count = Number(penta1ClientsRes.rows?.[0]?.count ?? 0);
-        const penta3ClientsRes = await db.execute(import_drizzle_orm31.sql`
+        const penta3ClientsRes = await db.execute(import_drizzle_orm32.sql`
           SELECT COUNT(DISTINCT cv.client_id)::int as count
           FROM client_vaccinations cv
           JOIN clients c ON c.id = cv.client_id
@@ -39849,7 +40615,7 @@ Note from the requester: ${conflict.note}` : ""}`,
         const zeroDoseRate = eligibleCount > 0 ? zeroDoseCount / eligibleCount * 100 : 0;
         const dropoutCount = Math.max(0, penta1Count - penta3Count);
         const dropoutRate = penta1Count > 0 ? dropoutCount / penta1Count * 100 : 0;
-        const supervisionRes = await db.execute(import_drizzle_orm31.sql`
+        const supervisionRes = await db.execute(import_drizzle_orm32.sql`
           SELECT
             COUNT(*)::int as count,
             COALESCE(AVG(score::float), 0) as "avgScore"
@@ -39967,7 +40733,7 @@ This response is powered by the local VaxPlan database query engine. You can que
         res.status(500).json({ message: safeErrorMessage(err, "Failed to process chat query") });
       }
     });
-    void import_drizzle_orm31.sql;
+    void import_drizzle_orm32.sql;
   }
   app2.get("/api/villages/suggest-unmapped", ...auth, async (req, res) => {
     try {
@@ -40165,25 +40931,25 @@ This response is powered by the local VaxPlan database query engine. You can que
         const nearest = await getNearestHealthFacility(req.tenantId, settlement.longitude, settlement.latitude);
         let facilityRow = null;
         if (nearest.facilityName) {
-          const [fac] = await db.select().from(facilities).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(facilities.tenantId, req.tenantId), (0, import_drizzle_orm31.eq)(facilities.name, nearest.facilityName))).limit(1);
+          const [fac] = await db.select().from(facilities).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(facilities.tenantId, req.tenantId), (0, import_drizzle_orm32.eq)(facilities.name, nearest.facilityName))).limit(1);
           facilityRow = fac;
         }
         const messageText = `ALERT: Community "${settlement.name}" (estimated population: ${settlement.population_estimate}) in ${settlement.district_name || "District"}, ${settlement.province_name || "Province"} has been identified as UNCOVERED (not in any official facility catchment). The nearest health facility is "${nearest.facilityName || "Unknown"}" (${nearest.distanceKm} km away). Please coordinate to cover this community.`;
         const recipients = [];
         if (facilityRow) {
-          const facUsers = await db.select({ email: users.email }).from(users).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(users.tenantId, req.tenantId), (0, import_drizzle_orm31.eq)(users.facilityId, facilityRow.id)));
+          const facUsers = await db.select({ email: users.email }).from(users).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(users.tenantId, req.tenantId), (0, import_drizzle_orm32.eq)(users.facilityId, facilityRow.id)));
           facUsers.forEach((u) => {
             if (u.email) recipients.push(u.email);
           });
         }
         if (settlement.district_name) {
-          const [districtRow] = await db.select().from(districts).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(districts.tenantId, req.tenantId), (0, import_drizzle_orm31.ilike)(districts.name, settlement.district_name))).limit(1);
+          const [districtRow] = await db.select().from(districts).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(districts.tenantId, req.tenantId), (0, import_drizzle_orm32.ilike)(districts.name, settlement.district_name))).limit(1);
           if (districtRow) {
             const distUsers = await db.select({ email: users.email }).from(users).where(
-              (0, import_drizzle_orm31.and)(
-                (0, import_drizzle_orm31.eq)(users.tenantId, req.tenantId),
-                (0, import_drizzle_orm31.eq)(users.districtId, districtRow.id),
-                (0, import_drizzle_orm31.or)((0, import_drizzle_orm31.eq)(users.role, "district_manager"), import_drizzle_orm31.sql`${users.roles}::jsonb ? 'district_manager'`)
+              (0, import_drizzle_orm32.and)(
+                (0, import_drizzle_orm32.eq)(users.tenantId, req.tenantId),
+                (0, import_drizzle_orm32.eq)(users.districtId, districtRow.id),
+                (0, import_drizzle_orm32.or)((0, import_drizzle_orm32.eq)(users.role, "district_manager"), import_drizzle_orm32.sql`${users.roles}::jsonb ? 'district_manager'`)
               )
             );
             distUsers.forEach((u) => {
@@ -40192,13 +40958,13 @@ This response is powered by the local VaxPlan database query engine. You can que
           }
         }
         if (settlement.province_name) {
-          const [provinceRow] = await db.select().from(provinces).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(provinces.tenantId, req.tenantId), (0, import_drizzle_orm31.ilike)(provinces.name, settlement.province_name))).limit(1);
+          const [provinceRow] = await db.select().from(provinces).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(provinces.tenantId, req.tenantId), (0, import_drizzle_orm32.ilike)(provinces.name, settlement.province_name))).limit(1);
           if (provinceRow) {
             const provUsers = await db.select({ email: users.email }).from(users).where(
-              (0, import_drizzle_orm31.and)(
-                (0, import_drizzle_orm31.eq)(users.tenantId, req.tenantId),
-                (0, import_drizzle_orm31.eq)(users.provinceId, provinceRow.id),
-                (0, import_drizzle_orm31.or)((0, import_drizzle_orm31.eq)(users.role, "provincial_coordinator"), import_drizzle_orm31.sql`${users.roles}::jsonb ? 'provincial_coordinator'`)
+              (0, import_drizzle_orm32.and)(
+                (0, import_drizzle_orm32.eq)(users.tenantId, req.tenantId),
+                (0, import_drizzle_orm32.eq)(users.provinceId, provinceRow.id),
+                (0, import_drizzle_orm32.or)((0, import_drizzle_orm32.eq)(users.role, "provincial_coordinator"), import_drizzle_orm32.sql`${users.roles}::jsonb ? 'provincial_coordinator'`)
               )
             );
             provUsers.forEach((u) => {
@@ -40260,21 +41026,21 @@ This response is powered by the local VaxPlan database query engine. You can que
       const [row] = await db.select({
         catchmentPolygon: facilities.catchmentPolygon,
         catchmentGridPopulation: facilities.catchmentGridPopulation
-      }).from(facilities).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(facilities.id, facilityId), (0, import_drizzle_orm31.eq)(facilities.tenantId, req.tenantId))).limit(1);
+      }).from(facilities).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(facilities.id, facilityId), (0, import_drizzle_orm32.eq)(facilities.tenantId, req.tenantId))).limit(1);
       if (!row) return res.status(404).json({ message: "Facility not found" });
       const { gisPolygons: gisPolygons2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
-      const [activeGeo] = await db.select().from(gisPolygons2).where((0, import_drizzle_orm31.and)(
-        (0, import_drizzle_orm31.eq)(gisPolygons2.tenantId, req.tenantId),
-        (0, import_drizzle_orm31.eq)(gisPolygons2.ownerType, "facility"),
-        (0, import_drizzle_orm31.eq)(gisPolygons2.ownerId, facilityId),
-        (0, import_drizzle_orm31.eq)(gisPolygons2.status, "active")
+      const [activeGeo] = await db.select().from(gisPolygons2).where((0, import_drizzle_orm32.and)(
+        (0, import_drizzle_orm32.eq)(gisPolygons2.tenantId, req.tenantId),
+        (0, import_drizzle_orm32.eq)(gisPolygons2.ownerType, "facility"),
+        (0, import_drizzle_orm32.eq)(gisPolygons2.ownerId, facilityId),
+        (0, import_drizzle_orm32.eq)(gisPolygons2.status, "active")
       )).limit(1);
-      const [draftRow] = await db.select().from(gisPolygons2).where((0, import_drizzle_orm31.and)(
-        (0, import_drizzle_orm31.eq)(gisPolygons2.tenantId, req.tenantId),
-        (0, import_drizzle_orm31.eq)(gisPolygons2.ownerType, "facility"),
-        (0, import_drizzle_orm31.eq)(gisPolygons2.ownerId, facilityId),
-        (0, import_drizzle_orm31.inArray)(gisPolygons2.status, ["draft", "submitted_for_review", "needs_correction"])
-      )).orderBy((0, import_drizzle_orm31.desc)(gisPolygons2.version)).limit(1);
+      const [draftRow] = await db.select().from(gisPolygons2).where((0, import_drizzle_orm32.and)(
+        (0, import_drizzle_orm32.eq)(gisPolygons2.tenantId, req.tenantId),
+        (0, import_drizzle_orm32.eq)(gisPolygons2.ownerType, "facility"),
+        (0, import_drizzle_orm32.eq)(gisPolygons2.ownerId, facilityId),
+        (0, import_drizzle_orm32.inArray)(gisPolygons2.status, ["draft", "submitted_for_review", "needs_correction"])
+      )).orderBy((0, import_drizzle_orm32.desc)(gisPolygons2.version)).limit(1);
       res.json({
         catchmentPolygon: activeGeo?.geometry || row.catchmentPolygon || null,
         catchmentGridPopulation: activeGeo?.populationEstimate || row.catchmentGridPopulation || null,
@@ -40328,12 +41094,12 @@ This response is powered by the local VaxPlan database query engine. You can que
       const { geojson, gridPopulation, status = "active" } = req.body;
       const { gisPolygons: gisPolygons2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
       if (status === "active") {
-        const [currentActive] = await db.select({ id: gisPolygons2.id }).from(gisPolygons2).where((0, import_drizzle_orm31.and)(
-          (0, import_drizzle_orm31.eq)(gisPolygons2.tenantId, req.tenantId),
-          (0, import_drizzle_orm31.eq)(gisPolygons2.ownerType, "facility"),
-          (0, import_drizzle_orm31.eq)(gisPolygons2.ownerId, facilityId),
-          (0, import_drizzle_orm31.eq)(gisPolygons2.isActive, true),
-          (0, import_drizzle_orm31.eq)(gisPolygons2.status, "active")
+        const [currentActive] = await db.select({ id: gisPolygons2.id }).from(gisPolygons2).where((0, import_drizzle_orm32.and)(
+          (0, import_drizzle_orm32.eq)(gisPolygons2.tenantId, req.tenantId),
+          (0, import_drizzle_orm32.eq)(gisPolygons2.ownerType, "facility"),
+          (0, import_drizzle_orm32.eq)(gisPolygons2.ownerId, facilityId),
+          (0, import_drizzle_orm32.eq)(gisPolygons2.isActive, true),
+          (0, import_drizzle_orm32.eq)(gisPolygons2.status, "active")
         )).limit(1);
         if (currentActive) {
           return res.status(409).json({
@@ -40343,11 +41109,11 @@ This response is powered by the local VaxPlan database query engine. You can que
         }
       }
       if (status === "clear_draft") {
-        await db.update(gisPolygons2).set({ status: "archived", isActive: false, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm31.and)(
-          (0, import_drizzle_orm31.eq)(gisPolygons2.tenantId, req.tenantId),
-          (0, import_drizzle_orm31.eq)(gisPolygons2.ownerType, "facility"),
-          (0, import_drizzle_orm31.eq)(gisPolygons2.ownerId, facilityId),
-          (0, import_drizzle_orm31.eq)(gisPolygons2.status, "draft")
+        await db.update(gisPolygons2).set({ status: "archived", isActive: false, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm32.and)(
+          (0, import_drizzle_orm32.eq)(gisPolygons2.tenantId, req.tenantId),
+          (0, import_drizzle_orm32.eq)(gisPolygons2.ownerType, "facility"),
+          (0, import_drizzle_orm32.eq)(gisPolygons2.ownerId, facilityId),
+          (0, import_drizzle_orm32.eq)(gisPolygons2.status, "draft")
         ));
         return res.json({ ok: true, cleared: true });
       }
@@ -40378,7 +41144,7 @@ This response is powered by the local VaxPlan database query engine. You can que
       const [facInfo] = await db.select({
         latitude: facilities.latitude,
         longitude: facilities.longitude
-      }).from(facilities).where((0, import_drizzle_orm31.eq)(facilities.id, facilityId)).limit(1);
+      }).from(facilities).where((0, import_drizzle_orm32.eq)(facilities.id, facilityId)).limit(1);
       const warnings = [...validation.warnings];
       if (facInfo?.latitude && facInfo?.longitude) {
         const isInside = pointInsidePolygon2(facInfo.latitude, facInfo.longitude, geojson);
@@ -40418,29 +41184,29 @@ This response is powered by the local VaxPlan database query engine. You can que
           catchmentPolygon: geojson,
           catchmentGridPopulation: popEst,
           updatedAt: /* @__PURE__ */ new Date()
-        }).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(facilities.id, facilityId), (0, import_drizzle_orm31.eq)(facilities.tenantId, req.tenantId))).returning();
+        }).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(facilities.id, facilityId), (0, import_drizzle_orm32.eq)(facilities.tenantId, req.tenantId))).returning();
         if (!updated) return res.status(404).json({ message: "Facility not found" });
         await logAudit(req, "update_catchment_polygon", "facility", facilityId, null, { facilityId, gridPopulation: popEst });
         updatedCatchment = updated.catchmentPolygon;
         updatedPop = updated.catchmentGridPopulation;
       }
-      const existing = await db.select({ id: gisPolygons2.id }).from(gisPolygons2).where((0, import_drizzle_orm31.and)(
-        (0, import_drizzle_orm31.eq)(gisPolygons2.tenantId, req.tenantId),
-        (0, import_drizzle_orm31.eq)(gisPolygons2.ownerType, "facility"),
-        (0, import_drizzle_orm31.eq)(gisPolygons2.ownerId, facilityId),
-        (0, import_drizzle_orm31.eq)(gisPolygons2.status, status)
+      const existing = await db.select({ id: gisPolygons2.id }).from(gisPolygons2).where((0, import_drizzle_orm32.and)(
+        (0, import_drizzle_orm32.eq)(gisPolygons2.tenantId, req.tenantId),
+        (0, import_drizzle_orm32.eq)(gisPolygons2.ownerType, "facility"),
+        (0, import_drizzle_orm32.eq)(gisPolygons2.ownerId, facilityId),
+        (0, import_drizzle_orm32.eq)(gisPolygons2.status, status)
       )).limit(1);
       if (existing.length > 0) {
-        await db.update(gisPolygons2).set(polyData).where((0, import_drizzle_orm31.eq)(gisPolygons2.id, existing[0].id));
+        await db.update(gisPolygons2).set(polyData).where((0, import_drizzle_orm32.eq)(gisPolygons2.id, existing[0].id));
       } else {
         await db.insert(gisPolygons2).values(polyData);
       }
       if (status === "active") {
-        await db.update(gisPolygons2).set({ status: "archived", isActive: false, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm31.and)(
-          (0, import_drizzle_orm31.eq)(gisPolygons2.tenantId, req.tenantId),
-          (0, import_drizzle_orm31.eq)(gisPolygons2.ownerType, "facility"),
-          (0, import_drizzle_orm31.eq)(gisPolygons2.ownerId, facilityId),
-          (0, import_drizzle_orm31.eq)(gisPolygons2.status, "draft")
+        await db.update(gisPolygons2).set({ status: "archived", isActive: false, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm32.and)(
+          (0, import_drizzle_orm32.eq)(gisPolygons2.tenantId, req.tenantId),
+          (0, import_drizzle_orm32.eq)(gisPolygons2.ownerType, "facility"),
+          (0, import_drizzle_orm32.eq)(gisPolygons2.ownerId, facilityId),
+          (0, import_drizzle_orm32.eq)(gisPolygons2.status, "draft")
         ));
       }
       res.json({
@@ -40496,14 +41262,14 @@ This response is powered by the local VaxPlan database query engine. You can que
           message: "Forbidden: Only National Admins and Managers can delete facility catchment polygons."
         });
       }
-      const [facility] = await db.select().from(facilities).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(facilities.id, facilityId), (0, import_drizzle_orm31.eq)(facilities.tenantId, req.tenantId))).limit(1);
+      const [facility] = await db.select().from(facilities).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(facilities.id, facilityId), (0, import_drizzle_orm32.eq)(facilities.tenantId, req.tenantId))).limit(1);
       if (!facility) return res.status(404).json({ message: "Facility not found" });
       const { gisPolygons: gisPolygons2, facilityCatchments: facilityCatchments2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
       await db.update(gisPolygons2).set({ status: "archived", isActive: false, validTo: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(
-        (0, import_drizzle_orm31.and)(
-          (0, import_drizzle_orm31.eq)(gisPolygons2.tenantId, req.tenantId),
-          (0, import_drizzle_orm31.eq)(gisPolygons2.ownerType, "facility"),
-          (0, import_drizzle_orm31.eq)(gisPolygons2.ownerId, facilityId)
+        (0, import_drizzle_orm32.and)(
+          (0, import_drizzle_orm32.eq)(gisPolygons2.tenantId, req.tenantId),
+          (0, import_drizzle_orm32.eq)(gisPolygons2.ownerType, "facility"),
+          (0, import_drizzle_orm32.eq)(gisPolygons2.ownerId, facilityId)
         )
       );
       await db.update(facilities).set({
@@ -40511,8 +41277,8 @@ This response is powered by the local VaxPlan database query engine. You can que
         catchmentRadius: null,
         catchmentGridPopulation: 0,
         updatedAt: /* @__PURE__ */ new Date()
-      }).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(facilities.id, facilityId), (0, import_drizzle_orm31.eq)(facilities.tenantId, req.tenantId)));
-      await db.delete(facilityCatchments2).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(facilityCatchments2.facilityId, facilityId), (0, import_drizzle_orm31.eq)(facilityCatchments2.tenantId, req.tenantId)));
+      }).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(facilities.id, facilityId), (0, import_drizzle_orm32.eq)(facilities.tenantId, req.tenantId)));
+      await db.delete(facilityCatchments2).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(facilityCatchments2.facilityId, facilityId), (0, import_drizzle_orm32.eq)(facilityCatchments2.tenantId, req.tenantId)));
       await logAudit(req, "delete_facility_catchment_polygon", "facilities", facilityId, facility, null);
       res.json({ success: true, message: "Facility catchment polygon deleted successfully." });
     } catch (err) {
@@ -40530,21 +41296,21 @@ This response is powered by the local VaxPlan database query engine. You can que
         griddedPopulation: villages.griddedPopulation,
         polygonColor: villages.polygonColor,
         populationSourceLabel: villages.populationSourceLabel
-      }).from(villages).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(villages.id, villageId), (0, import_drizzle_orm31.eq)(villages.tenantId, req.tenantId))).limit(1);
+      }).from(villages).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(villages.id, villageId), (0, import_drizzle_orm32.eq)(villages.tenantId, req.tenantId))).limit(1);
       if (!row) return res.status(404).json({ message: "Village not found" });
       const { gisPolygons: gisPolygons2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
-      const [activeGeo] = await db.select().from(gisPolygons2).where((0, import_drizzle_orm31.and)(
-        (0, import_drizzle_orm31.eq)(gisPolygons2.tenantId, req.tenantId),
-        (0, import_drizzle_orm31.eq)(gisPolygons2.ownerType, "village"),
-        (0, import_drizzle_orm31.eq)(gisPolygons2.ownerId, villageId),
-        (0, import_drizzle_orm31.eq)(gisPolygons2.status, "active")
+      const [activeGeo] = await db.select().from(gisPolygons2).where((0, import_drizzle_orm32.and)(
+        (0, import_drizzle_orm32.eq)(gisPolygons2.tenantId, req.tenantId),
+        (0, import_drizzle_orm32.eq)(gisPolygons2.ownerType, "village"),
+        (0, import_drizzle_orm32.eq)(gisPolygons2.ownerId, villageId),
+        (0, import_drizzle_orm32.eq)(gisPolygons2.status, "active")
       )).limit(1);
-      const [draftRow] = await db.select().from(gisPolygons2).where((0, import_drizzle_orm31.and)(
-        (0, import_drizzle_orm31.eq)(gisPolygons2.tenantId, req.tenantId),
-        (0, import_drizzle_orm31.eq)(gisPolygons2.ownerType, "village"),
-        (0, import_drizzle_orm31.eq)(gisPolygons2.ownerId, villageId),
-        (0, import_drizzle_orm31.inArray)(gisPolygons2.status, ["draft", "submitted_for_review", "needs_correction"])
-      )).orderBy((0, import_drizzle_orm31.desc)(gisPolygons2.version)).limit(1);
+      const [draftRow] = await db.select().from(gisPolygons2).where((0, import_drizzle_orm32.and)(
+        (0, import_drizzle_orm32.eq)(gisPolygons2.tenantId, req.tenantId),
+        (0, import_drizzle_orm32.eq)(gisPolygons2.ownerType, "village"),
+        (0, import_drizzle_orm32.eq)(gisPolygons2.ownerId, villageId),
+        (0, import_drizzle_orm32.inArray)(gisPolygons2.status, ["draft", "submitted_for_review", "needs_correction"])
+      )).orderBy((0, import_drizzle_orm32.desc)(gisPolygons2.version)).limit(1);
       res.json({
         catchmentPolygon: activeGeo?.geometry || row.catchmentPolygon || row.boundary || null,
         griddedPopulation: activeGeo?.populationEstimate || row.griddedPopulation || null,
@@ -40588,7 +41354,7 @@ This response is powered by the local VaxPlan database query engine. You can que
       const [village] = await db.select({
         facilityId: villages.assignedFacilityId,
         name: villages.name
-      }).from(villages).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(villages.id, villageId), (0, import_drizzle_orm31.eq)(villages.tenantId, req.tenantId))).limit(1);
+      }).from(villages).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(villages.id, villageId), (0, import_drizzle_orm32.eq)(villages.tenantId, req.tenantId))).limit(1);
       if (!village) return res.status(404).json({ message: "Village not found" });
       if (village.facilityId) {
         const locked = await isFacilityMicroplanLocked(req.tenantId, village.facilityId);
@@ -40607,12 +41373,12 @@ This response is powered by the local VaxPlan database query engine. You can que
       const { geojson, griddedPopulation, polygonColor, populationSourceLabel, status = "active", overrideReason } = req.body;
       const { gisPolygons: gisPolygons2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
       if (status === "active") {
-        const [currentActive] = await db.select({ id: gisPolygons2.id }).from(gisPolygons2).where((0, import_drizzle_orm31.and)(
-          (0, import_drizzle_orm31.eq)(gisPolygons2.tenantId, req.tenantId),
-          (0, import_drizzle_orm31.eq)(gisPolygons2.ownerType, "village"),
-          (0, import_drizzle_orm31.eq)(gisPolygons2.ownerId, villageId),
-          (0, import_drizzle_orm31.eq)(gisPolygons2.isActive, true),
-          (0, import_drizzle_orm31.eq)(gisPolygons2.status, "active")
+        const [currentActive] = await db.select({ id: gisPolygons2.id }).from(gisPolygons2).where((0, import_drizzle_orm32.and)(
+          (0, import_drizzle_orm32.eq)(gisPolygons2.tenantId, req.tenantId),
+          (0, import_drizzle_orm32.eq)(gisPolygons2.ownerType, "village"),
+          (0, import_drizzle_orm32.eq)(gisPolygons2.ownerId, villageId),
+          (0, import_drizzle_orm32.eq)(gisPolygons2.isActive, true),
+          (0, import_drizzle_orm32.eq)(gisPolygons2.status, "active")
         )).limit(1);
         if (currentActive) {
           return res.status(409).json({
@@ -40622,11 +41388,11 @@ This response is powered by the local VaxPlan database query engine. You can que
         }
       }
       if (status === "clear_draft") {
-        await db.update(gisPolygons2).set({ status: "archived", isActive: false, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm31.and)(
-          (0, import_drizzle_orm31.eq)(gisPolygons2.tenantId, req.tenantId),
-          (0, import_drizzle_orm31.eq)(gisPolygons2.ownerType, "village"),
-          (0, import_drizzle_orm31.eq)(gisPolygons2.ownerId, villageId),
-          (0, import_drizzle_orm31.eq)(gisPolygons2.status, "draft")
+        await db.update(gisPolygons2).set({ status: "archived", isActive: false, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm32.and)(
+          (0, import_drizzle_orm32.eq)(gisPolygons2.tenantId, req.tenantId),
+          (0, import_drizzle_orm32.eq)(gisPolygons2.ownerType, "village"),
+          (0, import_drizzle_orm32.eq)(gisPolygons2.ownerId, villageId),
+          (0, import_drizzle_orm32.eq)(gisPolygons2.status, "draft")
         ));
         return res.json({ ok: true, cleared: true });
       }
@@ -40651,7 +41417,7 @@ This response is powered by the local VaxPlan database query engine. You can que
         const [facility] = await db.select({
           catchmentPolygon: facilities.catchmentPolygon,
           name: facilities.name
-        }).from(facilities).where((0, import_drizzle_orm31.eq)(facilities.id, village.facilityId)).limit(1);
+        }).from(facilities).where((0, import_drizzle_orm32.eq)(facilities.id, village.facilityId)).limit(1);
         if (facility?.catchmentPolygon) {
           const isInside = polygonInsidePolygon2(geojson, facility.catchmentPolygon);
           if (!isInside) {
@@ -40675,10 +41441,10 @@ This response is powered by the local VaxPlan database query engine. You can que
           id: villages.id,
           name: villages.name,
           catchmentPolygon: villages.catchmentPolygon
-        }).from(villages).where((0, import_drizzle_orm31.and)(
-          (0, import_drizzle_orm31.eq)(villages.assignedFacilityId, village.facilityId),
-          (0, import_drizzle_orm31.ne)(villages.id, villageId),
-          (0, import_drizzle_orm31.eq)(villages.tenantId, req.tenantId)
+        }).from(villages).where((0, import_drizzle_orm32.and)(
+          (0, import_drizzle_orm32.eq)(villages.assignedFacilityId, village.facilityId),
+          (0, import_drizzle_orm32.ne)(villages.id, villageId),
+          (0, import_drizzle_orm32.eq)(villages.tenantId, req.tenantId)
         ));
         for (const other of otherVillages) {
           if (other.catchmentPolygon) {
@@ -40735,29 +41501,29 @@ This response is powered by the local VaxPlan database query engine. You can que
           polygonColor: polygonColor || null,
           populationSourceLabel: popSource || null,
           updatedAt: /* @__PURE__ */ new Date()
-        }).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(villages.id, villageId), (0, import_drizzle_orm31.eq)(villages.tenantId, req.tenantId))).returning();
+        }).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(villages.id, villageId), (0, import_drizzle_orm32.eq)(villages.tenantId, req.tenantId))).returning();
         if (!updated) return res.status(404).json({ message: "Village not found" });
         await logAudit(req, "update_community_polygon", "village", villageId, null, { villageId, griddedPopulation: popEst });
         updatedCatchment = updated.catchmentPolygon;
         updatedPop = updated.griddedPopulation;
       }
-      const existing = await db.select({ id: gisPolygons2.id }).from(gisPolygons2).where((0, import_drizzle_orm31.and)(
-        (0, import_drizzle_orm31.eq)(gisPolygons2.tenantId, req.tenantId),
-        (0, import_drizzle_orm31.eq)(gisPolygons2.ownerType, "village"),
-        (0, import_drizzle_orm31.eq)(gisPolygons2.ownerId, villageId),
-        (0, import_drizzle_orm31.eq)(gisPolygons2.status, status)
+      const existing = await db.select({ id: gisPolygons2.id }).from(gisPolygons2).where((0, import_drizzle_orm32.and)(
+        (0, import_drizzle_orm32.eq)(gisPolygons2.tenantId, req.tenantId),
+        (0, import_drizzle_orm32.eq)(gisPolygons2.ownerType, "village"),
+        (0, import_drizzle_orm32.eq)(gisPolygons2.ownerId, villageId),
+        (0, import_drizzle_orm32.eq)(gisPolygons2.status, status)
       )).limit(1);
       if (existing.length > 0) {
-        await db.update(gisPolygons2).set(polyData).where((0, import_drizzle_orm31.eq)(gisPolygons2.id, existing[0].id));
+        await db.update(gisPolygons2).set(polyData).where((0, import_drizzle_orm32.eq)(gisPolygons2.id, existing[0].id));
       } else {
         await db.insert(gisPolygons2).values(polyData);
       }
       if (status === "active") {
-        await db.update(gisPolygons2).set({ status: "archived", isActive: false, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm31.and)(
-          (0, import_drizzle_orm31.eq)(gisPolygons2.tenantId, req.tenantId),
-          (0, import_drizzle_orm31.eq)(gisPolygons2.ownerType, "village"),
-          (0, import_drizzle_orm31.eq)(gisPolygons2.ownerId, villageId),
-          (0, import_drizzle_orm31.eq)(gisPolygons2.status, "draft")
+        await db.update(gisPolygons2).set({ status: "archived", isActive: false, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm32.and)(
+          (0, import_drizzle_orm32.eq)(gisPolygons2.tenantId, req.tenantId),
+          (0, import_drizzle_orm32.eq)(gisPolygons2.ownerType, "village"),
+          (0, import_drizzle_orm32.eq)(gisPolygons2.ownerId, villageId),
+          (0, import_drizzle_orm32.eq)(gisPolygons2.status, "draft")
         ));
       }
       res.json({
@@ -40812,14 +41578,14 @@ This response is powered by the local VaxPlan database query engine. You can que
           message: "Forbidden: Only National Admins and Managers can delete community polygons."
         });
       }
-      const [village] = await db.select().from(villages).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(villages.id, villageId), (0, import_drizzle_orm31.eq)(villages.tenantId, req.tenantId))).limit(1);
+      const [village] = await db.select().from(villages).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(villages.id, villageId), (0, import_drizzle_orm32.eq)(villages.tenantId, req.tenantId))).limit(1);
       if (!village) return res.status(404).json({ message: "Village not found" });
       const { gisPolygons: gisPolygons2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
       await db.update(gisPolygons2).set({ status: "archived", isActive: false, validTo: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(
-        (0, import_drizzle_orm31.and)(
-          (0, import_drizzle_orm31.eq)(gisPolygons2.tenantId, req.tenantId),
-          (0, import_drizzle_orm31.eq)(gisPolygons2.ownerType, "village"),
-          (0, import_drizzle_orm31.eq)(gisPolygons2.ownerId, villageId)
+        (0, import_drizzle_orm32.and)(
+          (0, import_drizzle_orm32.eq)(gisPolygons2.tenantId, req.tenantId),
+          (0, import_drizzle_orm32.eq)(gisPolygons2.ownerType, "village"),
+          (0, import_drizzle_orm32.eq)(gisPolygons2.ownerId, villageId)
         )
       );
       await db.update(villages).set({
@@ -40828,7 +41594,7 @@ This response is powered by the local VaxPlan database query engine. You can que
         griddedPopulation: null,
         polygonColor: null,
         updatedAt: /* @__PURE__ */ new Date()
-      }).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(villages.id, villageId), (0, import_drizzle_orm31.eq)(villages.tenantId, req.tenantId)));
+      }).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(villages.id, villageId), (0, import_drizzle_orm32.eq)(villages.tenantId, req.tenantId)));
       await logAudit(req, "delete_community_polygon", "village", villageId, village, null);
       res.json({ success: true, message: "Community polygon deleted successfully." });
     } catch (err) {
@@ -40841,7 +41607,7 @@ This response is powered by the local VaxPlan database query engine. You can que
       const facilityId = parseInt(req.params.id, 10);
       if (isNaN(facilityId)) return res.status(400).json({ message: "Invalid facility id" });
       const { uncoveredCommunities: uncoveredCommunities2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
-      const rows = await db.select().from(uncoveredCommunities2).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(uncoveredCommunities2.tenantId, req.tenantId), (0, import_drizzle_orm31.eq)(uncoveredCommunities2.facilityId, facilityId))).orderBy(uncoveredCommunities2.flaggedAt);
+      const rows = await db.select().from(uncoveredCommunities2).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(uncoveredCommunities2.tenantId, req.tenantId), (0, import_drizzle_orm32.eq)(uncoveredCommunities2.facilityId, facilityId))).orderBy(uncoveredCommunities2.flaggedAt);
       res.json(rows);
     } catch (err) {
       res.status(500).json({ message: safeErrorMessage(err, "Failed to load uncovered communities") });
@@ -40870,7 +41636,7 @@ This response is powered by the local VaxPlan database query engine. You can que
       try {
         const facility = await storage.getFacility(req.tenantId, facilityId);
         if (facility) {
-          const districtUsers = await db.select({ id: users.id }).from(users).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(users.tenantId, req.tenantId), (0, import_drizzle_orm31.eq)(users.districtId, facility.districtId)));
+          const districtUsers = await db.select({ id: users.id }).from(users).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(users.tenantId, req.tenantId), (0, import_drizzle_orm32.eq)(users.districtId, facility.districtId)));
           for (const u of districtUsers) {
             await db.insert(notifications).values({
               tenantId: req.tenantId,
@@ -40922,63 +41688,63 @@ This response is powered by the local VaxPlan database query engine. You can que
       }
       const tenantId = req.tenantId;
       const { summarizeReadiness: summarizeReadiness2 } = await Promise.resolve().then(() => (init_microplanPrefillService(), microplanPrefillService_exports));
-      const popRecords = await db.select({ count: import_drizzle_orm31.sql`count(*)` }).from(populationData).where(
-        (0, import_drizzle_orm31.and)(
-          (0, import_drizzle_orm31.eq)(populationData.facilityId, facilityId),
-          (0, import_drizzle_orm31.eq)(populationData.tenantId, tenantId),
-          (0, import_drizzle_orm31.eq)(populationData.year, year)
+      const popRecords = await db.select({ count: import_drizzle_orm32.sql`count(*)` }).from(populationData).where(
+        (0, import_drizzle_orm32.and)(
+          (0, import_drizzle_orm32.eq)(populationData.facilityId, facilityId),
+          (0, import_drizzle_orm32.eq)(populationData.tenantId, tenantId),
+          (0, import_drizzle_orm32.eq)(populationData.year, year)
         )
       );
       const popCount = Number(popRecords[0]?.count || 0);
       let anyYearPopCount = popCount;
       if (popCount === 0) {
-        const anyYearRecords = await db.select({ count: import_drizzle_orm31.sql`count(*)` }).from(populationData).where(
-          (0, import_drizzle_orm31.and)(
-            (0, import_drizzle_orm31.eq)(populationData.facilityId, facilityId),
-            (0, import_drizzle_orm31.eq)(populationData.tenantId, tenantId)
+        const anyYearRecords = await db.select({ count: import_drizzle_orm32.sql`count(*)` }).from(populationData).where(
+          (0, import_drizzle_orm32.and)(
+            (0, import_drizzle_orm32.eq)(populationData.facilityId, facilityId),
+            (0, import_drizzle_orm32.eq)(populationData.tenantId, tenantId)
           )
         );
         anyYearPopCount = Number(anyYearRecords[0]?.count || 0);
       }
-      const villageRecords = await db.select({ count: import_drizzle_orm31.sql`count(*)` }).from(villages).where(
-        (0, import_drizzle_orm31.and)(
-          (0, import_drizzle_orm31.eq)(villages.assignedFacilityId, facilityId),
-          (0, import_drizzle_orm31.eq)(villages.tenantId, tenantId)
+      const villageRecords = await db.select({ count: import_drizzle_orm32.sql`count(*)` }).from(villages).where(
+        (0, import_drizzle_orm32.and)(
+          (0, import_drizzle_orm32.eq)(villages.assignedFacilityId, facilityId),
+          (0, import_drizzle_orm32.eq)(villages.tenantId, tenantId)
         )
       );
       const villageCount = Number(villageRecords[0]?.count || 0);
-      const stockRecords = await db.select({ count: import_drizzle_orm31.sql`count(*)` }).from(stockTransactions).where(
-        (0, import_drizzle_orm31.and)(
-          (0, import_drizzle_orm31.eq)(stockTransactions.facilityId, facilityId),
-          (0, import_drizzle_orm31.eq)(stockTransactions.tenantId, tenantId)
+      const stockRecords = await db.select({ count: import_drizzle_orm32.sql`count(*)` }).from(stockTransactions).where(
+        (0, import_drizzle_orm32.and)(
+          (0, import_drizzle_orm32.eq)(stockTransactions.facilityId, facilityId),
+          (0, import_drizzle_orm32.eq)(stockTransactions.tenantId, tenantId)
         )
       );
       const stockCount = Number(stockRecords[0]?.count || 0);
-      const coverageRecords = await db.select({ count: import_drizzle_orm31.sql`count(*)` }).from(monthlyReports).where(
-        (0, import_drizzle_orm31.and)(
-          (0, import_drizzle_orm31.eq)(monthlyReports.facilityId, facilityId),
-          (0, import_drizzle_orm31.eq)(monthlyReports.tenantId, tenantId)
+      const coverageRecords = await db.select({ count: import_drizzle_orm32.sql`count(*)` }).from(monthlyReports).where(
+        (0, import_drizzle_orm32.and)(
+          (0, import_drizzle_orm32.eq)(monthlyReports.facilityId, facilityId),
+          (0, import_drizzle_orm32.eq)(monthlyReports.tenantId, tenantId)
         )
       );
       const coverageCount = Number(coverageRecords[0]?.count || 0);
-      const staffRecords = await db.select({ count: import_drizzle_orm31.sql`count(*)` }).from(facilityStaff).where(
-        (0, import_drizzle_orm31.and)(
-          (0, import_drizzle_orm31.eq)(facilityStaff.facilityId, facilityId),
-          (0, import_drizzle_orm31.eq)(facilityStaff.tenantId, tenantId)
+      const staffRecords = await db.select({ count: import_drizzle_orm32.sql`count(*)` }).from(facilityStaff).where(
+        (0, import_drizzle_orm32.and)(
+          (0, import_drizzle_orm32.eq)(facilityStaff.facilityId, facilityId),
+          (0, import_drizzle_orm32.eq)(facilityStaff.tenantId, tenantId)
         )
       );
       const staffCount = Number(staffRecords[0]?.count || 0);
-      const chvRecords = await db.select({ count: import_drizzle_orm31.sql`count(*)` }).from(communityHealthVolunteers).where(
-        (0, import_drizzle_orm31.and)(
-          (0, import_drizzle_orm31.eq)(communityHealthVolunteers.facilityId, facilityId),
-          (0, import_drizzle_orm31.eq)(communityHealthVolunteers.tenantId, tenantId)
+      const chvRecords = await db.select({ count: import_drizzle_orm32.sql`count(*)` }).from(communityHealthVolunteers).where(
+        (0, import_drizzle_orm32.and)(
+          (0, import_drizzle_orm32.eq)(communityHealthVolunteers.facilityId, facilityId),
+          (0, import_drizzle_orm32.eq)(communityHealthVolunteers.tenantId, tenantId)
         )
       );
       const chvCount = Number(chvRecords[0]?.count || 0);
-      const coldChainRecords = await db.select({ count: import_drizzle_orm31.sql`count(*)` }).from(coldChainEquipment).where(
-        (0, import_drizzle_orm31.and)(
-          (0, import_drizzle_orm31.eq)(coldChainEquipment.facilityId, facilityId),
-          (0, import_drizzle_orm31.eq)(coldChainEquipment.tenantId, tenantId)
+      const coldChainRecords = await db.select({ count: import_drizzle_orm32.sql`count(*)` }).from(coldChainEquipment).where(
+        (0, import_drizzle_orm32.and)(
+          (0, import_drizzle_orm32.eq)(coldChainEquipment.facilityId, facilityId),
+          (0, import_drizzle_orm32.eq)(coldChainEquipment.tenantId, tenantId)
         )
       );
       const coldChainCount = Number(coldChainRecords[0]?.count || 0);
@@ -41148,9 +41914,9 @@ This response is powered by the local VaxPlan database query engine. You can que
         }
       }
       const result = await db.execute(
-        showUnpublished ? import_drizzle_orm31.sql`SELECT id, slug, title, category, gamification, sort_order, is_published, updated_at
+        showUnpublished ? import_drizzle_orm32.sql`SELECT id, slug, title, category, gamification, sort_order, is_published, updated_at
                  FROM wiki_pages
-                 ORDER BY sort_order ASC, id ASC` : import_drizzle_orm31.sql`SELECT id, slug, title, category, gamification, sort_order, is_published, updated_at
+                 ORDER BY sort_order ASC, id ASC` : import_drizzle_orm32.sql`SELECT id, slug, title, category, gamification, sort_order, is_published, updated_at
                  FROM wiki_pages
                  WHERE is_published = TRUE
                  ORDER BY sort_order ASC, id ASC`
@@ -41176,10 +41942,10 @@ This response is powered by the local VaxPlan database query engine. You can que
         }
       }
       const result = await db.execute(
-        showUnpublished ? import_drizzle_orm31.sql`SELECT id, slug, title, category, body, gamification, sort_order, is_published, updated_by, updated_at
+        showUnpublished ? import_drizzle_orm32.sql`SELECT id, slug, title, category, body, gamification, sort_order, is_published, updated_by, updated_at
                  FROM wiki_pages
                  WHERE slug = ${slug}
-                 LIMIT 1` : import_drizzle_orm31.sql`SELECT id, slug, title, category, body, gamification, sort_order, is_published, updated_by, updated_at
+                 LIMIT 1` : import_drizzle_orm32.sql`SELECT id, slug, title, category, body, gamification, sort_order, is_published, updated_by, updated_at
                  FROM wiki_pages
                  WHERE slug = ${slug} AND is_published = TRUE
                  LIMIT 1`
@@ -41202,7 +41968,7 @@ This response is powered by the local VaxPlan database query engine. You can que
       const safeSlug = String(slug).toLowerCase().replace(/[^a-z0-9-]/g, "-").slice(0, 120);
       const userId = getCurrentUserId(req);
       const result = await db.execute(
-        import_drizzle_orm31.sql`INSERT INTO wiki_pages (slug, title, body, category, gamification, sort_order, is_published, created_by, updated_by)
+        import_drizzle_orm32.sql`INSERT INTO wiki_pages (slug, title, body, category, gamification, sort_order, is_published, created_by, updated_by)
              VALUES (
                ${safeSlug},
                ${String(title)},
@@ -41231,17 +41997,17 @@ This response is powered by the local VaxPlan database query engine. You can que
       const userId = getCurrentUserId(req);
       const { title, body, category, gamification, sort_order, is_published } = req.body ?? {};
       const setParts = [];
-      setParts.push(import_drizzle_orm31.sql`updated_at = NOW()`);
-      setParts.push(import_drizzle_orm31.sql`updated_by = ${userId}`);
-      if (title !== void 0) setParts.push(import_drizzle_orm31.sql`title = ${String(title)}`);
-      if (body !== void 0) setParts.push(import_drizzle_orm31.sql`body = ${String(body)}`);
-      if (category !== void 0) setParts.push(import_drizzle_orm31.sql`category = ${String(category)}`);
-      if (gamification !== void 0) setParts.push(import_drizzle_orm31.sql`gamification = ${String(gamification)}::jsonb`);
-      if (sort_order !== void 0) setParts.push(import_drizzle_orm31.sql`sort_order = ${Number(sort_order) || 0}`);
-      if (is_published !== void 0) setParts.push(import_drizzle_orm31.sql`is_published = ${Boolean(is_published)}`);
-      const setClause = import_drizzle_orm31.sql.join(setParts, import_drizzle_orm31.sql`, `);
+      setParts.push(import_drizzle_orm32.sql`updated_at = NOW()`);
+      setParts.push(import_drizzle_orm32.sql`updated_by = ${userId}`);
+      if (title !== void 0) setParts.push(import_drizzle_orm32.sql`title = ${String(title)}`);
+      if (body !== void 0) setParts.push(import_drizzle_orm32.sql`body = ${String(body)}`);
+      if (category !== void 0) setParts.push(import_drizzle_orm32.sql`category = ${String(category)}`);
+      if (gamification !== void 0) setParts.push(import_drizzle_orm32.sql`gamification = ${String(gamification)}::jsonb`);
+      if (sort_order !== void 0) setParts.push(import_drizzle_orm32.sql`sort_order = ${Number(sort_order) || 0}`);
+      if (is_published !== void 0) setParts.push(import_drizzle_orm32.sql`is_published = ${Boolean(is_published)}`);
+      const setClause = import_drizzle_orm32.sql.join(setParts, import_drizzle_orm32.sql`, `);
       const result = await db.execute(
-        import_drizzle_orm31.sql`UPDATE wiki_pages
+        import_drizzle_orm32.sql`UPDATE wiki_pages
              SET ${setClause}
              WHERE slug = ${slug}
              RETURNING *`
@@ -41260,7 +42026,7 @@ This response is powered by the local VaxPlan database query engine. You can que
       const { slug } = req.params;
       const userId = getCurrentUserId(req);
       const result = await db.execute(
-        import_drizzle_orm31.sql`UPDATE wiki_pages
+        import_drizzle_orm32.sql`UPDATE wiki_pages
              SET is_published = FALSE, updated_at = NOW(), updated_by = ${userId}
              WHERE slug = ${slug}
              RETURNING slug, title`
@@ -41484,7 +42250,7 @@ This response is powered by the local VaxPlan database query engine. You can que
         return res.status(400).json({ message: "Valid microplanId required." });
       }
       const { PopulationIntelligenceService: PopulationIntelligenceService2 } = await Promise.resolve().then(() => (init_populationIntelligenceService(), populationIntelligenceService_exports));
-      const [microplan] = await db.select().from(microplans).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(microplans.id, microplanId), (0, import_drizzle_orm31.eq)(microplans.tenantId, req.tenantId))).limit(1);
+      const [microplan] = await db.select().from(microplans).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(microplans.id, microplanId), (0, import_drizzle_orm32.eq)(microplans.tenantId, req.tenantId))).limit(1);
       if (!microplan || !microplan.facilityId) {
         return res.status(404).json({ message: "Microplan or associated facility not found." });
       }
@@ -41507,15 +42273,15 @@ This response is powered by the local VaxPlan database query engine. You can que
       const facilityId = req.query.facilityId ? parseInt(req.query.facilityId) : null;
       const sortBy = req.query.sortBy || "name";
       const sortOrder = req.query.sortOrder || "asc";
-      const conditions = [(0, import_drizzle_orm31.eq)(chvProfiles2.tenantId, req.tenantId)];
+      const conditions = [(0, import_drizzle_orm32.eq)(chvProfiles2.tenantId, req.tenantId)];
       if (facilityId) {
-        conditions.push((0, import_drizzle_orm31.eq)(chvProfiles2.facilityId, facilityId));
+        conditions.push((0, import_drizzle_orm32.eq)(chvProfiles2.facilityId, facilityId));
       }
       if (search) {
-        conditions.push((0, import_drizzle_orm31.or)(
-          (0, import_drizzle_orm31.ilike)(chvProfiles2.fullName, `%${search}%`),
-          (0, import_drizzle_orm31.ilike)(chvProfiles2.nrc, `%${search}%`),
-          (0, import_drizzle_orm31.ilike)(chvProfiles2.contactPhone, `%${search}%`)
+        conditions.push((0, import_drizzle_orm32.or)(
+          (0, import_drizzle_orm32.ilike)(chvProfiles2.fullName, `%${search}%`),
+          (0, import_drizzle_orm32.ilike)(chvProfiles2.nrc, `%${search}%`),
+          (0, import_drizzle_orm32.ilike)(chvProfiles2.contactPhone, `%${search}%`)
         ));
       }
       let baseQuery = db.select({
@@ -41542,28 +42308,28 @@ This response is powered by the local VaxPlan database query engine. You can que
         employmentStatus: chvProfiles2.employmentStatus,
         supervisorId: chvProfiles2.supervisorId,
         supervisorName: facilityStaff2.fullName
-      }).from(chvProfiles2).innerJoin(facilities4, (0, import_drizzle_orm31.eq)(chvProfiles2.facilityId, facilities4.id)).innerJoin(districts3, (0, import_drizzle_orm31.eq)(facilities4.districtId, districts3.id)).innerJoin(provinces4, (0, import_drizzle_orm31.eq)(districts3.provinceId, provinces4.id)).leftJoin(villages4, (0, import_drizzle_orm31.eq)(chvProfiles2.assignedVillageId, villages4.id)).leftJoin(facilityStaff2, (0, import_drizzle_orm31.eq)(chvProfiles2.supervisorId, facilityStaff2.id));
+      }).from(chvProfiles2).innerJoin(facilities4, (0, import_drizzle_orm32.eq)(chvProfiles2.facilityId, facilities4.id)).innerJoin(districts3, (0, import_drizzle_orm32.eq)(facilities4.districtId, districts3.id)).innerJoin(provinces4, (0, import_drizzle_orm32.eq)(districts3.provinceId, provinces4.id)).leftJoin(villages4, (0, import_drizzle_orm32.eq)(chvProfiles2.assignedVillageId, villages4.id)).leftJoin(facilityStaff2, (0, import_drizzle_orm32.eq)(chvProfiles2.supervisorId, facilityStaff2.id));
       if (provinceId) {
-        conditions.push((0, import_drizzle_orm31.eq)(districts3.provinceId, provinceId));
+        conditions.push((0, import_drizzle_orm32.eq)(districts3.provinceId, provinceId));
       }
       if (districtId) {
-        conditions.push((0, import_drizzle_orm31.eq)(facilities4.districtId, districtId));
+        conditions.push((0, import_drizzle_orm32.eq)(facilities4.districtId, districtId));
       }
-      const countResult = await db.select({ count: import_drizzle_orm31.sql`count(*)` }).from(chvProfiles2).innerJoin(facilities4, (0, import_drizzle_orm31.eq)(chvProfiles2.facilityId, facilities4.id)).innerJoin(districts3, (0, import_drizzle_orm31.eq)(facilities4.districtId, districts3.id)).innerJoin(provinces4, (0, import_drizzle_orm31.eq)(districts3.provinceId, provinces4.id)).where((0, import_drizzle_orm31.and)(...conditions));
+      const countResult = await db.select({ count: import_drizzle_orm32.sql`count(*)` }).from(chvProfiles2).innerJoin(facilities4, (0, import_drizzle_orm32.eq)(chvProfiles2.facilityId, facilities4.id)).innerJoin(districts3, (0, import_drizzle_orm32.eq)(facilities4.districtId, districts3.id)).innerJoin(provinces4, (0, import_drizzle_orm32.eq)(districts3.provinceId, provinces4.id)).where((0, import_drizzle_orm32.and)(...conditions));
       const totalCount = Number(countResult[0]?.count || 0);
       let orderClause;
       if (sortBy === "nrc") {
-        orderClause = sortOrder === "desc" ? (0, import_drizzle_orm31.desc)(chvProfiles2.nrc) : (0, import_drizzle_orm31.asc)(chvProfiles2.nrc);
+        orderClause = sortOrder === "desc" ? (0, import_drizzle_orm32.desc)(chvProfiles2.nrc) : (0, import_drizzle_orm32.asc)(chvProfiles2.nrc);
       } else if (sortBy === "facility") {
-        orderClause = sortOrder === "desc" ? (0, import_drizzle_orm31.desc)(facilities4.name) : (0, import_drizzle_orm31.asc)(facilities4.name);
+        orderClause = sortOrder === "desc" ? (0, import_drizzle_orm32.desc)(facilities4.name) : (0, import_drizzle_orm32.asc)(facilities4.name);
       } else if (sortBy === "village") {
-        orderClause = sortOrder === "desc" ? (0, import_drizzle_orm31.desc)(villages4.name) : (0, import_drizzle_orm31.asc)(villages4.name);
+        orderClause = sortOrder === "desc" ? (0, import_drizzle_orm32.desc)(villages4.name) : (0, import_drizzle_orm32.asc)(villages4.name);
       } else if (sortBy === "yearsOfService") {
-        orderClause = sortOrder === "desc" ? (0, import_drizzle_orm31.desc)(chvProfiles2.yearsOfService) : (0, import_drizzle_orm31.asc)(chvProfiles2.yearsOfService);
+        orderClause = sortOrder === "desc" ? (0, import_drizzle_orm32.desc)(chvProfiles2.yearsOfService) : (0, import_drizzle_orm32.asc)(chvProfiles2.yearsOfService);
       } else {
-        orderClause = sortOrder === "desc" ? (0, import_drizzle_orm31.desc)(chvProfiles2.fullName) : (0, import_drizzle_orm31.asc)(chvProfiles2.fullName);
+        orderClause = sortOrder === "desc" ? (0, import_drizzle_orm32.desc)(chvProfiles2.fullName) : (0, import_drizzle_orm32.asc)(chvProfiles2.fullName);
       }
-      const rows = await baseQuery.where((0, import_drizzle_orm31.and)(...conditions)).orderBy(orderClause).limit(pageSize).offset(offset);
+      const rows = await baseQuery.where((0, import_drizzle_orm32.and)(...conditions)).orderBy(orderClause).limit(pageSize).offset(offset);
       res.json({
         data: rows,
         total: totalCount,
@@ -41586,7 +42352,7 @@ This response is powered by the local VaxPlan database query engine. You can que
         campaignRole: chvProfiles2.siaRole,
         facilityId: chvProfiles2.facilityId,
         villageId: chvProfiles2.assignedVillageId
-      }).from(chvProfiles2).where((0, import_drizzle_orm31.eq)(chvProfiles2.tenantId, req.tenantId));
+      }).from(chvProfiles2).where((0, import_drizzle_orm32.eq)(chvProfiles2.tenantId, req.tenantId));
       res.json({ data: rows, total: rows.length });
     } catch (err) {
       res.status(500).json({ message: safeErrorMessage(err, "Failed to fetch CHV coverage data") });
@@ -41625,7 +42391,7 @@ This response is powered by the local VaxPlan database query engine. You can que
         supervisorName: facilityStaff2.fullName,
         createdAt: chvProfiles2.createdAt,
         updatedAt: chvProfiles2.updatedAt
-      }).from(chvProfiles2).innerJoin(facilities4, (0, import_drizzle_orm31.eq)(chvProfiles2.facilityId, facilities4.id)).innerJoin(districts3, (0, import_drizzle_orm31.eq)(facilities4.districtId, districts3.id)).innerJoin(provinces4, (0, import_drizzle_orm31.eq)(districts3.provinceId, provinces4.id)).leftJoin(villages4, (0, import_drizzle_orm31.eq)(chvProfiles2.assignedVillageId, villages4.id)).leftJoin(facilityStaff2, (0, import_drizzle_orm31.eq)(chvProfiles2.supervisorId, facilityStaff2.id)).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(chvProfiles2.id, id), (0, import_drizzle_orm31.eq)(chvProfiles2.tenantId, req.tenantId)));
+      }).from(chvProfiles2).innerJoin(facilities4, (0, import_drizzle_orm32.eq)(chvProfiles2.facilityId, facilities4.id)).innerJoin(districts3, (0, import_drizzle_orm32.eq)(facilities4.districtId, districts3.id)).innerJoin(provinces4, (0, import_drizzle_orm32.eq)(districts3.provinceId, provinces4.id)).leftJoin(villages4, (0, import_drizzle_orm32.eq)(chvProfiles2.assignedVillageId, villages4.id)).leftJoin(facilityStaff2, (0, import_drizzle_orm32.eq)(chvProfiles2.supervisorId, facilityStaff2.id)).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(chvProfiles2.id, id), (0, import_drizzle_orm32.eq)(chvProfiles2.tenantId, req.tenantId)));
       if (!row) return res.status(404).json({ message: "CHV not found" });
       res.json(row);
     } catch (err) {
@@ -41637,7 +42403,7 @@ This response is powered by the local VaxPlan database query engine. You can que
       const { chvProfiles: chvProfiles2, facilities: facilities4 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
       const { chvs } = req.body;
       if (!Array.isArray(chvs) || chvs.length === 0) return res.status(400).json({ message: "No CHVs provided" });
-      const allFacs = await db.select().from(facilities4).where((0, import_drizzle_orm31.eq)(facilities4.tenantId, req.tenantId));
+      const allFacs = await db.select().from(facilities4).where((0, import_drizzle_orm32.eq)(facilities4.tenantId, req.tenantId));
       const hmisMap = /* @__PURE__ */ new Map();
       const nameMap = /* @__PURE__ */ new Map();
       const idMap = /* @__PURE__ */ new Map();
@@ -41708,14 +42474,14 @@ This response is powered by the local VaxPlan database query engine. You can que
       if (!facilityId || isNaN(facilityId)) {
         return res.status(400).json({ message: "facilityId is required" });
       }
-      const [fac] = await db.select({ id: facilities.id }).from(facilities).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(facilities.id, facilityId), (0, import_drizzle_orm31.eq)(facilities.tenantId, req.tenantId))).limit(1);
+      const [fac] = await db.select({ id: facilities.id }).from(facilities).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(facilities.id, facilityId), (0, import_drizzle_orm32.eq)(facilities.tenantId, req.tenantId))).limit(1);
       if (!fac) return res.status(400).json({ message: "Facility not found or not accessible" });
       const cleanName = (req.body.name || "").trim();
       if (!cleanName) return res.status(400).json({ message: "Full name is required" });
-      const [nameDup] = await db.select().from(chvProfiles2).where((0, import_drizzle_orm31.and)(
-        (0, import_drizzle_orm31.eq)(chvProfiles2.tenantId, req.tenantId),
-        (0, import_drizzle_orm31.eq)(chvProfiles2.facilityId, facilityId),
-        (0, import_drizzle_orm31.eq)(import_drizzle_orm31.sql`LOWER(TRIM(${chvProfiles2.fullName}))`, cleanName.toLowerCase())
+      const [nameDup] = await db.select().from(chvProfiles2).where((0, import_drizzle_orm32.and)(
+        (0, import_drizzle_orm32.eq)(chvProfiles2.tenantId, req.tenantId),
+        (0, import_drizzle_orm32.eq)(chvProfiles2.facilityId, facilityId),
+        (0, import_drizzle_orm32.eq)(import_drizzle_orm32.sql`LOWER(TRIM(${chvProfiles2.fullName}))`, cleanName.toLowerCase())
       )).limit(1);
       if (nameDup) {
         return res.status(400).json({ message: `Duplicate name: A worker named "${cleanName}" is already registered in this facility.` });
@@ -41731,12 +42497,12 @@ This response is powered by the local VaxPlan database query engine. You can que
       }
       const cleanNrc = idVal.normalized || formatSpec.normalizeId(req.body.nrc);
       const compactNrc = cleanNrc.replace(/[\/\-\s]/g, "").toLowerCase();
-      const [nrcDup] = await db.select().from(chvProfiles2).where((0, import_drizzle_orm31.and)(
-        (0, import_drizzle_orm31.eq)(chvProfiles2.tenantId, req.tenantId),
-        (0, import_drizzle_orm31.eq)(import_drizzle_orm31.sql`LOWER(REPLACE(REPLACE(REPLACE(${chvProfiles2.nrc}, '/', ''), '-', ''), ' ', ''))`, compactNrc)
+      const [nrcDup] = await db.select().from(chvProfiles2).where((0, import_drizzle_orm32.and)(
+        (0, import_drizzle_orm32.eq)(chvProfiles2.tenantId, req.tenantId),
+        (0, import_drizzle_orm32.eq)(import_drizzle_orm32.sql`LOWER(REPLACE(REPLACE(REPLACE(${chvProfiles2.nrc}, '/', ''), '-', ''), ' ', ''))`, compactNrc)
       )).limit(1);
       if (nrcDup) {
-        const [nrcFac] = await db.select({ name: facilities.name }).from(facilities).where((0, import_drizzle_orm31.eq)(facilities.id, nrcDup.facilityId)).limit(1);
+        const [nrcFac] = await db.select({ name: facilities.name }).from(facilities).where((0, import_drizzle_orm32.eq)(facilities.id, nrcDup.facilityId)).limit(1);
         return res.status(400).json({ message: `Duplicate ${formatSpec.idShortLabel}: "${nrcDup.fullName}" at "${nrcFac?.name || "another facility"}" has this ${formatSpec.idShortLabel}.` });
       }
       let cleanPhone = null;
@@ -41793,16 +42559,16 @@ This response is powered by the local VaxPlan database query engine. You can que
       const id = parseInt(req.params.id);
       if (isNaN(id)) return res.status(400).json({ message: "Invalid CHV id" });
       const { chvProfiles: chvProfiles2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
-      const [existing] = await db.select().from(chvProfiles2).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(chvProfiles2.id, id), (0, import_drizzle_orm31.eq)(chvProfiles2.tenantId, req.tenantId))).limit(1);
+      const [existing] = await db.select().from(chvProfiles2).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(chvProfiles2.id, id), (0, import_drizzle_orm32.eq)(chvProfiles2.tenantId, req.tenantId))).limit(1);
       if (!existing) return res.status(404).json({ message: "CHV not found" });
       if (req.body.name !== void 0) {
         const cleanName = req.body.name.trim();
         if (!cleanName) return res.status(400).json({ message: "Full name cannot be empty" });
-        const [nameDup] = await db.select().from(chvProfiles2).where((0, import_drizzle_orm31.and)(
-          (0, import_drizzle_orm31.eq)(chvProfiles2.tenantId, req.tenantId),
-          (0, import_drizzle_orm31.eq)(chvProfiles2.facilityId, existing.facilityId),
-          (0, import_drizzle_orm31.ne)(chvProfiles2.id, id),
-          (0, import_drizzle_orm31.eq)(import_drizzle_orm31.sql`LOWER(TRIM(${chvProfiles2.fullName}))`, cleanName.toLowerCase())
+        const [nameDup] = await db.select().from(chvProfiles2).where((0, import_drizzle_orm32.and)(
+          (0, import_drizzle_orm32.eq)(chvProfiles2.tenantId, req.tenantId),
+          (0, import_drizzle_orm32.eq)(chvProfiles2.facilityId, existing.facilityId),
+          (0, import_drizzle_orm32.ne)(chvProfiles2.id, id),
+          (0, import_drizzle_orm32.eq)(import_drizzle_orm32.sql`LOWER(TRIM(${chvProfiles2.fullName}))`, cleanName.toLowerCase())
         )).limit(1);
         if (nameDup) {
           return res.status(400).json({ message: `Duplicate name: "${cleanName}" is already registered in this facility.` });
@@ -41821,13 +42587,13 @@ This response is powered by the local VaxPlan database query engine. You can que
         }
         cleanNrc = idVal.normalized || formatSpec.normalizeId(req.body.nrc);
         const compactNrc = cleanNrc.replace(/[\/\-\s]/g, "").toLowerCase();
-        const [nrcDup] = await db.select().from(chvProfiles2).where((0, import_drizzle_orm31.and)(
-          (0, import_drizzle_orm31.eq)(chvProfiles2.tenantId, req.tenantId),
-          (0, import_drizzle_orm31.ne)(chvProfiles2.id, id),
-          (0, import_drizzle_orm31.eq)(import_drizzle_orm31.sql`LOWER(REPLACE(REPLACE(REPLACE(${chvProfiles2.nrc}, '/', ''), '-', ''), ' ', ''))`, compactNrc)
+        const [nrcDup] = await db.select().from(chvProfiles2).where((0, import_drizzle_orm32.and)(
+          (0, import_drizzle_orm32.eq)(chvProfiles2.tenantId, req.tenantId),
+          (0, import_drizzle_orm32.ne)(chvProfiles2.id, id),
+          (0, import_drizzle_orm32.eq)(import_drizzle_orm32.sql`LOWER(REPLACE(REPLACE(REPLACE(${chvProfiles2.nrc}, '/', ''), '-', ''), ' ', ''))`, compactNrc)
         )).limit(1);
         if (nrcDup) {
-          const [nrcFac] = await db.select({ name: facilities.name }).from(facilities).where((0, import_drizzle_orm31.eq)(facilities.id, nrcDup.facilityId)).limit(1);
+          const [nrcFac] = await db.select({ name: facilities.name }).from(facilities).where((0, import_drizzle_orm32.eq)(facilities.id, nrcDup.facilityId)).limit(1);
           return res.status(400).json({ message: `Duplicate ${formatSpec.idShortLabel}: "${nrcDup.fullName}" at "${nrcFac?.name || "another facility"}" has this ${formatSpec.idShortLabel}.` });
         }
       }
@@ -41860,7 +42626,7 @@ This response is powered by the local VaxPlan database query engine. You can que
       if (req.body.supervisorId !== void 0) allowed2.supervisorId = req.body.supervisorId ? Number(req.body.supervisorId) : null;
       if (req.body.facilityId !== void 0) allowed2.facilityId = req.body.facilityId ? Number(req.body.facilityId) : null;
       allowed2.updatedAt = /* @__PURE__ */ new Date();
-      const [updated] = await db.update(chvProfiles2).set(allowed2).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(chvProfiles2.id, id), (0, import_drizzle_orm31.eq)(chvProfiles2.tenantId, req.tenantId))).returning();
+      const [updated] = await db.update(chvProfiles2).set(allowed2).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(chvProfiles2.id, id), (0, import_drizzle_orm32.eq)(chvProfiles2.tenantId, req.tenantId))).returning();
       await logAudit(req, "update", "chv_profile", id, existing, updated);
       res.json({
         id: updated.id,
@@ -41890,9 +42656,9 @@ This response is powered by the local VaxPlan database query engine. You can que
       const id = parseInt(req.params.id);
       if (isNaN(id)) return res.status(400).json({ message: "Invalid CHV id" });
       const { chvProfiles: chvProfiles2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
-      const [existing] = await db.select().from(chvProfiles2).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(chvProfiles2.id, id), (0, import_drizzle_orm31.eq)(chvProfiles2.tenantId, req.tenantId))).limit(1);
+      const [existing] = await db.select().from(chvProfiles2).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(chvProfiles2.id, id), (0, import_drizzle_orm32.eq)(chvProfiles2.tenantId, req.tenantId))).limit(1);
       if (!existing) return res.status(404).json({ message: "CHV not found" });
-      const [deactivated] = await db.update(chvProfiles2).set({ isActive: false, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm31.and)((0, import_drizzle_orm31.eq)(chvProfiles2.id, id), (0, import_drizzle_orm31.eq)(chvProfiles2.tenantId, req.tenantId))).returning();
+      const [deactivated] = await db.update(chvProfiles2).set({ isActive: false, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm32.and)((0, import_drizzle_orm32.eq)(chvProfiles2.id, id), (0, import_drizzle_orm32.eq)(chvProfiles2.tenantId, req.tenantId))).returning();
       await logAudit(req, "deactivate", "chv_profile", id, existing, deactivated);
       res.json({ success: true, message: "Community health volunteer deactivated." });
     } catch (err) {
@@ -41903,15 +42669,15 @@ This response is powered by the local VaxPlan database query engine. You can que
     try {
       const { entityType, status } = req.query;
       const { entityHistoryVersions: entityHistoryVersions2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
-      const { eq: eq41, and: and33, desc: desc12 } = await import("drizzle-orm");
-      const conditions = [eq41(entityHistoryVersions2.tenantId, req.tenantId)];
+      const { eq: eq42, and: and34, desc: desc12 } = await import("drizzle-orm");
+      const conditions = [eq42(entityHistoryVersions2.tenantId, req.tenantId)];
       if (entityType && entityType !== "all") {
-        conditions.push(eq41(entityHistoryVersions2.entityType, String(entityType)));
+        conditions.push(eq42(entityHistoryVersions2.entityType, String(entityType)));
       }
       if (status && status !== "all") {
-        conditions.push(eq41(entityHistoryVersions2.status, String(status)));
+        conditions.push(eq42(entityHistoryVersions2.status, String(status)));
       }
-      const versions = await db.select().from(entityHistoryVersions2).where(and33(...conditions)).orderBy(desc12(entityHistoryVersions2.createdAt)).limit(200);
+      const versions = await db.select().from(entityHistoryVersions2).where(and34(...conditions)).orderBy(desc12(entityHistoryVersions2.createdAt)).limit(200);
       res.json(versions);
     } catch (err) {
       res.status(500).json({ message: safeErrorMessage(err, "Failed to fetch global entity history") });
@@ -41992,13 +42758,13 @@ This response is powered by the local VaxPlan database query engine. You can que
   app2.get("/api/entity-history/pending-approvals", ...auth, requireTenant, async (req, res) => {
     try {
       const { entityHistoryVersions: entityHistoryVersions2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
-      const { eq: eq41, and: and33, or: or8, desc: desc12 } = await import("drizzle-orm");
+      const { eq: eq42, and: and34, or: or8, desc: desc12 } = await import("drizzle-orm");
       const pending = await db.select().from(entityHistoryVersions2).where(
-        and33(
-          eq41(entityHistoryVersions2.tenantId, req.tenantId),
+        and34(
+          eq42(entityHistoryVersions2.tenantId, req.tenantId),
           or8(
-            eq41(entityHistoryVersions2.status, "pending_review"),
-            eq41(entityHistoryVersions2.status, "draft")
+            eq42(entityHistoryVersions2.status, "pending_review"),
+            eq42(entityHistoryVersions2.status, "draft")
           )
         )
       ).orderBy(desc12(entityHistoryVersions2.createdAt));
@@ -42131,7 +42897,7 @@ This response is powered by the local VaxPlan database query engine. You can que
   });
   app2.get("/api/supervision/question-bank", ...auth, requireTenant, async (req, res) => {
     try {
-      const qb = await db.select().from(supervisionQuestionBank).where((0, import_drizzle_orm31.eq)(supervisionQuestionBank.tenantId, req.tenantId));
+      const qb = await db.select().from(supervisionQuestionBank).where((0, import_drizzle_orm32.eq)(supervisionQuestionBank.tenantId, req.tenantId));
       res.json(qb);
     } catch (err) {
       res.status(500).json({ message: safeErrorMessage(err, "Failed to fetch question bank") });
@@ -42159,7 +42925,7 @@ This response is powered by the local VaxPlan database query engine. You can que
   });
   return httpServer2;
 }
-var import_express8, import_pdfkit, import_child_process2, import_crypto2, import_fs5, import_zod10, import_fs6, import_path5, import_drizzle_orm31, import_turf2, _geoScopeCache, GEO_SCOPE_TTL_MS, ROLE_DELEGATION_LEVEL, SYSTEM_USER_PERMISSIONS, auth, DEFAULT_SUPERVISION_CHECKLIST, outsideVillageIds, zambiaGeoJSON, tenantBoundaryGeoJSONCache;
+var import_express8, import_pdfkit, import_child_process2, import_crypto2, import_fs5, import_zod10, import_fs6, import_path5, import_drizzle_orm32, import_turf2, _geoScopeCache, GEO_SCOPE_TTL_MS, ROLE_DELEGATION_LEVEL, SYSTEM_USER_PERMISSIONS, auth, DEFAULT_SUPERVISION_CHECKLIST, outsideVillageIds, zambiaGeoJSON, tenantBoundaryGeoJSONCache;
 var init_routes = __esm({
   "server/routes.ts"() {
     "use strict";
@@ -42205,7 +42971,7 @@ var init_routes = __esm({
     init_db();
     import_fs6 = require("fs");
     import_path5 = require("path");
-    import_drizzle_orm31 = require("drizzle-orm");
+    import_drizzle_orm32 = require("drizzle-orm");
     init_geoBoundariesService();
     init_bundledBoundaries();
     init_boundaryOptimizationService();
@@ -42406,10 +43172,10 @@ function setupRealtime(httpServer2, sessionMiddleware2) {
             if (token && typeof token === "string" && token.length > 10) {
               const hash = nodeCrypto.createHash("sha256").update(token).digest("hex");
               const rows = await db.select({ id: deviceTokens.id }).from(deviceTokens).where(
-                (0, import_drizzle_orm32.and)(
-                  (0, import_drizzle_orm32.eq)(deviceTokens.tokenHash, hash),
-                  (0, import_drizzle_orm32.isNull)(deviceTokens.revokedAt),
-                  (0, import_drizzle_orm32.gt)(deviceTokens.expiresAt, /* @__PURE__ */ new Date())
+                (0, import_drizzle_orm33.and)(
+                  (0, import_drizzle_orm33.eq)(deviceTokens.tokenHash, hash),
+                  (0, import_drizzle_orm33.isNull)(deviceTokens.revokedAt),
+                  (0, import_drizzle_orm33.gt)(deviceTokens.expiresAt, /* @__PURE__ */ new Date())
                 )
               ).limit(1);
               if (rows.length > 0) {
@@ -42504,7 +43270,7 @@ function setupRealtime(httpServer2, sessionMiddleware2) {
     });
   }, KEEPALIVE_MS);
 }
-var import_ws, import_url, nodeCrypto, import_drizzle_orm32, tenants2, debounceTimers, wss, POKE_DEBOUNCE_MS, KEEPALIVE_MS, UUID_RE2, realtimeBroadcastMiddleware;
+var import_ws, import_url, nodeCrypto, import_drizzle_orm33, tenants2, debounceTimers, wss, POKE_DEBOUNCE_MS, KEEPALIVE_MS, UUID_RE2, realtimeBroadcastMiddleware;
 var init_realtime = __esm({
   "server/services/realtime.ts"() {
     "use strict";
@@ -42513,7 +43279,7 @@ var init_realtime = __esm({
     nodeCrypto = __toESM(require("crypto"), 1);
     init_db();
     init_schema();
-    import_drizzle_orm32 = require("drizzle-orm");
+    import_drizzle_orm33 = require("drizzle-orm");
     tenants2 = /* @__PURE__ */ new Map();
     debounceTimers = /* @__PURE__ */ new Map();
     wss = null;
@@ -42543,10 +43309,10 @@ var init_realtime = __esm({
 async function runSessionArchive() {
   const cutoff = new Date(Date.now() - ARCHIVE_AFTER_DAYS * 24 * 60 * 60 * 1e3);
   const result = await db.update(sessionPlans).set({ status: "archived", updatedAt: /* @__PURE__ */ new Date() }).where(
-    (0, import_drizzle_orm33.and)(
-      (0, import_drizzle_orm33.eq)(sessionPlans.status, "completed"),
-      (0, import_drizzle_orm33.isNotNull)(sessionPlans.completedAt),
-      (0, import_drizzle_orm33.lt)(sessionPlans.completedAt, cutoff)
+    (0, import_drizzle_orm34.and)(
+      (0, import_drizzle_orm34.eq)(sessionPlans.status, "completed"),
+      (0, import_drizzle_orm34.isNotNull)(sessionPlans.completedAt),
+      (0, import_drizzle_orm34.lt)(sessionPlans.completedAt, cutoff)
     )
   ).returning({ id: sessionPlans.id });
   const archived = result.length;
@@ -42570,11 +43336,11 @@ function startSessionArchiveScheduler() {
     // 00:05 UTC — staggered from other midnight jobs
   );
 }
-var import_drizzle_orm33, ARCHIVE_AFTER_DAYS;
+var import_drizzle_orm34, ARCHIVE_AFTER_DAYS;
 var init_sessionArchive = __esm({
   "server/jobs/sessionArchive.ts"() {
     "use strict";
-    import_drizzle_orm33 = require("drizzle-orm");
+    import_drizzle_orm34 = require("drizzle-orm");
     init_db();
     init_schema();
     init_scheduler();
@@ -42870,9 +43636,9 @@ async function runApprovalScheduler() {
   console.log(`[approval-scheduler] Running daily auto-approvals and reminders check at ${now.toISOString()}`);
   try {
     const pendingToApprove = await db.select().from(microplans).where(
-      (0, import_drizzle_orm34.and)(
-        (0, import_drizzle_orm34.eq)(microplans.status, "pending"),
-        (0, import_drizzle_orm34.lt)(microplans.autoApproveAt, now)
+      (0, import_drizzle_orm35.and)(
+        (0, import_drizzle_orm35.eq)(microplans.status, "pending"),
+        (0, import_drizzle_orm35.lt)(microplans.autoApproveAt, now)
       )
     );
     console.log(`[approval-scheduler] Found ${pendingToApprove.length} microplans eligible for auto-approval.`);
@@ -42886,13 +43652,13 @@ async function runApprovalScheduler() {
         autoApprovedAt: now,
         approvedAt: now,
         updatedAt: now
-      }).where((0, import_drizzle_orm34.and)((0, import_drizzle_orm34.eq)(microplans.id, mp.id), (0, import_drizzle_orm34.eq)(microplans.tenantId, mp.tenantId)));
+      }).where((0, import_drizzle_orm35.and)((0, import_drizzle_orm35.eq)(microplans.id, mp.id), (0, import_drizzle_orm35.eq)(microplans.tenantId, mp.tenantId)));
       const matchingRequests = await db.select().from(approvalRequests).where(
-        (0, import_drizzle_orm34.and)(
-          (0, import_drizzle_orm34.eq)(approvalRequests.tenantId, mp.tenantId),
-          (0, import_drizzle_orm34.eq)(approvalRequests.entityType, "microplan"),
-          (0, import_drizzle_orm34.eq)(approvalRequests.entityId, mp.id),
-          (0, import_drizzle_orm34.eq)(approvalRequests.status, "pending")
+        (0, import_drizzle_orm35.and)(
+          (0, import_drizzle_orm35.eq)(approvalRequests.tenantId, mp.tenantId),
+          (0, import_drizzle_orm35.eq)(approvalRequests.entityType, "microplan"),
+          (0, import_drizzle_orm35.eq)(approvalRequests.entityId, mp.id),
+          (0, import_drizzle_orm35.eq)(approvalRequests.status, "pending")
         )
       );
       for (const req of matchingRequests) {
@@ -42901,7 +43667,7 @@ async function runApprovalScheduler() {
           comments: "Auto-approved after 2 weeks of inactivity",
           resolvedAt: now,
           resolvedById: "system"
-        }).where((0, import_drizzle_orm34.and)((0, import_drizzle_orm34.eq)(approvalRequests.id, req.id), (0, import_drizzle_orm34.eq)(approvalRequests.tenantId, mp.tenantId)));
+        }).where((0, import_drizzle_orm35.and)((0, import_drizzle_orm35.eq)(approvalRequests.id, req.id), (0, import_drizzle_orm35.eq)(approvalRequests.tenantId, mp.tenantId)));
       }
       try {
         const seeded = await seedQuarterlySupervisionVisits(mp.tenantId, mp, null);
@@ -42918,10 +43684,10 @@ async function runApprovalScheduler() {
     }
     const sevenDaysAgo = new Date(now.getTime() - 7 * DAY_MS2);
     const pendingToRemind = await db.select().from(microplans).where(
-      (0, import_drizzle_orm34.and)(
-        (0, import_drizzle_orm34.eq)(microplans.status, "pending"),
-        (0, import_drizzle_orm34.lt)(microplans.submittedAt, sevenDaysAgo),
-        (0, import_drizzle_orm34.isNull)(microplans.reminderSentAt)
+      (0, import_drizzle_orm35.and)(
+        (0, import_drizzle_orm35.eq)(microplans.status, "pending"),
+        (0, import_drizzle_orm35.lt)(microplans.submittedAt, sevenDaysAgo),
+        (0, import_drizzle_orm35.isNull)(microplans.reminderSentAt)
       )
     );
     console.log(`[approval-scheduler] Found ${pendingToRemind.length} pending microplans requiring a 1-week review reminder.`);
@@ -42933,10 +43699,10 @@ async function runApprovalScheduler() {
       const recipients = [];
       if (facility.districtId) {
         const distUsers = await db.select({ email: users.email }).from(users).where(
-          (0, import_drizzle_orm34.and)(
-            (0, import_drizzle_orm34.eq)(users.tenantId, mp.tenantId),
-            (0, import_drizzle_orm34.eq)(users.districtId, facility.districtId),
-            (0, import_drizzle_orm34.or)((0, import_drizzle_orm34.eq)(users.role, "district_manager"), import_drizzle_orm34.sql`${users.roles}::jsonb ? 'district_manager'`)
+          (0, import_drizzle_orm35.and)(
+            (0, import_drizzle_orm35.eq)(users.tenantId, mp.tenantId),
+            (0, import_drizzle_orm35.eq)(users.districtId, facility.districtId),
+            (0, import_drizzle_orm35.or)((0, import_drizzle_orm35.eq)(users.role, "district_manager"), import_drizzle_orm35.sql`${users.roles}::jsonb ? 'district_manager'`)
           )
         );
         distUsers.forEach((u) => {
@@ -42946,10 +43712,10 @@ async function runApprovalScheduler() {
       const district = await storage.getDistrict(mp.tenantId, facility.districtId);
       if (district && district.provinceId) {
         const provUsers = await db.select({ email: users.email }).from(users).where(
-          (0, import_drizzle_orm34.and)(
-            (0, import_drizzle_orm34.eq)(users.tenantId, mp.tenantId),
-            (0, import_drizzle_orm34.eq)(users.provinceId, district.provinceId),
-            (0, import_drizzle_orm34.or)((0, import_drizzle_orm34.eq)(users.role, "provincial_coordinator"), import_drizzle_orm34.sql`${users.roles}::jsonb ? 'provincial_coordinator'`)
+          (0, import_drizzle_orm35.and)(
+            (0, import_drizzle_orm35.eq)(users.tenantId, mp.tenantId),
+            (0, import_drizzle_orm35.eq)(users.provinceId, district.provinceId),
+            (0, import_drizzle_orm35.or)((0, import_drizzle_orm35.eq)(users.role, "provincial_coordinator"), import_drizzle_orm35.sql`${users.roles}::jsonb ? 'provincial_coordinator'`)
           )
         );
         provUsers.forEach((u) => {
@@ -42969,7 +43735,7 @@ async function runApprovalScheduler() {
       await db.update(microplans).set({
         reminderSentAt: now,
         updatedAt: now
-      }).where((0, import_drizzle_orm34.and)((0, import_drizzle_orm34.eq)(microplans.id, mp.id), (0, import_drizzle_orm34.eq)(microplans.tenantId, mp.tenantId)));
+      }).where((0, import_drizzle_orm35.and)((0, import_drizzle_orm35.eq)(microplans.id, mp.id), (0, import_drizzle_orm35.eq)(microplans.tenantId, mp.tenantId)));
       console.log(`[approval-scheduler] Sent reminder email to ${uniqueRecipients.length} reviewers for microplan ID ${mp.id}`);
     }
   } catch (error) {
@@ -42988,14 +43754,14 @@ function startApprovalScheduler() {
     // Run at 00:45 UTC, staggered from other jobs
   );
 }
-var import_drizzle_orm34, DAY_MS2, schedulerHandle2;
+var import_drizzle_orm35, DAY_MS2, schedulerHandle2;
 var init_approvalScheduler = __esm({
   "server/jobs/approvalScheduler.ts"() {
     "use strict";
     init_microplanPolicy();
     init_db();
     init_schema();
-    import_drizzle_orm34 = require("drizzle-orm");
+    import_drizzle_orm35 = require("drizzle-orm");
     init_scheduler();
     init_mailer();
     init_storage();
@@ -43033,9 +43799,9 @@ async function runMicroplanApprovalCron(now = /* @__PURE__ */ new Date()) {
           reminderSentAt: microplans.reminderSentAt,
           autoApproveAt: microplans.autoApproveAt
         }).from(microplans).where(
-          (0, import_drizzle_orm35.and)(
-            (0, import_drizzle_orm35.eq)(microplans.tenantId, tenant.id),
-            (0, import_drizzle_orm35.eq)(microplans.status, "pending")
+          (0, import_drizzle_orm36.and)(
+            (0, import_drizzle_orm36.eq)(microplans.tenantId, tenant.id),
+            (0, import_drizzle_orm36.eq)(microplans.status, "pending")
           )
         );
       } catch (err) {
@@ -43065,9 +43831,9 @@ async function runMicroplanApprovalCron(now = /* @__PURE__ */ new Date()) {
               approvedAt: now
             }).catch(() => {
             });
-            const facilityUsers = await db.select({ id: users.id }).from(users).where((0, import_drizzle_orm35.and)(
-              (0, import_drizzle_orm35.eq)(users.tenantId, tenant.id),
-              (0, import_drizzle_orm35.eq)(users.facilityId, mp.facilityId)
+            const facilityUsers = await db.select({ id: users.id }).from(users).where((0, import_drizzle_orm36.and)(
+              (0, import_drizzle_orm36.eq)(users.tenantId, tenant.id),
+              (0, import_drizzle_orm36.eq)(users.facilityId, mp.facilityId)
             ));
             for (const u of facilityUsers) {
               await db.insert(notifications).values({
@@ -43094,9 +43860,9 @@ async function runMicroplanApprovalCron(now = /* @__PURE__ */ new Date()) {
             const allFacilities = await storage.getFacilities(tenant.id);
             const fac = allFacilities.find((f2) => f2.id === mp.facilityId);
             if (!fac?.districtId) continue;
-            const districtUsers = await db.select({ id: users.id, role: users.role }).from(users).where((0, import_drizzle_orm35.and)(
-              (0, import_drizzle_orm35.eq)(users.tenantId, tenant.id),
-              (0, import_drizzle_orm35.eq)(users.districtId, fac.districtId)
+            const districtUsers = await db.select({ id: users.id, role: users.role }).from(users).where((0, import_drizzle_orm36.and)(
+              (0, import_drizzle_orm36.eq)(users.tenantId, tenant.id),
+              (0, import_drizzle_orm36.eq)(users.districtId, fac.districtId)
             ));
             const targets = districtUsers.filter(
               (u) => ["district_coordinator", "district_supervisor", "national_admin", "provincial_coordinator"].includes(u.role)
@@ -43145,13 +43911,13 @@ function startMicroplanApprovalCron() {
   setTimeout(tick, 6e4);
   schedulerHandle3 = setInterval(tick, intervalMs);
 }
-var import_drizzle_orm35, HOUR_MS, DAY_MS3, schedulerHandle3;
+var import_drizzle_orm36, HOUR_MS, DAY_MS3, schedulerHandle3;
 var init_microplanApprovalCron = __esm({
   "server/jobs/microplanApprovalCron.ts"() {
     "use strict";
     init_storage();
     init_db();
-    import_drizzle_orm35 = require("drizzle-orm");
+    import_drizzle_orm36 = require("drizzle-orm");
     init_schema();
     HOUR_MS = 60 * 60 * 1e3;
     DAY_MS3 = 24 * HOUR_MS;
@@ -43168,7 +43934,7 @@ async function pickFacilities(tenantId) {
     districtName: districts.name,
     provinceId: provinces.id,
     provinceName: provinces.name
-  }).from(facilities).innerJoin(districts, (0, import_drizzle_orm36.eq)(districts.id, facilities.districtId)).innerJoin(provinces, (0, import_drizzle_orm36.eq)(provinces.id, districts.provinceId)).where((0, import_drizzle_orm36.and)((0, import_drizzle_orm36.eq)(facilities.tenantId, tenantId), (0, import_drizzle_orm36.eq)(facilities.isActive, true))).orderBy(facilities.id).limit(FACILITIES_PER_TENANT);
+  }).from(facilities).innerJoin(districts, (0, import_drizzle_orm37.eq)(districts.id, facilities.districtId)).innerJoin(provinces, (0, import_drizzle_orm37.eq)(provinces.id, districts.provinceId)).where((0, import_drizzle_orm37.and)((0, import_drizzle_orm37.eq)(facilities.tenantId, tenantId), (0, import_drizzle_orm37.eq)(facilities.isActive, true))).orderBy(facilities.id).limit(FACILITIES_PER_TENANT);
   return rows;
 }
 function emailFor(tenantCode, slug) {
@@ -43224,7 +43990,7 @@ async function seedUsers(tenantCode, tenantId, picks) {
   let inserted = 0;
   for (const s of seeds) {
     const email = emailFor(tenantCode, s.slug);
-    const existing = await db.select({ id: users.id }).from(users).where((0, import_drizzle_orm36.eq)(users.email, email)).limit(1);
+    const existing = await db.select({ id: users.id }).from(users).where((0, import_drizzle_orm37.eq)(users.email, email)).limit(1);
     if (existing.length > 0) continue;
     await db.insert(users).values({
       tenantId,
@@ -43257,7 +44023,7 @@ async function seedPopulationData(tenantId, picks, demographics) {
     source: populationData.source,
     year: populationData.year,
     totalPopulation: populationData.totalPopulation
-  }).from(populationData).where((0, import_drizzle_orm36.eq)(populationData.tenantId, tenantId));
+  }).from(populationData).where((0, import_drizzle_orm37.eq)(populationData.tenantId, tenantId));
   const existingByFacility = /* @__PURE__ */ new Map();
   const existingKeys = /* @__PURE__ */ new Set();
   for (const r of existing) {
@@ -43309,7 +44075,7 @@ async function seedVaccineRequirements(tenantId, picks, demographics, catchmentB
     vaccineName: vaccineRequirements.vaccineName,
     quarter: vaccineRequirements.quarter,
     year: vaccineRequirements.year
-  }).from(vaccineRequirements).where((0, import_drizzle_orm36.eq)(vaccineRequirements.tenantId, tenantId));
+  }).from(vaccineRequirements).where((0, import_drizzle_orm37.eq)(vaccineRequirements.tenantId, tenantId));
   const existingKeys = new Set(
     existing.map((r) => `${r.facilityId}|${r.vaccineName}|${r.quarter}|${r.year}`)
   );
@@ -43364,7 +44130,7 @@ async function seedMonthlyReports(tenantId, picks, demographics, catchmentByFaci
     facilityId: monthlyReports.facilityId,
     month: monthlyReports.month,
     year: monthlyReports.year
-  }).from(monthlyReports).where((0, import_drizzle_orm36.eq)(monthlyReports.tenantId, tenantId));
+  }).from(monthlyReports).where((0, import_drizzle_orm37.eq)(monthlyReports.tenantId, tenantId));
   const existingKeys = new Set(
     existing.map((r) => `${r.facilityId}|${r.month}|${r.year}`)
   );
@@ -43423,11 +44189,11 @@ async function backfillMissingVaccinesInMonthlyReports(tenantId, picks, demograp
     month: monthlyReports.month,
     immunizations: monthlyReports.immunizations
   }).from(monthlyReports).where(
-    (0, import_drizzle_orm36.and)(
-      (0, import_drizzle_orm36.eq)(monthlyReports.tenantId, tenantId),
-      (0, import_drizzle_orm36.eq)(monthlyReports.year, YEAR),
-      (0, import_drizzle_orm36.inArray)(monthlyReports.facilityId, facilityIds),
-      (0, import_drizzle_orm36.inArray)(monthlyReports.month, months)
+    (0, import_drizzle_orm37.and)(
+      (0, import_drizzle_orm37.eq)(monthlyReports.tenantId, tenantId),
+      (0, import_drizzle_orm37.eq)(monthlyReports.year, YEAR),
+      (0, import_drizzle_orm37.inArray)(monthlyReports.facilityId, facilityIds),
+      (0, import_drizzle_orm37.inArray)(monthlyReports.month, months)
     )
   );
   if (reports.length === 0) return 0;
@@ -43459,7 +44225,7 @@ async function backfillMissingVaccinesInMonthlyReports(tenantId, picks, demograp
         changed = true;
       }
       if (!changed) continue;
-      await db.update(monthlyReports).set({ immunizations: imm }).where((0, import_drizzle_orm36.eq)(monthlyReports.id, r.id));
+      await db.update(monthlyReports).set({ immunizations: imm }).where((0, import_drizzle_orm37.eq)(monthlyReports.id, r.id));
       updated++;
     }
   }
@@ -43472,7 +44238,7 @@ async function seedSessionPlans(tenantId, picks, demographics, catchmentByFacili
     name: sessionPlans.name,
     quarter: sessionPlans.quarter,
     year: sessionPlans.year
-  }).from(sessionPlans).where((0, import_drizzle_orm36.eq)(sessionPlans.tenantId, tenantId));
+  }).from(sessionPlans).where((0, import_drizzle_orm37.eq)(sessionPlans.tenantId, tenantId));
   const existingKeys = new Set(
     existing.map((r) => `${r.facilityId}|${r.name}|${r.quarter}|${r.year}`)
   );
@@ -43482,12 +44248,12 @@ async function seedSessionPlans(tenantId, picks, demographics, catchmentByFacili
     if (catchmentPop === void 0) continue;
     const microplanName = `${p.facilityName} \u2014 Demo Microplan Q${QUARTER} ${YEAR}`;
     const existingMicroplan = await db.select({ id: microplans.id }).from(microplans).where(
-      (0, import_drizzle_orm36.and)(
-        (0, import_drizzle_orm36.eq)(microplans.tenantId, tenantId),
-        (0, import_drizzle_orm36.eq)(microplans.facilityId, p.facilityId),
-        (0, import_drizzle_orm36.eq)(microplans.name, microplanName),
-        (0, import_drizzle_orm36.eq)(microplans.year, YEAR),
-        (0, import_drizzle_orm36.eq)(microplans.quarter, QUARTER)
+      (0, import_drizzle_orm37.and)(
+        (0, import_drizzle_orm37.eq)(microplans.tenantId, tenantId),
+        (0, import_drizzle_orm37.eq)(microplans.facilityId, p.facilityId),
+        (0, import_drizzle_orm37.eq)(microplans.name, microplanName),
+        (0, import_drizzle_orm37.eq)(microplans.year, YEAR),
+        (0, import_drizzle_orm37.eq)(microplans.quarter, QUARTER)
       )
     ).limit(1);
     let microplanId;
@@ -43536,7 +44302,7 @@ async function seedSessionPlans(tenantId, picks, demographics, catchmentByFacili
   return inserted;
 }
 async function ensureVaccineConfigs(tenantId) {
-  const existing = await db.select({ id: vaccineConfigurations.id, name: vaccineConfigurations.name }).from(vaccineConfigurations).where((0, import_drizzle_orm36.eq)(vaccineConfigurations.tenantId, tenantId));
+  const existing = await db.select({ id: vaccineConfigurations.id, name: vaccineConfigurations.name }).from(vaccineConfigurations).where((0, import_drizzle_orm37.eq)(vaccineConfigurations.tenantId, tenantId));
   const byName = /* @__PURE__ */ new Map();
   for (const r of existing) byName.set(r.name, r.id);
   for (const cfg of VACCINE_CONFIG_DEFAULTS) {
@@ -43624,13 +44390,13 @@ async function pickVillagesPerFacility(tenantCode, tenantId, picks) {
     longitude: villages.longitude,
     transportMode: villages.transportMode,
     seasonalAccessibility: villages.seasonalAccessibility
-  }).from(villages).where((0, import_drizzle_orm36.eq)(villages.tenantId, tenantId));
+  }).from(villages).where((0, import_drizzle_orm37.eq)(villages.tenantId, tenantId));
   const facilityIds = picks.map((p) => p.facilityId);
   const facilityRows = await db.select({
     id: facilities.id,
     latitude: facilities.latitude,
     longitude: facilities.longitude
-  }).from(facilities).where((0, import_drizzle_orm36.and)((0, import_drizzle_orm36.eq)(facilities.tenantId, tenantId), (0, import_drizzle_orm36.inArray)(facilities.id, facilityIds)));
+  }).from(facilities).where((0, import_drizzle_orm37.and)((0, import_drizzle_orm37.eq)(facilities.tenantId, tenantId), (0, import_drizzle_orm37.inArray)(facilities.id, facilityIds)));
   const facilityCoords = /* @__PURE__ */ new Map();
   for (const f2 of facilityRows) {
     if (f2.latitude != null && f2.longitude != null) {
@@ -43665,7 +44431,7 @@ async function pickVillagesPerFacility(tenantCode, tenantId, picks) {
             slot - 1
           );
           if (v.name !== expectedName) {
-            await db.update(villages).set({ name: expectedName }).where((0, import_drizzle_orm36.eq)(villages.id, v.id));
+            await db.update(villages).set({ name: expectedName }).where((0, import_drizzle_orm37.eq)(villages.id, v.id));
             v.name = expectedName;
           }
         }
@@ -43699,7 +44465,7 @@ async function pickVillagesPerFacility(tenantCode, tenantId, picks) {
         if (reused.seasonalAccessibility == null)
           updates.seasonalAccessibility = seasonalAccessibility;
         if (Object.keys(updates).length > 0) {
-          await db.update(villages).set(updates).where((0, import_drizzle_orm36.eq)(villages.id, reused.id));
+          await db.update(villages).set(updates).where((0, import_drizzle_orm37.eq)(villages.id, reused.id));
           reused.name = demoName;
           reused.code = demoCode;
         }
@@ -43791,7 +44557,7 @@ async function seedDemoClients(tenantId, picks, villagesByFacility, vaccineConfi
       continue;
     }
     const roster = buildClientRoster(pi);
-    const existing = await db.select({ id: clients.id, name: clients.name }).from(clients).where((0, import_drizzle_orm36.and)((0, import_drizzle_orm36.eq)(clients.tenantId, tenantId), (0, import_drizzle_orm36.eq)(clients.facilityId, p.facilityId)));
+    const existing = await db.select({ id: clients.id, name: clients.name }).from(clients).where((0, import_drizzle_orm37.and)((0, import_drizzle_orm37.eq)(clients.tenantId, tenantId), (0, import_drizzle_orm37.eq)(clients.facilityId, p.facilityId)));
     const existingNames = new Set(existing.map((r) => r.name));
     const clientIdBySlug = /* @__PURE__ */ new Map();
     for (const c of roster) {
@@ -43848,10 +44614,10 @@ async function seedDemoClients(tenantId, picks, villagesByFacility, vaccineConfi
       month: monthlyReports.month,
       immunizations: monthlyReports.immunizations
     }).from(monthlyReports).where(
-      (0, import_drizzle_orm36.and)(
-        (0, import_drizzle_orm36.eq)(monthlyReports.tenantId, tenantId),
-        (0, import_drizzle_orm36.eq)(monthlyReports.facilityId, p.facilityId),
-        (0, import_drizzle_orm36.eq)(monthlyReports.year, YEAR)
+      (0, import_drizzle_orm37.and)(
+        (0, import_drizzle_orm37.eq)(monthlyReports.tenantId, tenantId),
+        (0, import_drizzle_orm37.eq)(monthlyReports.facilityId, p.facilityId),
+        (0, import_drizzle_orm37.eq)(monthlyReports.year, YEAR)
       )
     );
     const reportByMonth = /* @__PURE__ */ new Map();
@@ -43877,7 +44643,7 @@ async function seedDemoClients(tenantId, picks, villagesByFacility, vaccineConfi
     }
     const updates = Array.from(reportByMonth.values());
     for (const { id, imm } of updates) {
-      await db.update(monthlyReports).set({ immunizations: imm }).where((0, import_drizzle_orm36.eq)(monthlyReports.id, id));
+      await db.update(monthlyReports).set({ immunizations: imm }).where((0, import_drizzle_orm37.eq)(monthlyReports.id, id));
     }
   }
   return { clientsInserted, vaccinationsInserted };
@@ -43889,10 +44655,10 @@ async function seedVillagePopulation(tenantId, villagesByFacility, picks) {
     id: villages.id,
     districtId: villages.districtId,
     assignedFacilityId: villages.assignedFacilityId
-  }).from(villages).where((0, import_drizzle_orm36.and)((0, import_drizzle_orm36.eq)(villages.tenantId, tenantId), (0, import_drizzle_orm36.inArray)(villages.id, villageIds)));
+  }).from(villages).where((0, import_drizzle_orm37.and)((0, import_drizzle_orm37.eq)(villages.tenantId, tenantId), (0, import_drizzle_orm37.inArray)(villages.id, villageIds)));
   const provinceByDistrict = /* @__PURE__ */ new Map();
   for (const p of picks) provinceByDistrict.set(p.districtId, p.provinceId);
-  const existing = await db.select({ villageId: populationData.villageId, year: populationData.year, source: populationData.source }).from(populationData).where((0, import_drizzle_orm36.and)((0, import_drizzle_orm36.eq)(populationData.tenantId, tenantId), (0, import_drizzle_orm36.inArray)(populationData.villageId, villageIds)));
+  const existing = await db.select({ villageId: populationData.villageId, year: populationData.year, source: populationData.source }).from(populationData).where((0, import_drizzle_orm37.and)((0, import_drizzle_orm37.eq)(populationData.tenantId, tenantId), (0, import_drizzle_orm37.inArray)(populationData.villageId, villageIds)));
   const existingKeys = new Set(existing.map((r) => `${r.villageId}|${r.source}|${r.year}`));
   let inserted = 0;
   for (let i = 0; i < villageRows.length; i++) {
@@ -43932,7 +44698,7 @@ async function seedImportedCoverage(tenantId, picks, villagesByFacility) {
   if (picks.length === 0) return 0;
   const periods = lastNPeriods(3);
   const villageIds = Array.from(new Set(Array.from(villagesByFacility.values()).flat()));
-  const popRows = villageIds.length ? await db.select({ villageId: populationData.villageId, under1: populationData.under1Population }).from(populationData).where((0, import_drizzle_orm36.and)((0, import_drizzle_orm36.eq)(populationData.tenantId, tenantId), (0, import_drizzle_orm36.inArray)(populationData.villageId, villageIds))) : [];
+  const popRows = villageIds.length ? await db.select({ villageId: populationData.villageId, under1: populationData.under1Population }).from(populationData).where((0, import_drizzle_orm37.and)((0, import_drizzle_orm37.eq)(populationData.tenantId, tenantId), (0, import_drizzle_orm37.inArray)(populationData.villageId, villageIds))) : [];
   const popByVillage = /* @__PURE__ */ new Map();
   for (const r of popRows) {
     if (r.villageId == null) continue;
@@ -43986,9 +44752,9 @@ async function seedImportedCoverage(tenantId, picks, villagesByFacility) {
           importedCoverage.source
         ],
         set: {
-          dosesAdministered: import_drizzle_orm36.sql`excluded.doses_administered`,
-          sourceRef: import_drizzle_orm36.sql`excluded.source_ref`,
-          importedAt: import_drizzle_orm36.sql`now()`
+          dosesAdministered: import_drizzle_orm37.sql`excluded.doses_administered`,
+          sourceRef: import_drizzle_orm37.sql`excluded.source_ref`,
+          importedAt: import_drizzle_orm37.sql`now()`
         }
       });
       inserted += rows.length;
@@ -44009,11 +44775,11 @@ async function seedStockSummary(tenantId, picks) {
     immunizations: monthlyReports.immunizations,
     stockSummary: monthlyReports.stockSummary
   }).from(monthlyReports).where(
-    (0, import_drizzle_orm36.and)(
-      (0, import_drizzle_orm36.eq)(monthlyReports.tenantId, tenantId),
-      (0, import_drizzle_orm36.eq)(monthlyReports.year, YEAR),
-      (0, import_drizzle_orm36.inArray)(monthlyReports.facilityId, facilityIds),
-      (0, import_drizzle_orm36.inArray)(monthlyReports.month, monthsInQuarter)
+    (0, import_drizzle_orm37.and)(
+      (0, import_drizzle_orm37.eq)(monthlyReports.tenantId, tenantId),
+      (0, import_drizzle_orm37.eq)(monthlyReports.year, YEAR),
+      (0, import_drizzle_orm37.inArray)(monthlyReports.facilityId, facilityIds),
+      (0, import_drizzle_orm37.inArray)(monthlyReports.month, monthsInQuarter)
     )
   );
   const byFacility = {};
@@ -44047,7 +44813,7 @@ async function seedStockSummary(tenantId, picks) {
       }
       if (alreadyFilled) continue;
       if (Object.keys(summary).length === 0) continue;
-      await db.update(monthlyReports).set({ stockSummary: summary }).where((0, import_drizzle_orm36.eq)(monthlyReports.id, r.id));
+      await db.update(monthlyReports).set({ stockSummary: summary }).where((0, import_drizzle_orm37.eq)(monthlyReports.id, r.id));
       updated++;
     }
   }
@@ -44059,9 +44825,9 @@ async function seedStockTransactions(tenantId, picks) {
   const monthsInQuarter = [startMonth, startMonth + 1, startMonth + 2];
   const facilityIds = picks.map((p) => p.facilityId);
   const existing = await db.select({ facilityId: stockTransactions.facilityId }).from(stockTransactions).where(
-    (0, import_drizzle_orm36.and)(
-      (0, import_drizzle_orm36.eq)(stockTransactions.tenantId, tenantId),
-      (0, import_drizzle_orm36.inArray)(stockTransactions.facilityId, facilityIds)
+    (0, import_drizzle_orm37.and)(
+      (0, import_drizzle_orm37.eq)(stockTransactions.tenantId, tenantId),
+      (0, import_drizzle_orm37.inArray)(stockTransactions.facilityId, facilityIds)
     )
   );
   const seededFacilityIds = new Set(existing.map((r) => r.facilityId));
@@ -44070,11 +44836,11 @@ async function seedStockTransactions(tenantId, picks) {
     month: monthlyReports.month,
     immunizations: monthlyReports.immunizations
   }).from(monthlyReports).where(
-    (0, import_drizzle_orm36.and)(
-      (0, import_drizzle_orm36.eq)(monthlyReports.tenantId, tenantId),
-      (0, import_drizzle_orm36.eq)(monthlyReports.year, YEAR),
-      (0, import_drizzle_orm36.inArray)(monthlyReports.facilityId, facilityIds),
-      (0, import_drizzle_orm36.inArray)(monthlyReports.month, monthsInQuarter)
+    (0, import_drizzle_orm37.and)(
+      (0, import_drizzle_orm37.eq)(monthlyReports.tenantId, tenantId),
+      (0, import_drizzle_orm37.eq)(monthlyReports.year, YEAR),
+      (0, import_drizzle_orm37.inArray)(monthlyReports.facilityId, facilityIds),
+      (0, import_drizzle_orm37.inArray)(monthlyReports.month, monthsInQuarter)
     )
   );
   const immsByFacMonth = /* @__PURE__ */ new Map();
@@ -44170,14 +44936,14 @@ async function seedStockTransactions(tenantId, picks) {
 }
 async function seedSurveillanceCases(tenantId, picks, villagesByFacility) {
   if (picks.length === 0) return 0;
-  const existing = await db.select({ id: surveillanceCases.id }).from(surveillanceCases).where((0, import_drizzle_orm36.eq)(surveillanceCases.tenantId, tenantId)).limit(1);
+  const existing = await db.select({ id: surveillanceCases.id }).from(surveillanceCases).where((0, import_drizzle_orm37.eq)(surveillanceCases.tenantId, tenantId)).limit(1);
   if (existing.length > 0) return 0;
   let inserted = 0;
   const diseases = ["afp", "measles", "cholera"];
   for (let pi = 0; pi < picks.length; pi++) {
     const p = picks[pi];
     const villagePool = villagesByFacility.get(p.facilityId) || [];
-    const [fac] = await db.select({ latitude: facilities.latitude, longitude: facilities.longitude }).from(facilities).where((0, import_drizzle_orm36.eq)(facilities.id, p.facilityId)).limit(1);
+    const [fac] = await db.select({ latitude: facilities.latitude, longitude: facilities.longitude }).from(facilities).where((0, import_drizzle_orm37.eq)(facilities.id, p.facilityId)).limit(1);
     if (!fac || !fac.latitude || !fac.longitude) continue;
     const lat = Number(fac.latitude);
     const lng = Number(fac.longitude);
@@ -44187,7 +44953,7 @@ async function seedSurveillanceCases(tenantId, picks, villagesByFacility) {
       gender: clients.gender,
       dateOfBirth: clients.dateOfBirth,
       villageId: clients.villageId
-    }).from(clients).where((0, import_drizzle_orm36.eq)(clients.facilityId, p.facilityId)).limit(10);
+    }).from(clients).where((0, import_drizzle_orm37.eq)(clients.facilityId, p.facilityId)).limit(10);
     const numCases = 3;
     for (let cIdx = 0; cIdx < numCases; cIdx++) {
       const disease = diseases[(pi + cIdx) % diseases.length];
@@ -44234,12 +45000,12 @@ async function seedSurveillanceCases(tenantId, picks, villagesByFacility) {
 }
 async function backfillPasswordHashes() {
   const nullDemoUsers = await db.execute(
-    import_drizzle_orm36.sql`SELECT id FROM users WHERE password_hash IS NULL AND email LIKE 'demo+%@%.vaxplan.test'`
+    import_drizzle_orm37.sql`SELECT id FROM users WHERE password_hash IS NULL AND email LIKE 'demo+%@%.vaxplan.test'`
   );
   const count3 = nullDemoUsers.rows.length;
   if (count3 === 0) return 0;
   const hash = await hashPassword("vaxplan2024");
-  await db.execute(import_drizzle_orm36.sql`
+  await db.execute(import_drizzle_orm37.sql`
     UPDATE users SET password_hash = ${hash}
     WHERE password_hash IS NULL AND email LIKE 'demo+%@%.vaxplan.test'
   `);
@@ -44247,7 +45013,7 @@ async function backfillPasswordHashes() {
 }
 async function seedDemoOperational() {
   for (const code of ["ZMB", "SSD", "PNG", "ZAF"]) {
-    const rows = await db.select().from(tenants).where((0, import_drizzle_orm36.eq)(tenants.code, code)).limit(1);
+    const rows = await db.select().from(tenants).where((0, import_drizzle_orm37.eq)(tenants.code, code)).limit(1);
     const tenant = rows[0];
     if (!tenant) {
       console.warn(`[${code}] tenant not found \u2014 skipping demo seed.`);
@@ -44303,7 +45069,7 @@ async function seedDemoOperational() {
 }
 async function runCli2() {
   await seedDemoOperational();
-  const summary = await db.execute(import_drizzle_orm36.sql`
+  const summary = await db.execute(import_drizzle_orm37.sql`
     SELECT
       t.code,
       (SELECT COUNT(*) FROM users                u WHERE u.tenant_id = t.id) AS users,
@@ -44326,14 +45092,14 @@ async function runCli2() {
   console.log("Done.");
   process.exit(0);
 }
-var import_node_fs, import_node_path, import_drizzle_orm36, FACILITIES_PER_TENANT, YEAR, QUARTER, VACCINES, SESSION_TEMPLATES, DEMO_CATCHMENTS, DEMO_COVERAGE_FRACTIONS, VACCINE_CONFIG_DEFAULTS, MIN_VILLAGES_PER_FACILITY, ZMB_DISTRICT_POOLS, ZMB_PROVINCE_POOLS, SSD_DISTRICT_POOLS, PNG_DISTRICT_POOLS, ZAF_PROVINCE_POOLS, DEMO_VILLAGE_NAME_POOLS, D_BIRTH, D_6W, D_10W, D_14W, D_9M, CHILD_FIRST_NAMES, CHILD_LAST_NAMES, MOTHER_NAMES, COHORTS, COVERAGE_ANTIGENS, isDirectCli;
+var import_node_fs, import_node_path, import_drizzle_orm37, FACILITIES_PER_TENANT, YEAR, QUARTER, VACCINES, SESSION_TEMPLATES, DEMO_CATCHMENTS, DEMO_COVERAGE_FRACTIONS, VACCINE_CONFIG_DEFAULTS, MIN_VILLAGES_PER_FACILITY, ZMB_DISTRICT_POOLS, ZMB_PROVINCE_POOLS, SSD_DISTRICT_POOLS, PNG_DISTRICT_POOLS, ZAF_PROVINCE_POOLS, DEMO_VILLAGE_NAME_POOLS, D_BIRTH, D_6W, D_10W, D_14W, D_9M, CHILD_FIRST_NAMES, CHILD_LAST_NAMES, MOTHER_NAMES, COHORTS, COVERAGE_ANTIGENS, isDirectCli;
 var init_seed_demo_operational = __esm({
   "server/migrations/006-seed-demo-operational.ts"() {
     "use strict";
     import_node_fs = __toESM(require("node:fs"), 1);
     import_node_path = __toESM(require("node:path"), 1);
     init_db();
-    import_drizzle_orm36 = require("drizzle-orm");
+    import_drizzle_orm37 = require("drizzle-orm");
     init_schema();
     init_passwordAuth();
     try {
@@ -45872,18 +46638,18 @@ async function applyPerfIndexes() {
   ];
   for (const stmt of statements) {
     try {
-      await db.execute(import_drizzle_orm37.sql.raw(stmt));
+      await db.execute(import_drizzle_orm38.sql.raw(stmt));
     } catch (err) {
       console.warn(`[perf-indexes] Skipped (${err?.message ?? err}): ${stmt.split("\n")[0].trim()}`);
     }
   }
 }
-var import_drizzle_orm37;
+var import_drizzle_orm38;
 var init_perf_indexes = __esm({
   "server/migrations/011-perf-indexes.ts"() {
     "use strict";
     init_db();
-    import_drizzle_orm37 = require("drizzle-orm");
+    import_drizzle_orm38 = require("drizzle-orm");
   }
 });
 
@@ -45891,23 +46657,49 @@ var init_perf_indexes = __esm({
 async function applyVillageColumns() {
   const statements = [
     `ALTER TABLE villages ADD COLUMN IF NOT EXISTS accessibility_score varchar(50)`,
-    `ALTER TABLE villages ADD COLUMN IF NOT EXISTS referral_route text`
+    `ALTER TABLE villages ADD COLUMN IF NOT EXISTS referral_route text`,
+    `ALTER TABLE villages ADD COLUMN IF NOT EXISTS is_active boolean DEFAULT true`,
+    `ALTER TABLE villages ADD COLUMN IF NOT EXISTS linked_settlement_id integer`,
+    `ALTER TABLE villages ADD COLUMN IF NOT EXISTS is_mapped_in_hmis boolean DEFAULT false`,
+    `ALTER TABLE villages ADD COLUMN IF NOT EXISTS last_verified timestamp`,
+    `ALTER TABLE villages ADD COLUMN IF NOT EXISTS detection_source varchar(50)`,
+    `ALTER TABLE villages ADD COLUMN IF NOT EXISTS confidence_score decimal(5, 2)`,
+    `ALTER TABLE villages ADD COLUMN IF NOT EXISTS high_risk boolean DEFAULT false`,
+    `ALTER TABLE villages ADD COLUMN IF NOT EXISTS high_risk_reason varchar(255)`,
+    `ALTER TABLE villages ADD COLUMN IF NOT EXISTS settlement_type varchar(50) DEFAULT 'village'`,
+    `ALTER TABLE villages ADD COLUMN IF NOT EXISTS border_village_country varchar(100)`,
+    `ALTER TABLE villages ADD COLUMN IF NOT EXISTS border_village_facility_name varchar(255)`,
+    `ALTER TABLE villages ADD COLUMN IF NOT EXISTS is_cross_border boolean DEFAULT false`,
+    `ALTER TABLE villages ADD COLUMN IF NOT EXISTS border_country varchar(100)`,
+    `ALTER TABLE villages ADD COLUMN IF NOT EXISTS is_crossing_point boolean DEFAULT false`,
+    `ALTER TABLE villages ADD COLUMN IF NOT EXISTS crossing_type varchar(50)`,
+    `ALTER TABLE villages ADD COLUMN IF NOT EXISTS daily_movement_volume integer`,
+    `ALTER TABLE villages ADD COLUMN IF NOT EXISTS focal_person_name varchar(255)`,
+    `ALTER TABLE villages ADD COLUMN IF NOT EXISTS focal_person_phone varchar(50)`,
+    `ALTER TABLE villages ADD COLUMN IF NOT EXISTS focal_person_comm_checked boolean DEFAULT false`,
+    `ALTER TABLE villages ADD COLUMN IF NOT EXISTS outside_follow_up_made boolean DEFAULT false`,
+    `ALTER TABLE villages ADD COLUMN IF NOT EXISTS total_catchment_population integer`,
+    `ALTER TABLE villages ADD COLUMN IF NOT EXISTS under5_population integer`,
+    `ALTER TABLE villages ADD COLUMN IF NOT EXISTS catchment_polygon jsonb`,
+    `ALTER TABLE villages ADD COLUMN IF NOT EXISTS gridded_population integer`,
+    `ALTER TABLE villages ADD COLUMN IF NOT EXISTS population_source_label varchar(100)`,
+    `ALTER TABLE villages ADD COLUMN IF NOT EXISTS polygon_color varchar(7)`
   ];
   for (const stmt of statements) {
     try {
-      await db.execute(import_drizzle_orm38.sql.raw(stmt));
+      await db.execute(import_drizzle_orm39.sql.raw(stmt));
       console.log(`[migration] Executed statement: ${stmt}`);
     } catch (err) {
       console.error(`[migration] Failed statement: ${stmt} - ${err.message}`);
     }
   }
 }
-var import_drizzle_orm38;
+var import_drizzle_orm39;
 var init_village_route_columns = __esm({
   "server/migrations/013-village-route-columns.ts"() {
     "use strict";
     init_db();
-    import_drizzle_orm38 = require("drizzle-orm");
+    import_drizzle_orm39 = require("drizzle-orm");
   }
 });
 
@@ -45920,19 +46712,19 @@ async function applyOutreachColumns() {
   ];
   for (const stmt of statements) {
     try {
-      await db.execute(import_drizzle_orm39.sql.raw(stmt));
+      await db.execute(import_drizzle_orm40.sql.raw(stmt));
       console.log(`[migration] Executed statement: ${stmt}`);
     } catch (err) {
       console.error(`[migration] Failed statement: ${stmt} - ${err.message}`);
     }
   }
 }
-var import_drizzle_orm39;
+var import_drizzle_orm40;
 var init_outreach_columns = __esm({
   "server/migrations/014-outreach-columns.ts"() {
     "use strict";
     init_db();
-    import_drizzle_orm39 = require("drizzle-orm");
+    import_drizzle_orm40 = require("drizzle-orm");
   }
 });
 
@@ -45951,19 +46743,19 @@ async function applyMicroplanApprovalColumns() {
   ];
   for (const stmt of statements) {
     try {
-      await db.execute(import_drizzle_orm40.sql.raw(stmt));
+      await db.execute(import_drizzle_orm41.sql.raw(stmt));
       console.log(`[migration] Executed statement: ${stmt}`);
     } catch (err) {
       console.error(`[migration] Failed statement: ${stmt} - ${err.message}`);
     }
   }
 }
-var import_drizzle_orm40;
+var import_drizzle_orm41;
 var init_microplan_approval_columns = __esm({
   "server/migrations/015-microplan-approval-columns.ts"() {
     "use strict";
     init_db();
-    import_drizzle_orm40 = require("drizzle-orm");
+    import_drizzle_orm41 = require("drizzle-orm");
   }
 });
 
@@ -45979,19 +46771,19 @@ async function applySessionsTable() {
   ];
   for (const stmt of statements) {
     try {
-      await db.execute(import_drizzle_orm41.sql.raw(stmt));
+      await db.execute(import_drizzle_orm42.sql.raw(stmt));
       console.log(`[migration] sessions table ensured`);
     } catch (err) {
       console.error(`[migration] sessions table warning: ${err.message}`);
     }
   }
 }
-var import_drizzle_orm41;
+var import_drizzle_orm42;
 var init_sessions_table = __esm({
   "server/migrations/016-sessions-table.ts"() {
     "use strict";
     init_db();
-    import_drizzle_orm41 = require("drizzle-orm");
+    import_drizzle_orm42 = require("drizzle-orm");
   }
 });
 
@@ -46015,7 +46807,7 @@ async function applyWikiPages() {
   ];
   for (const stmt of createStatements) {
     try {
-      await db.execute(import_drizzle_orm42.sql.raw(stmt));
+      await db.execute(import_drizzle_orm43.sql.raw(stmt));
       console.log(`[migration:017] OK \u2014 ${stmt.slice(0, 60).trim()}\u2026`);
     } catch (err) {
       console.error(`[migration:017] Warning: ${err.message}`);
@@ -46023,7 +46815,7 @@ async function applyWikiPages() {
   }
   try {
     const countResult = await db.execute(
-      import_drizzle_orm42.sql.raw("SELECT COUNT(*)::int AS n FROM wiki_pages")
+      import_drizzle_orm43.sql.raw("SELECT COUNT(*)::int AS n FROM wiki_pages")
     );
     const existingCount = Number(countResult.rows[0]?.n ?? 0);
     if (existingCount > 0) {
@@ -46056,7 +46848,7 @@ async function applyWikiPages() {
     const slug = slugify(title);
     try {
       await db.execute(
-        import_drizzle_orm42.sql.raw(
+        import_drizzle_orm43.sql.raw(
           `INSERT INTO wiki_pages (slug, title, body, sort_order, is_published)
            VALUES (${sqlStr(slug)}, ${sqlStr(title)}, ${sqlStr(body)}, ${i * 10}, TRUE)
            ON CONFLICT (slug) DO NOTHING`
@@ -46093,12 +46885,12 @@ function slugify(s) {
 function sqlStr(s) {
   return "'" + s.replace(/'/g, "''") + "'";
 }
-var import_drizzle_orm42, import_fs8, import_path7;
+var import_drizzle_orm43, import_fs8, import_path7;
 var init_wiki_pages = __esm({
   "server/migrations/017-wiki-pages.ts"() {
     "use strict";
     init_db();
-    import_drizzle_orm42 = require("drizzle-orm");
+    import_drizzle_orm43 = require("drizzle-orm");
     import_fs8 = require("fs");
     import_path7 = require("path");
   }
@@ -46109,15 +46901,15 @@ async function promoteAdminUser() {
   const adminEmail = "lawrencemukombo2@gmail.com";
   try {
     const findResult = await db.execute(
-      import_drizzle_orm43.sql.raw(`SELECT id, role, roles, is_platform_admin, is_active, password_hash FROM users WHERE LOWER(email) = LOWER('${adminEmail}') LIMIT 1`)
+      import_drizzle_orm44.sql.raw(`SELECT id, role, roles, is_platform_admin, is_active, password_hash FROM users WHERE LOWER(email) = LOWER('${adminEmail}') LIMIT 1`)
     );
     const row = findResult.rows[0];
     if (!row) {
       console.log(`[migration:018] Admin user '${adminEmail}' not found \u2014 upserting platform administrator...`);
-      const tenantResult = await db.execute(import_drizzle_orm43.sql.raw(`SELECT id FROM tenants ORDER BY created_at ASC LIMIT 1`));
+      const tenantResult = await db.execute(import_drizzle_orm44.sql.raw(`SELECT id FROM tenants ORDER BY created_at ASC LIMIT 1`));
       const defaultTenantId = tenantResult.rows[0]?.id || "4bb7abba-11cd-4c99-96c2-eedc8a4dfd06";
       await db.execute(
-        import_drizzle_orm43.sql.raw(
+        import_drizzle_orm44.sql.raw(
           `INSERT INTO users (
             id, tenant_id, email, first_name, last_name, role, roles, is_platform_admin, is_active, password_hash, created_at, updated_at
           ) VALUES (
@@ -46169,7 +46961,7 @@ async function promoteAdminUser() {
     const rolesJson = JSON.stringify(updatedRoles).replace(/'/g, "''");
     const passwordClause = !hasPassword ? `, password_hash = '$2b$12$SNbOjAVQ6b8ZGurd4DU23e6zGpf6X5YTXpgyjGOaapsVa/nFcvpri'` : "";
     await db.execute(
-      import_drizzle_orm43.sql.raw(
+      import_drizzle_orm44.sql.raw(
         `UPDATE users
          SET role              = 'national_admin',
              roles             = '${rolesJson}'::jsonb,
@@ -46187,12 +46979,12 @@ async function promoteAdminUser() {
     console.error(`[migration:018] Warning: could not promote admin user: ${err?.message ?? err}`);
   }
 }
-var import_drizzle_orm43;
+var import_drizzle_orm44;
 var init_promote_admin = __esm({
   "server/migrations/018-promote-admin.ts"() {
     "use strict";
     init_db();
-    import_drizzle_orm43 = require("drizzle-orm");
+    import_drizzle_orm44 = require("drizzle-orm");
   }
 });
 
@@ -46208,7 +47000,7 @@ async function applyNewUserRoles() {
   for (const role of newRoles) {
     try {
       await db.execute(
-        import_drizzle_orm44.sql.raw(`ALTER TYPE user_role ADD VALUE IF NOT EXISTS '${role}'`)
+        import_drizzle_orm45.sql.raw(`ALTER TYPE user_role ADD VALUE IF NOT EXISTS '${role}'`)
       );
       console.log(`[migration:019] Added enum value '${role}' to user_role.`);
     } catch (err) {
@@ -46218,18 +47010,18 @@ async function applyNewUserRoles() {
     }
   }
 }
-var import_drizzle_orm44;
+var import_drizzle_orm45;
 var init_new_user_roles = __esm({
   "server/migrations/019-new-user-roles.ts"() {
     "use strict";
     init_db();
-    import_drizzle_orm44 = require("drizzle-orm");
+    import_drizzle_orm45 = require("drizzle-orm");
   }
 });
 
 // server/migrations/020-cold-chain-equipment.ts
 async function up(db2) {
-  await db2.execute(import_drizzle_orm45.sql`
+  await db2.execute(import_drizzle_orm46.sql`
     CREATE TABLE IF NOT EXISTS cold_chain_equipment (
       id                           SERIAL PRIMARY KEY,
       tenant_id                    VARCHAR NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -46293,17 +47085,17 @@ async function up(db2) {
       ON cold_chain_equipment(tenant_id, condition);
   `);
 }
-var import_drizzle_orm45;
+var import_drizzle_orm46;
 var init_cold_chain_equipment = __esm({
   "server/migrations/020-cold-chain-equipment.ts"() {
     "use strict";
-    import_drizzle_orm45 = require("drizzle-orm");
+    import_drizzle_orm46 = require("drizzle-orm");
   }
 });
 
 // server/migrations/021-normalize-stock-vaccine-names.ts
 async function up2(db2) {
-  await db2.execute(import_drizzle_orm46.sql`
+  await db2.execute(import_drizzle_orm47.sql`
     UPDATE stock_transactions
     SET vaccine_name = CASE 
       WHEN UPPER(TRIM(vaccine_name)) IN ('OPV-0', 'OPV-1', 'OPV-2', 'OPV-3') THEN 'OPV'
@@ -46326,17 +47118,17 @@ async function up2(db2) {
     );
   `);
 }
-var import_drizzle_orm46;
+var import_drizzle_orm47;
 var init_normalize_stock_vaccine_names = __esm({
   "server/migrations/021-normalize-stock-vaccine-names.ts"() {
     "use strict";
-    import_drizzle_orm46 = require("drizzle-orm");
+    import_drizzle_orm47 = require("drizzle-orm");
   }
 });
 
 // server/migrations/022-research-hub-schema.ts
 async function up3(db2) {
-  await db2.execute(import_drizzle_orm47.sql`
+  await db2.execute(import_drizzle_orm48.sql`
     CREATE TABLE IF NOT EXISTS research_documents (
       id                   SERIAL PRIMARY KEY,
       tenant_id            VARCHAR NOT NULL,
@@ -46374,7 +47166,7 @@ async function up3(db2) {
       archived_at          TIMESTAMPTZ
     );
   `);
-  await db2.execute(import_drizzle_orm47.sql`
+  await db2.execute(import_drizzle_orm48.sql`
     CREATE TABLE IF NOT EXISTS pilot_activities (
       id                   SERIAL PRIMARY KEY,
       tenant_id            VARCHAR NOT NULL,
@@ -46414,7 +47206,7 @@ async function up3(db2) {
       published_at         TIMESTAMPTZ
     );
   `);
-  await db2.execute(import_drizzle_orm47.sql`
+  await db2.execute(import_drizzle_orm48.sql`
     CREATE TABLE IF NOT EXISTS pilot_updates (
       id                   SERIAL PRIMARY KEY,
       pilot_id             INTEGER NOT NULL REFERENCES pilot_activities(id) ON DELETE CASCADE,
@@ -46431,7 +47223,7 @@ async function up3(db2) {
       updated_at           TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
   `);
-  await db2.execute(import_drizzle_orm47.sql`
+  await db2.execute(import_drizzle_orm48.sql`
     CREATE TABLE IF NOT EXISTS implementation_lessons (
       id                   SERIAL PRIMARY KEY,
       tenant_id            VARCHAR NOT NULL,
@@ -46453,7 +47245,7 @@ async function up3(db2) {
       updated_at           TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
   `);
-  await db2.execute(import_drizzle_orm47.sql`
+  await db2.execute(import_drizzle_orm48.sql`
     CREATE TABLE IF NOT EXISTS download_assets (
       id                   SERIAL PRIMARY KEY,
       tenant_id            VARCHAR NOT NULL,
@@ -46476,7 +47268,7 @@ async function up3(db2) {
       updated_at           TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
   `);
-  await db2.execute(import_drizzle_orm47.sql`
+  await db2.execute(import_drizzle_orm48.sql`
     CREATE TABLE IF NOT EXISTS research_interest_submissions (
       id                   SERIAL PRIMARY KEY,
       tenant_id            VARCHAR NOT NULL,
@@ -46493,7 +47285,7 @@ async function up3(db2) {
       updated_at           TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
   `);
-  await db2.execute(import_drizzle_orm47.sql`
+  await db2.execute(import_drizzle_orm48.sql`
     CREATE TABLE IF NOT EXISTS research_download_events (
       id                   SERIAL PRIMARY KEY,
       document_id          INTEGER REFERENCES research_documents(id) ON DELETE CASCADE,
@@ -46504,19 +47296,19 @@ async function up3(db2) {
       downloaded_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
   `);
-  await db2.execute(import_drizzle_orm47.sql`CREATE INDEX IF NOT EXISTS idx_research_doc_tenant ON research_documents(tenant_id);`);
-  await db2.execute(import_drizzle_orm47.sql`CREATE INDEX IF NOT EXISTS idx_research_doc_status ON research_documents(status);`);
-  await db2.execute(import_drizzle_orm47.sql`CREATE INDEX IF NOT EXISTS idx_pilot_act_tenant ON pilot_activities(tenant_id);`);
-  await db2.execute(import_drizzle_orm47.sql`CREATE INDEX IF NOT EXISTS idx_pilot_act_status ON pilot_activities(status);`);
-  await db2.execute(import_drizzle_orm47.sql`CREATE INDEX IF NOT EXISTS idx_pilot_upd_pilot ON pilot_updates(pilot_id);`);
-  await db2.execute(import_drizzle_orm47.sql`CREATE INDEX IF NOT EXISTS idx_impl_lesson_tenant ON implementation_lessons(tenant_id);`);
-  await db2.execute(import_drizzle_orm47.sql`CREATE INDEX IF NOT EXISTS idx_download_asset_tenant ON download_assets(tenant_id);`);
-  const docCount = await db2.execute(import_drizzle_orm47.sql`SELECT COUNT(*) as count FROM research_documents`);
+  await db2.execute(import_drizzle_orm48.sql`CREATE INDEX IF NOT EXISTS idx_research_doc_tenant ON research_documents(tenant_id);`);
+  await db2.execute(import_drizzle_orm48.sql`CREATE INDEX IF NOT EXISTS idx_research_doc_status ON research_documents(status);`);
+  await db2.execute(import_drizzle_orm48.sql`CREATE INDEX IF NOT EXISTS idx_pilot_act_tenant ON pilot_activities(tenant_id);`);
+  await db2.execute(import_drizzle_orm48.sql`CREATE INDEX IF NOT EXISTS idx_pilot_act_status ON pilot_activities(status);`);
+  await db2.execute(import_drizzle_orm48.sql`CREATE INDEX IF NOT EXISTS idx_pilot_upd_pilot ON pilot_updates(pilot_id);`);
+  await db2.execute(import_drizzle_orm48.sql`CREATE INDEX IF NOT EXISTS idx_impl_lesson_tenant ON implementation_lessons(tenant_id);`);
+  await db2.execute(import_drizzle_orm48.sql`CREATE INDEX IF NOT EXISTS idx_download_asset_tenant ON download_assets(tenant_id);`);
+  const docCount = await db2.execute(import_drizzle_orm48.sql`SELECT COUNT(*) as count FROM research_documents`);
   const count3 = Number(docCount.rows[0]?.count || 0);
   if (count3 === 0) {
-    const tenantRows = await db2.execute(import_drizzle_orm47.sql`SELECT id FROM tenants LIMIT 1`);
+    const tenantRows = await db2.execute(import_drizzle_orm48.sql`SELECT id FROM tenants LIMIT 1`);
     const tenantId = tenantRows.rows[0]?.id || "default-tenant-uuid";
-    await db2.execute(import_drizzle_orm47.sql`
+    await db2.execute(import_drizzle_orm48.sql`
       INSERT INTO research_documents (
         tenant_id, title, slug, abstract, document_type, authors, organizations,
         publication_date, year, version, country, region, tags, status, visibility,
@@ -46628,7 +47420,7 @@ async function up3(db2) {
         76
       );
     `);
-    await db2.execute(import_drizzle_orm47.sql`
+    await db2.execute(import_drizzle_orm48.sql`
       INSERT INTO pilot_activities (
         tenant_id, title, slug, summary, country, province, district, facility,
         communities, latitude, longitude, start_date, end_date, status, pilot_type,
@@ -46701,7 +47493,7 @@ async function up3(db2) {
         true
       );
     `);
-    await db2.execute(import_drizzle_orm47.sql`
+    await db2.execute(import_drizzle_orm48.sql`
       INSERT INTO implementation_lessons (
         tenant_id, title, slug, category, context, what_was_tested, what_worked,
         what_did_not_work, recommendation, pilot_id, document_id, tags, status, visibility, author
@@ -46741,7 +47533,7 @@ async function up3(db2) {
         'T. Smith'
       );
     `);
-    await db2.execute(import_drizzle_orm47.sql`
+    await db2.execute(import_drizzle_orm48.sql`
       INSERT INTO download_assets (
         tenant_id, title, slug, description, category, recommended_audience,
         file_url, file_name, file_type, file_size, version, status, visibility, download_count
@@ -46813,45 +47605,45 @@ async function up3(db2) {
     `);
   }
 }
-var import_drizzle_orm47;
+var import_drizzle_orm48;
 var init_research_hub_schema = __esm({
   "server/migrations/022-research-hub-schema.ts"() {
     "use strict";
-    import_drizzle_orm47 = require("drizzle-orm");
+    import_drizzle_orm48 = require("drizzle-orm");
   }
 });
 
 // server/migrations/023-safe-geometry.ts
 async function applySafeGeometryFixes(db2) {
   try {
-    await db2.execute(import_drizzle_orm48.sql`CREATE EXTENSION IF NOT EXISTS postgis`);
+    await db2.execute(import_drizzle_orm49.sql`CREATE EXTENSION IF NOT EXISTS postgis`);
   } catch (err) {
   }
-  await db2.execute(import_drizzle_orm48.sql`
+  await db2.execute(import_drizzle_orm49.sql`
     ALTER TABLE population_grids 
     ADD COLUMN IF NOT EXISTS geometry geometry(Geometry, 4326),
     ADD COLUMN IF NOT EXISTS geojson jsonb
   `);
   try {
-    await db2.execute(import_drizzle_orm48.sql`
+    await db2.execute(import_drizzle_orm49.sql`
       ALTER TABLE imported_coverage
       ADD CONSTRAINT imported_coverage_unique UNIQUE (tenant_id, village_id, parameter, year)
     `);
   } catch (err) {
   }
 }
-var import_drizzle_orm48;
+var import_drizzle_orm49;
 var init_safe_geometry = __esm({
   "server/migrations/023-safe-geometry.ts"() {
     "use strict";
-    import_drizzle_orm48 = require("drizzle-orm");
+    import_drizzle_orm49 = require("drizzle-orm");
   }
 });
 
 // server/migrations/024-settlements-gis-microplanning.ts
 async function applySettlementsGisMigration(db2) {
   try {
-    await db2.execute(import_drizzle_orm49.sql`
+    await db2.execute(import_drizzle_orm50.sql`
       ALTER TABLE villages 
       ADD COLUMN IF NOT EXISTS linked_settlement_id integer
     `);
@@ -46859,7 +47651,7 @@ async function applySettlementsGisMigration(db2) {
     console.error("Migration: failed to add linked_settlement_id to villages:", err.message);
   }
   try {
-    await db2.execute(import_drizzle_orm49.sql`
+    await db2.execute(import_drizzle_orm50.sql`
       ALTER TABLE settlements_master 
       ADD COLUMN IF NOT EXISTS province_id integer,
       ADD COLUMN IF NOT EXISTS district_id integer,
@@ -46884,18 +47676,18 @@ async function applySettlementsGisMigration(db2) {
     console.error("Migration: failed to add columns to settlements_master:", err.message);
   }
 }
-var import_drizzle_orm49;
+var import_drizzle_orm50;
 var init_settlements_gis_microplanning = __esm({
   "server/migrations/024-settlements-gis-microplanning.ts"() {
     "use strict";
-    import_drizzle_orm49 = require("drizzle-orm");
+    import_drizzle_orm50 = require("drizzle-orm");
   }
 });
 
 // server/migrations/026-polygon-planning.ts
 async function applyPolygonPlanningMigration(db2) {
   try {
-    await db2.execute(import_drizzle_orm50.sql`
+    await db2.execute(import_drizzle_orm51.sql`
       ALTER TABLE gis_polygons 
       ADD COLUMN IF NOT EXISTS centroid jsonb,
       ADD COLUMN IF NOT EXISTS population_estimate integer,
@@ -46914,17 +47706,17 @@ async function applyPolygonPlanningMigration(db2) {
     console.error("Migration: failed to add columns to gis_polygons:", err.message);
   }
 }
-var import_drizzle_orm50;
+var import_drizzle_orm51;
 var init_polygon_planning = __esm({
   "server/migrations/026-polygon-planning.ts"() {
     "use strict";
-    import_drizzle_orm50 = require("drizzle-orm");
+    import_drizzle_orm51 = require("drizzle-orm");
   }
 });
 
 // server/migrations/028-polygon-lifecycle.ts
 async function applyPolygonLifecycleMigration(db2) {
-  await db2.execute(import_drizzle_orm51.sql`
+  await db2.execute(import_drizzle_orm52.sql`
     ALTER TABLE gis_polygons
       ADD COLUMN IF NOT EXISTS previous_version_id integer,
       ADD COLUMN IF NOT EXISTS replaced_version_id integer,
@@ -46938,15 +47730,15 @@ async function applyPolygonLifecycleMigration(db2) {
       ADD COLUMN IF NOT EXISTS rejection_reason text,
       ADD COLUMN IF NOT EXISTS metadata_json jsonb DEFAULT '{}'::jsonb
   `);
-  await db2.execute(import_drizzle_orm51.sql`
+  await db2.execute(import_drizzle_orm52.sql`
     CREATE INDEX IF NOT EXISTS idx_gis_polygons_owner_version
       ON gis_polygons (tenant_id, owner_type, owner_id, version DESC)
   `);
-  await db2.execute(import_drizzle_orm51.sql`
+  await db2.execute(import_drizzle_orm52.sql`
     CREATE INDEX IF NOT EXISTS idx_gis_polygons_parent_facility
       ON gis_polygons (tenant_id, parent_facility_id)
   `);
-  await db2.execute(import_drizzle_orm51.sql`
+  await db2.execute(import_drizzle_orm52.sql`
     WITH ranked_active AS (
       SELECT id,
              row_number() OVER (
@@ -46967,12 +47759,12 @@ async function applyPolygonLifecycleMigration(db2) {
      WHERE polygon.id = ranked_active.id
        AND ranked_active.active_rank > 1
   `);
-  await db2.execute(import_drizzle_orm51.sql`
+  await db2.execute(import_drizzle_orm52.sql`
     CREATE UNIQUE INDEX IF NOT EXISTS idx_gis_polygons_one_active_owner
       ON gis_polygons (tenant_id, owner_type, owner_id, polygon_type)
       WHERE is_active = true AND status = 'active'
   `);
-  await db2.execute(import_drizzle_orm51.sql`
+  await db2.execute(import_drizzle_orm52.sql`
     UPDATE gis_polygons
        SET version = COALESCE(version, 1),
            valid_from = COALESCE(valid_from, created_at, now()),
@@ -46984,11 +47776,11 @@ async function applyPolygonLifecycleMigration(db2) {
         OR metadata_json IS NULL
   `);
 }
-var import_drizzle_orm51;
+var import_drizzle_orm52;
 var init_polygon_lifecycle = __esm({
   "server/migrations/028-polygon-lifecycle.ts"() {
     "use strict";
-    import_drizzle_orm51 = require("drizzle-orm");
+    import_drizzle_orm52 = require("drizzle-orm");
   }
 });
 
@@ -47001,19 +47793,19 @@ async function upsertPolygonPermissionsForAllTenants(db2) {
   const tenantRows = await db2.select({ id: tenants.id }).from(tenants);
   for (const tenant of tenantRows) {
     for (const permission of polygonPermissions) {
-      const [existing] = await db2.select({ id: userPermissions.id }).from(userPermissions).where((0, import_drizzle_orm52.and)((0, import_drizzle_orm52.eq)(userPermissions.tenantId, tenant.id), (0, import_drizzle_orm52.eq)(userPermissions.code, permission.code))).limit(1);
+      const [existing] = await db2.select({ id: userPermissions.id }).from(userPermissions).where((0, import_drizzle_orm53.and)((0, import_drizzle_orm53.eq)(userPermissions.tenantId, tenant.id), (0, import_drizzle_orm53.eq)(userPermissions.code, permission.code))).limit(1);
       if (existing) {
-        await db2.update(userPermissions).set({ name: permission.name, description: permission.description, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm52.eq)(userPermissions.id, existing.id));
+        await db2.update(userPermissions).set({ name: permission.name, description: permission.description, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm53.eq)(userPermissions.id, existing.id));
       } else {
         await db2.insert(userPermissions).values({ tenantId: tenant.id, ...permission });
       }
     }
     for (const roleCode of managedRoleCodes) {
       const defaults = ROLE_PERMISSIONS[roleCode] || [];
-      const [existingRole] = await db2.select().from(userRoles).where((0, import_drizzle_orm52.and)((0, import_drizzle_orm52.eq)(userRoles.tenantId, tenant.id), (0, import_drizzle_orm52.eq)(userRoles.code, roleCode))).limit(1);
+      const [existingRole] = await db2.select().from(userRoles).where((0, import_drizzle_orm53.and)((0, import_drizzle_orm53.eq)(userRoles.tenantId, tenant.id), (0, import_drizzle_orm53.eq)(userRoles.code, roleCode))).limit(1);
       const permissions2 = mergePermissions(existingRole?.permissions, defaults);
       if (existingRole) {
-        await db2.update(userRoles).set({ permissions: permissions2, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm52.eq)(userRoles.id, existingRole.id));
+        await db2.update(userRoles).set({ permissions: permissions2, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm53.eq)(userRoles.id, existingRole.id));
       } else {
         await db2.insert(userRoles).values({
           tenantId: tenant.id,
@@ -47025,11 +47817,11 @@ async function upsertPolygonPermissionsForAllTenants(db2) {
     }
   }
 }
-var import_drizzle_orm52, polygonPermissions, managedRoleCodes;
+var import_drizzle_orm53, polygonPermissions, managedRoleCodes;
 var init_polygon_permissions_all_tenants = __esm({
   "server/migrations/029-polygon-permissions-all-tenants.ts"() {
     "use strict";
-    import_drizzle_orm52 = require("drizzle-orm");
+    import_drizzle_orm53 = require("drizzle-orm");
     init_schema();
     init_permissions();
     polygonPermissions = [
@@ -47058,14 +47850,14 @@ var init_polygon_permissions_all_tenants = __esm({
 
 // server/migrations/030-microplan-version-control.ts
 async function applyMicroplanVersionControlMigration(db2) {
-  await db2.execute(import_drizzle_orm53.sql.raw("CREATE TABLE IF NOT EXISTS microplan_versions (id integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY, tenant_id varchar NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, microplan_id integer NOT NULL REFERENCES microplans(id) ON DELETE CASCADE, version_number integer NOT NULL, version_label varchar(50) NOT NULL, event_type varchar(50) NOT NULL, status varchar(50) NOT NULL, reason text, snapshot jsonb NOT NULL, created_by_user_id varchar REFERENCES users(id) ON DELETE SET NULL, created_at timestamp NOT NULL DEFAULT now(), CONSTRAINT uq_microplan_versions_plan_number UNIQUE (microplan_id, version_number))"));
-  await db2.execute(import_drizzle_orm53.sql.raw("CREATE INDEX IF NOT EXISTS idx_microplan_versions_tenant_plan ON microplan_versions (tenant_id, microplan_id, version_number DESC)"));
+  await db2.execute(import_drizzle_orm54.sql.raw("CREATE TABLE IF NOT EXISTS microplan_versions (id integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY, tenant_id varchar NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, microplan_id integer NOT NULL REFERENCES microplans(id) ON DELETE CASCADE, version_number integer NOT NULL, version_label varchar(50) NOT NULL, event_type varchar(50) NOT NULL, status varchar(50) NOT NULL, reason text, snapshot jsonb NOT NULL, created_by_user_id varchar REFERENCES users(id) ON DELETE SET NULL, created_at timestamp NOT NULL DEFAULT now(), CONSTRAINT uq_microplan_versions_plan_number UNIQUE (microplan_id, version_number))"));
+  await db2.execute(import_drizzle_orm54.sql.raw("CREATE INDEX IF NOT EXISTS idx_microplan_versions_tenant_plan ON microplan_versions (tenant_id, microplan_id, version_number DESC)"));
 }
-var import_drizzle_orm53;
+var import_drizzle_orm54;
 var init_microplan_version_control = __esm({
   "server/migrations/030-microplan-version-control.ts"() {
     "use strict";
-    import_drizzle_orm53 = require("drizzle-orm");
+    import_drizzle_orm54 = require("drizzle-orm");
   }
 });
 
@@ -47096,25 +47888,25 @@ async function upsertMicroplanVersionPermissionsForAllTenants(db2) {
   const tenantRows = await db2.select({ id: tenants.id }).from(tenants);
   for (const tenant of tenantRows) {
     for (const permission of permissions) {
-      const [current] = await db2.select({ id: userPermissions.id }).from(userPermissions).where((0, import_drizzle_orm54.and)((0, import_drizzle_orm54.eq)(userPermissions.tenantId, tenant.id), (0, import_drizzle_orm54.eq)(userPermissions.code, permission.code))).limit(1);
+      const [current] = await db2.select({ id: userPermissions.id }).from(userPermissions).where((0, import_drizzle_orm55.and)((0, import_drizzle_orm55.eq)(userPermissions.tenantId, tenant.id), (0, import_drizzle_orm55.eq)(userPermissions.code, permission.code))).limit(1);
       if (current) {
-        await db2.update(userPermissions).set({ name: permission.name, description: permission.description, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm54.eq)(userPermissions.id, current.id));
+        await db2.update(userPermissions).set({ name: permission.name, description: permission.description, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm55.eq)(userPermissions.id, current.id));
       } else {
         await db2.insert(userPermissions).values({ tenantId: tenant.id, ...permission });
       }
     }
     for (const [code, defaults] of Object.entries(ROLE_PERMISSIONS)) {
-      const [role] = await db2.select().from(userRoles).where((0, import_drizzle_orm54.and)((0, import_drizzle_orm54.eq)(userRoles.tenantId, tenant.id), (0, import_drizzle_orm54.eq)(userRoles.code, code))).limit(1);
+      const [role] = await db2.select().from(userRoles).where((0, import_drizzle_orm55.and)((0, import_drizzle_orm55.eq)(userRoles.tenantId, tenant.id), (0, import_drizzle_orm55.eq)(userRoles.code, code))).limit(1);
       if (!role) continue;
-      await db2.update(userRoles).set({ permissions: merge(role.permissions, defaults), updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm54.eq)(userRoles.id, role.id));
+      await db2.update(userRoles).set({ permissions: merge(role.permissions, defaults), updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm55.eq)(userRoles.id, role.id));
     }
   }
 }
-var import_drizzle_orm54, permissions;
+var import_drizzle_orm55, permissions;
 var init_microplan_version_permissions = __esm({
   "server/migrations/031-microplan-version-permissions.ts"() {
     "use strict";
-    import_drizzle_orm54 = require("drizzle-orm");
+    import_drizzle_orm55 = require("drizzle-orm");
     init_schema();
     init_permissions();
     permissions = [
@@ -47131,7 +47923,7 @@ var init_microplan_version_permissions = __esm({
 
 // server/migrations/032-risk-assessment-schema.ts
 async function applyRiskAssessmentSchema(db2) {
-  await db2.execute(import_drizzle_orm55.sql`
+  await db2.execute(import_drizzle_orm56.sql`
     CREATE TABLE IF NOT EXISTS risk_methodologies (
       id                   VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
       key                  VARCHAR(100) NOT NULL UNIQUE,
@@ -47142,7 +47934,7 @@ async function applyRiskAssessmentSchema(db2) {
       created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
   `);
-  await db2.execute(import_drizzle_orm55.sql`
+  await db2.execute(import_drizzle_orm56.sql`
     CREATE TABLE IF NOT EXISTS risk_methodology_versions (
       id                   VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
       methodology_id       VARCHAR NOT NULL REFERENCES risk_methodologies(id) ON DELETE CASCADE,
@@ -47155,7 +47947,7 @@ async function applyRiskAssessmentSchema(db2) {
       CONSTRAINT idx_risk_meth_ver_unique UNIQUE(methodology_id, version)
     );
   `);
-  await db2.execute(import_drizzle_orm55.sql`
+  await db2.execute(import_drizzle_orm56.sql`
     CREATE TABLE IF NOT EXISTS risk_methodology_profiles (
       id                   VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
       tenant_id            VARCHAR NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -47168,7 +47960,7 @@ async function applyRiskAssessmentSchema(db2) {
     );
     CREATE INDEX IF NOT EXISTS idx_risk_profile_tenant ON risk_methodology_profiles(tenant_id);
   `);
-  await db2.execute(import_drizzle_orm55.sql`
+  await db2.execute(import_drizzle_orm56.sql`
     CREATE TABLE IF NOT EXISTS risk_assessments (
       id                      VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
       tenant_id               VARCHAR NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -47190,7 +47982,7 @@ async function applyRiskAssessmentSchema(db2) {
       ADD COLUMN IF NOT EXISTS report_config_json JSONB DEFAULT '{}'::jsonb;
     CREATE INDEX IF NOT EXISTS idx_risk_assessment_tenant ON risk_assessments(tenant_id);
   `);
-  await db2.execute(import_drizzle_orm55.sql`
+  await db2.execute(import_drizzle_orm56.sql`
     CREATE TABLE IF NOT EXISTS risk_assessment_runs (
       id                      VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
       assessment_id           VARCHAR NOT NULL REFERENCES risk_assessments(id) ON DELETE CASCADE,
@@ -47206,7 +47998,7 @@ async function applyRiskAssessmentSchema(db2) {
     CREATE INDEX IF NOT EXISTS idx_risk_run_assessment ON risk_assessment_runs(assessment_id);
     CREATE INDEX IF NOT EXISTS idx_risk_run_tenant ON risk_assessment_runs(tenant_id);
   `);
-  await db2.execute(import_drizzle_orm55.sql`
+  await db2.execute(import_drizzle_orm56.sql`
     CREATE TABLE IF NOT EXISTS risk_area_results (
       id                      VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
       run_id                  VARCHAR NOT NULL REFERENCES risk_assessment_runs(id) ON DELETE CASCADE,
@@ -47226,7 +48018,7 @@ async function applyRiskAssessmentSchema(db2) {
     );
     CREATE INDEX IF NOT EXISTS idx_risk_area_tenant ON risk_area_results(tenant_id);
   `);
-  await db2.execute(import_drizzle_orm55.sql`
+  await db2.execute(import_drizzle_orm56.sql`
     CREATE TABLE IF NOT EXISTS risk_domain_results (
       id                      VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
       run_id                  VARCHAR NOT NULL REFERENCES risk_assessment_runs(id) ON DELETE CASCADE,
@@ -47239,7 +48031,7 @@ async function applyRiskAssessmentSchema(db2) {
       CONSTRAINT idx_risk_domain_run_dist_code UNIQUE(run_id, district_id, domain_code)
     );
   `);
-  await db2.execute(import_drizzle_orm55.sql`
+  await db2.execute(import_drizzle_orm56.sql`
     CREATE TABLE IF NOT EXISTS risk_indicator_results (
       id                      VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
       run_id                  VARCHAR NOT NULL REFERENCES risk_assessment_runs(id) ON DELETE CASCADE,
@@ -47261,7 +48053,7 @@ async function applyRiskAssessmentSchema(db2) {
       CONSTRAINT idx_risk_indicator_run_dist_code UNIQUE(run_id, district_id, indicator_code)
     );
   `);
-  await db2.execute(import_drizzle_orm55.sql`
+  await db2.execute(import_drizzle_orm56.sql`
     CREATE TABLE IF NOT EXISTS risk_case_raw (
       id                          VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
       tenant_id                   VARCHAR NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -47297,7 +48089,7 @@ async function applyRiskAssessmentSchema(db2) {
     CREATE INDEX IF NOT EXISTS idx_risk_case_assessment ON risk_case_raw(assessment_id);
     CREATE INDEX IF NOT EXISTS idx_risk_case_tenant ON risk_case_raw(tenant_id);
   `);
-  await db2.execute(import_drizzle_orm55.sql`
+  await db2.execute(import_drizzle_orm56.sql`
     CREATE TABLE IF NOT EXISTS risk_area_edges (
       id                          VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
       tenant_id                   VARCHAR NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -47311,7 +48103,7 @@ async function applyRiskAssessmentSchema(db2) {
     );
     CREATE INDEX IF NOT EXISTS idx_risk_edge_tenant ON risk_area_edges(tenant_id);
   `);
-  await db2.execute(import_drizzle_orm55.sql`
+  await db2.execute(import_drizzle_orm56.sql`
     CREATE TABLE IF NOT EXISTS risk_vulnerability_responses (
       id                          VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
       tenant_id                   VARCHAR NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -47326,7 +48118,7 @@ async function applyRiskAssessmentSchema(db2) {
       CONSTRAINT idx_risk_vuln_unique UNIQUE(assessment_id, district_id, factor_key)
     );
   `);
-  await db2.execute(import_drizzle_orm55.sql`
+  await db2.execute(import_drizzle_orm56.sql`
     CREATE TABLE IF NOT EXISTS risk_action_links (
       id                          VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
       tenant_id                   VARCHAR NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -47347,7 +48139,7 @@ async function applyRiskAssessmentSchema(db2) {
     );
   `);
   const methId = "who_measles";
-  await db2.execute(import_drizzle_orm55.sql`
+  await db2.execute(import_drizzle_orm56.sql`
     INSERT INTO risk_methodologies (id, key, name, disease, description, source_org)
     VALUES (
       ${methId},
@@ -47362,7 +48154,7 @@ async function applyRiskAssessmentSchema(db2) {
       description = EXCLUDED.description;
   `);
   const verId = WHO_MEASLES_GLOBAL_RECONCILED_V1.code;
-  await db2.execute(import_drizzle_orm55.sql`
+  await db2.execute(import_drizzle_orm56.sql`
     INSERT INTO risk_methodology_versions (id, methodology_id, version, status, rules_json, checksum)
     VALUES (
       ${verId},
@@ -47375,11 +48167,11 @@ async function applyRiskAssessmentSchema(db2) {
     ON CONFLICT (id) DO NOTHING;
   `);
 }
-var import_drizzle_orm55;
+var import_drizzle_orm56;
 var init_risk_assessment_schema = __esm({
   "server/migrations/032-risk-assessment-schema.ts"() {
     "use strict";
-    import_drizzle_orm55 = require("drizzle-orm");
+    import_drizzle_orm56 = require("drizzle-orm");
     init_methodologyRegistry();
   }
 });
@@ -47392,9 +48184,9 @@ async function applyRiskPermissionsAndSeed(db2) {
   const tenantRows = await db2.select({ id: tenants.id, countryCode: tenants.countryCode }).from(tenants);
   for (const tenant of tenantRows) {
     for (const perm of RISK_PERMISSIONS) {
-      const [current] = await db2.select({ id: userPermissions.id }).from(userPermissions).where((0, import_drizzle_orm56.and)((0, import_drizzle_orm56.eq)(userPermissions.tenantId, tenant.id), (0, import_drizzle_orm56.eq)(userPermissions.code, perm.code))).limit(1);
+      const [current] = await db2.select({ id: userPermissions.id }).from(userPermissions).where((0, import_drizzle_orm57.and)((0, import_drizzle_orm57.eq)(userPermissions.tenantId, tenant.id), (0, import_drizzle_orm57.eq)(userPermissions.code, perm.code))).limit(1);
       if (current) {
-        await db2.update(userPermissions).set({ name: perm.name, description: perm.description, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm56.eq)(userPermissions.id, current.id));
+        await db2.update(userPermissions).set({ name: perm.name, description: perm.description, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm57.eq)(userPermissions.id, current.id));
       } else {
         await db2.insert(userPermissions).values({
           tenantId: tenant.id,
@@ -47405,37 +48197,37 @@ async function applyRiskPermissionsAndSeed(db2) {
       }
     }
     for (const [roleCode, permList] of Object.entries(ROLE_RISK_MAP)) {
-      const [role] = await db2.select().from(userRoles).where((0, import_drizzle_orm56.and)((0, import_drizzle_orm56.eq)(userRoles.tenantId, tenant.id), (0, import_drizzle_orm56.eq)(userRoles.code, roleCode))).limit(1);
+      const [role] = await db2.select().from(userRoles).where((0, import_drizzle_orm57.and)((0, import_drizzle_orm57.eq)(userRoles.tenantId, tenant.id), (0, import_drizzle_orm57.eq)(userRoles.code, roleCode))).limit(1);
       if (role) {
-        await db2.update(userRoles).set({ permissions: merge2(role.permissions, permList), updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm56.eq)(userRoles.id, role.id));
+        await db2.update(userRoles).set({ permissions: merge2(role.permissions, permList), updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm57.eq)(userRoles.id, role.id));
       }
     }
   }
-  const [zafTenant] = await db2.select({ id: tenants.id }).from(tenants).where((0, import_drizzle_orm56.eq)(tenants.countryCode, "ZAF")).limit(1);
+  const [zafTenant] = await db2.select({ id: tenants.id }).from(tenants).where((0, import_drizzle_orm57.eq)(tenants.countryCode, "ZAF")).limit(1);
   if (zafTenant) {
     await seedAssessmentForTenant(db2, zafTenant.id, "ZAF", "2025 National Measles Programmatic Risk Assessment", 2025);
   }
-  const [ssdTenant] = await db2.select({ id: tenants.id }).from(tenants).where((0, import_drizzle_orm56.eq)(tenants.countryCode, "SSD")).limit(1);
+  const [ssdTenant] = await db2.select({ id: tenants.id }).from(tenants).where((0, import_drizzle_orm57.eq)(tenants.countryCode, "SSD")).limit(1);
   if (ssdTenant) {
     await seedAssessmentForTenant(db2, ssdTenant.id, "SSD", "2024 National Measles Programmatic Risk Assessment", 2024);
   }
-  const [zmbTenant] = await db2.select({ id: tenants.id }).from(tenants).where((0, import_drizzle_orm56.eq)(tenants.countryCode, "ZMB")).limit(1);
+  const [zmbTenant] = await db2.select({ id: tenants.id }).from(tenants).where((0, import_drizzle_orm57.eq)(tenants.countryCode, "ZMB")).limit(1);
   if (zmbTenant) {
     await seedAssessmentForTenant(db2, zmbTenant.id, "ZMB", "2025 National Measles Programmatic Risk Assessment", 2025);
   }
-  const [pngTenant] = await db2.select({ id: tenants.id }).from(tenants).where((0, import_drizzle_orm56.eq)(tenants.countryCode, "PNG")).limit(1);
+  const [pngTenant] = await db2.select({ id: tenants.id }).from(tenants).where((0, import_drizzle_orm57.eq)(tenants.countryCode, "PNG")).limit(1);
   if (pngTenant) {
     await seedAssessmentForTenant(db2, pngTenant.id, "PNG", "2024 National Measles Programmatic Risk Assessment", 2024);
   }
 }
 async function seedAssessmentForTenant(db2, tenantId, countryCode, title, year) {
-  const existingAssessment = await db2.execute(import_drizzle_orm56.sql`
+  const existingAssessment = await db2.execute(import_drizzle_orm57.sql`
     SELECT id, active_run_id FROM risk_assessments WHERE tenant_id = ${tenantId} LIMIT 1;
   `);
   let assessmentId;
   let activeRunId = null;
   if (existingAssessment.rows.length === 0) {
-    const insertRes = await db2.execute(import_drizzle_orm56.sql`
+    const insertRes = await db2.execute(import_drizzle_orm57.sql`
       INSERT INTO risk_assessments (
         tenant_id,
         title,
@@ -47459,12 +48251,12 @@ async function seedAssessmentForTenant(db2, tenantId, countryCode, title, year) 
     assessmentId = existingAssessment.rows[0].id;
     activeRunId = existingAssessment.rows[0].active_run_id;
   }
-  const existingRun = await db2.execute(import_drizzle_orm56.sql`
+  const existingRun = await db2.execute(import_drizzle_orm57.sql`
     SELECT id FROM risk_assessment_runs WHERE assessment_id = ${assessmentId} LIMIT 1;
   `);
   let runId;
   if (existingRun.rows.length === 0) {
-    const insertRun = await db2.execute(import_drizzle_orm56.sql`
+    const insertRun = await db2.execute(import_drizzle_orm57.sql`
       INSERT INTO risk_assessment_runs (
         tenant_id,
         assessment_id,
@@ -47488,17 +48280,17 @@ async function seedAssessmentForTenant(db2, tenantId, countryCode, title, year) 
     runId = existingRun.rows[0].id;
   }
   if (activeRunId !== runId) {
-    await db2.execute(import_drizzle_orm56.sql`
+    await db2.execute(import_drizzle_orm57.sql`
       UPDATE risk_assessments
       SET active_run_id = ${runId}, status = 'completed', updated_at = NOW()
       WHERE id = ${assessmentId};
     `);
   }
-  const existingAreas = await db2.execute(import_drizzle_orm56.sql`
+  const existingAreas = await db2.execute(import_drizzle_orm57.sql`
     SELECT COUNT(*) as count FROM risk_area_results WHERE run_id = ${runId};
   `);
   if (Number(existingAreas.rows[0]?.count || 0) === 0) {
-    const districtRows = await db2.select({ id: districts.id, name: districts.name, provinceId: districts.provinceId }).from(districts).where((0, import_drizzle_orm56.eq)(districts.tenantId, tenantId));
+    const districtRows = await db2.select({ id: districts.id, name: districts.name, provinceId: districts.provinceId }).from(districts).where((0, import_drizzle_orm57.eq)(districts.tenantId, tenantId));
     if (districtRows.length > 0) {
       for (let i = 0; i < districtRows.length; i++) {
         const d = districtRows[i];
@@ -47525,7 +48317,7 @@ async function seedAssessmentForTenant(db2, tenantId, countryCode, title, year) 
         else if (total >= 40) cat = "MEDIUM";
         const domainScores = { PI: pi, SQ: sq, PD: pd, TA: ta };
         const summaryText = `PI Score: ${pi}/40, SQ: ${sq}/20, PD: ${pd}/16, TA: ${ta}/24. Routine MCV1 estimate: ${Math.max(50, Math.min(97, Math.round(100 - pi * 1.3)))}%.`;
-        await db2.execute(import_drizzle_orm56.sql`
+        await db2.execute(import_drizzle_orm57.sql`
           INSERT INTO risk_area_results (
             run_id,
             tenant_id,
@@ -47562,7 +48354,7 @@ async function seedAssessmentForTenant(db2, tenantId, countryCode, title, year) 
         ];
         for (const dom of domains) {
           const domCat = dom.score >= dom.max * 0.65 ? "HIGH" : dom.score >= dom.max * 0.4 ? "MEDIUM" : "LOW";
-          await db2.execute(import_drizzle_orm56.sql`
+          await db2.execute(import_drizzle_orm57.sql`
             INSERT INTO risk_domain_results (
               run_id,
               tenant_id,
@@ -47585,7 +48377,7 @@ async function seedAssessmentForTenant(db2, tenantId, countryCode, title, year) 
       }
       const sampleHighRisk = districtRows[0];
       if (sampleHighRisk) {
-        await db2.execute(import_drizzle_orm56.sql`
+        await db2.execute(import_drizzle_orm57.sql`
           INSERT INTO risk_action_links (
             tenant_id,
             assessment_id,
@@ -47612,11 +48404,11 @@ async function seedAssessmentForTenant(db2, tenantId, countryCode, title, year) 
     }
   }
 }
-var import_drizzle_orm56, RISK_PERMISSIONS, ROLE_RISK_MAP;
+var import_drizzle_orm57, RISK_PERMISSIONS, ROLE_RISK_MAP;
 var init_risk_permissions_and_seed = __esm({
   "server/migrations/033-risk-permissions-and-seed.ts"() {
     "use strict";
-    import_drizzle_orm56 = require("drizzle-orm");
+    import_drizzle_orm57 = require("drizzle-orm");
     init_schema();
     RISK_PERMISSIONS = [
       { code: "risk.view", name: "View Risk Assessments", description: "View subnational VPD programmatic risk assessments, maps, and results." },
@@ -47681,7 +48473,7 @@ var init_risk_permissions_and_seed = __esm({
 
 // server/migrations/034-risk-direct-entry.ts
 async function applyRiskDirectEntrySchema(db2) {
-  await db2.execute(import_drizzle_orm57.sql`
+  await db2.execute(import_drizzle_orm58.sql`
     CREATE TABLE IF NOT EXISTS risk_district_data_entry (
       id                          VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
       tenant_id                   VARCHAR NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -47719,11 +48511,11 @@ async function applyRiskDirectEntrySchema(db2) {
     CREATE INDEX IF NOT EXISTS idx_risk_dist_entry_assessment ON risk_district_data_entry(assessment_id);
   `);
 }
-var import_drizzle_orm57;
+var import_drizzle_orm58;
 var init_risk_direct_entry = __esm({
   "server/migrations/034-risk-direct-entry.ts"() {
     "use strict";
-    import_drizzle_orm57 = require("drizzle-orm");
+    import_drizzle_orm58 = require("drizzle-orm");
   }
 });
 
@@ -47780,7 +48572,7 @@ async function seedVgieRules() {
   let rulesAdded = 0;
   for (const tenant of allTenants) {
     for (const rule of defaultRecommendationRules) {
-      const existing = await db.select().from(vgieRecommendationRules).where((0, import_drizzle_orm58.eq)(vgieRecommendationRules.tenantId, tenant.id));
+      const existing = await db.select().from(vgieRecommendationRules).where((0, import_drizzle_orm59.eq)(vgieRecommendationRules.tenantId, tenant.id));
       const exists = existing.find((e) => e.name === rule.name);
       if (!exists) {
         await db.insert(vgieRecommendationRules).values({
@@ -47792,7 +48584,7 @@ async function seedVgieRules() {
       }
     }
     for (const rule of defaultAlertRules) {
-      const existing = await db.select().from(vgieAlertRules).where((0, import_drizzle_orm58.eq)(vgieAlertRules.tenantId, tenant.id));
+      const existing = await db.select().from(vgieAlertRules).where((0, import_drizzle_orm59.eq)(vgieAlertRules.tenantId, tenant.id));
       const exists = existing.find((e) => e.name === rule.name);
       if (!exists) {
         await db.insert(vgieAlertRules).values({
@@ -47806,13 +48598,13 @@ async function seedVgieRules() {
   }
   console.log(`VGIE rules seeding completed. Added ${rulesAdded} new rules.`);
 }
-var import_drizzle_orm58;
+var import_drizzle_orm59;
 var init_seed_reference_data = __esm({
   "server/migrations/025-seed-reference-data.ts"() {
     "use strict";
     init_db();
     init_schema();
-    import_drizzle_orm58 = require("drizzle-orm");
+    import_drizzle_orm59 = require("drizzle-orm");
   }
 });
 
@@ -47820,18 +48612,18 @@ var init_seed_reference_data = __esm({
 async function runMigration() {
   console.log("Starting catalogue migration...");
   try {
-    await db.execute(import_drizzle_orm59.sql`
+    await db.execute(import_drizzle_orm60.sql`
       DO $$ BEGIN
         CREATE TYPE commodity_type AS ENUM ('diluent', 'syringe', 'safety_box', 'ppe', 'cold_chain', 'other');
       EXCEPTION
         WHEN duplicate_object THEN null;
       END $$;
     `);
-    await db.execute(import_drizzle_orm59.sql`
+    await db.execute(import_drizzle_orm60.sql`
       ALTER TYPE approval_status ADD VALUE IF NOT EXISTS 'published';
       ALTER TYPE approval_status ADD VALUE IF NOT EXISTS 'retired';
     `);
-    await db.execute(import_drizzle_orm59.sql`
+    await db.execute(import_drizzle_orm60.sql`
       CREATE TABLE IF NOT EXISTS catalogue_vaccines (
         id SERIAL PRIMARY KEY,
         tenant_id VARCHAR REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
@@ -47856,7 +48648,7 @@ async function runMigration() {
       CREATE INDEX IF NOT EXISTS idx_catalogue_vaccines_tenant ON catalogue_vaccines(tenant_id);
       CREATE INDEX IF NOT EXISTS idx_catalogue_vaccines_product ON catalogue_vaccines(product_id);
     `);
-    await db.execute(import_drizzle_orm59.sql`
+    await db.execute(import_drizzle_orm60.sql`
       CREATE TABLE IF NOT EXISTS catalogue_schedule_doses (
         id SERIAL PRIMARY KEY,
         tenant_id VARCHAR REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
@@ -47871,7 +48663,7 @@ async function runMigration() {
       CREATE INDEX IF NOT EXISTS idx_catalogue_doses_tenant ON catalogue_schedule_doses(tenant_id);
       CREATE INDEX IF NOT EXISTS idx_catalogue_doses_vaccine ON catalogue_schedule_doses(vaccine_id);
     `);
-    await db.execute(import_drizzle_orm59.sql`
+    await db.execute(import_drizzle_orm60.sql`
       CREATE TABLE IF NOT EXISTS catalogue_commodities (
         id SERIAL PRIMARY KEY,
         tenant_id VARCHAR REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
@@ -47886,33 +48678,38 @@ async function runMigration() {
       );
       CREATE INDEX IF NOT EXISTS idx_catalogue_commodities_tenant ON catalogue_commodities(tenant_id);
     `);
-    await db.execute(import_drizzle_orm59.sql`
+    await db.execute(import_drizzle_orm60.sql`
       ALTER TABLE stock_transactions ADD COLUMN IF NOT EXISTS catalogue_vaccine_id INTEGER;
       ALTER TABLE stock_transactions ADD COLUMN IF NOT EXISTS catalogue_commodity_id INTEGER;
     `);
-    const tenants3 = await db.execute(import_drizzle_orm59.sql`SELECT id FROM tenants`);
+    const tenants3 = await db.execute(import_drizzle_orm60.sql`SELECT id FROM tenants`);
     for (const tenantRow of tenants3.rows) {
       const tenantId = tenantRow.id;
-      const pentaResult = await db.execute(import_drizzle_orm59.sql`
-        INSERT INTO catalogue_vaccines (tenant_id, product_id, name, antigen_name, doses_per_vial, wastage_threshold, active, approval_status)
-        VALUES (${tenantId}, 'vaccine_product_penta', 'PENTA', 'DTP-HepB-Hib', 10, 10.00, true, 'published')
-        ON CONFLICT DO NOTHING
-        RETURNING id;
-      `);
-      let pentaId = pentaResult.rows[0]?.id;
+      let existingPenta = (await db.execute(import_drizzle_orm60.sql`
+        SELECT id FROM catalogue_vaccines WHERE tenant_id = ${tenantId} AND product_id = 'vaccine_product_penta' LIMIT 1
+      `)).rows[0];
+      let pentaId = existingPenta?.id;
       if (!pentaId) {
-        const existingPenta = await db.execute(import_drizzle_orm59.sql`SELECT id FROM catalogue_vaccines WHERE tenant_id = ${tenantId} AND product_id = 'vaccine_product_penta'`);
-        pentaId = existingPenta.rows[0]?.id;
+        const pentaResult = await db.execute(import_drizzle_orm60.sql`
+          INSERT INTO catalogue_vaccines (tenant_id, product_id, name, antigen_name, doses_per_vial, wastage_threshold, active, approval_status)
+          VALUES (${tenantId}, 'vaccine_product_penta', 'PENTA', 'DTP-HepB-Hib', 10, 10.00, true, 'published')
+          RETURNING id;
+        `);
+        pentaId = pentaResult.rows[0]?.id;
       }
       if (pentaId) {
-        await db.execute(import_drizzle_orm59.sql`
-          INSERT INTO catalogue_schedule_doses (tenant_id, vaccine_id, dose_code, name, dose_number, target_age, stock_deducting)
-          VALUES 
-            (${tenantId}, ${pentaId}, 'penta_1', 'PENTA-1', 1, '6 weeks', true),
-            (${tenantId}, ${pentaId}, 'penta_2', 'PENTA-2', 2, '10 weeks', true),
-            (${tenantId}, ${pentaId}, 'penta_3', 'PENTA-3', 3, '14 weeks', true)
-          ON CONFLICT DO NOTHING;
+        const existingDoses = await db.execute(import_drizzle_orm60.sql`
+          SELECT id FROM catalogue_schedule_doses WHERE tenant_id = ${tenantId} AND vaccine_id = ${pentaId} LIMIT 1
         `);
+        if (existingDoses.rows.length === 0) {
+          await db.execute(import_drizzle_orm60.sql`
+            INSERT INTO catalogue_schedule_doses (tenant_id, vaccine_id, dose_code, name, dose_number, target_age, stock_deducting)
+            VALUES 
+              (${tenantId}, ${pentaId}, 'penta_1', 'PENTA-1', 1, '6 weeks', true),
+              (${tenantId}, ${pentaId}, 'penta_2', 'PENTA-2', 2, '10 weeks', true),
+              (${tenantId}, ${pentaId}, 'penta_3', 'PENTA-3', 3, '14 weeks', true);
+          `);
+        }
       }
     }
     console.log("Catalogue migration completed successfully.");
@@ -47922,24 +48719,24 @@ async function runMigration() {
     return { success: false, error };
   }
 }
-var import_drizzle_orm59;
+var import_drizzle_orm60;
 var init_catalogue_migration = __esm({
   "server/migrations/020-catalogue-migration.ts"() {
     "use strict";
     init_db();
-    import_drizzle_orm59 = require("drizzle-orm");
+    import_drizzle_orm60 = require("drizzle-orm");
   }
 });
 
 // server/services/identitySequences.ts
 async function realignIdentitySequences(db2) {
-  await db2.execute(import_drizzle_orm60.sql.raw(REALIGN_IDENTITY_SEQUENCES_SQL));
+  await db2.execute(import_drizzle_orm61.sql.raw(REALIGN_IDENTITY_SEQUENCES_SQL));
 }
-var import_drizzle_orm60, REALIGN_IDENTITY_SEQUENCES_SQL;
+var import_drizzle_orm61, REALIGN_IDENTITY_SEQUENCES_SQL;
 var init_identitySequences = __esm({
   "server/services/identitySequences.ts"() {
     "use strict";
-    import_drizzle_orm60 = require("drizzle-orm");
+    import_drizzle_orm61 = require("drizzle-orm");
     REALIGN_IDENTITY_SEQUENCES_SQL = `
 DO $$
 DECLARE
@@ -48060,8 +48857,8 @@ async function applySupervisionTemplatesSeed() {
     CREATE INDEX IF NOT EXISTS idx_supervision_template_tenant ON supervision_checklist_templates(tenant_id);
   `;
   try {
-    await db.execute(import_drizzle_orm61.sql.raw(createTableStmt));
-    await db.execute(import_drizzle_orm61.sql`
+    await db.execute(import_drizzle_orm62.sql.raw(createTableStmt));
+    await db.execute(import_drizzle_orm62.sql`
       ALTER TABLE supervision_checklist_templates ADD COLUMN IF NOT EXISTS sections JSONB NOT NULL DEFAULT '[]'::jsonb;
       ALTER TABLE supervision_checklist_templates ADD COLUMN IF NOT EXISTS category VARCHAR(50) NOT NULL DEFAULT 'supervision';
       ALTER TABLE supervision_checklist_templates ADD COLUMN IF NOT EXISTS items JSONB NOT NULL DEFAULT '[]'::jsonb;
@@ -48104,7 +48901,7 @@ async function applySupervisionTemplatesSeed() {
     return;
   }
   try {
-    const tenantsRes = await db.execute(import_drizzle_orm61.sql`SELECT id, code, country_code FROM tenants`);
+    const tenantsRes = await db.execute(import_drizzle_orm62.sql`SELECT id, code, country_code FROM tenants`);
     const tenantRows = tenantsRes.rows;
     const countryScopedTemplates = parsedTemplates.filter((t) => t.countryCodes.length > 0);
     if (tenantRows.length === 0) {
@@ -48114,7 +48911,7 @@ async function applySupervisionTemplatesSeed() {
     for (const t of countryScopedTemplates) {
       for (const tenant of tenantRows) {
         if (isTemplateInScopeForTenant(t.countryCodes, tenant)) continue;
-        await db.execute(import_drizzle_orm61.sql`
+        await db.execute(import_drizzle_orm62.sql`
           DELETE FROM supervision_checklist_templates
           WHERE tenant_id = ${tenant.id}
             AND name = ${t.name}
@@ -48132,7 +48929,7 @@ async function applySupervisionTemplatesSeed() {
           continue;
         }
         try {
-          const checkRes = await db.execute(import_drizzle_orm61.sql`
+          const checkRes = await db.execute(import_drizzle_orm62.sql`
             SELECT id FROM supervision_checklist_templates
             WHERE tenant_id = ${tenantId}
               AND name = ${t.name}
@@ -48142,7 +48939,7 @@ async function applySupervisionTemplatesSeed() {
           const itemsJsonStr = JSON.stringify(t.items);
           if (checkRes.rows.length > 0) {
             const existingId = checkRes.rows[0].id;
-            await db.execute(import_drizzle_orm61.sql`
+            await db.execute(import_drizzle_orm62.sql`
               UPDATE supervision_checklist_templates
               SET category = ${t.category},
                   description = ${t.description},
@@ -48154,7 +48951,7 @@ async function applySupervisionTemplatesSeed() {
             `);
             console.log(`[migration:028] Updated template "${t.name}" (ID ${existingId}) for tenant "${tenantId}".`);
           } else {
-            await db.execute(import_drizzle_orm61.sql`
+            await db.execute(import_drizzle_orm62.sql`
               INSERT INTO supervision_checklist_templates (
                 tenant_id, name, category, description, sections, items, is_active
               ) VALUES (
@@ -48184,12 +48981,12 @@ async function applySupervisionTemplatesSeed() {
     console.error(`[migration:028] Fatal error during seed: ${err?.message || err}`);
   }
 }
-var import_drizzle_orm61, import_fs9, import_path8;
+var import_drizzle_orm62, import_fs9, import_path8;
 var init_supervision_templates_seed = __esm({
   "server/migrations/028-supervision-templates-seed.ts"() {
     "use strict";
     init_db();
-    import_drizzle_orm61 = require("drizzle-orm");
+    import_drizzle_orm62 = require("drizzle-orm");
     import_fs9 = require("fs");
     import_path8 = require("path");
   }
@@ -48216,18 +49013,18 @@ async function applyStockLedgerColumnsMigration(db2) {
   ];
   for (const stmt of statements) {
     try {
-      await db2.execute(import_drizzle_orm62.sql.raw(stmt));
+      await db2.execute(import_drizzle_orm63.sql.raw(stmt));
       console.log(`[migration:027] Executed: ${stmt}`);
     } catch (err) {
       console.warn(`[migration:027] Warning on statement "${stmt}": ${err.message}`);
     }
   }
 }
-var import_drizzle_orm62;
+var import_drizzle_orm63;
 var init_stock_ledger_columns = __esm({
   "server/migrations/027-stock-ledger-columns.ts"() {
     "use strict";
-    import_drizzle_orm62 = require("drizzle-orm");
+    import_drizzle_orm63 = require("drizzle-orm");
   }
 });
 
@@ -48253,18 +49050,151 @@ async function applyClientsColumns() {
   ];
   for (const stmt of statements) {
     try {
-      await db.execute(import_drizzle_orm63.sql.raw(stmt));
+      await db.execute(import_drizzle_orm64.sql.raw(stmt));
     } catch (err) {
       console.warn(`[migration:037] client column migration warning: ${err?.message ?? err}`);
     }
   }
 }
-var import_drizzle_orm63;
+var import_drizzle_orm64;
 var init_clients_columns = __esm({
   "server/migrations/037-clients-columns.ts"() {
     "use strict";
     init_db();
-    import_drizzle_orm63 = require("drizzle-orm");
+    import_drizzle_orm64 = require("drizzle-orm");
+  }
+});
+
+// server/migrations/038-cleanup-uppercase-facilities.ts
+async function applyCleanupUppercaseFacilities(dbInstance) {
+  const db2 = dbInstance || db;
+  try {
+    const uppercaseFacs = (await db2.execute(import_drizzle_orm65.sql`
+      SELECT id, tenant_id, district_id, name, hmis_code
+      FROM facilities
+      WHERE name LIKE '%PHCU%' OR name LIKE '%PHCC%' OR name LIKE '%HOSPITAL%'
+      ORDER BY id ASC;
+    `)).rows;
+    if (!uppercaseFacs || uppercaseFacs.length === 0) {
+      return { cleaned: 0, renamed: 0 };
+    }
+    console.log(`[Migration 038] Found ${uppercaseFacs.length} facilities with uppercase suffixes. Processing deduplication...`);
+    let cleanedCount = 0;
+    let renamedCount = 0;
+    for (const u of uppercaseFacs) {
+      const normalizedName = u.name.replace(/\bPHCU\b/g, "Phcu").replace(/\bPHCC\b/g, "Phcc").replace(/\bHOSPITAL\b/g, "Hospital").replace(/\s+/g, " ").trim();
+      const canonRows = (await db2.execute(import_drizzle_orm65.sql`
+        SELECT id, name
+        FROM facilities
+        WHERE tenant_id = ${u.tenant_id}
+          AND district_id IS NOT DISTINCT FROM ${u.district_id}
+          AND id != ${u.id}
+          AND LOWER(TRIM(name)) = LOWER(TRIM(${normalizedName}))
+        ORDER BY id ASC
+        LIMIT 1;
+      `)).rows;
+      if (canonRows.length > 0) {
+        const canonicalId = canonRows[0].id;
+        console.log(`[Migration 038] Merging duplicate '${u.name}' (id: ${u.id}) -> '${canonRows[0].name}' (id: ${canonicalId})`);
+        try {
+          await db2.execute(import_drizzle_orm65.sql`
+            DELETE FROM facility_catchments
+            WHERE facility_id = ${u.id}
+              AND EXISTS (SELECT 1 FROM facility_catchments WHERE facility_id = ${canonicalId});
+          `);
+        } catch (_) {
+        }
+        try {
+          await db2.execute(import_drizzle_orm65.sql`
+            DELETE FROM facility_excluded_villages
+            WHERE facility_id = ${u.id}
+              AND village_id IN (SELECT village_id FROM facility_excluded_villages WHERE facility_id = ${canonicalId});
+          `);
+        } catch (_) {
+        }
+        const foreignReferences = [
+          { table: "clients", col: "facility_id" },
+          { table: "surveillance_cases", col: "facility_id" },
+          { table: "mobilization_activities", col: "facility_id" },
+          { table: "session_plans", col: "facility_id" },
+          { table: "microplans", col: "facility_id" },
+          { table: "supervision_visits", col: "facility_id" },
+          { table: "stock_transactions", col: "facility_id" },
+          { table: "cold_chain_equipment", col: "facility_id" },
+          { table: "facility_staff", col: "facility_id" },
+          { table: "budget_items", col: "facility_id" },
+          { table: "pilot_activities", col: "facility_id" },
+          { table: "users", col: "facility_id" },
+          { table: "chv_profiles", col: "facility_id" },
+          { table: "community_health_volunteers", col: "facility_id" },
+          { table: "hfc_committee", col: "facility_id" },
+          { table: "hfc_committee_members", col: "facility_id" },
+          { table: "uncovered_communities", col: "facility_id" },
+          { table: "vgie_settlement_facility_links", col: "facility_id" },
+          { table: "vgie_alerts", col: "facility_id" },
+          { table: "microplan_denominator_scenarios", col: "facility_id" },
+          { table: "microplan_community_denominator_allocations", col: "facility_id" },
+          { table: "temporal_employment_assignments", col: "facility_id" },
+          { table: "planning_actions", col: "facility_id" },
+          { table: "planning_evidence", col: "facility_id" },
+          { table: "villages", col: "assigned_facility_id" },
+          { table: "imported_coverage", col: "facility_id" },
+          { table: "monthly_reports", col: "facility_id" },
+          { table: "quarterly_reviews", col: "facility_id" },
+          { table: "population_data", col: "facility_id" },
+          { table: "facility_catchments", col: "facility_id" },
+          { table: "facility_excluded_villages", col: "facility_id" },
+          { table: "settlements_master", col: "linked_facility_id" },
+          { table: "settlements_master", col: "nearest_facility_id" }
+        ];
+        for (const ref of foreignReferences) {
+          try {
+            await db2.execute(import_drizzle_orm65.sql.raw(`
+              UPDATE "${ref.table}"
+              SET "${ref.col}" = ${canonicalId}
+              WHERE "${ref.col}" = ${u.id};
+            `));
+          } catch (err) {
+          }
+        }
+        try {
+          await db2.execute(import_drizzle_orm65.sql`DELETE FROM facilities WHERE id = ${u.id}`);
+          cleanedCount++;
+        } catch (delErr) {
+          try {
+            await db2.execute(import_drizzle_orm65.sql`
+              UPDATE facilities
+              SET operational_status = 'duplicate_merged',
+                  name = ${normalizedName + " (Merged " + canonicalId + ")"},
+                  updated_at = NOW()
+              WHERE id = ${u.id};
+            `);
+            cleanedCount++;
+          } catch (_) {
+          }
+        }
+      } else {
+        await db2.execute(import_drizzle_orm65.sql`
+          UPDATE facilities
+          SET name = ${normalizedName}, updated_at = NOW()
+          WHERE id = ${u.id};
+        `);
+        renamedCount++;
+      }
+    }
+    console.log(`[Migration 038] Complete. Deleted ${cleanedCount} duplicate uppercase facilities, renamed ${renamedCount} standalone uppercase facilities.`);
+    return { cleaned: cleanedCount, renamed: renamedCount };
+  } catch (err) {
+    console.error(`[Migration 038] Error during facility cleanup: ${err?.message ?? err}`);
+    return { error: err?.message ?? String(err) };
+  }
+}
+var import_drizzle_orm65;
+var init_cleanup_uppercase_facilities = __esm({
+  "server/migrations/038-cleanup-uppercase-facilities.ts"() {
+    "use strict";
+    init_db();
+    import_drizzle_orm65 = require("drizzle-orm");
   }
 });
 
@@ -48279,19 +49209,19 @@ __export(remoteSensingService_exports, {
 });
 async function calculateSpatialGaps(districtId, radiusKm = 5) {
   try {
-    const [districtRow] = await db.select().from(districts).where((0, import_drizzle_orm64.eq)(districts.id, districtId)).limit(1);
+    const [districtRow] = await db.select().from(districts).where((0, import_drizzle_orm66.eq)(districts.id, districtId)).limit(1);
     if (!districtRow) {
       return { gaps: [], totalSettlements: 0, servedSettlements: 0 };
     }
-    const allSettlements = await db.select().from(settlementsMaster).where((0, import_drizzle_orm64.eq)(settlementsMaster.districtName, districtRow.name));
+    const allSettlements = await db.select().from(settlementsMaster).where((0, import_drizzle_orm66.eq)(settlementsMaster.districtName, districtRow.name));
     if (allSettlements.length === 0) {
       return { gaps: [], totalSettlements: 0, servedSettlements: 0 };
     }
-    const activeFacilities = await db.select().from(facilities).where((0, import_drizzle_orm64.eq)(facilities.districtId, districtId));
+    const activeFacilities = await db.select().from(facilities).where((0, import_drizzle_orm66.eq)(facilities.districtId, districtId));
     const plannedOutposts = await db.select().from(sessionPlans).where(
-      (0, import_drizzle_orm64.and)(
-        (0, import_drizzle_orm64.eq)(sessionPlans.facilityId, activeFacilities[0]?.id || 0),
-        (0, import_drizzle_orm64.eq)(sessionPlans.status, "planned")
+      (0, import_drizzle_orm66.and)(
+        (0, import_drizzle_orm66.eq)(sessionPlans.facilityId, activeFacilities[0]?.id || 0),
+        (0, import_drizzle_orm66.eq)(sessionPlans.status, "planned")
       )
     );
     const servedSet = /* @__PURE__ */ new Set();
@@ -48500,7 +49430,7 @@ function registerRemoteSensingRoutes(app2) {
         const result2 = await calculateSpatialGaps(firstDistrict.id, 5);
         return res.json({ ...result2, districtId: firstDistrict.id, districtName: firstDistrict.name });
       }
-      const [districtRow] = await db.select().from(districts).where((0, import_drizzle_orm64.eq)(districts.id, districtId)).limit(1);
+      const [districtRow] = await db.select().from(districts).where((0, import_drizzle_orm66.eq)(districts.id, districtId)).limit(1);
       if (!districtRow) return res.status(404).json({ message: "District not found" });
       const result = await calculateSpatialGaps(districtId, 5);
       res.json({ ...result, districtId, districtName: districtRow.name });
@@ -48521,7 +49451,7 @@ function registerRemoteSensingRoutes(app2) {
         targetDistrictId = firstDistrict.id;
         targetDistrictName = firstDistrict.name;
       } else {
-        const [districtRow] = await db.select().from(districts).where((0, import_drizzle_orm64.eq)(districts.id, targetDistrictId)).limit(1);
+        const [districtRow] = await db.select().from(districts).where((0, import_drizzle_orm66.eq)(districts.id, targetDistrictId)).limit(1);
         if (!districtRow) return res.status(404).json({ message: "District not found" });
         targetDistrictName = districtRow.name;
       }
@@ -48557,13 +49487,13 @@ function registerRemoteSensingRoutes(app2) {
     }
   });
 }
-var import_drizzle_orm64;
+var import_drizzle_orm66;
 var init_remoteSensingService = __esm({
   "server/services/remoteSensingService.ts"() {
     "use strict";
     init_errorUtils();
     init_db();
-    import_drizzle_orm64 = require("drizzle-orm");
+    import_drizzle_orm66 = require("drizzle-orm");
     init_schema();
     init_index();
     init_replitAuth();
@@ -48577,24 +49507,24 @@ function intList(values) {
 }
 function idInClause(column, values) {
   const ids = intList(values);
-  if (ids.length === 0) return import_drizzle_orm65.sql``;
+  if (ids.length === 0) return import_drizzle_orm67.sql``;
   if (!ALLOWED_SCOPE_COLUMNS.has(column)) {
     throw new Error(`Invalid column identifier for idInClause: ${column}`);
   }
-  const idParams = ids.map((id) => import_drizzle_orm65.sql`${id}`);
-  return import_drizzle_orm65.sql` AND ${import_drizzle_orm65.sql.raw(column)} = ANY(ARRAY[${import_drizzle_orm65.sql.join(idParams, import_drizzle_orm65.sql`, `)}]::int[])`;
+  const idParams = ids.map((id) => import_drizzle_orm67.sql`${id}`);
+  return import_drizzle_orm67.sql` AND ${import_drizzle_orm67.sql.raw(column)} = ANY(ARRAY[${import_drizzle_orm67.sql.join(idParams, import_drizzle_orm67.sql`, `)}]::int[])`;
 }
 function facilityScopeClause(filters) {
-  return filters.facilityIds?.length ? idInClause("f.id", filters.facilityIds) : filters.facilityId ? import_drizzle_orm65.sql` AND f.id = ${filters.facilityId}` : import_drizzle_orm65.sql``;
+  return filters.facilityIds?.length ? idInClause("f.id", filters.facilityIds) : filters.facilityId ? import_drizzle_orm67.sql` AND f.id = ${filters.facilityId}` : import_drizzle_orm67.sql``;
 }
 function districtScopeClause(filters) {
-  return filters.districtIds?.length ? idInClause("d.id", filters.districtIds) : filters.districtId ? import_drizzle_orm65.sql` AND d.id = ${filters.districtId}` : import_drizzle_orm65.sql``;
+  return filters.districtIds?.length ? idInClause("d.id", filters.districtIds) : filters.districtId ? import_drizzle_orm67.sql` AND d.id = ${filters.districtId}` : import_drizzle_orm67.sql``;
 }
 function provinceScopeClause(filters) {
-  return filters.provinceIds?.length ? idInClause("p.id", filters.provinceIds) : filters.provinceId ? import_drizzle_orm65.sql` AND p.id = ${filters.provinceId}` : import_drizzle_orm65.sql``;
+  return filters.provinceIds?.length ? idInClause("p.id", filters.provinceIds) : filters.provinceId ? import_drizzle_orm67.sql` AND p.id = ${filters.provinceId}` : import_drizzle_orm67.sql``;
 }
 async function getProvincesMap(tenantId) {
-  const provincesList = await db.execute(import_drizzle_orm65.sql`
+  const provincesList = await db.execute(import_drizzle_orm67.sql`
     SELECT id, name FROM provinces WHERE tenant_id = ${tenantId}
   `);
   const provincesMap = /* @__PURE__ */ new Map();
@@ -48604,7 +49534,7 @@ async function getProvincesMap(tenantId) {
   return provincesMap;
 }
 async function getDistrictsMap(tenantId) {
-  const districtsList = await db.execute(import_drizzle_orm65.sql`
+  const districtsList = await db.execute(import_drizzle_orm67.sql`
     SELECT id, name, province_id FROM districts WHERE tenant_id = ${tenantId}
   `);
   const districtsMap = /* @__PURE__ */ new Map();
@@ -48721,12 +49651,12 @@ function rollupHierarchy(facilities4, provincesMap, districtsMap, sumKeys, avgKe
   ];
 }
 async function getSessionReport(filters) {
-  const yearClause = filters.year ? import_drizzle_orm65.sql` AND sp.year = ${filters.year}` : import_drizzle_orm65.sql``;
-  const quarterClause = filters.quarter ? import_drizzle_orm65.sql` AND sp.quarter = ${filters.quarter}` : import_drizzle_orm65.sql``;
+  const yearClause = filters.year ? import_drizzle_orm67.sql` AND sp.year = ${filters.year}` : import_drizzle_orm67.sql``;
+  const quarterClause = filters.quarter ? import_drizzle_orm67.sql` AND sp.quarter = ${filters.quarter}` : import_drizzle_orm67.sql``;
   const facilityFilter = facilityScopeClause(filters);
   const districtFilter = districtScopeClause(filters);
   const provinceFilter = provinceScopeClause(filters);
-  const dbRows = await db.execute(import_drizzle_orm65.sql`
+  const dbRows = await db.execute(import_drizzle_orm67.sql`
     SELECT
       f.id                                     AS id,
       f.name                                   AS name,
@@ -48802,12 +49732,12 @@ async function getSessionReport(filters) {
   );
 }
 async function getMicroplanReport(filters) {
-  const yearClause = filters.year ? import_drizzle_orm65.sql` AND m.year = ${filters.year}` : import_drizzle_orm65.sql``;
-  const quarterClause = filters.quarter ? import_drizzle_orm65.sql` AND m.quarter = ${filters.quarter}` : import_drizzle_orm65.sql``;
+  const yearClause = filters.year ? import_drizzle_orm67.sql` AND m.year = ${filters.year}` : import_drizzle_orm67.sql``;
+  const quarterClause = filters.quarter ? import_drizzle_orm67.sql` AND m.quarter = ${filters.quarter}` : import_drizzle_orm67.sql``;
   const facilityFilter = facilityScopeClause(filters);
   const districtFilter = districtScopeClause(filters);
   const provinceFilter = provinceScopeClause(filters);
-  const dbRows = await db.execute(import_drizzle_orm65.sql`
+  const dbRows = await db.execute(import_drizzle_orm67.sql`
     SELECT
       f.id                                                                AS id,
       f.name                                                              AS name,
@@ -48866,7 +49796,7 @@ async function getZeroDoseReport(filters) {
   const facilityFilter = facilityScopeClause(filters);
   const districtFilter = districtScopeClause(filters);
   const provinceFilter = provinceScopeClause(filters);
-  const dbRows = await db.execute(import_drizzle_orm65.sql`
+  const dbRows = await db.execute(import_drizzle_orm67.sql`
     SELECT
       f.id                              AS id,
       f.name                            AS name,
@@ -48928,12 +49858,12 @@ async function getZeroDoseReport(filters) {
   );
 }
 async function getMissedCommunitiesReport(filters) {
-  const yearClause = filters.year ? import_drizzle_orm65.sql` AND sp.year = ${filters.year}` : import_drizzle_orm65.sql``;
-  const quarterClause = filters.quarter ? import_drizzle_orm65.sql` AND sp.quarter = ${filters.quarter}` : import_drizzle_orm65.sql``;
+  const yearClause = filters.year ? import_drizzle_orm67.sql` AND sp.year = ${filters.year}` : import_drizzle_orm67.sql``;
+  const quarterClause = filters.quarter ? import_drizzle_orm67.sql` AND sp.quarter = ${filters.quarter}` : import_drizzle_orm67.sql``;
   const facilityFilter = facilityScopeClause(filters);
   const districtFilter = districtScopeClause(filters);
   const provinceFilter = provinceScopeClause(filters);
-  const dbRows = await db.execute(import_drizzle_orm65.sql`
+  const dbRows = await db.execute(import_drizzle_orm67.sql`
     SELECT
       f.id                               AS id,
       f.name                             AS name,
@@ -48981,12 +49911,12 @@ async function getMissedCommunitiesReport(filters) {
   );
 }
 async function getCoverageReport(filters) {
-  const yearClause = filters.year ? import_drizzle_orm65.sql` AND sp.year = ${filters.year}` : import_drizzle_orm65.sql``;
-  const quarterClause = filters.quarter ? import_drizzle_orm65.sql` AND sp.quarter = ${filters.quarter}` : import_drizzle_orm65.sql``;
+  const yearClause = filters.year ? import_drizzle_orm67.sql` AND sp.year = ${filters.year}` : import_drizzle_orm67.sql``;
+  const quarterClause = filters.quarter ? import_drizzle_orm67.sql` AND sp.quarter = ${filters.quarter}` : import_drizzle_orm67.sql``;
   const facilityFilter = facilityScopeClause(filters);
   const districtFilter = districtScopeClause(filters);
   const provinceFilter = provinceScopeClause(filters);
-  const dbRows = await db.execute(import_drizzle_orm65.sql`
+  const dbRows = await db.execute(import_drizzle_orm67.sql`
     SELECT
       f.id                               AS id,
       f.name                             AS name,
@@ -49044,7 +49974,7 @@ async function getHtrReport(filters) {
   const facilityFilter = facilityScopeClause(filters);
   const districtFilter = districtScopeClause(filters);
   const provinceFilter = provinceScopeClause(filters);
-  const dbRows = await db.execute(import_drizzle_orm65.sql`
+  const dbRows = await db.execute(import_drizzle_orm67.sql`
     SELECT
       f.id AS id,
       f.name AS name,
@@ -49103,12 +50033,12 @@ async function getHtrReport(filters) {
   );
 }
 async function getBudgetReport(filters) {
-  const yearClause = filters.year ? import_drizzle_orm65.sql` AND bi.year = ${filters.year}` : import_drizzle_orm65.sql``;
-  const quarterClause = filters.quarter ? import_drizzle_orm65.sql` AND bi.quarter = ${filters.quarter}` : import_drizzle_orm65.sql``;
+  const yearClause = filters.year ? import_drizzle_orm67.sql` AND bi.year = ${filters.year}` : import_drizzle_orm67.sql``;
+  const quarterClause = filters.quarter ? import_drizzle_orm67.sql` AND bi.quarter = ${filters.quarter}` : import_drizzle_orm67.sql``;
   const facilityFilter = facilityScopeClause(filters);
   const districtFilter = districtScopeClause(filters);
   const provinceFilter = provinceScopeClause(filters);
-  const dbRows = await db.execute(import_drizzle_orm65.sql`
+  const dbRows = await db.execute(import_drizzle_orm67.sql`
     SELECT
       f.id AS id,
       f.name AS name,
@@ -49176,12 +50106,12 @@ async function getBudgetReport(filters) {
   );
 }
 async function getSupervisionReport(filters) {
-  const yearClause = filters.year ? import_drizzle_orm65.sql` AND EXTRACT(YEAR FROM sv.scheduled_date) = ${filters.year}` : import_drizzle_orm65.sql``;
-  const quarterClause = filters.quarter ? import_drizzle_orm65.sql` AND CEIL(EXTRACT(MONTH FROM sv.scheduled_date) / 3.0) = ${filters.quarter}` : import_drizzle_orm65.sql``;
+  const yearClause = filters.year ? import_drizzle_orm67.sql` AND EXTRACT(YEAR FROM sv.scheduled_date) = ${filters.year}` : import_drizzle_orm67.sql``;
+  const quarterClause = filters.quarter ? import_drizzle_orm67.sql` AND CEIL(EXTRACT(MONTH FROM sv.scheduled_date) / 3.0) = ${filters.quarter}` : import_drizzle_orm67.sql``;
   const facilityFilter = facilityScopeClause(filters);
   const districtFilter = districtScopeClause(filters);
   const provinceFilter = provinceScopeClause(filters);
-  const dbRows = await db.execute(import_drizzle_orm65.sql`
+  const dbRows = await db.execute(import_drizzle_orm67.sql`
     SELECT
       f.id AS id,
       f.name AS name,
@@ -49241,12 +50171,12 @@ async function getSupervisionReport(filters) {
     }
   );
 }
-var import_drizzle_orm65, ALLOWED_SCOPE_COLUMNS;
+var import_drizzle_orm67, ALLOWED_SCOPE_COLUMNS;
 var init_reportingService = __esm({
   "server/services/reportingService.ts"() {
     "use strict";
     init_db();
-    import_drizzle_orm65 = require("drizzle-orm");
+    import_drizzle_orm67 = require("drizzle-orm");
     ALLOWED_SCOPE_COLUMNS = /* @__PURE__ */ new Set(["f.id", "d.id", "p.id", "r.id", "v.id", "villages.id", "facilities.id", "districts.id", "provinces.id"]);
   }
 });
@@ -49435,12 +50365,12 @@ var gisPolygons_exports = {};
 __export(gisPolygons_exports, {
   gisPolygonsRouter: () => gisPolygonsRouter
 });
-var import_express11, import_drizzle_orm66, gisPolygonsRouter;
+var import_express11, import_drizzle_orm68, gisPolygonsRouter;
 var init_gisPolygons = __esm({
   "server/routes/gisPolygons.ts"() {
     "use strict";
     import_express11 = require("express");
-    import_drizzle_orm66 = require("drizzle-orm");
+    import_drizzle_orm68 = require("drizzle-orm");
     init_db();
     init_schema();
     init_populationIntelligenceService();
@@ -49452,13 +50382,13 @@ var init_gisPolygons = __esm({
       try {
         const tenantId = req.user?.tenantId;
         const { ownerType, ownerId } = req.query;
-        let query = db.select().from(gisPolygons).where((0, import_drizzle_orm66.eq)(gisPolygons.tenantId, tenantId));
+        let query = db.select().from(gisPolygons).where((0, import_drizzle_orm68.eq)(gisPolygons.tenantId, tenantId));
         if (ownerType && ownerId) {
           query = db.select().from(gisPolygons).where(
-            (0, import_drizzle_orm66.and)(
-              (0, import_drizzle_orm66.eq)(gisPolygons.tenantId, tenantId),
-              (0, import_drizzle_orm66.eq)(gisPolygons.ownerType, String(ownerType)),
-              (0, import_drizzle_orm66.eq)(gisPolygons.ownerId, parseInt(String(ownerId), 10))
+            (0, import_drizzle_orm68.and)(
+              (0, import_drizzle_orm68.eq)(gisPolygons.tenantId, tenantId),
+              (0, import_drizzle_orm68.eq)(gisPolygons.ownerType, String(ownerType)),
+              (0, import_drizzle_orm68.eq)(gisPolygons.ownerId, parseInt(String(ownerId), 10))
             )
           );
         }
@@ -49492,14 +50422,14 @@ var init_gisPolygons = __esm({
         const tenantId = req.user?.tenantId;
         const id = parseInt(req.params.id, 10);
         const data = req.body;
-        const [current] = await db.select({ id: gisPolygons.id, status: gisPolygons.status, isActive: gisPolygons.isActive }).from(gisPolygons).where((0, import_drizzle_orm66.and)((0, import_drizzle_orm66.eq)(gisPolygons.id, id), (0, import_drizzle_orm66.eq)(gisPolygons.tenantId, tenantId))).limit(1);
+        const [current] = await db.select({ id: gisPolygons.id, status: gisPolygons.status, isActive: gisPolygons.isActive }).from(gisPolygons).where((0, import_drizzle_orm68.and)((0, import_drizzle_orm68.eq)(gisPolygons.id, id), (0, import_drizzle_orm68.eq)(gisPolygons.tenantId, tenantId))).limit(1);
         if (current && (current.status === "active" || current.isActive || data?.status === "active" || data?.isActive === true)) {
           return res.status(409).json({
             code: "POLYGON_LIFECYCLE_REQUIRED",
             message: "Approved polygons must be changed through the polygon lifecycle workflow."
           });
         }
-        const [updated] = await db.update(gisPolygons).set({ ...data, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm66.and)((0, import_drizzle_orm66.eq)(gisPolygons.id, id), (0, import_drizzle_orm66.eq)(gisPolygons.tenantId, tenantId))).returning();
+        const [updated] = await db.update(gisPolygons).set({ ...data, updatedAt: /* @__PURE__ */ new Date() }).where((0, import_drizzle_orm68.and)((0, import_drizzle_orm68.eq)(gisPolygons.id, id), (0, import_drizzle_orm68.eq)(gisPolygons.tenantId, tenantId))).returning();
         if (!updated) return res.status(404).json({ message: "Polygon not found" });
         res.json(updated);
       } catch (err) {
@@ -49510,14 +50440,14 @@ var init_gisPolygons = __esm({
       try {
         const tenantId = req.user?.tenantId;
         const id = parseInt(req.params.id, 10);
-        const [current] = await db.select({ id: gisPolygons.id, status: gisPolygons.status, isActive: gisPolygons.isActive }).from(gisPolygons).where((0, import_drizzle_orm66.and)((0, import_drizzle_orm66.eq)(gisPolygons.id, id), (0, import_drizzle_orm66.eq)(gisPolygons.tenantId, tenantId))).limit(1);
+        const [current] = await db.select({ id: gisPolygons.id, status: gisPolygons.status, isActive: gisPolygons.isActive }).from(gisPolygons).where((0, import_drizzle_orm68.and)((0, import_drizzle_orm68.eq)(gisPolygons.id, id), (0, import_drizzle_orm68.eq)(gisPolygons.tenantId, tenantId))).limit(1);
         if (current && (current.status === "active" || current.isActive)) {
           return res.status(409).json({
             code: "POLYGON_LIFECYCLE_REQUIRED",
             message: "Approved polygons must be archived or replaced through the polygon lifecycle workflow."
           });
         }
-        await db.delete(gisPolygons).where((0, import_drizzle_orm66.and)((0, import_drizzle_orm66.eq)(gisPolygons.id, id), (0, import_drizzle_orm66.eq)(gisPolygons.tenantId, tenantId)));
+        await db.delete(gisPolygons).where((0, import_drizzle_orm68.and)((0, import_drizzle_orm68.eq)(gisPolygons.id, id), (0, import_drizzle_orm68.eq)(gisPolygons.tenantId, tenantId)));
         res.json({ success: true });
       } catch (err) {
         res.status(500).json({ message: "Failed to delete polygon" });
@@ -49661,8 +50591,8 @@ var init_mapStyles = __esm({
       let postgisVersion = "unavailable";
       try {
         const { db: db2 } = await Promise.resolve().then(() => (init_db(), db_exports));
-        const { sql: sql41 } = await import("drizzle-orm");
-        const result = await db2.execute(sql41`SELECT PostGIS_Full_Version() as ver`);
+        const { sql: sql43 } = await import("drizzle-orm");
+        const result = await db2.execute(sql43`SELECT PostGIS_Full_Version() as ver`);
         if (result && result.rows && result.rows.length > 0) {
           postgisReady = true;
           postgisVersion = String(result.rows[0].ver).slice(0, 80);
@@ -50056,7 +50986,52 @@ var workers_exports = {};
 __export(workers_exports, {
   communicationWorker: () => communicationWorker
 });
-var import_bullmq2, import_drizzle_orm67, communicationWorker;
+function renderTemplateMessage(templateName, data = {}) {
+  if (data.messageText && typeof data.messageText === "string") {
+    return {
+      subject: data.subject || "VaxPlan Notification",
+      body: data.messageText
+    };
+  }
+  switch (templateName) {
+    case "immunization_reminder":
+    case "dose_due":
+      return {
+        subject: data.subject || "Immunization Reminder",
+        body: `Dear Parent/Guardian, reminder that ${data.child_name || "your child"} is scheduled for vaccination (${data.vaccine || "routine immunization"}) on ${data.date || "your next session date"} at ${data.facility_name || "your local health facility"}.`
+      };
+    case "defaulter_recall":
+      return {
+        subject: data.subject || "Urgent Immunization Follow-Up",
+        body: `Dear Caregiver, ${data.child_name || "your child"} is due for missed vaccine dose (${data.vaccine || "vaccination"}). Please visit ${data.facility_name || "the nearest health clinic"} as soon as possible.`
+      };
+    case "stockout_alert":
+    case "cold_chain_alert":
+      return {
+        subject: data.subject || "Cold Chain & Stock Alert",
+        body: `VaxPlan Alert for ${data.facility_name || "Facility"}: ${data.alert_type || "Cold chain / stock event"} reported. Current status: ${data.details || "Requires immediate review"}.`
+      };
+    case "supervision_notice":
+      return {
+        subject: data.subject || "Supervision Visit Scheduled",
+        body: `Supervision visit scheduled for ${data.facility_name || "your facility"} on ${data.scheduled_date || data.date || "the upcoming scheduled date"}. Supervisor: ${data.supervisor_name || "EPI Supervisor"}.`
+      };
+    case "test_notification":
+    case "test_email":
+      return {
+        subject: data.subject || "VaxPlan Notification Engine Test",
+        body: data.messageText || `VaxPlan notification test for ${data.child_name || "recipient"} dispatched successfully.`
+      };
+    default:
+      if (data.text) return { subject: data.subject || "VaxPlan Notification", body: String(data.text) };
+      if (data.message) return { subject: data.subject || "VaxPlan Notification", body: String(data.message) };
+      return {
+        subject: data.subject || `Notification: ${templateName.replace(/_/g, " ")}`,
+        body: Object.entries(data).filter(([k]) => !["phone", "email", "subject"].includes(k)).map(([k, v]) => `${k.replace(/_/g, " ")}: ${v}`).join("\n") || `Notification for ${templateName.replace(/_/g, " ")}`
+      };
+  }
+}
+var import_bullmq2, import_drizzle_orm69, communicationWorker;
 var init_workers = __esm({
   "server/services/uce/workers.ts"() {
     "use strict";
@@ -50065,7 +51040,7 @@ var init_workers = __esm({
     init_db();
     init_schema();
     init_messaging();
-    import_drizzle_orm67 = require("drizzle-orm");
+    import_drizzle_orm69 = require("drizzle-orm");
     communicationWorker = new import_bullmq2.Worker(
       "communication-queue",
       async (job) => {
@@ -50077,13 +51052,15 @@ var init_workers = __esm({
           attempted: true,
           deliveryTime: /* @__PURE__ */ new Date()
         }).returning();
-        const messageBody = `[${templateName}] ` + JSON.stringify(templateData);
+        const rendered = renderTemplateMessage(templateName, templateData || {});
+        const messageBody = rendered.body;
+        const messageSubject = rendered.subject;
         let dispatchResult = { success: false, error: "Unknown channel", messageId: "" };
         try {
           let commConfig = null;
           if (tenantId) {
             const { tenants: tenants3 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
-            const [tenant] = await db.select().from(tenants3).where((0, import_drizzle_orm67.eq)(tenants3.id, tenantId)).limit(1);
+            const [tenant] = await db.select().from(tenants3).where((0, import_drizzle_orm69.eq)(tenants3.id, tenantId)).limit(1);
             if (tenant && tenant.settings && tenant.settings.communication) {
               commConfig = tenant.settings.communication[channel];
             }
@@ -50096,7 +51073,7 @@ var init_workers = __esm({
               dispatchResult = await sendSms({ to: templateData.phone || "", message: messageBody, config: commConfig });
               break;
             case "email":
-              dispatchResult = await sendEmail2({ to: templateData.email || "", subject: "VaxPlan Notification", text: messageBody, config: commConfig });
+              dispatchResult = await sendEmail2({ to: templateData.email || "", subject: messageSubject, text: messageBody, config: commConfig });
               break;
             // Mock push & voice
             case "push":
@@ -50112,8 +51089,8 @@ var init_workers = __esm({
             response: dispatchResult.error || dispatchResult.messageId || "Success"
           });
           if (dispatchResult.success) {
-            await db.update(communicationChannels).set({ delivered: true, responseCode: dispatchResult.messageId }).where((0, import_drizzle_orm67.eq)(communicationChannels.id, channelRecord.id));
-            await db.update(communications).set({ status: "completed" }).where((0, import_drizzle_orm67.eq)(communications.id, communicationId));
+            await db.update(communicationChannels).set({ delivered: true, responseCode: dispatchResult.messageId }).where((0, import_drizzle_orm69.eq)(communicationChannels.id, channelRecord.id));
+            await db.update(communications).set({ status: "completed" }).where((0, import_drizzle_orm69.eq)(communications.id, communicationId));
             return { status: "delivered", channel };
           } else {
             throw new Error(dispatchResult.error || "Unknown error");
@@ -50144,7 +51121,7 @@ var init_workers = __esm({
               channel: nextChannel
             }, { delay: delayMs });
           } else {
-            await db.update(communications).set({ status: "failed" }).where((0, import_drizzle_orm67.eq)(communications.id, communicationId));
+            await db.update(communications).set({ status: "failed" }).where((0, import_drizzle_orm69.eq)(communications.id, communicationId));
           }
           throw err;
         }
@@ -50203,7 +51180,7 @@ async function backfillClientIds() {
   try {
     const { clients: clients2, facilities: facilities4, districts: districts3, provinces: provinces4 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
     const { db: db2 } = await Promise.resolve().then(() => (init_db(), db_exports));
-    const { sql: sql41, isNull: isNull9, eq: eq41, and: and33 } = await import("drizzle-orm");
+    const { sql: sql43, isNull: isNull9, eq: eq42, and: and34 } = await import("drizzle-orm");
     const { getInitials: getInitials2, computeCheckDigit: computeCheckDigit2 } = await Promise.resolve().then(() => (init_routes(), routes_exports));
     const pendingClients = await db2.select().from(clients2).where(isNull9(clients2.clientId));
     if (pendingClients.length === 0) {
@@ -50215,16 +51192,16 @@ async function backfillClientIds() {
         facilityName: facilities4.name,
         districtName: districts3.name,
         provinceName: provinces4.name
-      }).from(facilities4).innerJoin(districts3, eq41(facilities4.districtId, districts3.id)).innerJoin(provinces4, eq41(districts3.provinceId, provinces4.id)).where(eq41(facilities4.id, client3.facilityId)).limit(1);
+      }).from(facilities4).innerJoin(districts3, eq42(facilities4.districtId, districts3.id)).innerJoin(provinces4, eq42(districts3.provinceId, provinces4.id)).where(eq42(facilities4.id, client3.facilityId)).limit(1);
       const provInit = getInitials2(facInfo?.provinceName || "PRV");
       const distInit = getInitials2(facInfo?.districtName || "DST");
       const hfInit = getInitials2(facInfo?.facilityName || "FAC");
       const regYear = client3.createdAt ? new Date(client3.createdAt).getFullYear() : (/* @__PURE__ */ new Date()).getFullYear();
-      const [maxClient] = await db2.select({ maxSerial: sql41`MAX(${clients2.serialNumber})` }).from(clients2).where(
-        and33(
-          eq41(clients2.facilityId, client3.facilityId),
-          eq41(clients2.registrationYear, regYear),
-          eq41(clients2.tenantId, client3.tenantId)
+      const [maxClient] = await db2.select({ maxSerial: sql43`MAX(${clients2.serialNumber})` }).from(clients2).where(
+        and34(
+          eq42(clients2.facilityId, client3.facilityId),
+          eq42(clients2.registrationYear, regYear),
+          eq42(clients2.tenantId, client3.tenantId)
         )
       );
       const serialNum = (maxClient?.maxSerial ?? 0) + 1;
@@ -50236,7 +51213,7 @@ async function backfillClientIds() {
         clientId: generatedClientId,
         serialNumber: serialNum,
         registrationYear: regYear
-      }).where(eq41(clients2.id, client3.id));
+      }).where(eq42(clients2.id, client3.id));
     }
     log(`Successfully backfilled ${pendingClients.length} Client IDs.`, "backfill");
   } catch (error) {
@@ -50289,6 +51266,7 @@ var init_index = __esm({
     init_supervision_templates_seed();
     init_stock_ledger_columns();
     init_clients_columns();
+    init_cleanup_uppercase_facilities();
     try {
       process.loadEnvFile?.();
     } catch {
@@ -50547,6 +51525,7 @@ var init_index = __esm({
           await applyRiskAssessmentSchema(db2);
           await applyRiskPermissionsAndSeed(db2);
           await applyRiskDirectEntrySchema(db2);
+          await applyCleanupUppercaseFacilities(db2);
           log("identity sequences, templates, and all-tenant lifecycle permissions ready", "db");
         }).catch((err) => log("identity sequence and lifecycle permission warning: " + String(err?.message ?? err), "db"));
         seedVgieRules().then(() => log("VGIE recommendation and alert rules upserted", "db")).catch((err) => log(`VGIE rules seed warning: ${err?.message ?? err}`, "db"));

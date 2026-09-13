@@ -3991,7 +3991,9 @@ export async function registerRoutes(
 
   app.get("/api/regions/:id", ...auth, async (req: any, res) => {
     try {
-      const region = await storage.getRegion(req.tenantId, parseInt(req.params.id));
+      const regionId = parseInt(req.params.id);
+      if (isNaN(regionId)) return res.status(400).json({ message: "Invalid region ID" });
+      const region = await storage.getRegion(req.tenantId, regionId);
       if (!region) return res.status(404).json({ message: "Region not found" });
       res.json(region);
     } catch (error) {

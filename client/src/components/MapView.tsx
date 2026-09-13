@@ -6107,26 +6107,8 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
         distance: parseFloat(l.distance.toFixed(2))
       }));
 
+    // Genuine spatial landmarks recorded in database within 3km
     const landmarks = [...dbLandmarks];
-    if (landmarks.length < 3 && nearestVillage) {
-      const commName = nearestVillage.village.name;
-      const mockTypes = [
-        { type: "school", nameSuffix: "Primary School" },
-        { type: "church", nameSuffix: "Community Church" },
-        { type: "market", nameSuffix: "Trading Market" }
-      ];
-      for (const m of mockTypes) {
-        if (landmarks.length >= 3) break;
-        const mockName = `${commName} ${m.nameSuffix}`;
-        if (!landmarks.some(l => l.name === mockName)) {
-          landmarks.push({
-            name: mockName,
-            type: m.type,
-            distance: parseFloat((nearestVillage.distance + 0.2).toFixed(2))
-          });
-        }
-      }
-    }
 
     // 9. Feature Intersection Details
     let intersectedFeature: { type: "facility" | "village" | "catchment" | "session"; data: any } | null = null;

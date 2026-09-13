@@ -3835,6 +3835,12 @@ var planningEvidenceHistory = (0, import_pg_core2.pgTable)("planning_evidence_hi
 // server/db.ts
 var { Pool } = import_pg.default;
 if (!process.env.DATABASE_URL) {
+  try {
+    process.loadEnvFile?.();
+  } catch {
+  }
+}
+if (!process.env.DATABASE_URL) {
   throw new Error(
     "DATABASE_URL must be set. Did you forget to provision a database?"
   );

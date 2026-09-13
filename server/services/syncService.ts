@@ -40,6 +40,8 @@ import {
   supervisionChecklistTemplates,
   facilityCatchments,
   coldChainEquipment,
+  chvProfiles,
+  facilityStaff,
 } from "@shared/schema";
 import { eq, and, gt, sql, inArray } from "drizzle-orm";
 import { canonicalizePerAntigen, normalizeStockVaccineName } from "@shared/vaccineSchedule";
@@ -106,6 +108,8 @@ export interface PullPayload {
   supervisionTemplates?: any[];
   catchments?: any[];
   coldChainEquipment?: any[];
+  chvProfiles?: any[];
+  facilityStaff?: any[];
 }
 
 // ─── PULL — server → client ───────────────────────────────────────────────────
@@ -244,6 +248,8 @@ export async function pullChanges(
     supervisionTemplatesData,
     catchmentsData,
     coldChainData,
+    chvProfilesData,
+    facilityStaffData,
   ] = await Promise.all([
     safeQuery("regions", () => db.select().from(regions).where(tenantFilter(regions))),
     safeQuery("provinces", () => db.select().from(provinces).where(tenantFilter(provinces))),
@@ -281,6 +287,8 @@ export async function pullChanges(
     safeQuery("supervisionChecklistTemplates", () => db.select().from(supervisionChecklistTemplates).where(tenantFilter(supervisionChecklistTemplates))),
     safeQuery("facilityCatchments", () => db.select().from(facilityCatchments).where(tenantFilter(facilityCatchments))),
     safeQuery("coldChainEquipment", () => db.select().from(coldChainEquipment).where(tenantFilter(coldChainEquipment))),
+    safeQuery("chvProfiles", () => db.select().from(chvProfiles).where(tenantFilter(chvProfiles))),
+    safeQuery("facilityStaff", () => db.select().from(facilityStaff).where(tenantFilter(facilityStaff))),
   ]);
 
   const clientsData = clientsRawData.map(({ client, ...geo }: any) => ({
@@ -326,6 +334,8 @@ export async function pullChanges(
     supervisionTemplates: supervisionTemplatesData,
     catchments: catchmentsData,
     coldChainEquipment: coldChainData,
+    chvProfiles: chvProfilesData,
+    facilityStaff: facilityStaffData,
   };
 }
 
@@ -355,6 +365,11 @@ export async function batchMutate(
       const body = mutation.body ? JSON.parse(mutation.body) : {};
       // Always stamp the server's tenantId — never trust client-provided tenantId
       const payload = { ...body, tenantId };
+
+      // Strip client-generated temporary id on POST for tables with Postgres identity columns
+      if (mutation.method === "POST" && !mutation.url.startsWith("/api/clients")) {
+        delete (payload as any).id;
+      }
 
       let serverId: string | number | undefined;
 
@@ -736,13 +751,56 @@ export async function batchMutate(
       } else if (mutation.url.startsWith("/api/microplans")) {
         if (payload?.status && payload.status !== "draft") throw new Error("Offline plan edits cannot approve or submit plans. Use the approval workflow.");
         if (mutation.method === "POST") {
-          const plan = await storage.createMicroplan(tenantId, payload);
-          serverId = plan.id;
-        } else if ((mutation.method === "PATCH" || mutation.method === "PUT") && mutation.serverId) {
-          const current = await storage.getMicroplan(tenantId, Number(mutation.serverId));
-          if (!current || current.status !== "draft") throw new Error("Only draft microplans can be edited offline.");
-          await storage.updateMicroplan(tenantId, Number(mutation.serverId), payload);
-          serverId = mutation.serverId;
+          const { id: _tempId, tenantId: _t, ...cleanPayload } = payload || {};
+          const facId = cleanPayload.facilityId ? Number(cleanPayload.facilityId) : null;
+          const planYear = cleanPayload.year ? Number(cleanPayload.year) : new Date().getFullYear();
+          const planQuarter = cleanPayload.quarter ? Number(cleanPayload.quarter) : Math.ceil((new Date().getMonth() + 1) / 3);
+          const planType = cleanPayload.planType || "facility_routine";
+          const planName = cleanPayload.name || (facId ? `Facility Routine Microplan Q${planQuarter} ${planYear}` : `Microplan ${planYear}`);
+
+          let existingPlan: any = null;
+          if (facId) {
+            const [found] = await db.select().from(microplans).where(and(
+              eq(microplans.tenantId, tenantId),
+              eq(microplans.facilityId, facId),
+              eq(microplans.year, planYear),
+              eq(microplans.quarter, planQuarter),
+              eq(microplans.planType, planType)
+            )).limit(1);
+            existingPlan = found;
+          }
+
+          if (existingPlan) {
+            await storage.updateMicroplan(tenantId, existingPlan.id, {
+              ...cleanPayload,
+              name: planName,
+              facilityId: facId ?? undefined,
+              year: planYear,
+              quarter: planQuarter,
+              planType,
+            });
+            serverId = existingPlan.id;
+          } else {
+            const plan = await storage.createMicroplan(tenantId, {
+              ...cleanPayload,
+              name: planName,
+              facilityId: facId ?? undefined,
+              year: planYear,
+              quarter: planQuarter,
+              planType,
+              status: cleanPayload.status || "draft",
+            } as any);
+            serverId = plan.id;
+          }
+        } else if ((mutation.method === "PATCH" || mutation.method === "PUT") && (mutation.serverId || mutation.url.split("/").pop())) {
+          let planId = mutation.serverId ? Number(mutation.serverId) : Number(mutation.url.split("/").pop());
+          if (planId && !isNaN(planId)) {
+            const current = await storage.getMicroplan(tenantId, planId);
+            if (!current || current.status !== "draft") throw new Error("Only draft microplans can be edited offline.");
+            const { id: _tempId, tenantId: _t, ...cleanPayload } = payload || {};
+            await storage.updateMicroplan(tenantId, planId, cleanPayload);
+            serverId = planId;
+          }
         } else if (mutation.method === "DELETE") {
           let planId = mutation.serverId ? Number(mutation.serverId) : null;
           if (!planId) {
@@ -892,9 +950,10 @@ export async function batchMutate(
 
       } else if (mutation.url.startsWith("/api/vaccines/config") || mutation.url.startsWith("/api/vaccines")) {
         if (mutation.method === "POST") {
+          const { id: _tempId, tenantId: _t, ...cleanPayload } = payload || {};
           const [inserted] = await db
             .insert(vaccineConfigurations)
-            .values({ ...payload, tenantId } as any)
+            .values({ ...cleanPayload, tenantId } as any)
             .returning();
           serverId = inserted?.id;
         } else if ((mutation.method === "PATCH" || mutation.method === "PUT") && (mutation.serverId || mutation.url.split("/").pop())) {
@@ -906,6 +965,230 @@ export async function batchMutate(
               .set({ ...safePayload, updatedAt: new Date() })
               .where(and(eq(vaccineConfigurations.id, cfgId), eq(vaccineConfigurations.tenantId, tenantId)));
             serverId = cfgId;
+          }
+        }
+
+      } else if (mutation.url.startsWith("/api/chvs") || mutation.url.startsWith("/api/community-health-volunteers")) {
+        if (mutation.url.includes("/bulk-reassign") && mutation.method === "POST") {
+          const chvIds = Array.isArray(payload.chvIds) ? payload.chvIds.map((x: any) => Number(x)).filter((n: number) => !isNaN(n)) : [];
+          const vid = payload.villageId ? Number(payload.villageId) : null;
+          let safeVid: number | null = null;
+          if (vid) {
+            const [foundVillage] = await db.select({ id: villages.id }).from(villages).where(and(eq(villages.id, vid), eq(villages.tenantId, tenantId))).limit(1);
+            if (foundVillage) safeVid = vid;
+          }
+          if (chvIds.length > 0) {
+            await db.update(chvProfiles)
+              .set({ assignedVillageId: safeVid, updatedAt: new Date() })
+              .where(and(eq(chvProfiles.tenantId, tenantId), inArray(chvProfiles.id, chvIds)));
+          }
+          serverId = "bulk-reassign";
+        } else if (mutation.url.includes("/import") && mutation.method === "POST") {
+          const items = Array.isArray(payload.items) ? payload.items : Array.isArray(payload) ? payload : [];
+          for (const item of items) {
+            const { id: _tId, tenantId: _t, ...cleanItem } = item;
+            let itemVid: number | null = null;
+            if (cleanItem.assignedVillageId) {
+              const [foundV] = await db.select({ id: villages.id }).from(villages).where(and(eq(villages.id, Number(cleanItem.assignedVillageId)), eq(villages.tenantId, tenantId))).limit(1);
+              if (foundV) itemVid = Number(cleanItem.assignedVillageId);
+            }
+            await db.insert(chvProfiles).values({
+              tenantId,
+              facilityId: Number(cleanItem.facilityId) || 0,
+              assignedVillageId: itemVid,
+              fullName: (cleanItem.fullName || cleanItem.name || "CHV").trim(),
+              nrc: cleanItem.nrc || "NRC-PENDING",
+              gender: cleanItem.gender || "female",
+              age: cleanItem.age ? Number(cleanItem.age) : null,
+              educationLevel: cleanItem.educationLevel || "primary",
+              trainingReceived: cleanItem.trainingReceived || cleanItem.trainingStatus || "trained",
+              roleDescription: cleanItem.roleDescription || null,
+              contactPhone: cleanItem.contactPhone || null,
+              yearsOfService: cleanItem.yearsOfService ? Number(cleanItem.yearsOfService) : null,
+              siaRole: cleanItem.siaRole || cleanItem.campaignRole || "mobilizer",
+              isActive: cleanItem.isActive ?? cleanItem.active ?? true,
+              employmentStatus: cleanItem.employmentStatus || "Active - In-service",
+              supervisorId: cleanItem.supervisorId ? Number(cleanItem.supervisorId) : null,
+            } as any);
+          }
+          serverId = "bulk-import";
+        } else if (mutation.method === "POST") {
+          const { id: _tempId, tenantId: _t, ...cleanPayload } = payload || {};
+          let resolvedVillageId: number | null = null;
+          const candidateVid = (cleanPayload.assignedVillageId ?? cleanPayload.villageId) ? Number(cleanPayload.assignedVillageId ?? cleanPayload.villageId) : null;
+          if (candidateVid) {
+            const [foundVillage] = await db.select({ id: villages.id }).from(villages).where(and(eq(villages.id, candidateVid), eq(villages.tenantId, tenantId))).limit(1);
+            if (foundVillage) resolvedVillageId = candidateVid;
+          }
+
+          let resolvedFacilityId = Number(cleanPayload.facilityId) || 0;
+          const [foundFac] = await db.select({ id: facilities.id }).from(facilities).where(and(eq(facilities.id, resolvedFacilityId), eq(facilities.tenantId, tenantId))).limit(1);
+          if (!foundFac) {
+            const [anyFac] = await db.select({ id: facilities.id }).from(facilities).where(eq(facilities.tenantId, tenantId)).limit(1);
+            if (anyFac) resolvedFacilityId = anyFac.id;
+          }
+
+          const [created] = await db.insert(chvProfiles).values({
+            tenantId,
+            facilityId: resolvedFacilityId,
+            assignedVillageId: resolvedVillageId,
+            fullName: (cleanPayload.fullName || cleanPayload.name || "CHV").trim(),
+            nrc: cleanPayload.nrc || "NRC-PENDING",
+            gender: cleanPayload.gender || "female",
+            age: cleanPayload.age ? Number(cleanPayload.age) : null,
+            educationLevel: cleanPayload.educationLevel || "primary",
+            trainingReceived: cleanPayload.trainingReceived ?? cleanPayload.trainingStatus ?? "trained",
+            roleDescription: cleanPayload.roleDescription || null,
+            contactPhone: cleanPayload.contactPhone || null,
+            yearsOfService: cleanPayload.yearsOfService ? Number(cleanPayload.yearsOfService) : null,
+            siaRole: cleanPayload.siaRole ?? cleanPayload.campaignRole ?? "mobilizer",
+            isActive: cleanPayload.isActive ?? cleanPayload.active ?? true,
+            employmentStatus: cleanPayload.employmentStatus || "Active - In-service",
+            supervisorId: cleanPayload.supervisorId ? Number(cleanPayload.supervisorId) : null,
+          } as any).returning();
+          serverId = created?.id;
+        } else if (mutation.method === "PATCH" || mutation.method === "PUT") {
+          let chvId = mutation.serverId ? Number(mutation.serverId) : null;
+          if (!chvId) {
+            const parts = mutation.url.split("/");
+            const lastPart = parts[parts.length - 1];
+            if (lastPart && !isNaN(Number(lastPart))) {
+              chvId = Number(lastPart);
+            }
+          }
+          if (chvId) {
+            const patchData: any = { updatedAt: new Date() };
+            if (payload.fullName !== undefined || payload.name !== undefined) {
+              patchData.fullName = (payload.fullName ?? payload.name ?? "").trim();
+            }
+            if (payload.assignedVillageId !== undefined || payload.villageId !== undefined) {
+              const vid = payload.assignedVillageId ?? payload.villageId;
+              const numVid = vid ? Number(vid) : null;
+              if (numVid) {
+                const [foundVillage] = await db.select({ id: villages.id }).from(villages).where(and(eq(villages.id, numVid), eq(villages.tenantId, tenantId))).limit(1);
+                patchData.assignedVillageId = foundVillage ? numVid : null;
+              } else {
+                patchData.assignedVillageId = null;
+              }
+            }
+            if (payload.facilityId !== undefined) {
+              const fid = payload.facilityId ? Number(payload.facilityId) : null;
+              if (fid) {
+                const [foundFac] = await db.select({ id: facilities.id }).from(facilities).where(and(eq(facilities.id, fid), eq(facilities.tenantId, tenantId))).limit(1);
+                if (foundFac) patchData.facilityId = fid;
+              }
+            }
+            if (payload.nrc !== undefined) patchData.nrc = payload.nrc;
+            if (payload.gender !== undefined) patchData.gender = payload.gender;
+            if (payload.age !== undefined) patchData.age = payload.age ? Number(payload.age) : null;
+            if (payload.educationLevel !== undefined) patchData.educationLevel = payload.educationLevel;
+            if (payload.trainingReceived !== undefined || payload.trainingStatus !== undefined) {
+              patchData.trainingReceived = payload.trainingReceived ?? payload.trainingStatus;
+            }
+            if (payload.roleDescription !== undefined) patchData.roleDescription = payload.roleDescription;
+            if (payload.contactPhone !== undefined) patchData.contactPhone = payload.contactPhone;
+            if (payload.yearsOfService !== undefined) patchData.yearsOfService = payload.yearsOfService ? Number(payload.yearsOfService) : null;
+            if (payload.siaRole !== undefined || payload.campaignRole !== undefined) {
+              patchData.siaRole = payload.siaRole ?? payload.campaignRole;
+            }
+            if (payload.isActive !== undefined || payload.active !== undefined) {
+              patchData.isActive = payload.isActive ?? payload.active;
+            }
+            if (payload.employmentStatus !== undefined) patchData.employmentStatus = payload.employmentStatus;
+            if (payload.supervisorId !== undefined) patchData.supervisorId = payload.supervisorId ? Number(payload.supervisorId) : null;
+
+            await db.update(chvProfiles).set(patchData).where(and(eq(chvProfiles.id, chvId), eq(chvProfiles.tenantId, tenantId)));
+            serverId = chvId;
+          }
+        } else if (mutation.method === "DELETE") {
+          let chvId = mutation.serverId ? Number(mutation.serverId) : null;
+          if (!chvId) {
+            const parts = mutation.url.split("/");
+            const lastPart = parts[parts.length - 1];
+            if (lastPart && !isNaN(Number(lastPart))) {
+              chvId = Number(lastPart);
+            }
+          }
+          if (chvId) {
+            await db.update(chvProfiles)
+              .set({ isActive: false, updatedAt: new Date() })
+              .where(and(eq(chvProfiles.id, chvId), eq(chvProfiles.tenantId, tenantId)));
+            serverId = chvId;
+          }
+        }
+
+      } else if (mutation.url.includes("/staff") || mutation.url.startsWith("/api/staff")) {
+        if (mutation.method === "POST") {
+          let facilityId = payload.facilityId ? Number(payload.facilityId) : null;
+          if (!facilityId) {
+            const m = mutation.url.match(/\/api\/facilities\/(\d+)\/staff/);
+            if (m) facilityId = Number(m[1]);
+          }
+          const { id: _tempId, tenantId: _t, ...cleanPayload } = payload || {};
+          const [inserted] = await db
+            .insert(facilityStaff)
+            .values({
+              ...cleanPayload,
+              facilityId: facilityId || cleanPayload.facilityId,
+              fullName: cleanPayload.fullName || cleanPayload.name || "Staff Member",
+              tenantId,
+            } as any)
+            .returning();
+          serverId = inserted?.id;
+        } else if ((mutation.method === "PATCH" || mutation.method === "PUT") && (mutation.serverId || mutation.url.split("/").pop())) {
+          let staffId = mutation.serverId ? Number(mutation.serverId) : Number(mutation.url.split("/").pop());
+          if (staffId && !isNaN(staffId)) {
+            const { id: _tempId, tenantId: _t, ...safePayload } = payload || {};
+            await db
+              .update(facilityStaff)
+              .set({ ...safePayload, updatedAt: new Date() })
+              .where(and(eq(facilityStaff.id, staffId), eq(facilityStaff.tenantId, tenantId)));
+            serverId = staffId;
+          }
+        } else if (mutation.method === "DELETE") {
+          let staffId = mutation.serverId ? Number(mutation.serverId) : Number(mutation.url.split("/").pop());
+          if (staffId && !isNaN(staffId)) {
+            await db
+              .delete(facilityStaff)
+              .where(and(eq(facilityStaff.id, staffId), eq(facilityStaff.tenantId, tenantId)));
+            serverId = staffId;
+          }
+        }
+
+      } else if (mutation.url.includes("/catchments") || mutation.url.startsWith("/api/catchments")) {
+        if (mutation.method === "POST") {
+          let facilityId = payload.facilityId ? Number(payload.facilityId) : null;
+          if (!facilityId) {
+            const m = mutation.url.match(/\/api\/facilities\/(\d+)\/catchments/);
+            if (m) facilityId = Number(m[1]);
+          }
+          const { id: _tempId, tenantId: _t, ...cleanPayload } = payload || {};
+          const [inserted] = await db
+            .insert(facilityCatchments)
+            .values({
+              ...cleanPayload,
+              facilityId: facilityId || cleanPayload.facilityId,
+              tenantId,
+            } as any)
+            .returning();
+          serverId = inserted?.id;
+        } else if ((mutation.method === "PATCH" || mutation.method === "PUT") && (mutation.serverId || mutation.url.split("/").pop())) {
+          let catchmentId = mutation.serverId ? String(mutation.serverId) : String(mutation.url.split("/").pop());
+          if (catchmentId && catchmentId !== "catchments") {
+            const { id: _tempId, tenantId: _t, ...safePayload } = payload || {};
+            await db
+              .update(facilityCatchments)
+              .set({ ...safePayload, updatedAt: new Date() })
+              .where(and(eq(facilityCatchments.id, catchmentId), eq(facilityCatchments.tenantId, tenantId)));
+            serverId = catchmentId;
+          }
+        } else if (mutation.method === "DELETE") {
+          let catchmentId = mutation.serverId ? String(mutation.serverId) : String(mutation.url.split("/").pop());
+          if (catchmentId && catchmentId !== "catchments") {
+            await db
+              .delete(facilityCatchments)
+              .where(and(eq(facilityCatchments.id, catchmentId), eq(facilityCatchments.tenantId, tenantId)));
+            serverId = catchmentId;
           }
         }
 

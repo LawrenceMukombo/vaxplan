@@ -5,6 +5,13 @@ import * as schema from "@shared/schema";
 const { Pool } = pg;
 
 if (!process.env.DATABASE_URL) {
+  try {
+    // @ts-ignore
+    process.loadEnvFile?.();
+  } catch {}
+}
+
+if (!process.env.DATABASE_URL) {
   throw new Error(
     "DATABASE_URL must be set. Did you forget to provision a database?",
   );

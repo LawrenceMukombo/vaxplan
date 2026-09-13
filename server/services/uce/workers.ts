@@ -5,6 +5,56 @@ import { communicationChannels, deliveryLogs, communications } from '@shared/sch
 import { sendSms, sendWhatsApp, sendEmail } from '../messaging';
 import { eq } from 'drizzle-orm';
 
+function renderTemplateMessage(templateName: string, data: Record<string, any> = {}): { subject: string; body: string } {
+  if (data.messageText && typeof data.messageText === "string") {
+    return {
+      subject: data.subject || "VaxPlan Notification",
+      body: data.messageText,
+    };
+  }
+
+  switch (templateName) {
+    case "immunization_reminder":
+    case "dose_due":
+      return {
+        subject: data.subject || "Immunization Reminder",
+        body: `Dear Parent/Guardian, reminder that ${data.child_name || "your child"} is scheduled for vaccination (${data.vaccine || "routine immunization"}) on ${data.date || "your next session date"} at ${data.facility_name || "your local health facility"}.`,
+      };
+    case "defaulter_recall":
+      return {
+        subject: data.subject || "Urgent Immunization Follow-Up",
+        body: `Dear Caregiver, ${data.child_name || "your child"} is due for missed vaccine dose (${data.vaccine || "vaccination"}). Please visit ${data.facility_name || "the nearest health clinic"} as soon as possible.`,
+      };
+    case "stockout_alert":
+    case "cold_chain_alert":
+      return {
+        subject: data.subject || "Cold Chain & Stock Alert",
+        body: `VaxPlan Alert for ${data.facility_name || "Facility"}: ${data.alert_type || "Cold chain / stock event"} reported. Current status: ${data.details || "Requires immediate review"}.`,
+      };
+    case "supervision_notice":
+      return {
+        subject: data.subject || "Supervision Visit Scheduled",
+        body: `Supervision visit scheduled for ${data.facility_name || "your facility"} on ${data.scheduled_date || data.date || "the upcoming scheduled date"}. Supervisor: ${data.supervisor_name || "EPI Supervisor"}.`,
+      };
+    case "test_notification":
+    case "test_email":
+      return {
+        subject: data.subject || "VaxPlan Notification Engine Test",
+        body: data.messageText || `VaxPlan notification test for ${data.child_name || "recipient"} dispatched successfully.`,
+      };
+    default:
+      if (data.text) return { subject: data.subject || "VaxPlan Notification", body: String(data.text) };
+      if (data.message) return { subject: data.subject || "VaxPlan Notification", body: String(data.message) };
+      return {
+        subject: data.subject || `Notification: ${templateName.replace(/_/g, " ")}`,
+        body: Object.entries(data)
+          .filter(([k]) => !["phone", "email", "subject"].includes(k))
+          .map(([k, v]) => `${k.replace(/_/g, " ")}: ${v}`)
+          .join("\n") || `Notification for ${templateName.replace(/_/g, " ")}`,
+      };
+  }
+}
+
 /**
  * Intelligent Router that processes UCE Jobs
  */
@@ -23,8 +73,10 @@ export const communicationWorker = new Worker<UceJobPayload>(
       deliveryTime: new Date(),
     }).returning();
 
-    // Reconstruct message (In a real system, look up templateName from message_templates and render with templateData)
-    const messageBody = `[${templateName}] ` + JSON.stringify(templateData);
+    // Render human-readable message content from template
+    const rendered = renderTemplateMessage(templateName, templateData || {});
+    const messageBody = rendered.body;
+    const messageSubject = rendered.subject;
 
     let dispatchResult: { success: boolean; error?: string; messageId?: string } = { success: false, error: 'Unknown channel', messageId: '' };
 
@@ -48,7 +100,7 @@ export const communicationWorker = new Worker<UceJobPayload>(
           dispatchResult = await sendSms({ to: templateData.phone || '', message: messageBody, config: commConfig });
           break;
         case 'email':
-          dispatchResult = await sendEmail({ to: templateData.email || '', subject: 'VaxPlan Notification', text: messageBody, config: commConfig });
+          dispatchResult = await sendEmail({ to: templateData.email || '', subject: messageSubject, text: messageBody, config: commConfig });
           break;
         // Mock push & voice
         case 'push':

@@ -287,14 +287,20 @@ export default function ResearchHub() {
   // Handle document file download
   const handleDownload = (doc: any, type: "document" | "asset") => {
     trackDownloadMutation.mutate({ id: doc.id, type });
-    // Simulate/trigger file download by creating a link
-    const link = document.createElement("a");
-    link.href = doc.fileUrl || "#";
-    link.download = doc.fileName || `${doc.slug}.pdf`;
-    document.body.appendChild(link);
-    // Realistically, for mock seed files, let's open them in a tab if they are just paths
     if (doc.fileUrl) {
-      window.open(doc.fileUrl, "_blank");
+      const link = document.createElement("a");
+      link.href = doc.fileUrl;
+      link.download = doc.fileName || `${doc.slug || "document"}.pdf`;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } else {
+      toast({
+        title: "Document Available",
+        description: `Summary details for "${doc.title}" are available in the Research Hub. Full publication file is archived.`,
+      });
     }
   };
 
