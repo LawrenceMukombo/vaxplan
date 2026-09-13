@@ -513,10 +513,22 @@ function AuthenticatedLayout() {
   }
   if (!user) {
     const pathname = typeof window !== "undefined" ? window.location.pathname : "";
+    const search = typeof window !== "undefined" ? window.location.search : "";
     const offline = typeof navigator !== "undefined" && !navigator.onLine;
     const logoutState = getLogoutState();
     if (offline || logoutState?.pendingServerLogout || pathname === "/login") {
       return <LoginPage />;
+    }
+    // If an unauthenticated user accesses any protected in-app route (e.g. /defaulters, /chw-field, /session-planning, etc.)
+    // Redirect to /login?redirect=...
+    if (pathname && pathname !== "/" && pathname !== "/landing") {
+      const fullPath = `${pathname}${search}`;
+      if (typeof window !== "undefined") {
+        try {
+          sessionStorage.setItem("vaxplan_login_redirect", fullPath);
+        } catch {}
+      }
+      return <Redirect to={`/login?redirect=${encodeURIComponent(fullPath)}`} />;
     }
     return <Landing />;
   }
@@ -656,6 +668,7 @@ function App() {
         <TooltipProvider>
           <Suspense fallback={<RouteFallback />}>
             <Switch>
+              <Route path="/login" component={LoginPage} />
               <Route path="/signup" component={Signup} />
               <Route path="/research">
                 {() => (

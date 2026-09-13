@@ -270,7 +270,17 @@ function PasswordLoginDialog({
         queryClient.setQueryData(["/api/auth/user"], data.user);
         void queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
       }
-      window.location.replace("/");
+      const urlParams = new URLSearchParams(window.location.search);
+      const redirectParam = urlParams.get("redirect");
+      const sessionRedirect = typeof window !== "undefined" ? sessionStorage.getItem("vaxplan_login_redirect") : null;
+      const target = redirectParam || sessionRedirect || "/";
+      if (typeof window !== "undefined") {
+        try {
+          sessionStorage.removeItem("vaxplan_login_redirect");
+        } catch {}
+      }
+      const safeTarget = target.startsWith("/") && !target.startsWith("//") ? target : "/";
+      window.location.replace(safeTarget);
     } catch (err) {
       setError("Network error. Try again.");
     } finally {
@@ -1568,7 +1578,7 @@ export default function Landing() {
                         className="w-full text-xs font-semibold gap-1.5 border-primary/30 hover:bg-primary/10 hover:text-primary transition-all mt-1"
                         data-testid={`roadmap-action-${item.id}`}
                       >
-                        <Link href={item.route}>
+                        <Link href={!user ? `/login?redirect=${encodeURIComponent(item.route)}` : item.route}>
                           <span>{item.actionLabel}</span>
                           <ArrowRight className="h-3.5 w-3.5 ml-auto text-primary" />
                         </Link>
