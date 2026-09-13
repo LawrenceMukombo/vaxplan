@@ -53,7 +53,7 @@ export function SyncStatus(props: SyncStatusProps = {}) {
   const canTriggerSync = online && !syncing && !!activeSyncTenantId;
   const handleSync = () => {
     if (canTriggerSync && activeSyncTenantId) {
-      syncEngine.sync(activeSyncTenantId);
+      syncEngine.sync(activeSyncTenantId, { forceRetry: true });
     }
   };
   const triggerProps = canTriggerSync
