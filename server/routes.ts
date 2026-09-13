@@ -293,6 +293,7 @@ function resolveRoleScopeIds(dbUser: any): {
   provinceIds: number[];
   districtIds: number[];
   facilityIds: number[];
+  communityDistrictIds: number[];
   hasAny: boolean;
   isScopedRole: boolean;
 } {
@@ -313,20 +314,25 @@ function resolveRoleScopeIds(dbUser: any): {
   let provinceIds: number[] = [];
   let districtIds: number[] = [];
   let facilityIds: number[] = [];
+  let communityDistrictIds: number[] = [];
   let isScopedRole = false;
 
   if (primaryIs("facility_clerk") || primaryIs("facility_in_charge") || primaryIs("facility_partner")) {
     isScopedRole = true;
     facilityIds = dbUser?.facilityId ? [Number(dbUser.facilityId)] : sFac;
+    // Operational district for communities and catchment planning:
+    communityDistrictIds = dbUser?.districtId ? [Number(dbUser.districtId)] : sDist;
   } else if (primaryIs("district_manager")) {
     isScopedRole = true;
     districtIds = dbUser?.districtId ? [Number(dbUser.districtId)] : sDist;
     facilityIds = sFac;
+    communityDistrictIds = districtIds;
   } else if (primaryIs("provincial_coordinator")) {
     isScopedRole = true;
     provinceIds = dbUser?.provinceId ? [Number(dbUser.provinceId)] : sProv;
     districtIds = sDist;
     facilityIds = sFac;
+    communityDistrictIds = sDist;
   } else if (has("provincial_coordinator")) {
     isScopedRole = true;
     provinceIds = sProv.length
@@ -336,6 +342,7 @@ function resolveRoleScopeIds(dbUser: any): {
         : [];
     districtIds = sDist;
     facilityIds = sFac;
+    communityDistrictIds = sDist;
   } else if (has("district_manager")) {
     isScopedRole = true;
     districtIds = sDist.length
@@ -344,6 +351,7 @@ function resolveRoleScopeIds(dbUser: any): {
         ? [Number(dbUser.districtId)]
         : [];
     facilityIds = sFac;
+    communityDistrictIds = districtIds;
   } else {
     // Unknown / custom role (e.g. a national-level reviewer): fall back to the
     // legacy precedence — explicit multi-scope union, else the most-specific
@@ -352,18 +360,20 @@ function resolveRoleScopeIds(dbUser: any): {
       provinceIds = sProv;
       districtIds = sDist;
       facilityIds = sFac;
+      communityDistrictIds = sDist;
     } else if (dbUser?.facilityId) {
       facilityIds = [Number(dbUser.facilityId)];
     } else if (dbUser?.districtId) {
       districtIds = [Number(dbUser.districtId)];
+      communityDistrictIds = districtIds;
     } else if (dbUser?.provinceId) {
       provinceIds = [Number(dbUser.provinceId)];
     }
   }
 
   const hasAny =
-    provinceIds.length > 0 || districtIds.length > 0 || facilityIds.length > 0;
-  return { provinceIds, districtIds, facilityIds, hasAny, isScopedRole };
+    provinceIds.length > 0 || districtIds.length > 0 || facilityIds.length > 0 || communityDistrictIds.length > 0;
+  return { provinceIds, districtIds, facilityIds, communityDistrictIds, hasAny, isScopedRole };
 }
 
 function roleNamesForAccess(dbUser: any): string[] {
@@ -400,7 +410,7 @@ function blockDistrictStaffClientWorkspaces(req: any, res: any, next: any) {
 async function userCanAccessGeo(
   dbUser: any,
   tenantId: string,
-  geo: { facilityId?: number | null; districtId?: number | null; provinceId?: number | null },
+  geo: { facilityId?: number | null; districtId?: number | null; provinceId?: number | null; isVillage?: boolean },
 ): Promise<boolean> {
   // Platform super-admin, national admins and GIS specialists keep full read
   // access in their tenant — mirrors hasPermission / isAdmin's role bypass.
@@ -435,6 +445,7 @@ async function userCanAccessGeo(
     provinceIds: scopeProvinces,
     districtIds: scopeDistricts,
     facilityIds: scopeFacilities,
+    communityDistrictIds: scopeCommunityDistricts,
     hasAny,
     isScopedRole,
   } = resolveRoleScopeIds(dbUser);
@@ -462,6 +473,7 @@ async function userCanAccessGeo(
   // districts / provinces (OR semantics).
   if (facilityId != null && scopeFacilities.includes(Number(facilityId))) return true;
   if (districtId != null && scopeDistricts.includes(Number(districtId))) return true;
+  if (geo.isVillage && districtId != null && (scopeDistricts.includes(Number(districtId)) || scopeCommunityDistricts?.includes(Number(districtId)))) return true;
   if (provinceId != null && scopeProvinces.includes(Number(provinceId))) return true;
   return false;
 }
@@ -502,15 +514,17 @@ type GeoScope = {
   provinceIds: Set<number>;
   districtIds: Set<number>;
   facilityIds: Set<number>;
+  communityDistrictIds: Set<number>;
 };
 
 /**
  * setCacheHeaders — sets browser-level Cache-Control for near-static reference data.
  * "private" ensures each user's browser caches without CDN sharing.
+ * Vary by x-tenant-id AND Cookie so different user sessions never share cached responses.
  * Combined with React Query staleTime, eliminates most cold-start round-trips.
  */
 function setCacheHeaders(res: any, maxAgeSeconds = 300): void {
-  res.setHeader("Vary", "x-tenant-id");
+  res.setHeader("Vary", "x-tenant-id, Cookie");
   res.setHeader(
     "Cache-Control",
     `private, max-age=${maxAgeSeconds}, stale-while-revalidate=${maxAgeSeconds * 2}`
@@ -523,6 +537,7 @@ async function getGeoScope(dbUser: any, tenantId: string): Promise<GeoScope> {
     provinceIds: new Set<number>(),
     districtIds: new Set<number>(),
     facilityIds: new Set<number>(),
+    communityDistrictIds: new Set<number>(),
   };
   if (dbUser?.isPlatformAdmin === true) return allScope;
   const primaryRole = String(dbUser?.role || "");
@@ -546,7 +561,7 @@ async function getGeoScope(dbUser: any, tenantId: string): Promise<GeoScope> {
 
   // Role-capped granted IDs (facility staff pinned to their facility, etc.) —
   // mirrors userCanAccessGeo exactly.
-  const { provinceIds: rProv, districtIds: rDist, facilityIds: rFac, hasAny, isScopedRole } =
+  const { provinceIds: rProv, districtIds: rDist, facilityIds: rFac, communityDistrictIds: rCommunityDist, hasAny, isScopedRole } =
     resolveRoleScopeIds(dbUser);
 
   // No resolvable scope: a hierarchical role with no area fails CLOSED (empty
@@ -558,6 +573,7 @@ async function getGeoScope(dbUser: any, tenantId: string): Promise<GeoScope> {
         provinceIds: new Set<number>(),
         districtIds: new Set<number>(),
         facilityIds: new Set<number>(),
+        communityDistrictIds: new Set<number>(),
       };
     }
     return allScope;
@@ -572,34 +588,52 @@ async function getGeoScope(dbUser: any, tenantId: string): Promise<GeoScope> {
   const provinceIds = new Set<number>(rProv);
   const districtIds = new Set<number>(rDist);
   const facilityIds = new Set<number>(rFac);
+  const communityDistrictIds = new Set<number>(rCommunityDist || []);
+  districtIds.forEach((d) => communityDistrictIds.add(d));
 
   // Expand province → districts → facilities so list rows that only carry a
   // facilityId still match for district/province-level users.
   for (const pid of Array.from(provinceIds)) {
     const dists = await storage.getDistricts(tenantId, Number(pid));
-    dists.forEach((d) => districtIds.add(d.id));
+    dists.forEach((d) => {
+      districtIds.add(d.id);
+      communityDistrictIds.add(d.id);
+    });
   }
   for (const did of Array.from(districtIds)) {
     const facs = await storage.getFacilities(tenantId, Number(did));
     facs.forEach((f) => facilityIds.add(f.id));
   }
 
-  const scope: GeoScope = { all: false, provinceIds, districtIds, facilityIds };
+  // If a facility-level user has no explicit districtId, derive it from their facility's hierarchy
+  if (communityDistrictIds.size === 0 && facilityIds.size > 0) {
+    for (const fid of Array.from(facilityIds)) {
+      const h: any = await getFacilityHierarchy(Number(fid), tenantId);
+      if (h && h.districtId) {
+        communityDistrictIds.add(Number(h.districtId));
+      }
+    }
+  }
+
+  const scope: GeoScope = { all: false, provinceIds, districtIds, facilityIds, communityDistrictIds };
   _geoScopeCache.set(cacheKey, { scope, exp: Date.now() + GEO_SCOPE_TTL_MS });
   return scope;
 }
 
 // Synchronous row test against a precomputed GeoScope. A row is visible when it
 // intersects any granted facility / district / province (OR semantics — same as
-// userCanAccessGeo's explicit-scope branch).
+// userCanAccessGeo's explicit-scope branch). When isVillage is true, also allows
+// any community in the user's operational district (communityDistrictIds).
 function recordInGeoScope(
   scope: GeoScope,
   geo: { facilityId?: number | null; districtId?: number | null; provinceId?: number | null },
+  isVillage = false,
 ): boolean {
   if (scope.all) return true;
   const { facilityId, districtId, provinceId } = geo;
   if (facilityId != null && scope.facilityIds.has(Number(facilityId))) return true;
   if (districtId != null && scope.districtIds.has(Number(districtId))) return true;
+  if (isVillage && districtId != null && scope.communityDistrictIds?.has(Number(districtId))) return true;
   if (provinceId != null && scope.provinceIds.has(Number(provinceId))) return true;
   return false;
 }
@@ -6938,7 +6972,7 @@ export async function registerRoutes(
         .filter((village: any) => {
           if (outsideVillageIds.has(Number(village.id))) return false;
           const district = districtMap.get(Number(village.districtId));
-          if (!recordInGeoScope(scope, { facilityId: village.assignedFacilityId, districtId: village.districtId, provinceId: district?.provinceId })) return false;
+          if (!recordInGeoScope(scope, { facilityId: village.assignedFacilityId, districtId: village.districtId, provinceId: district?.provinceId }, true)) return false;
           if (selectedProvinceId && Number(district?.provinceId) !== selectedProvinceId) return false;
           if (search) {
             const haystack = `${village.name ?? ""} ${village.code ?? ""}`.toLowerCase();
@@ -6981,8 +7015,9 @@ export async function registerRoutes(
       const all = await storage.getVillages(req.tenantId, districtId, facilityId);
       // Villages carry a districtId (primary geo key) and optionally an
       // assignedFacilityId. recordInGeoScope checks both with OR semantics,
-      // so the fix covers provincial (districtId match) and facility-level
-      // (facilityId match) users without the old per-facility async lookups.
+      // so the fix covers provincial (districtId match), district, and facility-level
+      // users (facilityId match + operational district community visibility)
+      // without the old per-facility async lookups.
       // This also correctly includes villages that have no assignedFacilityId
       // (previously those were silently excluded for provincial users).
       let result = scope.all
@@ -6991,7 +7026,7 @@ export async function registerRoutes(
             recordInGeoScope(scope, {
               districtId: (v as any).districtId,
               facilityId: (v as any).assignedFacilityId,
-            }),
+            }, true),
           );
       result = result.filter((v) => !outsideVillageIds.has(Number(v.id)));
       res.set("Pragma", "no-cache");
@@ -7012,6 +7047,7 @@ export async function registerRoutes(
       if (!(await userCanAccessGeo(dbUser, req.tenantId, {
         facilityId: (village as any).assignedFacilityId,
         districtId: (village as any).districtId,
+        isVillage: true,
       }))) {
         return res.status(404).json({ message: "Village not found" });
       }
@@ -7714,6 +7750,7 @@ export async function registerRoutes(
       const canEditExisting = await userCanAccessGeo(req.dbUser, req.tenantId, {
         facilityId: (oldVillage as any).assignedFacilityId ?? null,
         districtId: (oldVillage as any).districtId ?? null,
+        isVillage: true,
       });
       if (!canEditExisting) return res.status(404).json({ message: "Village not found" });
 
@@ -7746,6 +7783,7 @@ export async function registerRoutes(
         const canWriteDest = await userCanAccessGeo(req.dbUser, req.tenantId, {
           facilityId: destFacilityId,
           districtId: destDistrictId,
+          isVillage: true,
         });
         if (!canWriteDest) {
           return res.status(403).json({
@@ -7870,6 +7908,7 @@ export async function registerRoutes(
       const canRaise = await userCanAccessGeo(req.dbUser, req.tenantId, {
         facilityId: (village as any).assignedFacilityId ?? null,
         districtId: (village as any).districtId ?? null,
+        isVillage: true,
       });
       if (!canRaise) return res.status(404).json({ message: "Community not found." });
 
@@ -8048,7 +8087,7 @@ export async function registerRoutes(
             const facLat = parseFloat(facility.latitude.toString());
             const facLng = parseFloat(facility.longitude.toString());
             const dist = calculateHaversineDistance(lat, lng, facLat, facLng);
-            const radius = facility.catchmentRadius ? parseFloat(facility.catchmentRadius.toString()) : 5.0; // default 5km
+            const radius = facility.catchmentRadius ? Math.max(parseFloat(facility.catchmentRadius.toString()), 10.0) : 10.0;
 
             if (dist <= radius) {
               matchedVillageIds.push(v.id);
@@ -13237,6 +13276,7 @@ export async function registerRoutes(
           provinceIds: new Set<number>(),
           districtIds: new Set<number>(),
           facilityIds: new Set<number>([requestedFacilityId]),
+          communityDistrictIds: new Set<number>(),
         };
       }
       if (!scope.all && scope.facilityIds.size === 0 && scope.districtIds.size === 0 && scope.provinceIds.size === 0) {

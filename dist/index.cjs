@@ -24742,43 +24742,51 @@ function resolveRoleScopeIds(dbUser) {
   let provinceIds = [];
   let districtIds = [];
   let facilityIds = [];
+  let communityDistrictIds = [];
   let isScopedRole = false;
   if (primaryIs("facility_clerk") || primaryIs("facility_in_charge") || primaryIs("facility_partner")) {
     isScopedRole = true;
     facilityIds = dbUser?.facilityId ? [Number(dbUser.facilityId)] : sFac;
+    communityDistrictIds = dbUser?.districtId ? [Number(dbUser.districtId)] : sDist;
   } else if (primaryIs("district_manager")) {
     isScopedRole = true;
     districtIds = dbUser?.districtId ? [Number(dbUser.districtId)] : sDist;
     facilityIds = sFac;
+    communityDistrictIds = districtIds;
   } else if (primaryIs("provincial_coordinator")) {
     isScopedRole = true;
     provinceIds = dbUser?.provinceId ? [Number(dbUser.provinceId)] : sProv;
     districtIds = sDist;
     facilityIds = sFac;
+    communityDistrictIds = sDist;
   } else if (has("provincial_coordinator")) {
     isScopedRole = true;
     provinceIds = sProv.length ? sProv : dbUser?.provinceId ? [Number(dbUser.provinceId)] : [];
     districtIds = sDist;
     facilityIds = sFac;
+    communityDistrictIds = sDist;
   } else if (has("district_manager")) {
     isScopedRole = true;
     districtIds = sDist.length ? sDist : dbUser?.districtId ? [Number(dbUser.districtId)] : [];
     facilityIds = sFac;
+    communityDistrictIds = districtIds;
   } else {
     if (sFac.length || sDist.length || sProv.length) {
       provinceIds = sProv;
       districtIds = sDist;
       facilityIds = sFac;
+      communityDistrictIds = sDist;
     } else if (dbUser?.facilityId) {
       facilityIds = [Number(dbUser.facilityId)];
     } else if (dbUser?.districtId) {
       districtIds = [Number(dbUser.districtId)];
+      communityDistrictIds = districtIds;
     } else if (dbUser?.provinceId) {
       provinceIds = [Number(dbUser.provinceId)];
     }
   }
-  const hasAny = provinceIds.length > 0 || districtIds.length > 0 || facilityIds.length > 0;
-  return { provinceIds, districtIds, facilityIds, hasAny, isScopedRole };
+  const hasAny = provinceIds.length > 0 || districtIds.length > 0 || facilityIds.length > 0 || communityDistrictIds.length > 0;
+  return { provinceIds, districtIds, facilityIds, communityDistrictIds, hasAny, isScopedRole };
 }
 function roleNamesForAccess(dbUser) {
   const roles = Array.isArray(dbUser?.roles) ? dbUser.roles : [];
@@ -24820,6 +24828,7 @@ async function userCanAccessGeo(dbUser, tenantId, geo) {
     provinceIds: scopeProvinces,
     districtIds: scopeDistricts,
     facilityIds: scopeFacilities,
+    communityDistrictIds: scopeCommunityDistricts,
     hasAny,
     isScopedRole
   } = resolveRoleScopeIds(dbUser);
@@ -24836,6 +24845,7 @@ async function userCanAccessGeo(dbUser, tenantId, geo) {
   }
   if (facilityId != null && scopeFacilities.includes(Number(facilityId))) return true;
   if (districtId != null && scopeDistricts.includes(Number(districtId))) return true;
+  if (geo.isVillage && districtId != null && (scopeDistricts.includes(Number(districtId)) || scopeCommunityDistricts?.includes(Number(districtId)))) return true;
   if (provinceId != null && scopeProvinces.includes(Number(provinceId))) return true;
   return false;
 }
@@ -24847,7 +24857,7 @@ function invalidateGeoScopeCache(userId, tenantId) {
   _geoScopeCache.delete(`${userId}:${tenantId}`);
 }
 function setCacheHeaders(res, maxAgeSeconds = 300) {
-  res.setHeader("Vary", "x-tenant-id");
+  res.setHeader("Vary", "x-tenant-id, Cookie");
   res.setHeader(
     "Cache-Control",
     `private, max-age=${maxAgeSeconds}, stale-while-revalidate=${maxAgeSeconds * 2}`
@@ -24858,7 +24868,8 @@ async function getGeoScope(dbUser, tenantId) {
     all: true,
     provinceIds: /* @__PURE__ */ new Set(),
     districtIds: /* @__PURE__ */ new Set(),
-    facilityIds: /* @__PURE__ */ new Set()
+    facilityIds: /* @__PURE__ */ new Set(),
+    communityDistrictIds: /* @__PURE__ */ new Set()
   };
   if (dbUser?.isPlatformAdmin === true) return allScope;
   const primaryRole = String(dbUser?.role || "");
@@ -24869,14 +24880,15 @@ async function getGeoScope(dbUser, tenantId) {
   if (seesWholeTenant) return allScope;
   const isVisitingOtherTenant = !!dbUser?.tenantId && !!tenantId && tenantId !== dbUser.tenantId;
   if (isVisitingOtherTenant) return allScope;
-  const { provinceIds: rProv, districtIds: rDist, facilityIds: rFac, hasAny, isScopedRole } = resolveRoleScopeIds(dbUser);
+  const { provinceIds: rProv, districtIds: rDist, facilityIds: rFac, communityDistrictIds: rCommunityDist, hasAny, isScopedRole } = resolveRoleScopeIds(dbUser);
   if (!hasAny) {
     if (isScopedRole) {
       return {
         all: false,
         provinceIds: /* @__PURE__ */ new Set(),
         districtIds: /* @__PURE__ */ new Set(),
-        facilityIds: /* @__PURE__ */ new Set()
+        facilityIds: /* @__PURE__ */ new Set(),
+        communityDistrictIds: /* @__PURE__ */ new Set()
       };
     }
     return allScope;
@@ -24887,23 +24899,37 @@ async function getGeoScope(dbUser, tenantId) {
   const provinceIds = new Set(rProv);
   const districtIds = new Set(rDist);
   const facilityIds = new Set(rFac);
+  const communityDistrictIds = new Set(rCommunityDist || []);
+  districtIds.forEach((d) => communityDistrictIds.add(d));
   for (const pid of Array.from(provinceIds)) {
     const dists = await storage.getDistricts(tenantId, Number(pid));
-    dists.forEach((d) => districtIds.add(d.id));
+    dists.forEach((d) => {
+      districtIds.add(d.id);
+      communityDistrictIds.add(d.id);
+    });
   }
   for (const did of Array.from(districtIds)) {
     const facs = await storage.getFacilities(tenantId, Number(did));
     facs.forEach((f2) => facilityIds.add(f2.id));
   }
-  const scope = { all: false, provinceIds, districtIds, facilityIds };
+  if (communityDistrictIds.size === 0 && facilityIds.size > 0) {
+    for (const fid of Array.from(facilityIds)) {
+      const h = await getFacilityHierarchy(Number(fid), tenantId);
+      if (h && h.districtId) {
+        communityDistrictIds.add(Number(h.districtId));
+      }
+    }
+  }
+  const scope = { all: false, provinceIds, districtIds, facilityIds, communityDistrictIds };
   _geoScopeCache.set(cacheKey, { scope, exp: Date.now() + GEO_SCOPE_TTL_MS });
   return scope;
 }
-function recordInGeoScope(scope, geo) {
+function recordInGeoScope(scope, geo, isVillage = false) {
   if (scope.all) return true;
   const { facilityId, districtId, provinceId } = geo;
   if (facilityId != null && scope.facilityIds.has(Number(facilityId))) return true;
   if (districtId != null && scope.districtIds.has(Number(districtId))) return true;
+  if (isVillage && districtId != null && scope.communityDistrictIds?.has(Number(districtId))) return true;
   if (provinceId != null && scope.provinceIds.has(Number(provinceId))) return true;
   return false;
 }
@@ -29814,7 +29840,7 @@ async function registerRoutes(httpServer2, app2, sessionMiddleware2) {
       const communitiesResult = communityRows.filter((village) => {
         if (outsideVillageIds.has(Number(village.id))) return false;
         const district = districtMap.get(Number(village.districtId));
-        if (!recordInGeoScope(scope, { facilityId: village.assignedFacilityId, districtId: village.districtId, provinceId: district?.provinceId })) return false;
+        if (!recordInGeoScope(scope, { facilityId: village.assignedFacilityId, districtId: village.districtId, provinceId: district?.provinceId }, true)) return false;
         if (selectedProvinceId && Number(district?.provinceId) !== selectedProvinceId) return false;
         if (search) {
           const haystack = `${village.name ?? ""} ${village.code ?? ""}`.toLowerCase();
@@ -29854,7 +29880,7 @@ async function registerRoutes(httpServer2, app2, sessionMiddleware2) {
         (v) => recordInGeoScope(scope, {
           districtId: v.districtId,
           facilityId: v.assignedFacilityId
-        })
+        }, true)
       );
       result = result.filter((v) => !outsideVillageIds.has(Number(v.id)));
       res.set("Pragma", "no-cache");
@@ -29871,7 +29897,8 @@ async function registerRoutes(httpServer2, app2, sessionMiddleware2) {
       if (!village) return res.status(404).json({ message: "Village not found" });
       if (!await userCanAccessGeo(dbUser, req.tenantId, {
         facilityId: village.assignedFacilityId,
-        districtId: village.districtId
+        districtId: village.districtId,
+        isVillage: true
       })) {
         return res.status(404).json({ message: "Village not found" });
       }
@@ -30357,7 +30384,8 @@ async function registerRoutes(httpServer2, app2, sessionMiddleware2) {
       if (!oldVillage) return res.status(404).json({ message: "Village not found" });
       const canEditExisting = await userCanAccessGeo(req.dbUser, req.tenantId, {
         facilityId: oldVillage.assignedFacilityId ?? null,
-        districtId: oldVillage.districtId ?? null
+        districtId: oldVillage.districtId ?? null,
+        isVillage: true
       });
       if (!canEditExisting) return res.status(404).json({ message: "Village not found" });
       let derivedDistrictId = null;
@@ -30371,7 +30399,8 @@ async function registerRoutes(httpServer2, app2, sessionMiddleware2) {
         derivedDistrictId = destDistrictId;
         const canWriteDest = await userCanAccessGeo(req.dbUser, req.tenantId, {
           facilityId: destFacilityId,
-          districtId: destDistrictId
+          districtId: destDistrictId,
+          isVillage: true
         });
         if (!canWriteDest) {
           return res.status(403).json({
@@ -30459,7 +30488,8 @@ async function registerRoutes(httpServer2, app2, sessionMiddleware2) {
       }
       const canRaise = await userCanAccessGeo(req.dbUser, req.tenantId, {
         facilityId: village.assignedFacilityId ?? null,
-        districtId: village.districtId ?? null
+        districtId: village.districtId ?? null,
+        isVillage: true
       });
       if (!canRaise) return res.status(404).json({ message: "Community not found." });
       const ownFeat = toBoundaryFeature(village.boundary);
@@ -30598,7 +30628,7 @@ Note from the requester: ${conflict.note}` : ""}`,
             const facLat = parseFloat(facility.latitude.toString());
             const facLng = parseFloat(facility.longitude.toString());
             const dist = calculateHaversineDistance(lat, lng, facLat, facLng);
-            const radius = facility.catchmentRadius ? parseFloat(facility.catchmentRadius.toString()) : 5;
+            const radius = facility.catchmentRadius ? Math.max(parseFloat(facility.catchmentRadius.toString()), 10) : 10;
             if (dist <= radius) {
               matchedVillageIds.push(v.id);
             }
@@ -34494,7 +34524,8 @@ Note from the requester: ${conflict.note}` : ""}`,
           all: false,
           provinceIds: /* @__PURE__ */ new Set(),
           districtIds: /* @__PURE__ */ new Set(),
-          facilityIds: /* @__PURE__ */ new Set([requestedFacilityId])
+          facilityIds: /* @__PURE__ */ new Set([requestedFacilityId]),
+          communityDistrictIds: /* @__PURE__ */ new Set()
         };
       }
       if (!scope.all && scope.facilityIds.size === 0 && scope.districtIds.size === 0 && scope.provinceIds.size === 0) {
