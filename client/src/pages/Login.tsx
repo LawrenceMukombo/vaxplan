@@ -16,8 +16,8 @@ import {
 } from "lucide-react";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { PageHead } from "@/components/PageHead";
-import { saveTenantsCache, loadTenantsCache, saveActiveTenant } from "@/lib/tenantCache";
-import { clearLogoutState, recordOnlineAuthSession } from "@/lib/authSession";
+import { saveTenantsCache, loadTenantsCache, saveActiveTenant, loadActiveTenant } from "@/lib/tenantCache";
+import { clearLogoutState, recordOnlineAuthSession, saveOfflineCredentials, verifyOfflineCredentials } from "@/lib/authSession";
 import { queryClient } from "@/lib/queryClient";
 
 interface PublicTenant {
@@ -52,6 +52,11 @@ export default function LoginPage() {
   useEffect(() => {
     // Clear any stale pending logout flag so the user is never trapped
     clearLogoutState();
+    // Pre-populate active tenant from cache if available
+    const active = loadActiveTenant();
+    if (active?.id) {
+      setSelectedTenantId(String(active.id));
+    }
   }, []);
 
   const { data: fetchedTenants } = useQuery<PublicTenant[]>({
@@ -95,6 +100,50 @@ export default function LoginPage() {
     e.preventDefault();
     setBusy(true);
     setError(null);
+
+    // If device is offline, authenticate against cached credentials
+    if (!navigator.onLine) {
+      try {
+        const offlineResult = await verifyOfflineCredentials(email, password, selectedTenantId);
+        if (!offlineResult.success) {
+          setError(offlineResult.message || "Offline authentication failed.");
+          return;
+        }
+
+        clearLogoutState();
+        if (offlineResult.user) {
+          recordOnlineAuthSession(offlineResult.user);
+          const tId = selectedTenantId || offlineResult.tenantId;
+          if (tId) {
+            const matchedTenant = activeTenants.find((t) => t.id === tId);
+            if (matchedTenant) {
+              saveActiveTenant(matchedTenant);
+            }
+          }
+          queryClient.setQueryData(["/api/auth/user"], offlineResult.user);
+        }
+
+        const urlParams = new URLSearchParams(window.location.search);
+        const redirectParam = urlParams.get("redirect");
+        const sessionRedirect = typeof window !== "undefined" ? sessionStorage.getItem("vaxplan_login_redirect") : null;
+        const target = redirectParam || sessionRedirect || "/";
+        if (typeof window !== "undefined") {
+          try {
+            sessionStorage.removeItem("vaxplan_login_redirect");
+          } catch {}
+        }
+        const safeTarget = target.startsWith("/") && !target.startsWith("//") ? target : "/";
+        window.location.replace(safeTarget);
+        return;
+      } catch (offlineErr: any) {
+        setError(offlineErr?.message || "Offline authentication failed.");
+        return;
+      } finally {
+        setBusy(false);
+      }
+    }
+
+    // Online authentication flow
     try {
       const res = await fetch("/api/auth/login-password", {
         method: "POST",
@@ -116,6 +165,8 @@ export default function LoginPage() {
       clearLogoutState();
       if (data?.user) {
         recordOnlineAuthSession(data.user);
+        // Securely cache hashed offline credentials for seamless offline access
+        void saveOfflineCredentials(email, password, data.user, selectedTenantId);
         if (selectedTenantId) {
           const matchedTenant = activeTenants.find((t) => t.id === selectedTenantId);
           if (matchedTenant) {
@@ -137,7 +188,25 @@ export default function LoginPage() {
       const safeTarget = target.startsWith("/") && !target.startsWith("//") ? target : "/";
       window.location.replace(safeTarget);
     } catch (err) {
-      setError("Network error. Try again.");
+      // Graceful fallback to cached credentials if network drops mid-request
+      try {
+        const offlineResult = await verifyOfflineCredentials(email, password, selectedTenantId);
+        if (offlineResult.success && offlineResult.user) {
+          clearLogoutState();
+          recordOnlineAuthSession(offlineResult.user);
+          const tId = selectedTenantId || offlineResult.tenantId;
+          if (tId) {
+            const matchedTenant = activeTenants.find((t) => t.id === tId);
+            if (matchedTenant) {
+              saveActiveTenant(matchedTenant);
+            }
+          }
+          queryClient.setQueryData(["/api/auth/user"], offlineResult.user);
+          window.location.replace("/");
+          return;
+        }
+      } catch {}
+      setError("Network error. Unable to connect to server, and no valid offline credentials were found.");
     } finally {
       setBusy(false);
     }
@@ -240,9 +309,9 @@ export default function LoginPage() {
           {/* Form Panel (Right Column) */}
           <div className="p-6 sm:p-8 flex flex-col justify-center">
             {isOffline && (
-              <div className="mb-4 flex items-center gap-2 rounded-lg bg-amber-500/10 border border-amber-500/30 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
+              <div className="mb-4 flex items-center gap-2 rounded-lg bg-emerald-500/10 border border-emerald-500/30 px-3 py-2 text-xs text-emerald-800 dark:text-emerald-300">
                 <WifiOff className="h-4 w-4 shrink-0" />
-                <span>You are currently offline. Connect to internet to authenticate.</span>
+                <span>Offline Mode — Sign in with credentials previously used on this device.</span>
               </div>
             )}
 
@@ -352,10 +421,16 @@ export default function LoginPage() {
                     type="submit"
                     size="lg"
                     className="w-full"
-                    disabled={busy || isOffline}
+                    disabled={busy}
                     data-testid="button-submit-login"
                   >
-                    {busy ? "Signing in…" : "Sign in to VaxPlan"}
+                    {busy
+                      ? isOffline
+                        ? "Verifying offline…"
+                        : "Signing in…"
+                      : isOffline
+                        ? "Sign in (Offline Mode)"
+                        : "Sign in to VaxPlan"}
                   </Button>
                 </form>
                 <div className="mt-6 pt-4 border-t text-center text-xs text-muted-foreground space-y-2">

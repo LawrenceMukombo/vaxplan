@@ -74,6 +74,7 @@ interface PullPayload {
   supervisionVisits?: any[];
   supervisionTemplates?: any[];
   catchments?: any[];
+  coldChainEquipment?: any[];
 }
 
 // ─── Outbox flush result (mirrors POST /api/sync/batch response) ─────────────
@@ -201,7 +202,7 @@ class SyncEngine {
     if (this.networkUnsub) this.networkUnsub();
     this.networkUnsub = onNetworkChange((online) => {
       if (online && this._state.status !== "syncing") {
-        this.sync(tenantId, { silent: true });
+        this.sync(tenantId, { silent: true, forceRetry: true });
       } else if (!online) {
         this.setState({ status: "offline", currentStage: "Offline", progressPercent: 0 });
       }
@@ -549,6 +550,10 @@ class SyncEngine {
     if (payload.supervisionTemplates) {
       await bulkSyncEntities(offlineDb.supervisionTemplates, payload.supervisionTemplates.map(stamp));
     }
+    if (payload.coldChainEquipment) {
+      this.setState({ currentStage: `Syncing Cold Chain Equipment (${payload.coldChainEquipment.length} records)...`, progressPercent: 99 });
+      await bulkSyncEntities(offlineDb.coldChainEquipment, payload.coldChainEquipment.map(stamp));
+    }
 
     await setLastSyncAt(payload.serverTime);
     this.setState({ lastSyncAt: payload.serverTime });
@@ -569,7 +574,7 @@ class SyncEngine {
    */
   async sync(tenantId: string, opts: { silent?: boolean; forceRetry?: boolean } = {}): Promise<void> {
     const silent = opts.silent ?? false;
-    const manual = !silent;          // manual = user clicked "Sync Now"
+    const manual = !silent || !!opts.forceRetry;          // manual = user clicked "Sync Now" or auto-reconnect force-retry
     if (this.syncing) return;
     if (!navigator.onLine) {
       // Background polling stays quiet when offline; only an explicit sync

@@ -263,6 +263,10 @@ async function getOfflineData(url: string): Promise<any> {
   }
 
   if (pathname === "/api/me/tenant") {
+    const cachedActiveTenant = loadActiveTenant();
+    if (cachedActiveTenant && cachedActiveTenant.id) {
+      return cachedActiveTenant;
+    }
     const tenantIdRow = await offlineDb.syncMeta.get("tenantId");
     const tenantId = tenantIdRow?.value || "1";
     // Resolve dynamically based on offline active tenant ID as well as URL path fallbacks

@@ -39,6 +39,7 @@ import {
   supervisionVisits,
   supervisionChecklistTemplates,
   facilityCatchments,
+  coldChainEquipment,
 } from "@shared/schema";
 import { eq, and, gt, sql, inArray } from "drizzle-orm";
 import { canonicalizePerAntigen, normalizeStockVaccineName } from "@shared/vaccineSchedule";
@@ -104,6 +105,7 @@ export interface PullPayload {
   supervisionVisits?: any[];
   supervisionTemplates?: any[];
   catchments?: any[];
+  coldChainEquipment?: any[];
 }
 
 // ─── PULL — server → client ───────────────────────────────────────────────────
@@ -241,6 +243,7 @@ export async function pullChanges(
     supervisionVisitsData,
     supervisionTemplatesData,
     catchmentsData,
+    coldChainData,
   ] = await Promise.all([
     safeQuery("regions", () => db.select().from(regions).where(tenantFilter(regions))),
     safeQuery("provinces", () => db.select().from(provinces).where(tenantFilter(provinces))),
@@ -277,6 +280,7 @@ export async function pullChanges(
     safeQuery("supervisionVisits", () => db.select().from(supervisionVisits).where(tenantFilter(supervisionVisits))),
     safeQuery("supervisionChecklistTemplates", () => db.select().from(supervisionChecklistTemplates).where(tenantFilter(supervisionChecklistTemplates))),
     safeQuery("facilityCatchments", () => db.select().from(facilityCatchments).where(tenantFilter(facilityCatchments))),
+    safeQuery("coldChainEquipment", () => db.select().from(coldChainEquipment).where(tenantFilter(coldChainEquipment))),
   ]);
 
   const clientsData = clientsRawData.map(({ client, ...geo }: any) => ({
@@ -321,6 +325,7 @@ export async function pullChanges(
     supervisionVisits: supervisionVisitsData,
     supervisionTemplates: supervisionTemplatesData,
     catchments: catchmentsData,
+    coldChainEquipment: coldChainData,
   };
 }
 
@@ -608,8 +613,15 @@ export async function batchMutate(
 
       } else if (mutation.url.includes("/api/session-day-plans") || mutation.url.includes("/api/sessionDayPlans")) {
         if (mutation.method === "POST") {
-          const dayPlan = await storage.createSessionDayPlan(tenantId, payload);
-          serverId = dayPlan.id;
+          if (Array.isArray(payload.items)) {
+            for (const item of payload.items) {
+              await storage.createSessionDayPlan(tenantId, { ...item, tenantId });
+            }
+            serverId = "bulk-day-plans";
+          } else {
+            const dayPlan = await storage.createSessionDayPlan(tenantId, payload);
+            serverId = dayPlan.id;
+          }
         } else if ((mutation.method === "PATCH" || mutation.method === "PUT") && mutation.serverId) {
           await storage.updateSessionDayPlan(tenantId, Number(mutation.serverId), payload);
           serverId = mutation.serverId;
@@ -630,8 +642,15 @@ export async function batchMutate(
 
       } else if (mutation.url.startsWith("/api/budget-items")) {
         if (mutation.method === "POST") {
-          const item = await storage.createBudgetItem(tenantId, payload);
-          serverId = item.id;
+          if (Array.isArray(payload.items)) {
+            for (const item of payload.items) {
+              await storage.createBudgetItem(tenantId, { ...item, tenantId });
+            }
+            serverId = "bulk-budget-items";
+          } else {
+            const item = await storage.createBudgetItem(tenantId, payload);
+            serverId = item.id;
+          }
         } else if ((mutation.method === "PATCH" || mutation.method === "PUT") && mutation.serverId) {
           await storage.updateBudgetItem(tenantId, Number(mutation.serverId), payload);
           serverId = mutation.serverId;
@@ -743,11 +762,22 @@ export async function batchMutate(
 
       } else if (mutation.url.startsWith("/api/supervision-visits")) {
         if (mutation.method === "POST") {
-          const visit = await storage.createSupervisionVisit(tenantId, {
-            ...payload,
-            createdByUserId: performedById,
-          });
-          serverId = visit.id;
+          if (Array.isArray(payload.items)) {
+            for (const item of payload.items) {
+              await storage.createSupervisionVisit(tenantId, {
+                ...item,
+                tenantId,
+                createdByUserId: performedById,
+              });
+            }
+            serverId = "bulk-supervision-visits";
+          } else {
+            const visit = await storage.createSupervisionVisit(tenantId, {
+              ...payload,
+              createdByUserId: performedById,
+            });
+            serverId = visit.id;
+          }
         } else if ((mutation.method === "PATCH" || mutation.method === "PUT") && mutation.serverId) {
           await storage.updateSupervisionVisit(tenantId, Number(mutation.serverId), payload);
           serverId = mutation.serverId;
@@ -785,6 +815,97 @@ export async function batchMutate(
           if (tmplId) {
             await storage.deleteChecklistTemplate(tenantId, tmplId);
             serverId = tmplId;
+          }
+        }
+
+      } else if (mutation.url.startsWith("/api/population")) {
+        if (mutation.url.includes("/import") || mutation.url.includes("/bulk")) {
+          const items = Array.isArray(payload.population)
+            ? payload.population
+            : Array.isArray(payload.items)
+              ? payload.items
+              : Array.isArray(payload.records)
+                ? payload.records
+                : [];
+          for (const item of items) {
+            await storage.createPopulationData(tenantId, { ...item, tenantId });
+          }
+          serverId = "bulk-population";
+        } else if (mutation.method === "POST") {
+          const pop = await storage.createPopulationData(tenantId, payload);
+          serverId = pop.id;
+        } else if ((mutation.method === "PATCH" || mutation.method === "PUT") && mutation.serverId) {
+          const pop = await storage.updatePopulationData(tenantId, Number(mutation.serverId), payload);
+          serverId = pop?.id ?? mutation.serverId;
+        } else if (mutation.method === "DELETE") {
+          let popId = mutation.serverId ? Number(mutation.serverId) : null;
+          if (!popId) {
+            const parts = mutation.url.split("/");
+            const lastPart = parts[parts.length - 1];
+            if (lastPart && !isNaN(Number(lastPart))) {
+              popId = Number(lastPart);
+            }
+          }
+          if (popId) {
+            await storage.deletePopulationData(tenantId, popId);
+            serverId = popId;
+          }
+        }
+
+      } else if (mutation.url.includes("/cold-chain") || mutation.url.startsWith("/api/cold-chain")) {
+        if (mutation.method === "POST") {
+          let facilityId = payload.facilityId ? Number(payload.facilityId) : null;
+          if (!facilityId) {
+            const m = mutation.url.match(/\/api\/facilities\/(\d+)\/cold-chain/);
+            if (m) facilityId = Number(m[1]);
+          }
+          const [inserted] = await db
+            .insert(coldChainEquipment)
+            .values({
+              ...payload,
+              facilityId: facilityId || payload.facilityId,
+              tenantId,
+              createdByUserId: performedById ?? null,
+            } as any)
+            .returning();
+          serverId = inserted?.id;
+        } else if ((mutation.method === "PATCH" || mutation.method === "PUT") && (mutation.serverId || mutation.url.split("/").pop())) {
+          let equipId = mutation.serverId ? Number(mutation.serverId) : Number(mutation.url.split("/").pop());
+          if (equipId && !isNaN(equipId)) {
+            const { tenantId: _t, ...safePayload } = payload;
+            await db
+              .update(coldChainEquipment)
+              .set({ ...safePayload, updatedAt: new Date() })
+              .where(and(eq(coldChainEquipment.id, equipId), eq(coldChainEquipment.tenantId, tenantId)));
+            serverId = equipId;
+          }
+        } else if (mutation.method === "DELETE") {
+          let equipId = mutation.serverId ? Number(mutation.serverId) : Number(mutation.url.split("/").pop());
+          if (equipId && !isNaN(equipId)) {
+            await db
+              .update(coldChainEquipment)
+              .set({ isActive: false, updatedAt: new Date() })
+              .where(and(eq(coldChainEquipment.id, equipId), eq(coldChainEquipment.tenantId, tenantId)));
+            serverId = equipId;
+          }
+        }
+
+      } else if (mutation.url.startsWith("/api/vaccines/config") || mutation.url.startsWith("/api/vaccines")) {
+        if (mutation.method === "POST") {
+          const [inserted] = await db
+            .insert(vaccineConfigurations)
+            .values({ ...payload, tenantId } as any)
+            .returning();
+          serverId = inserted?.id;
+        } else if ((mutation.method === "PATCH" || mutation.method === "PUT") && (mutation.serverId || mutation.url.split("/").pop())) {
+          let cfgId = mutation.serverId ? Number(mutation.serverId) : Number(mutation.url.split("/").pop());
+          if (cfgId && !isNaN(cfgId)) {
+            const { tenantId: _t, ...safePayload } = payload;
+            await db
+              .update(vaccineConfigurations)
+              .set({ ...safePayload, updatedAt: new Date() })
+              .where(and(eq(vaccineConfigurations.id, cfgId), eq(vaccineConfigurations.tenantId, tenantId)));
+            serverId = cfgId;
           }
         }
 

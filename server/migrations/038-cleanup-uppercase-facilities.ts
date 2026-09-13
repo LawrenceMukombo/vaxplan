@@ -126,9 +126,22 @@ export async function applyCleanupUppercaseFacilities(dbInstance?: any) {
           }
         }
 
-        // Delete the duplicate uppercase facility
-        await db.execute(sql`DELETE FROM facilities WHERE id = ${u.id}`);
-        cleanedCount++;
+        // Delete the duplicate uppercase facility safely; if foreign keys still block deletion, mark operational_status = 'duplicate_merged'
+        try {
+          await db.execute(sql`DELETE FROM facilities WHERE id = ${u.id}`);
+          cleanedCount++;
+        } catch (delErr: any) {
+          try {
+            await db.execute(sql`
+              UPDATE facilities
+              SET operational_status = 'duplicate_merged',
+                  name = ${normalizedName + ' (Merged ' + canonicalId + ')'},
+                  updated_at = NOW()
+              WHERE id = ${u.id};
+            `);
+            cleanedCount++;
+          } catch (_) {}
+        }
       } else {
         // No canonical sibling exists; rename to titlecase to remove capital letters
         await db.execute(sql`

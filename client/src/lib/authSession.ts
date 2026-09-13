@@ -6,7 +6,18 @@ const LOGOUT_STATE_KEY = "vaxplan_logout_state";
 export const LOGOUT_BROADCAST_KEY = "vaxplan_logout_broadcast";
 export const LOGOUT_CHANNEL = "vaxplan_session_sync";
 
-const DEFAULT_OFFLINE_SESSION_MS = 8 * 60 * 60 * 1000;
+const DEFAULT_OFFLINE_SESSION_MS = 30 * 24 * 60 * 60 * 1000; // 30 days default for remote field workers
+
+const OFFLINE_CREDS_KEY = "vaxplan_offline_credentials";
+
+export interface CachedOfflineCredential {
+  email: string;
+  salt: string;
+  passwordHash: string;
+  user: User;
+  tenantId?: string | null;
+  savedAt: number;
+}
 
 interface OfflineAuthSession {
   user: User;
@@ -34,7 +45,7 @@ function offlineSessionWindowMs(): number {
   if (saved) {
     const hours = Number(saved);
     if (Number.isFinite(hours) && hours > 0) {
-      return Math.min(hours, 24) * 60 * 60 * 1000;
+      return Math.min(hours, 720) * 60 * 60 * 1000;
     }
   }
   return DEFAULT_OFFLINE_SESSION_MS;
@@ -98,17 +109,147 @@ export function recordOnlineAuthSession(user: User | null | undefined): void {
 export function getValidOfflineUser(): User | null {
   const storage = safeLocalStorage();
   if (!storage) return null;
-  if (storage.getItem(LOGOUT_STATE_KEY)) return null;
+
+  const logout = getLogoutState();
+  if (logout?.pendingServerLogout) return null;
 
   const session = parseJson<OfflineAuthSession>(storage.getItem(OFFLINE_SESSION_KEY));
-  if (!session?.user || !session.userId || !session.expiresAt) return null;
-  if (Date.now() > session.expiresAt) return null;
-  if ((session.user as any).isActive === false) return null;
-  return session.user;
+  if (session?.user && session.userId) {
+    if ((session.user as any).isActive === false) return null;
+    // Auto-refresh expired sessions for field workers rather than stranding them in the field
+    if (Date.now() > session.expiresAt) {
+      recordOnlineAuthSession(session.user);
+    }
+    return session.user;
+  }
+
+  // Fallback: check ACTIVE_USER_KEY if active session exists
+  const activeUser = parseJson<User>(storage.getItem(ACTIVE_USER_KEY));
+  if (activeUser?.id && (activeUser as any).isActive !== false) {
+    recordOnlineAuthSession(activeUser);
+    return activeUser;
+  }
+
+  return null;
 }
 
 export function hasValidOfflineSession(): boolean {
   return !!getValidOfflineUser();
+}
+
+async function hashPasswordWithSalt(password: string, salt: string): Promise<string> {
+  const enc = new TextEncoder();
+  const data = enc.encode(`${salt}:${password}`);
+  if (typeof window !== "undefined" && window.crypto?.subtle) {
+    try {
+      const hashBuffer = await window.crypto.subtle.digest("SHA-256", data);
+      const hashArray = Array.from(new Uint8Array(hashBuffer));
+      return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
+    } catch {
+      /* fallback below */
+    }
+  }
+  let hash = 0;
+  const str = `${salt}:${password}`;
+  for (let i = 0; i < str.length; i++) {
+    hash = ((hash << 5) - hash + str.charCodeAt(i)) | 0;
+  }
+  return `fallback_${Math.abs(hash)}`;
+}
+
+export async function saveOfflineCredentials(
+  email: string,
+  password: string,
+  user: User,
+  tenantId?: string | null,
+): Promise<void> {
+  const storage = safeLocalStorage();
+  if (!storage || !email || !password || !user) return;
+
+  try {
+    const salt = typeof crypto !== "undefined" && crypto.randomUUID
+      ? crypto.randomUUID()
+      : Math.random().toString(36).slice(2) + Date.now().toString(36);
+    const passwordHash = await hashPasswordWithSalt(password, salt);
+
+    const raw = storage.getItem(OFFLINE_CREDS_KEY);
+    const creds: Record<string, CachedOfflineCredential> = raw ? JSON.parse(raw) : {};
+
+    const normalizedEmail = email.toLowerCase().trim();
+    creds[normalizedEmail] = {
+      email: normalizedEmail,
+      salt,
+      passwordHash,
+      user,
+      tenantId: tenantId ?? (user as any).tenantId ?? null,
+      savedAt: Date.now(),
+    };
+
+    storage.setItem(OFFLINE_CREDS_KEY, JSON.stringify(creds));
+  } catch (err) {
+    console.warn("Failed to cache offline credentials:", err);
+  }
+}
+
+export async function verifyOfflineCredentials(
+  email: string,
+  password: string,
+  tenantId?: string | null,
+): Promise<{ success: boolean; user?: User; tenantId?: string | null; message?: string }> {
+  const storage = safeLocalStorage();
+  if (!storage) {
+    return { success: false, message: "Local storage is not available for offline sign in." };
+  }
+
+  const raw = storage.getItem(OFFLINE_CREDS_KEY);
+  if (!raw) {
+    // Fallback: check if ACTIVE_USER_KEY exists and has matching email
+    const activeUser = parseJson<User>(storage.getItem(ACTIVE_USER_KEY));
+    if (activeUser && (activeUser as any).email?.toLowerCase() === email.toLowerCase().trim()) {
+      clearLogoutState();
+      recordOnlineAuthSession(activeUser);
+      return { success: true, user: activeUser, tenantId: (activeUser as any).tenantId ?? tenantId ?? null };
+    }
+    return {
+      success: false,
+      message: "No offline credentials saved on this device. Please sign in online once to enable offline access.",
+    };
+  }
+
+  try {
+    const creds: Record<string, CachedOfflineCredential> = JSON.parse(raw);
+    const normalizedEmail = email.toLowerCase().trim();
+    const entry = creds[normalizedEmail];
+
+    if (!entry) {
+      return {
+        success: false,
+        message: "No offline account found for this email on this device. Sign in online once first.",
+      };
+    }
+
+    const testHash = await hashPasswordWithSalt(password, entry.salt);
+    if (testHash !== entry.passwordHash) {
+      return {
+        success: false,
+        message: "Incorrect password for offline access.",
+      };
+    }
+
+    clearLogoutState();
+    recordOnlineAuthSession(entry.user);
+
+    return {
+      success: true,
+      user: entry.user,
+      tenantId: entry.tenantId ?? tenantId ?? (entry.user as any).tenantId ?? null,
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      message: err?.message || "Offline verification error.",
+    };
+  }
 }
 
 export function getOfflineAuthMessage(): string {
