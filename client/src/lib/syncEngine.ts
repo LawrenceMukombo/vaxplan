@@ -28,6 +28,7 @@ import { clearClientAuthStorage, broadcastLogout } from "./authSession";
 import {
   isMisroutedVaccinationOutboxItem,
   isObsoleteOfflineTelemetryItem,
+  isObsoleteApprovalOutboxItem,
   OUTBOX_TELEMETRY_CLEANUP_VERSION,
   VACCINATION_ROUTE_REPAIR_VERSION,
 } from "./offlineOutboxRepair";
@@ -312,17 +313,17 @@ class SyncEngine {
       // whose init guard ran before the repair code was loaded, so clicking
       // the failed badge immediately removes poison telemetry instead of
       // granting it another five futile attempts.
-      const obsoleteTelemetryIds = (await offlineDb.outbox
+      const obsoleteItemIds = (await offlineDb.outbox
         .where("tenantId")
         .equals(tenantId)
-        .filter(isObsoleteOfflineTelemetryItem)
+        .filter((item) => isObsoleteOfflineTelemetryItem(item) || isObsoleteApprovalOutboxItem(item))
         .primaryKeys()) as number[];
-      if (obsoleteTelemetryIds.length > 0) {
-        await offlineDb.outbox.bulkDelete(obsoleteTelemetryIds);
+      if (obsoleteItemIds.length > 0) {
+        await offlineDb.outbox.bulkDelete(obsoleteItemIds);
         const counts = await this._countOutbox(tenantId);
         this.setState({
           ...counts,
-          currentStage: `Removed ${obsoleteTelemetryIds.length} obsolete audit event(s).`,
+          currentStage: `Removed ${obsoleteItemIds.length} obsolete queue item(s).`,
           progressPercent: 10,
         });
       }
@@ -717,6 +718,23 @@ class SyncEngine {
   async refreshPendingCount(tenantId: string): Promise<void> {
     const { pendingCount, stuckCount } = await this._countOutbox(tenantId);
     this.setState({ pendingCount, stuckCount });
+  }
+
+  /** Clears permanently failed or poison outbox items for the active tenant */
+  async clearFailedOutbox(tenantId?: string): Promise<void> {
+    const tid = tenantId || this._initializedTenantId;
+    if (tid) {
+      const items = await offlineDb.outbox.where("tenantId").equals(tid).toArray();
+      const deletableIds = items
+        .filter((i) => i.retries >= MAX_RETRIES || isObsoleteOfflineTelemetryItem(i) || isObsoleteApprovalOutboxItem(i))
+        .map((i) => i.id)
+        .filter((id): id is number => id !== undefined);
+      if (deletableIds.length > 0) {
+        await offlineDb.outbox.bulkDelete(deletableIds);
+      }
+      const { pendingCount, stuckCount } = await this._countOutbox(tid);
+      this.setState({ pendingCount, stuckCount, errorMessage: null, status: "idle", currentStage: "" });
+    }
   }
 
   /** Tenant-less refresh used by SyncStatus when a SW Background Sync

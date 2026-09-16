@@ -26,3 +26,12 @@ export function isObsoleteOfflineTelemetryItem(item: OutboxItem): boolean {
     /^\/api\/microplans\/[^/]+\/version-event$/.test(path)
   );
 }
+
+/**
+ * Approval mutations cannot be replayed offline and must not poison the outbox queue.
+ */
+export function isObsoleteApprovalOutboxItem(item: OutboxItem): boolean {
+  const path = item.url.split(/[?#]/, 1)[0].replace(/\/+$/, "");
+  return /^\/api\/approvals(?:\/|$)/.test(path);
+}
+

@@ -167,6 +167,23 @@ export function OfflineBanner() {
           </span>
         )}
 
+        {/* Dismiss / Clear failed items on error */}
+        {status === "error" && (
+          <Button
+            size="sm"
+            variant="ghost"
+            className={`h-6 px-2 text-[11px] ${cfg.text} hover:opacity-80 underline`}
+            onClick={async () => {
+              const { syncEngine } = await import("@/lib/syncEngine");
+              await syncEngine.clearFailedOutbox();
+            }}
+            aria-label="Dismiss error and clear failed queue"
+            id="btn-clear-failed-sync"
+          >
+            Clear Queue
+          </Button>
+        )}
+
         {/* Sync Now button */}
         {isOnline && status !== "syncing" && (
           <Button

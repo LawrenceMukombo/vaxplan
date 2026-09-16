@@ -701,6 +701,59 @@ export function registerMicroplanRoutes(app: Express) {
     }
   });
 
+  app.post("/api/microplans/:id/review/steps-all", ...auth, requirePermission("approve_plans"), async (req: any, res) => {
+    try {
+      const microplanId = Number(req.params.id);
+      const plan = await storage.getMicroplan(req.tenantId, microplanId);
+      if (!plan || plan.status === "draft") return res.status(404).json({ message: "Submitted microplan not found." });
+      if (!(await userCanAccessGeo(req.dbUser, req.tenantId, { facilityId: plan.facilityId }))) {
+        return res.status(403).json({ message: "This microplan is outside your assigned review area." });
+      }
+      const [currentRequest] = await db.select().from(approvalRequests).where(and(
+        eq(approvalRequests.tenantId, req.tenantId),
+        eq(approvalRequests.entityType, "microplan"),
+        eq(approvalRequests.entityId, microplanId),
+        eq(approvalRequests.status, "pending"),
+      )).orderBy(desc(approvalRequests.submittedAt)).limit(1);
+      if (!currentRequest) return res.status(409).json({ message: "No active approval stage exists for this plan." });
+
+      const level = String(currentRequest.currentLevel).toLowerCase();
+      const requiredRole: Record<string, string> = {
+        district: "district_manager",
+        provincial: "provincial_coordinator",
+        national: "national_admin",
+      };
+      const reviewerRoles = new Set<string>([
+        String(req.dbUser?.role || ""),
+        ...(Array.isArray(req.dbUser?.roles) ? req.dbUser.roles.map(String) : []),
+      ]);
+      if (!requiredRole[level] || !reviewerRoles.has(requiredRole[level])) {
+        return res.status(403).json({ message: `Only the assigned ${level} reviewer may review this stage.` });
+      }
+      const comment = String(req.body?.comment ?? "All 11 microplan steps reviewed and verified.").trim().slice(0, 4000);
+      for (let step = 1; step <= 11; step++) {
+        await logAudit(req, "microplan_step_reviewed", "microplan_step_review", microplanId, null, {
+          requestId: currentRequest.id,
+          level,
+          step,
+          reviewed: true,
+          comment: comment || null,
+        });
+      }
+      res.json({
+        success: true,
+        microplanId,
+        requestId: currentRequest.id,
+        level,
+        reviewedStepsCount: 11,
+        reviewedAt: new Date().toISOString(),
+      });
+    } catch (error) {
+      console.error("Error recording all microplan step reviews:", error);
+      res.status(500).json({ message: "Failed to record step reviews." });
+    }
+  });
+
   app.get("/api/microplans/:id/versions", ...auth, requirePermission("microplan.view_history"), async (req: any, res) => {
     try {
       const microplanId = Number(req.params.id);

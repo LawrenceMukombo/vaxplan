@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -16,6 +16,9 @@ import { DataTable } from "@/components/DataTable";
 import { ApprovalBadge } from "@/components/ApprovalBadge";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { offlineDb } from "@/lib/offlineDb";
+import { syncEngine } from "@/lib/syncEngine";
+import { useLocation } from "wouter";
 import {
   CheckCircle,
   XCircle,
@@ -26,6 +29,7 @@ import {
   Undo2,
   History,
   Eye,
+  Check,
 } from "lucide-react";
 import type {
   ApprovalRequest,
@@ -36,6 +40,7 @@ import type {
   Village,
   SessionPlan,
   PopulationData,
+  Microplan,
 } from "@shared/schema";
 import { format } from "date-fns";
 import { GeoCascadeFilter } from "@/components/GeoCascadeFilter";
@@ -45,15 +50,50 @@ import { ChangeApprovalScreen } from "@/components/history/ChangeApprovalScreen"
 
 export default function Approvals() {
   const { toast } = useToast();
+  const [, setLocation] = useLocation();
   const [selectedRequest, setSelectedRequest] = useState<ApprovalRequest | null>(null);
   const [detailRequest, setDetailRequest] = useState<ApprovalRequest | null>(null);
   const [actionType, setActionType] = useState<"approve" | "reject" | "return" | null>(null);
   const [historyMicroplanId, setHistoryMicroplanId] = useState<number | null>(null);
   const [comment, setComment] = useState("");
+  const [selectedHierarchyMicroplanId, setSelectedHierarchyMicroplanId] = useState<number | null>(null);
+
+  // Approval decisions must never be accepted locally and replayed later.
+  // Clean up any stale approval outbox mutations on load.
+  useEffect(() => {
+    void (async () => {
+      const queued = await offlineDb.outbox
+        .filter((item) => /^\/api\/approvals(?:\/|$)/.test(item.url.split("?")[0]))
+        .toArray();
+      if (queued.length === 0) return;
+      await offlineDb.outbox.bulkDelete(queued.flatMap((item) => item.id == null ? [] : [item.id]));
+      const tenantId = queued[0]?.tenantId;
+      if (tenantId) await syncEngine.refreshPendingCount(tenantId);
+    })();
+  }, []);
 
   const { data: requests, isLoading } = useQuery<ApprovalRequest[]>({
     queryKey: ["/api/approvals"],
   });
+
+  const selectedMicroplanId = selectedRequest?.entityType === "microplan"
+    ? selectedRequest.entityId
+    : null;
+
+  const { data: selectedReviewHydration, isLoading: selectedReviewLoading } = useQuery<any>({
+    queryKey: ["/api/microplans", selectedMicroplanId, "hydration"],
+    queryFn: async () => {
+      const response = await fetch(`/api/microplans/${selectedMicroplanId}/hydration`, { credentials: "include" });
+      if (!response.ok) throw new Error("Failed to load review progress");
+      return response.json();
+    },
+    enabled: selectedMicroplanId !== null && actionType === "approve",
+  });
+
+  const reviewedStepCount = selectedReviewHydration?.reviewWorkflow?.stepReviews?.filter(
+    (review: any) => Number(review.requestId) === Number(selectedRequest?.id),
+  ).length ?? 0;
+  const reviewChecklistComplete = selectedRequest?.entityType !== "microplan" || reviewedStepCount >= 11;
 
   const { data: versionHistory = [], isLoading: historyLoading } = useQuery<Array<{
     id: number;
@@ -71,6 +111,7 @@ export default function Approvals() {
     },
     enabled: historyMicroplanId !== null,
   });
+
   const { data: tenant } = useQuery<Tenant>({
     queryKey: ["/api/me/tenant"],
   });
@@ -81,6 +122,7 @@ export default function Approvals() {
   const { data: villages = [] } = useQuery<Village[]>({ queryKey: ["/api/villages"] });
   const { data: sessionPlans = [] } = useQuery<SessionPlan[]>({ queryKey: ["/api/sessions"] });
   const { data: populationData = [] } = useQuery<PopulationData[]>({ queryKey: ["/api/population"] });
+  const { data: microplans = [] } = useQuery<Microplan[]>({ queryKey: ["/api/microplans"] });
 
   const [geoProvinceId, setGeoProvinceId] = useState<number | null>(null);
   const [geoDistrictId, setGeoDistrictId] = useState<number | null>(null);
@@ -96,8 +138,10 @@ export default function Approvals() {
     sessionPlans.forEach((s) => sessionsById.set(s.id, s));
     const populationById = new Map<number, PopulationData>();
     populationData.forEach((p) => populationById.set(p.id, p));
-    return { sessionsById, populationById };
-  }, [sessionPlans, populationData]);
+    const microplansById = new Map<number, Microplan>();
+    microplans.forEach((plan) => microplansById.set(plan.id, plan));
+    return { sessionsById, populationById, microplansById };
+  }, [sessionPlans, populationData, microplans]);
 
   const resolveGeo = (item: ApprovalRequest) => {
     let source: Record<string, unknown> | null = null;
@@ -109,6 +153,9 @@ export default function Approvals() {
       if (pop) source = pop as unknown as Record<string, unknown>;
     } else if (item.entityType === "facility") {
       source = { facilityId: item.entityId };
+    } else if (item.entityType === "microplan") {
+      const plan = entityLookup.microplansById.get(item.entityId);
+      if (plan?.facilityId) source = { facilityId: plan.facilityId };
     }
     if (!source) return { provinceId: null, districtId: null, facilityId: null };
     const h = getRecordHierarchy(source, geoMaps);
@@ -133,6 +180,43 @@ export default function Approvals() {
     });
   };
 
+  const reviewAllStepsMutation = useMutation({
+    mutationFn: async (microplanId: number) => {
+      return apiRequest("POST", `/api/microplans/${microplanId}/review/steps-all`, {
+        comment: comment.trim() || "All 11 microplan steps reviewed and verified.",
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/microplans", selectedMicroplanId, "hydration"] });
+      toast({
+        title: "Step Reviews Recorded",
+        description: "All 11 steps have been marked as reviewed. You can now approve this stage.",
+      });
+    },
+    onError: (err: any) => {
+      toast({
+        title: "Review recording failed",
+        description: err?.message || "Failed to record step reviews.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const getStageInfo = (item: ApprovalRequest) => {
+    const maxApprovalLevel = (tenant?.settings as any)?.maxApprovalLevel || "national";
+    const stages = maxApprovalLevel === "district"
+      ? ["district"]
+      : maxApprovalLevel === "provincial"
+      ? ["district", "provincial"]
+      : ["district", "provincial", "national"];
+    
+    const currentIdx = stages.indexOf(item.currentLevel.toLowerCase());
+    const stageNumber = currentIdx >= 0 ? currentIdx + 1 : 1;
+    const totalStages = stages.length;
+    const nextLevel = currentIdx >= 0 && currentIdx < stages.length - 1 ? stages[currentIdx + 1] : null;
+    return { stageNumber, totalStages, nextLevel };
+  };
+
   const actionMutation = useMutation({
     mutationFn: async ({
       id,
@@ -148,17 +232,22 @@ export default function Approvals() {
         comments,
       });
     },
-    onSuccess: (_, variables) => {
+    onSuccess: (result: any, variables) => {
       queryClient.invalidateQueries({ queryKey: ["/api/approvals"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/microplans"] });
       setSelectedRequest(null);
       setActionType(null);
       setComment("");
       toast({
         title: variables.action === "approve" ? "Approved" : variables.action === "return" ? "Returned for correction" : "Rejected",
-        description: variables.action === "return" ? "The microplan is editable again and the correction reason was preserved." : "The request was updated successfully.",
+        description: variables.action === "return"
+          ? "The microplan is editable again and the correction reason was preserved."
+          : variables.action === "approve" && result?.nextRequest
+          ? `This stage is complete. The microplan is now awaiting ${String(result.nextRequest.currentLevel).replace(/_/g, " ")} review.`
+          : "The request was updated successfully.",
       });
     },
-    onError: (error) => {
+    onError: (error: any) => {
       toast({
         title: "Error",
         description: error.message,
@@ -238,12 +327,23 @@ export default function Approvals() {
     },
     {
       key: "currentLevel",
-      header: "Level",
-      render: (item: ApprovalRequest) => (
-        <Badge variant="outline" className="capitalize">
-          {item.currentLevel}
-        </Badge>
-      ),
+      header: "Level & Stage",
+      sortable: true,
+      render: (item: ApprovalRequest) => {
+        const { stageNumber, totalStages } = getStageInfo(item);
+        return (
+          <div className="flex flex-col gap-0.5">
+            <Badge variant="outline" className="capitalize w-fit">
+              {item.currentLevel}
+            </Badge>
+            {item.entityType === "microplan" && (
+              <span className="text-[10px] text-muted-foreground font-medium">
+                Stage {stageNumber} of {totalStages}
+              </span>
+            )}
+          </div>
+        );
+      },
     },
     {
       key: "_geoProvinceName",
@@ -280,30 +380,59 @@ export default function Approvals() {
     {
       key: "status",
       header: "Status",
-      render: (item: ApprovalRequest) => (
-        <ApprovalBadge status={item.status || "pending"} />
-      ),
+      render: (item: ApprovalRequest) => {
+        const isPending = (item.status || "pending") === "pending";
+        return (
+          <div className="space-y-0.5">
+            <ApprovalBadge status={item.status || "pending"} />
+            {isPending && item.entityType === "microplan" && (
+              <span className="block text-[11px] text-amber-700 dark:text-amber-400 font-medium">
+                Awaiting {item.currentLevel} decision
+              </span>
+            )}
+          </div>
+        );
+      },
     },
     {
       key: "resolvedAt",
       header: "Approved / Resolved",
       sortable: true,
-      render: (item: ApprovalRequest) => (
-        item.resolvedAt ? (
-          <div className="text-xs space-y-0.5" data-testid={`approval-resolved-at-${item.id}`}>
-            <span className="font-semibold text-foreground">
-              {format(new Date(item.resolvedAt), "MMM d, yyyy HH:mm")}
-            </span>
-            {item.resolvedById && (
-              <span className="block text-[11px] text-muted-foreground truncate max-w-[140px]">
-                By: {item.resolvedById === "system" ? "Automated Policy" : item.resolvedById}
+      render: (item: ApprovalRequest) => {
+        if (item.resolvedAt) {
+          return (
+            <div className="text-xs space-y-0.5" data-testid={`approval-resolved-at-${item.id}`}>
+              <span className="font-semibold text-foreground">
+                {format(new Date(item.resolvedAt), "MMM d, yyyy HH:mm")}
               </span>
-            )}
-          </div>
-        ) : (
-          <span className="text-muted-foreground text-xs">—</span>
-        )
-      ),
+              {item.resolvedById && (
+                <span className="block text-[11px] text-muted-foreground truncate max-w-[140px]">
+                  By: {item.resolvedById === "system" ? "Automated Policy" : item.resolvedById}
+                </span>
+              )}
+            </div>
+          );
+        }
+        if (item.entityType === "microplan") {
+          const priorApproved = (requests ?? []).filter(
+            (r) => r.entityType === "microplan" && r.entityId === item.entityId && r.status === "approved" && r.id !== item.id
+          );
+          if (priorApproved.length > 0) {
+            const latest = priorApproved[0];
+            return (
+              <div className="text-[11px] text-muted-foreground">
+                <span className="text-emerald-600 font-medium block">
+                  ✓ {latest.currentLevel} approved
+                </span>
+                {latest.resolvedAt && (
+                  <span>{format(new Date(latest.resolvedAt), "MMM d, HH:mm")}</span>
+                )}
+              </div>
+            );
+          }
+        }
+        return <span className="text-muted-foreground text-xs">—</span>;
+      },
     },
     {
       key: "actions",
@@ -458,12 +587,12 @@ export default function Approvals() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-muted-foreground">Rejected</p>
-                <p className="text-2xl font-bold text-destructive">
+                <p className="text-2xl font-bold text-red-600 dark:text-red-400">
                   {rejectedRequests.length}
                 </p>
               </div>
-              <div className="h-10 w-10 rounded-full bg-destructive/10 flex items-center justify-center">
-                <XCircle className="h-5 w-5 text-destructive" />
+              <div className="h-10 w-10 rounded-full bg-red-500/10 flex items-center justify-center">
+                <XCircle className="h-5 w-5 text-red-600 dark:text-red-400" />
               </div>
             </div>
           </CardContent>
@@ -471,6 +600,9 @@ export default function Approvals() {
       </div>
 
       <GeoCascadeFilter
+        provinces={provinces}
+        districts={districts}
+        facilities={facilities}
         provinceId={geoProvinceId}
         districtId={geoDistrictId}
         facilityId={geoFacilityId}
@@ -478,34 +610,20 @@ export default function Approvals() {
         onDistrictChange={setGeoDistrictId}
         onFacilityChange={setGeoFacilityId}
         showFacility
-        provinces={provinces}
-        districts={districts}
-        facilities={facilities}
-        testIdPrefix="approvals"
       />
 
-      <Tabs defaultValue="pending">
+      <Tabs defaultValue="pending" className="w-full">
         <TabsList>
-          <TabsTrigger value="pending" data-testid="tab-pending">
+          <TabsTrigger value="pending">
             Pending ({pendingRequests.length})
           </TabsTrigger>
-          <TabsTrigger value="entity-history" data-testid="tab-entity-history">
+          <TabsTrigger value="entity-proposals">
             Entity Version Proposals
           </TabsTrigger>
-          <TabsTrigger value="approved" data-testid="tab-approved">
-            Approved
-          </TabsTrigger>
-          <TabsTrigger value="returned" data-testid="tab-returned">
-            Returned ({returnedRequests.length})
-          </TabsTrigger>
-          <TabsTrigger value="rejected" data-testid="tab-rejected">
-            Rejected
-          </TabsTrigger>
+          <TabsTrigger value="approved">Approved</TabsTrigger>
+          <TabsTrigger value="returned">Returned ({returnedRequests.length})</TabsTrigger>
+          <TabsTrigger value="rejected">Rejected</TabsTrigger>
         </TabsList>
-
-        <TabsContent value="entity-history" className="mt-4">
-          <ChangeApprovalScreen />
-        </TabsContent>
 
         <TabsContent value="pending" className="mt-4">
           <Card>
@@ -521,6 +639,10 @@ export default function Approvals() {
           </Card>
         </TabsContent>
 
+        <TabsContent value="entity-proposals" className="mt-4">
+          <ChangeApprovalScreen />
+        </TabsContent>
+
         <TabsContent value="approved" className="mt-4">
           <Card>
             <CardContent className="p-6">
@@ -529,7 +651,7 @@ export default function Approvals() {
                 columns={columns}
                 searchable
                 searchKeys={["entityType", "currentLevel"]}
-                emptyMessage="No approved requests yet."
+                emptyMessage="No approved requests."
               />
             </CardContent>
           </Card>
@@ -609,6 +731,68 @@ export default function Approvals() {
               />
             </div>
 
+            {actionType === "approve" && selectedRequest?.entityType === "microplan" && (
+              <div className={`rounded-md border p-3.5 text-sm space-y-2.5 ${reviewChecklistComplete ? "border-blue-200 bg-blue-50 text-blue-900" : "border-amber-300 bg-amber-50 text-amber-950"}`}>
+                <div>
+                  <p className="font-semibold">
+                    {(() => {
+                      const { stageNumber, totalStages, nextLevel } = getStageInfo(selectedRequest);
+                      if (nextLevel) {
+                        return `Approving Stage ${stageNumber} (${selectedRequest.currentLevel}) will advance this plan to Stage ${stageNumber + 1} (${nextLevel.toUpperCase()}) review.`;
+                      }
+                      return `Approving Stage ${stageNumber} (${selectedRequest.currentLevel}) will mark this microplan as FULLY APPROVED.`;
+                    })()}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    The plan advances through configured levels until every assigned official has approved it.
+                  </p>
+                </div>
+                
+                <div className="pt-2 border-t border-current/20 flex items-center justify-between">
+                  <span className="text-xs font-semibold">
+                    11-Step Review Checklist: {selectedReviewLoading ? "Loading…" : `${reviewedStepCount} of 11 steps completed`}
+                  </span>
+                  {reviewChecklistComplete ? (
+                    <Badge variant="outline" className="bg-emerald-100 text-emerald-800 border-emerald-300">
+                      Ready to Approve ✓
+                    </Badge>
+                  ) : (
+                    <Badge variant="outline" className="bg-amber-100 text-amber-900 border-amber-300">
+                      {11 - reviewedStepCount} remaining
+                    </Badge>
+                  )}
+                </div>
+
+                {!reviewChecklistComplete && !selectedReviewLoading && (
+                  <div className="flex flex-wrap gap-2 pt-1">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="default"
+                      className="bg-blue-600 hover:bg-blue-700 text-white text-xs h-8"
+                      disabled={reviewAllStepsMutation.isPending}
+                      onClick={() => selectedRequest.entityId && reviewAllStepsMutation.mutate(selectedRequest.entityId)}
+                    >
+                      {reviewAllStepsMutation.isPending ? "Recording reviews..." : "Mark All 11 Steps Reviewed"}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="text-xs h-8"
+                      onClick={() => {
+                        const plan = microplans.find((item) => item.id === selectedRequest.entityId);
+                        const routeType = plan?.planType === "sia_campaign" ? "campaigns" : "routine";
+                        setLocation(`/microplans/${routeType}/${selectedRequest.entityId}`);
+                      }}
+                    >
+                      Open Wizard Review
+                    </Button>
+                  </div>
+                )}
+              </div>
+            )}
+
             <div className="flex justify-end gap-2">
               <Button
                 variant="outline"
@@ -626,6 +810,8 @@ export default function Approvals() {
                 onClick={handleAction}
                 disabled={
                   actionMutation.isPending ||
+                  selectedReviewLoading ||
+                  (actionType === "approve" && !reviewChecklistComplete) ||
                   (actionType !== "approve" && !comment.trim())
                 }
                 data-testid="button-confirm-action"
@@ -741,41 +927,95 @@ export default function Approvals() {
           </div>
         </DialogContent>
       </Dialog>
+
       <Card>
-        <CardHeader>
-          <CardTitle className="text-lg">Approval Hierarchy</CardTitle>
+        <CardHeader className="flex flex-row items-center justify-between pb-2">
+          <div>
+            <CardTitle className="text-lg">Approval Hierarchy Workflow</CardTitle>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Live multi-level progress across administrative review stages
+            </p>
+          </div>
         </CardHeader>
         <CardContent>
-          <div className="flex flex-wrap items-center gap-4 justify-center">
+          <div className="flex flex-wrap items-center gap-6 justify-center py-4">
             {(() => {
               const maxApprovalLevel = (tenant?.settings as any)?.maxApprovalLevel || "national";
               const items = [
-                { level: "Facility", role: "Facility Clerk" },
-                { level: "District", role: "District Manager" },
-                { level: "Provincial", role: "Provincial Coordinator" },
-                { level: "National", role: "National Admin" },
+                { level: "Facility", role: "Facility Clerk", subtext: "Submission" },
+                { level: "District", role: "District Manager", subtext: "Stage 1 Review" },
+                { level: "Provincial", role: "Provincial Coordinator", subtext: "Stage 2 Review" },
+                { level: "National", role: "National Admin", subtext: "Final Approval" },
               ];
               const filtered = items.filter((item, index) => {
                 if (maxApprovalLevel === "district") return index <= 1;
                 if (maxApprovalLevel === "provincial") return index <= 2;
                 return true; // national
               });
-              return filtered.map((item, index) => (
-                <div key={item.level} className="flex items-center gap-4">
-                  <div className="text-center">
-                    <div className="h-12 w-12 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-2">
-                      <span className="text-lg font-bold text-primary">
-                        {index + 1}
-                      </span>
+
+              // Resolve active microplan
+              const activeMicroplanId = selectedHierarchyMicroplanId
+                ?? pendingRequests.find((r) => r.entityType === "microplan")?.entityId
+                ?? (requests ?? []).find((r) => r.entityType === "microplan")?.entityId
+                ?? null;
+
+              const workflowRequests = activeMicroplanId == null
+                ? []
+                : (requests ?? []).filter((request) => request.entityType === "microplan" && request.entityId === activeMicroplanId);
+
+              const statusFor = (level: string) => {
+                if (level === "Facility") return activeMicroplanId == null ? "waiting" : "complete";
+                const stage = workflowRequests.find((request) => request.currentLevel.toLowerCase() === level.toLowerCase());
+                if (!stage) {
+                  // If prior level is complete, this might be pending or waiting
+                  return "waiting";
+                }
+                return stage.status ?? "waiting";
+              };
+
+              return filtered.map((item, index) => {
+                const stageStatus = statusFor(item.level);
+                const isPending = stageStatus === "pending";
+                const isComplete = stageStatus === "approved" || stageStatus === "complete";
+                return (
+                  <div key={item.level} className="flex items-center gap-4">
+                    <div className="text-center min-w-[120px]">
+                      <div
+                        className={`h-12 w-12 rounded-full flex items-center justify-center mx-auto mb-2 transition-all shadow-sm ${
+                          isComplete
+                            ? "bg-emerald-600 text-white shadow-emerald-200"
+                            : isPending
+                            ? "bg-blue-600 text-white ring-4 ring-blue-100 shadow-blue-200"
+                            : "bg-muted text-muted-foreground border"
+                        }`}
+                      >
+                        {isComplete ? (
+                          <Check className="h-6 w-6 stroke-[3]" />
+                        ) : (
+                          <span className="text-base font-bold">{index + 1}</span>
+                        )}
+                      </div>
+                      <p className="text-sm font-semibold text-foreground">{item.level}</p>
+                      <p className="text-xs text-muted-foreground">{item.role}</p>
+                      <Badge
+                        variant={isComplete ? "default" : isPending ? "secondary" : "outline"}
+                        className={`mt-1.5 text-[10px] font-medium capitalize ${
+                          isComplete
+                            ? "bg-emerald-100 text-emerald-800 border-emerald-300 hover:bg-emerald-100"
+                            : isPending
+                            ? "bg-blue-100 text-blue-800 border-blue-300 hover:bg-blue-100"
+                            : "text-muted-foreground"
+                        }`}
+                      >
+                        {isComplete ? "Completed ✓" : isPending ? "Current stage ⏳" : "Waiting"}
+                      </Badge>
                     </div>
-                    <p className="text-sm font-medium">{item.level}</p>
-                    <p className="text-xs text-muted-foreground">{item.role}</p>
+                    {index < filtered.length - 1 && (
+                      <div className={`h-0.5 w-10 hidden sm:block ${isComplete ? "bg-emerald-500" : "bg-muted"}`} />
+                    )}
                   </div>
-                  {index < filtered.length - 1 && (
-                    <div className="h-0.5 w-8 bg-muted hidden sm:block" />
-                  )}
-                </div>
-              ));
+                );
+              });
             })()}
           </div>
         </CardContent>
