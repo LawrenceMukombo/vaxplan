@@ -15,12 +15,8 @@ async function run() {
       process.exit(1);
     }
 
-    const testEmail = "lawrencemukombo2@gmail.com";
-    await db.update(clients)
-      .set({ email: testEmail, preferredLanguage: 'en', preferredChannel: 'email' })
-      .where(eq(clients.id, client.id));
-
-    console.log(`Updated client ${client.name} with test email: ${testEmail}`);
+    const testEmail = process.env.TEST_EMAIL || client.email || "test@vaxplan.org";
+    console.log(`Using client ${client.name} for test notification dispatch to: ${testEmail}`);
 
     console.log("Dispatching test notification to UCE queue...");
     const result = await dispatchNotification({
@@ -30,6 +26,7 @@ async function run() {
       priority: 'high',
       templateName: 'test_notification',
       templateData: {
+        email: testEmail,
         child_name: client.name,
         subject: "VaxPlan Notification Engine Setup Successful!",
         messageText: "Hello! This is a test message dispatched from the Unified Communication Engine powered by Redis and Nodemailer."

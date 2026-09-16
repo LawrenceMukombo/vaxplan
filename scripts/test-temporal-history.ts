@@ -1,7 +1,7 @@
 import { EntityHistoryService } from "../server/services/entityHistoryService";
 import { AsOfDateService } from "../server/services/asOfDateService";
 import { db } from "../server/db";
-import { tenants } from "@shared/schema";
+import { tenants } from "../shared/schema";
 import { eq } from "drizzle-orm";
 
 async function runTemporalHistoryTestSuite() {
@@ -104,7 +104,7 @@ async function runTemporalHistoryTestSuite() {
     console.log("\n🧪 Test Case 4: Generating side-by-side version comparison diff (v1 vs v2)...");
     const diff = await EntityHistoryService.compareVersions(tenantId, activeV1.id, activeV2.id);
     console.log("   ✅ Version Diff Result:");
-    console.log("      Summary:", diff.summary);
+    console.log(`      Summary: ${diff.differences.length} difference(s) detected between versions`);
     console.log("      Differences:", JSON.stringify(diff.differences, null, 2));
 
     // 5. Point-in-Time Resolution (As-Of Date Query)

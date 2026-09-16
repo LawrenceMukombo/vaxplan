@@ -29,8 +29,7 @@ if [ -f ".env" ]; then
   echo "⚙️  Loading environment configuration..."
   # Automatically heal and migrate any leftover Neon URL in the .env file
   if grep -q "neon.tech" .env; then
-    echo "⚠️  Detected deprecated Neon database URL in .env. Migrating to local Hostinger PostgreSQL..."
-    sed -i 's|DATABASE_URL=.*|DATABASE_URL=postgresql://postgres:postgres@localhost:5432/vaxplan|' .env
+    echo "⚠️  Notice: Neon database URL detected in .env. Manual review recommended."
   fi
   DATABASE_URL=$(grep DATABASE_URL .env | cut -d '=' -f2-)
 else
@@ -40,7 +39,7 @@ fi
 
 # ── 1.5. Database Backup ────────────────────────────────────────────────────────
 echo ""
-echo "🗄️  1.5. Backing up existing database before restore..."
+echo "🗄️  1.5. Backing up existing database before deployment..."
 mkdir -p backups
 BACKUP_FILE="backups/backup_$(date +%Y%m%d_%H%M%S).sql"
 pg_dump "$DATABASE_URL" -f "$BACKUP_FILE"
@@ -52,22 +51,15 @@ echo "📦 2. Installing production dependencies..."
 npm install --legacy-peer-deps --no-audit --no-fund
 echo "      ✓ Dependencies installed."
 
-# ── 3. Database Restore ─────────────────────────────────────────────────────────
+# ── 3. Database Updates (Safe & Additive) ───────────────────────────────────────
 echo ""
-echo "🗄️  3. Unzipping and restoring development database..."
-if [ -f "local_dump.sql.zip" ]; then
-  echo "🔓 Unzipping database archive..."
-  unzip -o local_dump.sql.zip
-  
-  echo "🧹 Cleaning existing schema to prevent duplicate constraints..."
-  psql "$DATABASE_URL" -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public; GRANT ALL ON SCHEMA public TO public; CREATE EXTENSION IF NOT EXISTS postgis CASCADE;"
-  
-  echo "📥 Importing SQL dump into production database..."
-  psql "$DATABASE_URL" -f local_dump.sql
-  echo "✅ Database restore completed successfully."
+echo "🗄️  3. Running safe additive migrations..."
+if [ -f "node_modules/.bin/tsx" ]; then
+  node_modules/.bin/tsx scripts/migrate.ts
 else
-  echo "⚠️  local_dump.sql.zip not found. Skipping database restore."
+  npx tsx scripts/migrate.ts
 fi
+echo "✅ Database schema verified and up to date."
 
 # ── 4. Upload Docs Site ──────────────────────────────────────────────────────────
 echo ""

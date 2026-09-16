@@ -12,6 +12,8 @@ application. If a screen looks different in your environment, your
 tenant administrator may have customised the labels (for example
 "Province" → "Region") — the workflows below are unchanged.
 
+**Current coverage:** Version 1.9.4, reviewed 14 September 2026. For the complete route and module inventory, see [Platform reference](./PLATFORM_REFERENCE.md). For field synchronization behavior, see [Offline operation and synchronization](./OFFLINE_AND_SYNC.md).
+
 ---
 
 ## Table of Contents
@@ -390,10 +392,19 @@ to know:
 - If a sync entry is rejected (for example, a session was already
   closed on the server), the system shows the rejection inline and
   asks you to resolve it.
+- A failed item is retried automatically up to the client limit. The
+  sync badge can force a retry after that limit. If the server and
+  device versions cannot be reconciled safely, open **Sync Conflicts**
+  and review both versions; do not assume the local edit silently won.
+- Do not clear site data, uninstall the app, or reset the device while
+  pending items exist. These actions can remove the local outbox.
 
 > **Best practice.** Sync at the end of each session day, when you're
 > back in cellular range. Don't let the outbox grow longer than a
 > week's worth of entries.
+
+See [Offline operation and synchronization](./OFFLINE_AND_SYNC.md) for
+device preparation, recovery, and support diagnostics.
 
 ### 5.8 Manage your communities
 
@@ -1076,5 +1087,18 @@ The Comparative Scorecard Matrix allows multi-level comparison across Provinces,
 - **Enterprise Features**: Pagination (10, 25, 50, 100 per page), sortable wrapped header columns, column visibility picker popover, risk level dropdown filter, search, and CSV export.
 
 ---
+
+## 18. New operational workspaces in version 1.9.4
+
+The following workspaces were added or materially expanded after the original long-form guide was written:
+
+- **Campaign operations:** Campaign Summary Sheets, Readiness Assessment, and Real-Time Campaign Dashboard support time-bound SIA oversight and target monitoring.
+- **Planning assurance:** Plan Health shows readiness and policy gaps. Planning Actions assigns corrective work, owners, due dates, and status. Planning Evidence attaches the supporting record and keeps history. Field Readiness presents the operational readiness view.
+- **Surveillance and risk:** Surveillance manages VPD case and laboratory data. Risk Assessments use configurable methodology versions, district inputs, mapped results, vulnerability responses, and linked actions.
+- **Cold chain and catalogue:** Cold Chain provides the tenant-wide equipment inventory. Catalogue Administration manages vaccines, scheduled doses, commodities, and wastage thresholds; Reconcile Vaccines maps imported or offline codes that do not match the tenant catalogue.
+- **Field and offline:** CHW Field is the community-worker workspace. Field Teams manages operational teams. Desktop Hub presents packaged-device/offline information. Sync Conflicts supports reconciliation when local and server states diverge.
+- **Governance and evidence:** Annual National Plan, Temporal History, Notifications, Standards Alignment, Data Sources, and the API Reference expose planning, provenance, audit, and interoperability context.
+
+Your sidebar may omit a workspace because the tenant disabled its module, your role lacks permission, or your geographic assignment does not include the underlying records. Contact an administrator rather than using a direct URL to bypass the navigation.
 
 *If you spot an error in this guide or want a topic added, ask your national admin to file an issue with the VaxPlan team. The guide is versioned alongside the application code.*

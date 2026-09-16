@@ -1599,6 +1599,24 @@ export default function Population() {
   const totalPopulation = cohortTotals.total;
 
   const recordCount = filteredPopulationData.length;
+  const facilitySourceCoverage = useMemo(() => {
+    if (selectedFacility === "all" || activeTab === "comparison") return null;
+    const facilityId = Number(selectedFacility);
+    const assigned = (villages ?? []).filter(
+      (v) => Number(v.assignedFacilityId) === facilityId,
+    );
+    const represented = new Set(
+      filteredPopulationData
+        .map((row) => Number(row.villageId))
+        .filter((id) => Number.isFinite(id) && id > 0),
+    );
+    const missing = assigned.filter((v) => !represented.has(Number(v.id)));
+    return {
+      assigned: assigned.length,
+      represented: assigned.length - missing.length,
+      missingNames: missing.map((v) => v.name),
+    };
+  }, [selectedFacility, activeTab, villages, filteredPopulationData]);
 
   if (isLoading && !populationData) {
     return (
@@ -2032,6 +2050,22 @@ export default function Population() {
                           </div>
                         </div>
                       </div>
+                      {facilitySourceCoverage && (
+                        <div
+                          className={`mt-3 rounded-lg border px-3 py-2 text-xs ${
+                            facilitySourceCoverage.missingNames.length
+                              ? "border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-800 dark:bg-amber-950/25 dark:text-amber-200"
+                              : "border-emerald-300 bg-emerald-50 text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950/25 dark:text-emerald-200"
+                          }`}
+                          data-testid="population-facility-source-coverage"
+                        >
+                          <strong>{facilitySourceCoverage.represented} of {facilitySourceCoverage.assigned}</strong>{" "}
+                          assigned communities have {tab.label} population data.
+                          {facilitySourceCoverage.missingNames.length > 0 && (
+                            <> Missing: {facilitySourceCoverage.missingNames.join(", ")}.</>
+                          )}
+                        </div>
+                      )}
                     </CardHeader>
                     <CardContent>
                       {/* Live WHO Life-Course Target Cohort Breakdown */}

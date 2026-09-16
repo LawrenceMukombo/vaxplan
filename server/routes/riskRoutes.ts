@@ -24,7 +24,7 @@ import {
 } from "@shared/riskSchema";
 import { districts, provinces, tenants, adminBoundaries } from "@shared/schema";
 import { eq, and, or, ne, desc, sql, inArray } from "drizzle-orm";
-import { isAuthenticated } from "../replitAuth";
+import { isAuthenticated } from "../auth";
 import { requireTenant } from "../auth/tenantResolver";
 import { requireDbUser } from "../auth/loadDbUser";
 import {

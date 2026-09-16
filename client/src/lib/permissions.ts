@@ -177,10 +177,15 @@ export function canCreateFacility(user: User | null | undefined): boolean {
   );
 }
 
-// Communities (villages) can be added by any staff member with edit rights —
-// facility and district staff included. The server still scopes WHERE they can
-// add (own facility / district) and rejects cross-tenant writes.
+// Communities (villages) master records can be registered by district, provincial, and national authorities.
+// Facility staff cannot register brand new communities to prevent data corruption and population inflation,
+// but can link/unlink existing district communities to/from their health facility catchment.
 export function canCreateCommunity(user: User | null | undefined): boolean {
+  if (!user) return false;
+  return roleHierarchy[user.role] >= roleHierarchy.district_manager;
+}
+
+export function canManageCatchmentCommunities(user: User | null | undefined): boolean {
   if (!user) return false;
   return roleHierarchy[user.role] >= roleHierarchy.facility_clerk;
 }

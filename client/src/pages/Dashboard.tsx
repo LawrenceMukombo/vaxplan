@@ -6,7 +6,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAuth } from "@/hooks/useAuth";
-import { canViewSiteAnalytics, canApproveSessionPlan } from "@/lib/permissions";
+import { canViewSiteAnalytics, canApproveSessionPlan, canCreateSessionPlan } from "@/lib/permissions";
+import { hasAnyPermission } from "@/lib/accessControl";
 import { SiteActivityPanel } from "@/components/SiteActivityPanel";
 import {
   Building2,
@@ -1152,6 +1153,47 @@ export default function Dashboard() {
   const [deepDiveTab, setDeepDiveTab] = useState("supervision");
 
   const facilityLocked = isFacilityScopedRole(user?.role) && !!user?.facilityId;
+  const dashboardView = useMemo(() => {
+    const role = String(user?.role ?? "");
+    const facilityRole = isFacilityScopedRole(role);
+    const gisRole = role === "gis_specialist";
+    const reviewRole = canApproveSessionPlan(user);
+    const nationalRole = ["national_admin", "national_manager", "national_partner"].includes(role) || (user as any)?.isPlatformAdmin === true;
+    const regionalRole = ["district_manager", "district_partner", "provincial_coordinator", "provincial_partner"].includes(role);
+    const canViewSessions = hasAnyPermission(user, ["view_session_plans", "sessions.view", "manage_session_plans"]);
+    const canViewStock = hasAnyPermission(user, ["view_stock", "manage_stock"]);
+    const canViewReports = hasAnyPermission(user, ["view_reports", "manage_reports"]);
+    const canViewClients = hasAnyPermission(user, ["view_clients", "client_logbook.view"]);
+    const canViewBudget = hasAnyPermission(user, ["view_budget", "manage_budget", "approve_budget"]);
+
+    return {
+      roleLabel: role.split("_").map((word) => word.charAt(0).toUpperCase() + word.slice(1)).join(" ") || "Programme user",
+      scopeLabel: facilityRole ? "Your facility" : regionalRole ? "Your assigned administrative area" : nationalRole ? "National programme" : gisRole ? "Geospatial programme scope" : "Your assigned scope",
+      showEquity: canViewClients && !gisRole,
+      showOperations: canViewSessions || canViewStock,
+      showCoverage: canViewClients || canViewReports,
+      showMap: gisRole || regionalRole || nationalRole || facilityRole,
+      showPlanHealth: !gisRole && (canViewSessions || canViewBudget),
+      showDenominators: gisRole || regionalRole || nationalRole || facilityRole,
+      showStock: canViewStock,
+      showApprovals: reviewRole,
+      showReports: canViewReports,
+      showSupervision: reviewRole || nationalRole,
+      showVgie: gisRole || regionalRole || nationalRole,
+      canPlan: canCreateSessionPlan(user),
+      canReviewDefaulters: canViewClients,
+      canViewBudget,
+      nationalRole,
+      regionalRole,
+      facilityRole,
+      gisRole,
+    };
+  }, [user]);
+
+  useEffect(() => {
+    if (!dashboardView.showSupervision && dashboardView.showVgie) setDeepDiveTab("vgie");
+    if (dashboardView.showSupervision && !dashboardView.showVgie) setDeepDiveTab("supervision");
+  }, [dashboardView.showSupervision, dashboardView.showVgie]);
 
   const [coverageFilters, setCoverageFilters] = useState(() => {
     const params = new URLSearchParams(
@@ -1242,6 +1284,7 @@ export default function Dashboard() {
 
   const { data: sessions, isLoading: loadingSessions } = useQuery<SessionPlan[]>({
     queryKey: ["/api/sessions"],
+    enabled: dashboardView.showOperations || dashboardView.showPlanHealth,
     staleTime: 5 * 60 * 1000,
   });
 
@@ -1255,6 +1298,7 @@ export default function Dashboard() {
 
   const { data: budgetItems, isLoading: loadingBudget } = useQuery<BudgetItem[]>({
     queryKey: ["/api/budget-items"],
+    enabled: dashboardView.canViewBudget,
     staleTime: 5 * 60 * 1000,
   });
 
@@ -1300,6 +1344,7 @@ export default function Dashboard() {
 
   const { data: populationDataList, isLoading: loadingPopulation } = useQuery<PopulationData[]>({
     queryKey: [populationUrl],
+    enabled: dashboardView.showDenominators || dashboardView.showPlanHealth,
   });
 
   const { data: allDistricts } = useQuery<any[]>({
@@ -1315,11 +1360,13 @@ export default function Dashboard() {
   const { data: stockTransactions } = useQuery<StockTransaction[]>({
     queryKey: [stockLedgerUrl],
     staleTime: 5 * 60 * 1000,
+    enabled: dashboardView.showStock,
   });
 
   const { data: vaccineConfigs } = useQuery<CatalogueVaccine[]>({
     queryKey: ["/api/catalogue/vaccines"],
     staleTime: 30 * 60 * 1000, // vaccine config is near-static
+    enabled: dashboardView.showStock,
   });
 
   const stockAlertSummaries = useMemo(() => {
@@ -1392,6 +1439,7 @@ export default function Dashboard() {
 
   const { data: coverage, isLoading: loadingCoverage } = useQuery<CoverageData>({
     queryKey: [`/api/coverage?${coverageQueryString}`],
+    enabled: dashboardView.showCoverage,
   });
 
   const quarterlyReviewCoverageUrl = scopedFacilityId
@@ -1761,7 +1809,7 @@ export default function Dashboard() {
 
   // 5. Recent Context-aware Activity Feed
   const recentActivities = useMemo(() => {
-    const list = [];
+    const list: Array<{ action: string; facility: string; time: string; status: string }> = [];
     
     if (sessions && sessions.length > 0) {
       const sorted = [...sessions].sort((a, b) => b.id - a.id).slice(0, 2);
@@ -1787,24 +1835,6 @@ export default function Dashboard() {
       });
     }
 
-    // Standard Fallbacks
-    if (list.length < 4) {
-      list.push(
-        {
-          action: "HTR assessment completed",
-          facility: "Hilltop Aid Post",
-          time: "2 hours ago",
-          status: "pending",
-        },
-        {
-          action: "Population data updated",
-          facility: "Mountview Health Centre",
-          time: "5 hours ago",
-          status: "approved",
-        }
-      );
-    }
-    
     return list.slice(0, 4);
   }, [sessions, budgetItems]);
 
@@ -1821,6 +1851,35 @@ export default function Dashboard() {
     return "bg-rose-500";
   };
 
+  const dashboardNavigation = [
+    dashboardView.showEquity && { label: "Equity signals", href: "#equity", icon: AlertTriangle, detail: "Zero-dose and dropout" },
+    dashboardView.showOperations && { label: "Operations", href: "#operations", icon: Calendar, detail: "Sessions and delivery" },
+    dashboardView.showCoverage && { label: "Coverage", href: "#coverage", icon: Syringe, detail: "Antigen progress" },
+    dashboardView.showMap && { label: "Map", href: "#map", icon: Building2, detail: "Facilities and catchments" },
+    dashboardView.showEquity && { label: "Missed communities", href: "/missed-communities", icon: Users, detail: "No recent contact" },
+    dashboardView.showStock && { label: "Stock ledger", href: "/stock", icon: Package, detail: "Supply risks" },
+    dashboardView.showApprovals && { label: "Approvals", href: "/approvals", icon: CheckCircle2, detail: "Plans awaiting review" },
+    dashboardView.showReports && { label: "Reports", href: "/reports", icon: FileText, detail: "Exports and reviews" },
+  ].filter(Boolean) as Array<{ label: string; href: string; icon: typeof AlertTriangle; detail: string }>;
+
+  const rolePriorities = dashboardView.gisRole
+    ? [
+        { label: "Mapped facilities", value: stats?.totalFacilities || 0, detail: "Facilities in your GIS scope", href: "/map", tone: "text-blue-600" },
+        { label: "Catchment assignment", value: `${villagesPercentage}%`, detail: `${assignedVillagesCount.toLocaleString()} communities linked`, href: "/map", tone: villagesPercentage < 80 ? "text-rose-600" : "text-emerald-600" },
+        { label: "Denominator confidence", value: `${denominatorConfidenceScore}%`, detail: "Population evidence quality", href: "/population", tone: denominatorConfidenceScore < 70 ? "text-amber-600" : "text-emerald-600" },
+      ]
+    : dashboardView.facilityRole
+      ? [
+          { label: "Sessions requiring action", value: sessionsPendingImplementation.total, detail: `${sessionsPendingImplementation.overdue} overdue`, href: "/all-sessions", tone: sessionsPendingImplementation.overdue ? "text-rose-600" : "text-blue-600" },
+          { label: "Stock incidents", value: scopedStockAlerts.totals.lowStock + scopedStockAlerts.totals.outOfStock, detail: "Low or out-of-stock antigens", href: "/stock", tone: scopedStockAlerts.totals.outOfStock ? "text-rose-600" : "text-amber-600" },
+          { label: "Quarter coverage", value: `${coverage?.totals.coveragePct || 0}%`, detail: `Q${coverageFilters.quarter} service delivery`, href: "#coverage", tone: (coverage?.totals.coveragePct || 0) < 80 ? "text-amber-600" : "text-emerald-600" },
+        ]
+      : [
+          { label: dashboardView.showApprovals ? "Plans awaiting review" : "Approved facility plans", value: dashboardView.showApprovals ? pendingApprovals.length : `${facilityPlanCoveragePct}%`, detail: dashboardView.showApprovals ? "Your approval work queue" : "Facilities with approved plans", href: dashboardView.showApprovals ? "/approvals" : "/plan-health", tone: pendingApprovals.length ? "text-amber-600" : "text-emerald-600" },
+          { label: "Facilities with stock risk", value: scopedStockAlerts.totals.facilitiesAtRisk, detail: "Require supply intervention", href: "/stock", tone: scopedStockAlerts.totals.facilitiesAtRisk ? "text-rose-600" : "text-emerald-600" },
+          { label: "Plan coverage", value: `${facilityPlanCoveragePct}%`, detail: `${stats?.facilitiesWithApprovedPlans || 0} facilities approved`, href: "/plan-health", tone: facilityPlanCoveragePct < 80 ? "text-amber-600" : "text-emerald-600" },
+        ];
+
   return (
     <div className="p-6 space-y-6">
       <div className="rounded-xl border bg-card p-5 shadow-sm">
@@ -1828,7 +1887,7 @@ export default function Dashboard() {
           <div className="space-y-1">
             <div className="flex items-center gap-2 text-sm font-semibold text-primary">
               <Sparkles className="h-4 w-4" />
-              Q{coverageFilters.quarter} {coverageFilters.year} dashboard
+              {dashboardView.roleLabel} · Q{coverageFilters.quarter} {coverageFilters.year}
             </div>
             <h1 className="text-2xl font-bold tracking-tight text-foreground">
               {greeting}, {displayName}
@@ -1836,16 +1895,22 @@ export default function Dashboard() {
             <p className="text-sm text-muted-foreground">
               {user?.facilityId && facilities?.find((f) => f.id === user.facilityId)?.name
                 ? facilities.find((f) => f.id === user.facilityId)?.name
-                : "All facilities"} - Focus on missed children, plan readiness, and the next action to unblock service delivery.
+                : dashboardView.scopeLabel} — showing the decisions and work queues relevant to your role.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <Button asChild size="sm">
-              <Link href="/microplans/routine">Plan sessions</Link>
-            </Button>
-            <Button asChild size="sm" variant="outline">
-              <Link href="/clients/defaulters">Review defaulters</Link>
-            </Button>
+            {dashboardView.canPlan && !dashboardView.nationalRole && !dashboardView.gisRole && (
+              <Button asChild size="sm"><Link href="/microplans/routine">Plan sessions</Link></Button>
+            )}
+            {dashboardView.showApprovals && (
+              <Button asChild size="sm"><Link href="/approvals">Review approvals</Link></Button>
+            )}
+            {dashboardView.showReports && dashboardView.nationalRole && (
+              <Button asChild size="sm" variant="outline"><Link href="/reports">Open reports</Link></Button>
+            )}
+            {dashboardView.canReviewDefaulters && !dashboardView.nationalRole && !dashboardView.gisRole && (
+              <Button asChild size="sm" variant="outline"><Link href="/clients/defaulters">Review defaulters</Link></Button>
+            )}
             <Badge variant="outline" className="gap-1 px-3 py-1.5 font-mono">
               <Clock className="h-3.5 w-3.5 text-primary" />
               {formattedTime}
@@ -1854,22 +1919,37 @@ export default function Dashboard() {
         </div>
       </div>
 
+      <section aria-labelledby="role-priorities-title" className="space-y-3" data-testid="section-role-priorities">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h2 id="role-priorities-title" className="text-lg font-bold text-foreground">Your priorities</h2>
+            <p className="text-sm text-muted-foreground">The highest-value signals for {dashboardView.roleLabel.toLowerCase()} responsibilities.</p>
+          </div>
+          <Badge variant="secondary">{dashboardView.scopeLabel}</Badge>
+        </div>
+        <div className="grid gap-3 md:grid-cols-3">
+          {rolePriorities.map((priority) => (
+            <Link key={priority.label} href={priority.href} className="group rounded-xl border bg-card p-4 shadow-sm transition-all hover:-translate-y-0.5 hover:border-primary hover:shadow-md">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-wide text-muted-foreground">{priority.label}</p>
+                  <p className={`mt-2 text-3xl font-black ${priority.tone}`}>{priority.value}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">{priority.detail}</p>
+                </div>
+                <ArrowRight className="h-4 w-4 text-muted-foreground transition-transform group-hover:translate-x-1 group-hover:text-primary" />
+              </div>
+            </Link>
+          ))}
+        </div>
+      </section>
+
       <Card data-testid="card-dashboard-navigation">
         <CardHeader className="pb-3">
           <CardTitle className="text-lg">Dashboard navigation</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-            {[
-              { label: "Equity signals", href: "#equity", icon: AlertTriangle, detail: "Zero-dose and dropout" },
-              { label: "Operations", href: "#operations", icon: Calendar, detail: "Sessions and approvals" },
-              { label: "Coverage", href: "#coverage", icon: Syringe, detail: "Antigen progress" },
-              { label: "Map", href: "#map", icon: Building2, detail: "Facilities and catchments" },
-              { label: "Missed communities", href: "/missed-communities", icon: Users, detail: "No recent contact" },
-              { label: "Stock ledger", href: "/stock", icon: Package, detail: "Supply risks" },
-              { label: "Approvals", href: "/approvals", icon: CheckCircle2, detail: "Plans awaiting review" },
-              { label: "Reports", href: "/reports", icon: FileText, detail: "Exports and reviews" },
-            ].map((item) => {
+            {dashboardNavigation.map((item) => {
               const Icon = item.icon;
               const content = (
                 <div className="flex items-center gap-3 rounded-lg border bg-muted/20 px-3 py-3 transition-colors hover:border-primary hover:bg-muted/35">
@@ -1896,29 +1976,29 @@ export default function Dashboard() {
         </CardContent>
       </Card>
 
-      <section id="equity" className="space-y-4" data-testid="section-equity-first-dashboard">
+      {(dashboardView.showEquity || dashboardView.showPlanHealth || dashboardView.showDenominators) && <section id="equity" className="space-y-4" data-testid="section-equity-first-dashboard">
         <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
           <div>
-            <h2 className="text-xl font-bold tracking-tight text-foreground">Equity command center</h2>
+            <h2 className="text-xl font-bold tracking-tight text-foreground">{dashboardView.showEquity ? "Equity command center" : "Planning intelligence"}</h2>
             <p className="text-sm text-muted-foreground">
-              Start here: zero-dose, under-immunized, dropout, denominator confidence, and plan readiness are the primary dashboard signals.
+              {dashboardView.showEquity ? "Zero-dose, under-immunized, dropout, denominator confidence, and plan readiness for your scope." : "Population denominators and planning quality signals for your assigned scope."}
             </p>
           </div>
-          <Button variant="outline" size="sm" asChild>
+          {dashboardView.showEquity && <Button variant="outline" size="sm" asChild>
             <Link href="/missed-communities">Open missed communities</Link>
-          </Button>
+          </Button>}
         </div>
-        <ImmunizationIndicatorCards />
-        <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1.15fr)_minmax(340px,0.85fr)]">
-          <PlanHealthCard metrics={planHealthMetrics} />
-          <DenominatorConfidenceCard
+        {dashboardView.showEquity && <ImmunizationIndicatorCards />}
+        <div className={`grid items-start gap-6 ${dashboardView.showPlanHealth && dashboardView.showDenominators ? "xl:grid-cols-[minmax(0,1.15fr)_minmax(340px,0.85fr)]" : "grid-cols-1"}`}>
+          {dashboardView.showPlanHealth && <PlanHealthCard metrics={planHealthMetrics} />}
+          {dashboardView.showDenominators && <DenominatorConfidenceCard
             records={populationDataList}
             fallbackPopulation={annualPopulationDisplay.value}
-          />
+          />}
         </div>
-      </section>
+      </section>}
 
-      <section id="operations" className="space-y-4">
+      {dashboardView.showOperations && <section id="operations" className="space-y-4">
         <div className="flex items-center justify-between gap-3">
           <div>
             <h2 className="text-xl font-bold tracking-tight text-foreground">Operations snapshot</h2>
@@ -1959,15 +2039,15 @@ export default function Dashboard() {
                 href="/microplans/routine"
                 testId="link-pending-implementation"
               />
-              <StatsCard
+              {dashboardView.showApprovals && <StatsCard
                 title="Pending Review"
                 value={stats?.submittedPlans || 0}
                 subtitle={`${stats?.approvedPlans || 0} approved - ${stats?.autoApprovedPlans || 0} auto-approved`}
                 icon={CheckCircle2}
                 href="/approvals"
                 testId="stats-pending-review"
-              />
-              <StatsCard
+              />}
+              {dashboardView.showStock && <StatsCard
                 title="Stock Alerts"
                 value={
                   scopedStockAlerts.totals.lowStock +
@@ -1982,7 +2062,7 @@ export default function Dashboard() {
                 icon={Package}
                 href="/stock"
                 testId="link-stock-alerts"
-              />
+              />}
             </>
           )}
         </div>
@@ -2047,7 +2127,7 @@ export default function Dashboard() {
             </Card>
           )}
 
-          <Card>
+          {dashboardView.showApprovals && <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-lg">Approval queue</CardTitle>
             </CardHeader>
@@ -2081,11 +2161,11 @@ export default function Dashboard() {
                 </Button>
               </div>
             </CardContent>
-          </Card>
+          </Card>}
         </div>
-      </section>
+      </section>}
 
-      <section id="coverage" className="space-y-4">
+      {dashboardView.showCoverage && <section id="coverage" className="space-y-4">
         <Card>
           <CardHeader className="pb-2">
             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
@@ -2154,9 +2234,9 @@ export default function Dashboard() {
             )}
           </CardContent>
         </Card>
-      </section>
+      </section>}
 
-      <section id="map" className="grid gap-6 lg:grid-cols-3">
+      {dashboardView.showMap && <section id="map" className="grid gap-6 lg:grid-cols-3">
         <Card className="lg:col-span-2">
           <CardHeader className="pb-2">
             <CardTitle className="text-lg">Facility and catchment map</CardTitle>
@@ -2197,32 +2277,32 @@ export default function Dashboard() {
             </div>
           </CardContent>
         </Card>
-      </section>
+      </section>}
 
       {canViewSiteAnalytics(user) && <SiteActivityPanel />}
 
-      <Tabs value={deepDiveTab} onValueChange={setDeepDiveTab} className="space-y-4">
+      {(dashboardView.showSupervision || dashboardView.showVgie) && <Tabs value={deepDiveTab} onValueChange={setDeepDiveTab} className="space-y-4">
         <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
           <div>
             <h2 className="text-xl font-bold tracking-tight text-foreground">Deep dives</h2>
             <p className="text-sm text-muted-foreground">Detailed analytics that are not repeated in the executive dashboard.</p>
           </div>
           <TabsList className="w-fit">
-            <TabsTrigger value="supervision">Supervision</TabsTrigger>
-            <TabsTrigger value="vgie">VGIE analytics</TabsTrigger>
+            {dashboardView.showSupervision && <TabsTrigger value="supervision">Supervision</TabsTrigger>}
+            {dashboardView.showVgie && <TabsTrigger value="vgie">VGIE analytics</TabsTrigger>}
           </TabsList>
         </div>
-        <TabsContent value="supervision" className="space-y-6 focus-visible:outline-none">
+        {dashboardView.showSupervision && <TabsContent value="supervision" className="space-y-6 focus-visible:outline-none">
           <SupervisionCoverageByDistrictCard />
-        </TabsContent>
-        <TabsContent value="vgie" className="focus-visible:outline-none">
+        </TabsContent>}
+        {dashboardView.showVgie && <TabsContent value="vgie" className="focus-visible:outline-none">
           {deepDiveTab === "vgie" && (
             <Suspense fallback={<Skeleton className="h-96 w-full" />}>
               <VgieDashboard />
             </Suspense>
           )}
-        </TabsContent>
-      </Tabs>
+        </TabsContent>}
+      </Tabs>}
     </div>
   );
 }

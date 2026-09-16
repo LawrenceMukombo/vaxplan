@@ -9,7 +9,7 @@ import { tenants, settlementsMaster } from "../shared/schema";
 
 // ============================ CONFIGURATION ============================
 // Specify where you want the final dataset saved
-const OUTPUT_CSV = "C:/Users/Public/global_multi_source_communities.csv";
+const OUTPUT_CSV = path.join(process.cwd(), "scratch", "global_multi_source_communities.csv");
 
 // The 8 target countries from your list
 const TARGET_COUNTRIES = ["ZM", "ZA", "PG", "SS", "ZW", "MW", "UG", "MG"];
@@ -101,7 +101,7 @@ async function parseGeonamesFile(filePath: string, countryCode: string): Promise
       const lng = parseFloat(fields[5]);
       if (isNaN(lat) || isNaN(lng)) continue;
 
-      records.append ? null : records.push({
+      records.push({
         Location_Name: fields[1],
         Country: countryCode,
         Classification: fields[7] || "PPL",

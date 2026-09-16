@@ -11,7 +11,7 @@ import {
   districts,
 } from "@shared/schema";
 import { log } from "../index";
-import { isAuthenticated } from "../replitAuth";
+import { isAuthenticated } from "../auth";
 import { requireTenant } from "../auth/tenantResolver";
 
 // ─── Computational GIS Services for Remote Sensing ─────────────────────────────────

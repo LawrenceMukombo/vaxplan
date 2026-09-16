@@ -13,16 +13,12 @@ async function main() {
   const backupRows = JSON.parse(fs.readFileSync(backupPath, "utf8"));
   console.log(`Loaded ${backupRows.length} rows from backup.`);
 
-  // We run the schema change and reload inside a transaction
+  // We run the schema change and reload inside a transaction safely without dropping tables
   await db.transaction(async (tx) => {
-    // 1. Drop existing table
-    console.log("Dropping old cold_chain_equipment table...");
-    await tx.execute(sql`DROP TABLE IF EXISTS cold_chain_equipment CASCADE;`);
-
-    // 2. Create new table using correct schema
-    console.log("Creating new cold_chain_equipment table...");
+    // 1. Ensure table exists using correct schema
+    console.log("Ensuring cold_chain_equipment table schema is aligned...");
     await tx.execute(sql`
-      CREATE TABLE cold_chain_equipment (
+      CREATE TABLE IF NOT EXISTS cold_chain_equipment (
         id                           SERIAL PRIMARY KEY,
         tenant_id                    VARCHAR NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         facility_id                  INTEGER NOT NULL REFERENCES facilities(id) ON DELETE CASCADE,
@@ -113,6 +109,13 @@ async function main() {
           ${r.condition}, ${last_service_date}, ${next_service_due}, ${last_temperature_check}, ${r.maintenance_notes},
           ${r.is_active}, null, ${external_id}, ${r.created_by_user_id}, null, ${r.created_at}, ${r.updated_at}
         )
+        ON CONFLICT (id) DO UPDATE SET
+          equipment_type = EXCLUDED.equipment_type,
+          brand = EXCLUDED.brand,
+          model = EXCLUDED.model,
+          serial_number = EXCLUDED.serial_number,
+          condition = EXCLUDED.condition,
+          updated_at = NOW()
       `);
     }
 

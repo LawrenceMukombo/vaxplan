@@ -4,6 +4,31 @@ This document tracks technical releases, architectural updates, database migrati
 
 ---
 
+## Release v1.9.4 (2026-09-14)
+
+### Highlights
+
+- **End-to-end planning assurance:** routine and campaign microplans now connect to Plan Health, action ownership, evidence records, field-readiness review, approvals, version history, and printable outputs.
+- **Campaign operations:** added readiness assessment, summary sheets, target quotas, RED-aligned planning, and a real-time campaign dashboard.
+- **Surveillance and risk:** added VPD case/laboratory workflows and configurable assessment methodologies with district input, mapped results, vulnerability review, and linked actions.
+- **Field and logistics expansion:** added or expanded cold-chain inventory, catalogue management, CHW field workspace, field teams, stock, client outcomes, and reconciliation for unmapped vaccine codes.
+- **Offline resilience:** added offline sign-in support after online provisioning, push-before-pull batch synchronization, forced retry, stuck-item counts, conflict review, warning events, and tenant-switch cache protection.
+- **Governance:** expanded roles and permission delegation, geographic fail-closed scoping, planning evidence history, temporal views, supervision template versioning, and audit coverage.
+
+### Upgrade notes
+
+1. Back up the database and verify the restore procedure.
+2. Apply the normal numbered migrations and the additive planning/RED migrations using the approved safe migration workflow.
+3. Confirm the production schema contains the stock, microplan approval, client/logbook, planning action, and planning evidence columns required by this release.
+4. Build the application, run TypeScript and automated tests, and validate login, tenant scope, one routine plan, one campaign plan, one offline replay, and one report before reopening field access.
+5. Review tenant module settings because newly available modules default to enabled unless explicitly disabled.
+
+### Documentation
+
+The canonical current-state references are [Platform reference](./PLATFORM_REFERENCE.md), [End-user guide](./USER_GUIDE.md), [Developer guide](./DEVELOPER_GUIDE.md), and [Offline operation and synchronization](./OFFLINE_AND_SYNC.md).
+
+---
+
 ## Release v1.9.2 (2026-08-07)
 
 ### Highlights

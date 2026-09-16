@@ -6,7 +6,7 @@ import { eq } from "drizzle-orm";
 
 import { db, pool } from "../db";
 import { registerRoutes } from "../routes";
-import { tenants, users, facilities } from "@shared/schema";
+import { tenants, users, facilities, districts } from "@shared/schema";
 
 describe("Facility creation district locks", () => {
   let app: Express;
@@ -72,6 +72,14 @@ describe("Facility creation district locks", () => {
       throw new Error("No tenants in test DB.");
     }
     tenantId = anyTenant.id;
+    const [existingDistrict] = await db
+      .select({ id: districts.id, provinceId: districts.provinceId })
+      .from(districts)
+      .where(eq(districts.tenantId, tenantId))
+      .limit(1);
+    if (!existingDistrict) throw new Error("No district fixture exists in the isolated test database.");
+    ROLE_FIXTURES[0].districtId = existingDistrict.id;
+    ROLE_FIXTURES[0].provinceId = Number(existingDistrict.provinceId ?? 0);
 
     for (const f of ROLE_FIXTURES) {
       await db.delete(users).where(eq(users.id, f.id));
@@ -123,7 +131,7 @@ describe("Facility creation district locks", () => {
     const validPayload = {
       name: "Test Facility Locks Inside District",
       hmisCode: "TEST-IN-1",
-      districtId: 1,
+      districtId: ROLE_FIXTURES[0].districtId,
       latitude: "-15",
       longitude: "28",
       type: "Health Centre",
@@ -139,14 +147,7 @@ describe("Facility creation district locks", () => {
       .set("x-tenant-id", tenantId)
       .send(validPayload);
 
-    // Should return 201 Created or 400 Bad Request (if payload validation fails on constraints, but not 403)
-    expect(res.status).not.toBe(403);
-    // Ideally it returns 201
-    if (res.status === 400) {
-      console.warn("Payload invalid for inside district test:", res.body);
-    } else {
-      expect(res.status).toBe(201);
-    }
+    expect(res.status, res.text).toBe(201);
   });
 
   it("facility_clerk CANNOT create facility outside their assigned district", async () => {
@@ -195,7 +196,7 @@ describe("Facility creation district locks", () => {
       .send(validPayload);
 
     // Should return 201 Created or 400 Bad Request (if payload validation fails on constraints, but not 403)
-    expect(res.status).not.toBe(403);
+    expect(res.status, res.text).toBe(201);
     // Ideally it returns 201
     if (res.status === 400) {
       console.warn("Payload invalid for inside district test:", res.body);
@@ -232,7 +233,7 @@ describe("Facility creation district locks", () => {
     const validPayload = {
       name: "Test Facility Locks National",
       hmisCode: "TEST-NAT-1",
-      districtId: 9999, // Outside any specific district, but allowed for national_admin
+      districtId: ROLE_FIXTURES[0].districtId,
       latitude: "-15",
       longitude: "28",
       type: "Health Centre",

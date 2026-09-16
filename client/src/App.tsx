@@ -19,6 +19,10 @@ import { GlobalSearch } from "@/components/GlobalSearch";
 import { OnlinePresence } from "@/components/OnlinePresence";
 import { NotificationBell } from "@/components/NotificationBell";
 import { useAuth } from "@/hooks/useAuth";
+import {
+  isPublicUnauthenticatedPath,
+  unauthenticatedCanonicalPath,
+} from "@/lib/urlPrivacy";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useQuery } from "@tanstack/react-query";
 import { IdleTimeoutController } from "@/components/IdleTimeoutController";
@@ -158,6 +162,30 @@ function RouteFallback() {
 }
 function OfflineAuthLockScreen() {
   return <LoginPage />;
+}
+
+function UnauthenticatedUrlGuard() {
+  const { user, isLoading } = useAuth();
+
+  useEffect(() => {
+    if (isLoading || user || typeof window === "undefined") return;
+
+    const { pathname, search, hash } = window.location;
+    const canonicalPath = unauthenticatedCanonicalPath(pathname);
+    const containsAddressDetails = Boolean(search || hash || pathname !== canonicalPath);
+    if (!containsAddressDetails) return;
+
+    if (!isPublicUnauthenticatedPath(pathname)) {
+      try {
+        sessionStorage.setItem("vaxplan_login_redirect", `${pathname}${search}${hash}`);
+      } catch {}
+    }
+
+    window.history.replaceState({}, document.title, canonicalPath);
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  }, [isLoading, user]);
+
+  return null;
 }
 // Public, unauthenticated chrome for pages that are meant to be viewable
 // without signing in (e.g. the Data Sources & Acknowledgements page). Provides
@@ -519,8 +547,8 @@ function AuthenticatedLayout() {
     if (offline || logoutState?.pendingServerLogout || pathname === "/login") {
       return <LoginPage />;
     }
-    // If an unauthenticated user accesses any protected in-app route (e.g. /defaulters, /chw-field, /session-planning, etc.)
-    // Redirect to /login?redirect=...
+    // Preserve the intended destination only in session storage. Never put it in
+    // the signed-out URL, where facility and reporting details would be visible.
     if (pathname && pathname !== "/" && pathname !== "/landing") {
       const fullPath = `${pathname}${search}`;
       if (typeof window !== "undefined") {
@@ -528,7 +556,7 @@ function AuthenticatedLayout() {
           sessionStorage.setItem("vaxplan_login_redirect", fullPath);
         } catch {}
       }
-      return <Redirect to={`/login?redirect=${encodeURIComponent(fullPath)}`} />;
+      return <LoginPage />;
     }
     return <Landing />;
   }
@@ -691,6 +719,7 @@ function App() {
   }
   return (
     <QueryClientProvider client={queryClient}>
+      <UnauthenticatedUrlGuard />
       {content}
     </QueryClientProvider>
   );

@@ -1,5 +1,6 @@
 import type { Request, Response, NextFunction, RequestHandler } from "express";
 import { storage } from "../storage";
+import { log } from "../index";
 
 declare global {
   namespace Express {
@@ -78,7 +79,7 @@ export const tenantContext: RequestHandler = async (req, _res, next) => {
       const u = await storage.getUser(userId);
       isSuperAdmin = u?.isPlatformAdmin === true;
     } catch (err) {
-      console.error("tenantContext super-admin check failed:", err);
+      log(`tenantContext super-admin check failed: ${err}`, "auth");
     }
   }
 
@@ -96,7 +97,7 @@ export const tenantContext: RequestHandler = async (req, _res, next) => {
           req.session.viewTenantId = t.id;
         }
       } catch (err) {
-        console.error("tenantContext header tenant lookup failed:", err);
+        log(`tenantContext header tenant lookup failed: ${err}`, "auth");
       }
     }
 
@@ -112,7 +113,7 @@ export const tenantContext: RequestHandler = async (req, _res, next) => {
         // Stale / inactive override — drop it so we fall back to home tenant.
         delete req.session.viewTenantId;
       } catch (err) {
-        console.error("tenantContext viewTenantId lookup failed:", err);
+        log(`tenantContext viewTenantId lookup failed: ${err}`, "auth");
         delete req.session.viewTenantId;
       }
     }
@@ -157,7 +158,7 @@ export const tenantContext: RequestHandler = async (req, _res, next) => {
       }
     }
   } catch (err) {
-    console.error("tenantContext error:", err);
+    log(`tenantContext error: ${err}`, "auth");
   }
   next();
 };

@@ -36,6 +36,7 @@ import {
   Flame,
   Info,
 } from "lucide-react";
+import { calculateReadinessPercent } from "@/lib/readinessScore";
 
 export interface StepReadinessItem {
   id: number;
@@ -214,9 +215,11 @@ export function MicroplanGamificationBar({
     ];
   }, [microplan, communities, sessionPlans, staffing, transport, budget, supervision]);
 
-  // Overall score percentage
+  // Normalize weighted checklist points against their actual maximum. The
+  // checklist currently totals 110 possible points, so displaying the raw sum
+  // as a percentage could incorrectly show 110%.
   const totalScore = useMemo(() => {
-    return readinessChecklist.reduce((acc, curr) => acc + curr.score, 0);
+    return calculateReadinessPercent(readinessChecklist);
   }, [readinessChecklist]);
 
   // Tier level

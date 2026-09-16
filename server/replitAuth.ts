@@ -30,7 +30,7 @@ const IS_LOCAL_DEV = !process.env.REPL_ID;
 const getOidcConfig = memoize(
   async () => {
     return await client.discovery(
-      new URL(process.env.ISSUER_URL ?? "https://replit.com/oidc"),
+      new URL((() => { if (!process.env.ISSUER_URL) throw new Error("[replitAuth] ISSUER_URL env var not set"); return process.env.ISSUER_URL; })()),
       process.env.REPL_ID!
     );
   },

@@ -79,15 +79,9 @@ if (-not $SkipDb) {
         Write-Host "Restoring database dump to Hostinger ($dbHost)..." -ForegroundColor Cyan
         $env:PGPASSWORD = $dbPass
         
-        # Drop and recreate schema to make sure it is clean
-        Write-Host "Cleaning remote schemas (if exists)..." -ForegroundColor Yellow
-        $confirm = Read-Host "WARNING: This will drop the remote schema and ALL data on Hostinger ($dbHost). Type 'YES' to confirm"
-        if ($confirm -ne "YES") {
-            Write-Error "Database schema cleaning cancelled by user. Aborting."
-            exit
-        }
-        $dropCmd = "DROP SCHEMA public CASCADE; CREATE SCHEMA public; AUTHORIZATION $dbUser; GRANT ALL ON SCHEMA public TO $dbUser; GRANT ALL ON SCHEMA public TO public;"
-        & "C:\Program Files\PostgreSQL\18\bin\psql.exe" -h $dbHost -p $dbPort -U $dbUser -d $dbName -c $dropCmd
+        # Enforce DATA SAFETY: NO WIPE, NO OVERWRITE, UPSERT ONLY.
+        # Destructive DROP SCHEMA public CASCADE has been eliminated to protect production data.
+        Write-Host "Applying safe non-destructive updates to Hostinger ($dbHost)..." -ForegroundColor Cyan
         
         # Restore schema and data
         & $pgRestore -h $dbHost -p $dbPort -U $dbUser -d $dbName -v --no-owner --no-privileges $tempDump

@@ -15,27 +15,93 @@ const MIN_PASSWORD_LEN = 8;
 // "user does not exist" by response time.
 const DUMMY_HASH = "$2a$12$CwTycUXWue0Thq9StjUM0uJ8.IxQ7XJjF6Q9hL.q5p9PqQ9oC5Yga";
 
-// In-memory login rate limit. Keyed by IP + email (lowercased). Resets after
-// the window. For a 2026 colleague-testing deployment this is sufficient;
-// migrate to Redis if we ever scale to multiple server instances.
+// ─── Login rate limiter ──────────────────────────────────────────────────────
+// Uses Redis atomic counters (INCR + EXPIRE) when REDIS_URL is set so that
+// limits are shared across all PM2 worker processes. Falls back to an in-memory
+// Map when Redis is not configured (single-process / local dev).
+//
+// Constants — identical for both backends so behaviour is consistent.
+const WINDOW_MS = 15 * 60 * 1000;         // 15 min sliding window
+const MAX_ATTEMPTS = 8;                    // lock after 8 failures
+const LOCK_MS = 15 * 60 * 1000;           // lockout duration: 15 min
+const WINDOW_SECS = Math.ceil(WINDOW_MS / 1000);
+const LOCK_SECS   = Math.ceil(LOCK_MS   / 1000);
+
+function rateKey(req: Request, email: string): string {
+  const ip = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim()
+    || req.ip
+    || "unknown";
+  return `login_rl::${ip}::${email.toLowerCase()}`;
+}
+
+// ── Redis backend ─────────────────────────────────────────────────────────────
+let redisClient: import("ioredis").Redis | null = null;
+(async () => {
+  if (!process.env.REDIS_URL) {
+    console.warn(
+      "[rate-limit] REDIS_URL not set — using in-memory rate limiter. " +
+      "With multiple PM2 workers each process tracks limits independently."
+    );
+    return;
+  }
+  try {
+    const { default: Redis } = await import("ioredis");
+    const client = new Redis(process.env.REDIS_URL, {
+      lazyConnect: true,
+      maxRetriesPerRequest: 1,
+      enableOfflineQueue: false,
+    });
+    client.on("error", () => { /* suppress noisy Redis connection errors */ });
+    await client.connect().catch(() => null);
+    if (client.status === "ready") {
+      redisClient = client;
+      console.log("[rate-limit] Redis backend active (cross-process brute-force protection enabled)");
+    }
+  } catch {
+    redisClient = null;
+  }
+})();
+
+
+// ── In-memory fallback ────────────────────────────────────────────────────────
 type Attempt = { count: number; firstAt: number; lockedUntil: number };
 const attempts = new Map<string, Attempt>();
-const WINDOW_MS = 15 * 60 * 1000;
-const MAX_ATTEMPTS = 8;
-const LOCK_MS = 15 * 60 * 1000;
 
-function rateKey(req: Request, email: string) {
-  const ip = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || req.ip || "unknown";
-  return `${ip}::${email}`;
-}
-function checkLocked(key: string): number | null {
+// ── Unified interface ─────────────────────────────────────────────────────────
+async function checkLocked(key: string): Promise<number | null> {
+  if (redisClient?.status === "ready") {
+    try {
+      const [countStr, ttlStr] = await redisClient.mget(`${key}:count`, `${key}:lock`);
+      if (ttlStr !== null) {
+        const lockTtl = await redisClient.ttl(`${key}:lock`);
+        if (lockTtl > 0) return lockTtl;
+      }
+      return null;
+    } catch { /* fall through to in-memory */ }
+  }
+  // In-memory path
   const a = attempts.get(key);
   const now = Date.now();
   if (a && a.lockedUntil > now) return Math.ceil((a.lockedUntil - now) / 1000);
   if (a && now - a.firstAt > WINDOW_MS) attempts.delete(key);
   return null;
 }
-function recordFailure(key: string) {
+
+async function recordFailure(key: string): Promise<void> {
+  if (redisClient?.status === "ready") {
+    try {
+      const pipe = redisClient.pipeline();
+      pipe.incr(`${key}:count`);
+      pipe.expire(`${key}:count`, WINDOW_SECS);
+      const results = await pipe.exec();
+      const count = (results?.[0]?.[1] as number) ?? 0;
+      if (count >= MAX_ATTEMPTS) {
+        await redisClient.setex(`${key}:lock`, LOCK_SECS, "1");
+      }
+      return;
+    } catch { /* fall through to in-memory */ }
+  }
+  // In-memory path
   const now = Date.now();
   const a = attempts.get(key);
   if (!a || now - a.firstAt > WINDOW_MS) {
@@ -45,7 +111,16 @@ function recordFailure(key: string) {
   a.count += 1;
   if (a.count >= MAX_ATTEMPTS) a.lockedUntil = now + LOCK_MS;
 }
-function clearAttempts(key: string) { attempts.delete(key); }
+
+async function clearAttempts(key: string): Promise<void> {
+  if (redisClient?.status === "ready") {
+    try {
+      await redisClient.del(`${key}:count`, `${key}:lock`);
+      return;
+    } catch { /* fall through to in-memory */ }
+  }
+  attempts.delete(key);
+}
 
 export async function hashPassword(plain: string): Promise<string> {
   return bcrypt.hash(plain, BCRYPT_ROUNDS);
@@ -108,7 +183,7 @@ export function registerPasswordAuthRoutes(app: Express) {
         return res.status(400).json({ message: "Email, password, and country selection are required." });
       }
 
-      const lockedFor = checkLocked(key);
+      const lockedFor = await checkLocked(key);
       if (lockedFor !== null) {
         return res
           .status(429)
@@ -146,11 +221,11 @@ export function registerPasswordAuthRoutes(app: Express) {
       const ok = await bcrypt.compare(password, hashToCheck);
 
       if (!ok || !dbUser || !dbUser.isActive || !dbUser.passwordHash) {
-        recordFailure(key);
+        await recordFailure(key);
         return res.status(401).json({ message: "Invalid email or password." });
       }
 
-      clearAttempts(key);
+      await clearAttempts(key);
 
       const userTenantId = tenantId || dbUser.tenantId || "";
       const sessionUser = await buildSessionUser(dbUser, userTenantId);
@@ -237,13 +312,13 @@ export function registerPasswordAuthRoutes(app: Express) {
   app.post("/api/auth/request-password-reset", async (req: Request, res: Response) => {
     const emailRaw = String((req.body && req.body.email) || "").trim().toLowerCase();
     const resetKey = rateKey(req, emailRaw);
-    const lockedFor = checkLocked(resetKey);
+    const lockedFor = await checkLocked(resetKey);
     if (lockedFor !== null) {
       return res.status(429).json({
         message: `Too many requests. Try again in ${Math.ceil(lockedFor / 60)} min.`,
       });
     }
-    recordFailure(resetKey);
+    await recordFailure(resetKey);
     try {
       if (emailRaw && /.+@.+\..+/.test(emailRaw)) {
         const dbUser = await storage.getUserByEmail(emailRaw);

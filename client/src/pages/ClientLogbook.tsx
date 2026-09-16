@@ -1386,6 +1386,7 @@ export default function ClientLogbook() {
           url: `/api/clients/${selectedClient.id}`,
           body: JSON.stringify(data),
           localId: selectedClient.id,
+          serverId: selectedClient.id,
         });
         return localClient;
       }

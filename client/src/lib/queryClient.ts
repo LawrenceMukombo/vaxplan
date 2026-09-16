@@ -445,6 +445,13 @@ async function handleOfflineMutation(method: string, url: string, data: any): Pr
   const cleanUrl = url.startsWith("/") ? url : `/${url}`;
   const [pathname] = cleanUrl.split("?");
 
+  // Microplan version events are best-effort server audit snapshots. Queuing
+  // them offline is both misleading (there is no server snapshot yet) and used
+  // to poison the outbox by falling through to the generic microplan creator.
+  if (method === "POST" && /^\/api\/microplans\/[^/]+\/version-event\/?$/.test(pathname)) {
+    return { success: true, skippedOfflineAuditEvent: true };
+  }
+
   if (pathname === "/api/me/switch-tenant") {
     const targetId = String(data.tenantId);
     await offlineDb.syncMeta.put({ key: "tenantId", value: targetId });
@@ -584,6 +591,13 @@ async function writeToIndexedDB(method: string, url: string, data: any): Promise
 async function handleOfflineMutation(method: string, url: string, data: any): Promise<any> {
   const cleanUrl = url.startsWith("/") ? url : `/${url}`;
   const [pathname] = cleanUrl.split("?");
+
+  // Microplan version events are best-effort server audit snapshots. Queuing
+  // them offline is both misleading (there is no server snapshot yet) and used
+  // to poison the outbox by falling through to the generic microplan creator.
+  if (method === "POST" && /^\/api\/microplans\/[^/]+\/version-event\/?$/.test(pathname)) {
+    return { success: true, skippedOfflineAuditEvent: true };
+  }
 
   if (pathname === "/api/me/switch-tenant") {
     const targetId = String(data.tenantId);

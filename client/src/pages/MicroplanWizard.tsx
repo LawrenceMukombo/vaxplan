@@ -534,7 +534,7 @@ export function UnifiedStepGuide({
 // village session once the microplan exists. Persisted to sessionStorage so
 // it survives hard reloads and clean-URL navigations (e.g. `/microplan/new?id=`).
 type ReturnVillage = {
-  villageId: number;
+  villageId: number | null;
   name: string;
   lat: number | null;
   lng: number | null;
@@ -551,7 +551,7 @@ function readStoredReturnVillage(id: number | null): ReturnVillage | null {
     const raw = window.sessionStorage.getItem(returnVillageStorageKey(id));
     if (!raw) return null;
     const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed.villageId !== "number") return null;
+    if (!parsed || (parsed.villageId !== null && typeof parsed.villageId !== "number")) return null;
     return {
       villageId: parsed.villageId,
       name: typeof parsed.name === "string" ? parsed.name : "",
@@ -694,6 +694,17 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
         };
       }
     }
+    if (sp.get("returnPoint") === "1") {
+      const lat = Number(sp.get("returnVillageLat"));
+      const lng = Number(sp.get("returnVillageLng"));
+      return {
+        villageId: null,
+        name: sp.get("returnVillageName") ?? "Mapped service gap",
+        lat: Number.isFinite(lat) ? lat : null,
+        lng: Number.isFinite(lng) ? lng : null,
+        isHardToReach: sp.get("returnVillageHtr") === "1",
+      };
+    }
     const idParam = sp.get("id");
     const wizardId =
       idParam && !Number.isNaN(Number(idParam)) ? Number(idParam) : null;
@@ -762,12 +773,12 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
   const continueToVillageSession = () => {
     if (!returnVillage || !microplanId) return;
     const qs = new URLSearchParams({
-      unservedVillageId: String(returnVillage.villageId),
       unservedName: returnVillage.name,
       unservedHtr: returnVillage.isHardToReach ? "1" : "0",
       prefillKind: "village",
       autoOpen: "1",
     });
+    if (returnVillage.villageId != null) qs.set("unservedVillageId", String(returnVillage.villageId));
     if (returnVillage.lat != null) qs.set("unservedLat", String(returnVillage.lat));
     if (returnVillage.lng != null) qs.set("unservedLng", String(returnVillage.lng));
     clearReturnVillage();
@@ -868,6 +879,7 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
     htrScores: HtrScore[];
     excludedVillageIds?: number[];
     excludedVillages?: ExcludedVillageDetail[];
+    reviewSnapshot?: Record<string, any> | null;
   };
   const { data: hydration } = useQuery<MicroplanHydration>({
     queryKey: ["/api/microplans", microplanId, "hydration"],
@@ -1368,10 +1380,23 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
   };
 
   const patchMicroplan = async (id: number, patch: Record<string, unknown>) => {
-    await apiRequest("PATCH", `/api/microplans/${id}`, patch);
-    queryClient.invalidateQueries({ queryKey: ["/api/microplans"] });
-    queryClient.invalidateQueries({ queryKey: ["/api/microplans", id] });
-    queryClient.invalidateQueries({ queryKey: ["/api/microplans", id, "hydration"] });
+    const updated = await apiRequest<Microplan>("PATCH", `/api/microplans/${id}`, patch);
+
+    // Editing used to invalidate the full hydration payload after every
+    // autosave. That refetched the plan and all of its child collections,
+    // retriggered hydration effects, and caused the large editor to visibly
+    // flash. The PATCH response is authoritative, so merge it into the three
+    // relevant cache entries without replacing/refetching the page data.
+    queryClient.setQueryData<Microplan[]>(["/api/microplans"], (current) =>
+      current?.map((plan) => (plan.id === id ? { ...plan, ...updated } : plan)),
+    );
+    queryClient.setQueryData<Microplan>(["/api/microplans", id], (current) =>
+      current ? { ...current, ...updated } : updated,
+    );
+    queryClient.setQueryData<MicroplanHydration>(
+      ["/api/microplans", id, "hydration"],
+      (current) => current ? { ...current, microplan: { ...current.microplan, ...updated } } : current,
+    );
   };
 
   // Versioning: trigger draft_closed version snapshot when leaving/closing the draft plan
@@ -1755,6 +1780,9 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
     // localStorage; otherwise a previously removed village can slip back into
     // the seed before `excludedVillageIds` rehydrates.
     if (!excludedReady) return;
+    // A pending/approved plan is reviewed from its immutable submission
+    // snapshot. Never seed it from the facility's current catchment.
+    if (microplanId && microplan?.status !== "draft") return;
     if (!facilityVillages.length || communities.length) return;
     setCommunities(
       facilityVillages.map((v) => ({
@@ -1799,7 +1827,7 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
         vaccinationPostLandmark: (v as any).vaccinationPostLandmark ?? ((v as any).metadata?.vaccinationPostLandmark) ?? undefined,
       })),
     );
-  }, [facilityVillages, communities.length, excludedReady]);
+  }, [facilityVillages, communities.length, excludedReady, microplanId, microplan?.status]);
 
   // Rehydrate Step 2 from saved population rows for this facility & year so
   // re-saves PATCH instead of inserting duplicates.
@@ -2459,6 +2487,41 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
     hydratedRef.current.supervision = true;
   }, [microplanId, existingSupervision]);
 
+  const reviewSnapshotHydratedRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!microplanId || microplan?.status === "draft") return;
+    const snapshot = hydration?.reviewSnapshot as any;
+    if (!snapshot || reviewSnapshotHydratedRef.current === microplanId) return;
+    reviewSnapshotHydratedRef.current = microplanId;
+
+    // Stop the ordinary live-row hydration effects from overwriting the
+    // submitted values while the reviewer moves between steps.
+    Object.keys(hydratedRef.current).forEach((key) => {
+      (hydratedRef.current as any)[key] = true;
+    });
+
+    if (snapshot.coverage) setCoverage((prev) => ({ ...prev, ...snapshot.coverage }));
+    if (Array.isArray(snapshot.communities)) {
+      setCommunities(snapshot.communities.map((row: any, index: number) => ({
+        ...row,
+        rowId: row.rowId || `submitted-community-${index + 1}`,
+        targetPopulation: String(row.targetPopulation ?? 0),
+        totalCatchmentPopulation: String(row.totalCatchmentPopulation ?? 0),
+        under5Population: String(row.under5Population ?? 0),
+        saved: true,
+      })));
+    }
+    if (Array.isArray(snapshot.risk)) setRisk(snapshot.risk);
+    if (Array.isArray(snapshot.sessionCalendar)) setCalendar(snapshot.sessionCalendar);
+    if (Array.isArray(snapshot.staffing)) setStaffing(snapshot.staffing);
+    if (Array.isArray(snapshot.vaccineForecast)) setVaccines(snapshot.vaccineForecast);
+    if (snapshot.coldChain) setColdChain(snapshot.coldChain);
+    if (Array.isArray(snapshot.mobilization)) setMobilization(snapshot.mobilization);
+    if (Array.isArray(snapshot.transport)) setTransport(snapshot.transport);
+    if (Array.isArray(snapshot.budget)) setBudget(snapshot.budget);
+    if (Array.isArray(snapshot.supervision)) setSupervision(snapshot.supervision);
+  }, [microplanId, microplan?.status, hydration?.reviewSnapshot]);
+
   // --- Per-step persistence ----------------------------------------------
   const [busy, setBusy] = useState(false);
 
@@ -2922,9 +2985,11 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
     const { silent } = opts;
     if (microplanId && microplan?.status !== "draft") return false;
     busyRef.current = true;
-    setBusy(true);
+    // Background autosave must not disable and repaint all visible editor
+    // controls. `busyRef` still serialises it with foreground saves.
+    if (!silent) setBusy(true);
     // A fresh save attempt clears any previously flagged field.
-    setErrorFocus(null);
+    if (!silent) setErrorFocus(null);
     // Set by the per-step logic below when a validation error should pull the
     // user to a specific field/row instead of just showing a toast.
     let focusTarget:
@@ -3787,7 +3852,7 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
       return false;
     } finally {
       busyRef.current = false;
-      setBusy(false);
+      if (!silent) setBusy(false);
       if (focusTarget) {
         setErrorFocus(focusTarget);
         setActive(focusTarget.step);
@@ -3796,6 +3861,13 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
   }
 
   async function handleNext() {
+    // Reviewers are looking at a frozen submission. Advancing between steps
+    // must not call the draft persistence endpoint (pending/approved plans are
+    // intentionally read-only and the server rejects those writes).
+    if (isReadOnly) {
+      if (active < 11) setActive(active + 1);
+      return;
+    }
     const stepErrors = validationErrors.filter((error) => error.step === active);
     if (stepErrors.length > 0) {
       const first = stepErrors[0];
@@ -5481,30 +5553,28 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
                 <ChevronLeft className="mr-1 h-4 w-4" /> Back
               </Button>
               <div className="flex flex-wrap items-center gap-2">
-                {saveStatus !== "idle" && (
-                  <span
-                    className="flex items-center gap-1 text-xs text-muted-foreground"
-                    aria-live="polite"
-                    data-testid="text-autosave-status"
-                  >
-                    {saveStatus === "saving" ? (
-                      <>
-                        <Loader2 className="h-3 w-3 animate-spin" />
-                        Saving...
-                      </>
-                    ) : (
-                      <>
-                        <CheckCircle2 className="h-3 w-3 text-emerald-600" />
-                        {lastSavedAt
-                          ? `Last saved ${new Date(lastSavedAt).toLocaleTimeString(
-                              [],
-                              { hour: "2-digit", minute: "2-digit" },
-                            )}`
-                          : "All changes saved"}
-                      </>
-                    )}
-                  </span>
-                )}
+                <span
+                  className={`flex min-w-28 items-center justify-end gap-1 text-xs text-muted-foreground transition-opacity duration-150 ${
+                    saveStatus === "idle" ? "opacity-0" : "opacity-100"
+                  }`}
+                  aria-live="polite"
+                  aria-hidden={saveStatus === "idle"}
+                  data-testid="text-autosave-status"
+                >
+                  {saveStatus === "saving" ? (
+                    <>Saving…</>
+                  ) : (
+                    <>
+                      <CheckCircle2 className="h-3 w-3 text-emerald-600" />
+                      {lastSavedAt
+                        ? `Saved ${new Date(lastSavedAt).toLocaleTimeString(
+                            [],
+                            { hour: "2-digit", minute: "2-digit" },
+                          )}`
+                        : "All changes saved"}
+                    </>
+                  )}
+                </span>
                 <Button
                   variant="outline"
                   onClick={saveDraft}

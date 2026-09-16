@@ -1,62 +1,62 @@
 # VaxPlan
 
-> ⚠️ **Proprietary & Confidential**
-> 
-> This repository contains the proprietary intellectual property of **Vumbi2018**. 
-> All rights are explicitly reserved. This is **NOT** an open-source project. 
-> 
-> You may view the source code hosted here for evaluation or portfolio review purposes only. You are strictly prohibited from copying, distributing, modifying, or using this codebase (in whole or in part) for any commercial or non-commercial purposes without explicit prior written consent or a paid commercial license.
-> 
-> Please refer to the `LICENSE` file for the full legal terms. For licensing inquiries, partnerships, or SaaS access, please contact the repository owner.
+> **Proprietary and confidential.** VaxPlan is proprietary software owned by Vumbi2018. See [LICENSE](./LICENSE) for the applicable terms.
 
----
+VaxPlan is a multi-tenant, offline-capable immunization planning and field-operations platform. It combines routine and campaign microplanning, GIS catchment intelligence, session execution, client vaccination records, vaccine and cold-chain logistics, supportive supervision, surveillance, risk assessment, reporting, and governance in one application.
 
-VaxPlan is an advanced, offline-first GIS microplanning and supportive supervision platform designed for national immunization and primary-care programs.
+The application currently reports version **1.9.4** in `package.json`. The source code, not screenshots or historical stakeholder material, is the authority for current behavior.
 
-## Key Modules & Platform Features
+## Current capabilities
 
-### 1. Supportive Supervision & Performance Scorecards
-- **Standardized & Short Supervision Checklists**: Supports both comprehensive 70-question national supervision templates and streamlined 35-question templates across 7 core domain sections:
-  1. *Facility Readiness & Service Delivery*
-  2. *Availability of RI Services*
-  3. *RI Session Monitoring*
-  4. *Cold Chain & Vaccine Management*
-  5. *Advocacy & Social Mobilization*
-  6. *Data Management & Monitoring*
-  7. *Supportive Supervision & Governance*
-- **Traffic Light Scoring Standard**: Visual indicator system following WHO/UNICEF guidelines:
-  - 🔴 **High Risk (0% – 49.9%)**: Requires immediate intervention and corrective action plan.
-  - 🟠 **Medium Risk (50.0% – 79.9%)**: Target for targeted supervisory coaching.
-  - 🟢 **Low Risk (80.0% – 100.0%)**: Fully compliant with high performance.
-- **Executive Facility Scorecards**: Printable scorecards (`SupervisionScorecard.tsx`) featuring facility metadata, overall risk badges, KPI tiles, section breakdowns, supervisor findings, and structured corrective action plans.
-- **Comparative Supervision Scorecard Matrix**: Multi-level comparative table (`ComparativeScorecardTable.tsx`) enabling cross-boundary quality comparisons across Provinces, Districts, and Health Facilities. Includes pagination, column visibility picker, sortable headers, and CSV exports.
+- Routine and supplementary immunization activity microplans, printable plans, approvals, version history, readiness checks, action registers, and evidence records.
+- Campaign summary sheets, readiness assessments, target quotas, and a real-time campaign dashboard.
+- Facilities, outreach posts, settlements, administrative boundaries, custom layers, catchment polygons, population denominators, hard-to-reach scoring, missed-community and zero-dose views.
+- Session planning, multi-day field plans, execution history, client logbook, defaulters, dropout indicators, stock ledger, vaccine calculator, budget and mobilization workspaces.
+- Supportive supervision visits, versioned checklist templates, scorecards, PCE, house-to-house tools, and corrective actions.
+- Vaccine-preventable disease surveillance, laboratory samples, configurable risk methodologies, district data entry, choropleth results, and action links.
+- Tenant administration, country onboarding, dynamic roles and permissions, geographic data scopes, catalogue management, audit/history views, notifications, and HIS integration surfaces.
+- Offline authentication and a Dexie/IndexedDB replica with queued writes, automatic and manual synchronization, retry recovery, and conflict review.
+- Web/PWA, Android/Capacitor, and Windows/Electron packaging.
 
-### 2. Strict Smart Location Cascade Filter (`GeoCascadeFilter`)
-- **Strict Parent-Child Dependency**:
-  - District selector remains disabled until a Province is selected.
-  - Health Facility selector remains disabled until a District is selected.
-- **Dynamic Parent Resolution**: Automatically filters child options to **only** display districts/facilities belonging to the active parent selection.
-- **One-Click Reset**: Instant clearing of location filters returns the interface to the full national view.
+## Technology
 
-### 3. GIS Spatial Microplanning & Catchment Analysis
-- **Spatial Target Area Coverage**: Interactive Leaflet maps with custom vector boundaries, community pins, zero-dose settlements, and cold chain logistics overlay.
-- **Offline-First Synchronization**: IndexedDB local storage guarantees continuous field operation with automatic conflict-free server sync.
-- **Multi-Tenant Administration**: Role-based access control (RBAC) supporting National Admins, Provincial Coordinators, District Managers, and Facility Supervisors.
+- React 18, TypeScript, Vite, TanStack Query, Tailwind CSS, Radix UI, Leaflet and MapLibre.
+- Node.js and Express, PostgreSQL/PostGIS, Drizzle ORM, Redis/BullMQ where configured.
+- Vitest for automated tests; Capacitor for Android; Electron Forge for Windows.
 
----
+## Local development
 
-## Technical Stack
+Requirements: Node.js 20 or newer and PostgreSQL with PostGIS. Redis is optional for deployments that enable queued messaging or background work.
 
-- **Frontend**: React 18, Vite, TypeScript, Tailwind CSS, ShadCN/Radix UI components, TanStack Query, Leaflet.
-- **Backend**: Node.js, Express.js, PostgreSQL with PostGIS extension, Drizzle ORM.
-- **Runtime**: PM2, Node 20+, PWA offline service workers.
+1. Copy `.env.production.example` to a local environment file and supply at least `DATABASE_URL` and `SESSION_SECRET`. Never commit credentials.
+2. Install dependencies with `npm ci`.
+3. Apply the approved database migration procedure for the target environment. For existing databases, prefer `npm run db:safe-update`; do not assume `db:push` is safe for production data.
+4. Start the development server with `npm run dev` and open `http://localhost:5000` unless `PORT` overrides it.
 
----
+Useful commands:
 
-## Technical Documentation & Guides
+| Command | Purpose |
+| --- | --- |
+| `npm run dev` | Start the TypeScript development server |
+| `npm run check` | Run TypeScript validation |
+| `npm test` | Run the Vitest suite |
+| `npm run build` | Create the production web/server bundle |
+| `npm run docs:site` | Build the documentation site |
+| `npm run docs:pdf` | Build the user-guide PDF |
+| `npm run build:android` | Build and synchronize the Android project |
+| `npm run build:windows` | Build the Windows desktop package |
 
-Comprehensive technical guides are available in the [`docs/`](./docs) directory:
-- [System User Guide](./docs/USER_GUIDE.md)
-- [Indicator Manual](./docs/INDICATOR_MANUAL.md)
-- [Release Notes](./docs/releases.md)
-- [Country Onboarding Guide](./docs/COUNTRY_ONBOARDING.md)
+`npm start` is production-oriented and runs the bundled bootstrap before starting `dist/index.cjs`. Use it only after `npm run build` and with a production-ready environment.
+
+## Documentation
+
+Start with the [documentation index](./docs/README.md). The canonical references are:
+
+- [Platform reference](./docs/PLATFORM_REFERENCE.md) — modules, routes, roles, status models, and source-of-truth rules.
+- [User guide](./docs/USER_GUIDE.md) — task-focused workflows for field, district, provincial, national, and platform users.
+- [Developer guide](./docs/DEVELOPER_GUIDE.md) — repository structure, architecture, validation, migrations, and documentation maintenance.
+- [Offline and synchronization guide](./docs/OFFLINE_AND_SYNC.md) — local data behavior, queued writes, retries, conflicts, and recovery.
+- [Safe deployment guide](./docs/deployment/vaxplan-safe-deployment-guide.md) — production deployment and data-safety controls.
+- [Release notes](./docs/releases.md) and [changelog](./CHANGELOG.md) — user-facing and repository release history.
+
+Historical Word manuals and stakeholder documents remain in the repository as publication artifacts. They are not the canonical reference for current application behavior unless regenerated from the current Markdown sources.

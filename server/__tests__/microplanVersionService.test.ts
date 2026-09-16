@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { compareMicroplanSnapshots } from "../services/microplanVersionService";
+import {
+  compareMicroplanSnapshots,
+  selectVersionCommunities,
+} from "../services/microplanVersionService";
 
 describe("compareMicroplanSnapshots", () => {
   it("reports only changed snapshot paths", () => {
@@ -15,5 +18,24 @@ describe("compareMicroplanSnapshots", () => {
 
   it("treats unchanged arrays as equal", () => {
     expect(compareMicroplanSnapshots({ sessions: [{ id: 1 }] }, { sessions: [{ id: 1 }] })).toEqual([]);
+  });
+});
+
+describe("selectVersionCommunities", () => {
+  const submitted = [{ villageId: 1 }, { villageId: 2 }, { villageId: 3 }];
+  const live = Array.from({ length: 23 }, (_, index) => ({ id: index + 1 }));
+
+  it("keeps a submitted plan pinned to its three-community snapshot", () => {
+    expect(selectVersionCommunities({
+      status: "pending",
+      staffing: { submissionSnapshot: { communities: submitted } },
+    }, live)).toEqual(submitted);
+  });
+
+  it("continues using the live catchment for editable drafts", () => {
+    expect(selectVersionCommunities({
+      status: "draft",
+      staffing: { submissionSnapshot: { communities: submitted } },
+    }, live)).toHaveLength(23);
   });
 });

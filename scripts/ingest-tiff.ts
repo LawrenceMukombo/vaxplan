@@ -25,6 +25,11 @@
  * serve population estimates from the local DB instead of calling the remote API.
  */
 
+try {
+  // @ts-ignore
+  process.loadEnvFile?.();
+} catch {}
+
 import { existsSync, statSync } from "fs";
 import { ingestWorldPopRaster } from "./ingestWorldPopRaster";
 import { pool } from "../server/db";
@@ -96,7 +101,7 @@ async function main() {
     rasterPath,
     cellPrefix: code.toLowerCase(),
     minPopulation,
-    truncateExisting: true,
+    truncateExisting: false,
     onProgress({ tilesDone, tilesTotal, rowsInserted }) {
       const pct = ((tilesDone / tilesTotal) * 100).toFixed(1);
       process.stdout.write(

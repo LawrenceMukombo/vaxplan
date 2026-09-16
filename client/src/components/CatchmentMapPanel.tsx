@@ -471,6 +471,7 @@ export function CatchmentMapPanel({
   const [basemap, setBasemap] = usePersistedBasemap("positron");
   const [fitCoords, setFitCoords] = useState<[number, number][] | null>(null);
   const [extracting, setExtracting] = useState(false);
+  const [extractBufferKm, setExtractBufferKm] = useState<number>(0.5);
   const [extractResult, setExtractResult] = useState<ExtractResult | null>(null);
   const [showGap, setShowGap] = useState(true);
   const [intelligenceData, setIntelligenceData] = useState<IntelligenceResult | null>(null);
@@ -929,14 +930,15 @@ export function CatchmentMapPanel({
     try {
       const result = await apiRequest<ExtractResult>("POST", "/api/catchments/extract", {
         geojson: { type: "Polygon", coordinates: [toGeoRing(catchment.coords)] },
-        bufferMeters: 500,
+        bufferKm: extractBufferKm,
+        bufferMeters: Math.round(extractBufferKm * 1000),
         includeOsm: true,
       });
       setExtractResult(result);
       const total = result.counts.villages + result.counts.settlements + result.counts.unmapped;
       toast({
         title: `${total} community places extracted`,
-        description: `${result.counts.villages} registered - ${result.counts.settlements} settlements - ${result.counts.unmapped} OSM places`,
+        description: `${result.counts.villages} registered - ${result.counts.settlements} settlements - ${result.counts.unmapped} OSM places (Buffer: ${extractBufferKm}km)`,
       });
       if (onExtractedCommunities) {
         onExtractedCommunities([
@@ -1081,9 +1083,28 @@ export function CatchmentMapPanel({
           </>
         )}
 
+        <div className="flex items-center gap-1.5 border rounded-md px-2 py-1 bg-background text-xs">
+          <span className="text-[11px] font-medium text-muted-foreground whitespace-nowrap">Buffer:</span>
+          <select
+            value={extractBufferKm}
+            onChange={(e) => setExtractBufferKm(parseFloat(e.target.value))}
+            className="text-xs bg-transparent border-none focus:ring-0 p-0 text-foreground font-semibold cursor-pointer"
+            title="Catchment extraction buffer radius"
+          >
+            <option value={0.5}>0.5 km (High Density)</option>
+            <option value={1.5}>1.5 km (Urban Clinic)</option>
+            <option value={3.0}>3.0 km (Urban Core)</option>
+            <option value={5.0}>5.0 km (Peri-Urban / Fixed)</option>
+            <option value={10.0}>10.0 km (Rural / Outreach)</option>
+            <option value={15.0}>15.0 km (Outreach Max)</option>
+            <option value={20.0}>20.0 km (Remote / Mobile)</option>
+            <option value={25.0}>25.0 km (Ceiling)</option>
+          </select>
+        </div>
         <button type="button" disabled={!catchment || extracting} onClick={extractCommunities}
-          className="rounded-md border border-sky-300 bg-sky-50 px-2.5 py-1 text-xs font-medium text-sky-700 hover:bg-sky-100 disabled:opacity-50">
-          {extracting ? " Extracting..." : " Extract Communities"}
+          className="rounded-md border border-sky-300 bg-sky-50 px-2.5 py-1 text-xs font-medium text-sky-700 hover:bg-sky-100 disabled:opacity-50"
+          title={`Extract communities within catchment + ${extractBufferKm}km buffer`}>
+          {extracting ? " Extracting..." : ` Extract Communities (${extractBufferKm}km)`}
         </button>
         <button type="button" onClick={saveAll} disabled={saving}
           className="rounded-md bg-emerald-600 px-3 py-1.5 text-white text-xs font-medium hover:bg-emerald-700 disabled:opacity-50">

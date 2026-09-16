@@ -24,6 +24,23 @@ export type VersionEvent =
   | "restored"
   | "rebaseline";
 
+export function getSubmissionSnapshot(microplan: { staffing?: unknown }): any | null {
+  if (!microplan.staffing || typeof microplan.staffing !== "object" || Array.isArray(microplan.staffing)) {
+    return null;
+  }
+  return (microplan.staffing as any).submissionSnapshot ?? null;
+}
+
+export function selectVersionCommunities(
+  microplan: { status?: string | null; staffing?: unknown },
+  liveCommunities: any[],
+): any[] {
+  const submitted = getSubmissionSnapshot(microplan);
+  return microplan.status !== "draft" && Array.isArray(submitted?.communities)
+    ? submitted.communities
+    : liveCommunities;
+}
+
 export async function buildMicroplanSnapshot(db: NodePgDatabase<any>, tenantId: string, microplanId: number) {
   const [microplan] = await db.select().from(microplans)
     .where(and(eq(microplans.tenantId, tenantId), eq(microplans.id, microplanId))).limit(1);
@@ -35,9 +52,14 @@ export async function buildMicroplanSnapshot(db: NodePgDatabase<any>, tenantId: 
   const linkedVillages = sessionIds.length
     ? await db.select().from(sessionVillages).where(and(eq(sessionVillages.tenantId, tenantId), inArray(sessionVillages.sessionId, sessionIds)))
     : [];
-  const communities = microplan.facilityId
+  const submittedSnapshot = getSubmissionSnapshot(microplan);
+  // Once submitted, a plan version must describe what the author submitted,
+  // not whatever happens to be in the facility registry at review time. The
+  // catchment may legitimately gain or lose communities after submission.
+  const liveCommunities = microplan.facilityId
     ? await db.select().from(villages).where(and(eq(villages.tenantId, tenantId), eq(villages.assignedFacilityId, microplan.facilityId)))
     : [];
+  const communities = selectVersionCommunities(microplan, liveCommunities);
   const staff = microplan.facilityId
     ? await db.select().from(facilityStaff).where(and(eq(facilityStaff.tenantId, tenantId), eq(facilityStaff.facilityId, microplan.facilityId)))
     : [];
@@ -67,6 +89,7 @@ export async function buildMicroplanSnapshot(db: NodePgDatabase<any>, tenantId: 
     vaccineRequirements: vaccines,
     mobilizationActivities: mobilization,
     budgetItems: budget,
+    submissionSnapshot: submittedSnapshot,
   };
 }
 

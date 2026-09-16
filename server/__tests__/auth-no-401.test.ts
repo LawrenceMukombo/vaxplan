@@ -21,7 +21,7 @@
  * downstream of `isAuthenticated`, this test catches it before merge.
  *
  * Requires a Postgres test DB with at least one tenant seeded
- * (TEST_DATABASE_URL or DATABASE_URL).
+ * (`TEST_DATABASE_URL` only; the application database is never reused).
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import express, { type Express } from "express";
@@ -212,6 +212,7 @@ describe("authenticated users never see 401 on core read/write endpoints", () =>
               `is rejecting a valid session after isAuthenticated passed. ` +
               `Body=${res.text}`,
           ).not.toBe(401);
+          expect(res.status, `GET ${path} unexpectedly failed: ${res.text}`).toBeLessThan(500);
         });
       }
 
@@ -229,6 +230,7 @@ describe("authenticated users never see 401 on core read/write endpoints", () =>
               `downstream of isAuthenticated). 400/403/409 are all fine; only ` +
               `401 fails this test. Body=${res.text}`,
           ).not.toBe(401);
+          expect(res.status, `POST ${path} unexpectedly failed: ${res.text}`).toBeLessThan(500);
         });
       }
     });

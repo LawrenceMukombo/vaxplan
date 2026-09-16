@@ -27,6 +27,8 @@ import { apiRequest } from "@/lib/queryClient";
 import { offlineDb, getCachedGisData, setCachedGisData } from "@/lib/offlineDb";
 import { loadActiveTenant } from "@/lib/tenantCache";
 import { getTenantMapDefaults, getTenantMaxBounds } from "@/lib/tenantGeo";
+import { buildBoundaryPopupInfoHtml } from "@/lib/boundaryPopupHtml";
+import { buildPointSessionPrefill, findFacilityDraftMicroplan } from "@/lib/mapGapPlanning";
 import { useIsMobile } from "@/hooks/use-mobile";
 import {
   Drawer,
@@ -435,7 +437,7 @@ const outreachPostIcon = L.divIcon({
         </defs>
         <path d="M12 0C5.37 0 0 5.37 0 12c0 9.3 12 22 12 22s12-12.7 12-22c0-6.63-5.37-12-12-12z" fill="url(#outreachGradMap)" stroke="#ffffff" stroke-width="1.8"/>
         <circle cx="12" cy="11" r="5" fill="#ffffff"/>
-        <circle cx="12" cy="11" r="2.8" fill="#a855f7" class="outreach-pin-dot"/>
+        <path d="M12 7.5v7M8.5 11h7" stroke="#a855f7" stroke-width="2.4" stroke-linecap="round"/>
       </svg>
     </div>
   `,
@@ -444,6 +446,27 @@ const outreachPostIcon = L.divIcon({
   iconAnchor: [16, 36],
   popupAnchor: [0, -36],
 });
+
+// Scheduled sessions are events, not communities. Give them a large calendar
+// badge and halo so they remain legible above facilities and boundary clutter.
+const createSessionEventIcon = (session: any) => {
+  const lifecycle = deriveSessionLifecycle(session);
+  const color = lifecycle.isOverdue
+    ? "#e11d48"
+    : lifecycle.phase === "reported" || lifecycle.phase === "archived"
+      ? "#059669"
+      : lifecycle.phase === "in_progress"
+        ? "#d97706"
+        : "#1d4ed8";
+  const label = lifecycle.isOverdue ? "!" : lifecycle.phase === "reported" || lifecycle.phase === "archived" ? "✓" : "▦";
+  return L.divIcon({
+    html: `<div aria-label="Scheduled session" style="width:38px;height:38px;border-radius:12px;background:${color};border:3px solid white;box-shadow:0 0 0 5px ${color}38,0 4px 14px rgba(15,23,42,.45);display:flex;align-items:center;justify-content:center;color:white;font-size:20px;font-weight:900;line-height:1">${label}</div>`,
+    className: "session-event-map-icon",
+    iconSize: [38, 38],
+    iconAnchor: [19, 19],
+    popupAnchor: [0, -23],
+  });
+};
 
 // Custom blue pin icon for reporting facilities in surveillance mode
 const reportingFacilitySvg = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="35" viewBox="0 0 24 35" fill="none">` +
@@ -720,22 +743,24 @@ function MapLegend({
   const items = [
     // Updated Code: facilityCount is now shown alongside the Health Facility legend item.
     // It reflects the currently-filtered facility count (province/district/search aware).
-    { key: "facility", label: "Health Facility", color: "bg-blue-500", count: facilityCount ?? null },
-    { key: "planned", label: "Planned Community", color: "bg-emerald-500", count: planningStats.planned },
-    // Session plan pins on the live map (Task #47). Status-driven styling.
-    { key: "sessionPlanned", label: "Session • Planned", color: "bg-blue-600", count: (planningStats as any).sessionPlanned ?? 0 },
-    { key: "sessionInProgress", label: "Session • In Progress", color: "bg-amber-500", count: (planningStats as any).sessionInProgress ?? 0 },
-    { key: "sessionOverdue", label: "Session • Overdue", color: "bg-rose-500", count: (planningStats as any).sessionOverdue ?? 0 },
-    { key: "sessionCompleted", label: "Session • Completed", color: "bg-emerald-600", count: (planningStats as any).sessionCompleted ?? 0 },
+    { key: "facility", label: "Health Facility", color: "bg-blue-500", symbol: "+", count: facilityCount ?? null },
+    { key: "planned", label: "Community linked to plan", color: "bg-emerald-500", symbol: "●", count: planningStats.planned },
+    // A session is a dated service event; it is deliberately distinct from a
+    // community that has merely been included in a microplan.
+    { key: "sessionPlanned", label: "Scheduled session (event)", color: "bg-blue-700", symbol: "▦", count: (planningStats as any).sessionPlanned ?? 0 },
+    { key: "sessionInProgress", label: "Session • In Progress", color: "bg-amber-500", symbol: "▦", count: (planningStats as any).sessionInProgress ?? 0 },
+    { key: "sessionOverdue", label: "Session • Overdue", color: "bg-rose-500", symbol: "!", count: (planningStats as any).sessionOverdue ?? 0 },
+    { key: "sessionCompleted", label: "Session • Completed", color: "bg-emerald-600", symbol: "✓", count: (planningStats as any).sessionCompleted ?? 0 },
+    { key: "outreachPost", label: "Outreach post (physical site)", color: "bg-purple-600", symbol: "✚", count: (planningStats as any).outreachPosts ?? 0 },
     ...(collisionCount > 0
-      ? [{ key: "collision", label: "Polygon Collision", color: "bg-rose-600", count: collisionCount }]
+      ? [{ key: "collision", label: "Polygon Collision", color: "bg-rose-600", symbol: "!", count: collisionCount }]
       : []),
-    { key: "unserved", label: "Unserved Place", color: "bg-red-600", count: (planningStats as any).unserved ?? 0 },
+    { key: "unserved", label: "Unserved Place", color: "bg-red-600", symbol: "○", count: (planningStats as any).unserved ?? 0 },
   ];
 
   return (
     <div className={`absolute ${leftOffset ? "left-72" : "left-4"} bottom-4 z-[1000] transition-all duration-300`} ref={disableLeafletPropagation}>
-      <Card className="w-56 shadow-2xl border border-white/15 bg-background/85 backdrop-blur-md rounded-xl select-none pointer-events-auto max-h-[calc(100vh-140px)] flex flex-col">
+      <Card className="w-72 shadow-2xl border border-white/15 bg-background/85 backdrop-blur-md rounded-xl select-none pointer-events-auto max-h-[calc(100vh-140px)] flex flex-col">
         <CardHeader className="p-3 pb-1.5 flex flex-row items-center justify-between border-b border-border/40 shrink-0">
           <CardTitle className="text-[10px] font-bold text-primary uppercase tracking-wider flex items-center gap-1.5">
             <SlidersHorizontal className="h-3 w-3" />
@@ -764,7 +789,7 @@ function MapLegend({
                   }`}
                 >
                   <div className="flex items-center gap-2 min-w-0">
-                    <div className={`w-2.5 h-2.5 rounded-full ${item.color} shadow-sm shrink-0`} />
+                    <div className={`flex h-4 w-4 shrink-0 items-center justify-center rounded ${item.color} text-[10px] font-black leading-none text-white shadow-sm`}>{item.symbol}</div>
                     <span className="text-xs font-semibold truncate">{item.label}</span>
                   </div>
                   <div className="flex items-center gap-1.5 shrink-0">
@@ -2984,6 +3009,40 @@ export function MapView({
     enabled: mode === "planning" && !!tenantInfo?.id,
   });
 
+  const planSessionFromIntelligence = useCallback((radiusKm: number) => {
+    if (!intelligencePoint || !mapClickDetails?.nearestFacility) return;
+    const facility = mapClickDetails.nearestFacility;
+    const now = new Date();
+    const year = now.getFullYear();
+    const quarter = Math.floor(now.getMonth() / 3) + 1;
+    const label = `Mapped service gap (${radiusKm} km extent)`;
+    const prefill = buildPointSessionPrefill(intelligencePoint, label);
+    prefill.set("facilityId", String(facility.id));
+    const existing = findFacilityDraftMicroplan(masterMicroplans, facility.id, year, quarter);
+    setIntelligencePoint(null);
+    if (existing) {
+      setLocation(`/sessions/microplan/${existing.id}?${prefill.toString()}`);
+      return;
+    }
+    const wizard = new URLSearchParams({
+      facilityId: String(facility.id),
+      returnPoint: "1",
+      returnVillageName: label,
+      returnVillageLat: String(intelligencePoint.lat),
+      returnVillageLng: String(intelligencePoint.lng),
+      returnVillageHtr: mapClickDetails.isHTR ? "1" : "0",
+    });
+    setLocation(`/microplan/new?${wizard.toString()}`);
+  }, [intelligencePoint, mapClickDetails, masterMicroplans, setLocation]);
+
+  const openNearestSessionFromIntelligence = useCallback(() => {
+    const nearest = mapClickDetails?.nearestPlan;
+    if (!nearest) return;
+    setIntelligencePoint(null);
+    const microplanId = nearest.raw?.microplanId;
+    setLocation(microplanId ? `/sessions/microplan/${microplanId}` : "/sessions");
+  }, [mapClickDetails, setLocation]);
+
   // Fetch GRID3 Settlement Extents GeoJSON footprints — with IndexedDB persistent caching.
   // On first load the 18.4 MB file is downloaded once and stored in Dexie gisCache.
   // All subsequent layer toggles and page reloads serve the data instantly from IndexedDB (< 50 ms),
@@ -3108,9 +3167,10 @@ export function MapView({
 
   const mapFeatureLayers = useMemo(() => {
     const activeLayers = ["facilities"];
-    if ((layers.villages && !hiddenCategories.has("villages")) || layers.outreachPosts) {
+    if (layers.villages && !hiddenCategories.has("villages")) {
       activeLayers.push("communities");
     }
+    if (layers.outreachPosts) activeLayers.push("outreach");
     return activeLayers.join(",");
   }, [hiddenCategories, layers.villages, layers.outreachPosts]);
 
@@ -3121,7 +3181,7 @@ export function MapView({
     !!tenantInfo?.id &&
     !!viewportBbox;
 
-  const { data: mapFeaturePayload } = useQuery<{ facilities?: Facility[]; villages?: Village[]; meta?: any }>({
+  const { data: mapFeaturePayload } = useQuery<{ facilities?: Facility[]; villages?: Village[]; outreachPosts?: Village[]; meta?: any }>({
     queryKey: [
       "/api/map/features",
       tenantInfo?.id,
@@ -3144,7 +3204,9 @@ export function MapView({
       if (viewportBbox) params.set("bbox", viewportBbox.bbox);
       params.set("zoom", String(currentZoom));
       params.set("layers", mapFeatureLayers);
-      params.set("limitFacilities", "2500");
+      // National facility registries are clustered on the map; request the full
+      // tenant inventory instead of silently clipping large countries at 2,500.
+      params.set("limitFacilities", "50000");
       params.set("limitCommunities", selectedFacilityId ? "5000" : "1200");
       if (selectedProvinceId !== "all") params.set("provinceId", String(selectedProvinceId));
       if (selectedDistrictId !== "all") params.set("districtId", String(selectedDistrictId));
@@ -3159,6 +3221,7 @@ export function MapView({
 
   facilities = mapFeaturePayload?.facilities ?? inputFacilities;
   villages = mapFeaturePayload?.villages ?? inputVillages;
+  const mapOutreachPosts: Village[] = mapFeaturePayload?.outreachPosts ?? [];
 
   // Unified panel visibility for the floating map "dock". On phones every panel
   // starts hidden so the map fills the screen; users reveal a panel by tapping
@@ -4112,10 +4175,12 @@ export function MapView({
   // Filtered outreach posts independent of community layer toggle
   const filteredOutreachPosts = useMemo(() => {
     if (mode === "surveillance") return [];
-    return filteredVillages.filter(
+    const candidates = [...villages, ...mapOutreachPosts];
+    const unique = Array.from(new Map(candidates.map((v) => [v.id, v])).values());
+    return unique.filter(
       (v) => v.latitude && v.longitude && v.outreachLatitude && v.outreachLongitude
     );
-  }, [filteredVillages, mode]);
+  }, [villages, mapOutreachPosts, mode]);
 
   const filteredUnservedPlaces = useMemo(() => {
     if (mode === "surveillance") return [];
@@ -4277,15 +4342,15 @@ export function MapView({
     let sessionOverdue = 0;
     for (const s of sessionMapPins as any[]) {
       const lc = deriveSessionLifecycle(s);
-      if (lc.phase === "reported" || lc.phase === "archived") sessionCompleted++;
+      if (lc.isOverdue) sessionOverdue++;
+      else if (lc.phase === "reported" || lc.phase === "archived") sessionCompleted++;
       else if (lc.phase === "in_progress") sessionInProgress++;
       else sessionPlanned++;
-      if (lc.isOverdue) sessionOverdue++;
     }
     const unserved = filteredUnservedPlaces.length;
 
-    return { planned, missingStandard, missingHtr, total, coverage, sessionPlanned, sessionInProgress, sessionCompleted, sessionOverdue, unserved };
-  }, [filteredVillages, plannedVillageIds, sessionMapPins, filteredUnservedPlaces]);
+    return { planned, missingStandard, missingHtr, total, coverage, sessionPlanned, sessionInProgress, sessionCompleted, sessionOverdue, outreachPosts: filteredOutreachPosts.length, unserved };
+  }, [filteredVillages, plannedVillageIds, sessionMapPins, filteredOutreachPosts, filteredUnservedPlaces]);
 
   /* Original visibleVillagesFiltered logic commented out to preserve backward compatibility and adhere to coding rules:
   const visibleVillagesFiltered = useMemo(() => {
@@ -4638,8 +4703,10 @@ export function MapView({
     if (!sessionMapPins || sessionMapPins.length === 0) return [];
 
     const statusFiltered = sessionMapPins.filter((s: any) => {
-      if (s.status === "completed") return !hiddenCategories.has("sessionCompleted");
-      if (s.status === "in_progress" || s.status === "in-progress") return !hiddenCategories.has("sessionInProgress");
+      const lifecycle = deriveSessionLifecycle(s);
+      if (lifecycle.isOverdue) return !hiddenCategories.has("sessionOverdue");
+      if (lifecycle.phase === "reported" || lifecycle.phase === "archived") return !hiddenCategories.has("sessionCompleted");
+      if (lifecycle.phase === "in_progress") return !hiddenCategories.has("sessionInProgress");
       return !hiddenCategories.has("sessionPlanned");
     });
 
@@ -5971,32 +6038,18 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
     const nearestFacility = facilitiesWithDist[0] || null;
     const nearbyFacilities = facilitiesWithDist.slice(0, 3);
 
-    // 4. Find nearest planned sessions (up to 3, within 10km)
+    // 4. Find nearest geographically resolvable sessions. Use the session's
+    // own geometry first, then linked communities, then its parent facility.
+    // The intelligence drawer compares these distances with the user-selected
+    // extent; do not pre-filter here or it cannot explain the nearest service
+    // that sits just outside that extent.
     const plansWithDist = activeSessionPlans
       .map((plan: any) => {
-        let planLat = 0;
-        let planLng = 0;
-        let count = 0;
-
-        const linkedVillageIds = sessionVillages
-          ?.filter((sv: any) => sv.sessionId === plan.id)
-          ?.map((sv: any) => sv.villageId) || [];
-
-        villages.forEach((v) => {
-          if (linkedVillageIds.includes(v.id) && v.latitude && v.longitude) {
-            planLat += Number(v.latitude);
-            planLng += Number(v.longitude);
-            count++;
-          }
-        });
-
-        if (count > 0) {
-          const avgLat = planLat / count;
-          const avgLng = planLng / count;
-          const dist = distance([lng, lat], [avgLng, avgLat], { units: "kilometers" });
-          return { plan, distance: dist };
-        }
-        return null;
+        const centroid = getSessionCentroid(plan);
+        if (!centroid) return null;
+        const [planLat, planLng] = centroid;
+        const dist = distance([lng, lat], [planLng, planLat], { units: "kilometers" });
+        return { plan, distance: dist };
       })
       .filter((x): x is { plan: any; distance: number } => x !== null)
       .sort((a, b) => a.distance - b.distance);
@@ -7496,75 +7549,7 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
                           container.insertBefore(infoDiv, buttonsDiv);
                         }
 
-                        infoDiv.innerHTML = `
-                          <div class="space-y-2 text-[11px] leading-snug">
-                            <div class="bg-primary/5 border border-primary/10 rounded p-1.5 space-y-0.5">
-                              <div class="flex justify-between items-center text-[9px] text-muted-foreground">
-                                <span>CLICK COORDINATES</span>
-                                <span class="font-mono">${lat.toFixed(5)}, ${lng.toFixed(5)}</span>
-                              </div>
-                              ${ctx.polygonName ? `
-                              <div class="text-[10px] font-bold text-primary flex justify-between items-center gap-1.5 mt-0.5">
-                                <span class="truncate">${ctx.polygonName}</span>
-                                ${ctx.polygonPopulation ? `<span class="text-emerald-600 font-bold shrink-0">~ ${ctx.polygonPopulation.toLocaleString()} pop</span>` : ""}
-                              </div>
-                              ` : ""}
-                            </div>
-
-                            <div class="space-y-1">
-                              <span class="font-bold text-[9px] text-muted-foreground uppercase block">Aggressive Gridded Population</span>
-                              <div class="grid grid-cols-3 gap-1 text-center font-mono text-[10px]">
-                                <div class="bg-muted p-1 rounded">
-                                  <span class="text-[8px] text-muted-foreground block">1km</span>
-                                  <strong class="text-xs text-foreground pop-1k-val">${ctx.pop1k.toLocaleString()}</strong>
-                                </div>
-                                <div class="bg-muted p-1 rounded">
-                                  <span class="text-[8px] text-muted-foreground block">2km</span>
-                                  <strong class="text-xs text-foreground pop-2k-val">${ctx.pop2k.toLocaleString()}</strong>
-                                </div>
-                                <div class="bg-muted p-1 rounded">
-                                  <span class="text-[8px] text-muted-foreground block">3km</span>
-                                  <strong class="text-xs text-foreground pop-3k-val">${ctx.pop3k.toLocaleString()}</strong>
-                                </div>
-                              </div>
-                            </div>
-
-                            <div class="space-y-1">
-                              <span class="font-bold text-[9px] text-muted-foreground uppercase block">Catchment Proximity</span>
-                              <div class="space-y-1 text-[10px]">
-                                <div class="flex justify-between items-center bg-muted/40 p-1 rounded px-1.5">
-                                  <span class="text-muted-foreground truncate max-w-[150px]">HF: ${ctx.nearestFacility?.name || "None"}</span>
-                                  <span class="font-mono font-bold shrink-0">${ctx.nearestFacility ? `${ctx.nearestFacility.distance}km` : "—"}</span>
-                                </div>
-                                <div class="flex justify-between items-center bg-muted/40 p-1 rounded px-1.5">
-                                  <span class="text-muted-foreground truncate max-w-[150px]">Session: ${ctx.nearestPlan?.name || "None"}</span>
-                                  <span class="font-mono font-bold shrink-0">${ctx.nearestPlan ? `${ctx.nearestPlan.distance}km` : "—"}</span>
-                                </div>
-                              </div>
-                            </div>
-
-                            <div class="space-y-1">
-                              <span class="font-bold text-[9px] text-muted-foreground uppercase block">Nearby Communities</span>
-                              <div class="space-y-1 max-h-[70px] overflow-y-auto">
-                                ${ctx.nearbyVillages.length > 0 ? ctx.nearbyVillages.map(nv => `
-                                  <div class="flex justify-between items-center text-[10px] border-b border-border/40 pb-0.5 last:border-0">
-                                    <span class="truncate max-w-[110px] ${nv.isHardToReach ? 'text-amber-600 font-medium' : 'text-foreground'}">
-                                      ${nv.name} ${nv.isHardToReach ? '(HTR)' : ''}
-                                    </span>
-                                    <span class="text-muted-foreground font-mono shrink-0">${nv.population} pop (${nv.distance}km)</span>
-                                  </div>
-                                `).join("") : `<p class="text-[9px] italic text-muted-foreground">No villages within 10km</p>`}
-                              </div>
-                            </div>
-
-                            ${ctx.isHTR ? `
-                            <div class="bg-amber-500/10 border border-amber-500/20 text-amber-700 rounded p-1.5 text-[9px] flex items-start gap-1 font-medium">
-                              <span>!</span>
-                              <span>Hard-to-Reach (HTR) designated zone.</span>
-                            </div>
-                            ` : ""}
-                          </div>
-                        `;
+                        infoDiv.innerHTML = buildBoundaryPopupInfoHtml(ctx, lat, lng);
 
                         layer.setPopupContent(container);
 
@@ -8067,7 +8052,7 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
         )}
 
         {/* Render outreach posts and connecting dashed lines for villages that have them */}
-        {layers.outreachPosts &&
+        {layers.outreachPosts && !hiddenCategories.has("outreachPost") &&
           filteredOutreachPosts.map((village) => {
             const villagePos: [number, number] = [Number(village.latitude), Number(village.longitude)];
             const outreachPos: [number, number] = [Number(village.outreachLatitude), Number(village.outreachLongitude)];
@@ -8084,8 +8069,8 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
                     position={outreachPos}
                     icon={outreachPostIcon}
                   >
-                    <Tooltip permanent={false} direction="top" className="map-outreach-label">
-                      {village.outreachPostName || "Outreach Post"} ({village.name})
+                    <Tooltip permanent={currentZoom >= 11} direction="top" className="map-outreach-label">
+                      ✚ {village.outreachPostName || "Outreach Post"} · serves {village.name}
                     </Tooltip>
                     <Popup className="premium-map-popup">
                       <div className="w-60 p-3 font-sans text-xs select-none">
@@ -8258,19 +8243,22 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
 
         {/* Updated Code: Render visibleSessionMapPins (which are already bounds-pruned and status-filtered in a memoized hook) */}
         {mode === "planning" && visibleSessionMapPins.map((s: any) => {
-          const color = s.status === "completed" ? "#059669" : (s.status === "in_progress" || s.status === "in-progress") ? "#f59e0b" : "#2563eb";
+          const lifecycle = deriveSessionLifecycle(s);
           return (
-            <CircleMarker
+            <Marker
               key={`session-pin-${s.id}`}
-              center={[Number(s.lat), Number(s.lng)]}
-              radius={9}
-              pathOptions={{ color, fillColor: color, fillOpacity: 0.55, weight: 2 }}
+              position={[Number(s.lat), Number(s.lng)]}
+              icon={createSessionEventIcon(s)}
+              zIndexOffset={1200}
             >
+              <Tooltip direction="top" offset={[0, -20]}>
+                <strong>Scheduled session:</strong> {s.name}
+              </Tooltip>
               <Popup className="premium-map-popup">
                 <div className="w-56 text-xs font-sans">
-                  <div className="font-bold text-sm mb-1.5">{s.name}</div>
+                  <div className="font-bold text-sm mb-1.5">Scheduled session: {s.name}</div>
                   <div className="space-y-0.5 text-foreground/80">
-                    <div><span className="text-muted-foreground">Status:</span> <span className="font-semibold capitalize">{String(s.status || "planned").replace("_", " ")}</span></div>
+                    <div><span className="text-muted-foreground">Event status:</span> <span className="font-semibold capitalize">{lifecycle.isOverdue ? "overdue" : String(s.status || "planned").replace("_", " ")}</span></div>
                     {s.scheduledDate && <div><span className="text-muted-foreground">Scheduled:</span> {new Date(s.scheduledDate).toLocaleDateString()}</div>}
                     {s.completedAt && <div><span className="text-muted-foreground">Completed:</span> {new Date(s.completedAt).toLocaleDateString()}</div>}
                     <div><span className="text-muted-foreground">Target pop:</span> {s.targetPopulation ?? "—"}</div>
@@ -8304,7 +8292,7 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
                   </Button>
                 </div>
               </Popup>
-            </CircleMarker>
+            </Marker>
           );
         })}
 
@@ -8366,13 +8354,13 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
                   className="w-full h-7 text-[11px] font-semibold bg-red-600 hover:bg-red-700 text-white"
                   onClick={() => {
                     const qs = new URLSearchParams({
-                      unservedVillageId: String(p.id),
                       unservedName: p.name ?? "",
                       unservedLat: String(p.latitude),
                       unservedLng: String(p.longitude),
                       unservedHtr: p.isHardToReach ? "1" : "0",
                       autoOpen: "1",
                     });
+                    if (p.villageId != null) qs.set("unservedVillageId", String(p.villageId));
                     window.location.assign(`/sessions?${qs.toString()}`);
                   }}
                   data-testid={`button-plan-session-here-${p.id}`}
@@ -11588,7 +11576,13 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
           </DialogFooter>
         </DialogContent>
       </Dialog>
-      <LocationIntelligenceDrawer point={intelligencePoint} context={mapClickDetails} onClose={() => setIntelligencePoint(null)} />
+      <LocationIntelligenceDrawer
+        point={intelligencePoint}
+        context={mapClickDetails}
+        onClose={() => setIntelligencePoint(null)}
+        onPlanSession={planSessionFromIntelligence}
+        onOpenNearestSession={openNearestSessionFromIntelligence}
+      />
     </div>
   );
 }

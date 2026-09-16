@@ -25,6 +25,12 @@ import {
 } from "./offlineDb";
 import { onNetworkChange, isOnline } from "./platformNetwork";
 import { clearClientAuthStorage, broadcastLogout } from "./authSession";
+import {
+  isMisroutedVaccinationOutboxItem,
+  isObsoleteOfflineTelemetryItem,
+  OUTBOX_TELEMETRY_CLEANUP_VERSION,
+  VACCINATION_ROUTE_REPAIR_VERSION,
+} from "./offlineOutboxRepair";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -191,6 +197,44 @@ class SyncEngine {
     }
     await offlineDb.syncMeta.put({ key: "syncedTenantId", value: tenantId });
 
+    // One-time recovery for vaccination rows that the old broad
+    // /api/clients dispatcher sent to createClient until they exhausted their
+    // retry budget.  Limit this migration to the exact affected URL shape.
+    const repairKey = `outboxRepair:${VACCINATION_ROUTE_REPAIR_VERSION}:${tenantId}`;
+    if (!(await offlineDb.syncMeta.get(repairKey))) {
+      const poisoned = await offlineDb.outbox
+        .where("tenantId")
+        .equals(tenantId)
+        .filter(isMisroutedVaccinationOutboxItem)
+        .toArray();
+      await offlineDb.transaction("rw", offlineDb.outbox, offlineDb.syncMeta, async () => {
+        for (const item of poisoned) {
+          if (item.id !== undefined) {
+            await offlineDb.outbox.update(item.id, { retries: 0, lastError: undefined });
+          }
+        }
+        await offlineDb.syncMeta.put({ key: repairKey, value: new Date().toISOString() });
+      });
+    }
+
+    // Remove legacy best-effort version events that were incorrectly queued as
+    // plan mutations. This never removes the actual microplan or any plan edit.
+    const telemetryCleanupKey = `outboxRepair:${OUTBOX_TELEMETRY_CLEANUP_VERSION}:${tenantId}`;
+    if (!(await offlineDb.syncMeta.get(telemetryCleanupKey))) {
+      const obsoleteIds = (await offlineDb.outbox
+        .where("tenantId")
+        .equals(tenantId)
+        .filter(isObsoleteOfflineTelemetryItem)
+        .primaryKeys()) as number[];
+      await offlineDb.transaction("rw", offlineDb.outbox, offlineDb.syncMeta, async () => {
+        if (obsoleteIds.length > 0) await offlineDb.outbox.bulkDelete(obsoleteIds);
+        await offlineDb.syncMeta.put({
+          key: telemetryCleanupKey,
+          value: JSON.stringify({ cleanedAt: new Date().toISOString(), removed: obsoleteIds.length }),
+        });
+      });
+    }
+
     // Load persisted last-sync time
     const lastSyncAt = await getLastSyncAt();
     const { pendingCount, stuckCount } = await this._countOutbox(tenantId);
@@ -264,6 +308,25 @@ class SyncEngine {
     }
 
     try {
+      // Enforce cleanup at flush time too. This covers already-open/HMR tabs
+      // whose init guard ran before the repair code was loaded, so clicking
+      // the failed badge immediately removes poison telemetry instead of
+      // granting it another five futile attempts.
+      const obsoleteTelemetryIds = (await offlineDb.outbox
+        .where("tenantId")
+        .equals(tenantId)
+        .filter(isObsoleteOfflineTelemetryItem)
+        .primaryKeys()) as number[];
+      if (obsoleteTelemetryIds.length > 0) {
+        await offlineDb.outbox.bulkDelete(obsoleteTelemetryIds);
+        const counts = await this._countOutbox(tenantId);
+        this.setState({
+          ...counts,
+          currentStage: `Removed ${obsoleteTelemetryIds.length} obsolete audit event(s).`,
+          progressPercent: 10,
+        });
+      }
+
       // On a manual Sync Now, reset stuck items so they get another attempt
       // instead of being silently skipped. Background/silent syncs leave them
       // alone to avoid flooding a persistently-failing endpoint.

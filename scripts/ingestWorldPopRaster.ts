@@ -8,6 +8,11 @@
  * tile-by-tile so the full image is never materialised in memory, and inserts
  * rows in batched multi-row INSERTs for throughput.
  */
+try {
+  // @ts-ignore
+  process.loadEnvFile?.();
+} catch {}
+
 // NOTE: geotiff is an optional CLI-only dependency installed in node_modules but lacks
 // official @types. The @ts-ignore below suppresses TS7016 (implicit any) at the import.
 // Install with: npm install geotiff
@@ -34,7 +39,7 @@ export interface IngestWorldPopOptions {
   batchSize?: number;
   /** Fraction of population that is under-5. Default 0.16. */
   under5Fraction?: number;
-  /** If true (default), delete the tenant's existing population_grids first. */
+  /** If true, delete the tenant's existing population_grids first. Default false to protect existing data. */
   truncateExisting?: boolean;
   /** Optional progress callback fired roughly every `progressEvery` tiles. */
   onProgress?: (info: {
@@ -100,7 +105,7 @@ export async function ingestWorldPopRaster(
     minPopulation = 10,
     batchSize = 500,
     under5Fraction = 0.16,
-    truncateExisting = true,
+    truncateExisting = false,
     onProgress,
     progressEvery = 50,
   } = opts;

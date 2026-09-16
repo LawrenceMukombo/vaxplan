@@ -19,6 +19,68 @@ export interface IntelligenceResult {
   discrepancyMessage: string;
 }
 
+export interface LocalRadiusPopulation {
+  totalPopulation: number;
+  under5Population: number;
+  coverageRatio: number;
+}
+
+/**
+ * Estimate population inside an actual radius, rather than summing every grid
+ * polygon that merely touches it. Partial cells are prorated by intersected
+ * area. When local cells cover only part of the circle, their observed density
+ * is extrapolated across the requested area instead of returning the same cell
+ * total for every radius.
+ */
+export async function fetchLocalRadiusPopulation(
+  tenantId: string,
+  lat: number,
+  lng: number,
+  radiusKm: number,
+): Promise<LocalRadiusPopulation> {
+  const result = await pool.query(
+    `WITH params AS (
+       SELECT ST_Buffer(
+         ST_SetSRID(ST_MakePoint($2, $3), 4326)::geography,
+         $4 * 1000
+       )::geometry AS circle
+     ), clipped AS (
+       SELECT
+         pg.population_total,
+         pg.under5_population,
+         ST_MakeValid(pg.geometry) AS cell,
+         ST_Intersection(ST_MakeValid(pg.geometry), params.circle) AS overlap,
+         params.circle
+       FROM population_grids pg
+       CROSS JOIN params
+       WHERE pg.tenant_id = $1
+         AND pg.geometry IS NOT NULL
+         AND ST_Intersects(ST_MakeValid(pg.geometry), params.circle)
+     ), measured AS (
+       SELECT
+         COALESCE(SUM(population_total * ST_Area(overlap::geography) /
+           NULLIF(ST_Area(cell::geography), 0)), 0) AS weighted_total,
+         COALESCE(SUM(under5_population * ST_Area(overlap::geography) /
+           NULLIF(ST_Area(cell::geography), 0)), 0) AS weighted_under5,
+         COALESCE(ST_Area(ST_Union(overlap)::geography), 0) AS covered_area,
+         COALESCE(MAX(ST_Area(circle::geography)), 0) AS circle_area
+       FROM clipped
+     )
+     SELECT
+       ROUND(weighted_total * GREATEST(1, circle_area / NULLIF(covered_area, 0)))::int AS total,
+       ROUND(weighted_under5 * GREATEST(1, circle_area / NULLIF(covered_area, 0)))::int AS under5,
+       LEAST(1, covered_area / NULLIF(circle_area, 0))::double precision AS coverage_ratio
+     FROM measured`,
+    [tenantId, lng, lat, radiusKm],
+  );
+
+  return {
+    totalPopulation: Number(result.rows[0]?.total) || 0,
+    under5Population: Number(result.rows[0]?.under5) || 0,
+    coverageRatio: Number(result.rows[0]?.coverage_ratio) || 0,
+  };
+}
+
 export const PopulationIntelligenceService = {
   
   /**
@@ -29,27 +91,15 @@ export const PopulationIntelligenceService = {
     
     // 1. Check local grid cache
     try {
-      const localResult = await pool.query(
-        `SELECT COALESCE(SUM(population_total),0)::int AS total,
-                COALESCE(SUM(under5_population),0)::int AS under5
-         FROM population_grids
-         WHERE tenant_id = $1
-           AND geometry IS NOT NULL
-           AND ST_DWithin(
-             geometry::geography,
-             ST_SetSRID(ST_MakePoint($2,$3),4326)::geography,
-             $4 * 1000
-           )`,
-        [tenantId, lng, lat, radiusKm]
-      );
-      const localTotal = localResult.rows[0]?.total ?? 0;
+      const localResult = await fetchLocalRadiusPopulation(tenantId, lat, lng, radiusKm);
+      const localTotal = localResult.totalPopulation;
       if (localTotal > 0) {
         sources.push({
-          source: "Local Grid (Cached)",
+          source: "Local Grid (Area-adjusted)",
           totalPopulation: localTotal,
-          under5Population: localResult.rows[0]?.under5 ?? 0,
-          method: "ST_DWithin Intersection",
-          confidence: "High",
+          under5Population: localResult.under5Population,
+          method: localResult.coverageRatio >= 0.8 ? "Radius-weighted grid intersection" : "Radius-weighted local density estimate",
+          confidence: localResult.coverageRatio >= 0.8 ? "High" : "Moderate",
           year: 2020
         });
       }
@@ -57,8 +107,10 @@ export const PopulationIntelligenceService = {
       console.warn("[PopIntel] local DB query failed:", e);
     }
 
-    // 2. WOPR API (WorldPop)
-    try {
+    // 2. WOPR API (WorldPop). A high-confidence local grid is authoritative for
+    // this interaction; do not add up to five seconds of network latency merely
+    // to obtain a secondary comparison source.
+    if (sources.length === 0) try {
       const woprUrl = `https://hub.worldpop.org/v1/wopr/pointestimate?iso3=${countryCode}&ver=1.0.0&lat=${lat}&lon=${lng}`;
       const woprRes = await fetch(woprUrl, { signal: AbortSignal.timeout(5000) });
       if (woprRes.ok) {

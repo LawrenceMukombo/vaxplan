@@ -1,17 +1,44 @@
 .env
 node_modules/
-# dist/ — included in git for zero-build VPS deployments
+dist/
 electron-dist/
 out/
 *.log
 .local/
 local_dump.sql
 local_dump.sql.zip
+localhost_data.json
 dump.rdb
 zipFile.zip
 attached_assets/
 Resources/
 data/
+scratch/
+outputs/
+advert-output/
+tmp_*/
+*.inspect.ndjson
+*.drawio.bkp
+~$*
+.$*
+
+# Office documents — belong in SharePoint/Confluence, not git
+*.docx
+*.xlsx
+*.xlsm
+*.pptx
+*.pdf
+
+# Backup and one-off patch scripts
+*.backup
+patch_*.cjs
+patch_*.py
+fix-*.cjs
+update_*.cjs
+update_*.py
+/RA/
+/Vietnam/
+/VaxPlan_TerraFrame_Meeting_Deck/
 # Capacitor Android generated project (re-generated from npm run cap:sync)
 android/
 # iOS Capacitor project

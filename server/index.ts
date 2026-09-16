@@ -55,7 +55,15 @@ import { applyClientsColumns } from "./migrations/037-clients-columns";
 import { applyCleanupUppercaseFacilities } from "./migrations/038-cleanup-uppercase-facilities";
 const app = express();
 const httpServer = createServer(app);
-const skipDbBootstrap = process.env.SKIP_DB_BOOTSTRAP === '1';
+// Schema and data migrations are deployment operations, not web-server startup
+// work. Running dozens of them concurrently here can leave an idle transaction
+// holding enough locks to make even authentication queries fail. Opt in only
+// from a controlled migration/deployment process.
+const runDbBootstrap =
+  process.env.RUN_DB_BOOTSTRAP === "1" &&
+  process.env.SKIP_DB_BOOTSTRAP !== "1";
+const skipDbBootstrap = !runDbBootstrap;
+const skipBackgroundJobs = process.env.SKIP_BACKGROUND_JOBS === "1";
 const sessionMiddleware = getSession();
 declare module "http" {
   interface IncomingMessage {
@@ -453,9 +461,8 @@ async function backfillClientIds() {
   applyOutreachColumns()
     .then(() => log("outreach columns migration complete", "db"))
     .catch((err) => log(`outreach columns warning: ${err?.message ?? err}`, "db"));
-  applyMicroplanApprovalColumns()
-    .then(() => log("microplan approval columns migration complete", "db"))
-    .catch((err) => log(`microplan approval columns warning: ${err?.message ?? err}`, "db"));
+  // applyMicroplanApprovalColumns() intentionally omitted here: it already runs
+  // in the controlled bootstrap block before routes are registered.
   applyMinimumPlanDevelopmentDaysMigration()
     .then(() => log("minimum plan development period defaulted to seven days", "db"))
     .catch((err) => log(`minimum plan development period warning: ${err?.message ?? err}`, "db"));
@@ -671,9 +678,7 @@ async function backfillClientIds() {
       log(`population geo-ID backfill warning: ${err?.message ?? err}`, "db");
     }
   }).catch((err) => log(`population geo-ID backfill db import failed: ${err?.message ?? err}`, "db"));
-  const autoUpsertEnabled =
-    process.env.ENABLE_AUTO_UPSERT === "1" ||
-    (process.env.NODE_ENV !== "production" && process.env.SKIP_AUTO_UPSERT !== "1");
+  const autoUpsertEnabled = process.env.ENABLE_AUTO_UPSERT === "1";
 
   if (autoUpsertEnabled) {
     // Auto-upsert database snapshot from scratch/local_database_all.jsonl.gz when
@@ -695,8 +700,8 @@ async function backfillClientIds() {
   }
   }
   setupRealtime(httpServer, sessionMiddleware);
-  if (skipDbBootstrap) {
-    log("DB bootstrap disabled: skipping background schedulers, workers, and demo seed", "db");
+  if (skipBackgroundJobs) {
+    log("Background jobs disabled by SKIP_BACKGROUND_JOBS", "db");
   } else {
   startPopulationRefreshScheduler();
   startSessionArchiveScheduler();

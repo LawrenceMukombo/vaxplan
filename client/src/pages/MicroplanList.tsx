@@ -39,7 +39,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { SessionPlan, Facility } from "@shared/schema";
 import { offlineDb } from "@/lib/offlineDb";
-import { ROLE_PERMISSIONS, type Permission } from "@shared/permissions";
+import { hasAnyPermission, isNationalAdmin } from "@/lib/accessControl";
 
 interface MicroplanListProps {
   planType: "routine" | "campaign";
@@ -92,19 +92,6 @@ function isCompletedSession(session: SessionPlan): boolean {
       status === "completed" ||
       status === "done"
   );
-}
-
-function permissionsForUser(user: any): Set<Permission> {
-  const roles = new Set<string>([
-    user?.role,
-    ...(Array.isArray(user?.roles) ? user.roles : []),
-  ].filter(Boolean));
-  const permissions = new Set<Permission>();
-  roles.forEach((role) => (ROLE_PERMISSIONS[role] ?? []).forEach((permission) => permissions.add(permission)));
-  if (Array.isArray(user?.permissions)) {
-    user.permissions.forEach((permission: Permission) => permissions.add(permission));
-  }
-  return permissions;
 }
 
 function isAdminUser(user: any): boolean {
@@ -250,14 +237,12 @@ export default function MicroplanList({ planType, initialTab }: MicroplanListPro
   };
 
   const permissionState = useMemo(() => {
-    const permissions = permissionsForUser(user);
-    const admin = isAdminUser(user);
+    const admin = isAdminUser(user) || isNationalAdmin(user);
     return {
-      canView: admin || permissions.has("view_session_plans") || permissions.has("manage_session_plans") || permissions.has("approve_plans"),
-      canCreate: admin || permissions.has("manage_session_plans"),
-      canEdit: admin || permissions.has("manage_session_plans"),
-      canApprove: admin || permissions.has("approve_plans"),
-      canDelete: admin || permissions.has("manage_session_plans"),
+      canView: admin || hasAnyPermission(user, ["microplans.view", "view_session_plans", "manage_session_plans"]),
+      canCreate: admin || hasAnyPermission(user, ["microplans.create", "manage_session_plans"]),
+      canEdit: admin || hasAnyPermission(user, ["microplans.update_draft", "manage_session_plans"]),
+      canApprove: admin || hasAnyPermission(user, ["microplans.review", "microplans.approve", "approve_plans"]),
     };
   }, [user]);
 
@@ -449,18 +434,24 @@ export default function MicroplanList({ planType, initialTab }: MicroplanListPro
         const isReadOnly = isApproved || isSubmitted || status === "locked" || status === "archived" || status === "superseded";
         const canEditThisPlan = permissionState.canEdit && !isReadOnly;
         const canReviewThisPlan = permissionState.canApprove && isSubmitted;
-        const canDeleteThisPlan = permissionState.canDelete && ["draft", "returned", "rejected"].includes(status);
+        // If a draft is visible in the user's already-scoped list, always show
+        // the action. The API remains authoritative for permission and
+        // geographic enforcement. Hiding this behind a second client-side
+        // permission calculation made valid draft owners/admins unable to
+        // discover the action when effective permissions arrived in a
+        // different auth payload shape.
+        const canDeleteThisPlan = status === "draft";
         const PrimaryIcon = canReviewThisPlan ? ShieldCheck : canEditThisPlan ? Pencil : Eye;
         const primaryLabel = canReviewThisPlan ? "Review" : canEditThisPlan ? "Edit Plan" : "View Plan";
 
         return (
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-1.5">
             {permissionState.canView && (
               <Button
                 size="sm"
                 variant="outline"
                 onClick={() => setLocation(openPath)}
-                className="rounded-xl font-semibold text-xs px-3 gap-1.5"
+                className="order-1 rounded-xl font-semibold text-xs px-3 gap-1.5"
                 data-testid={`button-open-microplan-${m.id}`}
               >
                 <PrimaryIcon className="h-3.5 w-3.5" />
@@ -471,7 +462,7 @@ export default function MicroplanList({ planType, initialTab }: MicroplanListPro
               <Button
                 size="sm"
                 variant="ghost"
-                className="rounded-xl font-semibold text-xs px-2 gap-1 text-muted-foreground hover:text-foreground"
+                className="order-3 rounded-xl font-semibold text-xs px-2 gap-1 text-muted-foreground hover:text-foreground"
                 onClick={() => {
                   setRenamePlan({ id: m.id, name: m.name });
                   setRenameValue(m.name);
@@ -486,13 +477,14 @@ export default function MicroplanList({ planType, initialTab }: MicroplanListPro
             {canDeleteThisPlan && (
               <Button
                 size="sm"
-                variant="ghost"
-                className="text-destructive hover:bg-destructive/10 rounded-xl"
+                variant="outline"
+                className="order-2 text-destructive border-destructive/30 hover:bg-destructive/10 rounded-xl font-semibold text-xs px-2 gap-1"
                 onClick={() => setDeleteId(m.id)}
                 title="Delete draft microplan"
                 data-testid={`button-delete-microplan-${m.id}`}
               >
-                <Trash2 className="h-4 w-4" />
+                <Trash2 className="h-3.5 w-3.5" />
+                Delete draft
               </Button>
             )}
           </div>
@@ -667,7 +659,7 @@ export default function MicroplanList({ planType, initialTab }: MicroplanListPro
           if (!open) setDeleteId(null);
         }}
         title="Delete saved microplan?"
-        description="This will permanently delete this microplan and all of its planned sessions. This action cannot be undone."
+        description="This will remove the draft microplan from active planning. Submitted, approved, returned, and rejected plans cannot be deleted."
         onConfirm={() => deleteId && handleDelete(deleteId)}
         isPending={deleteBusy}
       />

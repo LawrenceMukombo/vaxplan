@@ -1,4 +1,5 @@
 import { approvalEligibility, developmentDaysSchema, isApprovedPlan } from "@shared/microplanPolicy";
+import { buildMicroplanPrintHtml } from "./routes/microplanPrint";
 import { safeErrorMessage } from "./errorUtils";
 import { DenominatorHarmonisationService } from "./services/denominatorHarmonisationService.js";
 import { EntityHistoryService } from "./services/entityHistoryService";
@@ -46,6 +47,7 @@ import { registerPolygonLifecycleRoutes } from "./routes/polygonLifecycle";
 import {
   compareMicroplanSnapshots,
   createMicroplanVersion,
+  getSubmissionSnapshot,
   getMicroplanVersion,
   listMicroplanVersions,
   restoreMicroplanVersionAsDraft,
@@ -206,7 +208,7 @@ export function computeCheckDigit(str: string): number {
   return sum % 10;
 }
 
-async function logAudit(
+export async function logAudit(
   req: any,
   action: string,
   entityType: string,
@@ -248,7 +250,7 @@ async function logAudit(
 }
 
 // Geographic context resolution helper for row-level permissions
-async function getFacilityHierarchy(facilityId: number, tenantId: string) {
+export async function getFacilityHierarchy(facilityId: number, tenantId: string) {
   try {
     const fac = await storage.getFacility(tenantId, facilityId);
     if (!fac) return { facilityId, activeTenantId: tenantId };
@@ -289,7 +291,7 @@ async function getFacilityHierarchy(facilityId: number, tenantId: string) {
 // Returns the raw granted IDs (no hierarchy expansion). isScopedRole marks the
 // four hierarchical roles, which must fail CLOSED when no area resolves; a
 // non-scoped role with hasAny=false keeps tenant-wide access.
-function resolveRoleScopeIds(dbUser: any): {
+export function resolveRoleScopeIds(dbUser: any): {
   provinceIds: number[];
   districtIds: number[];
   facilityIds: number[];
@@ -523,7 +525,7 @@ type GeoScope = {
  * Vary by x-tenant-id AND Cookie so different user sessions never share cached responses.
  * Combined with React Query staleTime, eliminates most cold-start round-trips.
  */
-function setCacheHeaders(res: any, maxAgeSeconds = 300): void {
+export function setCacheHeaders(res: any, maxAgeSeconds = 300): void {
   res.setHeader("Vary", "x-tenant-id, Cookie");
   res.setHeader(
     "Cache-Control",
@@ -531,7 +533,7 @@ function setCacheHeaders(res: any, maxAgeSeconds = 300): void {
   );
 }
 
-async function getGeoScope(dbUser: any, tenantId: string): Promise<GeoScope> {
+export async function getGeoScope(dbUser: any, tenantId: string): Promise<GeoScope> {
   const allScope: GeoScope = {
     all: true,
     provinceIds: new Set<number>(),
@@ -624,7 +626,7 @@ async function getGeoScope(dbUser: any, tenantId: string): Promise<GeoScope> {
 // intersects any granted facility / district / province (OR semantics — same as
 // userCanAccessGeo's explicit-scope branch). When isVillage is true, also allows
 // any community in the user's operational district (communityDistrictIds).
-function recordInGeoScope(
+export function recordInGeoScope(
   scope: GeoScope,
   geo: { facilityId?: number | null; districtId?: number | null; provinceId?: number | null },
   isVillage = false,
@@ -722,7 +724,7 @@ async function userHasAccessToUser(viewer: any, target: any, tenantId: string): 
 }
 
 // Granular RBAC and Row-Level permission validation middleware
-function requirePermission(
+export function requirePermission(
   permission: Permission,
   getGeographicContext?: (req: any) => Promise<any> | any
 ) {
@@ -775,7 +777,7 @@ function requirePermission(
   };
 }
 
-function requireAnyPermission(
+export function requireAnyPermission(
   permissions: Permission[],
   getGeographicContext?: (req: any) => Promise<any> | any
 ) {
@@ -6853,7 +6855,11 @@ export async function registerRoutes(
       const districtMap = new Map(districtRows.map((d) => [Number(d.id), d]));
       const provinceMap = new Map(provinceRows.map((p) => [Number(p.id), p]));
 
-      const facilityLimit = parseMapLimit(req.query.limitFacilities, zoom < 7 ? 600 : 2500, 5000);
+      // Facilities are clustered client-side, so truncating a national tenant at
+      // 2,500 silently hides valid service points and corrupts the legend total.
+      // Keep a defensive ceiling, but make it large enough for national master
+      // facility lists across every tenant.
+      const facilityLimit = parseMapLimit(req.query.limitFacilities, 50000, 50000);
       const communityLimit = parseMapLimit(req.query.limitCommunities, 1200, 5000);
 
       const facilityConditions: any[] = [eq(facilities.tenantId, tenantId)];
@@ -6983,10 +6989,37 @@ export async function registerRoutes(
         })
         .slice(0, communityLimit);
 
+      // Outreach posts are physical delivery sites and must remain visible even
+      // when ordinary community markers are suppressed at national zoom.
+      const outreachRows = layers.has("outreach")
+        ? await db
+            .select()
+            .from(villages)
+            .where(and(
+              ...communityConditions,
+              isNotNull(villages.outreachLatitude),
+              isNotNull(villages.outreachLongitude),
+            ))
+            .limit(10000)
+        : [];
+      const outreachPostsResult = outreachRows.filter((village: any) => {
+        if (outsideVillageIds.has(Number(village.id))) return false;
+        const district = districtMap.get(Number(village.districtId));
+        if (!recordInGeoScope(scope, {
+          facilityId: village.assignedFacilityId,
+          districtId: village.districtId,
+          provinceId: district?.provinceId,
+        }, true)) return false;
+        if (selectedProvinceId && Number(district?.provinceId) !== selectedProvinceId) return false;
+        if (search && !`${village.name ?? ""} ${village.outreachPostName ?? ""}`.toLowerCase().includes(search)) return false;
+        return true;
+      });
+
       setCacheHeaders(res, 60);
       res.json({
         facilities: facilitiesResult,
         villages: communitiesResult,
+        outreachPosts: outreachPostsResult,
         meta: {
           bbox,
           zoom,
@@ -6995,6 +7028,7 @@ export async function registerRoutes(
           communitiesSuppressed: layers.has("communities") && !hasCommunityFocus,
           returnedFacilities: facilitiesResult.length,
           returnedCommunities: communitiesResult.length,
+          returnedOutreachPosts: outreachPostsResult.length,
         },
       });
     } catch (error) {
@@ -7224,6 +7258,45 @@ export async function registerRoutes(
             }
           }
         }
+      }
+
+      // Master Data Governance: Creating new communities with population baselines
+      // is restricted to District, Provincial, and National levels to protect denominator integrity.
+      // Facility staff may only link or unlink existing communities to/from their facility catchment.
+      const primaryRole = String(req.dbUser?.role || "");
+      const secondaryRoles: string[] = Array.isArray(req.dbUser?.roles) ? req.dbUser.roles.map(String) : [];
+      const isFacilityStaff =
+        primaryRole === "facility_clerk" ||
+        primaryRole === "facility_in_charge" ||
+        primaryRole === "facility_partner";
+      const hasDistrictOrHigherRole =
+        req.dbUser?.isPlatformAdmin === true ||
+        primaryRole === "national_admin" ||
+        primaryRole === "national_manager" ||
+        primaryRole === "gis_specialist" ||
+        primaryRole === "provincial_coordinator" ||
+        primaryRole === "district_manager" ||
+        primaryRole === "district_partner" ||
+        primaryRole === "admin" ||
+        primaryRole === "manager" ||
+        secondaryRoles.some((r) =>
+          [
+            "national_admin",
+            "national_manager",
+            "gis_specialist",
+            "provincial_coordinator",
+            "district_manager",
+            "district_partner",
+            "admin",
+            "manager",
+          ].includes(r)
+        );
+
+      if (isFacilityStaff && !hasDistrictOrHigherRole) {
+        return res.status(403).json({
+          message:
+            "Forbidden: Creating new communities with population baselines is restricted to District, Provincial, and National administrators. Facility staff may only assign or unlink existing communities in their catchment.",
+        });
       }
 
       // Authorize the write against the caller's geographic scope (task #261).
@@ -7793,6 +7866,51 @@ export async function registerRoutes(
       }
 
       const body = { ...req.body };
+
+      // Master Data Governance: Protect population and administrative identifiers from being altered by facility-level staff.
+      // Facility staff may link/unlink communities or update transport/accessibility, but cannot alter baseline population metrics.
+      const primaryRole = String(req.dbUser?.role || "");
+      const secondaryRoles: string[] = Array.isArray(req.dbUser?.roles) ? req.dbUser.roles.map(String) : [];
+      const isFacilityStaff =
+        primaryRole === "facility_clerk" ||
+        primaryRole === "facility_in_charge" ||
+        primaryRole === "facility_partner";
+      const hasDistrictOrHigherRole =
+        req.dbUser?.isPlatformAdmin === true ||
+        primaryRole === "national_admin" ||
+        primaryRole === "national_manager" ||
+        primaryRole === "gis_specialist" ||
+        primaryRole === "provincial_coordinator" ||
+        primaryRole === "district_manager" ||
+        primaryRole === "district_partner" ||
+        primaryRole === "admin" ||
+        primaryRole === "manager" ||
+        secondaryRoles.some((r) =>
+          [
+            "national_admin",
+            "national_manager",
+            "gis_specialist",
+            "provincial_coordinator",
+            "district_manager",
+            "district_partner",
+            "admin",
+            "manager",
+          ].includes(r)
+        );
+
+      if (isFacilityStaff && !hasDistrictOrHigherRole) {
+        // Strip protected master data fields so facility staff cannot alter baseline census / gridded population
+        delete body.population;
+        delete body.under5Population;
+        delete body.griddedPopulation;
+        delete body.totalCatchmentPopulation;
+        delete body.code;
+        // Keep district consistent with facility or old record, prevent manual arbitrary district reassignment
+        if (body.assignedFacilityId === undefined) {
+          delete body.districtId;
+        }
+      }
+
       // Persist the authoritative district derived above so the stored row stays
       // consistent with its assigned facility.
       if (derivedDistrictId != null) body.districtId = derivedDistrictId;
@@ -8049,6 +8167,24 @@ export async function registerRoutes(
           )
         );
 
+      // Configurable extraction buffer:
+      // Accepts req.body.bufferKm (min 0.5 km, max 25.0 km per WHO RED / microplanning ceiling).
+      // Fallback precedence: req.body.bufferKm -> facility.catchmentRadius -> default 5.0 km (or 10.0 km).
+      let bufferKm = 5.0;
+      if (req.body?.bufferKm !== undefined && req.body?.bufferKm !== null) {
+        const parsed = parseFloat(req.body.bufferKm.toString());
+        if (!isNaN(parsed) && parsed > 0) {
+          bufferKm = Math.min(Math.max(parsed, 0.5), 25.0);
+        }
+      } else if (facility.catchmentRadius) {
+        const facRadius = parseFloat(facility.catchmentRadius.toString());
+        if (!isNaN(facRadius) && facRadius > 0) {
+          bufferKm = Math.min(Math.max(facRadius, 0.5), 25.0);
+        }
+      } else {
+        bufferKm = 10.0;
+      }
+
       let matchedVillageIds: number[] = [];
 
       if (catchments.length > 0 && catchments[0].geojson) {
@@ -8082,20 +8218,19 @@ export async function registerRoutes(
             return;
           }
 
-          // Aggressive proximity fallback: Check distance if catchmentRadius is set, or default to 5km buffer
+          // Proximity fallback using configured buffer:
           if (facility.latitude && facility.longitude) {
             const facLat = parseFloat(facility.latitude.toString());
             const facLng = parseFloat(facility.longitude.toString());
             const dist = calculateHaversineDistance(lat, lng, facLat, facLng);
-            const radius = facility.catchmentRadius ? Math.max(parseFloat(facility.catchmentRadius.toString()), 10.0) : 10.0;
 
-            if (dist <= radius) {
+            if (dist <= bufferKm) {
               matchedVillageIds.push(v.id);
             }
           }
         });
       } else {
-        // Aggressive fallback when no polygon is drawn: associate all villages in the district that are within 10km!
+        // Fallback when no polygon is drawn: associate all villages in the district within bufferKm!
         districtVillages.forEach((v) => {
           if (!v.latitude || !v.longitude || !facility.latitude || !facility.longitude) return;
           const lat = parseFloat(v.latitude.toString());
@@ -8104,7 +8239,7 @@ export async function registerRoutes(
           const facLng = parseFloat(facility.longitude.toString());
           const dist = calculateHaversineDistance(lat, lng, facLat, facLng);
 
-          if (dist <= 10.0) {
+          if (dist <= bufferKm) {
             matchedVillageIds.push(v.id);
           }
         });
@@ -8112,29 +8247,90 @@ export async function registerRoutes(
 
       // De-duplicate matching IDs
       matchedVillageIds = Array.from(new Set(matchedVillageIds));
+      const reassignExisting = req.body?.reassignExisting !== false;
+
+      // Extraction may add currently unassigned communities, but it must never
+      // steal a community from another facility. Previous behaviour reassigned
+      // every spatial match and produced transient, contradictory catchments.
+      const conflictingVillageIds = matchedVillageIds.filter((vid) => {
+        const currentFacilityId = districtVillages.find((v) => v.id === vid)?.assignedFacilityId;
+        return currentFacilityId != null && Number(currentFacilityId) !== facilityId;
+      });
+      if (!reassignExisting) {
+        matchedVillageIds = matchedVillageIds.filter((vid) => {
+          const currentFacilityId = districtVillages.find((v) => v.id === vid)?.assignedFacilityId;
+          return currentFacilityId == null || Number(currentFacilityId) === facilityId;
+        });
+      }
 
       if (matchedVillageIds.length > 0) {
-        // Bulk update assignedFacilityId
-        await db
-          .update(villages)
-          .set({ assignedFacilityId: facilityId })
-          .where(
-            and(
-              inArray(villages.id, matchedVillageIds),
-              eq(villages.tenantId, tenantId)
-            )
-          );
+        const facLat = facility.latitude ? parseFloat(facility.latitude.toString()) : null;
+        const facLng = facility.longitude ? parseFloat(facility.longitude.toString()) : null;
+
+        for (const vid of matchedVillageIds) {
+          const vRecord = districtVillages.find((dv) => dv.id === vid);
+          let distStr: string | undefined = undefined;
+          let travelMins: number | undefined = undefined;
+          let transport: "walking" | "motorbike" | "car" | undefined = undefined;
+
+          if (facLat != null && facLng != null && vRecord?.latitude && vRecord?.longitude) {
+            const vLat = parseFloat(vRecord.latitude.toString());
+            const vLng = parseFloat(vRecord.longitude.toString());
+            const dist = calculateHaversineDistance(vLat, vLng, facLat, facLng);
+            distStr = dist.toFixed(2);
+            transport = dist <= 5.0 ? "walking" : dist <= 15.0 ? "motorbike" : "car";
+            const minutesPerKm = transport === "walking" ? 15 : transport === "motorbike" ? 3 : 2;
+            travelMins = Math.max(5, Math.round(dist * minutesPerKm));
+          }
+
+          await db
+            .update(villages)
+            .set({
+              assignedFacilityId: facilityId,
+              updatedAt: new Date(),
+              ...(distStr ? { distanceToFacility: distStr } : {}),
+              ...(travelMins ? { travelTimeMinutes: travelMins } : {}),
+              ...(transport ? { transportMode: transport } : {}),
+            })
+            .where(
+              and(
+                eq(villages.id, vid),
+                eq(villages.tenantId, tenantId)
+              )
+            );
+        }
       }
 
       await logAudit(req, "aggressive_extract_communities", "facilities", facilityId, null, {
         matchedVillageCount: matchedVillageIds.length,
         villageIds: matchedVillageIds,
+        skippedConflictCount: conflictingVillageIds.length,
+        skippedConflictVillageIds: conflictingVillageIds,
+        reassignExisting,
+        bufferKm,
       });
+
+      const persistedCommunities = matchedVillageIds.length
+        ? await db
+            .select()
+            .from(villages)
+            .where(and(
+              eq(villages.tenantId, tenantId),
+              inArray(villages.id, matchedVillageIds),
+              eq(villages.assignedFacilityId, facilityId),
+            ))
+        : [];
 
       res.json({
         success: true,
-        message: `Aggressively extracted and associated ${matchedVillageIds.length} communities with this health facility.`,
+        message: reassignExisting
+          ? `Associated ${matchedVillageIds.length} spatially matched communities within ${bufferKm} km; ${conflictingVillageIds.length} existing assignments were moved.`
+          : `Kept or associated ${matchedVillageIds.length} communities within ${bufferKm} km. ${conflictingVillageIds.length} communities assigned to other facilities were left unchanged.`,
         assignedCount: matchedVillageIds.length,
+        reassignedCount: reassignExisting ? conflictingVillageIds.length : 0,
+        skippedConflictCount: reassignExisting ? 0 : conflictingVillageIds.length,
+        communities: persistedCommunities,
+        bufferKm,
       });
     } catch (error: any) {
       console.error("Aggressive extraction failed:", error);
@@ -8900,6 +9096,22 @@ export async function registerRoutes(
       const excludeVillages = req.query.excludeVillages === "true" && filters.source !== "worldpop";
       filters.excludeVillages = excludeVillages;
 
+      // A community's current registry assignment is authoritative. Population
+      // rows retain their original facility_id for audit/history, which can be
+      // stale after catchments are reconciled. Resolve the selected facility to
+      // its live community IDs so reassigned communities neither remain under
+      // the old facility nor disappear from the new one.
+      if (filters.facilityId) {
+        const assigned = await db
+          .select({ id: villages.id })
+          .from(villages)
+          .where(and(
+            eq(villages.tenantId, req.tenantId),
+            eq(villages.assignedFacilityId, filters.facilityId),
+          ));
+        filters.effectiveFacilityVillageIds = assigned.map((row) => Number(row.id));
+      }
+
       const scope = await getGeoScope(dbUser, req.tenantId);
       let allPop = await storage.getPopulationData(req.tenantId, filters);
 
@@ -8969,13 +9181,15 @@ export async function registerRoutes(
       const enrichedPop = allPop.map((p: any) => {
         const meta = p.metadata && typeof p.metadata === "object" && !Array.isArray(p.metadata) ? p.metadata : {};
         const village = p.villageId ? villageById.get(Number(p.villageId)) : null;
-        const facility = p.facilityId
-          ? facilityById.get(Number(p.facilityId))
-          : (village?.assignedFacilityId ? facilityById.get(Number(village.assignedFacilityId)) : null);
+        const effectiveFacilityId = village
+          ? (village.assignedFacilityId ? Number(village.assignedFacilityId) : null)
+          : (p.facilityId ? Number(p.facilityId) : null);
+        const facility = effectiveFacilityId ? facilityById.get(effectiveFacilityId) : null;
         const communityName = village?.name ?? meta.communityName ?? meta.villageName ?? meta.catchmentName ?? null;
         const facilityName = facility?.name ?? meta.facilityName ?? meta.healthFacilityName ?? meta.hfName ?? null;
         return {
           ...p,
+          facilityId: effectiveFacilityId,
           _geoFacilityName: facilityName,
           _geoCommunityName: communityName,
           metadata: {
@@ -9026,23 +9240,16 @@ export async function registerRoutes(
 
     // 1️⃣ Check local DB first (fast path)
     try {
-      const radiusMeters = Math.round(radiusKm * 1000);
-      const localResult = await pool.query(
-        `SELECT COALESCE(SUM(population_total),0)::int AS total,
-                COALESCE(SUM(under5_population),0)::int AS under5
-         FROM population_grids
-         WHERE tenant_id = $1
-           AND geometry IS NOT NULL
-           AND ST_DWithin(
-             geometry::geography,
-             ST_SetSRID(ST_MakePoint($2,$3),4326)::geography,
-             $4
-           )`,
-        [req.tenantId, lng, lat, radiusMeters]
-      );
-      const localTotal = localResult.rows[0]?.total ?? 0;
+      const { fetchLocalRadiusPopulation } = await import("./services/populationIntelligenceService");
+      const localResult = await fetchLocalRadiusPopulation(req.tenantId, lat, lng, radiusKm);
+      const localTotal = localResult.totalPopulation;
       if (localTotal > 0) {
-        return res.json({ gridPop: localTotal, under5Pop: localResult.rows[0]?.under5 ?? 0, source: "local_grid" });
+        return res.json({
+          gridPop: localTotal,
+          under5Pop: localResult.under5Population,
+          source: localResult.coverageRatio >= 0.8 ? "local_grid" : "local_grid_density_estimate",
+          coverageRatio: localResult.coverageRatio,
+        });
       }
     } catch (e) {
       console.warn("[WorldPop proxy] local DB query failed:", e);
@@ -10164,6 +10371,25 @@ export async function registerRoutes(
       );
 
       const approvalAudit = await getMicroplanApprovalAudit(db as any, req.tenantId, microplan);
+      let reviewSnapshot = getSubmissionSnapshot(microplan);
+      // Older submitted plans may predate the embedded submission snapshot.
+      // Fall back to their immutable submitted version instead of live
+      // facility rows. Never use this fallback for an editable draft.
+      if (microplan.status !== "draft" && !reviewSnapshot) {
+        const [submittedVersion] = await db
+          .select({ snapshot: microplanVersions.snapshot })
+          .from(microplanVersions)
+          .where(and(
+            eq(microplanVersions.tenantId, req.tenantId),
+            eq(microplanVersions.microplanId, microplanId),
+            eq(microplanVersions.eventType, "submitted"),
+          ))
+          .orderBy(desc(microplanVersions.versionNumber))
+          .limit(1);
+        reviewSnapshot = (submittedVersion?.snapshot as any)?.submissionSnapshot
+          ?? submittedVersion?.snapshot
+          ?? null;
+      }
       res.json({
         microplan: { ...microplan, approvalDetails: approvalAudit, approvedAt: approvalAudit?.approvedAt || (microplan as any).approvedAt },
         approvalDetails: approvalAudit,
@@ -10177,6 +10403,7 @@ export async function registerRoutes(
         htrScores,
         excludedVillageIds,
         excludedVillages,
+        reviewSnapshot,
       });
     } catch (error) {
       console.error("Error fetching microplan hydration:", error);
@@ -10398,8 +10625,17 @@ export async function registerRoutes(
         return res.status(204).send();
       }
 
-      if (isApprovedPlan(oldPlan.status)) {
-        return res.status(403).json({ message: "Approved microplans cannot be deleted." });
+      const status = String(oldPlan.status ?? "draft").toLowerCase();
+      if (status !== "draft") {
+        return res.status(409).json({ message: "Only draft microplans can be deleted." });
+      }
+
+      const geoContext = oldPlan.facilityId ? { facilityId: Number(oldPlan.facilityId) } : undefined;
+      if (!hasPermission(req.dbUser, "microplans.update_draft", geoContext)) {
+        return res.status(403).json({ message: "Forbidden: you cannot delete this draft microplan." });
+      }
+      if (oldPlan.facilityId && !(await userCanAccessGeo(req.dbUser, req.tenantId, geoContext!))) {
+        return res.status(403).json({ message: "Forbidden: no access to this facility's microplan." });
       }
 
       // Clean up linked planning evidence records so FK constraint doesn't block deletion
@@ -11618,29 +11854,59 @@ export async function registerRoutes(
     }
   });
 
-  // Unserved populated places: villages with no session plan ever AND no
-  // administered doses. Heuristic for outreach gap discovery on the map.
+  // Unserved populated places from both operational communities and the national
+  // settlement master. Some tenants have many thousands of imported settlements
+  // that have not yet been promoted to `villages`; omitting them made national
+  // gap maps substantially incomplete.
   app.get("/api/unserved-places", ...auth, async (req: any, res) => {
     try {
-      const vilList = await storage.getVillages(req.tenantId);
+      const tenantId = String(req.tenantId);
+      const [vilList, masterRows, districtRows] = await Promise.all([
+        storage.getVillages(tenantId),
+        db
+          .select({
+            id: settlementsMaster.id,
+            name: settlementsMaster.name,
+            latitude: settlementsMaster.latitude,
+            longitude: settlementsMaster.longitude,
+            districtName: settlementsMaster.districtName,
+            linkedCommunityId: settlementsMaster.linkedCommunityId,
+            linkedFacilityId: settlementsMaster.linkedFacilityId,
+            hardToReach: settlementsMaster.hardToReach,
+            validationStatus: settlementsMaster.validationStatus,
+            serviceStatus: settlementsMaster.serviceStatus,
+            isActive: settlementsMaster.isActive,
+          })
+          .from(settlementsMaster)
+          .where(eq(settlementsMaster.tenantId, tenantId)),
+        db
+          .select({ id: districts.id, name: districts.name, provinceId: districts.provinceId })
+          .from(districts)
+          .where(eq(districts.tenantId, tenantId)),
+      ]);
 
       const svRows = await db
         .selectDistinct({ villageId: sessionVillages.villageId })
         .from(sessionVillages)
-        .where(eq(sessionVillages.tenantId, String(req.tenantId)));
+        .where(eq(sessionVillages.tenantId, tenantId));
       const plannedVillageIds = new Set<number>(svRows.map((r: any) => r.villageId));
 
       const cvRows = await db
         .selectDistinct({ villageId: clients.villageId })
         .from(clientVaccinations)
         .innerJoin(clients, eq(clientVaccinations.clientId, clients.id))
-        .where(eq(clientVaccinations.tenantId, String(req.tenantId)));
+        .where(eq(clientVaccinations.tenantId, tenantId));
       const servedVillageIds = new Set<number>(cvRows.map((r: any) => r.villageId).filter(Boolean));
 
-      const scope = await getGeoScope(req.dbUser, req.tenantId);
-      const unserved = (vilList as any[]).filter((v) => {
+      const scope = await getGeoScope(req.dbUser, tenantId);
+      const districtByName = new Map(
+        districtRows.map((district) => [String(district.name).trim().toLowerCase(), district]),
+      );
+      const operational = (vilList as any[]).filter((v) => {
         if (v.latitude == null || v.longitude == null) return false;
         if (!recordInGeoScope(scope, { facilityId: v.assignedFacilityId, districtId: v.districtId })) return false;
+
+        if (plannedVillageIds.has(Number(v.id)) || servedVillageIds.has(Number(v.id))) return false;
 
         // VGIE distance-based logic: served if distance <= 5km
         if (v.assignedFacilityId && v.distanceToFacility != null && Number(v.distanceToFacility) <= 5) {
@@ -11653,12 +11919,62 @@ export async function registerRoutes(
         return true;
       }).map((v) => ({
         id: v.id,
+        villageId: v.id,
+        source: "village",
         name: v.name,
         districtId: v.districtId,
         latitude: Number(v.latitude),
         longitude: Number(v.longitude),
         isHardToReach: !!v.isHardToReach,
       }));
+
+      const operationalVillageIds = new Set((vilList as any[]).map((v) => Number(v.id)));
+      // De-duplicate master records against every promoted village, including a
+      // village that is already served. Otherwise an imported copy of that same
+      // place could incorrectly reappear as an unserved master settlement.
+      const coordinateKeys = new Set(
+        (vilList as any[]).flatMap((place) => {
+          const latitude = Number(place.latitude);
+          const longitude = Number(place.longitude);
+          return Number.isFinite(latitude) && Number.isFinite(longitude)
+            ? [`${latitude.toFixed(5)}:${longitude.toFixed(5)}`]
+            : [];
+        }),
+      );
+      const master = masterRows.flatMap((settlement) => {
+        if (settlement.isActive === false) return [];
+        if (["duplicate", "rejected"].includes(String(settlement.validationStatus ?? "").toLowerCase())) return [];
+        if (String(settlement.serviceStatus ?? "unserved").toLowerCase() === "served") return [];
+        if (settlement.linkedCommunityId && operationalVillageIds.has(Number(settlement.linkedCommunityId))) return [];
+
+        const latitude = Number(settlement.latitude);
+        const longitude = Number(settlement.longitude);
+        if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return [];
+        const coordinateKey = `${latitude.toFixed(5)}:${longitude.toFixed(5)}`;
+        if (coordinateKeys.has(coordinateKey)) return [];
+
+        const district = districtByName.get(String(settlement.districtName ?? "").trim().toLowerCase());
+        if (!recordInGeoScope(scope, {
+          facilityId: settlement.linkedFacilityId,
+          districtId: district?.id,
+          provinceId: district?.provinceId,
+        }, true)) return [];
+
+        coordinateKeys.add(coordinateKey);
+        return [{
+          id: `settlement-${settlement.id}`,
+          settlementId: settlement.id,
+          source: "settlement_master",
+          name: settlement.name,
+          districtId: district?.id ?? null,
+          latitude,
+          longitude,
+          isHardToReach: !!settlement.hardToReach,
+        }];
+      });
+
+      const unserved = [...operational, ...master];
+      setCacheHeaders(res, 300);
       res.json(unserved);
     } catch (err) {
       console.error("GET /api/unserved-places failed:", err);
@@ -13890,7 +14206,8 @@ export async function registerRoutes(
       const tenantId = req.tenantId as string;
       const schema = z.object({
         geojson: z.object({ type: z.string(), coordinates: z.any().optional(), geometry: z.any().optional() }).passthrough(),
-        bufferMeters: z.number().min(0).max(5000).optional().default(250),
+        bufferMeters: z.number().min(0).max(25000).optional(),
+        bufferKm: z.number().min(0).max(25).optional(),
         includeOsm: z.boolean().optional().default(true),
       });
       const parsed = schema.safeParse(req.body);
@@ -13903,7 +14220,9 @@ export async function registerRoutes(
         return res.status(400).json({ message: "GeoJSON polygon required" });
       }
       const polyJson = JSON.stringify(rawGeom);
-      const bufM = parsed.data.bufferMeters ?? 250;
+      const bufM = parsed.data.bufferKm != null
+        ? Math.min(Math.max(parsed.data.bufferKm * 1000, 0), 25000)
+        : (parsed.data.bufferMeters ?? 500);
 
       // Villages inside buffered polygon (coordinate-based)
       const villagesGeoQ = await pool.query(
@@ -22880,66 +23199,13 @@ Instructions:
       const lng     = parseFloat((req.query.lng  as string) || "143.956");
       const zoom    = parseInt((req.query.zoom   as string) || "12", 10);
       const title   = (req.query.title  as string) || mp.name || "Microplan Map";
-
-      // Paper dimensions in mm → CSS
-      const sizes: Record<string, { width: string; height: string }> = {
-        A4: { width: "210mm", height: "297mm" },
-        A3: { width: "297mm", height: "420mm" },
-        A2: { width: "420mm", height: "594mm" },
-        A1: { width: "594mm", height: "841mm" },
-        A0: { width: "841mm", height: "1189mm" },
-      };
-      const sz = sizes[format] || sizes["A4"];
-
-      const html = `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8"/>
-  <title>${title} — ${format} Map Print</title>
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <style>
-    * { margin:0; padding:0; box-sizing:border-box; }
-    body { font-family:Arial,sans-serif; background:#fff; }
-    @page { size:${format} portrait; margin:10mm; }
-    .page { width:${sz.width}; min-height:${sz.height}; padding:10mm; display:flex; flex-direction:column; }
-    .header { margin-bottom:4mm; border-bottom:1px solid #ccc; padding-bottom:3mm; }
-    .header h1 { font-size:14pt; font-weight:700; }
-    .header p  { font-size:8pt; color:#666; }
-    #map { flex:1; min-height:200mm; border:1px solid #ccc; border-radius:2mm; }
-    .footer { margin-top:3mm; font-size:7pt; color:#888; display:flex; justify-content:space-between; }
-    @media print { .no-print { display:none; } }
-  </style>
-</head>
-<body>
-  <div class="page">
-    <div class="header">
-      <h1>${title}</h1>
-      <p>Format: ${format} &nbsp;|&nbsp; Generated: ${new Date().toLocaleDateString("en-GB")} &nbsp;|&nbsp; Coordinates: ${lat.toFixed(4)}, ${lng.toFixed(4)} &nbsp;|&nbsp; Zoom: ${zoom}</p>
-    </div>
-    <button class="no-print" onclick="window.print()" style="margin-bottom:4mm;padding:6px 16px;background:#1a56db;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:10pt;">🖨 Print / Save as PDF</button>
-    <div id="map"></div>
-    <div class="footer">
-      <span>VaxPlan — Health Facility Microplan</span>
-      <span>© OpenStreetMap contributors</span>
-    </div>
-  </div>
-  <script>
-    document.addEventListener('DOMContentLoaded', function() {
-      var map = L.map('map', { zoomControl:false, attributionControl:true }).setView([${lat}, ${lng}], ${zoom});
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution:'&copy; OpenStreetMap contributors', maxZoom:18
-      }).addTo(map);
-      // Add facility marker
-      L.marker([${lat}, ${lng}]).addTo(map).bindPopup('${title.replace(/'/g, "\\'")}').openPopup();
-      // Wait for tiles then auto-print
-      setTimeout(function() {
-        if (window.location.search.includes('autoprint=1')) { window.print(); }
-      }, 3000);
-    });
-  </script>
-</body>
-</html>`;
+      const html = buildMicroplanPrintHtml({
+        title,
+        format,
+        latitude: lat,
+        longitude: lng,
+        zoom,
+      });
 
       res.setHeader("Content-Type", "text/html; charset=utf-8");
       res.send(html);
@@ -23290,8 +23556,6 @@ Instructions:
         ORDER BY distance_meters ASC
         LIMIT 10
       `;
-      const facilitiesRes = await pool.query(facQuery, [lng, lat, tenantId, radiusMeters]);
-
       // 2. Nearby Communities/Villages
       const commQuery = `
         SELECT
@@ -23311,8 +23575,6 @@ Instructions:
         ORDER BY distance_meters ASC
         LIMIT 20
       `;
-      const communitiesRes = await pool.query(commQuery, [lng, lat, tenantId, radiusMeters]);
-
       // 3. Resolve Admin Boundaries for this point
       const adminQuery = `
         SELECT
@@ -23330,7 +23592,13 @@ Instructions:
             ST_SetSRID(ST_MakePoint($2, $3), 4326)
           )
       `;
-      const adminRes = await pool.query(adminQuery, [tenantId, lng, lat]);
+      // These lookups are independent. Running them concurrently removes two
+      // database round trips from the critical path of opening the drawer.
+      const [facilitiesRes, communitiesRes, adminRes] = await Promise.all([
+        pool.query(facQuery, [lng, lat, tenantId, radiusMeters]),
+        pool.query(commQuery, [lng, lat, tenantId, radiusMeters]),
+        pool.query(adminQuery, [tenantId, lng, lat]),
+      ]);
       const adminHierarchy: Record<number, string> = {};
       adminRes.rows.forEach(r => {
         adminHierarchy[r.admin_level] = r.name;
@@ -23361,6 +23629,7 @@ Instructions:
         distance_km: (f.distance_meters / 1000).toFixed(2)
       }));
 
+      setCacheHeaders(res, 60);
       res.json({
         success: true,
         data: {

@@ -15,6 +15,16 @@ const root = path.resolve(__dirname, "..");
 // Read source markdown files
 const userGuide = fs.readFileSync(path.join(root, "docs/USER_GUIDE.md"), "utf8");
 const quickstart = fs.readFileSync(path.join(root, "docs/QUICKSTART_FACILITY.md"), "utf8");
+const canonicalDocuments = [
+  ["platform-reference", "Platform reference", "docs/PLATFORM_REFERENCE.md"],
+  ["offline-and-sync", "Offline operation and synchronization", "docs/OFFLINE_AND_SYNC.md"],
+  ["developer-guide", "Developer guide", "docs/DEVELOPER_GUIDE.md"],
+].map(([id, title, relativePath]) => ({
+  id,
+  title,
+  body: fs.readFileSync(path.join(root, relativePath), "utf8")
+    .replace(/^#\s+.*(?:\r?\n)+/, ""),
+}));
 
 // ─── Tiny Markdown → HTML converter (no deps) ─────────────────────────────
 function mdToHtml(md) {
@@ -78,7 +88,7 @@ function extractSections(md) {
   return sections.filter(s => !/table of contents/i.test(s.title));
 }
 
-const sections = extractSections(userGuide);
+const sections = [...canonicalDocuments, ...extractSections(userGuide)];
 const quickstartHtml = mdToHtml(quickstart);
 const buildDate = new Date().toISOString().slice(0, 10);
 

@@ -1,25 +1,52 @@
-# VaxPlan Technical Documentation Index
+# VaxPlan documentation
 
-Welcome to the official technical documentation directory for **VaxPlan**.
+This directory documents version 1.9.4 of the repository. Use the documents under **Canonical product documentation** for current behavior. Planning notes, stakeholder collateral, screenshots, and old exported manuals may describe a particular release rather than the live application.
 
-## Documentation Guides & Manuals
+## Canonical product documentation
 
-- [**Executive Stakeholder Master Brief & Fast-Track Country Adaptation Blueprint (`VAXPLAN_EXECUTIVE_STAKEHOLDER_MASTER_BRIEF.md`)**](./VAXPLAN_EXECUTIVE_STAKEHOLDER_MASTER_BRIEF.md): Enterprise premium-grade prospectus for Ministers of Health, Permanent Secretaries, Gavi / WHO / UNICEF leaders, and National EPI Managers detailing what VaxPlan does, end-to-end capabilities, and the 30-day fast-track national adaptation roadmap. *(Word document available at [`VAXPLAN_EXECUTIVE_STAKEHOLDER_MASTER_BRIEF.docx`](./VAXPLAN_EXECUTIVE_STAKEHOLDER_MASTER_BRIEF.docx))*.
-- [**Stakeholder & Sponsor Pitch Deck (`VAXPLAN_STAKEHOLDER_SLIDE_DECK.md`)**](./VAXPLAN_STAKEHOLDER_SLIDE_DECK.md): 14-slide executive widescreen presentation with visual designs, structured layouts, and complete presenter speaker notes. *(PowerPoint file available at [`VAXPLAN_STAKEHOLDER_SLIDE_DECK.pptx`](./VAXPLAN_STAKEHOLDER_SLIDE_DECK.pptx))*.
-- [**Business Case & Stakeholder Investment Prospectus (`VAXPLAN_BUSINESS_CASE_AND_STAKEHOLDER_PROSPECTUS.md`)**](./VAXPLAN_BUSINESS_CASE_AND_STAKEHOLDER_PROSPECTUS.md): Comprehensive investment prospectus, ROI modeling, and value proposition for Ministries of Health, Gavi, WHO, UNICEF, and donors. *(Word document available at [`VAXPLAN_BUSINESS_CASE_AND_STAKEHOLDER_PROSPECTUS.docx`](./VAXPLAN_BUSINESS_CASE_AND_STAKEHOLDER_PROSPECTUS.docx))*.
-- [**Organizational Terms of Reference (ToR) & Operational Manual (`VAXPLAN_ORGANIZATIONAL_TOR_AND_OPERATING_MANUAL.md`)**](./VAXPLAN_ORGANIZATIONAL_TOR_AND_OPERATING_MANUAL.md): Full governance charters, ToRs for Founder, Co-Founders, Consultants, and Employees, and standard operating procedures. *(Word document available at [`VAXPLAN_ORGANIZATIONAL_TOR_AND_OPERATING_MANUAL.docx`](./VAXPLAN_ORGANIZATIONAL_TOR_AND_OPERATING_MANUAL.docx))*.
-- [**System User Guide (`USER_GUIDE.md`)**](./USER_GUIDE.md): Comprehensive user manual for microplanning, supportive supervision, scorecards, GIS maps, and data entry workflows.
-- [**Indicator Manual (`INDICATOR_MANUAL.md`)**](./INDICATOR_MANUAL.md): Standardized definitions, formulas, and threshold classifications for vaccination coverage and supervision indicators.
-- [**Release Notes (`releases.md`)**](./releases.md): Detailed release history detailing major platform updates, bug fixes, and schema migrations.
-- [**Country Onboarding Guide (`COUNTRY_ONBOARDING.md`)**](./COUNTRY_ONBOARDING.md): Step-by-step guide for initializing new country tenants, boundary shapefiles, and national facility databases.
-- [**Stakeholder Brief (`VAXPLAN_STAKEHOLDER_BRIEF.md`)**](./VAXPLAN_STAKEHOLDER_BRIEF.md): Executive summary for health ministry leadership, WHO/UNICEF partners, and program directors.
+| Document | Audience | Purpose |
+| --- | --- | --- |
+| [Platform reference](./PLATFORM_REFERENCE.md) | Everyone | Complete module and route catalogue, roles, permissions, statuses, and terminology |
+| [End-user guide](./USER_GUIDE.md) | Program and field users | Operational workflows by role |
+| [Developer guide](./DEVELOPER_GUIDE.md) | Engineers and maintainers | Architecture, repository layout, migrations, testing, builds, and documentation rules |
+| [Offline and sync](./OFFLINE_AND_SYNC.md) | Field users, support, engineers | Offline sign-in, local data, outbox, retry, conflicts, and troubleshooting |
+| [Indicator manual](./INDICATOR_MANUAL.md) | M&E and program teams | Indicator definitions and interpretation |
+| [Country onboarding](./COUNTRY_ONBOARDING.md) | Platform and national administrators | Tenant, geography, facility, catalogue, and user setup |
+| [Safe deployment guide](./deployment/vaxplan-safe-deployment-guide.md) | Operators | Data-safe production deployment |
+| [Release notes](./releases.md) | Users and operators | Release highlights and upgrade implications |
 
-## Recent Platform Highlights (v1.9.0 – v1.9.2)
+## Workflow guides
 
-1. **Supportive Supervision Module**:
-   - Short 35-question & National 70-question supervision checklists.
-   - Traffic Light color coding standard (🔴 0-49.9% Red, 🟠 50-79.9% Amber, 🟢 80-100% Green).
-   - Executive Facility Scorecard with Action Plan table (`SupervisionScorecard.tsx`).
-   - Comparative Supervision Scorecard Matrix (`ComparativeScorecardTable.tsx`).
-2. **Strict Smart Location Cascade Filter**:
-   - Province → District → Health Facility strict parent-child locking and options filtering (`GeoCascadeFilter.tsx`).
+- [Facility quick start](./QUICKSTART_FACILITY.md)
+- [Complete walkthrough](./walkthroughs/vaxplan-complete-walkthrough.md)
+- [Microplanning workflow](./microplanning-workflow.md)
+- [Microplanning readiness prefill](./microplanning-readiness-prefill.md)
+- [Planning evidence workflow](./modules/planning-evidence-workflow.md)
+- [Microplan approval policy](./modules/microplan-approval-policy.md)
+- [RED microplanning](./modules/red-microplanning-wizard.md)
+- [Facilities](./modules/facilities-module-walkthrough.md), [GIS](./modules/gis-microplanning-walkthrough.md), and [polygon drawing](./modules/polygon-drawing-walkthrough.md)
+- [Population intelligence](./modules/population-intelligence-walkthrough.md)
+- [Sessions](./modules/sessions-walkthrough.md)
+- [Supportive supervision](./modules/supervision-tools-walkthrough.md)
+- [Administration](./modules/admin-management-walkthrough.md)
+
+## Technical references
+
+- [Architecture diagrams](./architecture/vaxplan-architecture-diagrams.md)
+- [Database schema guide](./architecture/vaxplan-database-schema.md)
+- [Temporal framework](./architecture/enterprise-temporal-framework.md)
+- [Polygon lifecycle](./polygon-lifecycle.md)
+- [Email configuration](./email-setup.md)
+- [WHO, UNICEF, Gavi and MoH alignment](./who-unicef-gavi-alignment.md)
+
+## Status of other material
+
+- `planning-*-implementation*.md` files are implementation records, not user instructions.
+- Files under `templates/` are authoring templates.
+- `VAXPLAN_*` stakeholder, business, organizational, and slide-deck sources are communications collateral. Validate quantitative, roadmap, security, and standards claims before external reuse.
+- Root-level `.docx` manuals are retained publication snapshots. Their filenames do not establish that they reflect version 1.9.4.
+- `client/public/docs/microplanning-workflow.md` is the application-served copy of the microplanning guide. Keep it synchronized with `docs/microplanning-workflow.md` when that guide changes.
+
+## Documentation maintenance rule
+
+For every user-visible change, update the relevant canonical guide and `docs/releases.md` in the same change. When routes, role gates, module flags, schemas, environment variables, or offline entities change, also update `PLATFORM_REFERENCE.md`, `DEVELOPER_GUIDE.md`, or `OFFLINE_AND_SYNC.md` as applicable. Run `npm run docs:site` and a link check before release.

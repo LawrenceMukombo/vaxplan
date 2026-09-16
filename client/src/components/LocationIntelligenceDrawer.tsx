@@ -25,8 +25,10 @@ import {
   MapPin,
   Navigation,
   ShieldCheck,
+  Plus,
   Users,
 } from "lucide-react";
+import { isSessionCoverageGap } from "@/lib/mapGapPlanning";
 import { RadiusSelector } from "./ui/population/RadiusSelector";
 import { PopulationSummaryCard } from "./ui/population/PopulationSummaryCard";
 import { PopulationSourceComparisonTable } from "./ui/population/PopulationSourceComparisonTable";
@@ -40,6 +42,8 @@ interface LocationIntelligenceDrawerProps {
   point: Point | null;
   onClose: () => void;
   context?: any;
+  onPlanSession?: (radiusKm: number) => void;
+  onOpenNearestSession?: () => void;
 }
 
 type ApiResult<T> = { data: T | null; error: string | null };
@@ -89,12 +93,12 @@ function InfoCard({
   );
 }
 
-function Metric({ label, value, subtext }: { label: string; value: React.ReactNode; subtext?: string }) {
+function Metric({ label, value, subtext, intent = "default" }: { label: string; value: React.ReactNode; subtext?: string; intent?: "default" | "danger" }) {
   return (
-    <div className="rounded-lg border bg-muted/25 p-3">
-      <p className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">{label}</p>
-      <div className="mt-1 text-lg font-extrabold text-foreground">{value}</div>
-      {subtext && <p className="mt-0.5 text-[11px] text-muted-foreground">{subtext}</p>}
+    <div className={`rounded-lg border p-3 ${intent === "danger" ? "border-red-500/60 bg-red-50 dark:bg-red-950/30" : "bg-muted/25"}`}>
+      <p className={`text-[10px] font-bold uppercase tracking-wide ${intent === "danger" ? "text-red-700 dark:text-red-300" : "text-muted-foreground"}`}>{label}</p>
+      <div className={`mt-1 text-lg font-extrabold ${intent === "danger" ? "text-red-700 dark:text-red-300" : "text-foreground"}`}>{value}</div>
+      {subtext && <p className={`mt-0.5 text-[11px] ${intent === "danger" ? "text-red-700/80 dark:text-red-300/80" : "text-muted-foreground"}`}>{subtext}</p>}
     </div>
   );
 }
@@ -112,9 +116,9 @@ function EmptyState({ text }: { text: string }) {
   return <p className="rounded-lg border border-dashed bg-muted/20 p-3 text-sm italic text-muted-foreground">{text}</p>;
 }
 
-async function fetchJsonResult<T>(url: string): Promise<ApiResult<T>> {
+async function fetchJsonResult<T>(url: string, signal?: AbortSignal): Promise<ApiResult<T>> {
   try {
-    const res = await fetch(url, { credentials: "include" });
+    const res = await fetch(url, { credentials: "include", signal });
     const json = await res.json().catch(() => ({}));
     if (!res.ok) return { data: null, error: json?.message || "Request failed" };
     return { data: json?.data ?? json ?? null, error: null };
@@ -123,7 +127,7 @@ async function fetchJsonResult<T>(url: string): Promise<ApiResult<T>> {
   }
 }
 
-export function LocationIntelligenceDrawer({ point, onClose, context }: LocationIntelligenceDrawerProps) {
+export function LocationIntelligenceDrawer({ point, onClose, context, onPlanSession, onOpenNearestSession }: LocationIntelligenceDrawerProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [radiusKm, setRadiusKm] = useState<number>(5);
 
@@ -133,25 +137,27 @@ export function LocationIntelligenceDrawer({ point, onClose, context }: Location
 
   const { data: locationResult, isLoading: isLoadingLocation } = useQuery<ApiResult<any>>({
     queryKey: ["/api/gis/location-intelligence", point?.lat, point?.lng, radiusKm],
-    queryFn: async () => {
+    queryFn: async ({ signal }) => {
       if (!point) return { data: null, error: null };
-      return fetchJsonResult(`/api/gis/location-intelligence?lat=${point.lat}&lng=${point.lng}&radiusKm=${radiusKm}`);
+      return fetchJsonResult(`/api/gis/location-intelligence?lat=${point.lat}&lng=${point.lng}&radiusKm=${radiusKm}`, signal);
     },
     enabled: !!point,
   });
 
   const { data: popResult, isLoading: isLoadingPop } = useQuery<ApiResult<any>>({
     queryKey: ["/api/gis/population-intelligence", point?.lat, point?.lng, radiusKm],
-    queryFn: async () => {
+    queryFn: async ({ signal }) => {
       if (!point) return { data: null, error: null };
-      return fetchJsonResult(`/api/gis/population-intelligence?lat=${point.lat}&lng=${point.lng}&radiusKm=${radiusKm}`);
+      return fetchJsonResult(`/api/gis/population-intelligence?lat=${point.lat}&lng=${point.lng}&radiusKm=${radiusKm}`, signal);
     },
     enabled: !!point,
   });
 
   const locationData = locationResult?.data;
   const popData = popResult?.data;
-  const isLoading = isLoadingLocation || isLoadingPop;
+  // The map already supplies useful local context. Render that immediately and
+  // enrich it as server responses arrive instead of blocking the whole drawer.
+  const isLoading = !context && (isLoadingLocation || isLoadingPop);
 
   const fallbackPopulation = useMemo(() => {
     if (!context) return null;
@@ -168,6 +174,13 @@ export function LocationIntelligenceDrawer({ point, onClose, context }: Location
   }, [context, radiusKm]);
 
   const populationRecommendation = popData?.recommended ?? fallbackPopulation;
+  const ringPopulation = (ringKm: 1 | 2 | 3) => {
+    const localValue = context?.[`pop${ringKm}k`];
+    if (radiusKm === ringKm && populationRecommendation?.totalPopulation != null) {
+      return populationRecommendation.totalPopulation;
+    }
+    return localValue;
+  };
   const facilities = locationData?.facilities?.length
     ? locationData.facilities
     : context?.nearestFacility
@@ -205,6 +218,8 @@ export function LocationIntelligenceDrawer({ point, onClose, context }: Location
     4: context?.wardName,
   };
   const issues = [locationResult?.error, popResult?.error].filter(Boolean);
+  const nearestSessionDistance = normalizeApiDistance(context?.nearestPlan?.distance);
+  const isCoverageGap = isSessionCoverageGap(nearestSessionDistance, radiusKm);
 
   const handleOpenChange = (open: boolean) => {
     setIsOpen(open);
@@ -257,9 +272,23 @@ export function LocationIntelligenceDrawer({ point, onClose, context }: Location
 
               <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
                 <Metric label={`${radiusKm} km denominator`} value={formatNumber(populationRecommendation?.totalPopulation)} subtext="Best available estimate" />
-                <Metric label="Under-5 estimate" value={formatNumber(populationRecommendation?.under5Population)} subtext="Default target cohort" />
+                <Metric label="Population of interest" value={formatNumber(populationRecommendation?.under5Population)} subtext={`Under-5 target cohort within ${radiusKm} km`} />
                 <Metric label="Nearest facility" value={facilities[0]?.name || "None"} subtext={facilities[0] ? formatDistance(facilities[0].distance_km) : `Within ${radiusKm} km`} />
-                <Metric label="Coverage status" value={context?.isInsideCatchment ? "Inside catchment" : "Needs review"} subtext={context?.isHTR ? "HTR/access risk flagged" : "No HTR flag from local context"} />
+                <Metric label="Session coverage" value={isCoverageGap ? "Service gap" : "Covered"} subtext={isCoverageGap ? `No planned session within ${radiusKm} km` : `Nearest session is ${formatDistance(nearestSessionDistance)}`} intent={isCoverageGap ? "danger" : "default"} />
+              </div>
+
+              <div className={`rounded-xl border p-4 ${isCoverageGap ? "border-red-500/60 bg-red-50 text-red-950 dark:bg-red-950/30 dark:text-red-100" : "border-emerald-500/40 bg-emerald-500/10"}`}>
+                <div className="flex items-start gap-3">
+                  {isCoverageGap ? <AlertTriangle className="mt-0.5 h-5 w-5 text-red-600 dark:text-red-300" /> : <CheckCircle2 className="mt-0.5 h-5 w-5 text-emerald-600" />}
+                  <div>
+                    <p className={`font-bold ${isCoverageGap ? "text-red-700 dark:text-red-200" : ""}`}>{isCoverageGap ? "Unserved location confirmed" : "A planned session covers this extent"}</p>
+                    <p className={`text-sm ${isCoverageGap ? "text-red-800/80 dark:text-red-200/80" : "text-muted-foreground"}`}>
+                      {context?.nearestPlan
+                        ? `${context.nearestPlan.name} is ${formatDistance(nearestSessionDistance)} away; the expected extent is ${radiusKm} km.`
+                        : `No geographically located session was found. The expected extent is ${radiusKm} km.`}
+                    </p>
+                  </div>
+                </div>
               </div>
 
               <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
@@ -273,9 +302,9 @@ export function LocationIntelligenceDrawer({ point, onClose, context }: Location
 
                 <InfoCard title="Gridded Population Rings" icon={Database}>
                   <div className="grid grid-cols-3 gap-2 text-center">
-                    <Metric label="1 km" value={formatNumber(context?.pop1k)} subtext="people" />
-                    <Metric label="2 km" value={formatNumber(context?.pop2k)} subtext="people" />
-                    <Metric label="3 km" value={formatNumber(context?.pop3k)} subtext="people" />
+                    <Metric label="1 km" value={formatNumber(ringPopulation(1))} subtext="people" />
+                    <Metric label="2 km" value={formatNumber(ringPopulation(2))} subtext="people" />
+                    <Metric label="3 km" value={formatNumber(ringPopulation(3))} subtext="people" />
                   </div>
                   <p className="mt-3 text-xs text-muted-foreground">These rings are summed from the local map raster/context when the remote population service is unavailable.</p>
                 </InfoCard>
@@ -350,7 +379,10 @@ export function LocationIntelligenceDrawer({ point, onClose, context }: Location
                             <p className="font-semibold">{plan.name}</p>
                             <p className="text-xs capitalize text-muted-foreground">{plan.sessionType} | {plan.status}</p>
                           </div>
-                          <Badge variant="secondary">{formatDistance(plan.distance)}</Badge>
+                          <div className="text-right">
+                            <Badge variant={Number(plan.distance) <= radiusKm ? "secondary" : "outline"}>{formatDistance(plan.distance)}</Badge>
+                            <p className="mt-1 text-[10px] text-muted-foreground">{Number(plan.distance) <= radiusKm ? "Within extent" : `Outside ${radiusKm} km`}</p>
+                          </div>
                         </div>
                       </div>
                     )) : <EmptyState text="No planned sessions found near this point." />}
@@ -391,9 +423,19 @@ export function LocationIntelligenceDrawer({ point, onClose, context }: Location
           )}
         </ScrollArea>
 
-        <DrawerFooter className="mx-auto w-full max-w-6xl border-t">
+        <DrawerFooter className="mx-auto w-full max-w-6xl border-t sm:flex-row">
+          {isCoverageGap ? (
+            <Button className="flex-1 bg-red-600 text-white hover:bg-red-700" disabled={!context?.nearestFacility || !onPlanSession} onClick={() => onPlanSession?.(radiusKm)}>
+              <Plus className="mr-2 h-4 w-4" />
+              {context?.nearestFacility ? `Plan session here — ${context.nearestFacility.name}` : "No nearby facility available"}
+            </Button>
+          ) : (
+            <Button className="flex-1" onClick={onOpenNearestSession} disabled={!context?.nearestPlan || !onOpenNearestSession}>
+              <CalendarDays className="mr-2 h-4 w-4" /> Open nearest session
+            </Button>
+          )}
           <DrawerClose asChild>
-            <Button variant="outline" className="w-full">Close Analysis</Button>
+            <Button variant="outline">Close Analysis</Button>
           </DrawerClose>
         </DrawerFooter>
       </DrawerContent>

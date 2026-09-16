@@ -1,6 +1,11 @@
+try {
+  // @ts-ignore
+  process.loadEnvFile?.();
+} catch {}
+
 import { db } from "../server/db";
 import { sql, eq } from "drizzle-orm";
-import XLSX from "xlsx";
+import XLSX from "@e965/xlsx";
 import fs from "fs";
 import path from "path";
 import {
@@ -183,29 +188,8 @@ async function importFromCSV() {
   console.log(`Found ${uniqueDistricts.size} unique districts`);
   console.log(`Found ${facilitiesData.length} facilities`);
   console.log(`Found ${villagesData.length} communities/villages`);
-  
   await db.transaction(async (tx) => {
-    console.log("\nClearing existing data...");
-    await tx.execute(sql`DELETE FROM client_vaccinations`);
-    await tx.execute(sql`DELETE FROM clients`);
-    await tx.execute(sql`DELETE FROM stock_transactions`);
-    await tx.execute(sql`DELETE FROM monthly_reports`);
-    await tx.execute(sql`DELETE FROM imported_coverage`);
-    await tx.execute(sql`DELETE FROM microplans`);
-    await tx.execute(sql`DELETE FROM population_data`);
-    await tx.execute(sql`DELETE FROM session_villages`);
-    await tx.execute(sql`DELETE FROM vaccine_requirements`);
-    await tx.execute(sql`DELETE FROM budget_items`);
-    await tx.execute(sql`DELETE FROM session_plans`);
-    await tx.execute(sql`DELETE FROM mobilization_activities`);
-    await tx.execute(sql`DELETE FROM htr_scores`);
-    await tx.execute(sql`DELETE FROM villages`);
-    await tx.execute(sql`DELETE FROM facilities`);
-    await tx.execute(sql`DELETE FROM llgs`);
-    await tx.execute(sql`DELETE FROM districts`);
-    await tx.execute(sql`DELETE FROM provinces`);
-    await tx.execute(sql`DELETE FROM regions`);
-    console.log("Cleared existing data.");
+    console.log("\nPreserving existing data (safe non-destructive additive import)...");
     
     // Resolve PNG tenant to populate its facilities and boundary assets
     const [pngTenant] = await tx.select().from(tenants).where(eq(tenants.code, "PNG"));
@@ -215,39 +199,60 @@ async function importFromCSV() {
     }
     console.log(`Resolved active PNG tenant ID: ${tenantId}`);
     
-    console.log("\nInserting regions...");
+    console.log("\nEnsuring regions exist...");
     const regionValues = Array.from(uniqueRegions.values());
-    const insertedRegions = await tx
-      .insert(regions)
-      .values(regionValues.map(r => ({ name: r.name, code: r.code, tenantId })))
-      .returning();
-    console.log(`Inserted ${insertedRegions.length} regions`);
-    
+    const existingRegions = await tx.select().from(regions).where(eq(regions.tenantId, tenantId));
     const regionMap: Record<string, number> = {};
-    for (const r of insertedRegions) {
+    for (const r of existingRegions) {
       regionMap[r.name] = r.id;
     }
-    
-    console.log("\nInserting provinces...");
-    const provinceValues = Array.from(uniqueProvinces.values()).filter(p => regionMap[p.region]);
-    const insertedProvinces = await tx
-      .insert(provinces)
-      .values(provinceValues.map(p => ({
-        name: p.name,
-        code: p.code,
-        regionId: regionMap[p.region],
-        tenantId,
-      })))
-      .returning();
-    console.log(`Inserted ${insertedProvinces.length} provinces`);
-    
-    const provinceMap: Record<string, number> = {};
-    for (const p of insertedProvinces) {
-      provinceMap[p.name] = p.id;
+    const missingRegions = regionValues.filter(r => !regionMap[r.name]);
+    if (missingRegions.length > 0) {
+      const insertedRegions = await tx
+        .insert(regions)
+        .values(missingRegions.map(r => ({ name: r.name, code: r.code, tenantId })))
+        .returning();
+      for (const r of insertedRegions) {
+        regionMap[r.name] = r.id;
+      }
+      console.log(`Inserted ${insertedRegions.length} new regions`);
+    } else {
+      console.log(`All ${regionValues.length} regions already present in database`);
     }
     
-    console.log("\nInserting districts...");
+    console.log("\nEnsuring provinces exist...");
+    const provinceValues = Array.from(uniqueProvinces.values()).filter(p => regionMap[p.region]);
+    const existingProvinces = await tx.select().from(provinces).where(eq(provinces.tenantId, tenantId));
+    const provinceMap: Record<string, number> = {};
+    for (const p of existingProvinces) {
+      provinceMap[p.name] = p.id;
+    }
+    const missingProvinces = provinceValues.filter(p => !provinceMap[p.name]);
+    if (missingProvinces.length > 0) {
+      const insertedProvinces = await tx
+        .insert(provinces)
+        .values(missingProvinces.map(p => ({
+          name: p.name,
+          code: p.code,
+          regionId: regionMap[p.region],
+          tenantId,
+        })))
+        .returning();
+      for (const p of insertedProvinces) {
+        provinceMap[p.name] = p.id;
+      }
+      console.log(`Inserted ${insertedProvinces.length} new provinces`);
+    } else {
+      console.log(`All ${provinceValues.length} provinces already present in database`);
+    }
+    
+    console.log("\nEnsuring districts exist...");
     const districtValues = Array.from(uniqueDistricts.values()).filter(d => provinceMap[d.province]);
+    const existingDistricts = await tx.select().from(districts).where(eq(districts.tenantId, tenantId));
+    const districtMap: Record<string, number> = {};
+    for (const d of existingDistricts) {
+      districtMap[d.name] = d.id;
+    }
     
     const seenDistrictCodes = new Map<string, number>();
     const uniqueDistrictValues = districtValues.map(d => {
@@ -260,20 +265,23 @@ async function importFromCSV() {
       return d;
     });
     
-    const insertedDistricts = await tx
-      .insert(districts)
-      .values(uniqueDistrictValues.map(d => ({
-        name: d.name,
-        code: d.code,
-        provinceId: provinceMap[d.province],
-        tenantId,
-      })))
-      .returning();
-    console.log(`Inserted ${insertedDistricts.length} districts`);
-    
-    const districtMap: Record<string, number> = {};
-    for (const d of insertedDistricts) {
-      districtMap[d.name] = d.id;
+    const missingDistricts = uniqueDistrictValues.filter(d => !districtMap[d.name]);
+    if (missingDistricts.length > 0) {
+      const insertedDistricts = await tx
+        .insert(districts)
+        .values(missingDistricts.map(d => ({
+          name: d.name,
+          code: d.code,
+          provinceId: provinceMap[d.province],
+          tenantId,
+        })))
+        .returning();
+      for (const d of insertedDistricts) {
+        districtMap[d.name] = d.id;
+      }
+      console.log(`Inserted ${insertedDistricts.length} new districts`);
+    } else {
+      console.log(`All ${uniqueDistrictValues.length} districts already present in database`);
     }
     
     console.log("\nInserting facilities...");
@@ -302,8 +310,25 @@ async function importFromCSV() {
     const batchSize = 100;
     const allInsertedFacilities: Array<{ id: number; districtId: number | null; latitude: string | null; longitude: string | null }> = [];
     
-    for (let i = 0; i < uniqueFacilities.length; i += batchSize) {
-      const batch = uniqueFacilities.slice(i, i + batchSize);
+    // Check existing facilities for this tenant
+    const existingFacilities = await tx
+      .select({
+        id: facilities.id,
+        districtId: facilities.districtId,
+        latitude: facilities.latitude,
+        longitude: facilities.longitude,
+        hmisCode: facilities.hmisCode,
+      })
+      .from(facilities)
+      .where(eq(facilities.tenantId, tenantId));
+    
+    const existingFacilityHmis = new Set(existingFacilities.map(f => f.hmisCode).filter(Boolean));
+    allInsertedFacilities.push(...existingFacilities);
+    
+    const missingFacilities = uniqueFacilities.filter(f => !existingFacilityHmis.has(f.hmisCode));
+    
+    for (let i = 0; i < missingFacilities.length; i += batchSize) {
+      const batch = missingFacilities.slice(i, i + batchSize);
       const inserted = await tx
         .insert(facilities)
         .values(batch.map(f => ({
@@ -327,7 +352,7 @@ async function importFromCSV() {
       insertedFacilitiesCount += inserted.length;
       allInsertedFacilities.push(...inserted);
     }
-    console.log(`Inserted ${insertedFacilitiesCount} facilities`);
+    console.log(`Inserted ${insertedFacilitiesCount} new facilities (${allInsertedFacilities.length} total active facilities)`);
 
     // Group facilities by district for spatial nearest-neighbor search
     const facilitiesInDistrict = new Map<number, typeof allInsertedFacilities>();
@@ -352,9 +377,16 @@ async function importFromCSV() {
       console.log(`  ${villagesWithUnknownDistrict} villages assigned to 'Unknown' district`);
     }
     
+    const existingVillages = await tx
+      .select({ name: villages.name, districtId: villages.districtId })
+      .from(villages)
+      .where(eq(villages.tenantId, tenantId));
+    const existingVillageKeys = new Set(existingVillages.map(v => `${v.name}|${v.districtId}`));
+    const missingVillages = mappedVillages.filter(v => !existingVillageKeys.has(`${v.name}|${districtMap[v.district]}`));
+    
     let insertedVillagesCount = 0;
-    for (let i = 0; i < mappedVillages.length; i += batchSize) {
-      const batch = mappedVillages.slice(i, i + batchSize);
+    for (let i = 0; i < missingVillages.length; i += batchSize) {
+      const batch = missingVillages.slice(i, i + batchSize);
       const inserted = await tx
         .insert(villages)
         .values(batch.map((v, idx) => {

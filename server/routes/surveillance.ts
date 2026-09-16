@@ -14,7 +14,7 @@ import {
 } from "@shared/schema";
 import { eq, and, sql, isNotNull } from "drizzle-orm";
 import { dispatchNotification } from "../services/uce";
-import { isAuthenticated, ensureDbUserFromSession } from "../replitAuth";
+import { isAuthenticated, ensureDbUserFromSession } from "../auth";
 import { requireTenant } from "../auth/tenantResolver";
 import { requireDbUser } from "../auth/loadDbUser";
 

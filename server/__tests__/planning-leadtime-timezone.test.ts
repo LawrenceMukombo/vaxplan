@@ -24,7 +24,7 @@
  *      sessionDate ARE flagged as a conflict.
  *
  * Requires a Postgres test DB with at least one tenant + facility seeded
- * (TEST_DATABASE_URL or DATABASE_URL).
+ * (`TEST_DATABASE_URL` only; the application database is never reused).
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";

@@ -95,11 +95,11 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { Plus, Building2, Users, Thermometer, Filter, X, Pencil, Trash2 } from "lucide-react";
 */
 // Updated Code: Added Snowflake, Wrench, AlertTriangle, RefreshCw icons for Cold Chain tab
-import { Plus, Building2, Users, Thermometer, Clock, Zap, X, Pencil, Trash2, Download, Upload, Snowflake, Wrench, AlertTriangle, RefreshCw, CheckCircle2, Loader2, SlidersHorizontal, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ArrowUpDown, Check, Contact, Search, MapPin, History, UserMinus, ArrowLeftRight } from "lucide-react";
+import { Plus, Building2, Users, Thermometer, Clock, Zap, X, Pencil, Trash2, Download, Upload, Snowflake, Wrench, AlertTriangle, RefreshCw, CheckCircle2, Loader2, SlidersHorizontal, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ArrowUpDown, Check, Contact, Search, MapPin, History, UserMinus, ArrowLeftRight, Info } from "lucide-react";
 import { GeoCascadeFilter } from "@/components/GeoCascadeFilter";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useAuth } from "@/hooks/useAuth";
-import { canEditFacility, canDeleteData, canCreateFacility, canCreateCommunity } from "@/lib/permissions";
+import { canEditFacility, canDeleteData, canCreateFacility, canCreateCommunity, canManageCatchmentCommunities } from "@/lib/permissions";
 import { FacilityCascadePicker } from "@/components/FacilityCascadePicker";
 import { ColdChainTab } from "@/components/ColdChainTab";
 import { FacilityPopulationTab } from "@/components/ui/population/FacilityPopulationTab";
@@ -248,6 +248,12 @@ export default function Facilities({ initialTab, initialView }: FacilitiesProps 
   );
   const [bulkConfirmText, setBulkConfirmText] = useState("");
   const [bulkImportResult, setBulkImportResult] = useState<any | null>(null);
+  const [extractDialogOpen, setExtractDialogOpen] = useState(false);
+  const [extractFacility, setExtractFacility] = useState<Facility | null>(null);
+  const [extractBufferKm, setExtractBufferKm] = useState<number>(10.0);
+  const [extractReassignExisting, setExtractReassignExisting] = useState(true);
+  const [assignCommunityDialogOpen, setAssignCommunityDialogOpen] = useState(false);
+  const [assignCommSearch, setAssignCommSearch] = useState("");
 
   // Communities Registry states
   const [communityDialogOpen, setCommunityDialogOpen] = useState(false);
@@ -1087,16 +1093,26 @@ export default function Facilities({ initialTab, initialView }: FacilitiesProps 
   };
 
   const aggressiveExtractMutation = useMutation({
-    mutationFn: async (facilityId: number) => {
-      return apiRequest("POST", `/api/facilities/${facilityId}/communities/extract-aggressive`, {});
+    mutationFn: async (payload: number | { facilityId: number; bufferKm?: number; reassignExisting?: boolean }) => {
+      const targetId = typeof payload === "number" ? payload : payload.facilityId;
+      const bufferKm = typeof payload === "number" ? undefined : payload.bufferKm;
+      const reassignExisting = typeof payload === "number" ? true : payload.reassignExisting;
+      return apiRequest("POST", `/api/facilities/${targetId}/communities/extract-aggressive`, { bufferKm, reassignExisting });
     },
     onSuccess: (res: any) => {
-      queryClient.setQueryData<Village[]>(["/api/villages"], (old) => old ? [...old.filter((v) => Number(v.id) !== Number(res.id)), res] : old);
+      const persisted: Village[] = Array.isArray(res?.communities) ? res.communities : [];
+      queryClient.setQueryData<Village[]>(["/api/villages"], (old) => {
+        if (!old || persisted.length === 0) return old;
+        const byId = new Map(old.map((v) => [Number(v.id), v]));
+        persisted.forEach((v) => byId.set(Number(v.id), v));
+        return Array.from(byId.values());
+      });
       invalidateCommunityCaches();
       toast({
         title: "Extraction Successful",
         description: res.message || "Communities successfully linked to this facility.",
       });
+      setExtractDialogOpen(false);
     },
     onError: (error: any) => {
       toast({
@@ -1106,6 +1122,13 @@ export default function Facilities({ initialTab, initialView }: FacilitiesProps 
       });
     },
   });
+
+  const handleOpenExtractDialog = (facility: Facility) => {
+    setExtractFacility(facility);
+    const radius = facility.catchmentRadius ? parseFloat(String(facility.catchmentRadius)) : 10.0;
+    setExtractBufferKm(isNaN(radius) || radius <= 0 ? 10.0 : radius);
+    setExtractDialogOpen(true);
+  };
 
 
 
@@ -3018,7 +3041,7 @@ export default function Facilities({ initialTab, initialView }: FacilitiesProps 
                             variant="secondary"
                             size="sm"
                             disabled={aggressiveExtractMutation.isPending}
-                            onClick={() => aggressiveExtractMutation.mutate(editingFacility.id)}
+                            onClick={() => handleOpenExtractDialog(editingFacility)}
                             className="bg-emerald-600 hover:bg-emerald-700 text-white gap-1 shrink-0 mb-2 xl:mb-0"
                             data-testid="button-aggressive-extract"
                           >
@@ -3190,6 +3213,73 @@ export default function Facilities({ initialTab, initialView }: FacilitiesProps 
                                           }
                                           data-testid="input-staff-count"
                                         />
+                                      </FormControl>
+                                      <FormMessage />
+                                    </FormItem>
+                                  )}
+                                />
+
+                                <FormField
+                                  control={form.control}
+                                  name="catchmentRadius"
+                                  render={({ field }) => (
+                                    <FormItem className="space-y-2 rounded-lg border p-3 bg-muted/20">
+                                      <div className="flex items-center justify-between">
+                                        <div>
+                                          <FormLabel className="text-sm font-semibold">Catchment Buffer Radius</FormLabel>
+                                          <p className="text-xs text-muted-foreground">
+                                            Controls operational buffer extent for centroid extraction (0.5 – 25.0 km).
+                                          </p>
+                                        </div>
+                                        <Badge variant="outline" className="font-mono text-xs px-2 py-0.5 bg-background font-bold text-primary">
+                                          {field.value ? `${parseFloat(String(field.value)).toFixed(1)} km` : "10.0 km"}
+                                        </Badge>
+                                      </div>
+                                      <FormControl>
+                                        <div className="space-y-2">
+                                          <div className="flex items-center gap-3">
+                                            <input
+                                              type="range"
+                                              min="0.5"
+                                              max="25.0"
+                                              step="0.5"
+                                              value={field.value ? parseFloat(String(field.value)) : 10.0}
+                                              onChange={(e) => field.onChange(e.target.value)}
+                                              className="w-full accent-primary h-2 bg-muted rounded-lg cursor-pointer"
+                                              data-testid="slider-catchment-radius"
+                                            />
+                                            <Input
+                                              type="number"
+                                              min="0.5"
+                                              max="25.0"
+                                              step="0.1"
+                                              value={field.value ?? "10.0"}
+                                              onChange={(e) => field.onChange(e.target.value)}
+                                              className="w-24 text-right font-mono"
+                                              data-testid="input-catchment-radius"
+                                            />
+                                          </div>
+                                          <div className="flex flex-wrap gap-1.5 pt-1">
+                                            <span className="text-[11px] text-muted-foreground self-center mr-1">Presets:</span>
+                                            {[
+                                              { label: "Urban Clinic (1.5km)", val: "1.50" },
+                                              { label: "Peri-Urban (5km)", val: "5.00" },
+                                              { label: "Rural (10km)", val: "10.00" },
+                                              { label: "Remote (20km)", val: "20.00" },
+                                            ].map((preset) => (
+                                              <Button
+                                                key={preset.val}
+                                                type="button"
+                                                variant="outline"
+                                                size="sm"
+                                                className="h-6 text-[11px] px-2 py-0 hover:bg-primary/10"
+                                                onClick={() => field.onChange(preset.val)}
+                                              >
+                                                {preset.label}
+                                              </Button>
+                                            ))}
+                                          </div>
+                                        </div>
                                       </FormControl>
                                       <FormMessage />
                                     </FormItem>
@@ -3562,12 +3652,25 @@ export default function Facilities({ initialTab, initialView }: FacilitiesProps 
                                 <Plus className="h-4 w-4 mr-1" />
                                 Register Community
                               </Button>
+                              <Button
+                                size="sm"
+                                variant="secondary"
+                                onClick={() => {
+                                  setAssignCommSearch("");
+                                  setAssignCommunityDialogOpen(true);
+                                }}
+                                data-testid="button-nested-assign-community"
+                                className="border"
+                              >
+                                <Plus className="h-4 w-4 mr-1" />
+                                Add to Catchment
+                              </Button>
                             </div>
 
                             <div className="border rounded-md divide-y overflow-y-auto max-h-[45vh] custom-scrollbar p-1.5 space-y-1.5 bg-muted/10">
                               {(villages?.filter(v => v.assignedFacilityId === editingFacility?.id) || []).length === 0 ? (
                                 <div className="p-8 text-center text-muted-foreground text-sm">
-                                  No communities assigned. Click "Aggressive Centroid Extractor" above or "+ Register Community" to assign.
+                                  No communities assigned. Click "Aggressive Centroid Extractor" above or "+ Add to Catchment" to assign existing district communities.
                                 </div>
                               ) : (
                                 (villages?.filter(v => v.assignedFacilityId === editingFacility?.id) || []).map((village) => {
@@ -3949,11 +4052,32 @@ export default function Facilities({ initialTab, initialView }: FacilitiesProps 
                         <Plus className="h-4 w-4" />
                         Add Community
                       </Button>
-                    )}                    <Button
+                    )}
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => {
+                        const fac = facilities?.find(f => f.id === selectedFacilityId);
+                        if (fac) {
+                          setEditingFacility(fac);
+                          setAssignCommSearch("");
+                          setAssignCommunityDialogOpen(true);
+                        }
+                      }}
+                      className="gap-1 whitespace-nowrap border"
+                      data-testid="button-assign-community-for-selected-facility"
+                    >
+                      <Plus className="h-4 w-4" />
+                      Add to Catchment
+                    </Button>
+                    <Button
                       size="sm"
                       variant="outline"
                       disabled={aggressiveExtractMutation.isPending}
-                      onClick={() => aggressiveExtractMutation.mutate(selectedFacilityId)}
+                      onClick={() => {
+                        const fac = facilities?.find(f => f.id === selectedFacilityId);
+                        if (fac) handleOpenExtractDialog(fac);
+                      }}
                       className="bg-emerald-600 hover:bg-emerald-700 text-white gap-1 whitespace-nowrap"
                       data-testid="button-extract-communities"
                     >
@@ -4896,6 +5020,230 @@ export default function Facilities({ initialTab, initialView }: FacilitiesProps 
               )}
             </TabsContent>
           </Tabs>
+        </DialogContent>
+      </Dialog>
+
+      {/* Aggressive Catchment Extractor Configuration Modal */}
+      <Dialog open={extractDialogOpen} onOpenChange={setExtractDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Building2 className="h-5 w-5 text-emerald-600" />
+              Catchment Centroid Extractor
+            </DialogTitle>
+          </DialogHeader>
+          {extractFacility && (
+            <div className="space-y-4 pt-2">
+              <div className="rounded-lg bg-muted/40 p-3 border space-y-1 text-xs">
+                <p className="font-semibold text-sm text-foreground">{extractFacility.name}</p>
+                <p className="text-muted-foreground">
+                  HMIS: <span className="font-mono">{extractFacility.hmisCode || "N/A"}</span> &bull; District: {allDistricts?.find(d => d.id === extractFacility.districtId)?.name || `District #${extractFacility.districtId}`}
+                </p>
+                {extractFacility.latitude && extractFacility.longitude && (
+                  <p className="text-[11px] font-mono text-muted-foreground">
+                    Coords: {Number(extractFacility.latitude).toFixed(4)}, {Number(extractFacility.longitude).toFixed(4)}
+                  </p>
+                )}
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs font-semibold">Catchment Buffer Radius</Label>
+                  <Badge variant="outline" className="font-mono text-xs font-bold text-primary">
+                    {extractBufferKm.toFixed(1)} km
+                  </Badge>
+                </div>
+                <div className="flex items-center gap-3">
+                  <input
+                    type="range"
+                    min="0.5"
+                    max="25.0"
+                    step="0.5"
+                    value={extractBufferKm}
+                    onChange={(e) => setExtractBufferKm(parseFloat(e.target.value))}
+                    className="w-full accent-primary h-2 bg-muted rounded-lg cursor-pointer"
+                    data-testid="slider-extract-buffer"
+                  />
+                  <Input
+                    type="number"
+                    min="0.5"
+                    max="25.0"
+                    step="0.1"
+                    value={extractBufferKm}
+                    onChange={(e) => setExtractBufferKm(parseFloat(e.target.value) || 0.5)}
+                    className="w-20 text-right font-mono text-xs"
+                    data-testid="input-extract-buffer"
+                  />
+                </div>
+                <div className="flex flex-wrap gap-1 pt-1">
+                  {[
+                    { label: "High Density (0.5km)", km: 0.5 },
+                    { label: "Urban (1.5km)", km: 1.5 },
+                    { label: "Peri-Urban (5km)", km: 5.0 },
+                    { label: "Rural (10km)", km: 10.0 },
+                    { label: "Remote (20km)", km: 20.0 },
+                    { label: "Max Ceil (25km)", km: 25.0 },
+                  ].map((p) => (
+                    <Button
+                      key={p.km}
+                      type="button"
+                      variant={extractBufferKm === p.km ? "default" : "outline"}
+                      size="sm"
+                      className="h-6 text-[10px] px-2"
+                      onClick={() => setExtractBufferKm(p.km)}
+                    >
+                      {p.label}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-blue-200 bg-blue-50/50 p-2.5 text-xs text-blue-900 space-y-1">
+                <p className="font-semibold flex items-center gap-1.5">
+                  <Info className="h-3.5 w-3.5 text-blue-600" />
+                  WHO Reach Every District (RED) Strategy
+                </p>
+                <ul className="text-[11px] list-disc list-inside space-y-0.5 text-blue-800">
+                  <li><strong>&lt; 5 km:</strong> Fixed strategy (walking distance, primary clinic)</li>
+                  <li><strong>5 – 15 km:</strong> Outreach strategy (scheduled periodic sessions)</li>
+                  <li><strong>&gt; 15 km (up to 25km):</strong> Mobile clinic (vehicle & cold box day trips)</li>
+                </ul>
+              </div>
+
+              <div className="flex items-start justify-between gap-3 rounded-lg border border-amber-300 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-950/25">
+                <div className="space-y-1">
+                  <Label htmlFor="extract-reassign-existing" className="text-xs font-semibold text-amber-950 dark:text-amber-100">
+                    Move existing assignments
+                  </Label>
+                  <p className="text-[11px] text-amber-800 dark:text-amber-200">
+                    Include every spatial match. Communities currently linked to another facility will move to {extractFacility.name}.
+                  </p>
+                </div>
+                <Switch
+                  id="extract-reassign-existing"
+                  checked={extractReassignExisting}
+                  onCheckedChange={setExtractReassignExisting}
+                  data-testid="switch-extract-reassign-existing"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2 border-t">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setExtractDialogOpen(false)}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  disabled={aggressiveExtractMutation.isPending}
+                  onClick={() => {
+                    if (extractFacility) {
+                      aggressiveExtractMutation.mutate({
+                        facilityId: extractFacility.id,
+                        bufferKm: extractBufferKm,
+                        reassignExisting: extractReassignExisting,
+                      });
+                    }
+                  }}
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white gap-1"
+                  data-testid="button-confirm-extract"
+                >
+                  <Building2 className="h-4 w-4" />
+                  {aggressiveExtractMutation.isPending ? "Extracting..." : `Extract within ${extractBufferKm.toFixed(1)} km`}
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Assign Existing District Community to Catchment Modal */}
+      <Dialog open={assignCommunityDialogOpen} onOpenChange={setAssignCommunityDialogOpen}>
+        <DialogContent className="max-w-lg max-h-[85vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Plus className="h-5 w-5 text-primary" />
+              Add Community to Catchment
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 flex-1 overflow-hidden flex flex-col pt-1">
+            <div className="text-xs text-muted-foreground">
+              Select an unassigned community in <strong className="text-foreground">{allDistricts?.find(d => d.id === editingFacility?.districtId)?.name || "this district"}</strong> to include in <strong className="text-foreground">{editingFacility?.name}</strong>'s catchment area.
+            </div>
+            <Input
+              placeholder="Search unassigned communities..."
+              value={assignCommSearch}
+              onChange={(e) => setAssignCommSearch(e.target.value)}
+              className="h-9 text-xs"
+              data-testid="input-search-unassigned-communities"
+            />
+            <div className="flex-1 overflow-y-auto border rounded-md divide-y custom-scrollbar p-1 max-h-[45vh] bg-muted/10">
+              {(() => {
+                const unassigned = (villages || []).filter((v) => 
+                  editingFacility &&
+                  Number(v.districtId) === Number(editingFacility.districtId) &&
+                  !v.assignedFacilityId &&
+                  (assignCommSearch.trim() ? v.name.toLowerCase().includes(assignCommSearch.toLowerCase().trim()) : true)
+                );
+                if (unassigned.length === 0) {
+                  return (
+                    <div className="p-6 text-center text-xs text-muted-foreground">
+                      {assignCommSearch.trim()
+                        ? "No matching unassigned communities found."
+                        : "No unassigned communities available in this district. All communities are currently assigned or new ones must be registered by district authorities."}
+                    </div>
+                  );
+                }
+                return unassigned.map((comm) => (
+                  <div key={comm.id} className="p-2.5 flex items-center justify-between gap-3 hover:bg-muted/40 transition-colors rounded">
+                    <div className="min-w-0">
+                      <p className="font-semibold text-xs text-foreground truncate">{comm.name}</p>
+                      <div className="flex items-center gap-2 mt-0.5 text-[11px] text-muted-foreground">
+                        {comm.population != null && <span>Pop: {Number(comm.population).toLocaleString()}</span>}
+                        {comm.latitude && comm.longitude ? (
+                          <span className="font-mono text-[10px]">{Number(comm.latitude).toFixed(3)}, {Number(comm.longitude).toFixed(3)}</span>
+                        ) : (
+                          <span className="text-[10px] italic">No GPS</span>
+                        )}
+                        {comm.isHardToReach && <Badge variant="secondary" className="text-[9px] px-1 py-0">HTR</Badge>}
+                      </div>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 text-xs px-2.5 shrink-0 hover:bg-primary hover:text-white"
+                      disabled={updateCommunityMutation.isPending}
+                      onClick={() => {
+                        if (editingFacility) {
+                          updateCommunityMutation.mutate({
+                            id: comm.id,
+                            data: { assignedFacilityId: editingFacility.id }
+                          });
+                        }
+                      }}
+                      data-testid={`button-assign-comm-${comm.id}`}
+                    >
+                      + Add
+                    </Button>
+                  </div>
+                ));
+              })()}
+            </div>
+            <div className="flex justify-end pt-2 border-t">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setAssignCommunityDialogOpen(false)}
+              >
+                Close
+              </Button>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
 

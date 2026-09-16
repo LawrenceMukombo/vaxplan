@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.9.4] - 2026-09-14
+
+### Added
+- Campaign summary sheets, readiness assessment, real-time campaign monitoring, target quotas, and expanded RED microplanning.
+- Plan Health, Planning Actions, Planning Evidence, and Field Readiness workspaces.
+- VPD surveillance and configurable geographic risk-assessment workspaces with mapped results and action links.
+- Cold-chain inventory, catalogue administration, CHW field, field-team, desktop/offline, and synchronization-conflict workspaces.
+- Canonical platform, developer, and offline/synchronization documentation.
+
+### Changed
+- Unified routine and campaign navigation around the microplan builder while retaining routed session-planning detail views.
+- Expanded tenant module configuration, dynamic role/permission administration, geographic scope enforcement, and temporal/audit history.
+- Synchronization now supports offline authentication state, batch handlers, forced retry for stuck items, warning propagation, and tenant-local cache isolation.
+
+### Fixed
+- Corrected offline queue replay, identity sequence alignment, missing production columns, and resilient sync-pull behavior.
+- Corrected campaign, risk, surveillance, facility, settlement, population, map visibility, and tenant-geography edge cases.
+- Restricted editable landing-page field stories to administrators.
+
 ## [1.9.2] - 2026-08-07
 
 ### Added

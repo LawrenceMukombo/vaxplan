@@ -118,7 +118,7 @@ import type { UserRole } from "@shared/schema";
 import { normalizeStockVaccineName } from "@shared/vaccineSchedule";
 import { isApprovedPlan, approvalEligibility } from "@shared/microplanPolicy";
 import { db } from "./db";
-import { eq, and, desc, isNull, inArray, getTableColumns, sql, gte } from "drizzle-orm";
+import { eq, and, or, desc, isNull, inArray, getTableColumns, sql, gte, ne } from "drizzle-orm";
 
 export interface OnlineUser {
   userId: string | null;
@@ -1180,6 +1180,7 @@ export class DatabaseStorage implements IStorage {
       districtId?: number;
       villageId?: number;
       facilityId?: number;
+      effectiveFacilityVillageIds?: number[];
       year?: number;
       excludeVillages?: boolean;
     },
@@ -1195,7 +1196,14 @@ export class DatabaseStorage implements IStorage {
           filters?.provinceId ? eq(populationData.provinceId, filters.provinceId) : undefined,
           filters?.districtId ? eq(populationData.districtId, filters.districtId) : undefined,
           filters?.villageId ? eq(populationData.villageId, filters.villageId) : undefined,
-          filters?.facilityId ? eq(populationData.facilityId, filters.facilityId) : undefined,
+          filters?.facilityId
+            ? (filters.effectiveFacilityVillageIds?.length
+              ? or(
+                  inArray(populationData.villageId, filters.effectiveFacilityVillageIds),
+                  and(isNull(populationData.villageId), eq(populationData.facilityId, filters.facilityId)),
+                )
+              : and(isNull(populationData.villageId), eq(populationData.facilityId, filters.facilityId)))
+            : undefined,
           filters?.year ? eq(populationData.year, filters.year) : undefined,
           filters?.excludeVillages ? isNull(populationData.villageId) : undefined,
         ),
@@ -1628,7 +1636,7 @@ export class DatabaseStorage implements IStorage {
         updatedAt: microplans.updatedAt,
       })
       .from(microplans)
-      .where(eq(microplans.tenantId, tenantId)) as unknown as Microplan[];
+      .where(and(eq(microplans.tenantId, tenantId), ne(microplans.status, "archived"))) as unknown as Microplan[];
   }
   async getMicroplan(tenantId: string, id: number): Promise<Microplan | undefined> {
     const [row] = await db

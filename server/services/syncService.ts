@@ -46,6 +46,7 @@ import {
 import { eq, and, gt, sql, inArray } from "drizzle-orm";
 import { canonicalizePerAntigen, normalizeStockVaccineName } from "@shared/vaccineSchedule";
 import { checkProximityAndPopulation } from "./proximityCheck";
+import { classifySyncMutationRoute } from "./syncMutationRoute";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -372,14 +373,46 @@ export async function batchMutate(
       }
 
       let serverId: string | number | undefined;
+      const clientRoute = classifySyncMutationRoute(mutation.url);
 
-      if (mutation.url.startsWith("/api/clients")) {
+      if (clientRoute.kind === "client-vaccination" || clientRoute.kind === "client-vaccination-batch") {
+        if (mutation.method !== "POST") {
+          throw new Error(`${clientRoute.kind}: unsupported method ${mutation.method}`);
+        }
+        const client = await storage.getClient(tenantId, clientRoute.clientId);
+        if (!client) throw new Error(`${clientRoute.kind}: client ${clientRoute.clientId} not found`);
+
+        const doses = clientRoute.kind === "client-vaccination-batch" ? body : [body];
+        if (!Array.isArray(doses) || doses.length === 0) {
+          throw new Error(`${clientRoute.kind}: expected at least one vaccination dose`);
+        }
+
+        const insertedIds: number[] = [];
+        for (const dose of doses) {
+          if (!dose || typeof dose !== "object" || Array.isArray(dose)) {
+            throw new Error(`${clientRoute.kind}: invalid vaccination payload`);
+          }
+          const vaccination = await storage.createClientVaccination(tenantId, {
+            ...dose,
+            tenantId,
+            clientId: clientRoute.clientId,
+            administeredByUserId: performedById,
+          } as any);
+          insertedIds.push(vaccination.id);
+        }
+        // A batch result has one legacy serverId field; use the first row for
+        // audit compatibility while the full batch has already been persisted.
+        serverId = insertedIds[0];
+
+      } else if (clientRoute.kind === "client") {
         if (mutation.method === "POST") {
           const client = await storage.createClient(tenantId, payload);
           serverId = client.id;
-        } else if ((mutation.method === "PATCH" || mutation.method === "PUT") && mutation.serverId) {
-          await storage.updateClient(tenantId, String(mutation.serverId), payload);
-          serverId = mutation.serverId;
+        } else if (mutation.method === "PATCH" || mutation.method === "PUT") {
+          const clientId = mutation.serverId ?? mutation.localId ?? mutation.url.split("/").pop();
+          if (!clientId) throw new Error("client update: missing client id");
+          await storage.updateClient(tenantId, String(clientId), payload);
+          serverId = clientId;
         }
 
       } else if (mutation.url.includes("/vaccinations") || mutation.url.startsWith("/api/client-vaccinations")) {
