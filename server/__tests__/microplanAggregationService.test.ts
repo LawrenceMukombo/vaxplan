@@ -213,6 +213,67 @@ describe("microplanAggregationService", () => {
     expect(southern?.facilitiesWithPlan).toBe(2);
   });
 
+  it("keeps routine and campaign forecasts isolated for the same facility and period", async () => {
+    const plans = [
+      {
+        id: 2001,
+        facilityId: 101,
+        name: "Routine plan",
+        planType: "routine",
+        year: 2026,
+        quarter: 1,
+        status: "approved",
+        targetPopulation: 100,
+        budget: 0,
+        staffing: {
+          submissionSnapshot: {
+            vaccineForecast: [{ name: "BCG", target: "100", doses: 1, wastage: "10" }],
+            budget: [{ category: "Transport", quantity: "2", unitCost: "50", fundingSource: "government" }],
+            staffing: [{ role: "Vaccinator", count: 2, days: 3, dailyRate: 10 }],
+          },
+        },
+      },
+      {
+        id: 2002,
+        facilityId: 101,
+        name: "SIA plan",
+        planType: "sia_campaign",
+        year: 2026,
+        quarter: 1,
+        status: "pending",
+        targetPopulation: 250,
+        budget: 0,
+        staffing: {
+          submissionSnapshot: {
+            vaccineForecast: [{ name: "MR", target: "250", doses: 1, wastage: "20" }],
+            budget: [{ category: "Mobilization", quantity: "3", unitCost: "75", fundingSource: "gavi" }],
+            staffing: [{ role: "Campaign vaccinator", count: 4, days: 2, dailyRate: 15 }],
+          },
+        },
+      },
+    ];
+    const makeDb = () => {
+      let callIndex = 0;
+      const sequence = [provincesFixture, districtsFixture, facilitiesFixture, plans, [], vaccineRequirementsFixture, budgetItemsFixture];
+      return {
+        select: () => ({ from: () => ({ where: () => Promise.resolve(sequence[callIndex++] ?? []) }) }),
+      } as any;
+    };
+
+    const routine = await getMicroplanAggregations(makeDb(), "test-tenant", { planType: "routine", year: 2026, quarter: 1 });
+    const campaign = await getMicroplanAggregations(makeDb(), "test-tenant", { planType: "campaign", year: 2026, quarter: 1 });
+
+    expect(routine.summary.vaccines.totalDosesWithWastage).toBe(111);
+    expect(routine.summary.vaccines.byAntigen.map((row) => row.vaccineName)).toEqual(["BCG"]);
+    expect(routine.summary.totalBudget).toBe(100);
+    expect(routine.summary.staffingSummary.totalHeadcount).toBe(2);
+
+    expect(campaign.summary.vaccines.totalDosesWithWastage).toBe(300);
+    expect(campaign.summary.vaccines.byAntigen.map((row) => row.vaccineName)).toEqual(["MR"]);
+    expect(campaign.summary.totalBudget).toBe(225);
+    expect(campaign.summary.staffingSummary.totalHeadcount).toBe(4);
+  });
+
   it("handles empty facilities or plans gracefully", async () => {
     const emptyDb = {
       select: () => ({

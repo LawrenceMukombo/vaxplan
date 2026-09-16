@@ -3420,7 +3420,7 @@ export function Step2({
                 onCheckedChange={(v) => update(selectedIdx, { communicationContactMade: !!v })}
               />
               <Label htmlFor="comm-contact" className="text-xs font-medium cursor-pointer select-none">
-                Communication Contact Made
+                Communication Contact Made <span className="font-normal text-muted-foreground">(optional)</span>
               </Label>
             </div>
             <div className="flex items-center gap-2 pt-6">
@@ -3430,9 +3430,12 @@ export function Step2({
                 onCheckedChange={(v) => update(selectedIdx, { outsideFollowUpCheck: !!v })}
               />
               <Label htmlFor="outside-followup" className="text-xs font-medium cursor-pointer select-none">
-                Outside Follow-Up Required
+                Outside Follow-Up Required <span className="font-normal text-muted-foreground">(optional)</span>
               </Label>
             </div>
+            <p className="text-[11px] text-muted-foreground md:col-span-2 lg:col-span-4">
+              These confirmations can be completed later and do not block planning or moving to the next step.
+            </p>
             </div>
           </CardContent>
           {/* Cross-Border Coordination Section */}

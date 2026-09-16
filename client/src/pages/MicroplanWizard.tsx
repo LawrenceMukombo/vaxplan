@@ -3,7 +3,6 @@ import { disaggregatePopulation, populationRatios, type PopulationRatios } from 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useRoute } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { RedMicroplanningWorksheet } from "@/components/RedMicroplanningWorksheet";
 import { MicroplanGamificationBar } from "@/components/microplan/MicroplanGamificationBar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -628,7 +627,6 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
   const [returnToSummary, setReturnToSummary] = useState(false);
   const [microplanId, setMicroplanId] = useState<number | null>(null);
   const [showConfirmation, setShowConfirmation] = useState(false);
-  const [wizardViewMode, setWizardViewMode] = useState<"guided" | "red_worksheet">("guided");
 
   // --- Plan type (routine vs SIA campaign) ------------------------------
   // The wizard is the same template for both flows; only the planType and
@@ -880,6 +878,13 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
     excludedVillageIds?: number[];
     excludedVillages?: ExcludedVillageDetail[];
     reviewSnapshot?: Record<string, any> | null;
+    reviewWorkflow?: {
+      requests: Array<any>;
+      stepReviews: Array<any>;
+      currentRequest: any | null;
+      canReviewCurrentLevel: boolean;
+      requiredReviewerRole: string | null;
+    };
   };
   const { data: hydration } = useQuery<MicroplanHydration>({
     queryKey: ["/api/microplans", microplanId, "hydration"],
@@ -893,6 +898,34 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
     enabled: !!microplanId,
   });
   const microplan = hydration?.microplan;
+  const reviewWorkflow = hydration?.reviewWorkflow;
+  const [reviewComments, setReviewComments] = useState<Record<number, string>>({});
+  const currentStepReview = reviewWorkflow?.stepReviews?.find((review: any) =>
+    Number(review.requestId) === Number(reviewWorkflow.currentRequest?.id) &&
+    Number(review.step) === active,
+  );
+  useEffect(() => {
+    if (!currentStepReview?.comment) return;
+    setReviewComments((previous) => previous[active] != null
+      ? previous
+      : { ...previous, [active]: String(currentStepReview.comment) });
+  }, [active, currentStepReview?.comment]);
+  const recordStepReview = useMutation({
+    mutationFn: async () => apiRequest(
+      "POST",
+      `/api/microplans/${microplanId}/review/steps/${active}`,
+      { comment: reviewComments[active] ?? "" },
+    ),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/microplans", microplanId, "hydration"] });
+      toast({ title: `Step ${active} reviewed`, description: "The review and comment were added to the approval audit trail." });
+    },
+    onError: (error: any) => toast({
+      title: "Could not record review",
+      description: error?.message ?? "Please try again.",
+      variant: "destructive",
+    }),
+  });
 
   const { data: staffRoster } = useQuery<any[]>({
     queryKey: ["/api/facilities", facilityId, "staff"],
@@ -4023,6 +4056,7 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
   const approvalWindow = approvalEligibility(microplan?.createdAt, policyTenant?.settings);
   const status = microplan?.status ?? "draft";
   const isReadOnly = Boolean(microplanId && !microplan) || status !== "draft";
+  const isReviewerMode = isReadOnly && !!reviewWorkflow?.canReviewCurrentLevel;
   const facilityLabel = facility?.name ?? "No facility selected";
   // Facility staff (clerk + in-charge) author and submit microplans; higher
   // roles act as reviewers/approvers. national_admin is included so platform
@@ -4157,20 +4191,10 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
             message: `Communities: '${name}' is missing focal person name.`,
           });
         }
-        if (!c.communicationContactMade) {
-          errors.push({
-            step: 2,
-            id: `community-contact-not-made-${idx}`,
-            message: `Communities: '${name}' contact checkbox 'Communication Contact Made' must be checked.`,
-          });
-        }
-        if (!c.outsideFollowUpCheck) {
-          errors.push({
-            step: 2,
-            id: `community-followup-not-made-${idx}`,
-            message: `Communities: '${name}' contact checkbox 'Follow-up made outside platform' must be confirmed.`,
-          });
-        }
+        // Contact confirmation is operational follow-up information, not a
+        // prerequisite for defining the catchment. A planner may continue and
+        // arrange CHV contact later; the unchecked values remain visible in
+        // the saved plan and review snapshot.
       });
     }
 
@@ -4442,37 +4466,10 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
           </div>
           <div className="flex items-center gap-2.5 flex-wrap">
             {facilityId && microplanId && (
-              <div
-                className="inline-flex items-center rounded-lg border bg-muted/60 p-0.5 text-muted-foreground shadow-2xs"
-                data-testid="wizard-view-mode-toggle"
-              >
-                <Button
-                  type="button"
-                  variant={wizardViewMode === "guided" ? "default" : "ghost"}
-                  size="sm"
-                  onClick={() => setWizardViewMode("guided")}
-                  className={`h-7 text-xs font-semibold gap-1.5 px-3 rounded-md transition-all ${
-                    wizardViewMode === "guided" ? "shadow-xs" : "text-muted-foreground hover:text-foreground"
-                  }`}
-                  data-testid="tab-guided-wizard"
-                >
-                  <Sparkles className="h-3.5 w-3.5 text-amber-500 dark:text-amber-400" />
-                  Guided Digital Flow
-                </Button>
-                <Button
-                  type="button"
-                  variant={wizardViewMode === "red_worksheet" ? "default" : "ghost"}
-                  size="sm"
-                  onClick={() => setWizardViewMode("red_worksheet")}
-                  className={`h-7 text-xs font-semibold gap-1.5 px-3 rounded-md transition-all ${
-                    wizardViewMode === "red_worksheet" ? "shadow-xs" : "text-muted-foreground hover:text-foreground"
-                  }`}
-                  data-testid="tab-red-worksheet"
-                >
-                  <FileSpreadsheet className="h-3.5 w-3.5 text-blue-500 dark:text-blue-400" />
-                  WHO RED Formal Worksheet
-                </Button>
-              </div>
+              <Badge variant="outline" className="h-7 gap-1.5 border-blue-500/30 bg-blue-500/5 px-3 text-xs font-semibold text-blue-700 dark:text-blue-300" data-testid="badge-who-red-standard-workflow">
+                <FileSpreadsheet className="h-3.5 w-3.5" />
+                WHO RED Standard Workflow
+              </Badge>
             )}
             <Badge variant={status === "draft" ? "outline" : "default"}>
               {status}
@@ -4651,9 +4648,6 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
           activeStep={active}
           onSelectStep={(step) => {
             setActive(step);
-            if (wizardViewMode === "red_worksheet") {
-              setWizardViewMode("guided");
-            }
           }}
           planType={planType}
           microplan={microplan}
@@ -4989,44 +4983,6 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
               onViewDetails={() => setShowConfirmation(false)}
               onClose={() => setLocation(planType === "campaign" ? "/microplans/campaigns" : "/microplans/routine")}
             />
-          ) : wizardViewMode === "red_worksheet" && facilityId && microplanId ? (
-            <Card className="flex flex-1 flex-col overflow-hidden" data-testid="card-who-red-worksheet-mode">
-              <CardHeader className="border-b p-4">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                  <div>
-                    <CardTitle className="text-base flex items-center gap-2">
-                      <FileSpreadsheet className="h-4 w-4 text-primary" />
-                      WHO Reach Every District (RED) Formal Worksheet
-                    </CardTitle>
-                    <p className="text-xs text-muted-foreground mt-0.5">
-                      Authoritative 10-step facility microplanning tool (WHO guidelines pages 9–37). Pre-populated directly from health facility records.
-                    </p>
-                  </div>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => setWizardViewMode("guided")}
-                    className="text-xs h-8 gap-1.5 shrink-0"
-                    data-testid="button-return-to-guided"
-                  >
-                    <Sparkles className="h-3.5 w-3.5 text-primary" />
-                    Return to Guided Flow
-                  </Button>
-                </div>
-              </CardHeader>
-              <CardContent className="flex-1 overflow-y-auto p-4">
-                <RedMicroplanningWorksheet
-                  key={`${facilityId}:${microplanId}`}
-                  facilityId={facilityId}
-                  microplanId={microplanId}
-                  readOnly={isReadOnly}
-                  onOpenStep={(step) => {
-                    setActive(step);
-                    setWizardViewMode("guided");
-                  }}
-                />
-              </CardContent>
-            </Card>
           ) : (
             <Card className="flex flex-1 flex-col overflow-hidden">
             <CardHeader className="border-b py-3 px-3 sm:px-4">
@@ -5046,19 +5002,6 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
                   </CardTitle>
                 </div>
               <div className="flex items-center gap-2">
-                {facilityId && microplanId && (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => setWizardViewMode("red_worksheet")}
-                    className="text-xs h-8 gap-1.5 border-blue-500/30 text-blue-700 dark:text-blue-300 hover:bg-blue-500/10 font-medium"
-                    title="View this step inside the official WHO RED Microplanning Worksheet"
-                    data-testid="button-open-red-worksheet"
-                  >
-                    <FileSpreadsheet className="h-3.5 w-3.5" />
-                    <span className="hidden sm:inline">WHO RED Matrix</span>
-                  </Button>
-                )}
                 {returnToSummary && active !== 11 && (
                   <Button
                     size="sm"
@@ -5075,7 +5018,12 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
                 {/* Duplicate action button at the top of the card so it's always
                     reachable when the step content is long and the footer is
                     off-screen, and so toasts at the bottom can't obscure it. */}
-                {active === 11 ? (
+                {active === 11 && isReadOnly ? (
+                  <Button size="sm" variant="outline" disabled data-testid="button-reviewed-top">
+                    <CheckCircle2 className="mr-1 h-3 w-3" />
+                    {currentStepReview ? "Reviewed" : "Awaiting review"}
+                  </Button>
+                ) : active === 11 ? (
                   <Button
                     size="sm"
                     onClick={handleSubmit}
@@ -5108,6 +5056,70 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
               </div>
             </CardHeader>
             <CardContent className="flex-1 space-y-4 overflow-y-auto p-3 sm:p-4">
+              {isReadOnly && reviewWorkflow && (
+                <div className="space-y-3 rounded-lg border border-blue-200 bg-blue-50/70 p-3 dark:border-blue-900 dark:bg-blue-950/20" data-testid="microplan-review-workspace">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <p className="text-sm font-semibold">Approval review · Step {active} of 11</p>
+                      <p className="text-xs text-muted-foreground">
+                        Current stage: <span className="font-medium capitalize">{reviewWorkflow.currentRequest?.currentLevel ?? "completed"}</span>
+                        {reviewWorkflow.requiredReviewerRole ? ` · Assigned to ${String(reviewWorkflow.requiredReviewerRole).replace(/_/g, " ")}` : ""}
+                      </p>
+                    </div>
+                    <Badge variant={currentStepReview ? "default" : "outline"}>
+                      {currentStepReview ? "Reviewed" : "Not reviewed"}
+                    </Badge>
+                  </div>
+
+                  <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+                    <div className="rounded-md border border-emerald-300 bg-emerald-50 p-2 text-xs dark:bg-emerald-950/20">
+                      <p className="font-semibold">Facility submission</p>
+                      <p className="text-emerald-700 dark:text-emerald-300">Submitted</p>
+                      {microplan?.submittedAt && <p className="mt-1 text-[10px] text-muted-foreground">{new Date(microplan.submittedAt).toLocaleString()}</p>}
+                      {reviewWorkflow.requests?.[0]?.requestedById && <p className="text-[10px] text-muted-foreground">Submitted by: {reviewWorkflow.requests[0].requestedById}</p>}
+                    </div>
+                    {(["district", "provincial", "national"] as const).map((level) => {
+                      const stage = reviewWorkflow.requests?.find((request: any) => String(request.currentLevel).toLowerCase() === level);
+                      return (
+                        <div key={level} className={`rounded-md border p-2 text-xs ${stage?.status === "approved" ? "border-emerald-300 bg-emerald-50 dark:bg-emerald-950/20" : stage?.status === "pending" ? "border-blue-300 bg-background" : "bg-muted/30"}`}>
+                          <p className="font-semibold capitalize">{level} review</p>
+                          <p className="capitalize text-muted-foreground">{stage?.status ?? "Not reached"}</p>
+                          {stage?.resolvedAt && <p className="mt-1 text-[10px] text-muted-foreground">Completed {new Date(stage.resolvedAt).toLocaleString()}</p>}
+                          {stage?.resolvedById && <p className="text-[10px] text-muted-foreground">Reviewer: {stage.resolvedById}</p>}
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {isReviewerMode ? (
+                    <div className="space-y-2">
+                      <Label htmlFor={`review-comment-${active}`} className="text-xs">Reviewer comment (optional)</Label>
+                      <Textarea
+                        id={`review-comment-${active}`}
+                        value={reviewComments[active] ?? ""}
+                        onChange={(event) => setReviewComments((previous) => ({ ...previous, [active]: event.target.value }))}
+                        placeholder="Record observations, evidence checked, or follow-up needed for this step."
+                        rows={2}
+                        data-testid="input-step-review-comment"
+                      />
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={() => recordStepReview.mutate()}
+                        disabled={recordStepReview.isPending || !!currentStepReview}
+                        data-testid="button-mark-step-reviewed"
+                      >
+                        {recordStepReview.isPending ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <CheckCircle2 className="mr-1 h-3 w-3" />}
+                        {currentStepReview ? "Reviewed" : "Mark step reviewed"}
+                      </Button>
+                    </div>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">
+                      This stage is read-only for your role. The assigned reviewer records step checks and comments here.
+                    </p>
+                  )}
+                </div>
+              )}
               <UnifiedStepGuide active={active} stepDef={stepDef} />
               {microplan && !approvalWindow.allowed && status !== "approved" && status !== "auto_approved" && <p className="rounded border p-3 text-sm" role="note">{approvalWindow.message}</p>}
               {lifeCourseTarget.groupId && lifeCourseTarget.population > 0 && [4, 6].includes(active) && <div className="rounded-md border border-primary/30 bg-primary/5 p-3 text-sm" data-testid="life-course-target-context"><strong>Life-course target context:</strong> {lifeCourseTarget.population.toLocaleString()} eligible people from target group {lifeCourseTarget.groupId}. Keep this target separate from the infant denominator and use it for the applicable session or forecast rows.</div>}
@@ -5583,7 +5595,12 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
                 >
                   <Save className="mr-1 h-4 w-4" /> Save Draft
                 </Button>
-                {active === 11 ? (
+                {active === 11 && isReadOnly ? (
+                  <Button variant="outline" disabled data-testid="button-reviewed">
+                    <CheckCircle2 className="mr-1 h-4 w-4" />
+                    {currentStepReview ? "Reviewed" : "Awaiting review"}
+                  </Button>
+                ) : active === 11 ? (
                   <Button
                     onClick={handleSubmit}
                     disabled={!canSubmit || busy || !microplanId || validationErrors.length > 0 || isReadOnly}

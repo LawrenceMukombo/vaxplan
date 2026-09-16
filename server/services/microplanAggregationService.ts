@@ -305,6 +305,28 @@ export async function getMicroplanAggregations(
   });
 
   const planIds = filteredPlans.map((p: any) => p.id);
+  const periodKey = (row: any) => `${row.facilityId ?? "none"}:${row.year ?? "none"}:${row.quarter ?? "none"}`;
+  const plansByFacilityPeriod = new Map<string, any[]>();
+  rawPlans.forEach((plan: any) => {
+    const key = periodKey(plan);
+    plansByFacilityPeriod.set(key, [...(plansByFacilityPeriod.get(key) ?? []), plan]);
+  });
+  const submissionSnapshot = (plan: any): any | null => {
+    const staffing = plan?.staffing;
+    return staffing && typeof staffing === "object" && !Array.isArray(staffing)
+      ? staffing.submissionSnapshot ?? null
+      : null;
+  };
+  const planTargetPopulation = (plan: any): number => {
+    const stored = Number(plan?.targetPopulation) || 0;
+    if (stored > 0) return stored;
+    const snapshot = submissionSnapshot(plan);
+    const coverageTarget = Number(snapshot?.coverage?.targetInfants) || 0;
+    if (coverageTarget > 0) return coverageTarget;
+    return Array.isArray(snapshot?.communities)
+      ? snapshot.communities.reduce((sum: number, row: any) => sum + (Number(row?.targetPopulation) || 0), 0)
+      : 0;
+  };
   const planByFacilityId = new Map<number, typeof filteredPlans[0]>();
   filteredPlans.forEach((p: any) => {
     if (p.facilityId) {
@@ -399,12 +421,12 @@ export async function getMicroplanAggregations(
   });
 
   const vaccinesByAntigenMap = new Map<string, VaccineAntigenSummary>();
-  const vaccinesByFacilityMap = new Map<number, { doses: number; vials: number }>();
+  const vaccinesByPlanMap = new Map<number, { doses: number; vials: number }>();
   let totalDosesRequired = 0;
   let totalDosesWithWastage = 0;
   let totalVialsRequired = 0;
 
-  filteredVaccines.forEach((v: any) => {
+  const addVaccine = (planId: number, v: any) => {
     const doses = Number(v.dosesRequired) || 0;
     const dosesWastage = Number(v.dosesWithWastage) || 0;
     const vials = Number(v.vialsRequired) || 0;
@@ -428,10 +450,48 @@ export async function getMicroplanAggregations(
     existing.targetPopulation += pop;
     vaccinesByAntigenMap.set(antigenKey, existing);
 
-    const facVac = vaccinesByFacilityMap.get(v.facilityId) || { doses: 0, vials: 0 };
-    facVac.doses += doses;
-    facVac.vials += vials;
-    vaccinesByFacilityMap.set(v.facilityId, facVac);
+    const planVac = vaccinesByPlanMap.get(planId) || { doses: 0, vials: 0 };
+    planVac.doses += doses;
+    planVac.vials += vials;
+    vaccinesByPlanMap.set(planId, planVac);
+  };
+
+  const dosesPerVial = (name: string): number => {
+    const value = name.toUpperCase();
+    if (value.includes("BCG") || value.includes("OPV")) return 20;
+    if (value.includes("PCV")) return 4;
+    if (value.includes("IPV")) return 5;
+    if (value.includes("ROTA")) return 1;
+    return 10;
+  };
+
+  filteredPlans.forEach((plan: any) => {
+    const snapshotRows = submissionSnapshot(plan)?.vaccineForecast;
+    if (Array.isArray(snapshotRows)) {
+      snapshotRows.forEach((row: any) => {
+        const target = Number(row.target) || 0;
+        const doseSchedule = Number(row.doses) || 0;
+        if (target <= 0 || doseSchedule <= 0) return;
+        const dosesRequired = target * doseSchedule;
+        const dosesWithWastage = Math.ceil(dosesRequired * (1 + (Number(row.wastage) || 0) / 100));
+        addVaccine(plan.id, {
+          vaccineName: row.name,
+          targetPopulation: target,
+          dosesRequired,
+          dosesWithWastage,
+          vialsRequired: Math.ceil(dosesWithWastage / dosesPerVial(String(row.name ?? ""))),
+        });
+      });
+      return;
+    }
+
+    // Legacy vaccine rows are facility/period scoped and cannot distinguish a
+    // routine plan from an SIA plan. Use them only when exactly one plan owns
+    // that facility-period; otherwise returning zero is safer than cross-plan leakage.
+    if ((plansByFacilityPeriod.get(periodKey(plan)) ?? []).length !== 1) return;
+    filteredVaccines
+      .filter((row: any) => row.facilityId === plan.facilityId && row.year === plan.year && row.quarter === plan.quarter)
+      .forEach((row: any) => addVaccine(plan.id, row));
   });
 
   // 5. Fetch Budget Items for in-scope facilities
@@ -467,7 +527,8 @@ export async function getMicroplanAggregations(
   const budgetByFundingMap = new Map<string, BudgetFundingSummary>();
   let totalBudgetCents = 0;
 
-  filteredBudget.forEach((b: any) => {
+  const budgetByPlanMap = new Map<number, number>();
+  const addBudget = (planId: number, b: any) => {
     const cost = Number(b.totalCost) || 0;
     totalBudgetCents += cost;
 
@@ -482,15 +543,32 @@ export async function getMicroplanAggregations(
     fEntry.totalCost += cost;
     fEntry.count += 1;
     budgetByFundingMap.set(fund, fEntry);
+    budgetByPlanMap.set(planId, (budgetByPlanMap.get(planId) || 0) + cost);
+  };
+
+  filteredPlans.forEach((plan: any) => {
+    const snapshot = submissionSnapshot(plan);
+    if (Array.isArray(snapshot?.budget)) {
+      snapshot.budget.forEach((row: any) => addBudget(plan.id, {
+        ...row,
+        totalCost: (Number(row.quantity) || 0) * (Number(row.unitCost) || 0),
+      }));
+      return;
+    }
+    if ((plansByFacilityPeriod.get(periodKey(plan)) ?? []).length === 1) {
+      filteredBudget
+        .filter((row: any) => row.facilityId === plan.facilityId && row.year === plan.year && row.quarter === plan.quarter)
+        .forEach((row: any) => addBudget(plan.id, row));
+    }
+    if (!budgetByPlanMap.has(plan.id)) {
+      const storedBudget = Number(plan.budget) || 0;
+      if (storedBudget > 0) budgetByPlanMap.set(plan.id, storedBudget);
+    }
   });
 
   // If budget items total is zero but microplans have budget, fall back to microplan.budget sums
   let totalBudget = totalBudgetCents;
-  if (totalBudget === 0) {
-    filteredPlans.forEach((p: any) => {
-      totalBudget += Number(p.budget) || 0;
-    });
-  }
+  totalBudget = Array.from(budgetByPlanMap.values()).reduce((sum, value) => sum + value, 0);
 
   // 6. Aggregate staffing data from microplans
   const staffingByRoleMap = new Map<string, StaffRoleSummary>();
@@ -498,8 +576,16 @@ export async function getMicroplanAggregations(
   let totalPersonDays = 0;
 
   filteredPlans.forEach((p: any) => {
-    if (Array.isArray(p.staffing)) {
-      p.staffing.forEach((st: any) => {
+    const staffingPayload = p.staffing;
+    const roster = Array.isArray(staffingPayload)
+      ? staffingPayload
+      : Array.isArray(staffingPayload?.submissionSnapshot?.staffing)
+        ? staffingPayload.submissionSnapshot.staffing
+        : Array.isArray(staffingPayload?.roster)
+          ? staffingPayload.roster
+          : [];
+    if (roster.length > 0) {
+      roster.forEach((st: any) => {
         const role = String(st.role || "Staff").trim();
         const hc = Number(st.headcount ?? st.count) || 0;
         const days = Number(st.days) || 0;
@@ -527,7 +613,7 @@ export async function getMicroplanAggregations(
   let totalTargetPopulation = 0;
 
   filteredPlans.forEach((p: any) => {
-    totalTargetPopulation += Number(p.targetPopulation) || 0;
+    totalTargetPopulation += planTargetPopulation(p);
     const s = String(p.status ?? "draft").toLowerCase();
     if (s === "approved" || s === "auto_approved") statusCounts.approved++;
     else if (s === "pending" || s === "submitted" || s === "under_review") statusCounts.pending++;
@@ -561,8 +647,8 @@ export async function getMicroplanAggregations(
       let pDoses = 0;
 
       plansInProv.forEach((p: any) => {
-        pTargetPop += Number(p.targetPopulation) || 0;
-        pBudget += Number(p.budget) || 0;
+        pTargetPop += planTargetPopulation(p);
+        pBudget += budgetByPlanMap.get(p.id) || 0;
         const s = String(p.status ?? "draft").toLowerCase();
         if (s === "approved" || s === "auto_approved") pApproved++;
         else if (s === "pending" || s === "submitted" || s === "under_review") pPending++;
@@ -572,10 +658,7 @@ export async function getMicroplanAggregations(
         if (ses) pSessions += ses.planned;
       });
 
-      facsInProv.forEach((f: any) => {
-        const v = vaccinesByFacilityMap.get(f.id);
-        if (v) pDoses += v.doses;
-      });
+      plansInProv.forEach((p: any) => { pDoses += vaccinesByPlanMap.get(p.id)?.doses || 0; });
 
       return {
         provinceId: prov.id,
@@ -615,8 +698,8 @@ export async function getMicroplanAggregations(
       let dDoses = 0;
 
       plansInDist.forEach((p: any) => {
-        dTargetPop += Number(p.targetPopulation) || 0;
-        dBudget += Number(p.budget) || 0;
+        dTargetPop += planTargetPopulation(p);
+        dBudget += budgetByPlanMap.get(p.id) || 0;
         const s = String(p.status ?? "draft").toLowerCase();
         if (s === "approved" || s === "auto_approved") dApproved++;
         else if (s === "pending" || s === "submitted" || s === "under_review") dPending++;
@@ -626,10 +709,7 @@ export async function getMicroplanAggregations(
         if (ses) dSessions += ses.planned;
       });
 
-      facsInDist.forEach((f: any) => {
-        const v = vaccinesByFacilityMap.get(f.id);
-        if (v) dDoses += v.doses;
-      });
+      plansInDist.forEach((p: any) => { dDoses += vaccinesByPlanMap.get(p.id)?.doses || 0; });
 
       return {
         districtId: dist.id,
@@ -658,7 +738,7 @@ export async function getMicroplanAggregations(
     const prov = dist ? provinceMap.get(dist.provinceId) : undefined;
     const plan = planByFacilityId.get(fac.id);
     const ses = plan ? sessionsByPlanId.get(plan.id) : undefined;
-    const vac = vaccinesByFacilityMap.get(fac.id);
+    const vac = plan ? vaccinesByPlanMap.get(plan.id) : undefined;
 
     return {
       facilityId: fac.id,
@@ -675,8 +755,8 @@ export async function getMicroplanAggregations(
       year: plan ? plan.year : null,
       quarter: plan ? plan.quarter : null,
       status: plan ? plan.status : null,
-      targetPopulation: plan ? (Number(plan.targetPopulation) || 0) : 0,
-      budget: plan ? (Number(plan.budget) || 0) : 0,
+      targetPopulation: plan ? planTargetPopulation(plan) : 0,
+      budget: plan ? (budgetByPlanMap.get(plan.id) || 0) : 0,
       plannedSessions: ses ? ses.planned : 0,
       completedSessions: ses ? ses.completed : 0,
       totalDosesRequired: vac ? vac.doses : 0,
