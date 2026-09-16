@@ -140,6 +140,40 @@ export const tenantInterestRequests = pgTable(
   ]
 );
 
+// Public institutional partnership enquiries. These are deliberately separate
+// from tenant signup requests: an enquiry creates no account and grants no access.
+export const partnerEnquiries = pgTable("partner_enquiries", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: varchar("name", { length: 160 }).notNull(),
+  organisation: varchar("organisation", { length: 255 }).notNull(),
+  role: varchar("role", { length: 160 }),
+  country: varchar("country", { length: 120 }).notNull(),
+  email: varchar("email", { length: 255 }).notNull(),
+  interest: varchar("interest", { length: 80 }).notNull(),
+  message: text("message").notNull(),
+  stage: varchar("stage", { length: 40 }).notNull().default("new"),
+  referrer: varchar("referrer", { length: 500 }),
+  utmSource: varchar("utm_source", { length: 120 }),
+  utmMedium: varchar("utm_medium", { length: 120 }),
+  utmCampaign: varchar("utm_campaign", { length: 120 }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => [
+  index("idx_partner_enquiries_stage_created").on(table.stage, table.createdAt),
+  index("idx_partner_enquiries_email").on(table.email),
+]);
+
+export const partnerOutreachEvents = pgTable("partner_outreach_events", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  eventName: varchar("event_name", { length: 80 }).notNull(),
+  path: varchar("path", { length: 300 }).notNull(),
+  interest: varchar("interest", { length: 80 }),
+  utmSource: varchar("utm_source", { length: 120 }),
+  utmMedium: varchar("utm_medium", { length: 120 }),
+  utmCampaign: varchar("utm_campaign", { length: 120 }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [index("idx_partner_events_name_created").on(table.eventName, table.createdAt)]);
+
 // ============================================================================
 // DOMAIN ENUMS
 // ============================================================================

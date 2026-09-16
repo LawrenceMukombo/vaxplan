@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback } from "react";
+import React, { useState, useMemo, useCallback, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import {
@@ -245,6 +245,16 @@ export function MicroplanRollupDashboard({
   const [selectedYear, setSelectedYear] = useState<string>("all");
   const [selectedQuarter, setSelectedQuarter] = useState<string>("all");
 
+  // Wouter can preserve this component while switching between the Routine and
+  // SIA routes. Keep the controlled filter aligned with the active route instead
+  // of treating the first mounted prop as permanent state.
+  useEffect(() => {
+    setPlanTypeFilter(initialPlanType);
+    setDrillProvinceId(undefined);
+    setDrillDistrictId(undefined);
+    setCurrentPage(1);
+  }, [initialPlanType]);
+
   // Geographic drill-down state
   const [drillProvinceId, setDrillProvinceId] = useState<number | undefined>(undefined);
   const [drillDistrictId, setDrillDistrictId] = useState<number | undefined>(undefined);
@@ -307,11 +317,19 @@ export function MicroplanRollupDashboard({
     refetch,
     isFetching,
   } = useQuery<MicroplanAggregateResponse>({
-    queryKey: ["/api/microplans/aggregate", queryParams],
+    queryKey: [
+      "/api/microplans/aggregate",
+      planTypeFilter,
+      selectedYear,
+      selectedQuarter,
+      drillProvinceId ?? userProvinceId ?? null,
+      drillDistrictId ?? userDistrictId ?? null,
+    ],
     queryFn: async () => {
       const res = await fetch(`/api/microplans/aggregate?${queryParams}`, {
         headers: { "Content-Type": "application/json" },
         credentials: "include",
+        cache: "no-store",
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
@@ -319,7 +337,8 @@ export function MicroplanRollupDashboard({
       }
       return res.json();
     },
-    staleTime: 30_000,
+    staleTime: 0,
+    refetchOnMount: "always",
   });
 
   // Handle drill-down navigation

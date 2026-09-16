@@ -6,6 +6,9 @@ const PUBLIC_PATHS = new Set([
   "/research",
   "/data-sources",
   "/help",
+  "/partners",
+  "/demo",
+  "/partnership-concept",
 ]);
 
 export function isPublicUnauthenticatedPath(pathname: string): boolean {

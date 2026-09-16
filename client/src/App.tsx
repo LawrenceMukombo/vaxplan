@@ -47,6 +47,15 @@ import { flushPendingServerLogout, performClientLogout } from "./lib/logout";
 import { canAccessClientLogbook, canAccessDefaulterList, canAccessHisIntegrations, canAccessSessionPlanning, canAccessUserManagement, canPlanSessions } from "@/lib/accessControl";
 import type { User } from "@shared/schema";
 const Dashboard = lazy(() => import("@/pages/Dashboard"));
+const PartnersPage = lazy(() =>
+  import("@/pages/InstitutionalSite").then((module) => ({ default: module.PartnersPage })),
+);
+const DemoPage = lazy(() =>
+  import("@/pages/InstitutionalSite").then((module) => ({ default: module.DemoPage })),
+);
+const PartnershipConceptPage = lazy(() =>
+  import("@/pages/InstitutionalSite").then((module) => ({ default: module.PartnershipConceptPage })),
+);
 const MapPage = lazy(() => import("@/pages/MapPage"));
 const Facilities = lazy(() => import("@/pages/Facilities"));
 const Population = lazy(() => import("@/pages/Population"));
@@ -682,6 +691,7 @@ function App() {
         <TooltipProvider>
           <Suspense fallback={<RouteFallback />}>
             <Switch>
+              <Route path="/partnership-concept" component={PartnershipConceptPage} />
               <Route path="/" component={lazy(() => import("@/pages/PublicDocs"))} />
               <Route component={NotFound} />
             </Switch>
@@ -698,6 +708,9 @@ function App() {
             <Switch>
               <Route path="/login" component={LoginPage} />
               <Route path="/signup" component={Signup} />
+              <Route path="/partners" component={PartnersPage} />
+              <Route path="/demo" component={DemoPage} />
+              <Route path="/partnership-concept" component={PartnershipConceptPage} />
               <Route path="/research">
                 {() => (
                   <ThemeProvider forceTheme="light">
