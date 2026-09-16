@@ -74,6 +74,23 @@ export function calculateHaversineDistance(
 }
 
 // Helper to compute geometric centroid of a Polygon/MultiPolygon geometry
+export function normalizeTransportMode(
+  mode?: string | null,
+  isHardToReach: boolean = false,
+): "walking" | "road" | "car" | "motorbike" | "donkey" | "boat" | "air" | "chopper" {
+  if (!mode) return isHardToReach ? "walking" : "motorbike";
+  const m = mode.toLowerCase().trim();
+  if (m === "foot" || m === "walk" || m === "walking" || m === "pedestrian") return "walking";
+  if (m === "motorcycle" || m === "motorbike" || m === "bike" || m === "moto") return "motorbike";
+  if (m === "car" || m === "vehicle" || m === "automobile" || m === "4wd" || m === "truck") return "car";
+  if (m === "road") return "road";
+  if (m === "donkey" || m === "horse" || m === "animal") return "donkey";
+  if (m === "boat" || m === "canoe" || m === "ship" || m === "water") return "boat";
+  if (m === "air" || m === "plane" || m === "airplane") return "air";
+  if (m === "chopper" || m === "helicopter") return "chopper";
+  return isHardToReach ? "walking" : "motorbike";
+}
+
 export function getCentroid(geometry: any): [number, number] | null {
   if (!geometry || !geometry.coordinates) return null;
 
@@ -536,6 +553,9 @@ export function registerCommunityRoutes(app: Express) {
         }
       }
 
+      if (body.transportMode) {
+        body.transportMode = normalizeTransportMode(body.transportMode, body.isHardToReach);
+      }
       const villageData = insertVillageSchema.parse(body);
       const village = await storage.createVillage(req.tenantId, villageData);
 
@@ -605,27 +625,51 @@ export function registerCommunityRoutes(app: Express) {
         });
       }
 
-      let targetBoundary = boundaries.reduce((prev, curr) =>
-        (curr.adminLevel || 0) > (prev.adminLevel || 0) ? curr : prev,
+      // Sort boundaries by adminLevel descending to prefer finest admin unit (Ward > District > Province)
+      const sortedBoundaries = [...boundaries].sort(
+        (a, b) => (b.adminLevel || 0) - (a.adminLevel || 0)
       );
 
-      let geojson: any = targetBoundary.geojson;
-      if (typeof geojson === "string") {
-        try {
-          geojson = JSON.parse(geojson);
-        } catch {
-          extractionStatus.delete(req.tenantId);
-          return res.status(500).json({ message: "Invalid GeoJSON in target administrative layer" });
+      let targetBoundary: any = null;
+      let targetFeatures: any[] = [];
+
+      for (const b of sortedBoundaries) {
+        if (!b.geojson) continue;
+        let parsed: any = b.geojson;
+        if (typeof parsed === "string") {
+          try {
+            parsed = JSON.parse(parsed);
+          } catch {
+            continue;
+          }
+        }
+        const feats = parsed?.features || (parsed?.type === "Feature" ? [parsed] : []);
+        if (Array.isArray(feats) && feats.length > 0) {
+          targetBoundary = b;
+          targetFeatures = feats;
+          break;
         }
       }
 
-      const features: any[] = geojson.features || (geojson.type === "Feature" ? [geojson] : []);
-      if (!features || features.length === 0) {
+      if (!targetBoundary || targetFeatures.length === 0) {
         extractionStatus.delete(req.tenantId);
-        return res.status(400).json({ message: "No geometric features found in boundary layer." });
+        return res.status(400).json({
+          success: false,
+          message:
+            "No geometric features found in boundary layers. Please upload boundary GeoJSON files in Boundary Manager or import communities via CSV.",
+        });
       }
 
       const allDistricts = await storage.getDistricts(req.tenantId);
+      if (allDistricts.length === 0) {
+        extractionStatus.delete(req.tenantId);
+        return res.status(400).json({
+          success: false,
+          message:
+            "No administrative districts found for this country. Please configure at least one district in Geographic Setup before extracting communities.",
+        });
+      }
+
       const districtMap = new Map<string, number>();
       allDistricts.forEach((d) => districtMap.set(d.name.toLowerCase().trim(), d.id));
 
@@ -639,29 +683,34 @@ export function registerCommunityRoutes(app: Express) {
 
       extractionStatus.set(req.tenantId, {
         current: 0,
-        total: features.length,
+        total: targetFeatures.length,
         stage: "Computing polygon centroids and spatial health facility catchments...",
       });
 
-      for (let i = 0; i < features.length; i++) {
-        const feature = features[i];
+      for (let i = 0; i < targetFeatures.length; i++) {
+        const feature = targetFeatures[i];
         extractionStatus.set(req.tenantId, {
           current: i + 1,
-          total: features.length,
-          stage: `Processing boundary unit ${i + 1} of ${features.length}...`,
+          total: targetFeatures.length,
+          stage: `Processing boundary unit ${i + 1} of ${targetFeatures.length}...`,
         });
 
         const props = feature.properties || {};
         const rawName =
+          props.ADM4_EN ||
           props.ADM3_EN ||
           props.ADM2_EN ||
           props.ADM1_EN ||
           props.shapeName ||
           props.name ||
+          props.NAME_4 ||
           props.NAME_3 ||
           props.NAME_2 ||
           props.NAME_1 ||
           props.ward ||
+          props.SUBCOUNTY ||
+          props.VILLAGE ||
+          props.COMMUNITY ||
           `Community Cluster ${i + 1}`;
         const name = String(rawName).trim();
 
@@ -684,7 +733,11 @@ export function registerCommunityRoutes(app: Express) {
           props.ADM1_EN,
           props.district,
           props.DISTRICT,
+          props.District,
           props.NAME_2,
+          props.NAME_1,
+          props.Province,
+          props.PROVINCE,
         ].filter(Boolean);
         for (const cName of candidateDistrictNames) {
           const match = districtMap.get(String(cName).toLowerCase().trim());
@@ -722,14 +775,14 @@ export function registerCommunityRoutes(app: Express) {
         const village = {
           tenantId: req.tenantId,
           name,
-          districtId,
+          districtId: districtId || allDistricts[0].id,
           assignedFacilityId,
           latitude: lat.toFixed(6),
           longitude: lng.toFixed(6),
           boundary: feature.geometry,
           distanceToFacility,
           travelTimeMinutes: minDistance !== Infinity ? Math.round(minDistance * 12) : 60,
-          transportMode: isHardToReach ? "foot" : "motorcycle",
+          transportMode: normalizeTransportMode(null, isHardToReach),
           seasonalAccessibility: isHardToReach ? "difficult" : "accessible",
           settlementType: isHardToReach ? "remote" : "rural",
           isHardToReach,
@@ -747,10 +800,19 @@ export function registerCommunityRoutes(app: Express) {
           total: created.length,
           stage: `Saving extracted community centroids (${j + 1}/${created.length})...`,
         });
-        const vData = insertVillageSchema.parse(created[j]);
-        const v = await storage.createVillage(req.tenantId, vData);
-        inserted.push(v);
-        await estimateAndSaveVillagePopulation(req.tenantId, inserted[j].id);
+        try {
+          const vData = insertVillageSchema.parse(created[j]);
+          const v = await storage.createVillage(req.tenantId, vData);
+          inserted.push(v);
+          try {
+            await estimateAndSaveVillagePopulation(req.tenantId, v.id);
+          } catch (popErr) {
+            console.warn(`[ExtractVillages] Population estimation skipped for village ${v.id}:`, popErr);
+          }
+        } catch (itemErr) {
+          console.warn(`[ExtractVillages] Failed to insert village "${created[j]?.name}":`, itemErr);
+          skipped.push(`${created[j]?.name || 'Unknown'} (Validation/DB error)`);
+        }
       }
 
       extractionStatus.delete(req.tenantId);
@@ -768,10 +830,13 @@ export function registerCommunityRoutes(app: Express) {
         skippedCount: skipped.length,
         created: inserted,
       });
-    } catch (error) {
+    } catch (error: any) {
       extractionStatus.delete(req.tenantId);
       console.error("Error extracting villages from boundaries:", error);
-      res.status(500).json({ message: "Failed to extract villages from boundaries" });
+      res.status(500).json({
+        message: error?.message || "Failed to extract villages from boundaries",
+        detail: error?.detail || undefined,
+      });
     }
   });
 
@@ -888,7 +953,7 @@ export function registerCommunityRoutes(app: Express) {
               : distanceToFacility
                 ? Math.round(parseFloat(distanceToFacility) * 12)
                 : null,
-            transportMode: raw.transportMode || (isHardToReach ? "foot" : "motorcycle"),
+            transportMode: normalizeTransportMode(raw.transportMode, isHardToReach),
             seasonalAccessibility:
               raw.seasonalAccessibility || (isHardToReach ? "difficult" : "accessible"),
             settlementType: raw.settlementType || (isHardToReach ? "remote" : "rural"),
@@ -1023,6 +1088,10 @@ export function registerCommunityRoutes(app: Express) {
             body.distanceToFacility = dist.toFixed(2);
           }
         }
+      }
+
+      if (body.transportMode) {
+        body.transportMode = normalizeTransportMode(body.transportMode, body.isHardToReach);
       }
 
       if (body.boundary && req.body?.ignoreOverlapWarning !== true) {

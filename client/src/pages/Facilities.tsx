@@ -937,6 +937,8 @@ export default function Facilities({ initialTab, initialView }: FacilitiesProps 
     },
     onSuccess: (res: any) => {
       queryClient.invalidateQueries({ queryKey: ["/api/villages"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/facilities"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/population"] });
       toast({
         title: "GIS Extraction Successful",
         description: res.message || "Communities successfully extracted from boundary map features.",
@@ -944,7 +946,7 @@ export default function Facilities({ initialTab, initialView }: FacilitiesProps 
     },
     onError: (error: any) => {
       const msg = String(error?.message || "");
-      const missingBoundaries = /no administrative boundary/i.test(msg);
+      const missingBoundaries = /no administrative boundary|no geometric features|no boundary/i.test(msg);
       toast({
         title: missingBoundaries
           ? "No boundary maps for this country yet"
