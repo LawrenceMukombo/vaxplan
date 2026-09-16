@@ -88,9 +88,9 @@ export function getSession() {
   });
 }
 // --- Local-dev mock login ---
-export async function setupAuth(app: Express, sessionMiddleware: RequestHandler = getSession()) {
+export async function setupAuth(app: Express, sessionMiddleware?: RequestHandler) {
   app.set("trust proxy", 1);
-  app.use(sessionMiddleware);
+  app.use(sessionMiddleware ?? getSession());
   app.use(passport.initialize());
   app.use(passport.session());
   passport.serializeUser((user: Express.User, cb) => cb(null, user));

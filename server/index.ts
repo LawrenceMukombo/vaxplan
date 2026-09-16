@@ -1,8 +1,7 @@
 // Load .env file for local development (Node 20.12+ built-in, no dotenv package needed)
 // This runs before any other imports that touch process.env (e.g. db.ts checks DATABASE_URL).
 try {
-  // @ts-ignore - process.loadEnvFile is available in Node.js 20.12+
-  process.loadEnvFile?.();
+  (process as any).loadEnvFile?.();
 } catch {
   // .env file is optional - silently skip if not present (e.g. production with real env vars)
 }
@@ -447,11 +446,6 @@ async function backfillClientIds() {
   if (skipDbBootstrap) {
     log("DB bootstrap disabled: skipping startup migrations and schema/data ensure jobs", "db");
   } else {
-  /* Original Code commented out for backward-compatibility:
-  applyPerfIndexes()
-    .then(() => log("perf indexes applied", "db"))
-    .catch((err) => log(`perf indexes warning: ${err?.message ?? err}`, "db"));
-  */
   applyPerfIndexes()
     .then(() => log("perf indexes applied", "db"))
     .catch((err) => log(`perf indexes warning: ${err?.message ?? err}`, "db"));
@@ -561,6 +555,19 @@ async function backfillClientIds() {
   // on population_data records that have a villageId or facilityId but are missing geo scope.
   import("./db").then(async ({ pool }) => {
     try {
+      // Fast check: only run backfill if any records actually lack geo scope or linkage
+      const checkRes = await (pool as any).query(`
+        SELECT 1 FROM population_data
+        WHERE (district_id IS NULL OR province_id IS NULL)
+           OR (village_id IS NULL AND metadata IS NOT NULL)
+           OR (facility_id IS NULL AND metadata IS NOT NULL)
+        LIMIT 1
+      `);
+      if (!checkRes?.rows?.length) {
+        log("population geo-ID backfill skipped (all records up-to-date)", "db");
+        return;
+      }
+
       // Backfill from villages
       await (pool as any).query(`
         UPDATE population_data pd

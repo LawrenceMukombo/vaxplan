@@ -32,8 +32,7 @@ import path from 'node:path';
 
 // Load .env file for local development (Node 20.12+ built-in, no dotenv package needed)
 try {
-  // @ts-ignore
-  process.loadEnvFile?.();
+  (process as any).loadEnvFile?.();
 } catch {
   // Silently skip if not present
 }

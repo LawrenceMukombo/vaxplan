@@ -6,8 +6,7 @@ const { Pool } = pg;
 
 if (!process.env.DATABASE_URL) {
   try {
-    // @ts-ignore
-    process.loadEnvFile?.();
+    (process as any).loadEnvFile?.();
   } catch {}
 }
 

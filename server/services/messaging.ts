@@ -68,8 +68,8 @@ export async function sendSms(options: SendSmsOptions): Promise<{ success: boole
         throw new Error("Missing Twilio credentials. Please check your settings.");
       }
       
-      // @ts-ignore - Dynamically import so it doesn't crash if not installed
-      const twilio = (await import('twilio')).default || (await import('twilio'));
+      const twilioModule: any = await import('twilio');
+      const twilio = twilioModule.default || twilioModule;
       const client = twilio(accountSid, authToken);
       
       const res = await client.messages.create({ body: message, from: fromPhone, to });
@@ -172,8 +172,8 @@ export async function sendWhatsApp(options: SendWhatsAppOptions): Promise<{ succ
         throw new Error("Missing Twilio credentials. Please check your settings.");
       }
       
-      // @ts-ignore
-      const twilio = (await import('twilio')).default || (await import('twilio'));
+      const twilioModule: any = await import('twilio');
+      const twilio = twilioModule.default || twilioModule;
       const client = twilio(accountSid, authToken);
       
       // Twilio WhatsApp uses the prefix "whatsapp:" for numbers

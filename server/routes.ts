@@ -54,6 +54,7 @@ import {
 } from "./services/microplanVersionService";
 import { getMicroplanAggregations } from "./services/microplanAggregationService";
 import catalogueRouter from "./routes/catalogue";
+import stockRouter from "./routes/stock";
 import { VgieService } from "./services/vgieService";
 import { getCountryFormat } from "@shared/countryFormats";
 import {
@@ -65,6 +66,8 @@ import {
   insertMicroplanSchema,
   microplans,
   microplanVersions,
+  approvalRequests,
+  auditLogs,
   insertBudgetItemSchema,
   insertVaccineRequirementSchema,
   insertMobilizationActivitySchema,
@@ -1773,6 +1776,7 @@ export async function registerRoutes(
   app.use("/api/planning-evidence", planningEvidenceRouter);
   app.use("/api/risk", riskRouter);
   app.use("/api/catalogue", catalogueRouter);
+  app.use("/api/stock", stockRouter);
 
   // --- USER ACCESS MANAGEMENT ENDPOINTS ---
   /* Original Code commented out for backward-compatibility:
@@ -5804,45 +5808,6 @@ export async function registerRoutes(
       res.json({ succeeded, failed: results.filter(r => !r.ok).length, results });
     } catch (err: any) {
       res.status(500).json({ message: safeErrorMessage(err, "Bulk reassign failed") });
-    }
-  });
-
-  // ─── AI Predictive Stock Logistics (Task Layer 4) ────────────────────────
-  // GET /api/stock/predictive-forecast (Evaluates stock trajectories, cold chain volume, and outreach surge)
-  app.get("/api/stock/predictive-forecast", ...auth, async (req: any, res) => {
-    try {
-      const facilityId = req.query.facilityId ? parseInt(req.query.facilityId, 10) : undefined;
-      const antigen = req.query.antigen ? String(req.query.antigen) : undefined;
-      const daysAhead = req.query.daysAhead ? parseInt(req.query.daysAhead, 10) : 60;
-
-      const { getPredictiveStockForecast } = await import("./services/aiStockPredictorService");
-
-      // If facilityId specified, return detailed single-facility forecast
-      if (facilityId) {
-        const forecast = await getPredictiveStockForecast(req.tenantId, facilityId, { antigen, daysAhead });
-        if (!forecast) return res.status(404).json({ message: "Facility not found or inactive" });
-        return res.json(forecast);
-      }
-
-      // Otherwise evaluate all active tenant facilities and return summary list
-      const facRows = await db.execute(dsql`
-        SELECT id, name FROM facilities WHERE tenant_id = ${req.tenantId} AND is_active = true ORDER BY name ASC LIMIT 25
-      `);
-      const allFacs = (facRows as any).rows ?? [];
-      const reports = await Promise.all(
-        allFacs.map((f: any) => getPredictiveStockForecast(req.tenantId, f.id, { antigen, daysAhead }))
-      );
-
-      const validReports = reports.filter(Boolean);
-      res.json({
-        totalFacilitiesAnalyzed: validReports.length,
-        criticalRiskCount: validReports.filter((r: any) => r.overallRisk === "critical").length,
-        highRiskCount: validReports.filter((r: any) => r.overallRisk === "high").length,
-        facilityReports: validReports,
-      });
-    } catch (err: any) {
-      console.error("GET /api/stock/predictive-forecast error:", err);
-      res.status(500).json({ message: safeErrorMessage(err, "Failed to compute predictive stock forecast") });
     }
   });
 
@@ -10390,6 +10355,42 @@ export async function registerRoutes(
           ?? submittedVersion?.snapshot
           ?? null;
       }
+      const reviewRequests = microplan.status !== "draft"
+        ? await db.select().from(approvalRequests).where(and(
+            eq(approvalRequests.tenantId, req.tenantId),
+            eq(approvalRequests.entityType, "microplan"),
+            eq(approvalRequests.entityId, microplanId),
+          )).orderBy(asc(approvalRequests.submittedAt))
+        : [];
+      const reviewEvents = microplan.status !== "draft"
+        ? await db.select().from(auditLogs).where(and(
+            eq(auditLogs.tenantId, req.tenantId),
+            eq(auditLogs.entityType, "microplan_step_review"),
+            eq(auditLogs.entityId, microplanId),
+            eq(auditLogs.action, "microplan_step_reviewed"),
+          )).orderBy(asc(auditLogs.createdAt))
+        : [];
+      const latestStepReviews = new Map<string, any>();
+      for (const event of reviewEvents) {
+        const value = (event.newValue ?? {}) as any;
+        latestStepReviews.set(`${value.level}:${value.step}`, {
+          ...value,
+          reviewerId: event.userId,
+          reviewedAt: event.createdAt,
+        });
+      }
+      const currentReviewRequest = [...reviewRequests].reverse().find((request) => request.status === "pending") ?? null;
+      const reviewerRoles = new Set<string>([
+        String(dbUser.role || ""),
+        ...(Array.isArray(dbUser.roles) ? dbUser.roles.map(String) : []),
+      ]);
+      const requiredRoleByLevel: Record<string, string> = {
+        district: "district_manager",
+        provincial: "provincial_coordinator",
+        national: "national_admin",
+      };
+      const canReviewCurrentLevel = !!currentReviewRequest
+        && reviewerRoles.has(requiredRoleByLevel[String(currentReviewRequest.currentLevel).toLowerCase()]);
       res.json({
         microplan: { ...microplan, approvalDetails: approvalAudit, approvedAt: approvalAudit?.approvedAt || (microplan as any).approvedAt },
         approvalDetails: approvalAudit,
@@ -10404,6 +10405,15 @@ export async function registerRoutes(
         excludedVillageIds,
         excludedVillages,
         reviewSnapshot,
+        reviewWorkflow: {
+          requests: reviewRequests,
+          stepReviews: Array.from(latestStepReviews.values()),
+          currentRequest: currentReviewRequest,
+          canReviewCurrentLevel,
+          requiredReviewerRole: currentReviewRequest
+            ? requiredRoleByLevel[String(currentReviewRequest.currentLevel).toLowerCase()] ?? null
+            : null,
+        },
       });
     } catch (error) {
       console.error("Error fetching microplan hydration:", error);
@@ -13112,6 +13122,63 @@ export async function registerRoutes(
   // ─── Approvals ────────────────────────────────────────
   // Microplan version history is additive and tenant scoped. Historical
   // snapshots are immutable; restore always creates a new editable draft.
+  app.post("/api/microplans/:id/review/steps/:step", ...auth, requirePermission("approve_plans"), async (req: any, res) => {
+    try {
+      const microplanId = Number(req.params.id);
+      const step = Number(req.params.step);
+      if (!Number.isInteger(step) || step < 1 || step > 11) {
+        return res.status(400).json({ message: "Review step must be between 1 and 11." });
+      }
+      const plan = await storage.getMicroplan(req.tenantId, microplanId);
+      if (!plan || plan.status === "draft") return res.status(404).json({ message: "Submitted microplan not found." });
+      if (!(await userCanAccessGeo(req.dbUser, req.tenantId, { facilityId: plan.facilityId }))) {
+        return res.status(403).json({ message: "This microplan is outside your assigned review area." });
+      }
+      const [currentRequest] = await db.select().from(approvalRequests).where(and(
+        eq(approvalRequests.tenantId, req.tenantId),
+        eq(approvalRequests.entityType, "microplan"),
+        eq(approvalRequests.entityId, microplanId),
+        eq(approvalRequests.status, "pending"),
+      )).orderBy(desc(approvalRequests.submittedAt)).limit(1);
+      if (!currentRequest) return res.status(409).json({ message: "No active approval stage exists for this plan." });
+
+      const level = String(currentRequest.currentLevel).toLowerCase();
+      const requiredRole: Record<string, string> = {
+        district: "district_manager",
+        provincial: "provincial_coordinator",
+        national: "national_admin",
+      };
+      const reviewerRoles = new Set<string>([
+        String(req.dbUser?.role || ""),
+        ...(Array.isArray(req.dbUser?.roles) ? req.dbUser.roles.map(String) : []),
+      ]);
+      if (!requiredRole[level] || !reviewerRoles.has(requiredRole[level])) {
+        return res.status(403).json({ message: `Only the assigned ${level} reviewer may review this stage.` });
+      }
+      const comment = String(req.body?.comment ?? "").trim().slice(0, 4000);
+      await logAudit(req, "microplan_step_reviewed", "microplan_step_review", microplanId, null, {
+        requestId: currentRequest.id,
+        level,
+        step,
+        reviewed: true,
+        comment: comment || null,
+      });
+      res.json({
+        microplanId,
+        requestId: currentRequest.id,
+        level,
+        step,
+        reviewed: true,
+        comment: comment || null,
+        reviewerId: req.user.claims.sub,
+        reviewedAt: new Date().toISOString(),
+      });
+    } catch (error) {
+      console.error("Error recording microplan step review:", error);
+      res.status(500).json({ message: "Failed to record the step review." });
+    }
+  });
+
   app.get("/api/microplans/:id/versions", ...auth, requirePermission("microplan.view_history"), async (req: any, res) => {
     try {
       const microplanId = Number(req.params.id);
@@ -13333,8 +13400,39 @@ export async function registerRoutes(
       if (oldRequest.entityType === "microplan") {
         const mp = await storage.getMicroplan(req.tenantId, oldRequest.entityId);
         if (!mp) return res.status(404).json({ message: "Microplan not found" });
+        if (!(await userCanAccessGeo(req.dbUser, req.tenantId, { facilityId: mp.facilityId }))) {
+          return res.status(403).json({ message: "This microplan is outside your assigned approval area." });
+        }
+        const requestLevel = String(oldRequest.currentLevel).toLowerCase();
+        const requiredRole: Record<string, string> = {
+          district: "district_manager",
+          provincial: "provincial_coordinator",
+          national: "national_admin",
+        };
+        const decisionRoles = new Set<string>([
+          String(req.dbUser?.role || ""),
+          ...(Array.isArray(req.dbUser?.roles) ? req.dbUser.roles.map(String) : []),
+        ]);
+        if (!requiredRole[requestLevel] || !decisionRoles.has(requiredRole[requestLevel])) {
+          return res.status(403).json({ message: `Only the assigned ${requestLevel} reviewer may decide this stage.` });
+        }
         if (isApprovedPlan(mp.status)) return res.status(403).json({ message: "Approved microplans are read-only." });
         if (status === "approved") {
+          const reviewedRows = await db.select({ newValue: auditLogs.newValue }).from(auditLogs).where(and(
+            eq(auditLogs.tenantId, req.tenantId),
+            eq(auditLogs.action, "microplan_step_reviewed"),
+            eq(auditLogs.entityType, "microplan_step_review"),
+            eq(auditLogs.entityId, oldRequest.entityId),
+            dsql`${auditLogs.newValue}->>'requestId' = ${String(oldRequest.id)}`,
+          ));
+          const reviewedSteps = new Set(reviewedRows.map((row) => Number((row.newValue as any)?.step)).filter(Number.isFinite));
+          if (reviewedSteps.size < 11) {
+            return res.status(409).json({
+              message: `Review all 11 microplan steps before approving this ${requestLevel} stage.`,
+              reviewedSteps: Array.from(reviewedSteps).sort((a, b) => a - b),
+              remainingSteps: Array.from({ length: 11 }, (_, index) => index + 1).filter((step) => !reviewedSteps.has(step)),
+            });
+          }
           const tenant = await storage.getTenant(req.tenantId);
           const eligibility = approvalEligibility(mp.createdAt, tenant?.settings);
           if (!eligibility.allowed) return res.status(409).json({ message: eligibility.message, eligibleAt: eligibility.eligibleAt });
@@ -13356,6 +13454,7 @@ export async function registerRoutes(
       const request = await storage.updateApprovalRequest(req.tenantId, entityId, updateData);
       if (!request) return res.status(404).json({ message: "Approval request not found" });
 
+      let nextRequest: any = null;
       if (status === "approved") {
         const tenant = await storage.getTenant(req.tenantId);
         const maxLevel = (tenant?.settings as any)?.maxApprovalLevel || "national";
@@ -13418,6 +13517,25 @@ export async function registerRoutes(
               }
             }
           }
+        } else if (request.entityType === "microplan") {
+          const order = ["district", "provincial", "national"];
+          const currentIndex = order.indexOf(currentReqLevel);
+          const nextLevel = order[currentIndex + 1];
+          if (!nextLevel) return res.status(409).json({ message: "The next approval level could not be resolved." });
+          nextRequest = await storage.createApprovalRequest(req.tenantId, {
+            entityType: "microplan",
+            entityId: request.entityId,
+            requestedById: request.requestedById,
+            currentLevel: nextLevel,
+            status: "pending",
+            comments: `${currentReqLevel} review completed; forwarded to ${nextLevel}.`,
+          } as any);
+          await logAudit(req, "advance_approval_level", "approval_request", nextRequest.id, null, {
+            microplanId: request.entityId,
+            previousRequestId: request.id,
+            fromLevel: currentReqLevel,
+            toLevel: nextLevel,
+          });
         }
       }
 
@@ -13465,7 +13583,7 @@ export async function registerRoutes(
       }
 
       await logAudit(req, "update", "approval_request", entityId, oldRequest, request);
-      res.json(request);
+      res.json({ ...request, nextRequest });
     } catch (error) {
       console.error("Error updating approval request:", error);
       res.status(400).json({ message: "Failed to update approval request" });
@@ -16349,189 +16467,8 @@ export async function registerRoutes(
     }
   });
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // STOCK LEDGER TRANSACTIONS — WHO RED stock card transactions
-  // ─────────────────────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────────────────
 
-  // GET /api/stock/ledger — Fetch stock ledger card history for a facility
-  app.get("/api/stock/ledger", ...auth, async (req: any, res) => {
-    try {
-      const facilityIdRaw = req.query.facilityId as string | undefined;
-      const districtIdRaw = req.query.districtId as string | undefined;
-      const provinceIdRaw = req.query.provinceId as string | undefined;
-      const productIdRaw = req.query.productId as string | undefined;
-
-      const facilityId = facilityIdRaw ? parseInt(facilityIdRaw) : undefined;
-      const districtId = districtIdRaw ? parseInt(districtIdRaw) : undefined;
-      const provinceId = provinceIdRaw ? parseInt(provinceIdRaw) : undefined;
-      const productId = productIdRaw ? parseInt(productIdRaw) : undefined;
-
-      if (facilityIdRaw && (facilityId === undefined || isNaN(facilityId))) {
-        return res.status(400).json({ message: "Invalid facility ID parameter" });
-      }
-      if (productIdRaw && (productId === undefined || isNaN(productId))) {
-        return res.status(400).json({ message: "Invalid product ID parameter" });
-      }
-
-      let list = await storage.getStockTransactions(req.tenantId, facilityId, productId);
-      const scope = await getGeoScope(req.dbUser, req.tenantId);
-
-      let geoMaps: any = null;
-      if (provinceId || districtId) {
-         const allFacilities = await storage.getFacilities(req.tenantId);
-         const allDistricts = await storage.getDistricts(req.tenantId);
-         const districtMap = new Map(allDistricts.map(d => [d.id, d]));
-         geoMaps = { allFacilities, districtMap };
-      }
-
-      list = list.filter((t: any) => {
-         if (!recordInGeoScope(scope, { facilityId: t.facilityId })) return false;
-
-         if (geoMaps) {
-           const fac = geoMaps.allFacilities.find((f: any) => f.id === t.facilityId);
-           if (!fac) return false;
-           if (districtId && fac.districtId !== districtId) return false;
-           if (provinceId) {
-              const dist = geoMaps.districtMap.get(fac.districtId);
-              if (!dist || dist.provinceId !== provinceId) return false;
-           }
-         }
-         return true;
-      });
-
-      res.json(list);
-    } catch (err: any) {
-      console.error("GET /api/stock/ledger failed:", err);
-      res.status(500).json({ message: "Failed to fetch stock transactions" });
-    }
-  });
-
-  // POST /api/stock/transaction — Log a stock ledger card transaction (receipt, issue, loss, adjustment)
-  app.post("/api/stock/transaction", isAuthenticated, requireTenant, loadRole, async (req: any, res) => {
-    try {
-      /* ORIGINAL CODE:
-      const parsed = insertStockTransactionSchema.parse(req.body);
-      const transaction = await storage.createStockTransaction(req.tenantId, {
-        ...parsed,
-        recordedByUserId: req.user?.id ?? req.user?.claims?.sub ?? null,
-      });
-      */
-
-      // EXPLANATION OF CHANGE:
-      // Zod validation is failing on stock card transaction saves because Drizzle-Zod expects `expiryDate` and `transactionDate`
-      // to be JavaScript Date objects, but the client submits them as ISO strings. We pre-parse these values and also supply
-      // the verified `tenantId` to ensure strict multi-tenant validation succeeds.
-      const rawExp = req.body.expiryDate;
-      const cleanExp = (rawExp && !isNaN(new Date(rawExp).getTime())) ? new Date(rawExp) : new Date("2099-12-31T00:00:00.000Z");
-
-      const payload = {
-        ...req.body,
-        tenantId: req.tenantId,
-        batchNumber: req.body.batchNumber ? String(req.body.batchNumber) : "N/A",
-        expiryDate: cleanExp,
-        vvmStatus: typeof req.body.vvmStatus === "number" ? req.body.vvmStatus : 1,
-        transactionDate: req.body.transactionDate && !isNaN(new Date(req.body.transactionDate).getTime()) ? new Date(req.body.transactionDate) : new Date(),
-      };
-
-      const parsed = insertStockTransactionSchema.parse(payload);
-
-      const scope = await getGeoScope(req.dbUser, req.tenantId);
-      if (!scope.all && scope.facilityIds && !scope.facilityIds.has(parsed.facilityId)) {
-        return res.status(403).json({ message: "Not authorized to post transactions for this facility." });
-      }
-      const transaction = await storage.createStockTransaction(req.tenantId, {
-        ...parsed,
-        recordedByUserId: req.user?.id ?? req.user?.claims?.sub ?? null,
-      });
-      await logAudit(req, "create_stock_transaction", "stock_transaction", transaction.id, null, {
-        facilityId: transaction.facilityId,
-        productId: transaction.productId,
-        transactionType: transaction.transactionType,
-        quantityDoses: transaction.quantityDoses,
-      });
-      res.status(201).json(transaction);
-    } catch (err: any) {
-      if (err?.name === "ZodError") {
-        return res.status(400).json({ message: "Invalid payload details", errors: err.errors });
-      }
-      console.error("POST /api/stock/transaction failed:", err);
-      res.status(500).json({ message: "Failed to register stock transaction" });
-    }
-  });
-
-  // POST /api/stock/transfer — Atomically record a paired issue (source) + receipt (dest)
-  // for a suggested stock transfer between two facilities in the same tenant.
-  app.post("/api/stock/transfer", isAuthenticated, requireTenant, async (req: any, res) => {
-    try {
-      const transferSchema = z.object({
-        sourceFacilityId: z.number().int().positive(),
-        destFacilityId: z.number().int().positive(),
-        productId: z.number().int().positive(),
-        batchNumber: z.string().min(1),
-        expiryDate: z.string().min(1),
-        vvmStatus: z.number().int().min(1).max(4).default(1),
-        quantityDoses: z.number().int().positive(),
-        sourceFacilityName: z.string().optional(),
-        destFacilityName: z.string().optional(),
-        reason: z.string().optional(),
-      });
-      const parsed = transferSchema.parse(req.body);
-      if (parsed.sourceFacilityId === parsed.destFacilityId) {
-        return res.status(400).json({ message: "Source and destination facilities must differ" });
-      }
-      const sourceName = parsed.sourceFacilityName ?? `Facility ${parsed.sourceFacilityId}`;
-      const destName = parsed.destFacilityName ?? `Facility ${parsed.destFacilityId}`;
-      const reason = parsed.reason ?? "Suggested transfer (batch near expiry)";
-
-      const pair = await storage.createStockTransferPair(req.tenantId, {
-        sourceFacilityId: parsed.sourceFacilityId,
-        destFacilityId: parsed.destFacilityId,
-        productId: parsed.productId,
-        batchNumber: parsed.batchNumber,
-        expiryDate: new Date(parsed.expiryDate),
-        vvmStatus: parsed.vvmStatus,
-        quantityDoses: parsed.quantityDoses,
-        sourceSupplierOrRecipient: destName,
-        destSupplierOrRecipient: sourceName,
-        sourceNotes: `Transfer to ${destName}: ${reason}`,
-        destNotes: `Transfer from ${sourceName}: ${reason}`,
-        recordedByUserId: req.user?.id ?? req.user?.claims?.sub ?? null,
-      });
-
-      await logAudit(req, "create_stock_transfer", "stock_transaction", pair.issue.id, null, {
-        sourceFacilityId: parsed.sourceFacilityId,
-        destFacilityId: parsed.destFacilityId,
-        productId: parsed.productId,
-        batchNumber: parsed.batchNumber,
-        quantityDoses: parsed.quantityDoses,
-        issueId: pair.issue.id,
-        receiptId: pair.receipt.id,
-      });
-
-      res.status(201).json(pair);
-    } catch (err: any) {
-      if (err?.name === "ZodError") {
-        return res.status(400).json({ message: "Invalid payload details", errors: err.errors });
-      }
-      console.error("POST /api/stock/transfer failed:", err);
-      res.status(500).json({ message: "Failed to record stock transfer" });
-    }
-  });
-
-  // DELETE /api/stock/transaction/:id — Revert/delete a stock card entry
-  app.delete("/api/stock/transaction/:id", isAuthenticated, requireTenant, async (req: any, res) => {
-    try {
-      const id = parseInt(req.params.id);
-      if (isNaN(id)) return res.status(400).json({ message: "Invalid transaction ID" });
-      const deleted = await storage.deleteStockTransaction(req.tenantId, id);
-      if (!deleted) return res.status(404).json({ message: "Stock transaction entry not found" });
-      await logAudit(req, "delete_stock_transaction", "stock_transaction", id);
-      res.json({ success: true });
-    } catch (err: any) {
-      console.error("DELETE /api/stock/transaction/:id failed:", err);
-      res.status(500).json({ message: "Failed to revert stock transaction" });
-    }
-  });
 
   // ─────────────────────────────────────────────────────────────────────────
   // MONTHLY REPORTS — WHO RED monthly compiled facility report

@@ -155,7 +155,6 @@ async function sendViaSmtp(
   let nodemailer: any;
   try {
     // Optional dependency — only required when SMTP_HOST is configured.
-    // @ts-ignore — optional dependency, may not be installed
     const mod: any = await import("nodemailer");
     nodemailer = mod.default ?? mod;
   } catch (err: any) {
