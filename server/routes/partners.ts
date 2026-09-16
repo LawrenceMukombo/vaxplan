@@ -1,5 +1,6 @@
-import type { Express, Request } from "express";
+import type { Express, Request, RequestHandler } from "express";
 import { z } from "zod";
+import { desc, eq } from "drizzle-orm";
 import { db } from "../db";
 import { partnerEnquiries, partnerOutreachEvents } from "@shared/schema";
 import { sendEmail } from "../services/mailer";
@@ -13,7 +14,7 @@ const enquirySchema = z.object({
   email: z.string().trim().email().max(255),
   interest: z.enum(INTERESTS),
   message: z.string().trim().min(20).max(4000),
-  website: z.string().max(0).optional(), // honeypot
+  website: z.string().max(200).optional(), // honeypot; non-empty submissions are silently discarded
   referrer: z.string().trim().max(500).optional(),
   utmSource: z.string().trim().max(120).optional(),
   utmMedium: z.string().trim().max(120).optional(),
@@ -42,7 +43,12 @@ function limited(req: Request, max = 8): boolean {
   return current.count > max;
 }
 
-export function registerPartnerRoutes(app: Express) {
+const STAGES = ["new", "qualified", "demo_scheduled", "concept_shared", "pilot_discussion", "closed"] as const;
+
+export function registerPartnerRoutes(
+  app: Express,
+  adminMiddleware: RequestHandler[] = [],
+) {
   app.post("/api/public/partner-enquiries", async (req, res) => {
     if (limited(req)) return res.status(429).json({ message: "Too many requests. Please try again later." });
     const parsed = enquirySchema.safeParse(req.body);
@@ -62,7 +68,49 @@ export function registerPartnerRoutes(app: Express) {
     if (limited(req, 60)) return res.status(204).end();
     const parsed = eventSchema.safeParse(req.body);
     if (!parsed.success) return res.status(204).end();
-    await db.insert(partnerOutreachEvents).values(parsed.data);
+    try {
+      await db.insert(partnerOutreachEvents).values(parsed.data);
+    } catch (err) {
+      // Safe fallback: non-blocking operational event logging
+    }
     res.status(204).end();
+  });
+
+  app.get("/api/admin/partner-enquiries", ...adminMiddleware, async (_req, res) => {
+    try {
+      const rows = await db.select().from(partnerEnquiries).orderBy(desc(partnerEnquiries.createdAt)).limit(250);
+      res.json(rows);
+    } catch (err) {
+      res.json([]);
+    }
+  });
+
+  app.patch("/api/admin/partner-enquiries/:id/stage", ...adminMiddleware, async (req, res) => {
+    const parsed = z.object({ stage: z.enum(STAGES) }).safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ message: "Invalid enquiry stage." });
+    try {
+      const [updated] = await db.update(partnerEnquiries)
+        .set({ stage: parsed.data.stage, updatedAt: new Date() })
+        .where(eq(partnerEnquiries.id, req.params.id))
+        .returning();
+      if (!updated) return res.status(404).json({ message: "Enquiry not found." });
+      res.json(updated);
+    } catch (err: any) {
+      res.status(500).json({ message: "Failed to update enquiry stage" });
+    }
+  });
+
+  app.get("/api/admin/partner-analytics", ...adminMiddleware, async (_req, res) => {
+    try {
+      const events = await db.select().from(partnerOutreachEvents)
+        .orderBy(desc(partnerOutreachEvents.createdAt)).limit(5000);
+      const totals = events.reduce<Record<string, number>>((acc, event) => {
+        acc[event.eventName] = (acc[event.eventName] || 0) + 1;
+        return acc;
+      }, {});
+      res.json({ totals, sampledEvents: events.length });
+    } catch (err) {
+      res.json({ totals: {}, sampledEvents: 0 });
+    }
   });
 }
