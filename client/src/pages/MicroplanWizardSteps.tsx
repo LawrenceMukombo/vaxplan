@@ -3178,7 +3178,7 @@ export function Step2({
                             <option value="">Select community...</option>
                             {registeredCommunities.map(c => (
                               <option key={c.villageId} value={c.villageId}>
-                                {c.name} (ID: {c.villageId})
+                                {c.name}
                               </option>
                             ))}
                           </select>
@@ -7855,8 +7855,8 @@ export function StepChvProfile({ facilityId, villages, planType = "routine" }: {
               <SelectTrigger><SelectValue placeholder="Select village" /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="__none__">- None -</SelectItem>
-                {safeVillages.filter((v) => v && v.villageId).map((v) => (
-                  <SelectItem key={v.villageId} value={String(v.villageId)}>{v.name || ""}</SelectItem>
+                {villageOptions.map((v) => (
+                  <SelectItem key={v.id} value={v.id}>{v.name}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -7914,7 +7914,7 @@ export function StepChvProfile({ facilityId, villages, planType = "routine" }: {
                       {c.trainingStatus === "trained" ? "Trained" : "Untrained"}
                     </Badge>
                   </td>
-                  <td className="px-3 py-2">{c.villageId ? (villageMap[String(c.villageId)] ?? `ID ${c.villageId}`) : "-"}</td>
+                  <td className="px-3 py-2 font-medium">{c.villageName || (c.villageId ? (villageMap[String(c.villageId)] || "-") : "-")}</td>
                   <td className="px-3 py-2">
                     <div className="flex gap-1">
                       <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => { setEditId(c.id); setForm({ name: c.name, nrc: c.nrc || "", contactPhone: c.contactPhone || c.phone || "", gender: c.gender||"female", yearsOfService: c.yearsOfService??"", educationLevel: c.educationLevel||"Secondary", trainingStatus: c.trainingStatus||"trained", communityUnit: c.communityUnit||"", campaignRole: c.campaignRole||"social_mobilizer", villageId: c.villageId??"", active: c.active, employmentStatus: c.employmentStatus || "Active - In-service", supervisorId: c.supervisorId?.toString() || "" }); }}>

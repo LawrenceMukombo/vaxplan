@@ -1171,18 +1171,55 @@ export function registerFacilityRoutes(app: Express) {
 
       if (req.query.planType === "campaign") {
         const chvs = await db
-          .select()
+          .select({
+            chv: communityHealthVolunteers,
+            villageName: villages.name,
+          })
           .from(communityHealthVolunteers)
-          .where(and(eq(communityHealthVolunteers.facilityId, facilityId), eq(communityHealthVolunteers.tenantId, req.tenantId)))
+          .leftJoin(
+            villages,
+            and(
+              eq(communityHealthVolunteers.villageId, villages.id),
+              eq(villages.tenantId, req.tenantId),
+            ),
+          )
+          .where(
+            and(
+              eq(communityHealthVolunteers.facilityId, facilityId),
+              eq(communityHealthVolunteers.tenantId, req.tenantId),
+            ),
+          )
           .orderBy(communityHealthVolunteers.id);
-        res.json(chvs);
+        const mappedCampaign = chvs.map(({ chv, villageName }) => ({
+          ...chv,
+          villageName: villageName || null,
+        }));
+        res.json(mappedCampaign);
       } else {
         const { chvProfiles } = await import("@shared/schema");
-        const rows = await db.select().from(chvProfiles)
-          .where(and(eq(chvProfiles.tenantId, req.tenantId), eq(chvProfiles.facilityId, facilityId)))
+        const rows = await db
+          .select({
+            profile: chvProfiles,
+            villageName: villages.name,
+          })
+          .from(chvProfiles)
+          .leftJoin(
+            villages,
+            and(
+              eq(chvProfiles.assignedVillageId, villages.id),
+              eq(villages.tenantId, req.tenantId),
+            ),
+          )
+          .where(
+            and(
+              eq(chvProfiles.tenantId, req.tenantId),
+              eq(chvProfiles.facilityId, facilityId),
+            ),
+          )
           .orderBy(chvProfiles.fullName);
-        /* Original GET mapping commented out to maintain rule 1/2 of user_global config:
-        const mapped = rows.map((r) => ({
+
+        // Harmonized mapping returned to client with contactPhone, age, roleDescription, and villageName
+        const mapped = rows.map(({ profile: r, villageName }) => ({
           id: r.id,
           name: r.fullName,
           gender: r.gender,
@@ -1191,20 +1228,7 @@ export function registerFacilityRoutes(app: Express) {
           trainingStatus: r.trainingReceived,
           campaignRole: r.siaRole,
           villageId: r.assignedVillageId,
-          active: r.isActive,
-          communityUnit: "",
-        }));
-        */
-        // Harmonized mapping returned to client with contactPhone, age, and roleDescription
-        const mapped = rows.map((r) => ({
-          id: r.id,
-          name: r.fullName,
-          gender: r.gender,
-          yearsOfService: r.yearsOfService,
-          educationLevel: r.educationLevel,
-          trainingStatus: r.trainingReceived,
-          campaignRole: r.siaRole,
-          villageId: r.assignedVillageId,
+          villageName: villageName || null,
           active: r.isActive,
           communityUnit: "",
           contactPhone: r.contactPhone,
