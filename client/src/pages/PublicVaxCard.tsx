@@ -3,6 +3,8 @@ import { useRoute, Link } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import {
   ShieldCheck,
+  Search,
+  Users,
   BadgeCheck,
   Calendar,
   Heart,
@@ -36,6 +38,25 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { useToast } from "@/hooks/use-toast";
 import { getCountryConfig } from "@/lib/countryConfig";
 import { VACCINE_SCHEDULE } from "@/pages/ClientLogbook";
+
+
+export interface SearchResultItem {
+  id: string;
+  clientId: string;
+  name: string;
+  clientType: string;
+  dateOfBirth: string;
+  gender: string;
+  parentName: string;
+  contactPhone?: string | null;
+  email?: string | null;
+  villageName: string;
+  facilityName: string;
+  districtName: string;
+  provinceName: string;
+  countryCode: string;
+  doseCount: number;
+}
 
 interface PublicVaxRecord {
   success: boolean;
@@ -88,7 +109,29 @@ export default function PublicVaxCard() {
   const rawId = params?.id || vaxParams?.id;
   const { toast } = useToast();
 
-  const [lookupId, setLookupId] = useState("");
+  const [lookupId, setLookupId] = useState(rawId || "");
+  const [debouncedQuery, setDebouncedQuery] = useState(rawId || "");
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedQuery(lookupId.trim());
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [lookupId]);
+
+  const { data: searchResultsData, isFetching: isSearching } = useQuery<{ success: boolean; count: number; results: SearchResultItem[] }>({
+    queryKey: ["/api/public/vaxcard-search", debouncedQuery],
+    queryFn: async () => {
+      if (!debouncedQuery || debouncedQuery.length < 2) return { success: true, count: 0, results: [] };
+      const res = await fetch(`/api/public/vaxcard-search?q=${encodeURIComponent(debouncedQuery)}`);
+      if (!res.ok) return { success: true, count: 0, results: [] };
+      return res.json();
+    },
+    enabled: debouncedQuery.length >= 2,
+  });
+
+  const searchResults = searchResultsData?.results || [];
   const [isReminderOpen, setIsReminderOpen] = useState(false);
   const [reminderChannel, setReminderChannel] = useState<"sms" | "whatsapp" | "email">("whatsapp");
   const [reminderContact, setReminderContact] = useState("");
@@ -353,21 +396,130 @@ export default function PublicVaxCard() {
               </div>
             )}
 
-            {/* Lookup Form */}
+            {/* Universal Search & Lookup Form */}
             <form onSubmit={handleLookupSubmit} className="space-y-3 pt-1">
-              <div className="flex flex-col sm:flex-row gap-2">
+              <div className="relative">
+                <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input
-                  placeholder="Enter Child ID (e.g. CL-00012) or Client ID..."
+                  placeholder="Search by Child ID, Phone number, Child name, Parent/Caregiver, or Village..."
                   value={lookupId}
                   onChange={(e) => setLookupId(e.target.value)}
-                  className="rounded-xl h-11 text-xs px-4"
+                  className="rounded-xl h-12 text-xs sm:text-sm pl-10 pr-28 bg-card border-indigo-500/30 focus:border-indigo-600 shadow-xs"
                   autoFocus
                 />
-                <Button type="submit" className="rounded-xl h-11 px-6 font-bold text-xs bg-indigo-600 hover:bg-indigo-700 text-white shrink-0 gap-2">
-                  <BadgeCheck className="h-4 w-4" /> View Passport
-                </Button>
+                <div className="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                  {lookupId && (
+                    <button
+                      type="button"
+                      onClick={() => setLookupId("")}
+                      className="h-7 w-7 rounded-lg text-muted-foreground hover:text-foreground flex items-center justify-center text-xs"
+                    >
+                      ✕
+                    </button>
+                  )}
+                  <Button type="submit" size="sm" className="rounded-lg h-9 px-3.5 font-bold text-xs bg-indigo-600 hover:bg-indigo-700 text-white shrink-0 gap-1.5">
+                    {isSearching ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <BadgeCheck className="h-3.5 w-3.5" />}
+                    <span>{isSearching ? "Searching..." : "Search"}</span>
+                  </Button>
+                </div>
               </div>
+              <p className="text-[11px] text-muted-foreground text-left px-1">
+                💡 <strong>Multi-field search supported:</strong> Enter a 10-digit mobile number, child name (e.g. <em>Jane</em>), caregiver name, or full Child ID (e.g. <em>EAS-CAC-ADK-2026-0043-5</em>).
+              </p>
             </form>
+
+            {/* Live Search Candidate Results */}
+            {debouncedQuery.length >= 2 && (
+              <div className="pt-2 text-left space-y-3">
+                <div className="flex items-center justify-between border-b border-border/60 pb-2">
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="h-4 w-4 text-indigo-600" />
+                    <h3 className="text-xs font-bold text-foreground uppercase tracking-wider">
+                      {isSearching ? "Searching EPI Database..." : `Matching Records (${searchResults.length})`}
+                    </h3>
+                  </div>
+                  <span className="text-[10px] text-muted-foreground">Select and confirm your record</span>
+                </div>
+
+                {isSearching ? (
+                  <div className="p-6 text-center space-y-2 bg-muted/30 rounded-2xl border border-border">
+                    <Loader2 className="h-5 w-5 animate-spin mx-auto text-indigo-600" />
+                    <p className="text-xs text-muted-foreground font-medium">Scanning Ministry of Health EPI registry for "{debouncedQuery}"...</p>
+                  </div>
+                ) : searchResults.length > 0 ? (
+                  <div className="grid gap-3 max-h-[50vh] overflow-y-auto pr-1">
+                    {searchResults.map((rec) => (
+                      <div
+                        key={rec.id}
+                        className="p-4 rounded-2xl bg-card border border-indigo-500/30 hover:border-indigo-500 shadow-sm hover:shadow-md transition-all space-y-3 bg-gradient-to-r from-indigo-500/[0.04] to-transparent"
+                      >
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-border/50 pb-2.5">
+                          <div className="flex items-center gap-3">
+                            <div className="h-10 w-10 rounded-2xl bg-indigo-600 text-white flex items-center justify-center font-black text-sm shadow-xs shrink-0">
+                              {rec.name ? rec.name.charAt(0).toUpperCase() : "C"}
+                            </div>
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <h4 className="text-sm font-bold text-foreground">{rec.name}</h4>
+                                <Badge variant="outline" className="text-[10px] px-2 py-0 border-indigo-500/40 text-indigo-700 dark:text-indigo-300 bg-indigo-500/10 font-mono font-bold">
+                                  {rec.clientId}
+                                </Badge>
+                              </div>
+                              <span className="text-[11px] text-muted-foreground flex items-center gap-1.5 mt-0.5">
+                                <User className="h-3 w-3 text-muted-foreground" />
+                                Parent/Caregiver: <strong className="text-foreground font-semibold">{rec.parentName}</strong>
+                              </span>
+                            </div>
+                          </div>
+
+                          <Badge className="self-start sm:self-auto bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 text-[10px] font-bold px-2 py-0.5">
+                            ✓ {rec.doseCount} Doses Administered
+                          </Badge>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] text-muted-foreground">
+                          <div className="flex items-center gap-1.5">
+                            <Calendar className="h-3.5 w-3.5 text-indigo-500 shrink-0" />
+                            <span>DOB: <strong className="text-foreground">{rec.dateOfBirth ? new Date(rec.dateOfBirth).toLocaleDateString() : "N/A"}</strong></span>
+                          </div>
+                          {rec.contactPhone && (
+                            <div className="flex items-center gap-1.5">
+                              <Phone className="h-3.5 w-3.5 text-indigo-500 shrink-0" />
+                              <span>Phone: <strong className="text-foreground">{rec.contactPhone}</strong></span>
+                            </div>
+                          )}
+                          <div className="flex items-center gap-1.5">
+                            <MapPin className="h-3.5 w-3.5 text-indigo-500 shrink-0" />
+                            <span>Village/Address: <strong className="text-foreground">{rec.villageName}</strong></span>
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            <Building2 className="h-3.5 w-3.5 text-indigo-500 shrink-0" />
+                            <span>Facility: <strong className="text-foreground">{rec.facilityName}</strong> ({rec.districtName})</span>
+                          </div>
+                        </div>
+
+                        <div className="pt-1 flex items-center justify-end">
+                          <Button
+                            onClick={() => {
+                              window.location.href = `/verify/${encodeURIComponent(rec.id)}`;
+                            }}
+                            size="sm"
+                            className="rounded-xl text-xs h-9 px-4 font-bold bg-indigo-600 hover:bg-indigo-700 text-white gap-2 shadow-xs"
+                          >
+                            <BadgeCheck className="h-4 w-4" /> Confirm & View Passport →
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="p-4 rounded-2xl bg-muted/40 border border-border text-center space-y-1 text-xs text-muted-foreground">
+                    <p className="font-semibold text-foreground">No matching immunization records found for "{debouncedQuery}"</p>
+                    <p className="text-[11px]">Please check the phone number, spelling, or facility and try again.</p>
+                  </div>
+                )}
+              </div>
+            )}
 
             <div className="pt-2 border-t border-border/60 flex flex-wrap items-center justify-center gap-3">
               <Link href="/client-logbook">
@@ -472,6 +624,14 @@ export default function PublicVaxCard() {
           </div>
 
           <div className="flex items-center gap-2">
+            <Button
+              onClick={() => setIsSearchOpen(true)}
+              size="sm"
+              variant="outline"
+              className="text-xs h-8 rounded-xl gap-1.5 border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-50 dark:hover:bg-indigo-950/50"
+            >
+              <Search className="h-3.5 w-3.5" /> Search Another
+            </Button>
             <Link href="/login">
               <Button variant="ghost" size="sm" className="text-xs h-8 rounded-xl gap-1 text-muted-foreground hover:text-foreground">
                 <User className="h-3.5 w-3.5" /> Staff Sign In

@@ -8122,15 +8122,129 @@ export async function registerRoutes(
   // PUBLIC DIGITAL VAXCARD VERIFICATION & CAREGIVER REMINDERS
   // ─────────────────────────────────────────────────────────────────────────
 
+  // GET /api/public/vaxcard-search — Public multi-field search (phone, name, address, ID, etc.)
+  app.get("/api/public/vaxcard-search", async (req: any, res) => {
+    try {
+      const q = String(req.query.q || "").trim();
+      if (!q || q.length < 2) {
+        return res.json({ success: true, count: 0, results: [] });
+      }
+
+      const pattern = `%${q}%`;
+      const cleanDigits = q.replace(/\D/g, "");
+      const phonePattern = cleanDigits.length >= 3 ? `%${cleanDigits}%` : pattern;
+
+      const searchConditions = [
+        ilike(clients.clientId, pattern),
+        ilike(clients.name, pattern),
+        ilike(clients.parentName, pattern),
+        ilike(clients.contactPhone, pattern),
+        ilike(clients.email, pattern),
+        ilike(clients.foreignResidence, pattern),
+        ilike(villages.name, pattern),
+        ilike(facilities.name, pattern),
+        ilike(districts.name, pattern),
+        ilike(provinces.name, pattern),
+      ];
+
+      // If query is a UUID format
+      if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(q)) {
+        searchConditions.push(eq(clients.id, q));
+      }
+
+      if (cleanDigits.length >= 4) {
+        searchConditions.push(ilike(clients.contactPhone, phonePattern));
+      }
+
+      const rows = await db
+        .select({
+          id: clients.id,
+          clientId: clients.clientId,
+          name: clients.name,
+          clientType: clients.clientType,
+          dateOfBirth: clients.dateOfBirth,
+          gender: clients.gender,
+          parentName: clients.parentName,
+          contactPhone: clients.contactPhone,
+          email: clients.email,
+          catchmentStatus: clients.catchmentStatus,
+          villageName: villages.name,
+          foreignResidence: clients.foreignResidence,
+          facilityName: facilities.name,
+          facilityType: facilities.facilityType,
+          districtName: districts.name,
+          provinceName: provinces.name,
+          tenantName: tenants.name,
+          countryCode: tenants.countryCode,
+        })
+        .from(clients)
+        .innerJoin(tenants, eq(tenants.id, clients.tenantId))
+        .innerJoin(facilities, eq(facilities.id, clients.facilityId))
+        .innerJoin(districts, eq(districts.id, facilities.districtId))
+        .innerJoin(provinces, eq(provinces.id, districts.provinceId))
+        .leftJoin(villages, eq(villages.id, clients.villageId))
+        .where(or(...searchConditions))
+        .limit(15);
+
+      if (rows.length === 0) {
+        return res.json({ success: true, count: 0, results: [] });
+      }
+
+      const foundClientIds = rows.map(r => r.id);
+      const vaxCounts = await db
+        .select({
+          clientId: clientVaccinations.clientId,
+          count: dsql<number>`count(*)::int`,
+        })
+        .from(clientVaccinations)
+        .where(inArray(clientVaccinations.clientId, foundClientIds))
+        .groupBy(clientVaccinations.clientId);
+
+      const vaxCountMap = new Map<string, number>();
+      for (const vc of vaxCounts) {
+        if (vc.clientId) {
+          vaxCountMap.set(vc.clientId, Number(vc.count) || 0);
+        }
+      }
+
+      const results = rows.map(r => ({
+        id: r.id,
+        clientId: r.clientId || r.id,
+        name: r.name,
+        clientType: r.clientType,
+        dateOfBirth: r.dateOfBirth,
+        gender: r.gender,
+        parentName: r.parentName || "Caregiver",
+        contactPhone: r.contactPhone || null,
+        email: r.email || null,
+        villageName: r.villageName || r.foreignResidence || "Catchment Zone",
+        facilityName: r.facilityName,
+        districtName: r.districtName,
+        provinceName: r.provinceName,
+        countryCode: r.countryCode,
+        doseCount: vaxCountMap.get(r.id) || 0,
+      }));
+
+      res.json({
+        success: true,
+        count: results.length,
+        results,
+      });
+    } catch (err: any) {
+      console.error("GET /api/public/vaxcard-search error:", err);
+      res.status(500).json({ success: false, message: "Search failed" });
+    }
+  });
+
   // GET /api/public/vaxcard/:id — Public verification endpoint for QR code scanning
   app.get("/api/public/vaxcard/:id", async (req: any, res) => {
     try {
-      const clientId = req.params.id;
+      const clientId = decodeURIComponent(String(req.params.id || "")).trim();
       if (!clientId) {
         return res.status(400).json({ success: false, message: "Client ID required" });
       }
 
-      const [record] = await db
+      let [record] = await db
         .select({
           client: clients,
           tenant: tenants,
@@ -8146,7 +8260,41 @@ export async function registerRoutes(
         .innerJoin(districts, eq(districts.id, facilities.districtId))
         .innerJoin(provinces, eq(provinces.id, districts.provinceId))
         .leftJoin(villages, eq(villages.id, clients.villageId))
-        .where(or(eq(clients.id, clientId), eq(clients.clientId, clientId)));
+        .where(or(
+          eq(clients.id, clientId),
+          eq(clients.clientId, clientId),
+          ilike(clients.clientId, clientId)
+        ));
+
+      // If not found by exact ID, fallback to partial ID or phone match if applicable
+      if (!record || !record.client) {
+        const fallbackPattern = `%${clientId}%`;
+        const [fallbackRecord] = await db
+          .select({
+            client: clients,
+            tenant: tenants,
+            facilityName: facilities.name,
+            facilityType: facilities.facilityType,
+            villageName: villages.name,
+            districtName: districts.name,
+            provinceName: provinces.name,
+          })
+          .from(clients)
+          .innerJoin(tenants, eq(tenants.id, clients.tenantId))
+          .innerJoin(facilities, eq(facilities.id, clients.facilityId))
+          .innerJoin(districts, eq(districts.id, facilities.districtId))
+          .innerJoin(provinces, eq(provinces.id, districts.provinceId))
+          .leftJoin(villages, eq(villages.id, clients.villageId))
+          .where(or(
+            ilike(clients.clientId, fallbackPattern),
+            ilike(clients.contactPhone, fallbackPattern)
+          ))
+          .limit(1);
+
+        if (fallbackRecord && fallbackRecord.client) {
+          record = fallbackRecord;
+        }
+      }
 
       if (!record || !record.client) {
         return res.status(404).json({ success: false, message: "Immunization record not found or invalid QR code" });
