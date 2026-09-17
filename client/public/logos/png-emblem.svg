@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+  <!-- Papua New Guinea National Emblem (National Department of Health) -->
+  <defs>
+    <linearGradient id="pngGold" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fde047" />
+      <stop offset="50%" stop-color="#eab308" />
+      <stop offset="100%" stop-color="#ca8a04" />
+    </linearGradient>
+    <linearGradient id="pngRed" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ef4444" />
+      <stop offset="100%" stop-color="#b91c1c" />
+    </linearGradient>
+    <filter id="pngShadow">
+      <feDropShadow dx="0" dy="1" stdDeviation="1" flood-opacity="0.25" />
+    </filter>
+  </defs>
+
+  <!-- Circular subtle background frame -->
+  <circle cx="100" cy="100" r="92" fill="#fafafa" stroke="#eab308" stroke-width="2.5" />
+
+  <!-- Raggiana Bird of Paradise (Kumul) with elongated display tail plumes -->
+  <!-- Left flowing display plumes -->
+  <g fill="url(#pngGold)" stroke="#b45309" stroke-width="0.8">
+    <path d="M 90,65 C 60,35 30,50 20,80 C 40,70 65,75 85,80 Z" />
+    <path d="M 85,75 C 50,55 25,85 18,115 C 38,98 62,95 82,90 Z" />
+    <path d="M 82,88 C 45,80 20,120 18,145 C 36,120 60,110 82,102 Z" />
+  </g>
+
+  <!-- Right flowing display plumes -->
+  <g fill="url(#pngGold)" stroke="#b45309" stroke-width="0.8">
+    <path d="M 110,65 C 140,35 170,50 180,80 C 160,70 135,75 115,80 Z" />
+    <path d="M 115,75 C 150,55 175,85 182,115 C 162,98 138,95 118,90 Z" />
+    <path d="M 118,88 C 155,80 180,120 182,145 C 164,120 140,110 118,102 Z" />
+  </g>
+
+  <!-- Bird Body & Head (Emerald green throat, golden crown, crimson wings) -->
+  <g stroke="#0f172a" stroke-width="0.8">
+    <!-- Golden Head -->
+    <ellipse cx="100" cy="40" rx="9" ry="7" fill="#fde047" />
+    <!-- Blue-grey Beak -->
+    <polygon points="100,34 97,42 103,42" fill="#64748b" />
+    <!-- Emerald Throat -->
+    <path d="M 94,44 C 94,52 106,52 106,44 Z" fill="#059669" />
+    <!-- Maroon/Crimson Wings and Body -->
+    <path d="M 92,48 C 85,60 88,95 100,105 C 112,95 115,60 108,48 Z" fill="url(#pngRed)" />
+    <!-- Two long wiry black tail streamers (wires) -->
+    <path d="M 97,105 C 80,130 70,165 75,180" fill="none" stroke="#0f172a" stroke-width="1.2" stroke-linecap="round" />
+    <path d="M 103,105 C 120,130 130,165 125,180" fill="none" stroke="#0f172a" stroke-width="1.2" stroke-linecap="round" />
+  </g>
+
+  <!-- Traditional Kundu Hourglass Drum -->
+  <g fill="#1e293b" stroke="#fde047" stroke-width="1">
+    <!-- Drum body -->
+    <path d="M 45,130 Q 100,140 155,130 L 150,145 Q 115,142 100,148 Q 85,142 50,145 Z" fill="#334155" />
+    <path d="M 50,145 Q 85,142 100,148 Q 115,142 150,145 L 155,160 Q 100,150 45,160 Z" fill="#1e293b" />
+    <!-- Kundu handle in center -->
+    <path d="M 94,142 C 94,136 106,136 106,142 C 106,152 94,152 94,142 Z" fill="#f59e0b" stroke="#78350f" stroke-width="0.8" />
+  </g>
+
+  <!-- Ceremonial Spear Placed Horizontally behind drum -->
+  <g stroke="#92400e" stroke-width="2">
+    <line x1="25" y1="145" x2="175" y2="145" />
+    <!-- Spearhead on Left -->
+    <polygon points="25,145 38,140 34,145 38,150" fill="#0f172a" stroke="#475569" stroke-width="0.8" />
+  </g>
+
+  <!-- Text Label Badge for Health Ministry -->
+  <rect x="25" y="168" width="150" height="18" rx="5" fill="#dc2626" stroke="#fbbf24" stroke-width="1.2" />
+  <text x="100" y="180" fill="#ffffff" font-size="7" font-weight="900" font-family="'Segoe UI', Roboto, sans-serif" text-anchor="middle" letter-spacing="0.5">PAPUA NEW GUINEA • HEALTH</text>
+</svg>

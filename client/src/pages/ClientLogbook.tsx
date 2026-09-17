@@ -4960,36 +4960,40 @@ export default function ClientLogbook() {
                     <div>
                       {/* National Emblem & Title Header */}
                       <div className="flex items-center justify-between gap-3 border-b pb-4 mb-5 border-border print:border-black">
-                        <div className="flex items-center gap-3">
-                          {(tenantCode === "ZMB" || tenant?.name?.toLowerCase().includes("zambia") || tenant?.code?.toLowerCase().includes("zmb")) ? (
-                            <img 
-                              src="/zambia-coat-of-arms.png" 
-                              alt="Zambia Coat of Arms" 
-                              className="h-12 w-12 shrink-0 object-contain"
-                            />
-                          ) : (tenantCode === "SSD" || tenant?.name?.toLowerCase().includes("south sudan") || tenant?.code?.toLowerCase().includes("ssd")) ? (
-                            <img
-                              src="/ssd-moh-logo.png"
-                              alt="South Sudan Ministry of Health"
-                              className="h-12 w-12 shrink-0 object-contain"
-                            />
-                          ) : (
-                            <div className="h-11 w-11 shrink-0 bg-primary/10 rounded-2xl flex items-center justify-center text-primary print:text-black font-extrabold text-sm border border-primary/20">
-                              {getCountryConfig(tenant || { code: tenantCode, countryCode: tenantCode }).flagEmoji || tenantCode || "MOH"}
+                        {(() => {
+                          const countryConfig = getCountryConfig(tenant || { code: tenantCode, countryCode: tenantCode });
+                          const logoSrc = countryConfig.logoUrl || countryConfig.coatOfArmsUrl;
+                          return (
+                            <div className="flex items-center gap-3">
+                              {logoSrc ? (
+                                <img 
+                                  src={logoSrc} 
+                                  alt={`${countryConfig.name || tenantCode} Official Emblem`} 
+                                  className="h-12 w-12 shrink-0 object-contain drop-shadow-xs"
+                                  onError={(e) => {
+                                    // Fallback if image fails to load
+                                    (e.target as HTMLElement).style.display = 'none';
+                                  }}
+                                />
+                              ) : (
+                                <div className="h-11 w-11 shrink-0 bg-primary/10 rounded-2xl flex items-center justify-center text-primary print:text-black font-extrabold text-sm border border-primary/20">
+                                  {countryConfig.flagEmoji || tenantCode || "MOH"}
+                                </div>
+                              )}
+                              <div>
+                                <h2 className="text-[10px] font-black text-muted-foreground dark:text-muted-foreground uppercase tracking-wider print:text-black leading-none">
+                                  {tenant?.settings?.officialName || tenant?.name || countryConfig.officialName || `Republic of ${tenantCode}`}
+                                </h2>
+                                <h3 className="text-sm font-black text-foreground dark:text-white uppercase tracking-tight print:text-black mt-1">
+                                  Ministry of Health
+                                </h3>
+                                <p className="text-[9px] text-indigo-600 dark:text-indigo-400 font-extrabold uppercase tracking-wider mt-0.5 print:text-black">
+                                  Child Immunization Booklet
+                                </p>
+                              </div>
                             </div>
-                          )}
-                          <div>
-                            <h2 className="text-[10px] font-black text-muted-foreground dark:text-muted-foreground uppercase tracking-wider print:text-black leading-none">
-                              {tenant?.settings?.officialName || tenant?.name || getCountryConfig(tenant || { code: tenantCode, countryCode: tenantCode }).officialName || `Republic of ${tenantCode}`}
-                            </h2>
-                            <h3 className="text-sm font-black text-foreground dark:text-white uppercase tracking-tight print:text-black mt-1">
-                              Ministry of Health
-                            </h3>
-                            <p className="text-[9px] text-indigo-600 dark:text-indigo-400 font-extrabold uppercase tracking-wider mt-0.5 print:text-black">
-                              Child Immunization Booklet
-                            </p>
-                          </div>
-                        </div>
+                          );
+                        })()}
  
                         {/* Digital Authenticity Verification QR Code */}
                         <div className="flex flex-col items-center justify-center border border-border p-1 bg-white rounded-xl shrink-0 shadow-xs print:border-black">

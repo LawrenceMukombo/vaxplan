@@ -5,6 +5,8 @@ export interface CountryConfig {
   name: string;
   officialName: string;
   flagEmoji: string;
+  logoUrl?: string;
+  coatOfArmsUrl?: string;
   
   // Identification & Phone
   idLabel: string;
@@ -69,6 +71,8 @@ export const COUNTRY_CONFIGS: Record<string, CountryConfig> = {
     name: "Zambia",
     officialName: "Republic of Zambia Ministry of Health",
     flagEmoji: "🇿🇲",
+    logoUrl: "/zambia-coat-of-arms.png",
+    coatOfArmsUrl: "/zambia-coat-of-arms.png",
     idLabel: "NRC Number",
     idFormatPlaceholder: "123456/11/1",
     phonePrefix: "+260",
@@ -112,6 +116,8 @@ export const COUNTRY_CONFIGS: Record<string, CountryConfig> = {
     name: "Vietnam",
     officialName: "Republic of Vietnam Ministry of Health",
     flagEmoji: "🇻🇳",
+    logoUrl: "/logos/vietnam-emblem.svg",
+    coatOfArmsUrl: "/logos/vietnam-emblem.svg",
     idLabel: "CCCD / CMND Number",
     idFormatPlaceholder: "012345678901",
     phonePrefix: "+84",
@@ -155,6 +161,8 @@ export const COUNTRY_CONFIGS: Record<string, CountryConfig> = {
     name: "South Africa",
     officialName: "National Department of Health South Africa",
     flagEmoji: "🇿🇦",
+    logoUrl: "/logos/south-africa-coat-of-arms.svg",
+    coatOfArmsUrl: "/logos/south-africa-coat-of-arms.svg",
     idLabel: "South African ID Number",
     idFormatPlaceholder: "9001015009087",
     phonePrefix: "+27",
@@ -198,6 +206,8 @@ export const COUNTRY_CONFIGS: Record<string, CountryConfig> = {
     name: "Papua New Guinea",
     officialName: "National Department of Health Papua New Guinea",
     flagEmoji: "🇵🇬",
+    logoUrl: "/logos/png-emblem.svg",
+    coatOfArmsUrl: "/logos/png-emblem.svg",
     idLabel: "NID Number",
     idFormatPlaceholder: "1001234567",
     phonePrefix: "+675",
@@ -241,6 +251,8 @@ export const COUNTRY_CONFIGS: Record<string, CountryConfig> = {
     name: "Malawi",
     officialName: "Ministry of Health Republic of Malawi",
     flagEmoji: "🇲🇼",
+    logoUrl: "/logos/malawi-coat-of-arms.svg",
+    coatOfArmsUrl: "/logos/malawi-coat-of-arms.svg",
     idLabel: "National ID Number",
     idFormatPlaceholder: "MW123456789",
     phonePrefix: "+265",
@@ -284,6 +296,8 @@ export const COUNTRY_CONFIGS: Record<string, CountryConfig> = {
     name: "Kenya",
     officialName: "Ministry of Health Republic of Kenya",
     flagEmoji: "🇰🇪",
+    logoUrl: "/logos/kenya-coat-of-arms.svg",
+    coatOfArmsUrl: "/logos/kenya-coat-of-arms.svg",
     idLabel: "National ID Number",
     idFormatPlaceholder: "34567890",
     phonePrefix: "+254",
@@ -313,6 +327,8 @@ export const COUNTRY_CONFIGS: Record<string, CountryConfig> = {
     name: "Uganda",
     officialName: "Ministry of Health Republic of Uganda",
     flagEmoji: "🇺🇬",
+    logoUrl: "/logos/uganda-coat-of-arms.svg",
+    coatOfArmsUrl: "/logos/uganda-coat-of-arms.svg",
     idLabel: "NIN Number",
     idFormatPlaceholder: "CM9001015009087",
     phonePrefix: "+256",
@@ -342,6 +358,8 @@ export const COUNTRY_CONFIGS: Record<string, CountryConfig> = {
     name: "South Sudan",
     officialName: "Republic of South Sudan Ministry of Health",
     flagEmoji: "🇸🇸",
+    logoUrl: "/ssd-moh-logo.png",
+    coatOfArmsUrl: "/ssd-moh-logo.png",
     idLabel: "National ID Number",
     idShortLabel: "National ID",
     idFormatPlaceholder: "SSD1234567",
@@ -375,6 +393,8 @@ export const COUNTRY_CONFIGS: Record<string, CountryConfig> = {
     name: "Botswana",
     officialName: "Republic of Botswana Ministry of Health",
     flagEmoji: "🇧🇼",
+    logoUrl: "/logos/botswana-coat-of-arms.svg",
+    coatOfArmsUrl: "/logos/botswana-coat-of-arms.svg",
     idLabel: "Omang (National ID) Number",
     idShortLabel: "Omang ID",
     idFormatPlaceholder: "123412345",
@@ -422,6 +442,8 @@ export function getCountryConfig(tenant: any): CountryConfig & { formatSpec: Cou
     name: tenant.name || "Global Health",
     officialName: tenant.name || "Ministry of Health",
     flagEmoji: "🌐",
+    logoUrl: "/vaxplan-logo-light.png",
+    coatOfArmsUrl: "/vaxplan-logo-light.png",
     idLabel: formatSpec.idLabel,
     idShortLabel: formatSpec.idShortLabel,
     idFormatPlaceholder: formatSpec.idPlaceholder,
@@ -469,6 +491,8 @@ export function getCountryConfig(tenant: any): CountryConfig & { formatSpec: Cou
   return {
     ...baseConfig,
     formatSpec,
+    logoUrl: settings.logoUrl || settings.coatOfArmsUrl || baseConfig.logoUrl,
+    coatOfArmsUrl: settings.coatOfArmsUrl || settings.logoUrl || baseConfig.coatOfArmsUrl,
     currencyCode: settings.currency || baseConfig.currencyCode,
     currencySymbol: settings.currencySymbol || baseConfig.currencySymbol,
     idLabel: settings.idLabel || formatSpec.idLabel || baseConfig.idLabel,

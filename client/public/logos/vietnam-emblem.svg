@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+  <!-- Vietnam National Emblem (Quốc huy Việt Nam) -->
+  <defs>
+    <radialGradient id="vnmBg" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#ea2825" />
+      <stop offset="100%" stop-color="#b91c1c" />
+    </radialGradient>
+    <linearGradient id="vnmGold" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffeb3b" />
+      <stop offset="50%" stop-color="#ffd700" />
+      <stop offset="100%" stop-color="#f59e0b" />
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="1" stdDeviation="1.5" flood-opacity="0.3" />
+    </filter>
+  </defs>
+
+  <!-- Circular Red Base -->
+  <circle cx="100" cy="100" r="90" fill="url(#vnmBg)" stroke="#ffd700" stroke-width="4" filter="url(#shadow)" />
+
+  <!-- Rice Ear Garland Surrounding Shield -->
+  <!-- Left Garland -->
+  <g fill="url(#vnmGold)" stroke="#b45309" stroke-width="0.7">
+    <path d="M 30,125 C 22,95 32,55 58,35 C 50,48 45,68 46,90 C 47,105 52,120 60,130 Z" />
+    <path d="M 40,50 Q 52,42 58,35 Q 52,50 48,65 Z" />
+    <path d="M 32,70 Q 45,62 50,55 Q 43,72 38,85 Z" />
+    <path d="M 28,92 Q 40,85 45,78 Q 38,94 34,107 Z" />
+    <path d="M 29,114 Q 40,108 46,100 Q 38,116 35,128 Z" />
+  </g>
+
+  <!-- Right Garland -->
+  <g fill="url(#vnmGold)" stroke="#b45309" stroke-width="0.7">
+    <path d="M 170,125 C 178,95 168,55 142,35 C 150,48 155,68 154,90 C 153,105 148,120 140,130 Z" />
+    <path d="M 160,50 Q 148,42 142,35 Q 148,50 152,65 Z" />
+    <path d="M 168,70 Q 155,62 150,55 Q 157,72 162,85 Z" />
+    <path d="M 172,92 Q 160,85 155,78 Q 162,94 166,107 Z" />
+    <path d="M 171,114 Q 160,108 154,100 Q 162,116 165,128 Z" />
+  </g>
+
+  <!-- Central Gold Five-pointed Star -->
+  <polygon points="100,42 109,70 138,70 115,87 124,115 100,98 76,115 85,87 62,70 91,70" fill="url(#vnmGold)" stroke="#b45309" stroke-width="1" filter="url(#shadow)" />
+
+  <!-- Industrial Cogwheel at bottom -->
+  <g fill="url(#vnmGold)" stroke="#b45309" stroke-width="1">
+    <circle cx="100" cy="155" r="28" fill="#ffd700" />
+    <!-- Gear teeth -->
+    <path d="M 96,124 L 104,124 L 105,129 L 95,129 Z" />
+    <path d="M 118,131 L 124,136 L 121,140 L 114,135 Z" />
+    <path d="M 129,148 L 133,155 L 128,158 L 124,151 Z" />
+    <path d="M 76,136 L 82,131 L 86,135 L 79,140 Z" />
+    <path d="M 67,155 L 71,148 L 76,151 L 72,158 Z" />
+    <circle cx="100" cy="155" r="14" fill="#b91c1c" stroke="#ffd700" stroke-width="2" />
+  </g>
+
+  <!-- Red Ribbon Scroll Banner at Bottom -->
+  <path d="M 45,152 Q 100,168 155,152 Q 162,172 145,178 Q 100,188 55,178 Q 38,172 45,152 Z" fill="#d32f2f" stroke="#ffd700" stroke-width="2" />
+  <text x="100" y="172" fill="#ffd700" font-size="9" font-weight="900" font-family="Arial, sans-serif" text-anchor="middle" letter-spacing="0.5">CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM</text>
+</svg>

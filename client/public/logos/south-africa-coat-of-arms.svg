@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+  <!-- South Africa National Coat of Arms (Department of Health) -->
+  <defs>
+    <linearGradient id="saGold" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fef08a" />
+      <stop offset="50%" stop-color="#eab308" />
+      <stop offset="100%" stop-color="#ca8a04" />
+    </linearGradient>
+    <linearGradient id="saGreen" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#059669" />
+      <stop offset="100%" stop-color="#047857" />
+    </linearGradient>
+    <filter id="saShadow">
+      <feDropShadow dx="0" dy="1" stdDeviation="1" flood-opacity="0.2" />
+    </filter>
+  </defs>
+
+  <!-- Rising Sun at the Top -->
+  <g fill="url(#saGold)" stroke="#a16207" stroke-width="0.5">
+    <path d="M 80,45 L 85,25 L 92,43 L 100,20 L 108,43 L 115,25 L 120,45 Z" />
+    <path d="M 75,50 C 85,38 115,38 125,50 Z" fill="#facc15" />
+  </g>
+
+  <!-- Secretary Bird with Wings Spread -->
+  <g fill="url(#saGold)" stroke="#854d0e" stroke-width="0.7">
+    <!-- Bird Crown / Head -->
+    <circle cx="100" cy="48" r="7" fill="#fef08a" />
+    <path d="M 100,42 L 100,32 M 97,44 L 92,35 M 103,44 L 108,35" stroke="#a16207" stroke-width="1.5" stroke-linecap="round" />
+    <!-- Spread Wings -->
+    <path d="M 100,56 C 80,48 45,60 30,85 C 48,82 70,80 92,72 Z" fill="url(#saGold)" />
+    <path d="M 100,56 C 120,48 155,60 170,85 C 152,82 130,80 108,72 Z" fill="url(#saGold)" />
+  </g>
+
+  <!-- Protea Flower Petals & Body -->
+  <g stroke="#047857" stroke-width="0.8">
+    <path d="M 68,90 C 75,75 88,68 100,68 C 112,68 125,75 132,90 C 120,88 110,85 100,92 C 90,85 80,88 68,90 Z" fill="#10b981" />
+    <path d="M 82,92 L 100,75 L 118,92 L 100,85 Z" fill="#fcd34d" />
+  </g>
+
+  <!-- Central Indigenous Khoisan Figures in Rock Art Style on Shield -->
+  <g fill="none" stroke="#92400e" stroke-width="1">
+    <!-- Shield Outline -->
+    <path d="M 62,96 Q 100,92 138,96 C 138,135 100,165 100,165 C 100,165 62,135 62,96 Z" fill="#fef3c7" stroke="#b45309" stroke-width="2" />
+    <!-- Two Human Greeting Figures -->
+    <path d="M 86,115 C 86,110 90,110 90,115 C 90,128 82,138 82,145 M 84,124 L 94,126" stroke="#9a3412" stroke-width="2.5" stroke-linecap="round" />
+    <path d="M 114,115 C 114,110 110,110 110,115 C 110,128 118,138 118,145 M 116,124 L 106,126" stroke="#9a3412" stroke-width="2.5" stroke-linecap="round" />
+    <!-- Clasping Hands in Unity -->
+    <circle cx="100" cy="125" r="3" fill="#9a3412" />
+  </g>
+
+  <!-- Spear and Knobkierie Crossed Behind Shield -->
+  <g stroke="#78350f" stroke-width="2" stroke-linecap="round">
+    <line x1="55" y1="160" x2="145" y2="100" />
+    <line x1="145" y1="160" x2="55" y2="100" />
+  </g>
+
+  <!-- Elephant Tusks Base -->
+  <g fill="#f8fafc" stroke="#94a3b8" stroke-width="1.5">
+    <path d="M 38,155 C 36,130 45,105 56,92 C 54,110 48,135 52,158 Z" />
+    <path d="M 162,155 C 164,130 155,105 144,92 C 146,110 152,135 148,158 Z" />
+  </g>
+
+  <!-- Ears of Wheat / Spikes at Lower Base -->
+  <g stroke="#eab308" stroke-width="1.5" stroke-linecap="round">
+    <line x1="48" y1="165" x2="65" y2="152" />
+    <line x1="152" y1="165" x2="135" y2="152" />
+  </g>
+
+  <!-- National Motto Ribbon Banner -->
+  <path d="M 35,172 Q 100,165 165,172 Q 155,188 100,186 Q 45,188 35,172 Z" fill="#047857" stroke="#fbbf24" stroke-width="1.5" />
+  <text x="100" y="180" fill="#ffffff" font-size="6.5" font-weight="900" font-family="'Segoe UI', Roboto, sans-serif" text-anchor="middle" letter-spacing="0.5">!KE E: /XARRA //KE • SOUTH AFRICA</text>
+</svg>
