@@ -9,7 +9,29 @@ import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
-import { BookOpen, Pencil, Trash2, Plus, RefreshCw, ChevronDown, ChevronRight, Info, Award, HelpCircle, Landmark, CalendarRange } from "lucide-react";
+import {
+  BookOpen,
+  Pencil,
+  Trash2,
+  Plus,
+  RefreshCw,
+  ChevronDown,
+  ChevronRight,
+  Info,
+  Award,
+  HelpCircle,
+  Landmark,
+  CalendarRange,
+  Search,
+  Filter,
+  CheckCircle2,
+  Truck,
+  Activity,
+  Megaphone,
+  Smartphone,
+  ShieldCheck,
+  FileSpreadsheet,
+} from "lucide-react";
 
 /*
 // ORIGINAL INDICATOR ENTRY INTERFACE COMMENTED OUT TO PRESERVE BACKWARD COMPATIBILITY
@@ -113,6 +135,11 @@ export default function IndicatorManual() {
     }
   });
 
+  // Search and Filter States
+  const [searchQuery, setSearchQuery] = useState("");
+  const [selectedCategory, setSelectedCategory] = useState("all");
+  const [masteryFilter, setMasteryFilter] = useState<"all" | "mastered" | "unlearned">("all");
+
   const canEdit = useMemo(() => {
     if (!user) return false;
     return ["national_admin", "provincial_coordinator"].includes(user.role || "");
@@ -152,9 +179,10 @@ export default function IndicatorManual() {
       queryClient.invalidateQueries({ queryKey: ["/api/indicator-manual"] });
       toast({
         title: "Indicator updated",
-        description: "The definition has been saved successfully.",
+        description: "Indicator definition has been saved successfully.",
       });
       setIsEditDialogOpen(false);
+      setEditingEntry(null);
     },
     onError: (err: any) => {
       toast({
@@ -172,14 +200,17 @@ export default function IndicatorManual() {
         method: "POST",
         credentials: "include",
       });
-      if (!res.ok) throw new Error("Failed to reset indicator manual");
+      if (!res.ok) {
+        const errorText = await res.text();
+        throw new Error(errorText || "Failed to reset indicator manual");
+      }
       return res.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/indicator-manual"] });
       toast({
-        title: "Manual reset to defaults",
-        description: "All calculations and coverages have been restored.",
+        title: "Indicator manual reset",
+        description: "All definitions restored to standard WHO/UNICEF default formulas.",
       });
       setIsResetConfirmOpen(false);
     },
@@ -192,7 +223,7 @@ export default function IndicatorManual() {
     }
   });
 
-  // Mutate: create indicator
+  // Mutate: create custom indicator
   const createMutation = useMutation({
     mutationFn: async (newEntry: Omit<IndicatorEntry, "id" | "updatedAt">) => {
       const res = await fetch("/api/indicator-manual", {
@@ -211,10 +242,10 @@ export default function IndicatorManual() {
       queryClient.invalidateQueries({ queryKey: ["/api/indicator-manual"] });
       toast({
         title: "Indicator created",
-        description: "New indicator definition has been added successfully.",
+        description: "New indicator definition has been added to the manual.",
       });
       setIsCreateOpen(false);
-      // Reset form
+      // Reset create form
       setCreateCategory("");
       setCreateSubCategory("");
       setCreateName("");
@@ -267,11 +298,30 @@ export default function IndicatorManual() {
     }
   });
 
-  // Group entries by Category -> Subcategory
+  // Filter and group entries
+  const filteredEntries = useMemo(() => {
+    if (!entries) return [];
+    return entries.filter(entry => {
+      if (selectedCategory !== "all" && entry.category !== selectedCategory) return false;
+      if (masteryFilter === "mastered" && !masteredIds.includes(entry.id)) return false;
+      if (masteryFilter === "unlearned" && masteredIds.includes(entry.id)) return false;
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase();
+        const matchesName = entry.name?.toLowerCase().includes(q);
+        const matchesCategory = entry.category?.toLowerCase().includes(q);
+        const matchesSubCategory = entry.subCategory?.toLowerCase().includes(q);
+        const matchesCalculation = entry.calculation?.toLowerCase().includes(q);
+        const matchesNumerator = entry.numerator?.toLowerCase().includes(q);
+        const matchesDenominator = entry.denominator?.toLowerCase().includes(q);
+        return matchesName || matchesCategory || matchesSubCategory || matchesCalculation || matchesNumerator || matchesDenominator;
+      }
+      return true;
+    });
+  }, [entries, selectedCategory, masteryFilter, searchQuery, masteredIds]);
+
   const groupedEntries = useMemo(() => {
-    if (!entries) return {};
     const groups: Record<string, Record<string, IndicatorEntry[]>> = {};
-    for (const entry of entries) {
+    for (const entry of filteredEntries) {
       if (!groups[entry.category]) {
         groups[entry.category] = {};
       }
@@ -281,7 +331,7 @@ export default function IndicatorManual() {
       groups[entry.category][entry.subCategory].push(entry);
     }
     return groups;
-  }, [entries]);
+  }, [filteredEntries]);
 
   // Gamification: mastery stats
   const totalIndicators = entries?.length || 0;
@@ -381,25 +431,55 @@ export default function IndicatorManual() {
     return Array.from(new Set(entries.map(e => e.category)));
   }, [entries]);
 
-  // Visually distinct gradients for each category
+  // Visually distinct gradients and icons for all 8 categories
   const getCategoryStyles = (catName: string) => {
     const c = catName.toLowerCase();
-    if (c.includes("coverage")) {
+    if (c.includes("coverage") || c.includes("performance")) {
       return {
-        headerClass: "bg-gradient-to-r from-sky-500/10 via-indigo-500/5 to-transparent border-l-4 border-sky-500 text-sky-900 dark:text-sky-200",
+        headerClass: "bg-gradient-to-r from-sky-500/15 via-indigo-500/10 to-transparent border-l-4 border-sky-500 text-sky-950 dark:text-sky-200",
         icon: <Award className="h-5 w-5 text-sky-500" />,
       };
     }
-    if (c.includes("operational")) {
+    if (c.includes("operational") || c.includes("planning")) {
       return {
-        headerClass: "bg-gradient-to-r from-emerald-500/10 via-teal-500/5 to-transparent border-l-4 border-emerald-500 text-emerald-900 dark:text-emerald-200",
+        headerClass: "bg-gradient-to-r from-emerald-500/15 via-teal-500/10 to-transparent border-l-4 border-emerald-500 text-emerald-950 dark:text-emerald-200",
         icon: <CalendarRange className="h-5 w-5 text-emerald-500" />,
+      };
+    }
+    if (c.includes("supply") || c.includes("logistics") || c.includes("stock")) {
+      return {
+        headerClass: "bg-gradient-to-r from-cyan-500/15 via-blue-500/10 to-transparent border-l-4 border-cyan-500 text-cyan-950 dark:text-cyan-200",
+        icon: <Truck className="h-5 w-5 text-cyan-500" />,
+      };
+    }
+    if (c.includes("sia") || c.includes("campaign")) {
+      return {
+        headerClass: "bg-gradient-to-r from-rose-500/15 via-red-500/10 to-transparent border-l-4 border-rose-500 text-rose-950 dark:text-rose-200",
+        icon: <Megaphone className="h-5 w-5 text-rose-500" />,
+      };
+    }
+    if (c.includes("surveillance") || c.includes("safety")) {
+      return {
+        headerClass: "bg-gradient-to-r from-amber-500/15 via-orange-500/10 to-transparent border-l-4 border-amber-500 text-amber-950 dark:text-amber-200",
+        icon: <Activity className="h-5 w-5 text-amber-500" />,
       };
     }
     if (c.includes("budget") || c.includes("finance")) {
       return {
-        headerClass: "bg-gradient-to-r from-amber-500/10 via-orange-500/5 to-transparent border-l-4 border-amber-500 text-amber-900 dark:text-amber-200",
-        icon: <Landmark className="h-5 w-5 text-amber-500" />,
+        headerClass: "bg-gradient-to-r from-yellow-500/15 via-amber-500/10 to-transparent border-l-4 border-yellow-500 text-yellow-950 dark:text-yellow-200",
+        icon: <Landmark className="h-5 w-5 text-yellow-600 dark:text-yellow-400" />,
+      };
+    }
+    if (c.includes("digital") || c.includes("community")) {
+      return {
+        headerClass: "bg-gradient-to-r from-teal-500/15 via-emerald-500/10 to-transparent border-l-4 border-teal-500 text-teal-950 dark:text-teal-200",
+        icon: <Smartphone className="h-5 w-5 text-teal-500" />,
+      };
+    }
+    if (c.includes("supervision")) {
+      return {
+        headerClass: "bg-gradient-to-r from-purple-500/15 via-violet-500/10 to-transparent border-l-4 border-purple-500 text-purple-950 dark:text-purple-200",
+        icon: <ShieldCheck className="h-5 w-5 text-purple-500" />,
       };
     }
     return {
@@ -410,7 +490,7 @@ export default function IndicatorManual() {
 
   if (isLoading) {
     return (
-      <div className="p-6 space-y-6">
+      <div className="p-6 space-y-6 max-w-5xl mx-auto">
         <div className="space-y-2">
           <Skeleton className="h-8 w-64" />
           <Skeleton className="h-4 w-96" />
@@ -703,20 +783,124 @@ export default function IndicatorManual() {
         </CardContent>
       </Card>
 
-      {/* Accordion Categories */}
-      <div className="space-y-4">
-        {Object.entries(groupedEntries).map(([category, subcategories]) => {
-          const isCatCollapsed = collapsedCategories[category];
-          const styles = getCategoryStyles(category);
-
-          return (
-            <Card key={category} className="shadow-sm border border-border dark:border-border overflow-hidden">
-              {/* Category Header */}
+      {/* Search & Filter Toolbar */}
+      <div className="space-y-3 pt-2">
+        <div className="flex flex-col sm:flex-row items-center gap-3">
+          <div className="relative flex-1 w-full">
+            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              type="text"
+              placeholder="Search formulas, numerators, antigens (e.g. Penta, Zero-Dose, Wastage)..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-9 pr-9 rounded-xl h-10 text-xs sm:text-sm bg-card"
+            />
+            {searchQuery && (
               <button
                 type="button"
-                onClick={() => toggleCategory(category)}
-                className={`w-full flex items-center justify-between p-4 transition-all text-left font-bold text-base ${styles.headerClass}`}
+                onClick={() => setSearchQuery("")}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground hover:text-foreground"
               >
+                ✕
+              </button>
+            )}
+          </div>
+
+          <div className="flex items-center gap-1.5 w-full sm:w-auto overflow-x-auto pb-1 sm:pb-0">
+            <Button
+              variant={masteryFilter === "all" ? "default" : "outline"}
+              size="sm"
+              onClick={() => setMasteryFilter("all")}
+              className="rounded-xl text-xs h-9"
+            >
+              All ({totalIndicators})
+            </Button>
+            <Button
+              variant={masteryFilter === "mastered" ? "default" : "outline"}
+              size="sm"
+              onClick={() => setMasteryFilter("mastered")}
+              className="rounded-xl text-xs h-9 text-emerald-600 dark:text-emerald-400 gap-1"
+            >
+              🎯 Mastered ({masteredCount})
+            </Button>
+            <Button
+              variant={masteryFilter === "unlearned" ? "default" : "outline"}
+              size="sm"
+              onClick={() => setMasteryFilter("unlearned")}
+              className="rounded-xl text-xs h-9 gap-1"
+            >
+              🌱 Unlearned ({totalIndicators - masteredCount})
+            </Button>
+          </div>
+        </div>
+
+        {/* Category Pills */}
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-1.5 scrollbar-none text-xs">
+          <button
+            type="button"
+            onClick={() => setSelectedCategory("all")}
+            className={`px-3 py-1 rounded-full font-medium transition-all shrink-0 ${
+              selectedCategory === "all"
+                ? "bg-primary text-primary-foreground shadow-xs font-bold"
+                : "bg-muted/80 hover:bg-muted text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            All Categories
+          </button>
+          {existingCategories.map((cat) => (
+            <button
+              key={cat}
+              type="button"
+              onClick={() => setSelectedCategory(cat)}
+              className={`px-3 py-1 rounded-full font-medium transition-all shrink-0 ${
+                selectedCategory === cat
+                  ? "bg-primary text-primary-foreground shadow-xs font-bold"
+                  : "bg-muted/80 hover:bg-muted text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {cat}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Accordion Categories */}
+      <div className="space-y-4">
+        {Object.keys(groupedEntries).length === 0 ? (
+          <Card className="border border-border/80 p-8 text-center bg-card rounded-2xl shadow-xs space-y-3">
+            <div className="h-12 w-12 mx-auto rounded-2xl bg-muted flex items-center justify-center text-muted-foreground text-xl">
+              🔍
+            </div>
+            <h3 className="font-bold text-foreground text-sm sm:text-base">No Matching Indicators Found</h3>
+            <p className="text-xs text-muted-foreground max-w-sm mx-auto">
+              No formulas matched your search query "{searchQuery}" or selected category filter.
+            </p>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setSearchQuery("");
+                setSelectedCategory("all");
+                setMasteryFilter("all");
+              }}
+              className="rounded-xl text-xs"
+            >
+              Reset Filters
+            </Button>
+          </Card>
+        ) : (
+          Object.entries(groupedEntries).map(([category, subcategories]) => {
+            const isCatCollapsed = collapsedCategories[category];
+            const styles = getCategoryStyles(category);
+
+            return (
+              <Card key={category} className="shadow-sm border border-border dark:border-border overflow-hidden">
+                {/* Category Header */}
+                <button
+                  type="button"
+                  onClick={() => toggleCategory(category)}
+                  className={`w-full flex items-center justify-between p-4 transition-all text-left font-bold text-base ${styles.headerClass}`}
+                >
                 <div className="flex items-center gap-3">
                   {styles.icon}
                   <span>{category}</span>
@@ -888,7 +1072,7 @@ export default function IndicatorManual() {
               )}
             </Card>
           );
-        })}
+        }))}
       </div>
 
       {/* Edit Indicator Dialog */}

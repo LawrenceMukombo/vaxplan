@@ -13857,11 +13857,12 @@ export async function registerRoutes(
     */
 
     const DEFAULT_INDICATORS = [
+      // 1. Immunization Coverage & Performance
       {
         category: "Immunization Coverage & Performance",
         subCategory: "Coverage",
         name: "Vaccination Coverage Rate",
-        numerator: "Number of children vaccinated with a specific antigen dose (e.g., Penta 3, MCV 1) in the target cohort period.",
+        numerator: "Number of children vaccinated with a specific antigen dose (e.g., Penta 3, MCV 1, HPV, BCG) in the target cohort period.",
         numeratorSource: "Client vaccination records from completed outreach/static sessions (logbooks).",
         denominator: "Estimated target population of children in the same age group (e.g., Under-1 target population).",
         denominatorSource: "Imported census target population or WorldPop gridded population data.",
@@ -13872,7 +13873,33 @@ export async function registerRoutes(
       },
       {
         category: "Immunization Coverage & Performance",
-        subCategory: "Coverage",
+        subCategory: "Zero-Dose & Equity",
+        name: "Zero-Dose Children (Penta 1 Non-Receipt) Rate",
+        numerator: "Number of surviving infants who have not received the first dose of DTP/Penta-containing vaccine (DTP1).",
+        numeratorSource: "Target under-1 population minus total children who received Penta 1 in client logbooks.",
+        denominator: "Total surviving infants / under-1 target population in the catchment area.",
+        denominatorSource: "National census projections or WorldPop catchment gridded population.",
+        calculation: "Zero-Dose Rate (%) = ((Target Under-1 Population - Penta 1 Vaccinated) / Target Under-1 Population) * 100",
+        calculationExample: "If target is 1,000 infants and 820 received Penta 1: ((1,000 - 820) / 1,000) * 100 = 18% (180 zero-dose infants).",
+        reference: "Gavi Alliance Zero-Dose Strategy & IA2030 Global Framework",
+        referenceUrl: "https://www.gavi.org/our-alliance/strategy/phase-5-2021-2025/zero-dose-children-and-missed-communities",
+      },
+      {
+        category: "Immunization Coverage & Performance",
+        subCategory: "Zero-Dose & Equity",
+        name: "Under-Immunized Children (Penta 1 to 3 Dropouts)",
+        numerator: "Number of children who received Penta 1 but failed to complete the 3-dose primary Pentavalent series (Penta 3).",
+        numeratorSource: "Penta 1 client count minus Penta 3 client count from immunization logbooks.",
+        denominator: "Total children who received Penta 1 in the cohort period.",
+        denominatorSource: "Client logbook Penta 1 administration records.",
+        calculation: "Under-Immunized Count = Penta 1 Administered - Penta 3 Administered",
+        calculationExample: "If 500 children initiated with Penta 1 but only 420 received Penta 3: 500 - 420 = 80 under-immunized children.",
+        reference: "WHO Reaching Every District (RED) Strategic Guidelines",
+        referenceUrl: "https://www.who.int/publications/i/item/9789241514941",
+      },
+      {
+        category: "Immunization Coverage & Performance",
+        subCategory: "Zero-Dose & Equity",
         name: "Zero-Dose Villages Count",
         numerator: "Number of villages that have not been reached by any completed/achieved outreach or vaccination session.",
         numeratorSource: "Session plans achievement status database tables.",
@@ -13885,7 +13912,7 @@ export async function registerRoutes(
       },
       {
         category: "Immunization Coverage & Performance",
-        subCategory: "Coverage",
+        subCategory: "Zero-Dose & Equity",
         name: "Hard-to-Reach (HTR) Zero-Dose Villages",
         numerator: "Number of zero-dose villages with the Hard-to-Reach (HTR) flag set to true in the database.",
         numeratorSource: "Village table is_hard_to_reach attributes and session plans status.",
@@ -13922,6 +13949,34 @@ export async function registerRoutes(
         reference: "WHO Guidance on Immunization Performance Monitoring",
         referenceUrl: "https://www.who.int/publications/i/item/9789241514941",
       },
+      {
+        category: "Immunization Coverage & Performance",
+        subCategory: "Coverage",
+        name: "Fully Immunized Child (FIC) Rate",
+        numerator: "Number of children under 1 year of age who received all recommended basic EPI antigens (BCG, OPV3, Penta3, PCV3, Rota2, MCV1).",
+        numeratorSource: "Client vaccination complete milestone validation logbooks.",
+        denominator: "Total target population of children reaching 12 months of age.",
+        denominatorSource: "National census population estimates or facility birth registry projections.",
+        calculation: "FIC Rate (%) = (Fully Immunized Children / Target Population 12m) * 100",
+        calculationExample: "If 75 out of 100 infants received all primary doses before age 1: (75 / 100) * 100 = 75% FIC rate.",
+        reference: "WHO Immunization Agenda 2030 Core Indicators",
+        referenceUrl: "https://www.who.int/teams/immunization-vaccines-and-biologicals/strategies/ia2030",
+      },
+      {
+        category: "Immunization Coverage & Performance",
+        subCategory: "Equity",
+        name: "Gender Equity Ratio in Vaccination",
+        numerator: "Coverage rate of Penta3 or MCV1 among female infants.",
+        numeratorSource: "Disaggregated gender registers in client logbooks.",
+        denominator: "Coverage rate of Penta3 or MCV1 among male infants.",
+        denominatorSource: "Disaggregated gender registers in client logbooks.",
+        calculation: "Equity Ratio = Female Vaccination Coverage (%) / Male Vaccination Coverage (%)",
+        calculationExample: "If female coverage is 88% and male coverage is 90%: 88 / 90 = 0.98 (near parity; target range 0.95-1.05).",
+        reference: "UNICEF & WHO Gender and Immunization Guidance",
+        referenceUrl: "https://www.unicef.org/gender-equality",
+      },
+
+      // 2. Operational & Planning
       {
         category: "Operational & Planning",
         subCategory: "Session Execution",
@@ -13962,84 +14017,6 @@ export async function registerRoutes(
         referenceUrl: "https://www.who.int/teams/immunization-vaccines-and-biologicals",
       },
       {
-        category: "Financial & Budget",
-        subCategory: "Resource Allocation",
-        name: "Budget Realization Rate",
-        numerator: "Total cost of budget items that have been officially reviewed and approved.",
-        numeratorSource: "Approved lines in facility/district budget sheets.",
-        denominator: "Total planned cost of all submitted budget items.",
-        denominatorSource: "Submitted planned budget items.",
-        calculation: "Realization Rate (%) = (Approved Budget / Total Planned Budget) * 100",
-        calculationExample: "If a microplan requested $5,000 and the district approved budget lines totaling $4,000: ($4,000 / $5,000) * 100 = 80% realization rate.",
-        reference: "Ministry of Finance & Ministry of Health Joint Budgeting Manual",
-        referenceUrl: "https://www.who.int/teams/immunization-vaccines-and-biologicals/financing-and-sustainable-funding",
-      },
-      {
-        category: "Supervision",
-        subCategory: "Supervision Performance",
-        name: "Supervision Visit Completion Rate",
-        numerator: "Number of planned supportive supervision visits marked as conducted.",
-        numeratorSource: "Conducted supportive supervision checklists.",
-        denominator: "Total scheduled supervision visits registered in the system.",
-        denominatorSource: "Scheduled supervision records.",
-        calculation: "Completion Rate (%) = (Conducted Visits / Total Scheduled Visits) * 100",
-        calculationExample: "If 5 visits were scheduled for the quarter and 4 were conducted: (4 / 5) * 100 = 80% completion rate.",
-        reference: "WHO Integrated Supportive Supervision (ISS) guidelines",
-        referenceUrl: "https://www.who.int/publications/i/item/training-for-mid-level-managers-(mlm)-module-4-supportive-supervision",
-      },
-      {
-        category: "Supervision",
-        subCategory: "Supervision Performance",
-        name: "Average Supervision Score",
-        numerator: "Sum of score percentages obtained across all conducted supervision visits.",
-        numeratorSource: "Supportive supervision checklist scorecards.",
-        denominator: "Total number of conducted supervision visits with recorded scorecards.",
-        denominatorSource: "Conducted supportive supervision checklist log.",
-        calculation: "Average Score = Sum(recorded scores) / Count(recorded scores)",
-        calculationExample: "If three supervision scorecards recorded scores of 70%, 80%, and 90%: (70 + 80 + 90) / 3 = 80% average score.",
-        reference: "WHO Integrated Supportive Supervision (ISS) guidelines",
-        referenceUrl: "https://www.who.int/publications/i/item/training-for-mid-level-managers-(mlm)-module-4-supportive-supervision",
-      },
-      {
-        category: "Supply Chain & Logistics",
-        subCategory: "Stock Alerts",
-        name: "Facility-Level Stockouts",
-        numerator: "Total number of out-of-stock incidents across all facilities.",
-        numeratorSource: "Stock ledger zero balance records per facility.",
-        denominator: "N/A (This is an absolute count, not a rate)",
-        denominatorSource: "N/A",
-        calculation: "Sum of (count of antigens with 0 balance for each facility)",
-        calculationExample: "If Facility A is out of Polio and Measles (2), and Facility B is out of BCG (1), the total is 3 facility-level stockouts.",
-        reference: "VaxPlan Stock Monitoring Guidelines",
-        referenceUrl: null,
-      },
-      {
-        category: "Supply Chain & Logistics",
-        subCategory: "Stock Alerts",
-        name: "Facility-Level Low Stock Alerts",
-        numerator: "Total number of low stock incidents across all facilities (stock below configured threshold months).",
-        numeratorSource: "Stock ledger and stock consumption threshold formulas.",
-        denominator: "N/A (This is an absolute count)",
-        denominatorSource: "N/A",
-        calculation: "Sum of (count of antigens below threshold for each facility)",
-        calculationExample: "If Facility A has low Polio (1) and Facility B has low Polio and BCG (2), the total is 3 facility-level low stock alerts.",
-        reference: "VaxPlan Stock Monitoring Guidelines",
-        referenceUrl: null,
-      },
-      {
-        category: "Supply Chain & Logistics",
-        subCategory: "Stock Alerts",
-        name: "Expiring Batches at Facilities",
-        numerator: "Total number of vaccine batches across all facilities that expire within a specific timeframe (e.g., 30 or 60 days).",
-        numeratorSource: "Stock transaction batch expiration dates.",
-        denominator: "N/A (This is an absolute count)",
-        denominatorSource: "N/A",
-        calculation: "Sum of (count of distinct batches per facility with expiry date <= target date and remaining doses > 0)",
-        calculationExample: "If Facility A has 1 batch of Penta expiring in 20 days, and Facility B has 2 batches expiring in 15 days, the total is 3 expiring batches.",
-        reference: "WHO Vaccine Management Handbook",
-        referenceUrl: "https://www.who.int/teams/immunization-vaccines-and-biologicals/essential-programme-on-immunization/supply-chain",
-      },
-      {
         category: "Operational & Planning",
         subCategory: "Spatial Intelligence",
         name: "GIS Catchment Population",
@@ -14050,7 +14027,305 @@ export async function registerRoutes(
         calculation: "Sum of population points from WorldPop dataset falling within the PostGIS boundary of the catchment.",
         calculationExample: "If the polygon covers 3 WorldPop grid cells containing 10, 15, and 20 people, the total is 45 people.",
         reference: "VaxPlan Spatial Intelligence & Settlement Tracking",
-        referenceUrl: "https://www.worldpop.org/project/categories?id=3"
+        referenceUrl: "https://www.worldpop.org/project/categories?id=3",
+      },
+      {
+        category: "Operational & Planning",
+        subCategory: "Spatial Intelligence",
+        name: "High-Risk Catchment Accessibility Score",
+        numerator: "Count of remote settlements situated > 5km from the nearest fixed immunization clinic or facing seasonal flood/terrain barriers.",
+        numeratorSource: "VaxPlan GIS layer and catchment topography metadata.",
+        denominator: "Total settlements identified within the district boundary.",
+        denominatorSource: "Master Facility and Settlement Geodatabase.",
+        calculation: "Accessibility Vulnerability (%) = (Remote Settlements (>5km) / Total Settlements) * 100",
+        calculationExample: "If 14 of 40 villages are over 5km away across rough terrain: (14 / 40) * 100 = 35% high-risk accessibility proportion.",
+        reference: "WHO/UNICEF GIS Guidance for Immunization Microplanning",
+        referenceUrl: "https://www.who.int/publications/i/item/9789241514941",
+      },
+      {
+        category: "Operational & Planning",
+        subCategory: "Microplanning Validation",
+        name: "Microplan Target Cohort Alignment Ratio",
+        numerator: "Locally enumerated headcount of under-1 infants from community registers.",
+        numeratorSource: "Community health worker (CHW) house-to-house enumeration.",
+        denominator: "Centrally projected census under-1 population for the facility catchment.",
+        denominatorSource: "National Bureau of Statistics official census projection.",
+        calculation: "Alignment Ratio = Enumerated Cohort / Official Census Projection",
+        calculationExample: "If CHWs enumerate 480 infants while official projection is 400: 480 / 400 = 1.20 (20% under-estimation by census, requiring denominator adjustment).",
+        reference: "WHO Field Guide for Denominators in Immunization",
+        referenceUrl: "https://www.who.int/teams/immunization-vaccines-and-biologicals",
+      },
+
+      // 3. Financial & Budget
+      {
+        category: "Financial & Budget",
+        subCategory: "Budget Execution",
+        name: "Microplanning Operational Budget Execution Rate",
+        numerator: "Actual operational funds expended for outreach allowances, fuel, cold-chain transport, and social mobilization.",
+        numeratorSource: "Financial ledger and microplan activity expense vouchers.",
+        denominator: "Total allocated operational budget approved in the annual microplan.",
+        denominatorSource: "Approved microplanning budget breakdown.",
+        calculation: "Budget Execution (%) = (Actual Disbursed & Spent / Total Approved Budget) * 100",
+        calculationExample: "If $18,000 has been spent out of an approved $20,000 quarterly budget: (18,000 / 20,000) * 100 = 90% execution.",
+        reference: "WHO Comprehensive Multi-Year Planning (cMYP) Guidelines",
+        referenceUrl: "https://www.who.int/publications/i/item/guidelines-for-developing-a-comprehensive-multi-year-plan-(cmyp)",
+      },
+      {
+        category: "Financial & Budget",
+        subCategory: "Financial Sustainability",
+        name: "Vaccine Procurement & Financing Gap Rate",
+        numerator: "Unfunded financial deficit remaining for national/district vaccine supply and co-financing commitments.",
+        numeratorSource: "Government co-financing statements and donor contribution tracking.",
+        denominator: "Total projected financial requirement for vaccine procurement in the fiscal year.",
+        denominatorSource: "National Immunization Forecasting & Costing Model.",
+        calculation: "Funding Gap (%) = ((Total Required Budget - Secured Funding) / Total Required Budget) * 100",
+        calculationExample: "If $500,000 is required and $425,000 is secured: (($500,000 - $425,000) / $500,000) * 100 = 15% financing gap.",
+        reference: "Gavi Co-Financing Policy & National Budget Tracking",
+        referenceUrl: "https://www.gavi.org/our-alliance/strategy/phase-5-2021-2025",
+      },
+      {
+        category: "Financial & Budget",
+        subCategory: "Operational Financing",
+        name: "Cold Chain & Equipment Maintenance Funding Adequacy",
+        numerator: "Disbursed funds dedicated to preventive cold-chain servicing, spare parts, and solar battery replacement.",
+        numeratorSource: "District health maintenance expenditure ledgers.",
+        denominator: "Standard recommended annual maintenance allocation (minimum 5% of total CCE replacement value).",
+        denominatorSource: "CCE inventory replacement valuation.",
+        calculation: "Funding Adequacy (%) = (Actual Maintenance Expenditure / Required Maintenance Benchmark) * 100",
+        calculationExample: "If benchmark maintenance requires $10,000 and $8,500 was allocated: (8,500 / 10,000) * 100 = 85% adequacy.",
+        reference: "WHO/UNICEF Cold Chain Equipment Maintenance Principles",
+        referenceUrl: "https://www.who.int/teams/immunization-vaccines-and-biologicals/essential-programme-on-immunization/supply-chain",
+      },
+      {
+        category: "Financial & Budget",
+        subCategory: "Efficiency & Unit Costing",
+        name: "Cost per Fully Immunized Child (FIC)",
+        numerator: "Total programmatic routine immunization cost (vaccine, cold chain, personnel, logistics, microplanning).",
+        numeratorSource: "Annual immunization expenditure report.",
+        denominator: "Total number of verified fully immunized children (FIC) under 1 year of age.",
+        denominatorSource: "Validated annual immunization registry.",
+        calculation: "Unit Cost ($) = Total Immunization Expenditure / Fully Immunized Children",
+        calculationExample: "If total district operational cost is $120,000 and 3,000 infants achieved FIC: 120,000 / 3,000 = $40 per FIC.",
+        reference: "WHO Guidelines for Estimating Costs of Introducing New Vaccines and Routine Immunization",
+        referenceUrl: "https://www.who.int/publications/i/item/WHO-IVB-19.06",
+      },
+
+      // 4. Supervision
+      {
+        category: "Supervision",
+        subCategory: "Supervision Performance",
+        name: "Average Supervision Score",
+        numerator: "Sum of score percentages obtained across all conducted supervision visits.",
+        numeratorSource: "Supportive supervision checklist scorecards.",
+        denominator: "Total number of conducted supervision visits with recorded scorecards.",
+        denominatorSource: "Conducted supportive supervision checklist log.",
+        calculation: "Average Score (%) = Sum(recorded scores) / Count(recorded scorecards)",
+        calculationExample: "If three supervision scorecards recorded scores of 70%, 80%, and 90%: (70 + 80 + 90) / 3 = 80% average score.",
+        reference: "WHO Integrated Supportive Supervision (ISS) guidelines",
+        referenceUrl: "https://www.who.int/publications/i/item/training-for-mid-level-managers-(mlm)-module-4-supportive-supervision",
+      },
+      {
+        category: "Supervision",
+        subCategory: "Supervision Coverage",
+        name: "Supervision Visit Completion Rate",
+        numerator: "Number of health facilities that received at least one supportive supervision visit in the quarter.",
+        numeratorSource: "Logged supportive supervision visit records.",
+        denominator: "Total active health facilities offering routine immunization in the district.",
+        denominatorSource: "Master Facility List.",
+        calculation: "Supervision Coverage (%) = (Supervised Facilities / Total Active Facilities) * 100",
+        calculationExample: "If 18 out of 20 health centers were supervised this quarter: (18 / 20) * 100 = 90% supervision coverage.",
+        reference: "WHO Mid-Level Management Supportive Supervision Module",
+        referenceUrl: "https://www.who.int/publications/i/item/training-for-mid-level-managers-(mlm)-module-4-supportive-supervision",
+      },
+      {
+        category: "Supervision",
+        subCategory: "Quality Improvement",
+        name: "Corrective Action Plan (CAP) Resolution Rate",
+        numerator: "Number of identified supervisory action items verified as resolved within the agreed timeline.",
+        numeratorSource: "Supportive supervision action tracker.",
+        denominator: "Total actionable findings recorded during preceding supervision visits.",
+        denominatorSource: "Supportive supervision recommendation log.",
+        calculation: "Resolution Rate (%) = (Resolved Action Items / Total Action Items) * 100",
+        calculationExample: "If 16 out of 20 supervision action points were verified resolved: (16 / 20) * 100 = 80% resolution rate.",
+        reference: "WHO Quality Improvement in Immunization Services",
+        referenceUrl: "https://www.who.int/teams/immunization-vaccines-and-biologicals",
+      },
+
+      // 5. Supply Chain & Logistics
+      {
+        category: "Supply Chain & Logistics",
+        subCategory: "Stock Alerts",
+        name: "Facility-Level Stockouts",
+        numerator: "Total number of out-of-stock incidents across all facilities.",
+        numeratorSource: "Stock ledger zero balance records per facility.",
+        denominator: "N/A (Absolute incident count)",
+        denominatorSource: "N/A",
+        calculation: "Sum of (count of antigens with 0 balance for each facility)",
+        calculationExample: "If Facility A is out of Polio and Measles (2), and Facility B is out of BCG (1), the total is 3 facility-level stockouts.",
+        reference: "VaxPlan Stock Monitoring Guidelines",
+        referenceUrl: "https://www.who.int/teams/immunization-vaccines-and-biologicals/essential-programme-on-immunization/supply-chain",
+      },
+      {
+        category: "Supply Chain & Logistics",
+        subCategory: "Stock Alerts",
+        name: "Facility-Level Low Stock Alerts",
+        numerator: "Total number of low stock incidents across all facilities (stock below configured threshold months of stock).",
+        numeratorSource: "Stock ledger and monthly consumption rate formulas.",
+        denominator: "N/A (Absolute incident count)",
+        denominatorSource: "N/A",
+        calculation: "Sum of (count of antigens below minimum threshold for each facility)",
+        calculationExample: "If Facility A has low Polio (1) and Facility B has low Polio and BCG (2), the total is 3 facility-level low stock alerts.",
+        reference: "VaxPlan Stock Monitoring Guidelines",
+        referenceUrl: "https://www.who.int/teams/immunization-vaccines-and-biologicals/essential-programme-on-immunization/supply-chain",
+      },
+      {
+        category: "Supply Chain & Logistics",
+        subCategory: "Stock Alerts",
+        name: "Expiring Batches at Facilities",
+        numerator: "Total number of vaccine batches across all facilities that expire within a specific timeframe (e.g., 30 or 60 days).",
+        numeratorSource: "Stock transaction batch expiration dates.",
+        denominator: "N/A (Absolute batch count)",
+        denominatorSource: "N/A",
+        calculation: "Sum of (count of distinct batches per facility with expiry date <= target date and remaining doses > 0)",
+        calculationExample: "If Facility A has 1 batch of Penta expiring in 20 days, and Facility B has 2 batches expiring in 15 days, the total is 3 expiring batches.",
+        reference: "WHO Vaccine Management Handbook",
+        referenceUrl: "https://www.who.int/teams/immunization-vaccines-and-biologicals/essential-programme-on-immunization/supply-chain",
+      },
+      {
+        category: "Supply Chain & Logistics",
+        subCategory: "Vaccine Wastage",
+        name: "Vaccine Wastage Rate (Open & Closed Vial)",
+        numerator: "Total doses issued minus total doses administered to clients.",
+        numeratorSource: "Stock ledger issues minus tally sheet administration counts.",
+        denominator: "Total doses issued from the stock ledger for vaccination sessions.",
+        denominatorSource: "Stock ledger issue records.",
+        calculation: "Wastage Rate (%) = ((Doses Issued - Doses Administered) / Doses Issued) * 100",
+        calculationExample: "If 100 doses of BCG are opened and 65 infants are vaccinated: ((100 - 65) / 100) * 100 = 35% wastage rate.",
+        reference: "WHO Vaccine Wastage Assessment Guidelines",
+        referenceUrl: "https://www.who.int/publications/i/item/WHO-IVB-19.03",
+      },
+      {
+        category: "Supply Chain & Logistics",
+        subCategory: "Cold Chain Integrity",
+        name: "Cold Chain Equipment Optimization Platform (CCEOP) Uptime",
+        numerator: "Number of functional vaccine refrigerators/freezers operating consistently within the +2°C to +8°C target range.",
+        numeratorSource: "CCE monthly inventory audits and continuous 30DTR temperature logger records.",
+        denominator: "Total cold chain equipment units installed across health facilities.",
+        denominatorSource: "National Cold Chain Equipment Inventory.",
+        calculation: "CCE Functionality Rate (%) = (Functional CCE Units / Total Installed Units) * 100",
+        calculationExample: "If 45 out of 50 solar direct drive (SDD) refrigerators are fully functional: (45 / 50) * 100 = 90% uptime.",
+        reference: "Gavi CCEOP Operational Framework & WHO PQS Guidelines",
+        referenceUrl: "https://www.who.int/teams/immunization-vaccines-and-biologicals/essential-programme-on-immunization/supply-chain",
+      },
+      {
+        category: "Supply Chain & Logistics",
+        subCategory: "Cold Chain Safety",
+        name: "Vaccine Vial Monitor (VVM) Discard Rate",
+        numerator: "Number of vaccine vials discarded due to VVM reaching Stage 3 or Stage 4 (discard point).",
+        numeratorSource: "Facility vaccine damage and discard logbooks.",
+        denominator: "Total vaccine vials received and handled in the session period.",
+        denominatorSource: "Stock receiving register.",
+        calculation: "VVM Discard Rate (%) = (Vials Discarded on VVM / Total Vials Received) * 100",
+        calculationExample: "If 4 out of 200 vials show heat damage (Stage 3/4) and are safely discarded: (4 / 200) * 100 = 2% discard rate.",
+        reference: "WHO Making Use of Vaccine Vial Monitors in Immunization Services",
+        referenceUrl: "https://www.who.int/publications/i/item/WHO-V-B-99.18",
+      },
+
+      // 6. Campaigns & SIAs
+      {
+        category: "Campaigns & SIAs",
+        subCategory: "Campaign Performance",
+        name: "SIA Post-Campaign Administrative Coverage",
+        numerator: "Total target individuals vaccinated during the Supplementary Immunization Activity (e.g., Measles or Polio campaign).",
+        numeratorSource: "Daily SIA campaign tally sheets and supervisor summary tallies.",
+        denominator: "Total target campaign population specified in the SIA operational plan.",
+        denominatorSource: "Pre-campaign microplanning census.",
+        calculation: "SIA Coverage (%) = (Vaccinated Count in Campaign / Target Campaign Population) * 100",
+        calculationExample: "If 48,500 children are vaccinated against a campaign target of 50,000: (48,500 / 50,000) * 100 = 97% SIA coverage.",
+        reference: "WHO Field Guide for Supplementary Immunization Activities",
+        referenceUrl: "https://www.who.int/publications/i/item/WHO-IVB-16.03",
+      },
+      {
+        category: "Campaigns & SIAs",
+        subCategory: "Campaign Quality",
+        name: "Rapid Convenience Monitoring (RCM) In-Process Quality Score",
+        numerator: "Number of surveyed children found marked/vaccinated during independent in-process spot checks.",
+        numeratorSource: "Independent RCM monitoring forms collected in high-risk communities during campaign days.",
+        denominator: "Total children sampled during the RCM rapid monitor sweep (standard 20 children per cluster).",
+        denominatorSource: "RCM household survey cluster records.",
+        calculation: "RCM Pass Score (%) = (Marked Vaccinated Children / Total Sampled Children) * 100",
+        calculationExample: "If 19 out of 20 sampled children have finger marks: (19 / 20) * 100 = 95% (Pass; mop-up not required).",
+        reference: "WHO Rapid Convenience Monitoring (RCM) Guidelines for Polio and Measles SIAs",
+        referenceUrl: "https://www.who.int/publications/i/item/WHO-IVB-16.03",
+      },
+      {
+        category: "Campaigns & SIAs",
+        subCategory: "Campaign Readiness",
+        name: "Pre-Campaign Readiness / Preparedness Index",
+        numerator: "Sum of milestone points achieved across planning, logistics, social mobilization, and training checklists 2 weeks before SIA launch.",
+        numeratorSource: "National Pre-SIA Readiness Assessment Dashboard.",
+        denominator: "Total maximum possible preparedness checklist points (100 points).",
+        denominatorSource: "Standardized WHO Pre-Campaign Readiness Assessment Tool.",
+        calculation: "Readiness Index (%) = (Achieved Readiness Points / Maximum Possible Points) * 100",
+        calculationExample: "If a district achieves 84 out of 100 readiness criteria at 1 week prior: 84% readiness (Green light to proceed).",
+        reference: "WHO/UNICEF SIA Readiness Assessment Framework",
+        referenceUrl: "https://www.who.int/publications/i/item/WHO-IVB-16.03",
+      },
+
+      // 7. Surveillance & Safety
+      {
+        category: "Surveillance & Safety",
+        subCategory: "Safety & Pharmacovigilance",
+        name: "AEFI Reporting Rate per 100,000 Doses",
+        numerator: "Total Adverse Events Following Immunization (AEFI) notifications submitted to the pharmacovigilance committee.",
+        numeratorSource: "AEFI case investigation forms and national safety registry.",
+        denominator: "Total cumulative vaccine doses administered across all routine and campaign sessions.",
+        denominatorSource: "District vaccination administration tallies.",
+        calculation: "AEFI Rate = (Total Reported AEFI Cases / Total Doses Administered) * 100,000",
+        calculationExample: "If 6 AEFI cases are reported after 150,000 doses administered: (6 / 150,000) * 100,000 = 4.0 per 100,000 doses.",
+        reference: "WHO Global Manual on Surveillance of Adverse Events Following Immunization",
+        referenceUrl: "https://www.who.int/publications/i/item/9789241509862",
+      },
+      {
+        category: "Surveillance & Safety",
+        subCategory: "Surveillance",
+        name: "Suspected Vaccine-Preventable Disease (VPD) Investigation Rate",
+        numerator: "Number of suspected VPD outbreak cases (e.g., Measles, AFP, Yellow Fever) investigated with blood/stool specimen collection within 48 hours.",
+        numeratorSource: "Epidemiological surveillance case report forms and laboratory tracking books.",
+        denominator: "Total suspected VPD cases notified to the district health surveillance officer.",
+        denominatorSource: "Integrated Disease Surveillance and Response (IDSR) weekly alerts.",
+        calculation: "Timely Investigation Rate (%) = (Cases Investigated in 48h / Total Notified Cases) * 100",
+        calculationExample: "If 9 out of 10 suspected measles cases were investigated within 48 hours: (9 / 10) * 100 = 90% timely investigation rate.",
+        reference: "WHO Guidelines for Integrated Disease Surveillance and Response (IDSR)",
+        referenceUrl: "https://www.afro.who.int/publications/technical-guidelines-integrated-disease-surveillance-and-response-african-region",
+      },
+
+      // 8. Digital Health & Caregiver Continuity
+      {
+        category: "Digital Health & Caregiver Continuity",
+        subCategory: "Digital Continuity",
+        name: "Digital Immunization Registry (DIR) Completeness Rate",
+        numerator: "Number of vaccination encounters uploaded and recorded in the digital registry with complete client ID and GPS timestamp.",
+        numeratorSource: "VaxPlan digital sync records and mobile client encounters.",
+        denominator: "Total paper tally records submitted from the field.",
+        denominatorSource: "Monthly health facility physical tally summary reports.",
+        calculation: "DIR Completeness (%) = (Digital Records Synchronized / Paper Records Submitted) * 100",
+        calculationExample: "If 950 individual client encounters are digitally logged out of 1,000 reported on paper summaries: (950 / 1,000) * 100 = 95% completeness.",
+        reference: "WHO Digital Health Interventions for Health System Strengthening (EIR)",
+        referenceUrl: "https://www.who.int/publications/i/item/9789241550505",
+      },
+      {
+        category: "Digital Health & Caregiver Continuity",
+        subCategory: "Community Engagement",
+        name: "Defaulter Tracing & Recall Success Rate",
+        numerator: "Number of identified vaccination defaulters successfully tracked, reached, and returned for scheduled catch-up vaccination.",
+        numeratorSource: "VaxPlan SMS/CHW defaulter recall logs and follow-up vaccination registers.",
+        denominator: "Total children flagged as missed or overdue on the defaulter tracking list.",
+        denominatorSource: "Defaulter tracking line-list.",
+        calculation: "Recall Success Rate (%) = (Retrieved & Vaccinated Defaulters / Total Flagged Defaulters) * 100",
+        calculationExample: "If 45 out of 60 overdue children are reached by CHWs and brought to the catch-up clinic: (45 / 60) * 100 = 75% recall success rate.",
+        reference: "UNICEF Guidelines for Community Engagement and Defaulter Tracing",
+        referenceUrl: "https://www.unicef.org/immunization",
       }
     ];
 
@@ -14120,6 +14395,21 @@ export async function registerRoutes(
             .select()
             .from(indicatorManual)
             .where(eq(indicatorManual.tenantId, tenantId));
+        } else {
+          // Additive auto-sync: insert newly added standard indicators without overwriting any existing ones
+          const existingNames = new Set(rows.map(r => r.name.toLowerCase().trim()));
+          const missingDefaults = DEFAULT_INDICATORS.filter(ind => !existingNames.has(ind.name.toLowerCase().trim()));
+          if (missingDefaults.length > 0) {
+            const valuesToInsert = missingDefaults.map(ind => ({
+              ...ind,
+              tenantId,
+            }));
+            await db.insert(indicatorManual).values(valuesToInsert);
+            rows = await db
+              .select()
+              .from(indicatorManual)
+              .where(eq(indicatorManual.tenantId, tenantId));
+          }
         }
         res.json(rows);
       } catch (err: any) {
@@ -14127,54 +14417,6 @@ export async function registerRoutes(
         res.status(500).json({ message: "Failed to load indicator manual" });
       }
     });
-
-    /*
-    // Stale duplicate PUT endpoint using old 'source' field commented out to satisfy rule 1
-    app.put("/api/indicator-manual/:id", isAuthenticated, requireTenant, requireDbUser, async (req: any, res) => {
-      try {
-        const user = req.dbUser!;
-        const tenantId = req.tenantId;
-
-        const isAuthorized = hasPermission(user, "manage_reports") || user.role === "national_admin" || user.role === "provincial_coordinator";
-        if (!isAuthorized) {
-          return res.status(403).json({ message: "Forbidden: insufficient permissions to edit indicator manual" });
-        }
-
-        const { id } = req.params;
-        const body = req.body || {};
-
-        const existing = await db
-          .select()
-          .from(indicatorManual)
-          .where(and(eq(indicatorManual.id, id), eq(indicatorManual.tenantId, tenantId)))
-          .limit(1);
-
-        if (existing.length === 0) {
-          return res.status(404).json({ message: "Indicator manual entry not found" });
-        }
-
-        const updateData: Record<string, any> = {
-          numerator: body.numerator,
-          denominator: body.denominator,
-          source: body.source,
-          calculation: body.calculation,
-          reference: body.reference || null,
-          updatedAt: new Date(),
-        };
-
-        const [updated] = await db
-          .update(indicatorManual)
-          .set(updateData)
-          .where(and(eq(indicatorManual.id, id), eq(indicatorManual.tenantId, tenantId)))
-          .returning();
-
-        res.json(updated);
-      } catch (err: any) {
-        console.error("PUT /api/indicator-manual/:id failed:", err);
-        res.status(500).json({ message: "Failed to update indicator manual entry" });
-      }
-    });
-    */
 
     const indicatorManualSchema = z.object({
       category: z.string().min(1, "Category is required"),
