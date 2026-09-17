@@ -362,7 +362,6 @@ const createFacilityClusterIcon = function (cluster: any) {
     iconAnchor: [size / 2, size / 2],
   });
 };
-
 const createVillageClusterIcon = function (cluster: any) {
   const count = cluster.getChildCount();
   const size = count > 100 ? 44 : count > 50 ? 38 : count > 20 ? 32 : 26;
@@ -374,44 +373,6 @@ const createVillageClusterIcon = function (cluster: any) {
   });
 };
 
-/* Original Image/CDN Based Map Marker Icons:
-const facilityIcon = new L.Icon({
-  iconUrl: "https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-blue.png",
-  shadowUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png",
-  iconSize: [25, 41],
-  iconAnchor: [12, 41],
-  popupAnchor: [1, -34],
-  shadowSize: [41, 41],
-});
-
-const plannedIcon = new L.Icon({
-  iconUrl: "https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-green.png",
-  shadowUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png",
-  iconSize: [20, 33],
-  iconAnchor: [10, 33],
-  popupAnchor: [1, -27],
-  shadowSize: [33, 33],
-});
-
-const missingStandardIcon = new L.Icon({
-  iconUrl: "https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-orange.png",
-  shadowUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png",
-  iconSize: [20, 33],
-  iconAnchor: [10, 33],
-  popupAnchor: [1, -27],
-  shadowSize: [33, 33],
-});
-
-const missingHtrIcon = new L.Icon({
-  iconUrl: "https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-red.png",
-  shadowUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png",
-  iconSize: [20, 33],
-  iconAnchor: [10, 33],
-  popupAnchor: [1, -27],
-  shadowSize: [33, 33],
-});
-*/
-
 // Premium Offline-Available Vector Map Pin Icons (Built from shared SVG constants)
 const facilityIcon = createFacilityCircleIcon();
 const plannedIcon = createFilledPinIcon("green", FILLED_PIN_SIZE_20x29);
@@ -421,13 +382,11 @@ const missingHtrIcon = createFilledPinIcon("red", FILLED_PIN_SIZE_20x29);
 const villageIcon = createVillageWithChvsIcon(0); // Render as default community icon with 0 showing if no CHV data mapped here
 const htrIcon = createGapVillageIcon();
 
-// Custom glowing and flashing violet pin icon for community outreach posts
+// Custom glowing violet pin icon for community outreach posts (20x28 compact enterprise size)
 const outreachPostIcon = L.divIcon({
   html: `
     <div class="outreach-glow-marker">
-      <div class="outreach-beacon-halo"></div>
-      <div class="outreach-beacon-halo-delay"></div>
-      <svg class="outreach-pin-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 34" width="26" height="36">
+      <svg class="outreach-pin-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 34" width="20" height="28">
         <defs>
           <linearGradient id="outreachGradMap" x1="0%" y1="0%" x2="100%" y2="100%">
             <stop offset="0%" stop-color="#e879f9" />
@@ -436,19 +395,18 @@ const outreachPostIcon = L.divIcon({
           </linearGradient>
         </defs>
         <path d="M12 0C5.37 0 0 5.37 0 12c0 9.3 12 22 12 22s12-12.7 12-22c0-6.63-5.37-12-12-12z" fill="url(#outreachGradMap)" stroke="#ffffff" stroke-width="1.8"/>
-        <circle cx="12" cy="11" r="5" fill="#ffffff"/>
-        <path d="M12 7.5v7M8.5 11h7" stroke="#a855f7" stroke-width="2.4" stroke-linecap="round"/>
+        <circle cx="12" cy="11" r="4.5" fill="#ffffff"/>
+        <path d="M12 8v6M9 11h6" stroke="#a855f7" stroke-width="2" stroke-linecap="round"/>
       </svg>
     </div>
   `,
   className: "outreach-leaflet-div-icon",
-  iconSize: [32, 40],
-  iconAnchor: [16, 36],
-  popupAnchor: [0, -36],
+  iconSize: [20, 28],
+  iconAnchor: [10, 28],
+  popupAnchor: [0, -28],
 });
 
-// Scheduled sessions are events, not communities. Give them a large calendar
-// badge and halo so they remain legible above facilities and boundary clutter.
+// Scheduled sessions are events, rendered with clean, compact, proportionate badges (20x20)
 const createSessionEventIcon = (session: any) => {
   const lifecycle = deriveSessionLifecycle(session);
   const color = lifecycle.isOverdue
@@ -457,20 +415,20 @@ const createSessionEventIcon = (session: any) => {
       ? "#059669"
       : lifecycle.phase === "in_progress"
         ? "#d97706"
-        : "#1d4ed8";
+        : "#2563eb";
   const label = lifecycle.isOverdue ? "!" : lifecycle.phase === "reported" || lifecycle.phase === "archived" ? "✓" : "▦";
   return L.divIcon({
-    html: `<div aria-label="Scheduled session" style="width:38px;height:38px;border-radius:12px;background:${color};border:3px solid white;box-shadow:0 0 0 5px ${color}38,0 4px 14px rgba(15,23,42,.45);display:flex;align-items:center;justify-content:center;color:white;font-size:20px;font-weight:900;line-height:1">${label}</div>`,
+    html: `<div aria-label="Scheduled session" style="width:20px;height:20px;border-radius:5px;background:${color};border:1.5px solid white;box-shadow:0 1px 4px rgba(15,23,42,0.4);display:flex;align-items:center;justify-content:center;color:white;font-size:11px;font-weight:800;line-height:1">${label}</div>`,
     className: "session-event-map-icon",
-    iconSize: [38, 38],
-    iconAnchor: [19, 19],
-    popupAnchor: [0, -23],
+    iconSize: [20, 20],
+    iconAnchor: [10, 10],
+    popupAnchor: [0, -12],
   });
 };
 
-// Custom blue pin icon for reporting facilities in surveillance mode
-const reportingFacilitySvg = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="35" viewBox="0 0 24 35" fill="none">` +
-  `<path d="M12 0C5.37 0 0 5.37 0 12c0 9.3 12 23 12 23s12-13.7 12-23c0-6.63-5.37-12-12-12z" fill="#2563eb"/>` +
+const reportingFacilitySvg =
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 34" width="20" height="29">` +
+  `<path d="M12 0C5.37 0 0 5.37 0 12c0 9 12 22 12 22s12-13 12-22c0-6.63-5.37-12-12-12z" fill="#2563eb" stroke="#ffffff" stroke-width="1.5" />` +
   `<circle cx="12" cy="12" r="5.5" fill="#ffffff"/>` +
   `<path d="M10 15v-5a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v5M9 15h6" stroke="#2563eb" stroke-width="1.2" stroke-linecap="round" />` +
   `</svg>`;
@@ -481,7 +439,6 @@ const reportingFacilityIcon = L.icon({
   iconAnchor: [10, 29],
   popupAnchor: [0, -29],
 });
-
 
 interface MapControlsProps {
   onZoomIn: () => void;

@@ -72,13 +72,13 @@ import L from "leaflet";
 import type { Village, Facility, District, Province } from "@shared/schema";
 import { OutreachPostsMap } from "@/components/OutreachPostsMap";
 
-// Custom glowing and flashing violet pin icon for outreach posts
+// Custom glowing and flashing violet pin icon for outreach posts (20x28 compact enterprise size)
 const OUTREACH_PIN_ICON = L.divIcon({
   html: `
     <div class="outreach-glow-marker">
       <div class="outreach-beacon-halo"></div>
       <div class="outreach-beacon-halo-delay"></div>
-      <svg class="outreach-pin-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 34" width="26" height="36">
+      <svg class="outreach-pin-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 34" width="20" height="28">
         <defs>
           <linearGradient id="outreachMiniGrad" x1="0%" y1="0%" x2="100%" y2="100%">
             <stop offset="0%" stop-color="#e879f9" />
@@ -87,15 +87,15 @@ const OUTREACH_PIN_ICON = L.divIcon({
           </linearGradient>
         </defs>
         <path d="M12 0C5.37 0 0 5.37 0 12c0 9.3 12 22 12 22s12-12.7 12-22c0-6.63-5.37-12-12-12z" fill="url(#outreachMiniGrad)" stroke="#ffffff" stroke-width="1.8"/>
-        <circle cx="12" cy="11" r="4.8" fill="#ffffff"/>
-        <circle cx="12" cy="11" r="2.6" fill="#a855f7" class="outreach-pin-dot"/>
+        <circle cx="12" cy="11" r="4.5" fill="#ffffff"/>
+        <circle cx="12" cy="11" r="2.2" fill="#a855f7" class="outreach-pin-dot"/>
       </svg>
     </div>
   `,
   className: "outreach-leaflet-div-icon",
-  iconSize: [32, 40],
-  iconAnchor: [16, 36],
-  popupAnchor: [0, -36],
+  iconSize: [20, 28],
+  iconAnchor: [10, 28],
+  popupAnchor: [0, -28],
 });
 
 function MiniMapLocationPicker({
