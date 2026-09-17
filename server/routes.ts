@@ -8146,7 +8146,7 @@ export async function registerRoutes(
         .innerJoin(districts, eq(districts.id, facilities.districtId))
         .innerJoin(provinces, eq(provinces.id, districts.provinceId))
         .leftJoin(villages, eq(villages.id, clients.villageId))
-        .where(eq(clients.id, clientId));
+        .where(or(eq(clients.id, clientId), eq(clients.clientId, clientId)));
 
       if (!record || !record.client) {
         return res.status(404).json({ success: false, message: "Immunization record not found or invalid QR code" });
@@ -8156,7 +8156,7 @@ export async function registerRoutes(
       const vaccinations = await db
         .select()
         .from(clientVaccinations)
-        .where(eq(clientVaccinations.clientId, clientId))
+        .where(eq(clientVaccinations.clientId, record.client.id))
         .orderBy(asc(clientVaccinations.administeredDate));
 
       // Return sanitized public passport object
@@ -8222,7 +8222,7 @@ export async function registerRoutes(
       const [client] = await db
         .select()
         .from(clients)
-        .where(eq(clients.id, clientId));
+        .where(or(eq(clients.id, clientId), eq(clients.clientId, clientId)));
 
       if (!client) {
         return res.status(404).json({ success: false, message: "Client record not found" });

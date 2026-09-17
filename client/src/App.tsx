@@ -476,6 +476,10 @@ function AuthenticatedRouter({ user }: { user: User }) {
       <Route path="/vgie/recommendations" component={VgieRecommendations} />
       <Route path="/vgie/alerts" component={VgieAlerts} />
       <Route path="/sync/conflicts" component={lazy(() => import("@/pages/SyncConflicts"))} />
+      <Route path="/verify" component={PublicVaxCard} />
+      <Route path="/verify/:id" component={PublicVaxCard} />
+      <Route path="/vaxcard" component={PublicVaxCard} />
+      <Route path="/vaxcard/:id" component={PublicVaxCard} />
       <Route component={NotFound} />
     </Switch>
     </Suspense>
@@ -719,7 +723,9 @@ function App() {
               </Route>
               <Route path="/data-sources" component={DataSourcesGate} />
               <Route path="/help" component={HelpGate} />
+              <Route path="/verify" component={PublicVaxCard} />
               <Route path="/verify/:id" component={PublicVaxCard} />
+              <Route path="/vaxcard" component={PublicVaxCard} />
               <Route path="/vaxcard/:id" component={PublicVaxCard} />
               <Route><AuthenticatedLayout /></Route>
             </Switch>

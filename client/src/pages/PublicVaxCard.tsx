@@ -88,12 +88,21 @@ export default function PublicVaxCard() {
   const rawId = params?.id || vaxParams?.id;
   const { toast } = useToast();
 
+  const [lookupId, setLookupId] = useState("");
   const [isReminderOpen, setIsReminderOpen] = useState(false);
   const [reminderChannel, setReminderChannel] = useState<"sms" | "whatsapp" | "email">("whatsapp");
   const [reminderContact, setReminderContact] = useState("");
   const [guardianName, setGuardianName] = useState("");
   const [isSavedLocally, setIsSavedLocally] = useState(false);
   const [savedRecords, setSavedRecords] = useState<Array<{ id: string; name: string; dob: string }>>([]);
+
+  // Load saved local records unconditionally on mount
+  useEffect(() => {
+    try {
+      const stored = JSON.parse(localStorage.getItem("vaxplan_saved_passports") || "[]");
+      setSavedRecords(stored);
+    } catch {}
+  }, []);
 
   const { data, isLoading, error, refetch } = useQuery<PublicVaxRecord>({
     queryKey: ["/api/public/vaxcard", rawId],
@@ -297,24 +306,121 @@ export default function PublicVaxCard() {
     );
   }
 
-  if (error || !client) {
+  if (!rawId || error || !client) {
+    const handleLookupSubmit = (e: React.FormEvent) => {
+      e.preventDefault();
+      const cleaned = lookupId.trim();
+      if (!cleaned) {
+        toast({
+          title: "ID Required",
+          description: "Please enter a valid Child ID, Client ID, or scan the QR code.",
+          variant: "destructive",
+        });
+        return;
+      }
+      window.location.href = `/verify/${encodeURIComponent(cleaned)}`;
+    };
+
     return (
       <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex flex-col items-center justify-center p-4">
-        <div className="bg-card border border-border rounded-3xl p-8 max-w-md w-full text-center shadow-xl space-y-4">
-          <div className="h-16 w-16 mx-auto rounded-2xl bg-rose-500/10 flex items-center justify-center text-rose-600">
-            <XCircle className="h-9 w-9" />
+        <div className="max-w-xl w-full space-y-6">
+          
+          {/* Header Card */}
+          <div className="bg-card border border-border rounded-3xl p-6 sm:p-8 text-center shadow-xl space-y-5">
+            <div className="h-16 w-16 mx-auto rounded-2xl bg-indigo-500/10 flex items-center justify-center text-indigo-600 border border-indigo-500/20">
+              <ShieldCheck className="h-9 w-9" />
+            </div>
+
+            <div>
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 text-xs font-bold uppercase mb-2">
+                <BadgeCheck className="h-4 w-4" /> VaxPlan Digital Health Passport
+              </div>
+              <h2 className="text-xl sm:text-2xl font-black text-foreground tracking-tight">
+                Immunization Verification & Caregiver Portal
+              </h2>
+              <p className="text-xs text-muted-foreground mt-1.5 max-w-md mx-auto leading-relaxed">
+                Scan the QR code on the physical vaccination card or enter the Child / Client ID below to verify authenticity, view complete vaccine history, and subscribe to SMS/WhatsApp reminders.
+              </p>
+            </div>
+
+            {error && rawId && (
+              <div className="p-3.5 bg-rose-500/10 border border-rose-500/30 rounded-2xl text-rose-700 dark:text-rose-300 text-xs flex items-center gap-2.5 text-left">
+                <AlertTriangle className="h-5 w-5 shrink-0 text-rose-600" />
+                <div>
+                  <span className="font-bold block">Record Not Found</span>
+                  <span>No active immunization registry was found for ID <code className="font-mono bg-rose-500/20 px-1 py-0.5 rounded">{rawId}</code>. Please check the ID and try again.</span>
+                </div>
+              </div>
+            )}
+
+            {/* Lookup Form */}
+            <form onSubmit={handleLookupSubmit} className="space-y-3 pt-1">
+              <div className="flex flex-col sm:flex-row gap-2">
+                <Input
+                  placeholder="Enter Child ID (e.g. CL-00012) or Client ID..."
+                  value={lookupId}
+                  onChange={(e) => setLookupId(e.target.value)}
+                  className="rounded-xl h-11 text-xs px-4"
+                  autoFocus
+                />
+                <Button type="submit" className="rounded-xl h-11 px-6 font-bold text-xs bg-indigo-600 hover:bg-indigo-700 text-white shrink-0 gap-2">
+                  <BadgeCheck className="h-4 w-4" /> View Passport
+                </Button>
+              </div>
+            </form>
+
+            <div className="pt-2 border-t border-border/60 flex flex-wrap items-center justify-center gap-3">
+              <Link href="/client-logbook">
+                <Button variant="ghost" size="sm" className="rounded-xl text-xs gap-1.5 text-muted-foreground hover:text-foreground">
+                  <User className="h-3.5 w-3.5" /> Open Client Logbook
+                </Button>
+              </Link>
+              <Link href="/login">
+                <Button variant="ghost" size="sm" className="rounded-xl text-xs gap-1.5 text-muted-foreground hover:text-foreground">
+                  Staff Sign In
+                </Button>
+              </Link>
+            </div>
           </div>
-          <h2 className="text-lg font-bold text-foreground">Record Not Found</h2>
-          <p className="text-xs text-muted-foreground leading-relaxed">
-            The QR code scanned could not be verified against active health registry databases. Please confirm you have scanned a valid EPI child immunization card.
-          </p>
-          <div className="pt-2">
-            <Link href="/login">
-              <Button variant="outline" className="rounded-xl w-full text-xs">
-                Back to Login / Clinician Portal
-              </Button>
-            </Link>
-          </div>
+
+          {/* Saved Passports on this device */}
+          {savedRecords.length > 0 && (
+            <div className="bg-card border border-border rounded-3xl p-6 shadow-md space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <BookmarkCheck className="h-4 w-4 text-emerald-600" />
+                  <h3 className="text-xs font-bold text-foreground uppercase tracking-wider">
+                    Saved on This Device ({savedRecords.length})
+                  </h3>
+                </div>
+                <span className="text-[10px] text-muted-foreground">Instant offline access</span>
+              </div>
+
+              <div className="grid gap-2">
+                {savedRecords.map((item: any) => (
+                  <Link key={item.id} href={`/verify/${item.id}`}>
+                    <div className="flex items-center justify-between p-3 rounded-2xl bg-muted/40 hover:bg-muted border border-border/50 hover:border-border transition-all cursor-pointer group">
+                      <div className="flex items-center gap-3">
+                        <div className="h-9 w-9 rounded-xl bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 flex items-center justify-center font-bold text-xs">
+                          {item.name ? item.name.charAt(0).toUpperCase() : "C"}
+                        </div>
+                        <div>
+                          <h4 className="text-xs font-bold text-foreground group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">
+                            {item.name}
+                          </h4>
+                          <span className="text-[10px] text-muted-foreground">
+                            {item.clientId ? `ID: ${item.clientId} • ` : ""}DOB: {item.dob ? new Date(item.dob).toLocaleDateString() : "N/A"}
+                          </span>
+                        </div>
+                      </div>
+                      <ChevronRight className="h-4 w-4 text-muted-foreground group-hover:text-foreground transition-transform group-hover:translate-x-0.5" />
+                    </div>
+                  </Link>
+                ))}
+              </div>
+            </div>
+          )}
+
         </div>
       </div>
     );
