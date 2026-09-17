@@ -98,8 +98,14 @@ export function IdleTimeoutController() {
       doLogout("idle_timeout");
     }, timeoutMs);
 
-    if (broadcast && channel.current) {
-      channel.current.postMessage({ type: "RESET_IDLE" });
+    if (broadcast) {
+      try {
+        if (channel.current) {
+          channel.current.postMessage({ type: "RESET_IDLE" });
+        }
+      } catch {
+        /* ignore broadcast failure */
+      }
     }
     
     // Ping server to keep session alive based on actual elapsed time.
@@ -108,7 +114,10 @@ export function IdleTimeoutController() {
     const now = Date.now();
     if (!lastPingTime.current || now - lastPingTime.current >= 60000) {
       lastPingTime.current = now;
-      fetch("/api/auth/ping", { method: "POST" }).catch(() => {});
+      fetch("/api/auth/ping", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      }).catch(() => {});
     }
 
   }, [getTimeoutMinutes, doLogout, sessionConfig]);
@@ -116,14 +125,28 @@ export function IdleTimeoutController() {
   useEffect(() => {
     if (!user) return; // Only run if logged in
     
-    channel.current = new BroadcastChannel("vaxplan_session_sync");
-    channel.current.onmessage = (event) => {
-      if (event.data?.type === "RESET_IDLE") {
-        resetTimer(false);
-      } else if (event.data?.type === "LOGOUT_NOW") {
+    try {
+      if (typeof BroadcastChannel !== "undefined") {
+        channel.current = new BroadcastChannel("vaxplan_session_sync");
+        channel.current.onmessage = (event) => {
+          if (event.data?.type === "RESET_IDLE") {
+            resetTimer(false);
+          } else if (event.data?.type === "LOGOUT_NOW") {
+            doLogout("cross_tab_logout", false, false);
+          }
+        };
+      }
+    } catch {
+      channel.current = null;
+    }
+
+    // Fallback for environments where BroadcastChannel is unavailable or blocked
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key === "vaxplan_logout_broadcast" && event.newValue) {
         doLogout("cross_tab_logout", false, false);
       }
     };
+    window.addEventListener("storage", handleStorage);
 
     resetTimer();
 
@@ -149,13 +172,21 @@ export function IdleTimeoutController() {
       if (countdownId.current) clearInterval(countdownId.current);
       if (throttleTimeout) clearTimeout(throttleTimeout);
       events.forEach((e) => window.removeEventListener(e, handleActivity));
-      channel.current?.close();
+      window.removeEventListener("storage", handleStorage);
+      try {
+        channel.current?.close();
+      } catch {
+        /* ignore */
+      }
     };
-  }, [resetTimer, showWarning, user]);
+  }, [resetTimer, showWarning, user, doLogout]);
 
   const handleStaySignedIn = () => {
     resetTimer();
-    fetch("/api/auth/ping", { method: "POST" }).catch(() => {});
+    fetch("/api/auth/ping", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    }).catch(() => {});
   };
 
   const handleSignOutNow = () => {

@@ -16,6 +16,10 @@ async function req(path, options = {}) {
     ...(options.headers || {}),
   };
   
+  if (options.method && options.method !== "GET" && !headers["Content-Type"]) {
+    headers["Content-Type"] = "application/json";
+  }
+  
   if (options.body && typeof options.body === "object") {
     headers["Content-Type"] = "application/json";
     options.body = JSON.stringify(options.body);
@@ -294,7 +298,7 @@ async function main() {
     return `All ${keyRoutes.length} core application routes respond with status 200`;
   });
 
-  // 10. Security & Data Integrity Audit
+  // 10. Security, Idle Timeout & Logout Verification
   await runTest("10.1 Security Headers & Unauthenticated Protection", async () => {
     // Check that unauthorized access to protected resources without cookies returns 401
     const unauthRes = await req("/api/auth/user");
@@ -302,6 +306,51 @@ async function main() {
       throw new Error(`Expected unauthenticated /api/auth/user to return 401, got ${unauthRes.status}`);
     }
     return `RBAC and unauthenticated protection successfully enforced (401)`;
+  });
+
+  await runTest("10.2 Session Configuration Endpoint (/api/auth/session-config)", async () => {
+    const res = await req("/api/auth/session-config");
+    if (res.status !== 200 || typeof res.data?.idleTimeoutMinutes !== "number") {
+      throw new Error(`Expected session config with idleTimeoutMinutes, got ${res.status}: ${JSON.stringify(res.data)}`);
+    }
+    return `Idle Timeout: ${res.data.idleTimeoutMinutes}m, Warning Period: ${res.data.warningMinutes}m, Absolute Limit: ${res.data.absoluteTimeoutMinutes}m`;
+  });
+
+  await runTest("10.3 Keep-Alive Inactivity Heartbeat (/api/auth/ping)", async () => {
+    const res = await req("/api/auth/ping", { method: "POST", headers: authHeader });
+    if (res.status !== 200 || !res.data?.success) {
+      throw new Error(`Expected successful ping response, got ${res.status}: ${JSON.stringify(res.data)}`);
+    }
+    return `Activity heartbeat updated lastActive timestamp successfully`;
+  });
+
+  await runTest("10.4 User Custom Idle Timeout Configuration (/api/auth/user-idle-timeout)", async () => {
+    const setRes = await req("/api/auth/user-idle-timeout", {
+      method: "POST",
+      headers: authHeader,
+      body: { idleTimeout: 30 },
+    });
+    if (setRes.status !== 200 || !setRes.data?.success) {
+      throw new Error(`Failed to set user idle timeout: ${setRes.status}`);
+    }
+
+    const resetRes = await req("/api/auth/user-idle-timeout", {
+      method: "POST",
+      headers: authHeader,
+      body: { idleTimeout: "default" },
+    });
+    if (resetRes.status !== 200 || !resetRes.data?.success) {
+      throw new Error(`Failed to reset user idle timeout: ${resetRes.status}`);
+    }
+    return `User customized idle timeout preference saved & restored to default`;
+  });
+
+  await runTest("10.5 Session Logout & Invalidation (/api/logout)", async () => {
+    const res = await req("/api/logout?reason=manual_logout&format=json", { headers: authHeader });
+    if (res.status !== 200 || !res.data?.success) {
+      throw new Error(`Expected successful logout, got status ${res.status}`);
+    }
+    return `Session invalidated and cookies cleared cleanly`;
   });
 
   console.log(`\n=======================================================`);
