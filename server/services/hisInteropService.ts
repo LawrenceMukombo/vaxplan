@@ -52,6 +52,12 @@ export interface HisIntegrationConfig {
    * Optional: DHIS2 data set UID for immunization data.
    */
   dhis2DataSetUid?: string;
+  /** Facility organisation-unit level in the country DHIS2 hierarchy. */
+  dhis2FacilityOrgUnitLevel?: number;
+  /** Authentication scheme used by the country DHIS2 instance. */
+  authScheme?: "bearer" | "apiToken" | "basic";
+  /** Explicit opt-in for demonstrations. Never inferred from a missing secret. */
+  simulationMode?: boolean;
   /**
    * Optional: FHIR base URL if different from baseUrl (e.g. OpenMRS exposes
    * FHIR at a separate path).
@@ -190,21 +196,40 @@ function resolveToken(secretRef: string): string {
 */
 
 // Updated resolveToken with environment-resilient demo simulation support:
-function resolveToken(secretRef: string): string {
+function resolveToken(secretRef: string, simulationMode = false): string {
   const value = process.env[secretRef];
   if (!value) {
-    // Return a simulation mock token rather than raising unhandled process-aborting exceptions
-    return "mock_his_integration_token_for_demo_purposes";
+    if (simulationMode) return "mock_his_integration_token_for_demo_purposes";
+    throw new Error(
+      `HIS integration credential not found. Set environment variable "${secretRef}" or explicitly enable simulation mode.`,
+    );
   }
   return value;
 }
 
 // Exported helper for sibling services (Task #40 inbound coverage pull)
-export function resolveTokenForRef(secretRef: string): string {
-  return resolveToken(secretRef);
+export function resolveTokenForRef(secretRef: string, simulationMode = false): string {
+  return resolveToken(secretRef, simulationMode);
 }
 
-function buildHeaders(token: string): Record<string, string> {
+export function normalizeDhis2BaseUrl(baseUrl: string): string {
+  return baseUrl.trim().replace(/\/+$/, "").replace(/\/api$/i, "");
+}
+
+export function buildDhis2Headers(
+  token: string,
+  authScheme: HisIntegrationConfig["authScheme"] = "bearer",
+): Record<string, string> {
+  const hasScheme = /^(Bearer|Basic|ApiToken)\s/i.test(token);
+  const scheme = authScheme === "apiToken" ? "ApiToken" : authScheme === "basic" ? "Basic" : "Bearer";
+  return {
+    "Authorization": hasScheme ? token : `${scheme} ${token}`,
+    "Content-Type": "application/json",
+    "Accept": "application/json",
+  };
+}
+
+export function buildHeaders(token: string): Record<string, string> {
   return {
     "Authorization": `Bearer ${token}`,
     "Content-Type": "application/json",
@@ -241,7 +266,7 @@ export class Dhis2Adapter implements HisAdapter {
   }
 
   getToken(): string {
-    return resolveToken(this.config.secretRef);
+    return resolveToken(this.config.secretRef, this.config.simulationMode);
   }
 
   async pushImmunizations(records: ImmunizationRecord[]): Promise<HisOperationResult> {
@@ -315,10 +340,10 @@ export class Dhis2Adapter implements HisAdapter {
         dataValues,
       };
 
-      const url = `${this.config.baseUrl}/api/dataValueSets`;
+      const url = `${normalizeDhis2BaseUrl(this.config.baseUrl)}/api/dataValueSets`;
       const response = await fetch(url, {
         method: "POST",
-        headers: buildHeaders(token),
+        headers: buildDhis2Headers(token, this.config.authScheme),
         body: JSON.stringify(payload),
         signal: AbortSignal.timeout(30_000),
       });
@@ -393,11 +418,19 @@ export class Dhis2Adapter implements HisAdapter {
           ],
         };
       }
-      // Fetch all org units at level 4 or lower (facility level)
+      // Fetch facility org units within the configured country/root hierarchy.
       // Fields: id, code, name, level, parent, geometry
-      const url = `${this.config.baseUrl}/api/organisationUnits?paging=false&level=4&fields=id,code,name,level,parent[id],geometry`;
+      const params = new URLSearchParams({
+        paging: "false",
+        level: String(this.config.dhis2FacilityOrgUnitLevel ?? 4),
+        fields: "id,code,name,level,parent[id],geometry",
+      });
+      if (this.config.dhis2RootOrgUnit) {
+        params.set("filter", `path:like:/${this.config.dhis2RootOrgUnit}`);
+      }
+      const url = `${normalizeDhis2BaseUrl(this.config.baseUrl)}/api/organisationUnits?${params}`;
       const response = await fetch(url, {
-        headers: buildHeaders(token),
+        headers: buildDhis2Headers(token, this.config.authScheme),
         signal: AbortSignal.timeout(60_000),
       });
 

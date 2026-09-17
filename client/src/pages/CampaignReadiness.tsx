@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -15,6 +15,7 @@ import { Slider } from "@/components/ui/slider";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import { FacilityCascadePicker } from "@/components/FacilityCascadePicker";
+import { ReadinessChoroplethMap } from "@/components/readiness/ReadinessChoroplethMap";
 import {
   Radio,
   ClipboardCheck,
@@ -72,6 +73,7 @@ import {
 import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
 import L from "leaflet";
 import type { Facility, Province, District } from "@shared/schema";
+import type { TenantLike } from "@/lib/tenantGeo";
 
 // ─── Leaflet Icon Fix for Vite ───────────────────────────────────────────────
 const createColoredPinIcon = (color: string) => {
@@ -1077,64 +1079,318 @@ function getInitialAssessments(): AssessmentRecord[] {
   ];
 }
 
-function getInitialActions(): CorrectiveActionItem[] {
+const DEFAULT_PROVINCES_BY_COUNTRY: Record<string, string[]> = {
+  ZAF: [
+    "Gauteng",
+    "Western Cape",
+    "KwaZulu-Natal",
+    "Eastern Cape",
+    "Free State",
+    "Limpopo",
+    "Mpumalanga",
+    "North West",
+    "Northern Cape",
+  ],
+  ZMB: [
+    "Central Province",
+    "Copperbelt Province",
+    "Eastern Province",
+    "Luapula Province",
+    "Lusaka Province",
+    "Muchinga Province",
+    "Northern Province",
+    "North-Western Province",
+    "Southern Province",
+    "Western Province",
+  ],
+  SSD: [
+    "Central Equatoria",
+    "Eastern Equatoria",
+    "Western Equatoria",
+    "Jonglei",
+    "Unity",
+    "Upper Nile",
+    "Lakes",
+    "Warrap",
+    "Western Bahr el Ghazal",
+    "Northern Bahr el Ghazal",
+  ],
+  PNG: [
+    "National Capital District",
+    "Morobe",
+    "Eastern Highlands",
+    "Western Highlands",
+    "East New Britain",
+    "Madang",
+    "Enga",
+  ],
+};
+
+const DEFAULT_DISTRICTS_BY_COUNTRY: Record<string, { name: string; province: string }[]> = {
+  ZAF: [
+    { name: "City of Johannesburg", province: "Gauteng" },
+    { name: "City of Tshwane", province: "Gauteng" },
+    { name: "Ekurhuleni", province: "Gauteng" },
+    { name: "Sedibeng", province: "Gauteng" },
+    { name: "West Rand", province: "Gauteng" },
+    { name: "City of Cape Town", province: "Western Cape" },
+    { name: "Cape Winelands", province: "Western Cape" },
+    { name: "Garden Route", province: "Western Cape" },
+    { name: "Overberg", province: "Western Cape" },
+    { name: "eThekwini", province: "KwaZulu-Natal" },
+    { name: "uMgungundlovu", province: "KwaZulu-Natal" },
+    { name: "King Cetshwayo", province: "KwaZulu-Natal" },
+    { name: "Nelson Mandela Bay", province: "Eastern Cape" },
+    { name: "Buffalo City", province: "Eastern Cape" },
+    { name: "Mangaung", province: "Free State" },
+    { name: "Capricorn", province: "Limpopo" },
+    { name: "Ehlanzeni", province: "Mpumalanga" },
+    { name: "Bojanala Platinum", province: "North West" },
+    { name: "Frances Baard", province: "Northern Cape" },
+  ],
+  ZMB: [
+    { name: "Lusaka District", province: "Lusaka Province" },
+    { name: "Ndola District", province: "Copperbelt Province" },
+    { name: "Kitwe District", province: "Copperbelt Province" },
+    { name: "Kabwe District", province: "Central Province" },
+    { name: "Chibombo District", province: "Central Province" },
+    { name: "Chipata District", province: "Eastern Province" },
+    { name: "Choma District", province: "Southern Province" },
+    { name: "Kasama District", province: "Northern Province" },
+    { name: "Solwezi District", province: "North-Western Province" },
+    { name: "Mansa District", province: "Luapula Province" },
+    { name: "Mongu District", province: "Western Province" },
+    { name: "Chinsali District", province: "Muchinga Province" },
+  ],
+  SSD: [
+    { name: "Juba County", province: "Central Equatoria" },
+    { name: "Yei County", province: "Central Equatoria" },
+    { name: "Torit County", province: "Eastern Equatoria" },
+    { name: "Bor County", province: "Jonglei" },
+    { name: "Malakal County", province: "Upper Nile" },
+    { name: "Wau County", province: "Western Bahr el Ghazal" },
+  ],
+};
+
+function generateTenantInitialAssessments(
+  countryCode: string,
+  provincesList: Province[] = [],
+  districtsList: District[] = [],
+  facilitiesList: Facility[] = []
+): AssessmentRecord[] {
+  const code = (countryCode || "ZAF").toUpperCase();
+  const records: AssessmentRecord[] = [];
+
+  const provNames =
+    provincesList.length > 0
+      ? provincesList.map((p) => ({ id: p.id, name: p.name }))
+      : (DEFAULT_PROVINCES_BY_COUNTRY[code] || DEFAULT_PROVINCES_BY_COUNTRY.ZAF).map((name, i) => ({ id: i + 1, name }));
+
+  const getPresetScore = (name: string, domainIdx: number): number => {
+    let hash = 0;
+    for (let i = 0; i < name.length; i++) {
+      hash = (hash << 5) - hash + name.charCodeAt(i);
+      hash |= 0;
+    }
+    const pseudo = Math.abs((hash + domainIdx * 17) % 100);
+    return Math.min(10, Math.max(3, Math.round((55 + (pseudo % 42)) / 10)));
+  };
+
+  // 1. Tier 1: National Checks Provinces
+  provNames.forEach((prov, idx) => {
+    const scores: Record<string, number> = {};
+    READINESS_INDICATORS.forEach((ind, iIdx) => {
+      scores[ind.id] = getPresetScore(prov.name, iIdx + (idx % 3));
+    });
+    const { domainScores, compositeScore, status } = calculateScoresFromRaw(scores);
+    records.push({
+      id: `ass-prov-${prov.id}-${code.toLowerCase()}`,
+      campaignId: "campaign-mr-2026",
+      tier: "tier1_national",
+      milestone: "4W",
+      entityId: prov.id,
+      entityName: prov.name,
+      provinceId: prov.id,
+      provinceName: prov.name,
+      assessorName: "National Readiness Oversight Team",
+      assessorRole: "National EPI Manager",
+      assessmentDate: "2026-08-28",
+      scores,
+      domainScores,
+      compositeScore,
+      status,
+      isSignedOff: compositeScore >= 80,
+      notes: `${prov.name} provincial readiness evaluated against WHO Week 4 milestones.`,
+      updatedAt: new Date().toISOString(),
+    });
+  });
+
+  // 2. Tier 2: Province Checks Districts
+  const distItems: { id: number | string; name: string; provinceId?: number; provinceName: string }[] = [];
+  if (districtsList.length > 0) {
+    districtsList.forEach((d) => {
+      const p = provincesList.find((prov) => prov.id === d.provinceId);
+      distItems.push({
+        id: d.id,
+        name: d.name,
+        provinceId: d.provinceId ?? undefined,
+        provinceName: p ? p.name : "Province",
+      });
+    });
+  } else {
+    const defaults = DEFAULT_DISTRICTS_BY_COUNTRY[code] || DEFAULT_DISTRICTS_BY_COUNTRY.ZAF;
+    defaults.forEach((d, i) => {
+      const p = provNames.find((pn) => pn.name.toLowerCase().includes(d.province.toLowerCase())) || provNames[0];
+      distItems.push({
+        id: 100 + i + 1,
+        name: d.name,
+        provinceId: p ? p.id : 1,
+        provinceName: d.province,
+      });
+    });
+  }
+
+  distItems.forEach((dist, idx) => {
+    const scores: Record<string, number> = {};
+    READINESS_INDICATORS.forEach((ind, iIdx) => {
+      scores[ind.id] = getPresetScore(dist.name, iIdx + (idx % 5));
+    });
+    const { domainScores, compositeScore, status } = calculateScoresFromRaw(scores);
+    records.push({
+      id: `ass-dist-${dist.id}-${code.toLowerCase()}`,
+      campaignId: "campaign-mr-2026",
+      tier: "tier2_provincial",
+      milestone: "4W",
+      entityId: dist.id,
+      entityName: dist.name,
+      parentEntityName: dist.provinceName,
+      provinceId: dist.provinceId,
+      provinceName: dist.provinceName,
+      districtId: typeof dist.id === "number" ? dist.id : undefined,
+      districtName: dist.name,
+      assessorName: "Provincial Field Supervisory Team",
+      assessorRole: "Provincial EPI Coordinator",
+      assessmentDate: "2026-08-27",
+      scores,
+      domainScores,
+      compositeScore,
+      status,
+      isSignedOff: compositeScore >= 80,
+      notes: `${dist.name} operational planning, cold chain logistics, and training rosters audited.`,
+      updatedAt: new Date().toISOString(),
+    });
+  });
+
+  // 3. Tier 3: District Checks Facilities
+  if (facilitiesList.length > 0) {
+    facilitiesList.slice(0, 30).forEach((fac, idx) => {
+      const d = districtsList.find((dist) => dist.id === fac.districtId);
+      const p = d ? provincesList.find((prov) => prov.id === d.provinceId) : undefined;
+      const scores: Record<string, number> = {};
+      READINESS_INDICATORS.forEach((ind, iIdx) => {
+        scores[ind.id] = getPresetScore(fac.name, iIdx + (idx % 4));
+      });
+      const { domainScores, compositeScore, status } = calculateScoresFromRaw(scores);
+      records.push({
+        id: `ass-hf-${fac.id}-${code.toLowerCase()}`,
+        campaignId: "campaign-mr-2026",
+        tier: "tier3_district",
+        milestone: "4W",
+        entityId: fac.id,
+        entityName: fac.name,
+        parentEntityName: d ? d.name : "District",
+        provinceId: d ? d.provinceId : null,
+        provinceName: p ? p.name : undefined,
+        districtId: fac.districtId,
+        districtName: d ? d.name : undefined,
+        facilityId: fac.id,
+        facilityName: fac.name,
+        assessorName: "District Cold Chain Supervisor",
+        assessorRole: "District Nursing Officer",
+        assessmentDate: "2026-08-26",
+        scores,
+        domainScores,
+        compositeScore,
+        status,
+        isSignedOff: compositeScore >= 80,
+        notes: `Health facility vaccine storage, cold chain integrity, and team mobilization verified.`,
+        updatedAt: new Date().toISOString(),
+      });
+    });
+  }
+
+  return records;
+}
+
+function generateTenantInitialActions(
+  countryCode: string,
+  provincesList: Province[] = [],
+  districtsList: District[] = []
+): CorrectiveActionItem[] {
+  const code = (countryCode || "ZAF").toUpperCase();
+  const provName1 = provincesList[0]?.name || (code === "ZAF" ? "Gauteng" : "Central Province");
+  const provName2 = provincesList[1]?.name || (code === "ZAF" ? "Western Cape" : "Copperbelt Province");
+  const distName1 = districtsList[0]?.name || (code === "ZAF" ? "City of Johannesburg" : "Lusaka District");
+  const distName2 = districtsList[1]?.name || (code === "ZAF" ? "City of Cape Town" : "Ndola District");
+  const distName3 = districtsList[2]?.name || (code === "ZAF" ? "eThekwini" : "Chipata District");
+
   return [
     {
-      id: "act-1",
-      assessmentId: "ass-prov-central",
-      entityName: "Central Province",
+      id: `act-1-${code.toLowerCase()}`,
+      assessmentId: `ass-prov-1-${code.toLowerCase()}`,
+      entityName: provName1,
       domain: "Planning, Coordination & Financing",
-      issue: "Operational funds not yet received from Ministry of Health for field transport.",
-      actionRequired: "Escalate to National Treasury and MoH Permanent Secretary for immediate release of SIA tranches.",
-      responsiblePerson: "Dr. B. Chilufya (National EPI Manager)",
+      issue: "Operational funds disbursement tranche 1 pending final release to local sub-depots.",
+      actionRequired: "Escalate to National Treasury and MoH Finance Unit for immediate transfer confirmation.",
+      responsiblePerson: "National Readiness Team Lead",
       deadline: "2026-09-05",
       status: "in_progress",
       priority: "high",
     },
     {
-      id: "act-2",
-      assessmentId: "ass-prov-copperbelt",
-      entityName: "Copperbelt Province",
+      id: `act-2-${code.toLowerCase()}`,
+      assessmentId: `ass-prov-2-${code.toLowerCase()}`,
+      entityName: provName2,
       domain: "Vaccine, Cold Chain & Logistics",
-      issue: "Syringes and safety boxes not yet bundled with vaccine consignment in Kitwe central hub.",
-      actionRequired: "Dispatch safety boxes and AD syringes from central medical stores to Kitwe sub-depot.",
-      responsiblePerson: "Logistics Focal Person (Copperbelt PHO)",
+      issue: "Safety boxes and AD syringes need final bundling check with vaccine consignment.",
+      actionRequired: "Dispatch safety boxes and AD syringes from central medical stores to sub-depot.",
+      responsiblePerson: "Logistics Focal Person",
       deadline: "2026-09-08",
       status: "open",
       priority: "high",
     },
     {
-      id: "act-3",
-      assessmentId: "ass-dist-ngabwe",
-      entityName: "Ngabwe District",
+      id: `act-3-${code.toLowerCase()}`,
+      assessmentId: `ass-dist-1-${code.toLowerCase()}`,
+      entityName: distName1,
       domain: "Vaccine, Cold Chain & Logistics",
-      issue: "Kafue river crossing requires chartered pontoon and fuel for outreach teams.",
-      actionRequired: "Contract local river pontoon service and preposition fuel reserves on both shores.",
-      responsiblePerson: "Ngabwe District Health Director",
+      issue: "Outreach vehicle fleet requires maintenance check and fuel allocation.",
+      actionRequired: "Contract local transport support and preposition fuel vouchers for field teams.",
+      responsiblePerson: "District Health Director",
       deadline: "2026-09-10",
       status: "in_progress",
       priority: "high",
     },
     {
-      id: "act-4",
-      assessmentId: "ass-prov-eastern",
-      entityName: "Eastern Province",
-      domain: "Planning, Coordination & Financing",
-      issue: "Microplans for cross-border settlements with Malawi and Mozambique not yet synchronized.",
-      actionRequired: "Host bilateral synchronization cross-border meeting with Chipata and Mchinji health teams.",
-      responsiblePerson: "Eastern Provincial Health Director",
+      id: `act-4-${code.toLowerCase()}`,
+      assessmentId: `ass-dist-2-${code.toLowerCase()}`,
+      entityName: distName2,
+      domain: "Social Mobilisation & Communication",
+      issue: "Community awareness campaigns in informal and mobile settlements require intensified local media.",
+      actionRequired: "Engage community radio broadcasts, town criers, and civic leadership forums.",
+      responsiblePerson: "Health Promotion Officer",
       deadline: "2026-09-07",
       status: "open",
       priority: "medium",
     },
     {
-      id: "act-5",
-      assessmentId: "ass-dist-ithezitezhi",
-      entityName: "Itezhi-Tezhi District",
-      domain: "Social Mobilisation & Communication",
-      issue: "Zero community awareness detected in fishing camps along Lake Itezhi-Tezhi.",
-      actionRequired: "Deploy boat-based megaphone town criers and engage Fishermen Union executive committee.",
-      responsiblePerson: "Health Promotion Officer (Itezhi-Tezhi)",
+      id: `act-5-${code.toLowerCase()}`,
+      assessmentId: `ass-dist-3-${code.toLowerCase()}`,
+      entityName: distName3,
+      domain: "Training & Human Resources",
+      issue: "Vaccinator refresher training roster has 15% pending confirmation from peripheral clinics.",
+      actionRequired: "Follow up with facility in-charges and finalize standby vaccinator pool.",
+      responsiblePerson: "Training Coordinator",
       deadline: "2026-09-09",
       status: "open",
       priority: "high",
@@ -1156,42 +1412,108 @@ export default function CampaignReadiness() {
     userRole === "provincial_coordinator" ||
     userRole === "district_manager";
 
-  // Data State
+  // Tenant & Geographic Queries (Country Isolation & Scoping)
+  const { data: tenant } = useQuery<TenantLike>({
+    queryKey: ["/api/me/tenant"],
+  });
+  const countryCode = (tenant?.countryCode || "ZAF").toUpperCase();
+  const countryName =
+    (tenant as any)?.countryName ||
+    (tenant as any)?.name ||
+    (countryCode === "ZAF" ? "Republic of South Africa" : "Zambia");
+
+  const { data: provinces = [] } = useQuery<Province[]>({
+    queryKey: ["/api/provinces"],
+  });
+  const { data: districts = [] } = useQuery<District[]>({
+    queryKey: ["/api/districts"],
+  });
+  const { data: facilities = [] } = useQuery<Facility[]>({
+    queryKey: ["/api/facilities"],
+  });
+
+  const storageKeyAssessments = `vaxplan.campaign_readiness_assessments.${countryCode.toLowerCase()}.v2`;
+  const storageKeyActions = `vaxplan.campaign_readiness_actions.${countryCode.toLowerCase()}.v2`;
+
+  // Data State (Tenant-aware & Seeded)
   const [assessments, setAssessments] = useState<AssessmentRecord[]>(() => {
     try {
-      const stored = localStorage.getItem(STORAGE_KEY_ASSESSMENTS);
+      const key = `vaxplan.campaign_readiness_assessments.${(tenant?.countryCode || "zaf").toLowerCase()}.v2`;
+      const stored = localStorage.getItem(key);
       if (stored) return JSON.parse(stored);
     } catch (e) {
       console.warn("Could not load stored assessments:", e);
     }
-    return getInitialAssessments();
+    return generateTenantInitialAssessments(countryCode, provinces, districts, facilities);
   });
 
   const [actions, setActions] = useState<CorrectiveActionItem[]>(() => {
     try {
-      const stored = localStorage.getItem(STORAGE_KEY_ACTIONS);
+      const key = `vaxplan.campaign_readiness_actions.${(tenant?.countryCode || "zaf").toLowerCase()}.v2`;
+      const stored = localStorage.getItem(key);
       if (stored) return JSON.parse(stored);
     } catch (e) {
       console.warn("Could not load stored action items:", e);
     }
-    return getInitialActions();
+    return generateTenantInitialActions(countryCode, provinces, districts);
   });
+
+  // Re-sync data when country or entities change
+  useEffect(() => {
+    if (!countryCode) return;
+    try {
+      const stored = localStorage.getItem(storageKeyAssessments);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setAssessments(parsed);
+          return;
+        }
+      }
+    } catch (e) {
+      console.warn("Could not reload assessments for tenant:", e);
+    }
+    const fresh = generateTenantInitialAssessments(countryCode, provinces, districts, facilities);
+    setAssessments(fresh);
+  }, [countryCode, provinces.length, districts.length, facilities.length, storageKeyAssessments]);
+
+  useEffect(() => {
+    if (!countryCode) return;
+    try {
+      const stored = localStorage.getItem(storageKeyActions);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setActions(parsed);
+          return;
+        }
+      }
+    } catch (e) {
+      console.warn("Could not reload actions for tenant:", e);
+    }
+    const fresh = generateTenantInitialActions(countryCode, provinces, districts);
+    setActions(fresh);
+  }, [countryCode, provinces.length, districts.length, storageKeyActions]);
 
   useEffect(() => {
     try {
-      localStorage.setItem(STORAGE_KEY_ASSESSMENTS, JSON.stringify(assessments));
+      localStorage.setItem(storageKeyAssessments, JSON.stringify(assessments));
     } catch (e) {
       console.warn("Could not save assessments to storage:", e);
     }
-  }, [assessments]);
+  }, [assessments, storageKeyAssessments]);
 
   useEffect(() => {
     try {
-      localStorage.setItem(STORAGE_KEY_ACTIONS, JSON.stringify(actions));
+      localStorage.setItem(storageKeyActions, JSON.stringify(actions));
     } catch (e) {
       console.warn("Could not save actions to storage:", e);
     }
-  }, [actions]);
+  }, [actions, storageKeyActions]);
+
+  // Interactive Map Cross-Filter State
+  const [mapCategoryFilter, setMapCategoryFilter] = useState<string>("ALL");
+  const [selectedMapEntityId, setSelectedMapEntityId] = useState<number | string | null>(null);
 
   // Main UI Filter State
   const [activeTab, setActiveTab] = useState<"dashboard" | "checklist" | "actions">("dashboard");
@@ -1875,103 +2197,35 @@ export default function CampaignReadiness() {
 
           {/* ─── Interactive Map & Domain Radar View ──────────────────────── */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Interactive Leaflet Readiness Map (2 Cols) */}
-            <Card className="lg:col-span-2 shadow-sm border-border/60">
-              <CardHeader className="pb-3 flex flex-row items-center justify-between">
-                <div>
-                  <CardTitle className="text-base font-semibold flex items-center gap-2">
-                    <MapPin className="h-4 w-4 text-primary" />
-                    Geographic Readiness Map &amp; Spatial Hotspots
-                  </CardTitle>
-                  <CardDescription className="text-xs">
-                    Pin colors reflect operational readiness: Green (&gt;={readyThreshold}%), Amber ({watchlistThreshold}-{readyThreshold - 1}%), Red (&lt;{watchlistThreshold}%). Click pins to inspect.
-                  </CardDescription>
-                </div>
-                <div className="flex items-center gap-2 text-xs">
-                  <div className="flex items-center gap-1">
-                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
-                    <span>Ready</span>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <span className="w-2.5 h-2.5 rounded-full bg-amber-500" />
-                    <span>Watchlist</span>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <span className="w-2.5 h-2.5 rounded-full bg-red-500" />
-                    <span>Not Ready</span>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent className="p-0">
-                <div className="h-[380px] w-full relative rounded-b-lg overflow-hidden border-t">
-                  <MapContainer
-                    center={[-13.5, 28.0]}
-                    zoom={6}
-                    scrollWheelZoom={false}
-                    className="h-full w-full"
-                  >
-                    <MapViewUpdater center={[-13.5, 28.0]} zoom={6} />
-                    <TileLayer
-                      attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-                      url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                    />
-                    {filteredAssessments.map((item) => {
-                      const lat = item.coordinates ? item.coordinates[0] : -14.4 + Math.random() * 2;
-                      const lng = item.coordinates ? item.coordinates[1] : 27.5 + Math.random() * 2;
-                      const color =
-                        item.compositeScore >= readyThreshold
-                          ? "#10b981"
-                          : item.compositeScore >= watchlistThreshold
-                          ? "#f59e0b"
-                          : "#ef4444";
-
-                      return (
-                        <Marker
-                          key={item.id}
-                          position={[lat, lng]}
-                          icon={createColoredPinIcon(color)}
-                        >
-                          <Popup>
-                            <div className="p-1 space-y-1.5 text-xs min-w-[200px]">
-                              <div className="font-bold text-sm">{item.entityName}</div>
-                              <div className="text-muted-foreground">{item.parentEntityName || "Level Evaluation"}</div>
-                              <div className="flex items-center justify-between pt-1 border-t">
-                                <span>Readiness Score:</span>
-                                <Badge
-                                  className={
-                                    item.compositeScore >= readyThreshold
-                                      ? "bg-emerald-500"
-                                      : item.compositeScore >= watchlistThreshold
-                                      ? "bg-amber-500"
-                                      : "bg-red-500"
-                                  }
-                                >
-                                  {item.compositeScore}%
-                                </Badge>
-                              </div>
-                              <div className="grid grid-cols-2 gap-1 text-[11px] pt-1">
-                                <div>Planning: {item.domainScores.planning}%</div>
-                                <div>Logistics: {item.domainScores.logistics}%</div>
-                                <div>Training: {item.domainScores.training}%</div>
-                                <div>Comms: {item.domainScores.mobilization}%</div>
-                              </div>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="w-full mt-2 h-6 text-[10px]"
-                                onClick={() => setViewAssessmentDetail(item)}
-                              >
-                                View Detailed Audit
-                              </Button>
-                            </div>
-                          </Popup>
-                        </Marker>
-                      );
-                    })}
-                  </MapContainer>
-                </div>
-              </CardContent>
-            </Card>
+            {/* Enterprise-Grade Geographic Readiness Map (Shaded Choropleth + HFs Pins Only) */}
+            <div className="lg:col-span-2">
+              <ReadinessChoroplethMap
+                countryCode={countryCode}
+                countryName={countryName}
+                adminLevelLabel={
+                  selectedTier === "tier1_national"
+                    ? "Province"
+                    : selectedTier === "tier2_provincial"
+                    ? "District"
+                    : "Health Facility"
+                }
+                assessments={filteredAssessments}
+                facilities={facilities}
+                selectedCategoryFilter={mapCategoryFilter}
+                onSelectCategoryFilter={setMapCategoryFilter}
+                selectedEntityId={selectedMapEntityId}
+                onSelectEntity={(item) => setSelectedMapEntityId(item ? item.entityId : null)}
+                readyThreshold={readyThreshold}
+                watchlistThreshold={watchlistThreshold}
+                selectedTier={selectedTier}
+                selectedCampaignName={
+                  selectedCampaignId === "campaign-mr-2026"
+                    ? "2026 Measles-Rubella SIA"
+                    : "ICHD Multi-Antigen Round 2"
+                }
+                onViewAssessmentDetail={(item) => setViewAssessmentDetail(item)}
+              />
+            </div>
 
             {/* Radar Chart: 5 Operational Domains (1 Col) */}
             <Card className="shadow-sm border-border/60">
