@@ -405,6 +405,9 @@ function AuthenticatedRouter({ user }: { user: User }) {
       <Route path="/clients">
         {modules.clientLogbook !== false ? (canAccessClientLogbook(user) ? <ClientLogbook /> : <AccessDeniedPage moduleName="Client Logbook" />) : <ModuleDisabled moduleName="Client Logbook" />}
       </Route>
+      <Route path="/client-logbook">
+        {modules.clientLogbook !== false ? (canAccessClientLogbook(user) ? <ClientLogbook /> : <AccessDeniedPage moduleName="Client Logbook" />) : <ModuleDisabled moduleName="Client Logbook" />}
+      </Route>
       <Route path="/stock">
         {modules.stock !== false ? <StockLedger /> : <ModuleDisabled moduleName="Stock Ledger" />}
       </Route>

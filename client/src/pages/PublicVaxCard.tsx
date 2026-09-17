@@ -522,7 +522,7 @@ export default function PublicVaxCard() {
             )}
 
             <div className="pt-2 border-t border-border/60 flex flex-wrap items-center justify-center gap-3">
-              <Link href="/client-logbook">
+              <Link href="/clients">
                 <Button variant="ghost" size="sm" className="rounded-xl text-xs gap-1.5 text-muted-foreground hover:text-foreground">
                   <User className="h-3.5 w-3.5" /> Open Client Logbook
                 </Button>
