@@ -47,6 +47,7 @@ import { flushPendingServerLogout, performClientLogout } from "./lib/logout";
 import { canAccessClientLogbook, canAccessDefaulterList, canAccessHisIntegrations, canAccessSessionPlanning, canAccessUserManagement, canPlanSessions } from "@/lib/accessControl";
 import type { User } from "@shared/schema";
 const Dashboard = lazy(() => import("@/pages/Dashboard"));
+const PartnerEnquiriesAdmin = lazy(() => import("@/pages/PartnerEnquiriesAdmin"));
 const PartnersPage = lazy(() =>
   import("@/pages/InstitutionalSite").then((module) => ({ default: module.PartnersPage })),
 );
@@ -107,7 +108,7 @@ const AnnualNationalPlan = lazy(() => import("@/pages/AnnualNationalPlan"));
 const MicroplanPrintView = lazy(() => import("@/pages/MicroplanPrintView"));
 const DataSources = lazy(() => import("@/pages/DataSources"));
 const FieldTeams = lazy(() => import("@/pages/FieldTeams"));
-const Reports    = lazy(() => import("@/pages/Reports"));
+const Reports = lazy(() => import("@/pages/Reports"));
 const ApiReference = lazy(() => import("@/pages/ApiReference"));
 const IndicatorManual = lazy(() => import("@/pages/IndicatorManual"));
 const SupervisionTools = lazy(() => import("@/pages/SupervisionTools"));
@@ -117,6 +118,7 @@ const ModuleDisabled = lazy(() => import("@/pages/ModuleDisabled"));
 const Surveillance = lazy(() => import("@/pages/Surveillance"));
 const WikiEditor = lazy(() => import("@/pages/WikiEditor"));
 const CatalogueAdmin = lazy(() => import("@/pages/CatalogueAdmin"));
+const PublicVaxCard = lazy(() => import("@/pages/PublicVaxCard"));
 const ResearchHubPage = lazy(() => import("@/pages/ResearchHub"));
 const TemporalHistory = lazy(() => import("@/pages/TemporalHistory"));
 const RiskAssessmentList = lazy(() => import("@/pages/risk/RiskAssessmentList"));
@@ -130,13 +132,7 @@ const BudgetPlanning = lazy(() => import("@/pages/BudgetPlanning"));
 const VaccineCalculator = lazy(() => import("@/pages/VaccineCalculator"));
 const SocialMobilization = lazy(() => import("@/pages/SocialMobilization"));
 import { DEFAULT_MODULES } from "@/lib/modules";
-// Task #50 - Small wrapper that reads :id from the route and passes it to
-// SessionPlanning as `lockedMicroplanId`, so the unserved-prefill auto-open
-// flow has a real routed home.
-// Small wrapper around wouter <Redirect> that carries the current URL's query
-// string along to the destination. This matters because some legacy in-app
-// links pass `?facility=...&microplan=...` and the destination route (the wizard)
-// reads those params to keep context.
+
 function PreserveQueryRedirect({ to }: { to: string }) {
   const search = typeof window !== "undefined" ? window.location.search : "";
   return <Redirect to={`${to}${search}`} />;
@@ -180,7 +176,7 @@ function UnauthenticatedUrlGuard() {
     if (isLoading || user || typeof window === "undefined") return;
 
     const { pathname, search, hash } = window.location;
-    const canonicalPath = unauthenticatedCanonicalPath(pathname);
+    const canonicalPath = unauthenticatedCanonicalPath(pathname, search);
     const containsAddressDetails = Boolean(search || hash || pathname !== canonicalPath);
     if (!containsAddressDetails) return;
 
@@ -451,6 +447,7 @@ function AuthenticatedRouter({ user }: { user: User }) {
       <Route path="/admin/boundaries" component={BoundaryManager} />
       <Route path="/admin/custom-layers" component={CustomLayers} />
       <Route path="/admin/catalogue" component={CatalogueAdmin} />
+      <Route path="/admin/partners" component={PartnerEnquiriesAdmin} />
       <Route path="/admin/wiki" component={WikiEditor} />
       <Route path="/his-integrations">
         {modules.interop !== false ? (canAccessHisIntegrations(user) ? <HisIntegrations /> : <AccessDeniedPage moduleName="HIS Integrations" />) : <ModuleDisabled moduleName="HIS Interoperability" />}
@@ -722,6 +719,8 @@ function App() {
               </Route>
               <Route path="/data-sources" component={DataSourcesGate} />
               <Route path="/help" component={HelpGate} />
+              <Route path="/verify/:id" component={PublicVaxCard} />
+              <Route path="/vaxcard/:id" component={PublicVaxCard} />
               <Route><AuthenticatedLayout /></Route>
             </Switch>
           </Suspense>
@@ -738,4 +737,3 @@ function App() {
   );
 }
 export default App;
-

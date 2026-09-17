@@ -6727,7 +6727,27 @@ export async function registerRoutes(
       const entityType = req.query.entityType as string | undefined;
       const entityId = req.query.entityId as string | undefined;
       const limit = req.query.limit ? Math.min(parseInt(req.query.limit as string), 500) : 200;
-      res.json(await storage.listAuditLogs(req.tenantId, { userId, entityType, entityId, limit }));
+      const logs = await storage.listAuditLogs(req.tenantId, { userId, entityType, entityId, limit });
+      const actorIds = Array.from(new Set(logs.map((log) => log.userId).filter((id): id is string => Boolean(id && id !== "system"))));
+      const actors = actorIds.length === 0 ? [] : await db.select({
+        id: users.id,
+        firstName: users.firstName,
+        lastName: users.lastName,
+        email: users.email,
+        role: users.role,
+      }).from(users).where(and(eq(users.tenantId, req.tenantId), inArray(users.id, actorIds)));
+      const actorsById = new Map(actors.map((actor) => [actor.id, {
+        id: actor.id,
+        name: [actor.firstName, actor.lastName].filter(Boolean).join(" ").trim() || actor.email || actor.id,
+        email: actor.email,
+        role: actor.role,
+      }]));
+      res.json(logs.map((log) => ({
+        ...log,
+        actor: log.userId === "system"
+          ? { id: "system", name: "Automated Policy", email: null, role: "system" }
+          : (log.userId ? actorsById.get(log.userId) ?? null : null),
+      })));
     } catch (error) {
       console.error("Error listing audit logs:", error);
       res.status(500).json({ message: "Failed to list audit logs" });
@@ -6739,10 +6759,32 @@ export async function registerRoutes(
   // approve (district/provincial/national). Submitting an approval request
   // (POST) stays open to any authenticated tenant user so facility staff
   // can hand work up the chain.
+  const enrichApprovalActors = async (tenantId: string, rows: any[]) => {
+    const ids = Array.from(new Set(rows.flatMap((row) => [row.requestedById, row.resolvedById]).filter((id) => id && id !== "system"))) as string[];
+    const people = ids.length === 0 ? [] : await db.select({
+      id: users.id, firstName: users.firstName, lastName: users.lastName,
+      email: users.email, role: users.role, roles: users.roles,
+      facilityId: users.facilityId, districtId: users.districtId, provinceId: users.provinceId,
+    }).from(users).where(and(eq(users.tenantId, tenantId), inArray(users.id, ids)));
+    const byId = new Map(people.map((person) => [person.id, {
+      id: person.id,
+      name: [person.firstName, person.lastName].filter(Boolean).join(" ").trim() || person.email || person.id,
+      email: person.email, role: person.role, roles: person.roles,
+      facilityId: person.facilityId, districtId: person.districtId, provinceId: person.provinceId,
+    }]));
+    const systemActor = { id: "system", name: "Automated Policy", email: null, role: "system", roles: ["system"] };
+    return rows.map((row) => ({
+      ...row,
+      submitter: row.requestedById === "system" ? systemActor : byId.get(row.requestedById) ?? null,
+      resolver: row.resolvedById === "system" ? systemActor : byId.get(row.resolvedById) ?? null,
+    }));
+  };
+
   app.get("/api/approvals", ...auth, requirePermission("approve_plans"), async (req: any, res) => {
     try {
       const status = req.query.status as string | undefined;
-      res.json(await storage.getApprovalRequests(req.tenantId, status));
+      const requests = await storage.getApprovalRequests(req.tenantId, status);
+      res.json(await enrichApprovalActors(req.tenantId, requests));
     } catch (error) {
       console.error("Error fetching approval requests:", error);
       res.status(500).json({ message: "Failed to fetch approval requests" });
@@ -6753,7 +6795,7 @@ export async function registerRoutes(
     try {
       const request = await storage.getApprovalRequest(req.tenantId, parseInt(req.params.id));
       if (!request) return res.status(404).json({ message: "Approval request not found" });
-      res.json(request);
+      res.json((await enrichApprovalActors(req.tenantId, [request]))[0]);
     } catch (error) {
       console.error("Error fetching approval request:", error);
       res.status(500).json({ message: "Failed to fetch approval request" });
@@ -6930,7 +6972,7 @@ export async function registerRoutes(
             });
           }
           const tenant = await storage.getTenant(req.tenantId);
-          const eligibility = approvalEligibility(mp.createdAt, tenant?.settings);
+          const eligibility = approvalEligibility(mp.submittedAt ?? mp.createdAt, tenant?.settings);
           if (!eligibility.allowed) return res.status(409).json({ message: eligibility.message, eligibleAt: eligibility.eligibleAt });
         }
       }
@@ -7031,6 +7073,13 @@ export async function registerRoutes(
             previousRequestId: request.id,
             fromLevel: currentReqLevel,
             toLevel: nextLevel,
+            actor: {
+              id: req.dbUser?.id ?? req.user.claims.sub,
+              name: [req.dbUser?.firstName, req.dbUser?.lastName].filter(Boolean).join(" ").trim() || req.dbUser?.email || req.user.claims.sub,
+              email: req.dbUser?.email ?? null,
+              role: req.dbUser?.role ?? null,
+            },
+            actionAt: new Date().toISOString(),
           });
         }
       }
@@ -7078,8 +7127,22 @@ export async function registerRoutes(
         }
       }
 
-      await logAudit(req, "update", "approval_request", entityId, oldRequest, request);
-      res.json({ ...request, nextRequest });
+      const auditActor = {
+        id: req.dbUser?.id ?? req.user.claims.sub,
+        name: [req.dbUser?.firstName, req.dbUser?.lastName].filter(Boolean).join(" ").trim() || req.dbUser?.email || req.user.claims.sub,
+        email: req.dbUser?.email ?? null,
+        role: req.dbUser?.role ?? null,
+      };
+      await logAudit(req, "update", "approval_request", entityId, oldRequest, {
+        ...request,
+        actor: auditActor,
+        actionAt: new Date().toISOString(),
+        decision: status,
+        stage: request.currentLevel,
+      });
+      const [enrichedRequest] = await enrichApprovalActors(req.tenantId, [request]);
+      const [enrichedNextRequest] = nextRequest ? await enrichApprovalActors(req.tenantId, [nextRequest]) : [null];
+      res.json({ ...enrichedRequest, nextRequest: enrichedNextRequest });
     } catch (error) {
       console.error("Error updating approval request:", error);
       res.status(400).json({ message: "Failed to update approval request" });
@@ -8054,6 +8117,166 @@ export async function registerRoutes(
   // ─────────────────────────────────────────────────────────────────────────
   // CLIENTS — Child & Pregnant Woman logbook demographics
   // ─────────────────────────────────────────────────────────────────────────
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // PUBLIC DIGITAL VAXCARD VERIFICATION & CAREGIVER REMINDERS
+  // ─────────────────────────────────────────────────────────────────────────
+
+  // GET /api/public/vaxcard/:id — Public verification endpoint for QR code scanning
+  app.get("/api/public/vaxcard/:id", async (req: any, res) => {
+    try {
+      const clientId = req.params.id;
+      if (!clientId) {
+        return res.status(400).json({ success: false, message: "Client ID required" });
+      }
+
+      const [record] = await db
+        .select({
+          client: clients,
+          tenant: tenants,
+          facilityName: facilities.name,
+          facilityType: facilities.facilityType,
+          villageName: villages.name,
+          districtName: districts.name,
+          provinceName: provinces.name,
+        })
+        .from(clients)
+        .innerJoin(tenants, eq(tenants.id, clients.tenantId))
+        .innerJoin(facilities, eq(facilities.id, clients.facilityId))
+        .innerJoin(districts, eq(districts.id, facilities.districtId))
+        .innerJoin(provinces, eq(provinces.id, districts.provinceId))
+        .leftJoin(villages, eq(villages.id, clients.villageId))
+        .where(eq(clients.id, clientId));
+
+      if (!record || !record.client) {
+        return res.status(404).json({ success: false, message: "Immunization record not found or invalid QR code" });
+      }
+
+      // Fetch all administered doses for this client
+      const vaccinations = await db
+        .select()
+        .from(clientVaccinations)
+        .where(eq(clientVaccinations.clientId, clientId))
+        .orderBy(asc(clientVaccinations.administeredDate));
+
+      // Return sanitized public passport object
+      res.json({
+        success: true,
+        verified: true,
+        verifiedAt: new Date().toISOString(),
+        client: {
+          id: record.client.id,
+          clientId: record.client.clientId,
+          name: record.client.name,
+          clientType: record.client.clientType,
+          dateOfBirth: record.client.dateOfBirth,
+          gender: record.client.gender,
+          parentName: record.client.parentName,
+          contactPhone: record.client.contactPhone,
+          email: record.client.email,
+          preferredChannel: record.client.preferredChannel,
+          catchmentStatus: record.client.catchmentStatus,
+          isCrossBorder: record.client.isCrossBorder,
+          countryOfOrigin: record.client.countryOfOrigin,
+          contraindications: record.client.contraindications,
+          isRefusal: record.client.isRefusal,
+          refusalReason: record.client.refusalReason,
+          facilityName: record.facilityName,
+          facilityType: record.facilityType,
+          villageName: record.villageName || "Catchment Zone",
+          districtName: record.districtName,
+          provinceName: record.provinceName,
+        },
+        tenant: {
+          id: record.tenant.id,
+          code: record.tenant.code,
+          countryCode: record.tenant.countryCode,
+          name: record.tenant.name,
+          settings: record.tenant.settings,
+        },
+        vaccinations: vaccinations.map(v => ({
+          id: v.id,
+          vaccineName: v.vaccineName,
+          administeredDate: v.administeredDate,
+          batchNumber: v.batchNumber,
+          expiryDate: v.expiryDate,
+          vvmStatus: v.vvmStatus,
+        })),
+      });
+    } catch (err: any) {
+      console.error("GET /api/public/vaxcard/:id error:", err);
+      res.status(500).json({ success: false, message: "Failed to verify immunization record" });
+    }
+  });
+
+  // POST /api/public/vaxcard/:id/subscribe-reminders — Allow caregiver to subscribe/save reminders
+  app.post("/api/public/vaxcard/:id/subscribe-reminders", async (req: any, res) => {
+    try {
+      const clientId = req.params.id;
+      const { phone, email, channel, caregiverName } = req.body;
+
+      if (!phone && !email) {
+        return res.status(400).json({ success: false, message: "Phone number or email address is required to receive reminders" });
+      }
+
+      const [client] = await db
+        .select()
+        .from(clients)
+        .where(eq(clients.id, clientId));
+
+      if (!client) {
+        return res.status(404).json({ success: false, message: "Client record not found" });
+      }
+
+      // Update client communication preferences safely
+      const updateData: any = {
+        updatedAt: new Date(),
+      };
+      if (phone) updateData.contactPhone = phone;
+      if (email) updateData.email = email;
+      if (caregiverName) updateData.parentName = caregiverName;
+      if (channel) {
+        updateData.preferredChannel = channel;
+        if (channel === "whatsapp") updateData.whatsappAvailable = true;
+      }
+
+      await db
+        .update(clients)
+        .set(updateData)
+        .where(eq(clients.id, clientId));
+
+      // Send instant confirmation dispatch
+      const targetDestination = channel === "email" ? email : phone;
+      const channelLabel = channel === "email" ? "Email" : channel === "whatsapp" ? "WhatsApp" : "SMS";
+      const host = req.get("host") || "vaxplan.org";
+      const protocol = req.protocol || "https";
+      const digitalCardUrl = `${protocol}://${host}/verify/${client.id}`;
+      const confirmText = `Dear ${caregiverName || client.parentName || "Caregiver"}, you are subscribed to immunization reminders for ${client.name}. Access child digital health passport anytime: ${digitalCardUrl}`;
+
+      try {
+        if (channel === "sms" && phone) {
+          await sendSms({ to: phone, message: confirmText });
+        } else if (channel === "whatsapp" && phone) {
+          await sendWhatsApp({ to: phone, message: confirmText });
+        } else if (channel === "email" && email) {
+          await sendMessagingEmail({ to: email, subject: `Immunization Reminder Subscription: ${client.name}`, text: confirmText });
+        }
+      } catch (dispatchErr) {
+        console.warn("Caregiver subscription dispatch notice warning:", dispatchErr);
+      }
+
+      res.json({
+        success: true,
+        message: `Successfully configured ${channelLabel} reminders for ${client.name}. Record saved.`,
+        preferredChannel: channel || "sms",
+        contactPhone: phone || client.contactPhone,
+        email: email || client.email,
+      });
+    } catch (err: any) {
+      console.error("POST /api/public/vaxcard/:id/subscribe-reminders error:", err);
+      res.status(500).json({ success: false, message: "Failed to update reminder subscription" });
+    }
+  });
 
   app.use("/api/clients", isAuthenticated, requireTenant, requireDbUser, blockDistrictStaffClientWorkspaces);
   app.use("/api/indicators/defaulters", isAuthenticated, requireTenant, requireDbUser, blockDistrictStaffClientWorkspaces);

@@ -270,7 +270,7 @@ const clientFormSchema = insertClientSchema.extend({
   }
 );
 
-const VACCINE_SCHEDULE = [
+export const VACCINE_SCHEDULE = [
   { group: "At Birth", name: "BCG", weeks: 0, code: "BCG" },
   { group: "At Birth", name: "OPV 0", weeks: 0, code: "OPV_0" },
   
