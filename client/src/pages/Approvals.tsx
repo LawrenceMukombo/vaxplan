@@ -30,6 +30,7 @@ import {
   History,
   Eye,
   Check,
+  ExternalLink,
 } from "lucide-react";
 import type {
   ApprovalRequest,
@@ -48,11 +49,31 @@ import { buildGeoMaps, getRecordHierarchy } from "@/lib/geoHierarchy";
 
 import { ChangeApprovalScreen } from "@/components/history/ChangeApprovalScreen";
 
+type ApprovalActor = {
+  id: string;
+  name: string;
+  email?: string | null;
+  role?: string | null;
+  roles?: string[] | null;
+};
+
+type EnrichedApprovalRequest = ApprovalRequest & {
+  submitter?: ApprovalActor | null;
+  resolver?: ApprovalActor | null;
+};
+
+const humanizeRole = (role?: string | null) => role
+  ? role.replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase())
+  : "Role not recorded";
+
+const actorName = (actor: ApprovalActor | null | undefined, fallbackId?: string | null) =>
+  actor?.name || (fallbackId === "system" ? "Automated Policy" : "User record unavailable");
+
 export default function Approvals() {
   const { toast } = useToast();
   const [, setLocation] = useLocation();
-  const [selectedRequest, setSelectedRequest] = useState<ApprovalRequest | null>(null);
-  const [detailRequest, setDetailRequest] = useState<ApprovalRequest | null>(null);
+  const [selectedRequest, setSelectedRequest] = useState<EnrichedApprovalRequest | null>(null);
+  const [detailRequest, setDetailRequest] = useState<EnrichedApprovalRequest | null>(null);
   const [actionType, setActionType] = useState<"approve" | "reject" | "return" | null>(null);
   const [historyMicroplanId, setHistoryMicroplanId] = useState<number | null>(null);
   const [comment, setComment] = useState("");
@@ -72,8 +93,19 @@ export default function Approvals() {
     })();
   }, []);
 
-  const { data: requests, isLoading } = useQuery<ApprovalRequest[]>({
-    queryKey: ["/api/approvals"],
+  const { data: requests, isLoading } = useQuery<EnrichedApprovalRequest[]>({
+    queryKey: ["/api/approvals", "with-actor-identities-v1"],
+    queryFn: async () => {
+      const response = await fetch("/api/approvals", {
+        credentials: "include",
+        cache: "no-store",
+        headers: { Accept: "application/json" },
+      });
+      if (!response.ok) throw new Error("Failed to load approval workflow");
+      return response.json();
+    },
+    staleTime: 0,
+    refetchOnMount: "always",
   });
 
   const selectedMicroplanId = selectedRequest?.entityType === "microplan"
@@ -102,6 +134,8 @@ export default function Approvals() {
     status: string;
     reason: string | null;
     createdAt: string;
+    createdByUserId?: string | null;
+    actor?: ApprovalActor | null;
   }>>({
     queryKey: ["/api/microplans", historyMicroplanId, "versions"],
     queryFn: async () => {
@@ -143,7 +177,7 @@ export default function Approvals() {
     return { sessionsById, populationById, microplansById };
   }, [sessionPlans, populationData, microplans]);
 
-  const resolveGeo = (item: ApprovalRequest) => {
+  const resolveGeo = (item: EnrichedApprovalRequest) => {
     let source: Record<string, unknown> | null = null;
     if (item.entityType === "session") {
       const sp = entityLookup.sessionsById.get(item.entityId);
@@ -169,7 +203,7 @@ export default function Approvals() {
     };
   };
 
-  const applyGeoFilter = (list: ApprovalRequest[]): ApprovalRequest[] => {
+  const applyGeoFilter = (list: EnrichedApprovalRequest[]): EnrichedApprovalRequest[] => {
     if (geoProvinceId === null && geoDistrictId === null && geoFacilityId === null) return list;
     return list.filter((r) => {
       const g = resolveGeo(r);
@@ -202,7 +236,7 @@ export default function Approvals() {
     },
   });
 
-  const getStageInfo = (item: ApprovalRequest) => {
+  const getStageInfo = (item: EnrichedApprovalRequest) => {
     const maxApprovalLevel = (tenant?.settings as any)?.maxApprovalLevel || "national";
     const stages = maxApprovalLevel === "district"
       ? ["district"]
@@ -256,7 +290,7 @@ export default function Approvals() {
     },
   });
 
-  const enrichWithGeo = (list: ApprovalRequest[]) =>
+  const enrichWithGeo = (list: EnrichedApprovalRequest[]) =>
     list.map((r) => {
       const g = resolveGeo(r);
       return {
@@ -267,7 +301,7 @@ export default function Approvals() {
           g.provinceId !== null ? geoMaps.provinceMap.get(g.provinceId)?.name ?? "" : "",
         _geoDistrictName:
           g.districtId !== null ? geoMaps.districtMap.get(g.districtId)?.name ?? "" : "",
-      } as ApprovalRequest & {
+      } as EnrichedApprovalRequest & {
         _geoProvinceId: number | null;
         _geoDistrictId: number | null;
         _geoProvinceName: string;
@@ -308,15 +342,22 @@ export default function Approvals() {
       key: "entityType",
       header: "Request Type",
       sortable: true,
-      render: (item: ApprovalRequest) => {
+      render: (item: EnrichedApprovalRequest) => {
         const Icon = getEntityIcon(item.entityType);
         return (
-          <div className="flex items-center gap-2">
-            <div className="h-8 w-8 rounded bg-primary/10 flex items-center justify-center">
+          <div
+            className="flex items-center gap-2 group cursor-pointer"
+            title="Click to view details"
+            onClick={(e) => {
+              e.stopPropagation();
+              setDetailRequest(item);
+            }}
+          >
+            <div className="h-8 w-8 rounded bg-primary/10 flex items-center justify-center group-hover:bg-primary/20 transition-colors">
               <Icon className="h-4 w-4 text-primary" />
             </div>
             <div>
-              <p className="font-medium capitalize">{item.entityType} Update</p>
+              <p className="font-medium capitalize text-foreground group-hover:text-primary transition-colors">{item.entityType} Update</p>
               <p className="text-xs text-muted-foreground">
                 ID: {item.entityId}
               </p>
@@ -329,7 +370,7 @@ export default function Approvals() {
       key: "currentLevel",
       header: "Level & Stage",
       sortable: true,
-      render: (item: ApprovalRequest) => {
+      render: (item: EnrichedApprovalRequest) => {
         const { stageNumber, totalStages } = getStageInfo(item);
         return (
           <div className="flex flex-col gap-0.5">
@@ -349,7 +390,7 @@ export default function Approvals() {
       key: "_geoProvinceName",
       header: "Province",
       sortable: true,
-      render: (item: ApprovalRequest) => {
+      render: (item: EnrichedApprovalRequest) => {
         const g = resolveGeo(item);
         const name = g.provinceId !== null ? geoMaps.provinceMap.get(g.provinceId)?.name : null;
         return <span className="text-sm">{name ?? "—"}</span>;
@@ -359,7 +400,7 @@ export default function Approvals() {
       key: "_geoDistrictName",
       header: "District",
       sortable: true,
-      render: (item: ApprovalRequest) => {
+      render: (item: EnrichedApprovalRequest) => {
         const g = resolveGeo(item);
         const name = g.districtId !== null ? geoMaps.districtMap.get(g.districtId)?.name : null;
         return <span className="text-sm">{name ?? "—"}</span>;
@@ -369,18 +410,20 @@ export default function Approvals() {
       key: "submittedAt",
       header: "Submitted",
       sortable: true,
-      render: (item: ApprovalRequest) => (
-        <span className="text-sm">
-          {item.submittedAt
-            ? format(new Date(item.submittedAt), "MMM d, yyyy HH:mm")
-            : "-"}
-        </span>
+      render: (item: EnrichedApprovalRequest) => (
+        <div className="text-xs space-y-0.5 max-w-[180px]">
+          <span className="font-semibold block">{actorName(item.submitter, item.requestedById)}</span>
+          <span className="block text-muted-foreground">{humanizeRole(item.submitter?.role)}</span>
+          <time className="block text-muted-foreground" title={item.submittedAt ? new Date(item.submittedAt).toISOString() : undefined}>
+            {item.submittedAt ? format(new Date(item.submittedAt), "MMM d, yyyy HH:mm:ss") : "Time not recorded"}
+          </time>
+        </div>
       ),
     },
     {
       key: "status",
       header: "Status",
-      render: (item: ApprovalRequest) => {
+      render: (item: EnrichedApprovalRequest) => {
         const isPending = (item.status || "pending") === "pending";
         return (
           <div className="space-y-0.5">
@@ -398,7 +441,7 @@ export default function Approvals() {
       key: "resolvedAt",
       header: "Approved / Resolved",
       sortable: true,
-      render: (item: ApprovalRequest) => {
+      render: (item: EnrichedApprovalRequest) => {
         if (item.resolvedAt) {
           return (
             <div className="text-xs space-y-0.5" data-testid={`approval-resolved-at-${item.id}`}>
@@ -407,9 +450,10 @@ export default function Approvals() {
               </span>
               {item.resolvedById && (
                 <span className="block text-[11px] text-muted-foreground truncate max-w-[140px]">
-                  By: {item.resolvedById === "system" ? "Automated Policy" : item.resolvedById}
+                  By: {actorName(item.resolver, item.resolvedById)}
                 </span>
               )}
+              {item.resolver?.role && <span className="block text-[10px] text-muted-foreground">{humanizeRole(item.resolver.role)}</span>}
             </div>
           );
         }
@@ -425,8 +469,9 @@ export default function Approvals() {
                   ✓ {latest.currentLevel} approved
                 </span>
                 {latest.resolvedAt && (
-                  <span>{format(new Date(latest.resolvedAt), "MMM d, HH:mm")}</span>
+                  <span>{format(new Date(latest.resolvedAt), "MMM d, yyyy HH:mm:ss")}</span>
                 )}
+                <span className="block">By {actorName(latest.resolver, latest.resolvedById)}</span>
               </div>
             );
           }
@@ -437,14 +482,21 @@ export default function Approvals() {
     {
       key: "actions",
       header: "Actions",
-      render: (item: ApprovalRequest) => {
+      render: (item: EnrichedApprovalRequest) => {
         const isMicroplan = item.entityType === "microplan";
+        const targetPlan = isMicroplan ? microplans.find((m) => m.id === item.entityId) : null;
+        const isCampaign = targetPlan?.planType === "sia_campaign" || targetPlan?.planType === "campaign";
+        const planPath = isMicroplan ? `/microplans/${isCampaign ? "campaigns" : "routine"}/${item.entityId}` : null;
+
         return (
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
             <Button
               size="sm"
               variant="ghost"
-              onClick={() => setDetailRequest(item)}
+              onClick={(e) => {
+                e.stopPropagation();
+                setDetailRequest(item);
+              }}
               title="View approval audit details"
               data-testid={"button-detail-" + item.id}
             >
@@ -454,11 +506,30 @@ export default function Approvals() {
               <Button
                 size="sm"
                 variant="ghost"
-                onClick={() => setHistoryMicroplanId(item.entityId)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setHistoryMicroplanId(item.entityId);
+                }}
                 title="Version history"
                 data-testid={"button-history-" + item.id}
               >
                 <History className="h-4 w-4" />
+              </Button>
+            )}
+            {isMicroplan && planPath && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-8 px-2.5 gap-1.5 text-xs text-primary hover:text-primary font-medium border-primary/20 hover:bg-primary/5"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setLocation(planPath);
+                }}
+                title={item.status === "pending" ? "Open and review microplan" : "Open and view microplan details"}
+                data-testid={"button-open-plan-" + item.id}
+              >
+                <ExternalLink className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">Open Plan</span>
               </Button>
             )}
             {item.status === "pending" && (
@@ -467,7 +538,8 @@ export default function Approvals() {
                   <Button
                     size="sm"
                     variant="outline"
-                    onClick={() => {
+                    onClick={(e) => {
+                      e.stopPropagation();
                       setSelectedRequest(item);
                       setActionType("return");
                     }}
@@ -480,7 +552,8 @@ export default function Approvals() {
                 <Button
                   size="sm"
                   variant="ghost"
-                  onClick={() => {
+                  onClick={(e) => {
+                    e.stopPropagation();
                     setSelectedRequest(item);
                     setActionType("approve");
                   }}
@@ -492,7 +565,8 @@ export default function Approvals() {
                 <Button
                   size="sm"
                   variant="ghost"
-                  onClick={() => {
+                  onClick={(e) => {
+                    e.stopPropagation();
                     setSelectedRequest(item);
                     setActionType("reject");
                   }}
@@ -631,6 +705,7 @@ export default function Approvals() {
               <DataTable
                 data={pendingRequests}
                 columns={columns}
+                onRowClick={(item) => setDetailRequest(item)}
                 searchable
                 searchKeys={["entityType", "currentLevel"]}
                 emptyMessage="No pending approval requests."
@@ -649,6 +724,7 @@ export default function Approvals() {
               <DataTable
                 data={approvedRequests}
                 columns={columns}
+                onRowClick={(item) => setDetailRequest(item)}
                 searchable
                 searchKeys={["entityType", "currentLevel"]}
                 emptyMessage="No approved requests."
@@ -663,6 +739,7 @@ export default function Approvals() {
               <DataTable
                 data={returnedRequests}
                 columns={columns}
+                onRowClick={(item) => setDetailRequest(item)}
                 searchable
                 searchKeys={["entityType", "currentLevel"]}
                 emptyMessage="No requests have been returned for correction."
@@ -676,6 +753,7 @@ export default function Approvals() {
               <DataTable
                 data={rejectedRequests}
                 columns={columns}
+                onRowClick={(item) => setDetailRequest(item)}
                 searchable
                 searchKeys={["entityType", "currentLevel"]}
                 emptyMessage="No rejected requests."
@@ -830,68 +908,204 @@ export default function Approvals() {
       </Dialog>
 
       <Dialog open={!!detailRequest} onOpenChange={(open) => !open && setDetailRequest(null)}>
-        <DialogContent className="sm:max-w-lg" data-testid="dialog-approval-detail">
+        <DialogContent className="sm:max-w-xl" data-testid="dialog-approval-detail">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-base">
-              <span>Approval Audit Record</span>
-              {detailRequest && <Badge variant="outline">#{detailRequest.id}</Badge>}
+            <DialogTitle className="flex items-center justify-between text-base pr-6">
+              <div className="flex items-center gap-2">
+                <span>Approval Request Details</span>
+                {detailRequest && <Badge variant="outline">#{detailRequest.id}</Badge>}
+              </div>
+              {detailRequest && <ApprovalBadge status={detailRequest.status || "pending"} />}
             </DialogTitle>
           </DialogHeader>
-          {detailRequest && (
-            <div className="space-y-4 py-2 text-xs">
-              <div className="rounded-lg bg-muted/40 p-3.5 space-y-2 border">
-                <div className="flex justify-between items-center">
-                  <span className="font-semibold text-muted-foreground uppercase text-[10px]">Entity</span>
-                  <span className="font-bold text-foreground capitalize">
-                    {detailRequest.entityType} #{detailRequest.entityId}
-                  </span>
+          {detailRequest && (() => {
+            const detailMicroplan = detailRequest.entityType === "microplan"
+              ? microplans.find((m) => m.id === detailRequest.entityId)
+              : null;
+            const detailFacility = detailMicroplan?.facilityId
+              ? facilities.find((f) => f.id === detailMicroplan.facilityId)
+              : (detailRequest.entityType === "facility" ? facilities.find((f) => f.id === detailRequest.entityId) : null);
+            const detailGeo = resolveGeo(detailRequest);
+            const detailProvince = detailGeo.provinceId !== null ? geoMaps.provinceMap.get(detailGeo.provinceId) : null;
+            const detailDistrict = detailGeo.districtId !== null ? geoMaps.districtMap.get(detailGeo.districtId) : null;
+            const { stageNumber, totalStages } = getStageInfo(detailRequest);
+            const isCampaign = detailMicroplan?.planType === "sia_campaign" || detailMicroplan?.planType === "campaign";
+            const planPath = detailRequest.entityType === "microplan"
+              ? `/microplans/${isCampaign ? "campaigns" : "routine"}/${detailRequest.entityId}`
+              : null;
+
+            return (
+              <div className="space-y-4 py-2 text-xs">
+                {/* Target Record Information Card */}
+                <div className="rounded-lg bg-muted/40 p-3.5 space-y-2.5 border">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <span className="font-semibold text-muted-foreground uppercase text-[10px] block">Target Record</span>
+                      <p className="font-bold text-sm text-foreground capitalize">
+                        {detailMicroplan?.name || `${detailRequest.entityType} #${detailRequest.entityId}`}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <span className="font-semibold text-muted-foreground uppercase text-[10px] block">Review Level</span>
+                      <Badge variant="outline" className="capitalize font-medium">
+                        {detailRequest.currentLevel} (Stage {stageNumber} of {totalStages})
+                      </Badge>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 pt-2 border-t text-[11px]">
+                    {detailFacility && (
+                      <div>
+                        <span className="text-muted-foreground block text-[10px]">Facility</span>
+                        <span className="font-medium text-foreground">{detailFacility.name}</span>
+                      </div>
+                    )}
+                    {detailDistrict && (
+                      <div>
+                        <span className="text-muted-foreground block text-[10px]">District</span>
+                        <span className="font-medium text-foreground">{detailDistrict.name}</span>
+                      </div>
+                    )}
+                    {detailProvince && (
+                      <div>
+                        <span className="text-muted-foreground block text-[10px]">Province</span>
+                        <span className="font-medium text-foreground">{detailProvince.name}</span>
+                      </div>
+                    )}
+                    {detailMicroplan && (
+                      <>
+                        <div>
+                          <span className="text-muted-foreground block text-[10px]">Plan Type</span>
+                          <span className="font-medium text-foreground capitalize">
+                            {isCampaign ? "SIA Campaign" : "Routine Microplan"}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-muted-foreground block text-[10px]">Period / Cycle</span>
+                          <span className="font-medium text-foreground">
+                            {detailMicroplan.year} {detailMicroplan.quarter ? `Q${detailMicroplan.quarter}` : ""}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-muted-foreground block text-[10px]">Plan Status</span>
+                          <span className="font-medium text-foreground capitalize">{detailMicroplan.status || "—"}</span>
+                        </div>
+                      </>
+                    )}
+                  </div>
                 </div>
-                <div className="flex justify-between items-center">
-                  <span className="font-semibold text-muted-foreground uppercase text-[10px]">Review Level</span>
-                  <Badge variant="outline" className="capitalize">{detailRequest.currentLevel}</Badge>
+
+                {/* Audit Grid */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="rounded-lg border p-3 space-y-1 bg-card">
+                    <span className="font-bold text-[10px] text-muted-foreground uppercase block">Submission Details</span>
+                    <p className="font-semibold text-foreground">
+                      {detailRequest.submittedAt ? format(new Date(detailRequest.submittedAt), "MMM d, yyyy HH:mm:ss") : "—"}
+                    </p>
+                    <span className="text-[11px] font-medium block">{actorName(detailRequest.submitter, detailRequest.requestedById)}</span>
+                    <span className="text-[11px] text-muted-foreground block">{humanizeRole(detailRequest.submitter?.role)}</span>
+                    {detailRequest.submitter?.email && <span className="text-[11px] text-muted-foreground block break-all">{detailRequest.submitter.email}</span>}
+                  </div>
+
+                  <div className="rounded-lg border p-3 space-y-1 bg-card">
+                    <span className="font-bold text-[10px] text-muted-foreground uppercase block">Resolution Details</span>
+                    <p className="font-semibold text-foreground">
+                      {detailRequest.resolvedAt ? format(new Date(detailRequest.resolvedAt), "MMM d, yyyy HH:mm:ss") : "Awaiting reviewer decision"}
+                    </p>
+                    <span className="text-[11px] font-medium block">
+                      {detailRequest.resolvedById ? actorName(detailRequest.resolver, detailRequest.resolvedById) : "Pending"}
+                    </span>
+                    {detailRequest.resolver?.role && <span className="text-[11px] text-muted-foreground block">{humanizeRole(detailRequest.resolver.role)}</span>}
+                    {detailRequest.resolver?.email && <span className="text-[11px] text-muted-foreground block break-all">{detailRequest.resolver.email}</span>}
+                  </div>
                 </div>
-                <div className="flex justify-between items-center">
-                  <span className="font-semibold text-muted-foreground uppercase text-[10px]">Status</span>
-                  <ApprovalBadge status={detailRequest.status || "pending"} />
+
+                {detailRequest.comments && (
+                  <div className="rounded-lg border bg-muted/30 p-3 space-y-1">
+                    <span className="font-bold text-[10px] text-muted-foreground uppercase block">Reviewer Notes & Justification</span>
+                    <p className="italic text-foreground">{detailRequest.comments}</p>
+                  </div>
+                )}
+
+                {/* Dialog Footer Actions */}
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 pt-2 border-t">
+                  <div className="flex items-center gap-2">
+                    {planPath && (
+                      <Button
+                        type="button"
+                        variant="default"
+                        size="sm"
+                        className="gap-1.5 font-medium"
+                        onClick={() => {
+                          setDetailRequest(null);
+                          setLocation(planPath);
+                        }}
+                        data-testid="button-open-plan-from-dialog"
+                      >
+                        <ExternalLink className="h-4 w-4" />
+                        {detailRequest.status === "pending" ? "Open & Review Plan in Wizard" : "Open & View Plan Details"}
+                      </Button>
+                    )}
+                    {detailRequest.entityType === "microplan" && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="gap-1"
+                        onClick={() => {
+                          const targetId = detailRequest.entityId;
+                          setDetailRequest(null);
+                          setHistoryMicroplanId(targetId);
+                        }}
+                      >
+                        <History className="h-3.5 w-3.5" />
+                        <span>History</span>
+                      </Button>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-2 justify-end">
+                    {detailRequest.status === "pending" && (
+                      <>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            const req = detailRequest;
+                            setDetailRequest(null);
+                            setSelectedRequest(req);
+                            setActionType("return");
+                          }}
+                        >
+                          <Undo2 className="mr-1 h-3.5 w-3.5" />
+                          Revert
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="default"
+                          size="sm"
+                          className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                          onClick={() => {
+                            const req = detailRequest;
+                            setDetailRequest(null);
+                            setSelectedRequest(req);
+                            setActionType("approve");
+                          }}
+                        >
+                          <CheckCircle className="mr-1 h-3.5 w-3.5" />
+                          Approve
+                        </Button>
+                      </>
+                    )}
+                    <Button variant="ghost" size="sm" onClick={() => setDetailRequest(null)}>
+                      Close
+                    </Button>
+                  </div>
                 </div>
               </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div className="rounded-lg border p-3 space-y-1">
-                  <span className="font-bold text-[10px] text-muted-foreground uppercase block">Date & Time Submitted</span>
-                  <p className="font-semibold text-foreground">
-                    {detailRequest.submittedAt ? format(new Date(detailRequest.submittedAt), "MMM d, yyyy HH:mm") : "—"}
-                  </p>
-                  <span className="text-[11px] text-muted-foreground block truncate">
-                    By: {detailRequest.requestedById}
-                  </span>
-                </div>
-
-                <div className="rounded-lg border p-3 space-y-1">
-                  <span className="font-bold text-[10px] text-muted-foreground uppercase block">Date & Time Approved / Resolved</span>
-                  <p className="font-semibold text-foreground">
-                    {detailRequest.resolvedAt ? format(new Date(detailRequest.resolvedAt), "MMM d, yyyy HH:mm") : "Pending resolution"}
-                  </p>
-                  <span className="text-[11px] text-muted-foreground block truncate">
-                    {detailRequest.resolvedById ? `By: ${detailRequest.resolvedById === "system" ? "Automated Policy" : detailRequest.resolvedById}` : "Awaiting reviewer"}
-                  </span>
-                </div>
-              </div>
-
-              {detailRequest.comments && (
-                <div className="rounded-lg border bg-muted/30 p-3 space-y-1">
-                  <span className="font-bold text-[10px] text-muted-foreground uppercase block">Reviewer Notes & Justification</span>
-                  <p className="italic text-foreground">{detailRequest.comments}</p>
-                </div>
-              )}
-
-              <div className="flex justify-end pt-2">
-                <Button variant="outline" size="sm" onClick={() => setDetailRequest(null)}>
-                  Close
-                </Button>
-              </div>
-            </div>
-          )}
+            );
+          })()}
         </DialogContent>
       </Dialog>
 
@@ -917,9 +1131,14 @@ export default function Approvals() {
                       <ApprovalBadge status={version.status as any} />
                     </div>
                     {version.reason && <p className="mt-2 text-sm text-muted-foreground">{version.reason}</p>}
+                    <p className="mt-2 text-xs font-medium">{actorName(version.actor, version.createdByUserId)}</p>
+                    <p className="text-[11px] text-muted-foreground">
+                      {humanizeRole(version.actor?.role)}{version.actor?.email ? ` · ${version.actor.email}` : ""}
+                    </p>
+                    {version.createdByUserId && <p className="text-[10px] text-muted-foreground">Actor ID: {version.createdByUserId}</p>}
                   </div>
                   <time className="whitespace-nowrap text-xs text-muted-foreground">
-                    {format(new Date(version.createdAt), "MMM d, yyyy HH:mm")}
+                    {format(new Date(version.createdAt), "MMM d, yyyy HH:mm:ss")}
                   </time>
                 </div>
               ))
@@ -977,6 +1196,12 @@ export default function Approvals() {
                 const stageStatus = statusFor(item.level);
                 const isPending = stageStatus === "pending";
                 const isComplete = stageStatus === "approved" || stageStatus === "complete";
+                const stageRequest = item.level === "Facility"
+                  ? workflowRequests.slice().sort((a, b) => new Date(a.submittedAt || 0).getTime() - new Date(b.submittedAt || 0).getTime())[0]
+                  : workflowRequests.find((request) => request.currentLevel.toLowerCase() === item.level.toLowerCase());
+                const stageActor = item.level === "Facility" ? stageRequest?.submitter : stageRequest?.resolver;
+                const stageActorId = item.level === "Facility" ? stageRequest?.requestedById : stageRequest?.resolvedById;
+                const stageTime = item.level === "Facility" ? stageRequest?.submittedAt : stageRequest?.resolvedAt;
                 return (
                   <div key={item.level} className="flex items-center gap-4">
                     <div className="text-center min-w-[120px]">
@@ -1009,6 +1234,15 @@ export default function Approvals() {
                       >
                         {isComplete ? "Completed ✓" : isPending ? "Current stage ⏳" : "Waiting"}
                       </Badge>
+                      {stageRequest && (
+                        <div className="mt-2 text-[10px] leading-4 max-w-[150px] mx-auto">
+                          {isComplete && <p className="font-semibold text-foreground break-words">{actorName(stageActor, stageActorId)}</p>}
+                          {isPending && <p className="font-medium text-blue-700">Awaiting {humanizeRole(item.role)}</p>}
+                          {isComplete && stageActor?.role && <p className="text-muted-foreground">{humanizeRole(stageActor.role)}</p>}
+                          {stageTime && <time className="block text-muted-foreground" title={new Date(stageTime).toISOString()}>{format(new Date(stageTime), "MMM d, yyyy HH:mm:ss")}</time>}
+                          {stageRequest.comments && item.level !== "Facility" && <p className="mt-1 text-muted-foreground italic break-words">“{stageRequest.comments}”</p>}
+                        </div>
+                      )}
                     </div>
                     {index < filtered.length - 1 && (
                       <div className={`h-0.5 w-10 hidden sm:block ${isComplete ? "bg-emerald-500" : "bg-muted"}`} />
