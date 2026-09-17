@@ -218,11 +218,12 @@ export function AddCommunityDialog({
     if (activeFacility && activeFacility.latitude && activeFacility.longitude) {
       return [parseFloat(activeFacility.latitude.toString()), parseFloat(activeFacility.longitude.toString())] as [number, number];
     }
-    // Check country/tenant center or fall back to Zambia Lusaka Center
+    // Tenant configuration is authoritative. Unknown/new tenants receive a
+    // neutral world view rather than being silently placed in another country.
     if (tenant?.settings?.mapCenter && Array.isArray(tenant.settings.mapCenter)) {
       return [tenant.settings.mapCenter[0], tenant.settings.mapCenter[1]] as [number, number];
     }
-    return [-15.42, 28.29] as [number, number];
+    return [0, 20] as [number, number];
   }, [activeFacility, tenant]);
 
   const latVal = latitude ? parseFloat(latitude) : null;

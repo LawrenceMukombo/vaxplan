@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   MapContainer,
   Marker,
@@ -73,7 +74,7 @@ interface FitBoundsProps {
   defaultZoom?: number;
 }
 
-function MapController({ bounds, defaultCenter = [-28.4793, 24.6727], defaultZoom = 6 }: FitBoundsProps) {
+function MapController({ bounds, defaultCenter = [0, 20], defaultZoom = 6 }: FitBoundsProps) {
   const map = useMap();
 
   useEffect(() => {
@@ -118,6 +119,7 @@ export function OutreachPostsMap({
   onEditPost,
   onSwitchToTable,
 }: OutreachPostsMapProps) {
+  const { data: tenant } = useQuery<any>({ queryKey: ["/api/me/tenant"] });
   const [basemap, setBasemap] = usePersistedBasemap();
 
   // Filters
@@ -248,8 +250,14 @@ export function OutreachPostsMap({
       const lng = parseFloat(String(f.longitude));
       if (!isNaN(lat) && !isNaN(lng) && lat !== 0) return [lat, lng];
     }
-    return [-28.4793, 24.6727]; // South Africa default
-  }, [facilities]);
+    const configuredCenter = tenant?.settings?.mapCenter;
+    if (Array.isArray(configuredCenter) && configuredCenter.length >= 2) {
+      const lat = Number(configuredCenter[0]);
+      const lng = Number(configuredCenter[1]);
+      if (Number.isFinite(lat) && Number.isFinite(lng)) return [lat, lng];
+    }
+    return [0, 20];
+  }, [facilities, tenant]);
 
   const handleCopyCoords = (id: number, lat: string | number, lng: string | number) => {
     const text = `${lat}, ${lng}`;

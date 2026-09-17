@@ -156,6 +156,7 @@ type FormValues = z.infer<typeof dayPlanFormSchema>;
 
 export default function SessionDayPlans() {
   const { id } = useParams<{ id: string }>();
+  const { data: tenant } = useQuery<any>({ queryKey: ["/api/me/tenant"] });
   const { toast } = useToast();
   const populationOverlay = usePopulationOverlay();
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -485,8 +486,14 @@ export default function SessionDayPlans() {
     if (activeFacility && activeFacility.latitude && activeFacility.longitude) {
       return [parseFloat(activeFacility.latitude.toString()), parseFloat(activeFacility.longitude.toString())] as [number, number];
     }
-    return [-4.85, 31.6] as [number, number]; // South Sudan default
-  }, [activeFacility]);
+    const configuredCenter = tenant?.settings?.mapCenter;
+    if (Array.isArray(configuredCenter) && configuredCenter.length >= 2) {
+      const lat = Number(configuredCenter[0]);
+      const lng = Number(configuredCenter[1]);
+      if (Number.isFinite(lat) && Number.isFinite(lng)) return [lat, lng] as [number, number];
+    }
+    return [0, 20] as [number, number];
+  }, [activeFacility, tenant]);
 
   // Quick Add Village States
   const [quickAddOpen, setQuickAddOpen] = useState(false);

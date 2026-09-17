@@ -111,7 +111,7 @@ export async function notifyUserSignupDecision(
   tenant?: Tenant,
 ): Promise<void> {
   const isApproved = request.status === "approved";
-  const tenantName = tenant?.name || "Republic of South Africa National Department of Health";
+  const tenantName = tenant?.name || "your Ministry of Health programme";
   const roleDisplay = request.requestedRole.replace(/_/g, " ").toUpperCase();
   const loginUrl = `${APP_BASE_URL}/`;
 

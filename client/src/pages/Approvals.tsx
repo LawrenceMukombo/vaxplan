@@ -127,6 +127,10 @@ export default function Approvals() {
   ).length ?? 0;
   const reviewChecklistComplete = selectedRequest?.entityType !== "microplan" || reviewedStepCount >= 11;
 
+  const historyTargetMicroplanId = historyMicroplanId ?? (
+    detailRequest?.entityType === "microplan" ? detailRequest.entityId : null
+  );
+
   const { data: versionHistory = [], isLoading: historyLoading } = useQuery<Array<{
     id: number;
     versionLabel: string;
@@ -137,13 +141,13 @@ export default function Approvals() {
     createdByUserId?: string | null;
     actor?: ApprovalActor | null;
   }>>({
-    queryKey: ["/api/microplans", historyMicroplanId, "versions"],
+    queryKey: ["/api/microplans", historyTargetMicroplanId, "versions"],
     queryFn: async () => {
-      const response = await fetch("/api/microplans/" + historyMicroplanId + "/versions", { credentials: "include" });
+      const response = await fetch("/api/microplans/" + historyTargetMicroplanId + "/versions", { credentials: "include" });
       if (!response.ok) throw new Error("Failed to load microplan history");
       return response.json();
     },
-    enabled: historyMicroplanId !== null,
+    enabled: historyTargetMicroplanId !== null,
   });
 
   const { data: tenant } = useQuery<Tenant>({
@@ -485,7 +489,7 @@ export default function Approvals() {
       render: (item: EnrichedApprovalRequest) => {
         const isMicroplan = item.entityType === "microplan";
         const targetPlan = isMicroplan ? microplans.find((m) => m.id === item.entityId) : null;
-        const isCampaign = targetPlan?.planType === "sia_campaign" || targetPlan?.planType === "campaign";
+        const isCampaign = targetPlan?.planType === "sia_campaign";
         const planPath = isMicroplan ? `/microplans/${isCampaign ? "campaigns" : "routine"}/${item.entityId}` : null;
 
         return (
@@ -908,10 +912,10 @@ export default function Approvals() {
       </Dialog>
 
       <Dialog open={!!detailRequest} onOpenChange={(open) => !open && setDetailRequest(null)}>
-        <DialogContent className="sm:max-w-xl" data-testid="dialog-approval-detail">
-          <DialogHeader>
-            <DialogTitle className="flex items-center justify-between text-base pr-6">
-              <div className="flex items-center gap-2">
+        <DialogContent className="flex max-h-[92dvh] w-[calc(100vw-1.5rem)] max-w-5xl flex-col gap-0 overflow-hidden p-0 sm:rounded-2xl" data-testid="dialog-approval-detail">
+          <DialogHeader className="shrink-0 border-b bg-gradient-to-r from-background via-background to-muted/40 px-5 py-4 sm:px-7">
+            <DialogTitle className="flex min-w-0 flex-col gap-3 pr-8 text-lg sm:flex-row sm:items-center sm:justify-between sm:text-xl">
+              <div className="flex min-w-0 items-center gap-2">
                 <span>Approval Request Details</span>
                 {detailRequest && <Badge variant="outline">#{detailRequest.id}</Badge>}
               </div>
@@ -929,31 +933,53 @@ export default function Approvals() {
             const detailProvince = detailGeo.provinceId !== null ? geoMaps.provinceMap.get(detailGeo.provinceId) : null;
             const detailDistrict = detailGeo.districtId !== null ? geoMaps.districtMap.get(detailGeo.districtId) : null;
             const { stageNumber, totalStages } = getStageInfo(detailRequest);
-            const isCampaign = detailMicroplan?.planType === "sia_campaign" || detailMicroplan?.planType === "campaign";
+            const isCampaign = detailMicroplan?.planType === "sia_campaign";
             const planPath = detailRequest.entityType === "microplan"
               ? `/microplans/${isCampaign ? "campaigns" : "routine"}/${detailRequest.entityId}`
               : null;
 
+            const maxApprovalLevel = (tenant?.settings as any)?.maxApprovalLevel || "national";
+            const workflowLevels = maxApprovalLevel === "district"
+              ? ["facility", "district"]
+              : maxApprovalLevel === "provincial"
+              ? ["facility", "district", "provincial"]
+              : ["facility", "district", "provincial", "national"];
+            const workflowRequests = (requests ?? []).filter(
+              (request) => request.entityType === detailRequest.entityType && request.entityId === detailRequest.entityId,
+            );
+            const currentWorkflowIndex = workflowLevels.indexOf(detailRequest.currentLevel.toLowerCase());
+
             return (
-              <div className="space-y-4 py-2 text-xs">
+              <div className="flex min-h-0 flex-1 flex-col text-sm">
+                <Tabs defaultValue="summary" className="flex min-h-0 flex-1 flex-col">
+                  <div className="shrink-0 border-b px-5 pt-3 sm:px-7">
+                    <TabsList className="grid h-auto w-full grid-cols-3 rounded-xl bg-muted/70 p-1 sm:w-[460px]">
+                      <TabsTrigger value="summary" className="py-2">Summary</TabsTrigger>
+                      <TabsTrigger value="workflow" className="py-2">Workflow stage</TabsTrigger>
+                      <TabsTrigger value="history" className="py-2">History</TabsTrigger>
+                    </TabsList>
+                  </div>
+
+                  <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-5 sm:px-7">
+                    <TabsContent value="summary" className="m-0 space-y-5">
                 {/* Target Record Information Card */}
-                <div className="rounded-lg bg-muted/40 p-3.5 space-y-2.5 border">
-                  <div className="flex items-center justify-between">
-                    <div>
+                <div className="space-y-4 rounded-xl border bg-muted/30 p-4 sm:p-5">
+                  <div className="flex min-w-0 flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                    <div className="min-w-0">
                       <span className="font-semibold text-muted-foreground uppercase text-[10px] block">Target Record</span>
-                      <p className="font-bold text-sm text-foreground capitalize">
+                      <p className="break-words text-base font-bold text-foreground capitalize sm:text-lg">
                         {detailMicroplan?.name || `${detailRequest.entityType} #${detailRequest.entityId}`}
                       </p>
                     </div>
-                    <div className="text-right">
+                    <div className="shrink-0 lg:text-right">
                       <span className="font-semibold text-muted-foreground uppercase text-[10px] block">Review Level</span>
-                      <Badge variant="outline" className="capitalize font-medium">
+                      <Badge variant="outline" className="max-w-full whitespace-normal text-left capitalize font-medium lg:text-right">
                         {detailRequest.currentLevel} (Stage {stageNumber} of {totalStages})
                       </Badge>
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 pt-2 border-t text-[11px]">
+                  <div className="grid grid-cols-1 gap-4 border-t pt-4 sm:grid-cols-2 lg:grid-cols-3">
                     {detailFacility && (
                       <div>
                         <span className="text-muted-foreground block text-[10px]">Facility</span>
@@ -1021,21 +1047,92 @@ export default function Approvals() {
                 </div>
 
                 {detailRequest.comments && (
-                  <div className="rounded-lg border bg-muted/30 p-3 space-y-1">
+                  <div className="space-y-1 rounded-xl border bg-muted/30 p-4">
                     <span className="font-bold text-[10px] text-muted-foreground uppercase block">Reviewer Notes & Justification</span>
                     <p className="italic text-foreground">{detailRequest.comments}</p>
                   </div>
                 )}
 
+                    </TabsContent>
+
+                    <TabsContent value="workflow" className="m-0 space-y-4">
+                      <div>
+                        <h3 className="text-base font-semibold">Approval workflow</h3>
+                        <p className="text-sm text-muted-foreground">Live progress through the configured approval hierarchy.</p>
+                      </div>
+                      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                        {workflowLevels.map((level, index) => {
+                          const stageRequest = level === "facility"
+                            ? workflowRequests.slice().sort((a, b) => new Date(a.submittedAt || 0).getTime() - new Date(b.submittedAt || 0).getTime())[0]
+                            : workflowRequests.find((request) => request.currentLevel.toLowerCase() === level);
+                          const complete = level === "facility" ? Boolean(stageRequest) : stageRequest?.status === "approved";
+                          const current = level !== "facility" && index === currentWorkflowIndex && detailRequest.status === "pending";
+                          const actor = level === "facility" ? stageRequest?.submitter : stageRequest?.resolver;
+                          const actorId = level === "facility" ? stageRequest?.requestedById : stageRequest?.resolvedById;
+                          const eventTime = level === "facility" ? stageRequest?.submittedAt : stageRequest?.resolvedAt;
+                          return (
+                            <div key={level} className={`relative overflow-hidden rounded-xl border p-4 ${current ? "border-blue-300 bg-blue-50/70 dark:bg-blue-950/20" : complete ? "border-emerald-200 bg-emerald-50/60 dark:bg-emerald-950/20" : "bg-card"}`}>
+                              <div className="flex items-center justify-between gap-3">
+                                <div className={`flex h-9 w-9 items-center justify-center rounded-full font-bold ${complete ? "bg-emerald-600 text-white" : current ? "bg-blue-600 text-white" : "bg-muted text-muted-foreground"}`}>
+                                  {complete ? <Check className="h-5 w-5" /> : index + 1}
+                                </div>
+                                <Badge variant={current ? "default" : "outline"} className="capitalize">
+                                  {complete ? "Completed" : current ? "Current stage" : "Waiting"}
+                                </Badge>
+                              </div>
+                              <p className="mt-4 font-semibold capitalize">{level}</p>
+                              <p className="text-xs text-muted-foreground">{level === "facility" ? "Plan submission" : `${humanizeRole(`${level}_coordinator`)} review`}</p>
+                              {(actor || actorId) && <p className="mt-3 break-words text-xs font-medium">{actorName(actor, actorId)}</p>}
+                              {actor?.role && <p className="text-xs text-muted-foreground">{humanizeRole(actor.role)}</p>}
+                              {eventTime && <time className="mt-1 block text-xs text-muted-foreground">{format(new Date(eventTime), "MMM d, yyyy HH:mm:ss")}</time>}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </TabsContent>
+
+                    <TabsContent value="history" className="m-0 space-y-3">
+                      <div>
+                        <h3 className="text-base font-semibold">Decision and version history</h3>
+                        <p className="text-sm text-muted-foreground">An immutable timeline of submissions, reviews, returns, and approvals.</p>
+                      </div>
+                      {historyLoading ? (
+                        <Skeleton className="h-28 w-full rounded-xl" />
+                      ) : versionHistory.length === 0 ? (
+                        <div className="rounded-xl border border-dashed p-10 text-center text-sm text-muted-foreground">No audit checkpoints have been recorded yet.</div>
+                      ) : (
+                        <div className="space-y-3">
+                          {versionHistory.map((version) => (
+                            <div key={version.id} className="flex flex-col gap-3 rounded-xl border bg-card p-4 sm:flex-row sm:items-start sm:justify-between">
+                              <div className="min-w-0">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <Badge variant="outline">{version.versionLabel}</Badge>
+                                  <span className="font-semibold capitalize">{version.eventType.replace(/_/g, " ")}</span>
+                                  <ApprovalBadge status={version.status as any} />
+                                </div>
+                                {version.reason && <p className="mt-2 break-words text-sm text-muted-foreground">{version.reason}</p>}
+                                <p className="mt-2 text-sm font-medium">{actorName(version.actor, version.createdByUserId)}</p>
+                                <p className="break-all text-xs text-muted-foreground">{humanizeRole(version.actor?.role)}{version.actor?.email ? ` · ${version.actor.email}` : ""}</p>
+                              </div>
+                              <time className="shrink-0 text-xs text-muted-foreground">{format(new Date(version.createdAt), "MMM d, yyyy HH:mm:ss")}</time>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </TabsContent>
+                  </div>
+                </Tabs>
+
                 {/* Dialog Footer Actions */}
-                <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 pt-2 border-t">
-                  <div className="flex items-center gap-2">
+                <div className="shrink-0 border-t bg-background/95 px-5 py-4 backdrop-blur sm:px-7">
+                  <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                  <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:flex-wrap">
                     {planPath && (
                       <Button
                         type="button"
                         variant="default"
                         size="sm"
-                        className="gap-1.5 font-medium"
+                        className="w-full gap-1.5 font-medium sm:w-auto"
                         onClick={() => {
                           setDetailRequest(null);
                           setLocation(planPath);
@@ -1043,28 +1140,12 @@ export default function Approvals() {
                         data-testid="button-open-plan-from-dialog"
                       >
                         <ExternalLink className="h-4 w-4" />
-                        {detailRequest.status === "pending" ? "Open & Review Plan in Wizard" : "Open & View Plan Details"}
-                      </Button>
-                    )}
-                    {detailRequest.entityType === "microplan" && (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="gap-1"
-                        onClick={() => {
-                          const targetId = detailRequest.entityId;
-                          setDetailRequest(null);
-                          setHistoryMicroplanId(targetId);
-                        }}
-                      >
-                        <History className="h-3.5 w-3.5" />
-                        <span>History</span>
+                        <span className="truncate">{detailRequest.status === "pending" ? "Open & Review Plan" : "Open Plan Details"}</span>
                       </Button>
                     )}
                   </div>
 
-                  <div className="flex items-center gap-2 justify-end">
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 lg:flex lg:justify-end">
                     {detailRequest.status === "pending" && (
                       <>
                         <Button
@@ -1098,9 +1179,10 @@ export default function Approvals() {
                         </Button>
                       </>
                     )}
-                    <Button variant="ghost" size="sm" onClick={() => setDetailRequest(null)}>
+                    <Button className="w-full lg:w-auto" variant="ghost" size="sm" onClick={() => setDetailRequest(null)}>
                       Close
                     </Button>
+                  </div>
                   </div>
                 </div>
               </div>

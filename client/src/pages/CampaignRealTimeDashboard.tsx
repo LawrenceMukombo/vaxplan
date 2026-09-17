@@ -75,6 +75,7 @@ import {
 import type { Facility } from "@shared/schema";
 import { getCountryConfig } from "@/lib/countryConfig";
 import { getTenantMapDefaults, type TenantLike } from "@/lib/tenantGeo";
+import { getSeededCampaignMetrics } from "@/lib/seededCampaignMetrics";
 
 // ─── Supportive Supervision Alert Item ──────────────────────────────────────
 export interface SupervisionFieldAlert {
@@ -137,7 +138,13 @@ export default function CampaignRealTimeDashboard() {
       return dbFacilities.map((fac, idx) => {
         const districtObj = dbDistricts.find((d) => d.id === fac.districtId);
         const provinceObj = districtObj ? dbProvinces.find((p) => p.id === districtObj.provinceId) : undefined;
-        const target = (fac as any).targetPop || (fac as any).targetPopulation || (fac as any).catchmentPopulation || 2500;
+        const target = getSeededCampaignMetrics({
+          tenantKey: tenant?.id || tenant?.code || effectiveCountryCode,
+          campaignKey: "facility-target",
+          facilityId: fac.id,
+          facilityName: fac.name,
+          targetPopulation: (fac as any).targetPop || (fac as any).targetPopulation || (fac as any).catchmentPopulation,
+        }).targetPopulation;
         const lat = fac.latitude != null ? Number(fac.latitude) : (districtObj?.lat != null ? Number(districtObj.lat) : tenantMapDefaults.center[0] + ((idx % 5) - 2) * 0.04);
         const lng = fac.longitude != null ? Number(fac.longitude) : (districtObj?.lng != null ? Number(districtObj.lng) : tenantMapDefaults.center[1] + (Math.floor(idx / 5) - 1) * 0.04);
         const phone = (fac as any).phone || `${countryConfig.phonePrefix} ${Math.floor(700000000 + (fac.id * 12345) % 200000000)}`;
@@ -164,7 +171,7 @@ export default function CampaignRealTimeDashboard() {
       { id: 3, name: `${countryConfig.name} Community Clinic`, district: `${countryConfig.name} Central`, districtId: 1, province: countryConfig.adminLabels.level1 || "Central", targetPop: 2100, status: "Submitted (Day 3)", supervisionScore: 79, inCharge: "Nurse-in-Charge", phone: `${countryConfig.phonePrefix} 734 567 890`, lat: tenantMapDefaults.center[0] - 0.02, lng: tenantMapDefaults.center[1] - 0.02 },
       { id: 4, name: `${countryConfig.name} Outpost PHCC`, district: `${countryConfig.name} Central`, districtId: 1, province: countryConfig.adminLabels.level1 || "Central", targetPop: 1800, status: "Pending (Day 3)", supervisionScore: 72, inCharge: "Community Health Worker", phone: `${countryConfig.phonePrefix} 745 678 901`, lat: tenantMapDefaults.center[0] + 0.04, lng: tenantMapDefaults.center[1] - 0.03 },
     ];
-  }, [dbFacilities, dbDistricts, dbProvinces, countryConfig, tenantMapDefaults]);
+  }, [dbFacilities, dbDistricts, dbProvinces, countryConfig, tenantMapDefaults, tenant?.id, tenant?.code, effectiveCountryCode]);
 
   // Dynamic Default Campaigns based on Country Norms
   const dynamicDefaultCampaigns = useMemo<SiaCampaignConfig[]>(() => {
@@ -508,8 +515,15 @@ export default function CampaignRealTimeDashboard() {
     return activeFacilities.map((fac) => {
       const sheets = campaignSheets.filter((s) => s.facilityId === fac.id);
       const vaccinatedFromSheets = sheets.reduce((sum, s) => sum + s.totalVaccinated, 0);
-      const target = fac.targetPop || 2500;
-      const vaccinated = vaccinatedFromSheets > 0 ? vaccinatedFromSheets : Math.round(target * 0.72);
+      const seeded = getSeededCampaignMetrics({
+        tenantKey: tenant?.id || tenant?.code || effectiveCountryCode,
+        campaignKey: activeCampaign.id,
+        facilityId: fac.id,
+        facilityName: fac.name,
+        targetPopulation: fac.targetPop,
+      });
+      const target = seeded.targetPopulation;
+      const vaccinated = vaccinatedFromSheets > 0 ? vaccinatedFromSheets : seeded.vaccinated;
       const coveragePercent = Number(((vaccinated / target) * 100).toFixed(1));
       const hasAlert = fieldAlerts.some((a) => a.facilityId === fac.id && !a.resolved);
       const coords = { lat: fac.lat, lng: fac.lng };
@@ -532,7 +546,7 @@ export default function CampaignRealTimeDashboard() {
         coordinates: coords,
       };
     });
-  }, [activeFacilities, campaignSheets, fieldAlerts]);
+  }, [activeFacilities, campaignSheets, fieldAlerts, tenant?.id, tenant?.code, effectiveCountryCode, activeCampaign.id]);
 
   // Dynamic Trajectory Curve Data (No Hardcoding)
   const trajectoryChartData = useMemo(() => {
@@ -674,14 +688,22 @@ export default function CampaignRealTimeDashboard() {
   const facilityLeagueRows = useMemo(() => {
     return activeFacilities.map((fac) => {
       const sheetsForFac = campaignSheets.filter((s) => s.facilityId === fac.id);
-      const vaccinated = sheetsForFac.reduce((sum, s) => sum + s.totalVaccinated, 0) || Math.round(fac.targetPop * 0.48);
-      const coverage = Number(((vaccinated / fac.targetPop) * 100).toFixed(1));
+      const submittedVaccinated = sheetsForFac.reduce((sum, s) => sum + s.totalVaccinated, 0);
+      const seeded = getSeededCampaignMetrics({
+        tenantKey: tenant?.id || tenant?.code || effectiveCountryCode,
+        campaignKey: activeCampaign.id,
+        facilityId: fac.id,
+        facilityName: fac.name,
+        targetPopulation: fac.targetPop,
+      });
+      const vaccinated = submittedVaccinated > 0 ? submittedVaccinated : seeded.vaccinated;
+      const coverage = Number(((vaccinated / seeded.targetPopulation) * 100).toFixed(1));
       const zeroDose = sheetsForFac.reduce((sum, s) => sum + s.zeroDoseIdentified, 0) || Math.round(vaccinated * 0.08);
       return {
         id: fac.id,
         name: fac.name,
         district: fac.district,
-        targetPop: fac.targetPop,
+        targetPop: seeded.targetPopulation,
         vaccinated,
         coverage,
         zeroDose,
@@ -691,7 +713,7 @@ export default function CampaignRealTimeDashboard() {
         phone: fac.phone,
       };
     });
-  }, [activeFacilities, campaignSheets]);
+  }, [activeFacilities, campaignSheets, tenant?.id, tenant?.code, effectiveCountryCode, activeCampaign.id]);
 
   // Table Sorting and Filtering State (Global Rule 24)
   const [tableSearch, setTableSearch] = useState("");

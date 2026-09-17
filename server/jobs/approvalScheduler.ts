@@ -30,7 +30,7 @@ export async function runApprovalScheduler(): Promise<void> {
     for (const mp of pendingToApprove) {
       if (!mp.tenantId) continue;
       const tenant = await storage.getTenant(mp.tenantId);
-      if (!approvalEligibility(mp.createdAt, tenant?.settings, now).allowed) continue;
+      if (!approvalEligibility(mp.submittedAt ?? mp.createdAt, tenant?.settings, now).allowed) continue;
       console.log(`[approval-scheduler] Auto-approving microplan ID: ${mp.id} (Tenant: ${mp.tenantId})`);
 
       // Update microplan status to 'auto_approved'

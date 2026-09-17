@@ -1,5 +1,5 @@
 import { Express } from "express";
-import { and, asc, desc, eq, sql as dsql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql as dsql } from "drizzle-orm";
 import { db } from "../db";
 import { storage } from "../storage";
 import {
@@ -7,6 +7,7 @@ import {
   microplanVersions,
   approvalRequests,
   auditLogs,
+  users,
   populationData,
   villages,
   stockTransactions,
@@ -306,12 +307,44 @@ export function registerMicroplanRoutes(app: Express) {
             eq(auditLogs.action, "microplan_step_reviewed"),
           )).orderBy(asc(auditLogs.createdAt))
         : [];
+      const actorIds = Array.from(new Set([
+        ...reviewRequests.flatMap((request) => [request.requestedById, request.resolvedById]),
+        ...reviewEvents.map((event) => event.userId),
+      ].filter((id): id is string => Boolean(id) && id !== "system")));
+      const reviewActors = actorIds.length === 0 ? [] : await db.select({
+        id: users.id,
+        firstName: users.firstName,
+        lastName: users.lastName,
+        email: users.email,
+        role: users.role,
+        roles: users.roles,
+      }).from(users).where(and(
+        eq(users.tenantId, req.tenantId),
+        inArray(users.id, actorIds),
+      ));
+      const reviewActorsById = new Map(reviewActors.map((actor) => [actor.id, {
+        id: actor.id,
+        name: [actor.firstName, actor.lastName].filter(Boolean).join(" ").trim() || actor.email || "Former user",
+        email: actor.email,
+        role: actor.role,
+        roles: actor.roles,
+      }]));
+      const systemActor = { id: "system", name: "Automated Policy", email: null, role: "system", roles: ["system"] };
+      const resolveActor = (id: string | null | undefined) => id === "system"
+        ? systemActor
+        : id ? reviewActorsById.get(id) ?? { id, name: "Former or unavailable user", email: null, role: null, roles: [] } : null;
+      const enrichedReviewRequests = reviewRequests.map((request) => ({
+        ...request,
+        submitter: resolveActor(request.requestedById),
+        resolver: resolveActor(request.resolvedById),
+      }));
       const latestStepReviews = new Map<string, any>();
       for (const event of reviewEvents) {
         const value = (event.newValue ?? {}) as any;
         latestStepReviews.set(`${value.level}:${value.step}`, {
           ...value,
           reviewerId: event.userId,
+          reviewer: resolveActor(event.userId),
           reviewedAt: event.createdAt,
         });
       }
@@ -342,7 +375,7 @@ export function registerMicroplanRoutes(app: Express) {
         excludedVillages,
         reviewSnapshot,
         reviewWorkflow: {
-          requests: reviewRequests,
+          requests: enrichedReviewRequests,
           stepReviews: Array.from(latestStepReviews.values()),
           currentRequest: currentReviewRequest,
           canReviewCurrentLevel,

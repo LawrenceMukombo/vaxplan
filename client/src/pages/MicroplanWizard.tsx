@@ -4053,7 +4053,7 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
   // --- Render ------------------------------------------------------------
   const stepDef = STEPS.find((s) => s.id === active)!;
   const { data: policyTenant } = useQuery<{ settings?: unknown }>({ queryKey: ["/api/me/tenant"] });
-  const approvalWindow = approvalEligibility(microplan?.createdAt, policyTenant?.settings);
+  const approvalWindow = approvalEligibility(microplan?.submittedAt ?? microplan?.createdAt, policyTenant?.settings);
   const status = microplan?.status ?? "draft";
   const isReadOnly = Boolean(microplanId && !microplan) || status !== "draft";
   const isReviewerMode = isReadOnly && !!reviewWorkflow?.canReviewCurrentLevel;
@@ -4357,9 +4357,11 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
   }, [communities, calendar, staffing, staffRoster, vaccines, mobilization, transport, budget]);
 
   const { data: readiness } = useQuery<any>({
-    queryKey: ["/api/microplans/readiness", facilityId, year],
+    queryKey: ["/api/microplans/readiness", facilityId, year, microplanId],
     queryFn: async () => {
-      const res = await fetch(`/api/microplans/readiness/${facilityId}?year=${year}`, { credentials: "include" });
+      const params = new URLSearchParams({ year: String(year) });
+      if (microplanId) params.set("microplanId", String(microplanId));
+      const res = await fetch(`/api/microplans/readiness/${facilityId}?${params.toString()}`, { credentials: "include" });
       if (!res.ok) throw new Error("Failed to load microplanning readiness");
       return res.json();
     },
@@ -5019,9 +5021,23 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
                     reachable when the step content is long and the footer is
                     off-screen, and so toasts at the bottom can't obscure it. */}
                 {active === 11 && isReadOnly ? (
-                  <Button size="sm" variant="outline" disabled data-testid="button-reviewed-top">
+                  <Button
+                    size="sm"
+                    variant="default"
+                    disabled={!isReviewerMode || recordStepReview.isPending}
+                    onClick={() => currentStepReview
+                      ? setLocation("/approvals")
+                      : recordStepReview.mutate()}
+                    data-testid="button-reviewed-top"
+                  >
                     <CheckCircle2 className="mr-1 h-3 w-3" />
-                    {currentStepReview ? "Reviewed" : "Awaiting review"}
+                    {currentStepReview && isReviewerMode
+                      ? "Continue to approval"
+                      : currentStepReview
+                      ? "Reviewed"
+                      : isReviewerMode
+                      ? "Mark reviewed"
+                      : "Awaiting review"}
                   </Button>
                 ) : active === 11 ? (
                   <Button
@@ -5076,7 +5092,14 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
                       <p className="font-semibold">Facility submission</p>
                       <p className="text-emerald-700 dark:text-emerald-300">Submitted</p>
                       {microplan?.submittedAt && <p className="mt-1 text-[10px] text-muted-foreground">{new Date(microplan.submittedAt).toLocaleString()}</p>}
-                      {reviewWorkflow.requests?.[0]?.requestedById && <p className="text-[10px] text-muted-foreground">Submitted by: {reviewWorkflow.requests[0].requestedById}</p>}
+                      {reviewWorkflow.requests?.[0] && (
+                        <p className="text-[10px] text-muted-foreground">
+                          Submitted by: {reviewWorkflow.requests[0].submitter?.name || "Former or unavailable user"}
+                          {reviewWorkflow.requests[0].submitter?.role
+                            ? ` · ${String(reviewWorkflow.requests[0].submitter.role).replace(/_/g, " ")}`
+                            : ""}
+                        </p>
+                      )}
                     </div>
                     {(["district", "provincial", "national"] as const).map((level) => {
                       const stage = reviewWorkflow.requests?.find((request: any) => String(request.currentLevel).toLowerCase() === level);
@@ -5085,7 +5108,12 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
                           <p className="font-semibold capitalize">{level} review</p>
                           <p className="capitalize text-muted-foreground">{stage?.status ?? "Not reached"}</p>
                           {stage?.resolvedAt && <p className="mt-1 text-[10px] text-muted-foreground">Completed {new Date(stage.resolvedAt).toLocaleString()}</p>}
-                          {stage?.resolvedById && <p className="text-[10px] text-muted-foreground">Reviewer: {stage.resolvedById}</p>}
+                          {stage?.resolvedById && (
+                            <p className="text-[10px] text-muted-foreground">
+                              Reviewer: {stage.resolver?.name || "Former or unavailable user"}
+                              {stage.resolver?.role ? ` · ${String(stage.resolver.role).replace(/_/g, " ")}` : ""}
+                            </p>
+                          )}
                         </div>
                       );
                     })}
@@ -5596,9 +5624,22 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
                   <Save className="mr-1 h-4 w-4" /> Save Draft
                 </Button>
                 {active === 11 && isReadOnly ? (
-                  <Button variant="outline" disabled data-testid="button-reviewed">
+                  <Button
+                    variant="default"
+                    disabled={!isReviewerMode || recordStepReview.isPending}
+                    onClick={() => currentStepReview
+                      ? setLocation("/approvals")
+                      : recordStepReview.mutate()}
+                    data-testid="button-reviewed"
+                  >
                     <CheckCircle2 className="mr-1 h-4 w-4" />
-                    {currentStepReview ? "Reviewed" : "Awaiting review"}
+                    {currentStepReview && isReviewerMode
+                      ? "Continue to approval"
+                      : currentStepReview
+                      ? "Reviewed"
+                      : isReviewerMode
+                      ? "Mark reviewed"
+                      : "Awaiting review"}
                   </Button>
                 ) : active === 11 ? (
                   <Button

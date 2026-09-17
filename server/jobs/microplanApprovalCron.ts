@@ -4,8 +4,8 @@
  * Background job that runs every 6 hours and:
  *  1. Sends a 7-day reminder to district officials for microplans still "pending"
  *     after 7 days without action.
- *  2. Auto-approves microplans that have been pending for ≥14 days without a
- *     district-level decision ("silence = consent" policy).
+ *  2. Escalates overdue reviews. Auto-approval is disabled by default and is
+ *     only available when a tenant explicitly enables allowMicroplanAutoApproval.
  *
  * Both thresholds are configurable via environment variables:
  *   MICROPLAN_REMINDER_DAYS   (default: 7)
@@ -44,6 +44,7 @@ export async function runMicroplanApprovalCron(now: Date = new Date()): Promise<
 
   for (const tenant of tenants) {
     try {
+      const allowAutoApproval = (tenant.settings as any)?.allowMicroplanAutoApproval === true;
       // Fetch all pending microplans for this tenant that have a submittedAt
       let pendingMicroplans: any[] = [];
       try {
@@ -75,7 +76,7 @@ export async function runMicroplanApprovalCron(now: Date = new Date()): Promise<
         if (!submittedAt) continue;
 
         // ── Auto-approve: pending ≥ autoApproveDays ────────────────────────
-        if (submittedAt <= autoApproveThreshold) {
+        if (allowAutoApproval && submittedAt <= autoApproveThreshold) {
           try {
             // Create an approval record marked as auto-approved
             await db.insert(approvalRequests as any).values({
@@ -151,7 +152,9 @@ export async function runMicroplanApprovalCron(now: Date = new Date()): Promise<
                 userId: u.id,
                 type: "microplan_approval_reminder",
                 title: `⏰ Reminder: Microplan awaiting approval — ${fac.name}`,
-                body: `A microplan for ${fac.name} has been pending for ${reminderDays} days. It will be auto-approved in ${autoApproveDays - reminderDays} more days if no action is taken.`,
+                body: allowAutoApproval
+                  ? `A microplan for ${fac.name} has been pending for ${reminderDays} days. Tenant policy permits auto-approval after ${autoApproveDays} days if no action is taken.`
+                  : `A microplan for ${fac.name} has exceeded the ${reminderDays}-day review SLA. Please review it now or escalate it to the next responsible manager; it will not be approved automatically.`,
                 data: { microplanId: mp.id, facilityId: fac.id } as any,
               }).catch(() => {});
             }
@@ -187,7 +190,7 @@ export function startMicroplanApprovalCron(): void {
   if (schedulerHandle) return;
   const intervalHours = 6; // Check every 6 hours
   const intervalMs = intervalHours * 60 * 60 * 1000;
-  console.log(`[microplan-cron] scheduler started — checking every ${intervalHours}h | reminder=${envDays("MICROPLAN_REMINDER_DAYS",7)}d | auto-approve=${envDays("MICROPLAN_AUTO_APPROVE_DAYS",14)}d`);
+  console.log(`[microplan-cron] scheduler started — checking every ${intervalHours}h | SLA reminder=${envDays("MICROPLAN_REMINDER_DAYS",7)}d | auto-approval requires explicit tenant opt-in`);
 
   const tick = () => {
     runMicroplanApprovalCron().catch((err) => {

@@ -1666,7 +1666,7 @@ export class DatabaseStorage implements IStorage {
 
     if (existing && data.status && isApprovedPlan(data.status) && !isApprovedPlan(existing.status)) {
       const tenant = await this.getTenant(tenantId);
-      const eligibility = approvalEligibility(existing.createdAt, tenant?.settings);
+      const eligibility = approvalEligibility(existing.submittedAt ?? existing.createdAt, tenant?.settings);
       if (!eligibility.allowed) {
         throw new Error(eligibility.message);
       }

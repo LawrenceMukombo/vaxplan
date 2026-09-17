@@ -14,10 +14,10 @@ describe("microplan persistence approval boundaries", () => {
   await expect(storage.updateMicroplan("tenant",1,{status:"draft",name:"Changed"} as any)).rejects.toThrow("read-only");
   expect(mock.update).not.toHaveBeenCalled();
  });
- it("rejects early approval before touching persistent fields",async()=>{
+ it("allows approval immediately after submission",async()=>{
   vi.spyOn(storage,"getMicroplan").mockResolvedValue({status:"pending",createdAt:new Date("2026-09-02")} as any);
-  await expect(storage.updateMicroplan("tenant",1,{status:"approved"} as any)).rejects.toThrow("21 days");
-  expect(mock.update).not.toHaveBeenCalled();
+  await storage.updateMicroplan("tenant",1,{status:"approved"} as any);
+  expect(mock.update).toHaveBeenCalledTimes(1);
  });
  it("allows approval at the boundary and strips a forged creation date",async()=>{
   vi.spyOn(storage,"getMicroplan").mockResolvedValue({status:"pending",createdAt:new Date("2026-09-01")} as any);

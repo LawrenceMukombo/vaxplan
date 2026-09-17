@@ -62,6 +62,7 @@ import {
   DollarSign,
   Calculator,
   RefreshCw,
+  Handshake,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -242,6 +243,13 @@ const workflowNavItems: NavItem[] = [
 
 // 10. Administration & Governance
 const adminNavItems: NavItem[] = [
+  {
+    title: "Partnership Enquiries",
+    path: "/admin/partners",
+    icon: Handshake,
+    moduleKey: "userManagement",
+    permissionCheck: (u) => canAccessAdministration(u),
+  },
   {
     title: "User Management",
     path: "/admin/users",

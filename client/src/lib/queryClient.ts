@@ -768,9 +768,18 @@ export async function apiRequest<T = unknown>(
   url: string,
   data?: unknown | undefined,
 ): Promise<T> {
+  const [requestPath] = url.split("?");
+  // Governance decisions must never be accepted locally and replayed later.
+  // An approval is only valid when the server can authenticate the reviewer,
+  // verify geography/role, enforce the review checklist, and advance the
+  // hierarchy atomically.
+  const requiresLiveServer = /^\/api\/approvals(?:\/|$)/.test(requestPath);
   // If browser network state is offline, run mutation locally and queue in outbox
   const isOffline = !navigator.onLine;
   if (isOffline && method !== "GET") {
+    if (requiresLiveServer) {
+      throw new Error("Approval decisions require a live server connection. Reconnect, then try again.");
+    }
     if (!hasValidOfflineSession()) {
       throw new Error("Offline authentication required. Reconnect and sign in again.");
     }
@@ -793,6 +802,9 @@ export async function apiRequest<T = unknown>(
     });
   } catch (err) {
     if (method !== "GET") {
+      if (requiresLiveServer) {
+        throw new Error("The approval was not saved because the server could not be reached. Nothing was queued; try again when connected.");
+      }
       if (!hasValidOfflineSession()) {
         throw new Error("Offline authentication required. Reconnect and sign in again.");
       }

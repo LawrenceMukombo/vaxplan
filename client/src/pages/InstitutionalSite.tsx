@@ -20,22 +20,22 @@ function track(eventName: string, interest?: string) {
 function Seo({ title, description, canonical }: { title: string; description: string; canonical: string }) {
   useEffect(() => {
     document.title = title;
-    const set = (selector: string, attr: string, value: string) => {
-      let el = document.head.querySelector(selector) as HTMLMetaElement | HTMLLinkElement | null;
-      if (!el) {
-        const newEl = document.createElement(selector.startsWith("link") ? "link" : "meta");
-        document.head.appendChild(newEl);
-        el = newEl as HTMLMetaElement | HTMLLinkElement;
-      }
-      el.setAttribute(attr, value);
+    const meta = (attribute: "name" | "property", key: string, value: string) => {
+      let el = document.head.querySelector(`meta[${attribute}="${key}"]`) as HTMLMetaElement | null;
+      if (!el) { el = document.createElement("meta"); el.setAttribute(attribute, key); document.head.appendChild(el); }
+      el.content = value;
     };
-    set('meta[name="description"]', "content", description);
-    set('meta[property="og:title"]', "content", title);
-    set('meta[property="og:description"]', "content", description);
-    set('meta[property="og:type"]', "content", "website");
-    set('meta[property="og:image"]', "content", "https://vaxplan.org/og-card.png");
-    set('meta[name="twitter:card"]', "content", "summary_large_image");
-    set('link[rel="canonical"]', "href", canonical);
+    meta("name", "description", description);
+    meta("property", "og:title", title); meta("property", "og:description", description);
+    meta("property", "og:type", "website"); meta("property", "og:url", canonical);
+    meta("property", "og:image", "https://vaxplan.org/og-card.png");
+    meta("name", "twitter:card", "summary_large_image");
+    let link = document.head.querySelector('link[rel="canonical"]') as HTMLLinkElement | null;
+    if (!link) { link = document.createElement("link"); link.rel = "canonical"; document.head.appendChild(link); }
+    link.href = canonical;
+    let structured = document.head.querySelector("script[data-vaxplan-institutional-schema]") as HTMLScriptElement | null;
+    if (!structured) { structured = document.createElement("script"); structured.type = "application/ld+json"; structured.dataset.vaxplanInstitutionalSchema = "true"; document.head.appendChild(structured); }
+    structured.text = JSON.stringify({ "@context": "https://schema.org", "@type": "WebPage", name: title, description, url: canonical, isPartOf: { "@type": "WebSite", name: "VaxPlan", url: "https://vaxplan.org" } });
   }, [title, description, canonical]);
   return null;
 }

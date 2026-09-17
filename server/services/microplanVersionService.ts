@@ -10,6 +10,7 @@ import {
   sessionVillages,
   vaccineRequirements,
   villages,
+  users,
 } from "@shared/schema";
 
 export type VersionEvent =
@@ -126,7 +127,7 @@ export async function createMicroplanVersion(
 }
 
 export async function listMicroplanVersions(db: NodePgDatabase<any>, tenantId: string, microplanId: number) {
-  return db.select({
+  const versions = await db.select({
     id: microplanVersions.id,
     microplanId: microplanVersions.microplanId,
     versionNumber: microplanVersions.versionNumber,
@@ -139,6 +140,26 @@ export async function listMicroplanVersions(db: NodePgDatabase<any>, tenantId: s
   }).from(microplanVersions)
     .where(and(eq(microplanVersions.tenantId, tenantId), eq(microplanVersions.microplanId, microplanId)))
     .orderBy(desc(microplanVersions.versionNumber));
+  const userIds = Array.from(new Set(versions.map((version) => version.createdByUserId).filter((id): id is string => Boolean(id && id !== "system"))));
+  const creators = userIds.length === 0 ? [] : await db.select({
+    id: users.id,
+    firstName: users.firstName,
+    lastName: users.lastName,
+    email: users.email,
+    role: users.role,
+  }).from(users).where(and(eq(users.tenantId, tenantId), inArray(users.id, userIds)));
+  const byId = new Map(creators.map((creator) => [creator.id, {
+    id: creator.id,
+    name: [creator.firstName, creator.lastName].filter(Boolean).join(" ").trim() || creator.email || creator.id,
+    email: creator.email,
+    role: creator.role,
+  }]));
+  return versions.map((version) => ({
+    ...version,
+    actor: version.createdByUserId === "system"
+      ? { id: "system", name: "Automated Policy", email: null, role: "system" }
+      : (version.createdByUserId ? byId.get(version.createdByUserId) ?? null : null),
+  }));
 }
 
 export async function getMicroplanVersion(db: NodePgDatabase<any>, tenantId: string, microplanId: number, versionId: number) {

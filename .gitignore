@@ -28,6 +28,7 @@ tmp_*/
 *.xlsm
 *.pptx
 *.pdf
+!client/public/downloads/VaxPlan-Partnership-Implementation-Brief-2026-2030.pdf
 
 # Backup and one-off patch scripts
 *.backup

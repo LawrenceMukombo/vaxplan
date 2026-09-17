@@ -2509,7 +2509,7 @@ riskRouter.get("/assessments/:id/export-report-docx", async (req: any, res) => {
       .where(eq(tenants.id, effectiveTenantId))
       .limit(1);
 
-    const countryName = tenant?.name || "South Africa";
+    const countryName = tenant?.name || "Tenant programme";
 
     // Get latest run
     const [latestRun] = await db

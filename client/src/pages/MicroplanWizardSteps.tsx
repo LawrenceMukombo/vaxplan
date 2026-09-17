@@ -7672,6 +7672,13 @@ export function StepChvProfile({ facilityId, villages, planType = "routine" }: {
   const { toast } = useToast();
   const { data: tenant } = useQuery<any>({ queryKey: ["/api/me/tenant"] });
   const countryConfig = getCountryConfig(tenant);
+  const villageOptions = useMemo(
+    () => villages
+      .filter((v) => v?.id != null)
+      .map((v) => ({ id: String(v.id), name: String(v.name || `Community ${v.id}`) }))
+      .sort((a, b) => a.name.localeCompare(b.name)),
+    [villages],
+  );
 
   const { data: staffList } = useQuery<any[]>({
     queryKey: ["/api/facilities", Number(facilityId), "staff"],

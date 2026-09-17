@@ -5,6 +5,14 @@ export function minimumDevelopmentDays(settings: unknown): number {
   const result = developmentDaysSchema.safeParse((settings as any)?.minimumPlanDevelopmentDays);
   return result.success ? result.data : 7;
 }
+// Backward-compatible setting name: this value is now an SLA target used for
+// reminders/escalation, not a lock that prevents reviewers from acting.
+export function approvalReviewSlaDays(settings: unknown): number {
+  const configured = (settings as any)?.approvalReviewSlaDays
+    ?? (settings as any)?.minimumPlanDevelopmentDays;
+  const result = developmentDaysSchema.safeParse(configured);
+  return result.success ? result.data : 7;
+}
 export function minimumSessionLeadDays(settings: unknown): number {
   const result = developmentDaysSchema.safeParse(
     (settings as any)?.minimumSessionLeadDays ?? (settings as any)?.sessionExecutionLeadDays
@@ -31,19 +39,22 @@ export function formatSimpleDateTime(date: Date): string {
   }
 }
 
-export function approvalEligibility(createdAt: string | Date | null | undefined, settings: unknown, now = new Date()) {
-  const days = minimumDevelopmentDays(settings);
+export function approvalEligibility(submittedAt: string | Date | null | undefined, settings: unknown, now = new Date()) {
+  const days = approvalReviewSlaDays(settings);
   const sessionLeadDays = minimumSessionLeadDays(settings);
-  const created = createdAt ? new Date(createdAt) : null;
-  const eligibleAt = created && Number.isFinite(created.getTime()) ? new Date(created.getTime() + days * 86400000) : null;
-  const formattedDate = eligibleAt ? formatSimpleDateTime(eligibleAt) : null;
+  const submitted = submittedAt ? new Date(submittedAt) : null;
+  const validSubmission = !!submitted && Number.isFinite(submitted.getTime());
+  const reviewDueAt = validSubmission ? new Date(submitted.getTime() + days * 86400000) : null;
+  const formattedDueDate = reviewDueAt ? formatSimpleDateTime(reviewDueAt) : null;
+  void now;
   return {
     days,
     sessionLeadDays,
-    eligibleAt,
-    allowed: eligibleAt !== null && now >= eligibleAt,
-    message: eligibleAt
-      ? `Plan approvals require at least ${days} days of review following submission (approval eligible from ${formattedDate}). All planned vaccination sessions must be scheduled for implementation at least ${sessionLeadDays} days after approval.`
-      : "The plan creation date is missing or invalid; approval is blocked.",
+    eligibleAt: validSubmission ? submitted : null,
+    reviewDueAt,
+    allowed: validSubmission,
+    message: validSubmission
+      ? `Approval can start immediately after submission. The ${days}-day review SLA is due by ${formattedDueDate} and is used for reminders and escalation, not as a waiting period. Planned vaccination sessions must remain at least ${sessionLeadDays} days ahead of implementation.`
+      : "The plan submission date is missing or invalid; approval is blocked.",
   };
 }
