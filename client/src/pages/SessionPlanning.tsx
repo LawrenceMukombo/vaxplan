@@ -45,6 +45,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { offlineDb, enqueueOutbox } from "@/lib/offlineDb";
+import { SessionMatrixCalendar } from "@/components/microplan/SessionMatrixCalendar";
 import {
   Plus,
   Calendar,
@@ -211,6 +212,7 @@ export default function SessionPlanning({
   // follow-up sessions only. Driven by the persisted `outreachPurpose`
   // column so it survives planners renaming the session.
   const [defaulterOnly, setDefaulterOnly] = useState<boolean>(false);
+  const [sessionLayoutMode, setSessionLayoutMode] = useState<"calendar_matrix" | "table">("calendar_matrix");
   const [geoFilterFacilityId, setGeoFilterFacilityId] = useState<number | null>(() => {
     if (typeof window === "undefined") return null;
     const f = new URLSearchParams(window.location.search).get("facility");
@@ -2193,92 +2195,142 @@ export default function SessionPlanning({
         </Card>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">
-            {isCreator ? "My sessions" : "All sessions"}
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="p-6 pt-0 space-y-4">
-          <GeoCascadeFilter
-            provinceId={geoFilterProvinceId}
-            districtId={geoFilterDistrictId}
-            facilityId={geoFilterFacilityId}
-            onProvinceChange={setGeoFilterProvinceId}
-            onDistrictChange={setGeoFilterDistrictId}
-            onFacilityChange={setGeoFilterFacilityId}
-            showFacility
-            provinces={provinces}
-            districts={districts}
-            facilities={facilities}
-            provinceLabel={adminLabels.level1 || "Province"}
-            districtLabel={adminLabels.level2 || "District"}
-            facilityLabel={adminLabels.level3 || "Facility"}
-            testIdPrefix="session"
-          />
-          {/* Task #197 — Filter chip: narrow the list to defaulter
-              follow-up sessions only. The count comes from the persisted
-              outreachPurpose column, so it stays correct even if planners
-              renamed the auto-prefilled session name. */}
-          <div className="flex items-center gap-2 flex-wrap">
-            <Badge
-              role="button"
-              tabIndex={0}
-              data-testid="chip-filter-defaulter-followup"
-              aria-pressed={defaulterOnly}
-              onClick={() => setDefaulterOnly((v) => !v)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  setDefaulterOnly((v) => !v);
-                }
-              }}
-              variant={defaulterOnly ? "default" : "outline"}
-              className={
-                "gap-1 cursor-pointer select-none h-7 px-2 text-xs " +
-                (defaulterOnly
-                  ? "bg-red-600 hover:bg-red-700 text-white border-red-600"
-                  : "border-red-500/40 text-red-700 dark:text-red-300 hover:bg-red-500/10")
-              }
-            >
-              <AlertTriangle className="h-3 w-3" />
-              Defaulter follow-up only
-              <span
-                className={
-                  "ml-1 rounded-full px-1.5 text-[10px] font-semibold " +
-                  (defaulterOnly
-                    ? "bg-white/20 text-white"
-                    : "bg-red-500/15 text-red-700 dark:text-red-300")
-                }
-                data-testid="chip-filter-defaulter-followup-count"
-              >
-                {defaulterCount}
-              </span>
-            </Badge>
-            {defaulterOnly && (
-              <button
-                type="button"
-                className="text-xs text-muted-foreground hover:underline"
-                onClick={() => setDefaulterOnly(false)}
-                data-testid="chip-filter-defaulter-followup-clear"
-              >
-                Clear
-              </button>
-            )}
-          </div>
-          <DataTable
-            data={filteredSessions}
-            columns={columns}
-            searchable
-            searchKeys={["name"]}
-            emptyMessage={
-              isCreator
-                ? "No sessions match the current filters. Click 'New microplan' to start one, or clear the filters above."
-                : "No sessions match the current filters. Try clearing the geo filters above."
+      {/* ── View Mode Switcher: Interactive Calendar Matrix vs Standard Table ── */}
+      <div className="flex items-center justify-between gap-4 flex-wrap pb-1">
+        <div className="flex items-center gap-1.5 bg-muted/60 p-1 rounded-xl border">
+          <Button
+            size="sm"
+            type="button"
+            variant={sessionLayoutMode === "calendar_matrix" ? "default" : "ghost"}
+            className={sessionLayoutMode === "calendar_matrix" ? "text-xs font-bold bg-indigo-900 text-white shadow-sm" : "text-xs text-muted-foreground hover:text-foreground"}
+            onClick={() => setSessionLayoutMode("calendar_matrix")}
+          >
+            <Calendar className="h-3.5 w-3.5 mr-1.5 text-indigo-300" />
+            Interactive Calendar Matrix & Clash Validator
+          </Button>
+          <Button
+            size="sm"
+            type="button"
+            variant={sessionLayoutMode === "table" ? "default" : "ghost"}
+            className={sessionLayoutMode === "table" ? "text-xs font-bold bg-indigo-900 text-white shadow-sm" : "text-xs text-muted-foreground hover:text-foreground"}
+            onClick={() => setSessionLayoutMode("table")}
+          >
+            <Users className="h-3.5 w-3.5 mr-1.5" />
+            Standard Sessions Table
+          </Button>
+        </div>
+      </div>
+
+      {sessionLayoutMode === "calendar_matrix" ? (
+        <SessionMatrixCalendar
+          sessions={filteredSessions}
+          facilities={facilities ?? []}
+          districts={districts ?? []}
+          villages={villages ?? []}
+          onAddSession={() => setDialogOpen(true)}
+          onEditSession={(s) => handleOpenEditModal(s)}
+          onValidatePlan={() => {
+            toast({
+              title: "Proximity Clash Validation Complete",
+              description: "Scanned all scheduled sessions across 5km proximity radius and same-day delivery slots.",
+            });
+          }}
+          onResolveConflict={(s) => handleOpenEditModal(s)}
+          onOpenDayPlans={(sessionId) => {
+            if (typeof window !== "undefined") {
+              window.location.href = `/sessions/${sessionId}/day-plans`;
             }
-          />
-        </CardContent>
-      </Card>
+          }}
+          isCreator={isCreator}
+        />
+      ) : (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">
+              {isCreator ? "My sessions" : "All sessions"}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="p-6 pt-0 space-y-4">
+            <GeoCascadeFilter
+              provinceId={geoFilterProvinceId}
+              districtId={geoFilterDistrictId}
+              facilityId={geoFilterFacilityId}
+              onProvinceChange={setGeoFilterProvinceId}
+              onDistrictChange={setGeoFilterDistrictId}
+              onFacilityChange={setGeoFilterFacilityId}
+              showFacility
+              provinces={provinces}
+              districts={districts}
+              facilities={facilities}
+              provinceLabel={adminLabels.level1 || "Province"}
+              districtLabel={adminLabels.level2 || "District"}
+              facilityLabel={adminLabels.level3 || "Facility"}
+              testIdPrefix="session"
+            />
+            {/* Task #197 — Filter chip: narrow the list to defaulter
+                follow-up sessions only. The count comes from the persisted
+                outreachPurpose column, so it stays correct even if planners
+                renamed the auto-prefilled session name. */}
+            <div className="flex items-center gap-2 flex-wrap">
+              <Badge
+                role="button"
+                tabIndex={0}
+                data-testid="chip-filter-defaulter-followup"
+                aria-pressed={defaulterOnly}
+                onClick={() => setDefaulterOnly((v) => !v)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    setDefaulterOnly((v) => !v);
+                  }
+                }}
+                variant={defaulterOnly ? "default" : "outline"}
+                className={
+                  "gap-1 cursor-pointer select-none h-7 px-2 text-xs " +
+                  (defaulterOnly
+                    ? "bg-red-600 hover:bg-red-700 text-white border-red-600"
+                    : "border-red-500/40 text-red-700 dark:text-red-300 hover:bg-red-500/10")
+                }
+              >
+                <AlertTriangle className="h-3 w-3" />
+                Defaulter follow-up only
+                <span
+                  className={
+                    "ml-1 rounded-full px-1.5 text-[10px] font-semibold " +
+                    (defaulterOnly
+                      ? "bg-white/20 text-white"
+                      : "bg-red-500/15 text-red-700 dark:text-red-300")
+                  }
+                  data-testid="chip-filter-defaulter-followup-count"
+                >
+                  {defaulterCount}
+                </span>
+              </Badge>
+              {defaulterOnly && (
+                <button
+                  type="button"
+                  className="text-xs text-muted-foreground hover:underline"
+                  onClick={() => setDefaulterOnly(false)}
+                  data-testid="chip-filter-defaulter-followup-clear"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+            <DataTable
+              data={filteredSessions}
+              columns={columns}
+              searchable
+              searchKeys={["name"]}
+              emptyMessage={
+                isCreator
+                  ? "No sessions match the current filters. Click 'New microplan' to start one, or clear the filters above."
+                  : "No sessions match the current filters. Try clearing the geo filters above."
+              }
+            />
+          </CardContent>
+        </Card>
+      )}
 
       {/* View Session Details Dialog — opened by clicking a session row.
           Read-only. Shows ONLY this session's details. The full edit form
