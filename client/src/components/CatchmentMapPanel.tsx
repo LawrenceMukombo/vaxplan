@@ -14,9 +14,9 @@
  *  - Save All in one click
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  MapContainer, TileLayer, Polygon, Marker, Popup, GeoJSON, useMap,
+  MapContainer, TileLayer, Polygon, Marker, Popup, GeoJSON, CircleMarker, useMap,
 } from "react-leaflet";
 import L from "leaflet";
 import { usePersistedBasemap, BasemapTileLayer, BasemapSwitcher } from "@/components/map/BasemapToggle";
@@ -232,16 +232,38 @@ async function estimatePolygonPop(
 
 
 // --- Drawing controller - click to place vertices, dblclick to close ----------
+// --- Snapping helper: snaps coordinate to nearest point within pixel threshold ---
+function findSnapPoint(lat: number, lng: number, snapPoints: [number, number][], map: L.Map, snapPixelThreshold = 18): [number, number] {
+  if (!snapPoints || snapPoints.length === 0) return [lat, lng];
+  const mousePt = map.latLngToLayerPoint(L.latLng(lat, lng));
+  let closest: [number, number] = [lat, lng];
+  let minDistance = Infinity;
+
+  for (const [sLat, sLng] of snapPoints) {
+    const sPt = map.latLngToLayerPoint(L.latLng(sLat, sLng));
+    const dist = mousePt.distanceTo(sPt);
+    if (dist <= snapPixelThreshold && dist < minDistance) {
+      minDistance = dist;
+      closest = [sLat, sLng];
+    }
+  }
+
+  return closest;
+}
+
+// --- Drawing controller with live snapping, vertex placement, and undo ---
 function DrawingController({
-  mode, onClose, onPolygonComplete,
+  mode, onClose, onPolygonComplete, snapCoords = [],
 }: {
   mode: "catchment" | "community" | null;
   onClose: () => void;
   onPolygonComplete: (coords: [number, number][]) => void;
+  snapCoords?: [number, number][];
 }) {
   const map = useMap();
   const pointsRef = useRef<[number, number][]>([]);
   const lgRef = useRef<L.LayerGroup | null>(null);
+  const snapMarkerRef = useRef<L.CircleMarker | null>(null);
 
   useEffect(() => {
     if (!mode) return;
@@ -250,6 +272,15 @@ function DrawingController({
     lgRef.current = lg;
     map.getContainer().style.cursor = "crosshair";
     const color = mode === "catchment" ? "#1a56db" : "#e74c3c";
+
+    const snapMarker = L.circleMarker([0, 0], {
+      radius: 6,
+      color: "#10b981",
+      fillColor: "#10b981",
+      fillOpacity: 0.85,
+      weight: 2,
+    });
+    snapMarkerRef.current = snapMarker;
 
     const redraw = () => {
       lg.clearLayers();
@@ -262,10 +293,24 @@ function DrawingController({
       );
     };
 
+    const onMouseMove = (e: L.LeafletMouseEvent) => {
+      if (snapCoords.length === 0) return;
+      const snapped = findSnapPoint(e.latlng.lat, e.latlng.lng, snapCoords, map, 18);
+      const isSnapped = snapped[0] !== e.latlng.lat || snapped[1] !== e.latlng.lng;
+      if (isSnapped) {
+        snapMarker.setLatLng(snapped);
+        if (!lg.hasLayer(snapMarker)) snapMarker.addTo(lg);
+      } else {
+        if (lg.hasLayer(snapMarker)) lg.removeLayer(snapMarker);
+      }
+    };
+
     const onClick = (e: L.LeafletMouseEvent) => {
-      pointsRef.current = [...pointsRef.current, [e.latlng.lat, e.latlng.lng]];
+      const snapped = findSnapPoint(e.latlng.lat, e.latlng.lng, snapCoords, map, 18);
+      pointsRef.current = [...pointsRef.current, snapped];
       redraw();
     };
+
     const onDblClick = () => {
       if (pointsRef.current.length < 3) return;
       lg.clearLayers();
@@ -273,6 +318,7 @@ function DrawingController({
       onPolygonComplete([...pointsRef.current]);
       cleanup();
     };
+
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") { onClose(); cleanup(); }
       if ((e.key === "z" || e.key === "Z") && (e.ctrlKey || e.metaKey)) {
@@ -286,12 +332,14 @@ function DrawingController({
 
     const cleanup = () => {
       map.off("click", onClick);
+      map.off("mousemove", onMouseMove);
       map.off("dblclick", onDblClick);
       document.removeEventListener("keydown", onKey);
       map.getContainer().style.cursor = "";
     };
 
     map.on("click", onClick);
+    map.on("mousemove", onMouseMove);
     map.on("dblclick", onDblClick);
     document.addEventListener("keydown", onKey);
 
@@ -299,7 +347,7 @@ function DrawingController({
       cleanup();
       if (lgRef.current) { map.removeLayer(lgRef.current); lgRef.current = null; }
     };
-  }, [mode, map, onPolygonComplete, onClose]);
+  }, [mode, map, onPolygonComplete, onClose, snapCoords]);
 
   return null;
 }
@@ -485,6 +533,71 @@ export function CatchmentMapPanel({
   const [historyRows, setHistoryRows] = useState<LifecycleVersion[]>([]);
   const [historyBusy, setHistoryBusy] = useState(false);
   const [comparison, setComparison] = useState<any | null>(null);
+
+  // Missed communities analysis state
+  const [missedAnalysis, setMissedAnalysis] = useState<any | null>(null);
+  const [loadingMissed, setLoadingMissed] = useState(false);
+  const [autoClipping, setAutoClipping] = useState(false);
+
+  const fetchMissedCommunities = useCallback(async () => {
+    if (!facilityId) return;
+    setLoadingMissed(true);
+    try {
+      const data = await apiRequest<any>("GET", `/api/facilities/${facilityId}/missed-communities`);
+      setMissedAnalysis(data);
+    } catch {
+      // Keep previous or null
+    } finally {
+      setLoadingMissed(false);
+    }
+  }, [facilityId]);
+
+  useEffect(() => {
+    fetchMissedCommunities();
+  }, [fetchMissedCommunities, communityPolygons.length, catchment?.coords]);
+
+  const snapCoords = useMemo(() => {
+    const coords: [number, number][] = [];
+    if (catchment?.coords) coords.push(...catchment.coords);
+    for (const poly of communityPolygons) {
+      if (poly.communityName !== selectedCommunity && poly.coords) {
+        coords.push(...poly.coords);
+      }
+    }
+    return coords;
+  }, [catchment, communityPolygons, selectedCommunity]);
+
+  const handleAutoClip = async () => {
+    const targetVillageId = selectedCommunityRecord?.villageId;
+    if (!targetVillageId || !selectedCommunityPolygon) return;
+    setAutoClipping(true);
+    try {
+      const res = await apiRequest<any>("POST", `/api/polygons/village/${targetVillageId}/auto-clip`, {
+        geometry: { type: "Polygon", coordinates: [toGeoRing(selectedCommunityPolygon.coords)] }
+      });
+      if (res.clippedGeometry) {
+        const coords = coordsFromGeoJson(res.clippedGeometry);
+        if (coords) {
+          setCommunityPolygons((rows) => rows.map((p) => p.communityId === targetVillageId ? {
+            ...p,
+            coords,
+            saved: false,
+            ...localPolygonMeta(coords, facilityLat, facilityLng),
+          } : p));
+          toast({
+            title: "Boundary Auto-Clipped",
+            description: `Trimmed ${res.removedAreaSqKm.toFixed(2)} km² of overlap against ${res.clippedBySiblingsCount} neighboring boundaries with zero overlap.`,
+          });
+        }
+      } else {
+        toast({ title: "Auto-clip notice", description: "This boundary is completely covered by existing neighbors.", variant: "destructive" });
+      }
+    } catch (err: any) {
+      toast({ title: "Auto-clip failed", description: err?.message, variant: "destructive" });
+    } finally {
+      setAutoClipping(false);
+    }
+  };
 
   const activeLifecycleCoords = lifecycleEdit?.entityType === "facility"
     ? catchment?.coords
@@ -1066,6 +1179,17 @@ export function CatchmentMapPanel({
               <button type="button" disabled={!!drawMode} onClick={() => beginCommunityLifecycle("edit")}
                 className="rounded-md border px-2.5 py-1 text-xs hover:bg-muted disabled:opacity-50">Edit vertices</button>
             )}
+            {selectedCommunityPolygon && !selectedCommunityPolygon.saved && (
+              <button
+                type="button"
+                onClick={handleAutoClip}
+                disabled={autoClipping}
+                className="rounded-md border border-emerald-300 bg-emerald-50 text-emerald-700 px-2.5 py-1 text-xs font-medium hover:bg-emerald-100 disabled:opacity-50"
+                title="Automatically trim overlapping areas against neighboring boundaries"
+              >
+                {autoClipping ? "Clipping..." : "⚡ Auto-Clip to Free Space"}
+              </button>
+            )}
             {canReplacePolygon && (
               <button type="button" disabled={!!drawMode} onClick={() => beginCommunityLifecycle("replace")}
                 className="rounded-md border px-2.5 py-1 text-xs hover:bg-muted disabled:opacity-50">Replace</button>
@@ -1200,6 +1324,40 @@ export function CatchmentMapPanel({
               </Popup>
             </Polygon>
           ))}
+          {missedAnalysis?.uncoveredInteriorGeoJson && (
+            <GeoJSON
+              key={JSON.stringify(missedAnalysis.uncoveredInteriorGeoJson)}
+              data={missedAnalysis.uncoveredInteriorGeoJson}
+              style={{ color: "#dc2626", fillColor: "#ef4444", fillOpacity: 0.22, weight: 2, dashArray: "4,4" }}
+            />
+          )}
+
+          {/* Missed / Orphaned Zero-Dose Communities */}
+          {missedAnalysis?.missedCommunities?.map((mc: any) => (
+            <CircleMarker
+              key={`missed-${mc.id}`}
+              center={[mc.latitude, mc.longitude]}
+              radius={mc.category === "orphaned_zero_dose" ? 7 : 5}
+              pathOptions={{
+                color: mc.category === "orphaned_zero_dose" ? "#dc2626" : "#f59e0b",
+                fillColor: mc.category === "orphaned_zero_dose" ? "#ef4444" : "#fbbf24",
+                fillOpacity: 0.85,
+                weight: 2,
+              }}
+            >
+              <Popup>
+                <div className="text-xs space-y-1">
+                  <strong className={mc.category === "orphaned_zero_dose" ? "text-red-700 font-bold" : "text-amber-700 font-bold"}>
+                    {mc.category === "orphaned_zero_dose" ? "⚠️ Orphaned Zero-Dose Community" : "ℹ️ Unzoned Community"}
+                  </strong>
+                  <p className="font-semibold">{mc.name}</p>
+                  <p className="text-muted-foreground">{mc.explanation}</p>
+                  <p className="text-muted-foreground">Est. Pop: {mc.populationEstimate?.toLocaleString() ?? "N/A"}</p>
+                  {mc.distanceToFacilityKm != null && <p className="text-muted-foreground">Dist: {mc.distanceToFacilityKm.toFixed(1)} km</p>}
+                </div>
+              </Popup>
+            </CircleMarker>
+          ))}
 
           {/* Extracted place markers */}
           {extractResult?.unmapped.map((u, i) => (
@@ -1245,7 +1403,7 @@ export function CatchmentMapPanel({
               onChange={(coords) => setCommunityPolygons((rows) => rows.map((polygon) => polygon.communityId === lifecycleEdit.entityId ? { ...polygon, coords, saved: false, ...localPolygonMeta(coords, facilityLat, facilityLng) } : polygon))}
             />
           )}
-          <DrawingController mode={drawMode} onClose={() => setDrawMode(null)} onPolygonComplete={handlePolygonComplete} />
+          <DrawingController mode={drawMode} onClose={() => setDrawMode(null)} onPolygonComplete={handlePolygonComplete} snapCoords={snapCoords} />
           <FitToPolygon coords={fitCoords} />
           <GeolocateButton />
         </MapContainer>
@@ -1445,6 +1603,90 @@ export function CatchmentMapPanel({
           )}
           {uncovered.length === 0 && communityPolygons.length === communities.length && communities.length > 0 && (
             <p className="text-xs font-medium text-green-700">Saved All communities have polygons - no coverage gaps!</p>
+          )}
+        </div>
+      )}
+
+      {/* -- Missed Communities & Spatial Gap Intelligence -- */}
+      {missedAnalysis && (
+        <div className="rounded-lg border bg-card p-3.5 space-y-3">
+          <div className="flex items-center justify-between border-b pb-2">
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-semibold text-foreground flex items-center gap-1.5">
+                🎯 Missed Communities & Gap Analysis
+              </span>
+              {missedAnalysis.missedCommunitiesCount > 0 ? (
+                <span className="rounded-full bg-red-100 px-2 py-0.5 text-[11px] font-bold text-red-700">
+                  {missedAnalysis.missedCommunitiesCount} detected
+                </span>
+              ) : (
+                <span className="rounded-full bg-green-100 px-2 py-0.5 text-[11px] font-bold text-green-700">
+                  0 missed
+                </span>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={fetchMissedCommunities}
+              disabled={loadingMissed}
+              className="rounded border px-2 py-1 text-[11px] font-medium text-muted-foreground hover:bg-muted"
+            >
+              {loadingMissed ? "Refreshing..." : "🔄 Refresh"}
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
+            <div className="rounded-md border bg-muted/40 p-2.5">
+              <span className="text-[11px] font-medium text-muted-foreground">Uncovered Catchment Area</span>
+              <p className="text-base font-bold text-foreground mt-0.5">
+                {missedAnalysis.uncoveredAreaSqKm?.toFixed(2) ?? "0.00"} km²
+              </p>
+            </div>
+            <div className="rounded-md border bg-red-50/50 border-red-200/60 p-2.5">
+              <span className="text-[11px] font-medium text-red-700">Orphaned Zero-Dose Places</span>
+              <p className="text-base font-bold text-red-800 mt-0.5">
+                {missedAnalysis.missedCommunities?.filter((m: any) => m.category === "orphaned_zero_dose").length ?? 0}
+              </p>
+            </div>
+            <div className="rounded-md border bg-amber-50/50 border-amber-200/60 p-2.5">
+              <span className="text-[11px] font-medium text-amber-700">Unzoned In-Catchment</span>
+              <p className="text-base font-bold text-amber-800 mt-0.5">
+                {missedAnalysis.missedCommunities?.filter((m: any) => m.category === "unzoned_in_catchment").length ?? 0}
+              </p>
+            </div>
+          </div>
+
+          {missedAnalysis.missedCommunities?.length > 0 && (
+            <div className="space-y-1.5">
+              <p className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Detected Uncovered Settlements</p>
+              <div className="max-h-[160px] overflow-y-auto space-y-1.5 pr-1">
+                {missedAnalysis.missedCommunities.map((mc: any) => (
+                  <div
+                    key={mc.id}
+                    className={`flex items-center justify-between p-2 rounded-md border text-xs ${
+                      mc.category === "orphaned_zero_dose"
+                        ? "bg-red-50/70 border-red-200 text-red-900"
+                        : "bg-amber-50/70 border-amber-200 text-amber-900"
+                    }`}
+                  >
+                    <div>
+                      <span className="font-semibold">{mc.name}</span>
+                      <span className="ml-2 text-[11px] opacity-75">
+                        {mc.category === "orphaned_zero_dose" ? "• Orphaned (outside all catchments)" : "• Inside HF boundary but unassigned"}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2 text-right text-[11px]">
+                      {mc.distanceToFacilityKm != null && (
+                        <span>{mc.distanceToFacilityKm.toFixed(1)} km away</span>
+                      )}
+                      <span className="font-medium tabular-nums">
+                        ~{mc.populationEstimate?.toLocaleString() ?? "N/A"} pop
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
           )}
         </div>
       )}

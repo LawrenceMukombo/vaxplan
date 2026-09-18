@@ -188,3 +188,247 @@ export function comparePolygonVersions(fromGeometry: any, toGeometry: any, popul
     removedGeometry: removed,
   };
 }
+
+/**
+ * 1-Click Auto-Clip: Takes a proposed geometry and cleanly subtracts overlapping
+ * sibling geometries (and clips inside parent boundary if provided).
+ * Returns the clipped GeoJSON geometry, or null if the geometry is completely consumed.
+ */
+export function clipToAvailableSpace(input: {
+  geometry: any;
+  parentGeometry?: any;
+  siblingPolygons?: Array<{ id: number; name?: string | null; geometry: any }>;
+}): {
+  clippedGeometry: any | null;
+  originalAreaSqKm: number;
+  clippedAreaSqKm: number;
+  removedAreaSqKm: number;
+  clippedBySiblingsCount: number;
+} {
+  let current = asPolygonFeature(input.geometry);
+  if (!current) throw new Error("Invalid geometry provided for clipping.");
+
+  const originalAreaSqKm = turf.area(current) / 1_000_000;
+
+  // 1. Clip inside parent boundary if parent exists
+  const parent = asPolygonFeature(input.parentGeometry);
+  if (parent) {
+    try {
+      const intersected = turf.intersect(turf.featureCollection([current as any, parent as any]));
+      if (intersected && (intersected.geometry.type === "Polygon" || intersected.geometry.type === "MultiPolygon")) {
+        current = intersected as Feature<Polygon | MultiPolygon>;
+      } else {
+        return {
+          clippedGeometry: null,
+          originalAreaSqKm,
+          clippedAreaSqKm: 0,
+          removedAreaSqKm: originalAreaSqKm,
+          clippedBySiblingsCount: 0,
+        };
+      }
+    } catch {
+      // Continue if parent intersection encounters geometry quirks
+    }
+  }
+
+  // 2. Subtract each overlapping sibling polygon
+  let clippedBySiblingsCount = 0;
+  for (const sibling of input.siblingPolygons || []) {
+    const siblingFeature = asPolygonFeature(sibling.geometry);
+    if (!siblingFeature) continue;
+    try {
+      const overlap = turf.intersect(turf.featureCollection([current as any, siblingFeature as any]));
+      if (overlap && turf.area(overlap) > 0.01) {
+        const diff = turf.difference(turf.featureCollection([current as any, siblingFeature as any]));
+        if (diff && (diff.geometry.type === "Polygon" || diff.geometry.type === "MultiPolygon")) {
+          current = diff as Feature<Polygon | MultiPolygon>;
+          clippedBySiblingsCount++;
+        }
+      }
+    } catch {
+      // Sibling diff fallback
+    }
+  }
+
+  const clippedAreaSqKm = current ? turf.area(current) / 1_000_000 : 0;
+  const removedAreaSqKm = Math.max(0, originalAreaSqKm - clippedAreaSqKm);
+
+  return {
+    clippedGeometry: current ? current.geometry : null,
+    originalAreaSqKm,
+    clippedAreaSqKm,
+    removedAreaSqKm,
+    clippedBySiblingsCount,
+  };
+}
+
+export interface MissedCommunityAnalysis {
+  facilityId: number;
+  facilityName?: string;
+  parentCatchmentPresent: boolean;
+  totalVillagesCount: number;
+  enclosedCount: number;
+  unzonedCount: number;
+  orphanedCount: number;
+  uncoveredInteriorAreaSqKm: number;
+  uncoveredInteriorGeoJson: any | null;
+  villages: Array<{
+    id: number;
+    name: string;
+    latitude: number | null;
+    longitude: number | null;
+    targetPopulation?: number;
+    status: "enclosed" | "unzoned" | "orphaned" | "other_facility";
+    enclosedInVillageId?: number;
+    enclosedInVillageName?: string;
+    otherFacilityId?: number;
+    otherFacilityName?: string;
+  }>;
+}
+
+/**
+ * Spatial Gap Analysis: Identifies enclosed, unzoned, and orphaned communities
+ * and computes the uncovered interior area of an HF catchment.
+ */
+export function detectMissedCommunities(input: {
+  facilityId: number;
+  facilityName?: string;
+  parentCatchmentGeometry: any;
+  communityPolygons: Array<{ id: number; name?: string | null; geometry: any }>;
+  villages: Array<{ id: number; name: string; latitude: number | string | null; longitude: number | string | null; targetPopulation?: number | string | null; assignedFacilityId?: number | null }>;
+  otherFacilityCatchments?: Array<{ id: number; name?: string | null; geometry: any }>;
+}): MissedCommunityAnalysis {
+  const parent = asPolygonFeature(input.parentCatchmentGeometry);
+  const communityFeatures = (input.communityPolygons || [])
+    .map((c) => ({ id: c.id, name: c.name ?? null, feature: asPolygonFeature(c.geometry) }))
+    .filter((c): c is { id: number; name: string | null; feature: Feature<Polygon | MultiPolygon> } => c.feature !== null);
+
+  const otherCatchmentFeatures = (input.otherFacilityCatchments || [])
+    .map((c) => ({ id: c.id, name: c.name ?? null, feature: asPolygonFeature(c.geometry) }))
+    .filter((c): c is { id: number; name: string | null; feature: Feature<Polygon | MultiPolygon> } => c.feature !== null);
+
+  // 1. Calculate Uncovered Interior Area = ParentCatchment - Union(CommunityPolygons)
+  let gapGeom: Feature<Polygon | MultiPolygon> | null = parent ? { ...parent } : null;
+  if (gapGeom) {
+    for (const c of communityFeatures) {
+      try {
+        const diff = turf.difference(turf.featureCollection([gapGeom as any, c.feature as any]));
+        if (diff && (diff.geometry.type === "Polygon" || diff.geometry.type === "MultiPolygon")) {
+          gapGeom = diff as Feature<Polygon | MultiPolygon>;
+        }
+      } catch {
+        // Keep partial gap
+      }
+    }
+  }
+
+  const uncoveredInteriorAreaSqKm = gapGeom ? turf.area(gapGeom) / 1_000_000 : 0;
+
+  // 2. Point-in-polygon classification for every village
+  let enclosedCount = 0;
+  let unzonedCount = 0;
+  let orphanedCount = 0;
+
+  const evaluatedVillages = (input.villages || []).map((v) => {
+    const lat = Number(v.latitude);
+    const lng = Number(v.longitude);
+    const pop = Number(v.targetPopulation || 0) || undefined;
+
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      return {
+        id: v.id,
+        name: v.name,
+        latitude: null,
+        longitude: null,
+        targetPopulation: pop,
+        status: "orphaned" as const,
+      };
+    }
+
+    const pt = turf.point([lng, lat]);
+
+    // Check if point is enclosed in any community polygon
+    for (const c of communityFeatures) {
+      try {
+        if (turf.booleanPointInPolygon(pt, c.feature as any)) {
+          enclosedCount++;
+          return {
+            id: v.id,
+            name: v.name,
+            latitude: lat,
+            longitude: lng,
+            targetPopulation: pop,
+            status: "enclosed" as const,
+            enclosedInVillageId: c.id,
+            enclosedInVillageName: c.name || undefined,
+          };
+        }
+      } catch {
+        // Continue
+      }
+    }
+
+    // If not enclosed, is it inside the parent HF catchment?
+    if (parent) {
+      try {
+        if (turf.booleanPointInPolygon(pt, parent as any)) {
+          unzonedCount++;
+          return {
+            id: v.id,
+            name: v.name,
+            latitude: lat,
+            longitude: lng,
+            targetPopulation: pop,
+            status: "unzoned" as const,
+          };
+        }
+      } catch {
+        // Continue
+      }
+    }
+
+    // Check if inside another facility's catchment
+    for (const other of otherCatchmentFeatures) {
+      try {
+        if (turf.booleanPointInPolygon(pt, other.feature as any)) {
+          return {
+            id: v.id,
+            name: v.name,
+            latitude: lat,
+            longitude: lng,
+            targetPopulation: pop,
+            status: "other_facility" as const,
+            otherFacilityId: other.id,
+            otherFacilityName: other.name || undefined,
+          };
+        }
+      } catch {
+        // Continue
+      }
+    }
+
+    // Outside all catchments = Orphaned / Uncovered
+    orphanedCount++;
+    return {
+      id: v.id,
+      name: v.name,
+      latitude: lat,
+      longitude: lng,
+      targetPopulation: pop,
+      status: "orphaned" as const,
+    };
+  });
+
+  return {
+    facilityId: input.facilityId,
+    facilityName: input.facilityName,
+    parentCatchmentPresent: !!parent,
+    totalVillagesCount: evaluatedVillages.length,
+    enclosedCount,
+    unzonedCount,
+    orphanedCount,
+    uncoveredInteriorAreaSqKm: Math.round(uncoveredInteriorAreaSqKm * 100) / 100,
+    uncoveredInteriorGeoJson: gapGeom?.geometry || null,
+    villages: evaluatedVillages,
+  };
+}

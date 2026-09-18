@@ -1,5 +1,5 @@
 import type { Express } from "express";
-import { and, asc, desc, eq, ne } from "drizzle-orm";
+import { and, asc, desc, eq, ne, or } from "drizzle-orm";
 import {
   facilities,
   gisPolygons,
@@ -17,8 +17,11 @@ import { PopulationIntelligenceService } from "../services/populationIntelligenc
 import {
   comparePolygonVersions,
   validatePolygonLifecycleGeometry,
+  clipToAvailableSpace,
+  detectMissedCommunities,
   type PolygonEntityType,
 } from "../services/polygonLifecycleService";
+import * as turf from "@turf/turf";
 
 type LifecycleDependencies = {
   auth: readonly any[];
@@ -606,5 +609,152 @@ export function registerPolygonLifecycleRoutes(app: Express, deps: LifecycleDepe
     }).where(and(eq(gisPolygons.tenantId, req.tenantId), eq(gisPolygons.id, id))).returning();
     await deps.logAudit(req, "polygon_population_recalculated", "gis_polygon", id, row, updated);
     res.json(updated);
+  });
+
+  // 1-Click Auto-Clip: trims proposed geometry cleanly against overlapping siblings & parent boundary
+  app.post("/api/polygons/:entityType/:entityId/auto-clip", ...deps.auth, async (req: any, res) => {
+    const parsed = parseEntity(req);
+    if (!parsed) return res.status(400).json({ message: "Invalid polygon owner." });
+    const owner = await ownerContext(req.tenantId, parsed.entityType, parsed.entityId);
+    if (!owner) return res.status(404).json({ message: "Polygon owner not found." });
+    if (!(await authorize(req, res, deps, "polygon.view", owner))) return;
+    const geometry = req.body?.geometry;
+    if (!geometry) return res.status(400).json({ message: "Geometry is required for auto-clipping." });
+    const context = await validationContext(req.tenantId, parsed.entityType, parsed.entityId, owner);
+    try {
+      const result = clipToAvailableSpace({
+        geometry,
+        parentGeometry: context.parentGeometry,
+        siblingPolygons: context.siblingPolygons,
+      });
+      res.json(result);
+    } catch (err: any) {
+      res.status(422).json({ message: err.message || "Failed to auto-clip polygon." });
+    }
+  });
+
+  // Spatial Gap Analysis: Detects enclosed, unzoned, and orphaned communities + interior gap geometry
+  app.get("/api/facilities/:id/missed-communities", ...deps.auth, async (req: any, res) => {
+    const facilityId = Number(req.params.id);
+    if (!Number.isInteger(facilityId) || facilityId <= 0) {
+      return res.status(400).json({ message: "Invalid facility id." });
+    }
+    const [fac] = await db.select({
+      id: facilities.id,
+      name: facilities.name,
+      districtId: facilities.districtId,
+      catchmentPolygon: facilities.catchmentPolygon,
+    }).from(facilities).where(and(eq(facilities.tenantId, req.tenantId), eq(facilities.id, facilityId))).limit(1);
+
+    if (!fac) return res.status(404).json({ message: "Facility not found." });
+
+    // Active catchment polygon
+    const activeParent = await currentPolygon(req.tenantId, "facility", facilityId);
+    const parentCatchmentGeometry = activeParent?.geometry || fac.catchmentPolygon || null;
+
+    // Active community polygons for this facility
+    const communityRows = await db.select().from(gisPolygons).where(and(
+      eq(gisPolygons.tenantId, req.tenantId),
+      eq(gisPolygons.ownerType, "village"),
+      eq(gisPolygons.parentFacilityId, facilityId),
+      eq(gisPolygons.isActive, true),
+      eq(gisPolygons.status, "active"),
+    ));
+
+    // Villages associated with this facility or district
+    const districtVillages = await db.select({
+      id: villages.id,
+      name: villages.name,
+      latitude: villages.latitude,
+      longitude: villages.longitude,
+      targetPopulation: villages.targetPopulation,
+      assignedFacilityId: villages.assignedFacilityId,
+    }).from(villages).where(and(
+      eq(villages.tenantId, req.tenantId),
+      or(eq(villages.assignedFacilityId, facilityId), eq(villages.districtId, fac.districtId))
+    ));
+
+    // Other facility catchments in district
+    const otherCatchments = await db.select().from(gisPolygons).where(and(
+      eq(gisPolygons.tenantId, req.tenantId),
+      eq(gisPolygons.ownerType, "facility"),
+      eq(gisPolygons.isActive, true),
+      eq(gisPolygons.status, "active"),
+      ne(gisPolygons.ownerId, facilityId),
+    ));
+
+    const analysis = detectMissedCommunities({
+      facilityId,
+      facilityName: fac.name,
+      parentCatchmentGeometry,
+      communityPolygons: communityRows.map((c) => ({ id: c.ownerId, name: c.name, geometry: c.geometry })),
+      villages: districtVillages,
+      otherFacilityCatchments: otherCatchments.map((o) => ({ id: o.ownerId, name: o.name, geometry: o.geometry })),
+    });
+
+    res.json(analysis);
+  });
+
+  // Fast Viewport Polygon Querying with Zoom-Based Douglas-Peucker Simplification
+  app.get("/api/gis/polygons/viewport", ...deps.auth, async (req: any, res) => {
+    const minLng = Number(req.query.minLng);
+    const minLat = Number(req.query.minLat);
+    const maxLng = Number(req.query.maxLng);
+    const maxLat = Number(req.query.maxLat);
+    const zoom = Number(req.query.zoom || 12);
+    const ownerType = req.query.ownerType ? String(req.query.ownerType) : undefined;
+
+    const queryConditions = [
+      eq(gisPolygons.tenantId, req.tenantId),
+      eq(gisPolygons.isActive, true),
+      eq(gisPolygons.status, "active"),
+    ];
+
+    if (ownerType) {
+      queryConditions.push(eq(gisPolygons.ownerType, ownerType));
+    }
+
+    const rows = await db.select().from(gisPolygons).where(and(...queryConditions));
+
+    const hasBbox = Number.isFinite(minLng) && Number.isFinite(minLat) && Number.isFinite(maxLng) && Number.isFinite(maxLat);
+    const bboxPoly = hasBbox ? turf.bboxPolygon([minLng, minLat, maxLng, maxLat]) : null;
+
+    const filtered = rows.filter((row) => {
+      if (!bboxPoly) return true;
+      try {
+        const feat = turf.feature(row.geometry as any);
+        return turf.booleanIntersects(feat as any, bboxPoly as any);
+      } catch {
+        return true;
+      }
+    });
+
+    // Simplify when zoomed out (zoom < 10) to minimize payload overhead
+    const result = filtered.map((row) => {
+      let geom = row.geometry;
+      if (zoom < 10) {
+        try {
+          const feat = turf.feature(geom as any);
+          const simplified = turf.simplify(feat, { tolerance: zoom < 8 ? 0.005 : 0.001, highQuality: false });
+          geom = simplified.geometry;
+        } catch {
+          // Keep original
+        }
+      }
+      return {
+        id: row.id,
+        ownerType: row.ownerType,
+        ownerId: row.ownerId,
+        parentFacilityId: row.parentFacilityId,
+        polygonType: row.polygonType,
+        name: row.name,
+        areaSqKm: row.areaSqKm,
+        populationEstimate: row.populationEstimate,
+        version: row.version,
+        geometry: geom,
+      };
+    });
+
+    res.json({ count: result.length, polygons: result });
   });
 }
