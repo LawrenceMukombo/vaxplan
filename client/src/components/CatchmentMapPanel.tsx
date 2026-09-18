@@ -300,10 +300,22 @@ function DrawingController({
   const lgRef = useRef<L.LayerGroup | null>(null);
   const snapMarkerRef = useRef<L.CircleMarker | null>(null);
 
+  const onPolygonCompleteRef = useRef(onPolygonComplete);
+  onPolygonCompleteRef.current = onPolygonComplete;
+
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
+  const onPointCountChangeRef = useRef(onPointCountChange);
+  onPointCountChangeRef.current = onPointCountChange;
+
+  const snapCoordsRef = useRef(snapCoords);
+  snapCoordsRef.current = snapCoords;
+
   useEffect(() => {
     if (!mode) return;
     pointsRef.current = [];
-    onPointCountChange?.(0);
+    onPointCountChangeRef.current?.(0);
 
     const lg = L.layerGroup().addTo(map);
     lgRef.current = lg;
@@ -326,7 +338,7 @@ function DrawingController({
         L.polyline([...pts, pts[0]], { color, weight: 2.5, dashArray: "6,4", opacity: 0.85 }).addTo(lg);
       }
       pts.forEach((pt) =>
-        L.circleMarker(pt, { radius: 4.5, color: "#fff", fillColor: color, fillOpacity: 1, weight: 1.5 }).addTo(lg)
+        L.circleMarker(pt, { radius: 5, color: "#fff", fillColor: color, fillOpacity: 1, weight: 2 }).addTo(lg)
       );
     };
 
@@ -335,7 +347,7 @@ function DrawingController({
       if (pts.length < 3) return;
       lg.clearLayers();
       L.polygon(pts, { color, fillOpacity: 0.18, weight: 3 }).addTo(lg);
-      onPolygonComplete([...pts]);
+      onPolygonCompleteRef.current([...pts]);
       cleanup();
     };
 
@@ -344,8 +356,9 @@ function DrawingController({
     }
 
     const onMouseMove = (e: L.LeafletMouseEvent) => {
-      if (snapCoords.length === 0) return;
-      const snapped = findSnapPoint(e.latlng.lat, e.latlng.lng, snapCoords, map, 18);
+      const currentSnap = snapCoordsRef.current;
+      if (!currentSnap || currentSnap.length === 0) return;
+      const snapped = findSnapPoint(e.latlng.lat, e.latlng.lng, currentSnap, map, 18);
       const isSnapped = snapped[0] !== e.latlng.lat || snapped[1] !== e.latlng.lng;
       if (isSnapped) {
         snapMarker.setLatLng(snapped);
@@ -356,9 +369,10 @@ function DrawingController({
     };
 
     const onClick = (e: L.LeafletMouseEvent) => {
-      const snapped = findSnapPoint(e.latlng.lat, e.latlng.lng, snapCoords, map, 18);
+      const currentSnap = snapCoordsRef.current;
+      const snapped = findSnapPoint(e.latlng.lat, e.latlng.lng, currentSnap, map, 18);
       pointsRef.current = [...pointsRef.current, snapped];
-      onPointCountChange?.(pointsRef.current.length);
+      onPointCountChangeRef.current?.(pointsRef.current.length);
       redraw();
     };
 
@@ -367,12 +381,15 @@ function DrawingController({
     };
 
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") { onClose(); cleanup(); }
+      if (e.key === "Escape") { 
+        onCloseRef.current(); 
+        cleanup(); 
+      }
       if ((e.key === "z" || e.key === "Z") && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
         if (pointsRef.current.length > 0) {
           pointsRef.current = pointsRef.current.slice(0, -1);
-          onPointCountChange?.(pointsRef.current.length);
+          onPointCountChangeRef.current?.(pointsRef.current.length);
           redraw();
         }
       }
@@ -385,7 +402,7 @@ function DrawingController({
       document.removeEventListener("keydown", onKey);
       map.getContainer().style.cursor = "";
       if (finishTriggerRef) finishTriggerRef.current = null;
-      onPointCountChange?.(0);
+      onPointCountChangeRef.current?.(0);
     };
 
     map.on("click", onClick);
@@ -395,9 +412,12 @@ function DrawingController({
 
     return () => {
       cleanup();
-      if (lgRef.current) { map.removeLayer(lgRef.current); lgRef.current = null; }
+      if (lgRef.current) { 
+        map.removeLayer(lgRef.current); 
+        lgRef.current = null; 
+      }
     };
-  }, [mode, map, onPolygonComplete, onClose, snapCoords, onPointCountChange, finishTriggerRef]);
+  }, [mode, map, finishTriggerRef]);
 
   return null;
 }
@@ -922,12 +942,13 @@ export function CatchmentMapPanel({
     setSuggesting(true);
     try {
       const result = await apiRequest<any>("POST", "/api/gis/polygons/suggest", { facilityId });
-      if (result.geometry && result.geometry.coordinates) {
+      const geom = result?.geometry || result;
+      if (geom && geom.coordinates) {
         let coords: [number, number][];
-        if (result.geometry.type === "Polygon") {
-          coords = result.geometry.coordinates[0].map(([lng, lat]: number[]) => [lat, lng]);
-        } else if (result.geometry.type === "MultiPolygon") {
-          coords = result.geometry.coordinates[0][0].map(([lng, lat]: number[]) => [lat, lng]);
+        if (geom.type === "Polygon") {
+          coords = geom.coordinates[0].map(([lng, lat]: number[]) => [lat, lng]);
+        } else if (geom.type === "MultiPolygon") {
+          coords = geom.coordinates[0][0].map(([lng, lat]: number[]) => [lat, lng]);
         } else {
           throw new Error("Invalid geometry type");
         }

@@ -141,8 +141,13 @@ gisPolygonsRouter.post("/buffer", async (req, res) => {
 gisPolygonsRouter.post("/suggest", async (req, res) => {
   try {
     const tenantId = (req.user as any)?.tenantId;
-    const { facilityId } = req.body;
+    const rawFacId = req.body?.facilityId;
+    const facilityId = rawFacId != null ? parseInt(String(rawFacId), 10) : NaN;
     
+    if (isNaN(facilityId)) {
+      return res.status(400).json({ message: "A valid facilityId is required." });
+    }
+
     const result = await pool.query(`
       SELECT ST_AsGeoJSON(
         ST_ConvexHull(
@@ -150,31 +155,35 @@ gisPolygonsRouter.post("/suggest", async (req, res) => {
         )
       )::jsonb as geometry
       FROM villages
-      WHERE tenant_id = $1 AND assigned_facility_id = $2 AND latitude IS NOT NULL AND longitude IS NOT NULL
-    `, [tenantId, facilityId]);
+      WHERE ($1::int IS NULL OR tenant_id = $1) 
+        AND (assigned_facility_id = $2 OR assigned_facility_id = $2::text) 
+        AND latitude IS NOT NULL AND longitude IS NOT NULL
+    `, [tenantId || null, facilityId]);
     
     let geometry = result.rows[0]?.geometry;
     
-    // If no villages or points form a valid polygon (e.g. only 1 village), fallback to a 5km buffer around the facility itself
+    // If no villages or points form a valid polygon (e.g. fewer than 3 points), fallback to a 5km buffer around the facility itself
     if (!geometry || geometry.type === "Point" || geometry.type === "LineString") {
       const facResult = await pool.query(`
         SELECT ST_AsGeoJSON(
           ST_Buffer(ST_SetSRID(ST_MakePoint(longitude::float, latitude::float), 4326)::geography, 5000)
         )::jsonb as geometry
         FROM facilities
-        WHERE tenant_id = $1 AND id = $2
-      `, [tenantId, facilityId]);
+        WHERE ($1::int IS NULL OR tenant_id = $1) 
+          AND id = $2 
+          AND latitude IS NOT NULL AND longitude IS NOT NULL
+      `, [tenantId || null, facilityId]);
       
       geometry = facResult.rows[0]?.geometry;
     }
     
     if (!geometry) {
-      return res.status(404).json({ message: "Could not generate suggestion. Ensure facility has coordinates." });
+      return res.status(404).json({ message: "Could not generate suggestion. Ensure facility or assigned communities have coordinates." });
     }
     
-    res.json(geometry);
+    res.json({ geometry });
   } catch (err: any) {
-    res.status(500).json({ message: "Failed to suggest polygon" });
+    res.status(500).json({ message: safeErrorMessage(err, "Failed to suggest polygon.") });
   }
 });
 
