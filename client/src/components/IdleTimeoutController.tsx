@@ -20,6 +20,7 @@ export function IdleTimeoutController() {
   const hasUnsavedChanges = useIdleStore().hasUnsavedChanges;
   
   const [showWarning, setShowWarning] = useState(false);
+  const showWarningRef = useRef(false);
   const [countdown, setCountdown] = useState(0);
 
   // Fetch server configuration
@@ -31,16 +32,17 @@ export function IdleTimeoutController() {
   const timeoutId = useRef<NodeJS.Timeout | null>(null);
   const warningId = useRef<NodeJS.Timeout | null>(null);
   const countdownId = useRef<NodeJS.Timeout | null>(null);
+  const targetLogoutTimeRef = useRef<number>(0);
   const lastPingTime = useRef<number>(0);
   const channel = useRef<BroadcastChannel | null>(null);
 
   const getTimeoutMinutes = useCallback(() => {
-    const userPref = localStorage.getItem("vaxplan_user_idle_timeout");
+    const userPref = typeof localStorage !== "undefined" ? localStorage.getItem("vaxplan_user_idle_timeout") : null;
     if (userPref && userPref !== "default") {
       const parsed = parseInt(userPref, 10);
-      if (!isNaN(parsed)) return parsed;
+      if (!isNaN(parsed) && parsed > 0) return parsed;
     }
-    if (sessionConfig?.idleTimeoutMinutes) {
+    if (sessionConfig?.idleTimeoutMinutes && sessionConfig.idleTimeoutMinutes > 0) {
       return sessionConfig.idleTimeoutMinutes;
     }
     const security = tenant?.settings?.security || tenant?.settings || {};
@@ -53,6 +55,21 @@ export function IdleTimeoutController() {
   }, [tenant, user, sessionConfig]);
 
   const doLogout = useCallback((reason = "idle_timeout", broadcast = true, server = true) => {
+    if (timeoutId.current) {
+      clearTimeout(timeoutId.current);
+      timeoutId.current = null;
+    }
+    if (warningId.current) {
+      clearTimeout(warningId.current);
+      warningId.current = null;
+    }
+    if (countdownId.current) {
+      clearInterval(countdownId.current);
+      countdownId.current = null;
+    }
+    setShowWarning(false);
+    showWarningRef.current = false;
+
     void performClientLogout({
       reason,
       broadcast,
@@ -62,36 +79,61 @@ export function IdleTimeoutController() {
   }, []);
 
   const resetTimer = useCallback((broadcast = true) => {
-    if (timeoutId.current) clearTimeout(timeoutId.current);
-    if (warningId.current) clearTimeout(warningId.current);
-    if (countdownId.current) clearInterval(countdownId.current);
+    if (timeoutId.current) {
+      clearTimeout(timeoutId.current);
+      timeoutId.current = null;
+    }
+    if (warningId.current) {
+      clearTimeout(warningId.current);
+      warningId.current = null;
+    }
+    if (countdownId.current) {
+      clearInterval(countdownId.current);
+      countdownId.current = null;
+    }
     
     setShowWarning(false);
+    showWarningRef.current = false;
 
     const timeoutMinutes = getTimeoutMinutes();
     if (!timeoutMinutes || timeoutMinutes <= 0) return;
 
     const timeoutMs = timeoutMinutes * 60 * 1000;
     
-    // Warning logic
-    const warningPeriodMinutes = sessionConfig?.warningMinutes || (timeoutMinutes > 15 ? 2 : 1);
+    // Warning logic: at least 1 minute warning, or 2 minutes if timeout is > 15m
+    const warningPeriodMinutes = Math.min(
+      timeoutMinutes,
+      sessionConfig?.warningMinutes || (timeoutMinutes > 15 ? 2 : 1)
+    );
     const warningPeriodMs = warningPeriodMinutes * 60 * 1000;
-    const timeUntilWarning = timeoutMs - warningPeriodMs;
+    const timeUntilWarning = Math.max(0, timeoutMs - warningPeriodMs);
 
     warningId.current = setTimeout(() => {
       setShowWarning(true);
-      setCountdown(warningPeriodMinutes * 60);
+      showWarningRef.current = true;
+      const totalWarningSeconds = Math.max(1, warningPeriodMinutes * 60);
+      const targetTime = Date.now() + totalWarningSeconds * 1000;
+      targetLogoutTimeRef.current = targetTime;
+      setCountdown(totalWarningSeconds);
       
+      if (countdownId.current) clearInterval(countdownId.current);
       countdownId.current = setInterval(() => {
-        setCountdown((prev) => {
-          if (prev <= 1) {
-            clearInterval(countdownId.current!);
-            doLogout("idle_timeout");
-            return 0;
+        const remainingSec = Math.max(0, Math.ceil((targetLogoutTimeRef.current - Date.now()) / 1000));
+        setCountdown(remainingSec);
+        if (remainingSec <= 0) {
+          if (countdownId.current) {
+            clearInterval(countdownId.current);
+            countdownId.current = null;
           }
-          return prev - 1;
-        });
-      }, 1000);
+          if (timeoutId.current) {
+            clearTimeout(timeoutId.current);
+            timeoutId.current = null;
+          }
+          setShowWarning(false);
+          showWarningRef.current = false;
+          doLogout("idle_timeout");
+        }
+      }, 500);
     }, timeUntilWarning);
 
     timeoutId.current = setTimeout(() => {
@@ -109,8 +151,6 @@ export function IdleTimeoutController() {
     }
     
     // Ping server to keep session alive based on actual elapsed time.
-    // This ensures that active users trigger the keep-alive even if the
-    // component or dependencies rapidly remount and clear timeouts.
     const now = Date.now();
     if (!lastPingTime.current || now - lastPingTime.current >= 60000) {
       lastPingTime.current = now;
@@ -123,7 +163,14 @@ export function IdleTimeoutController() {
   }, [getTimeoutMinutes, doLogout, sessionConfig]);
 
   useEffect(() => {
-    if (!user) return; // Only run if logged in
+    if (!user) {
+      if (timeoutId.current) clearTimeout(timeoutId.current);
+      if (warningId.current) clearTimeout(warningId.current);
+      if (countdownId.current) clearInterval(countdownId.current);
+      setShowWarning(false);
+      showWarningRef.current = false;
+      return;
+    }
     
     try {
       if (typeof BroadcastChannel !== "undefined") {
@@ -154,7 +201,7 @@ export function IdleTimeoutController() {
     let throttleTimeout: NodeJS.Timeout | null = null;
     
     const handleActivity = () => {
-      if (showWarning) return; // Don't reset if modal is up, unless they click "Stay Signed In"
+      if (showWarningRef.current) return; // Don't reset if modal is up, unless they click "Stay Signed In"
       
       if (!throttleTimeout) {
         throttleTimeout = setTimeout(() => {
@@ -179,7 +226,7 @@ export function IdleTimeoutController() {
         /* ignore */
       }
     };
-  }, [resetTimer, showWarning, user, doLogout]);
+  }, [user?.id, resetTimer, doLogout]);
 
   const handleStaySignedIn = () => {
     resetTimer();
@@ -200,7 +247,12 @@ export function IdleTimeoutController() {
   };
 
   return (
-    <Dialog open={showWarning} onOpenChange={() => {}}>
+    <Dialog open={showWarning} onOpenChange={(open) => {
+      if (!open) {
+        // If user closes dialog without clicking Stay Signed In, sign out
+        doLogout("manual_logout");
+      }
+    }}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-destructive">

@@ -87,9 +87,31 @@ export async function performClientLogout(options: LogoutOptions = {}): Promise<
     broadcastLogout(reason);
   }
 
-  if (typeof window !== "undefined" && window.location.pathname !== "/") {
-    window.history.replaceState({}, "", "/");
-    window.dispatchEvent(new PopStateEvent("popstate"));
+  if (typeof window !== "undefined") {
+    // Preserve the intended destination only in session storage for after sign-in.
+    // Never put it in the signed-out URL.
+    const pathname = window.location.pathname;
+    const search = window.location.search;
+    if (pathname && pathname !== "/" && pathname !== "/login" && pathname !== "/landing") {
+      try {
+        sessionStorage.setItem("vaxplan_login_redirect", `${pathname}${search}`);
+      } catch {}
+    }
+
+    if (window.location.pathname !== "/login") {
+      window.history.replaceState({}, "", "/login");
+      try {
+        if (typeof PopStateEvent !== "undefined") {
+          window.dispatchEvent(new PopStateEvent("popstate"));
+        } else if (typeof CustomEvent !== "undefined") {
+          window.dispatchEvent(new CustomEvent("popstate"));
+        } else if (typeof Event !== "undefined") {
+          window.dispatchEvent(new Event("popstate"));
+        }
+      } catch {
+        /* ignore event dispatch failure in test/headless environments */
+      }
+    }
   }
 
   if (shouldCallServer && online) {

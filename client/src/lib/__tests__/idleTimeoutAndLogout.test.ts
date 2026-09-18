@@ -7,10 +7,33 @@ import {
 } from "@/lib/authSession";
 import { performClientLogout } from "@/lib/logout";
 
+class MemoryStorage {
+  private store = new Map<string, string>();
+  get length() { return this.store.size; }
+  clear() { this.store.clear(); }
+  getItem(key: string) { return this.store.get(key) ?? null; }
+  setItem(key: string, value: string) { this.store.set(key, String(value)); }
+  removeItem(key: string) { this.store.delete(key); }
+  key(index: number) { return Array.from(this.store.keys())[index] ?? null; }
+}
+
+const mockStorage = new MemoryStorage();
+const mockSession = new MemoryStorage();
+
+(globalThis as any).window = {
+  localStorage: mockStorage,
+  sessionStorage: mockSession,
+  location: { pathname: "/dashboard", search: "" },
+  history: { replaceState: vi.fn() },
+  dispatchEvent: vi.fn(),
+};
+Object.defineProperty(globalThis, "localStorage", { value: mockStorage, writable: true, configurable: true });
+Object.defineProperty(globalThis, "sessionStorage", { value: mockSession, writable: true, configurable: true });
+
 describe("Session Management, Idle Timeout & Logout", () => {
   beforeEach(() => {
-    localStorage.clear();
-    sessionStorage.clear();
+    mockStorage.clear();
+    mockSession.clear();
     vi.clearAllMocks();
   });
 
@@ -64,5 +87,17 @@ describe("Session Management, Idle Timeout & Logout", () => {
 
     const logoutState = getLogoutState();
     expect(logoutState?.reason).toBe("manual_logout");
+  });
+
+  it("should navigate to /login and preserve previous location in sessionStorage on logout", async () => {
+    (globalThis as any).window.location = { pathname: "/campaigns/readiness", search: "?quarter=3&year=2026" };
+
+    await performClientLogout({
+      reason: "idle_timeout",
+      server: false,
+    });
+
+    expect(globalThis.sessionStorage.getItem("vaxplan_login_redirect")).toBe("/campaigns/readiness?quarter=3&year=2026");
+    expect((globalThis as any).window.history.replaceState).toHaveBeenCalledWith({}, "", "/login");
   });
 });
