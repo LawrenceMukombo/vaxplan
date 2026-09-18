@@ -230,11 +230,7 @@ export function buildDhis2Headers(
 }
 
 export function buildHeaders(token: string): Record<string, string> {
-  return {
-    "Authorization": `Bearer ${token}`,
-    "Content-Type": "application/json",
-    "Accept": "application/json",
-  };
+  return buildDhis2Headers(token, "bearer");
 }
 
 // ---------------------------------------------------------------------------
@@ -301,13 +297,12 @@ export class Dhis2Adapter implements HisAdapter {
       const groups = new Map<string, number>();
       for (const rec of records) {
         const period = rec.administeredDate.slice(0, 7).replace("-", ""); // "202405"
-        const orgUnit = rec.facilityDhis2OrgUnitId ?? this.config.dhis2RootOrgUnit ?? "UNKNOWN_OU";
-        const key = `${orgUnit}|${period}|${rec.vaccineName}`;
-        groups.set(key, (groups.get(key) ?? 0) + 1);
-
         if (!rec.facilityDhis2OrgUnitId) {
-          warnings.push(`Record for "${rec.vaccineName}" at facility ${rec.facilityId} has no DHIS2 org unit — using root org unit`);
+          warnings.push(`Record for "${rec.vaccineName}" at facility ${rec.facilityId} has no DHIS2 org unit and was skipped.`);
+          continue;
         }
+        const key = `${rec.facilityDhis2OrgUnitId}|${period}|${rec.vaccineName}`;
+        groups.set(key, (groups.get(key) ?? 0) + 1);
       }
 
       for (const [key, count] of Array.from(groups.entries())) {
@@ -1436,6 +1431,67 @@ export function createHisAdapter(config: HisIntegrationConfig): HisAdapter {
   }
 }
 
+export async function testDhis2Connection(config: HisIntegrationConfig): Promise<{
+  success: boolean;
+  version?: string;
+  checks: Array<{ key: string; success: boolean; message: string }>;
+}> {
+  const checks: Array<{ key: string; success: boolean; message: string }> = [];
+  if (config.type !== "dhis2") {
+    return { success: false, checks: [{ key: "type", success: false, message: "Integration is not DHIS2." }] };
+  }
+  if (!config.dhis2RootOrgUnit) checks.push({ key: "rootOrgUnit", success: false, message: "Root organisation-unit UID is required." });
+  if (!config.dhis2DataSetUid) checks.push({ key: "dataSet", success: false, message: "Immunization data-set UID is required." });
+  if (!Number.isInteger(config.dhis2FacilityOrgUnitLevel) || (config.dhis2FacilityOrgUnitLevel ?? 0) < 1) {
+    checks.push({ key: "facilityLevel", success: false, message: "Facility organisation-unit level must be a positive integer." });
+  }
+
+  let token: string;
+  try {
+    token = resolveToken(config.secretRef, config.simulationMode);
+  } catch (err: any) {
+    checks.push({ key: "credential", success: false, message: err.message });
+    return { success: false, checks };
+  }
+  if (token === "mock_his_integration_token_for_demo_purposes") {
+    checks.push({ key: "simulation", success: true, message: "Explicit simulation mode is enabled; no country instance was contacted." });
+    return { success: checks.every((c) => c.success), version: "simulation", checks };
+  }
+
+  const baseUrl = normalizeDhis2BaseUrl(config.baseUrl);
+  const headers = buildDhis2Headers(token, config.authScheme);
+  let version: string | undefined;
+  try {
+    const response = await fetch(`${baseUrl}/api/system/info`, { headers, signal: AbortSignal.timeout(15_000) });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const info = await response.json() as { version?: string };
+    version = info.version;
+    checks.push({ key: "connection", success: true, message: `Connected${version ? ` to DHIS2 ${version}` : " to DHIS2"}.` });
+  } catch (err: any) {
+    checks.push({ key: "connection", success: false, message: `Connection failed: ${err.message ?? String(err)}` });
+    return { success: false, checks };
+  }
+
+  for (const [key, resource, uid, label] of [
+    ["rootOrgUnit", "organisationUnits", config.dhis2RootOrgUnit, "root organisation unit"],
+    ["dataSet", "dataSets", config.dhis2DataSetUid, "immunization data set"],
+  ] as const) {
+    if (!uid) continue;
+    try {
+      const response = await fetch(`${baseUrl}/api/${resource}/${encodeURIComponent(uid)}?fields=id,name`, {
+        headers,
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const item = await response.json() as { name?: string };
+      checks.push({ key, success: true, message: `${label} found${item.name ? `: ${item.name}` : ""}.` });
+    } catch (err: any) {
+      checks.push({ key, success: false, message: `${label} check failed: ${err.message ?? String(err)}` });
+    }
+  }
+  return { success: checks.every((c) => c.success), version, checks };
+}
+
 // ---------------------------------------------------------------------------
 // HIS Interoperability Service (facade used by routes)
 // ---------------------------------------------------------------------------
@@ -1458,7 +1514,13 @@ export function parseHisIntegrations(
         typeof cfg.baseUrl === "string" &&
         typeof cfg.secretRef === "string",
     )
-    .map((cfg: any) => cfg as HisIntegrationConfig);
+    .map((cfg: any) => ({
+      ...cfg,
+      baseUrl: cfg.type === "dhis2" ? normalizeDhis2BaseUrl(cfg.baseUrl) : cfg.baseUrl.replace(/\/+$/, ""),
+      authScheme: cfg.authScheme ?? "bearer",
+      dhis2FacilityOrgUnitLevel: cfg.dhis2FacilityOrgUnitLevel ?? 4,
+      simulationMode: cfg.simulationMode === true,
+    } as HisIntegrationConfig));
 }
 
 /**
@@ -1473,6 +1535,12 @@ export function getIntegrationStatus(
   enabled: boolean;
   hasToken: boolean;
   baseUrl: string;
+  dhis2RootOrgUnit?: string;
+  dhis2DataSetUid?: string;
+  dhis2FacilityOrgUnitLevel?: number;
+  authScheme?: string;
+  simulationMode: boolean;
+  ready: boolean;
 }> {
   return integrations.map((cfg) => ({
     id: cfg.id,
@@ -1481,5 +1549,19 @@ export function getIntegrationStatus(
     enabled: cfg.enabled,
     hasToken: Boolean(process.env[cfg.secretRef]),
     baseUrl: cfg.baseUrl,
+    dhis2RootOrgUnit: cfg.dhis2RootOrgUnit,
+    dhis2DataSetUid: cfg.dhis2DataSetUid,
+    dhis2FacilityOrgUnitLevel: cfg.dhis2FacilityOrgUnitLevel,
+    authScheme: cfg.authScheme,
+    simulationMode: cfg.simulationMode === true,
+    ready: Boolean(
+      cfg.enabled &&
+      (process.env[cfg.secretRef] || cfg.simulationMode) &&
+      (cfg.type !== "dhis2" || (
+        cfg.dhis2RootOrgUnit &&
+        cfg.dhis2DataSetUid &&
+        cfg.dhis2FacilityOrgUnitLevel
+      )),
+    ),
   }));
 }

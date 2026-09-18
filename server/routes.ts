@@ -181,6 +181,7 @@ import {
   type VaccinationBundleInput,
   getIntegrationStatus,
   createHisAdapter,
+  testDhis2Connection,
   type ImmunizationRecord,
   type PatientRecord,
 } from "./services/hisInteropService";
@@ -10291,6 +10292,27 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/his/dhis2/test-connection", isAuthenticated, requireTenant, loadRole, requireHisRole, async (req: any, res) => {
+    try {
+      const { integrationId } = z.object({ integrationId: z.string().min(1) }).parse(req.body);
+      const tenant = await storage.getTenant(req.tenantId!);
+      if (!tenant) return res.status(404).json({ message: "Tenant not found" });
+      const cfg = parseHisIntegrations(tenant.settings as Record<string, any>)
+        .find((item) => item.id === integrationId && item.type === "dhis2");
+      if (!cfg) return res.status(404).json({ message: "DHIS2 integration not found" });
+      const result = await testDhis2Connection(cfg);
+      await logAudit(req, "dhis2_test_connection", "his_integration", null, null, {
+        integrationId,
+        success: result.success,
+        checks: result.checks.map((check) => ({ key: check.key, success: check.success })),
+      });
+      res.status(result.success ? 200 : 422).json(result);
+    } catch (err: any) {
+      if (err?.name === "ZodError") return res.status(400).json({ message: "Invalid payload", errors: err.errors });
+      res.status(500).json({ message: safeErrorMessage(err, "DHIS2 connection test failed") });
+    }
+  });
+
   /**
    * POST /api/his/push-immunizations
    * Push immunization records from a monthly report to one or all enabled HIS integrations.
@@ -10341,13 +10363,17 @@ export async function registerRoutes(
         return res.status(400).json({ message: "No enabled HIS integrations found for this tenant." });
       }
 
+      const reportFacility = await storage.getFacility(req.tenantId, report.facilityId);
+      const facilityExternalIds = (reportFacility?.externalIds ?? {}) as Record<string, unknown>;
+      const facilityDhis2OrgUnitId = facilityExternalIds.dhis2 ?? facilityExternalIds.dhis2_uid;
+
       // Build ImmunizationRecord array
       const records: ImmunizationRecord[] = filtered.map((v: any) => ({
         clientId: String(v.clientId),
         clientExternalHisId: v.externalHisId ?? undefined,
         facilityId: report.facilityId,
-        facilityDhis2OrgUnitId: undefined, // enriched below if facility has dhis2OrgUnitId
-        facilityHmisCode: undefined,
+        facilityDhis2OrgUnitId: facilityDhis2OrgUnitId ? String(facilityDhis2OrgUnitId) : undefined,
+        facilityHmisCode: reportFacility?.hmisCode ?? undefined,
         vaccineName: v.vaccineName ?? v.vaccineCode ?? "Unknown",
         vaccineCode: v.vaccineCode ?? undefined,
         doseNumber: v.doseNumber ?? 1,
@@ -10613,7 +10639,7 @@ export async function registerRoutes(
         const tenant = await storage.getTenant(req.tenantId);
         if (!tenant) return res.status(404).json({ message: "Tenant not found" });
         const integrations = parseHisIntegrations(tenant.settings as Record<string, any>);
-        const cfg = integrations.find((i) => i.id === body.integrationId && i.enabled);
+        const cfg = integrations.find((i) => i.id === body.integrationId && i.enabled && i.type === "dhis2");
         if (!cfg) return res.status(400).json({ message: `Integration "${body.integrationId}" not found or disabled.` });
 
         const pulled = await _coverageSvc.pullDhis2Coverage(req.tenantId, cfg as any, {
@@ -10668,7 +10694,7 @@ export async function registerRoutes(
         const tenant = await storage.getTenant(req.tenantId);
         if (!tenant) return res.status(404).json({ message: "Tenant not found" });
         const integrations = parseHisIntegrations(tenant.settings as Record<string, any>);
-        const cfg = integrations.find((i) => i.id === body.integrationId && i.enabled);
+        const cfg = integrations.find((i) => i.id === body.integrationId && i.enabled && i.type === "dhis2");
         if (!cfg) return res.status(400).json({ message: `Integration "${body.integrationId}" not found or disabled.` });
 
         const pulled = await _coverageSvc.pullDhis2Coverage(req.tenantId, cfg as any, {
@@ -10717,7 +10743,7 @@ export async function registerRoutes(
         const tenant = await storage.getTenant(req.tenantId);
         if (!tenant) return res.status(404).json({ message: "Tenant not found" });
         const integrations = parseHisIntegrations(tenant.settings as Record<string, any>);
-        const cfg = integrations.find((i) => i.id === body.integrationId && i.enabled);
+        const cfg = integrations.find((i) => i.id === body.integrationId && i.enabled && i.type === "dhis2");
         if (!cfg) return res.status(400).json({ message: `Integration "${body.integrationId}" not found or disabled.` });
 
         const pulled = await _coverageSvc.pullDhis2Population(req.tenantId, cfg as any, {
@@ -10770,7 +10796,7 @@ export async function registerRoutes(
         const tenant = await storage.getTenant(req.tenantId);
         if (!tenant) return res.status(404).json({ message: "Tenant not found" });
         const integrations = parseHisIntegrations(tenant.settings as Record<string, any>);
-        const cfg = integrations.find((i) => i.id === body.integrationId && i.enabled);
+        const cfg = integrations.find((i) => i.id === body.integrationId && i.enabled && i.type === "dhis2");
         if (!cfg) return res.status(400).json({ message: `Integration "${body.integrationId}" not found or disabled.` });
 
         const userId = req.user?.claims?.sub || null;

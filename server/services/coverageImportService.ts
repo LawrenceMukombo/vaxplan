@@ -21,7 +21,23 @@ import {
   coverageCsvRowSchema,
   type Facility,
 } from "@shared/schema";
-import { resolveTokenForRef } from "./hisInteropService";
+import {
+  buildDhis2Headers,
+  normalizeDhis2BaseUrl,
+  resolveTokenForRef,
+  type HisIntegrationConfig,
+} from "./hisInteropService";
+
+type Dhis2IntegrationConfig = Pick<
+  HisIntegrationConfig,
+  "id" | "baseUrl" | "secretRef" | "dhis2DataSetUid" | "dhis2RootOrgUnit" | "authScheme" | "simulationMode"
+>;
+
+function facilityDhis2OrgUnitId(externalIds: unknown): string | undefined {
+  const ids = (externalIds ?? {}) as Record<string, unknown>;
+  const value = ids.dhis2 ?? ids.dhis2_uid;
+  return value == null || value === "" ? undefined : String(value);
+}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -247,7 +263,7 @@ function buildDhisDataElementMap(): Map<string, string> {
  */
 export async function pullDhis2Coverage(
   tenantId: string,
-  integration: { id: string; baseUrl: string; secretRef: string; dhis2DataSetUid?: string; dhis2RootOrgUnit?: string },
+  integration: Dhis2IntegrationConfig,
   options: { period: string; rootOrgUnit?: string },
 ): Promise<{
   rows: DhisCoverageRow[];
@@ -266,12 +282,17 @@ export async function pullDhis2Coverage(
     .where(eq(facilities.tenantId, tenantId));
   const facByOu = new Map<string, number>();
   for (const f of facs) {
-    const ouId = (f.externalIds as any)?.dhis2;
+    const ouId = facilityDhis2OrgUnitId(f.externalIds);
     if (ouId) facByOu.set(String(ouId), f.id);
   }
 
-  const token = resolveTokenForRef(integration.secretRef);
+  const token = resolveTokenForRef(integration.secretRef, integration.simulationMode);
   const rootOu = options.rootOrgUnit ?? integration.dhis2RootOrgUnit;
+
+  if (facByOu.size === 0 && !integration.simulationMode) {
+    errors.push("No local facilities are mapped to DHIS2 organisation units (externalIds.dhis2 or externalIds.dhis2_uid).");
+    return { rows: [], warnings, errors, simulated: false };
+  }
   const dataSet = integration.dhis2DataSetUid;
   if (!dataSet) {
     errors.push("No dhis2DataSetUid configured on this integration");
@@ -305,11 +326,11 @@ export async function pullDhis2Coverage(
     return { rows, warnings, errors, simulated: true };
   }
 
-  const url = `${integration.baseUrl.replace(/\/$/, "")}/api/dataValueSets?dataSet=${encodeURIComponent(
+  const url = `${normalizeDhis2BaseUrl(integration.baseUrl)}/api/dataValueSets?dataSet=${encodeURIComponent(
     dataSet,
   )}&period=${encodeURIComponent(options.period)}&orgUnit=${encodeURIComponent(rootOu)}&children=true`;
   const resp = await fetch(url, {
-    headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
+    headers: buildDhis2Headers(token, integration.authScheme),
     signal: AbortSignal.timeout(60_000),
   });
   if (!resp.ok) {
@@ -647,7 +668,7 @@ export interface DhisPopulationRow {
  */
 export async function pullDhis2Population(
   tenantId: string,
-  integration: { id: string; baseUrl: string; secretRef: string; dhis2RootOrgUnit?: string },
+  integration: Dhis2IntegrationConfig,
   options: { year: number; rootOrgUnit?: string },
 ): Promise<{
   rows: DhisPopulationRow[];
@@ -664,14 +685,19 @@ export async function pullDhis2Population(
 
   const facByOu = new Map<string, { id: number; name: string }>();
   for (const f of facs) {
-    const ouId = (f.externalIds as any)?.dhis2;
+    const ouId = facilityDhis2OrgUnitId(f.externalIds);
     if (ouId) facByOu.set(String(ouId), { id: f.id, name: f.name });
   }
 
-  const token = resolveTokenForRef(integration.secretRef);
+  const token = resolveTokenForRef(integration.secretRef, integration.simulationMode);
   const rootOu = options.rootOrgUnit ?? integration.dhis2RootOrgUnit;
 
-  if (token === "mock_his_integration_token_for_demo_purposes" || facByOu.size === 0) {
+  if (facByOu.size === 0 && !integration.simulationMode) {
+    errors.push("No local facilities are mapped to DHIS2 organisation units (externalIds.dhis2 or externalIds.dhis2_uid).");
+    return { rows: [], warnings, errors, simulated: false };
+  }
+
+  if (token === "mock_his_integration_token_for_demo_purposes") {
     warnings.push("SIMULATION MODE: Target populations generated from national census estimates.");
     const sampleFacilities = facs.slice(0, 15);
     const rows: DhisPopulationRow[] = sampleFacilities.map((f, idx) => {
@@ -680,7 +706,7 @@ export async function pullDhis2Population(
       const under5 = Math.round(baseTotal * 0.178);
       const pregnant = Math.round(baseTotal * 0.046);
       return {
-        orgUnitId: String((f.externalIds as any)?.dhis2 || `ou-dhis2-mock-${f.id}`),
+        orgUnitId: facilityDhis2OrgUnitId(f.externalIds) || `ou-dhis2-mock-${f.id}`,
         facilityId: f.id,
         facilityName: f.name,
         year: options.year,
@@ -694,20 +720,24 @@ export async function pullDhis2Population(
   }
 
   try {
-    const totalPopDe = process.env.DHIS2_DE_TOTAL_POP_UID || "de_total_pop_uid";
-    const under1De = process.env.DHIS2_DE_UNDER1_POP_UID || "de_under1_pop_uid";
-    const url = `${integration.baseUrl.replace(/\/$/, "")}/api/analytics?dimension=dx:${totalPopDe};${under1De}&dimension=ou:${encodeURIComponent(
+    const totalPopDe = process.env.DHIS2_DE_TOTAL_POP_UID;
+    const under1De = process.env.DHIS2_DE_UNDER1_POP_UID;
+    if (!totalPopDe || !under1De) {
+      errors.push("Configure DHIS2_DE_TOTAL_POP_UID and DHIS2_DE_UNDER1_POP_UID before population import.");
+      return { rows: [], warnings, errors, simulated: false };
+    }
+    const url = `${normalizeDhis2BaseUrl(integration.baseUrl)}/api/analytics?dimension=dx:${totalPopDe};${under1De}&dimension=ou:${encodeURIComponent(
       rootOu || "USER_ORGUNIT",
     )};CHILDREN&dimension=pe:${options.year}`;
 
     const resp = await fetch(url, {
-      headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
+      headers: buildDhis2Headers(token, integration.authScheme),
       signal: AbortSignal.timeout(60_000),
     });
 
     if (!resp.ok) {
-      warnings.push(`DHIS2 Analytics response ${resp.status}. Using facility fallback projection.`);
-      return fallbackPopulationRows(facs, options.year, warnings);
+      errors.push(`DHIS2 Analytics response ${resp.status}: ${await resp.text()}`);
+      return { rows: [], warnings, errors, simulated: false };
     }
 
     const data = await resp.json() as any;
@@ -757,7 +787,7 @@ function fallbackPopulationRows(facs: any[], year: number, warnings: string[]): 
   const rows: DhisPopulationRow[] = facs.slice(0, 10).map((f, idx) => {
     const baseTotal = 9200 + (idx * 1650);
     return {
-      orgUnitId: String((f.externalIds as any)?.dhis2 || `ou-dhis2-mock-${f.id}`),
+      orgUnitId: facilityDhis2OrgUnitId(f.externalIds) || `ou-dhis2-mock-${f.id}`,
       facilityId: f.id,
       facilityName: f.name,
       year,
@@ -830,7 +860,7 @@ export interface MicroplanAchievementPayload {
  */
 export async function pushMicroplanningAchievements(
   tenantId: string,
-  integration: { id: string; baseUrl: string; secretRef: string; dhis2RootOrgUnit?: string; dhis2DataSetUid?: string },
+  integration: Dhis2IntegrationConfig,
   options: { period: string },
 ): Promise<{
   success: boolean;
@@ -842,14 +872,14 @@ export async function pushMicroplanningAchievements(
 }> {
   const warnings: string[] = [];
   const errors: string[] = [];
-  const token = resolveTokenForRef(integration.secretRef);
+  const token = resolveTokenForRef(integration.secretRef, integration.simulationMode);
 
   // Aggregate local sessions for the period
   const sessionStats = await db.execute(dsql`
     SELECT
       f.id AS facility_id,
       f.name AS facility_name,
-      f.external_ids->>'dhis2' AS dhis2_ou,
+      COALESCE(f.external_ids->>'dhis2', f.external_ids->>'dhis2_uid') AS dhis2_ou,
       COUNT(sp.id) AS planned_count,
       COUNT(CASE WHEN sp.status = 'completed' THEN 1 END) AS completed_count,
       COALESCE(SUM(sp.target_population), 0) AS total_target
@@ -875,9 +905,13 @@ export async function pushMicroplanningAchievements(
   }
 
   const dataValues: Array<{ dataElement: string; period: string; orgUnit: string; value: string }> = [];
-  const plannedDe = process.env.DHIS2_DE_SESSIONS_PLANNED_UID || "MP_SESS_PLANNED";
-  const completedDe = process.env.DHIS2_DE_SESSIONS_HELD_UID || "MP_SESS_HELD";
-  const targetDe = process.env.DHIS2_DE_CHILDREN_TARGETED_UID || "MP_CHILD_TARGET";
+  const plannedDe = process.env.DHIS2_DE_SESSIONS_PLANNED_UID;
+  const completedDe = process.env.DHIS2_DE_SESSIONS_HELD_UID;
+  const targetDe = process.env.DHIS2_DE_CHILDREN_TARGETED_UID;
+  if (!plannedDe || !completedDe || !targetDe) {
+    errors.push("Configure DHIS2_DE_SESSIONS_PLANNED_UID, DHIS2_DE_SESSIONS_HELD_UID, and DHIS2_DE_CHILDREN_TARGETED_UID before outbound sync.");
+    return { success: false, sessionsReported: 0, dataValuesCount: 0, warnings, errors, simulated: false };
+  }
 
   for (const r of statRows) {
     const ou = r.dhis2_ou || integration.dhis2RootOrgUnit;
@@ -892,10 +926,10 @@ export async function pushMicroplanningAchievements(
   }
 
   try {
-    const url = `${integration.baseUrl.replace(/\/$/, "")}/api/dataValueSets`;
+    const url = `${normalizeDhis2BaseUrl(integration.baseUrl)}/api/dataValueSets`;
     const resp = await fetch(url, {
       method: "POST",
-      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      headers: buildDhis2Headers(token, integration.authScheme),
       body: JSON.stringify({
         dataSet: integration.dhis2DataSetUid,
         dataValues,
@@ -957,13 +991,7 @@ export interface Dhis2BiDirectionalSyncResult {
 export async function syncDhis2BiDirectional(
   tenantId: string,
   userId: string | null,
-  integration: {
-    id: string;
-    baseUrl: string;
-    secretRef: string;
-    dhis2DataSetUid?: string;
-    dhis2RootOrgUnit?: string;
-  },
+  integration: Dhis2IntegrationConfig,
   options: { period: string; year: number },
 ): Promise<Dhis2BiDirectionalSyncResult> {
   const warnings: string[] = [];

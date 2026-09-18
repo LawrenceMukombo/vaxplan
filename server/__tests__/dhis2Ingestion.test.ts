@@ -13,6 +13,8 @@ describe("Direct DHIS2 Data Ingestion & Bi-Directional Interoperability", () => 
     secretRef: "HIS_DHIS2_TEST_TOKEN",
     dhis2DataSetUid: "IMM_DATASET_001",
     dhis2RootOrgUnit: "OU_NATIONAL_ROOT",
+    dhis2FacilityOrgUnitLevel: 4,
+    simulationMode: true,
   };
 
   it("pulls routine immunization coverage statistics with simulation fallback", async () => {

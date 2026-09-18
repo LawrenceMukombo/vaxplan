@@ -64,6 +64,12 @@ interface HisIntegrationStatus {
   enabled: boolean;
   hasToken: boolean;
   baseUrl: string;
+  dhis2RootOrgUnit?: string;
+  dhis2DataSetUid?: string;
+  dhis2FacilityOrgUnitLevel?: number;
+  authScheme?: "bearer" | "apiToken" | "basic";
+  simulationMode: boolean;
+  ready: boolean;
 }
 
 interface HisStatusResponse {
@@ -106,14 +112,16 @@ const ADAPTER_ICONS: Record<string, React.ComponentType<any>> = {
 function IntegrationCard({ 
   integration,
   isNationalAdmin,
-  onEdit 
+  onEdit,
+  onTest,
 }: { 
   integration: HisIntegrationStatus;
   isNationalAdmin: boolean;
   onEdit: () => void;
+  onTest: () => void;
 }) {
   const AdapterIcon = ADAPTER_ICONS[integration.type] ?? ServerCog;
-  const isReady = integration.enabled && integration.hasToken;
+  const isReady = integration.ready;
 
   return (
     <Card className="border border-border shadow-sm hover:shadow-md transition-all duration-200 group relative">
@@ -167,10 +175,20 @@ function IntegrationCard({
             Set environment variable for this integration's secret.
           </p>
         )}
+        {integration.type === "dhis2" && (
+          <p className={`text-[11px] mt-2 ${integration.ready ? "text-emerald-700" : "text-amber-700"}`}>
+            {integration.ready ? "Required DHIS2 mappings configured." : "Root OU, data set, facility level, and credential are required."}
+          </p>
+        )}
       </CardContent>
 
       {isNationalAdmin && (
         <div className="absolute bottom-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1">
+          {integration.type === "dhis2" && (
+            <Button size="sm" variant="ghost" className="h-7 px-2 text-xs border border-border bg-card" onClick={onTest}>
+              Test
+            </Button>
+          )}
           <Button
             size="sm"
             variant="ghost"
@@ -386,6 +404,10 @@ export default function HisIntegrations() {
   const [newBaseUrl, setNewBaseUrl] = useState("");
   const [newSecretRef, setNewSecretRef] = useState("");
   const [newEnabled, setNewEnabled] = useState(true);
+  const [newDhis2RootOrgUnit, setNewDhis2RootOrgUnit] = useState("");
+  const [newDhis2DataSetUid, setNewDhis2DataSetUid] = useState("");
+  const [newDhis2FacilityLevel, setNewDhis2FacilityLevel] = useState(4);
+  const [newAuthScheme, setNewAuthScheme] = useState<"bearer" | "apiToken" | "basic">("apiToken");
 
   const { data: tenant } = useQuery<Tenant>({
     queryKey: ["/api/me/tenant"],
@@ -417,6 +439,15 @@ export default function HisIntegrations() {
         variant: "destructive",
       });
     },
+  });
+
+  const testDhis2Mutation = useMutation({
+    mutationFn: async (integrationId: string) => apiRequest<any>("POST", "/api/his/dhis2/test-connection", { integrationId }),
+    onSuccess: (data) => toast({
+      title: "DHIS2 connection ready",
+      description: data.checks.map((check: any) => check.message).join(" "),
+    }),
+    onError: (err: Error) => toast({ title: "DHIS2 connection not ready", description: err.message, variant: "destructive" }),
   });
 
   const pushMutation = useMutation({
@@ -497,6 +528,10 @@ export default function HisIntegrations() {
       });
       return;
     }
+    if (newType === "dhis2" && (!newDhis2RootOrgUnit.trim() || !newDhis2DataSetUid.trim() || newDhis2FacilityLevel < 1)) {
+      toast({ title: "DHIS2 mapping required", description: "Enter the root organisation unit, immunization data set, and facility level.", variant: "destructive" });
+      return;
+    }
     const newConfig = {
       id: `his_${Date.now()}`,
       type: newType,
@@ -504,6 +539,12 @@ export default function HisIntegrations() {
       baseUrl: newBaseUrl,
       secretRef: newSecretRef,
       enabled: newEnabled,
+      ...(newType === "dhis2" ? {
+        dhis2RootOrgUnit: newDhis2RootOrgUnit.trim(),
+        dhis2DataSetUid: newDhis2DataSetUid.trim(),
+        dhis2FacilityOrgUnitLevel: newDhis2FacilityLevel,
+        authScheme: newAuthScheme,
+      } : {}),
     };
     const updatedSettings = {
       ...(tenant?.settings as any),
@@ -516,6 +557,10 @@ export default function HisIntegrations() {
     setNewBaseUrl("");
     setNewSecretRef("");
     setNewEnabled(true);
+    setNewDhis2RootOrgUnit("");
+    setNewDhis2DataSetUid("");
+    setNewDhis2FacilityLevel(4);
+    setNewAuthScheme("apiToken");
   };
 
   const handleEditIntegration = () => {
@@ -525,6 +570,10 @@ export default function HisIntegrations() {
         description: "Please fill out all configuration fields.",
         variant: "destructive",
       });
+      return;
+    }
+    if (newType === "dhis2" && (!newDhis2RootOrgUnit.trim() || !newDhis2DataSetUid.trim() || newDhis2FacilityLevel < 1)) {
+      toast({ title: "DHIS2 mapping required", description: "Enter the root organisation unit, immunization data set, and facility level.", variant: "destructive" });
       return;
     }
     if (editingConfigId === null) return;
@@ -537,6 +586,12 @@ export default function HisIntegrations() {
           baseUrl: newBaseUrl,
           secretRef: newSecretRef,
           enabled: newEnabled,
+          ...(newType === "dhis2" ? {
+            dhis2RootOrgUnit: newDhis2RootOrgUnit.trim(),
+            dhis2DataSetUid: newDhis2DataSetUid.trim(),
+            dhis2FacilityOrgUnitLevel: newDhis2FacilityLevel,
+            authScheme: newAuthScheme,
+          } : {}),
         };
       }
       return cfg;
@@ -569,6 +624,10 @@ export default function HisIntegrations() {
     setNewBaseUrl(integration.baseUrl);
     setNewSecretRef(orig.secretRef || "");
     setNewEnabled(integration.enabled);
+    setNewDhis2RootOrgUnit(orig.dhis2RootOrgUnit || "");
+    setNewDhis2DataSetUid(orig.dhis2DataSetUid || "");
+    setNewDhis2FacilityLevel(orig.dhis2FacilityOrgUnitLevel || 4);
+    setNewAuthScheme(orig.authScheme || "apiToken");
     setIsEditConfigOpen(true);
   };
 
@@ -816,6 +875,7 @@ export default function HisIntegrations() {
                 integration={integration} 
                 isNationalAdmin={isNationalAdmin}
                 onEdit={() => handleOpenEdit(integration)}
+                onTest={() => testDhis2Mutation.mutate(integration.id)}
               />
             ))}
           </div>
@@ -885,6 +945,30 @@ export default function HisIntegrations() {
                 Enter the name of the system environment variable containing the bearer or basic authentication token.
               </span>
             </div>
+
+            {newType === "dhis2" && (
+              <div className="grid grid-cols-2 gap-3 rounded-xl border p-3">
+                <div className="space-y-1 col-span-2">
+                  <Label className="text-xs">Country/root organisation-unit UID</Label>
+                  <Input value={newDhis2RootOrgUnit} onChange={(e) => setNewDhis2RootOrgUnit(e.target.value)} placeholder="e.g. ImspTQPwCqd" className="font-mono" />
+                </div>
+                <div className="space-y-1 col-span-2">
+                  <Label className="text-xs">Immunization data-set UID</Label>
+                  <Input value={newDhis2DataSetUid} onChange={(e) => setNewDhis2DataSetUid(e.target.value)} placeholder="DHIS2 data set UID" className="font-mono" />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Facility OU level</Label>
+                  <Input type="number" min={1} value={newDhis2FacilityLevel} onChange={(e) => setNewDhis2FacilityLevel(Number(e.target.value))} />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Authentication</Label>
+                  <Select value={newAuthScheme} onValueChange={(v: any) => setNewAuthScheme(v)}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent><SelectItem value="apiToken">Personal access token</SelectItem><SelectItem value="basic">Basic</SelectItem><SelectItem value="bearer">Bearer</SelectItem></SelectContent>
+                  </Select>
+                </div>
+              </div>
+            )}
 
             <div className="flex items-center justify-between p-3 bg-secondary/50 rounded-xl border border-border">
               <div className="space-y-0.5">
@@ -961,6 +1045,30 @@ export default function HisIntegrations() {
                 className="bg-background border-border text-foreground placeholder:text-muted-foreground rounded-xl font-mono"
               />
             </div>
+
+            {newType === "dhis2" && (
+              <div className="grid grid-cols-2 gap-3 rounded-xl border p-3">
+                <div className="space-y-1 col-span-2">
+                  <Label className="text-xs">Country/root organisation-unit UID</Label>
+                  <Input value={newDhis2RootOrgUnit} onChange={(e) => setNewDhis2RootOrgUnit(e.target.value)} className="font-mono" />
+                </div>
+                <div className="space-y-1 col-span-2">
+                  <Label className="text-xs">Immunization data-set UID</Label>
+                  <Input value={newDhis2DataSetUid} onChange={(e) => setNewDhis2DataSetUid(e.target.value)} className="font-mono" />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Facility OU level</Label>
+                  <Input type="number" min={1} value={newDhis2FacilityLevel} onChange={(e) => setNewDhis2FacilityLevel(Number(e.target.value))} />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Authentication</Label>
+                  <Select value={newAuthScheme} onValueChange={(v: any) => setNewAuthScheme(v)}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent><SelectItem value="apiToken">Personal access token</SelectItem><SelectItem value="basic">Basic</SelectItem><SelectItem value="bearer">Bearer</SelectItem></SelectContent>
+                  </Select>
+                </div>
+              </div>
+            )}
 
             <div className="flex items-center justify-between p-3 bg-secondary/50 rounded-xl border border-border">
               <div className="space-y-0.5">

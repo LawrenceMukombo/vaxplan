@@ -413,6 +413,18 @@ export const FUNDING_SOURCES = [
   { value: "other", label: "Other" },
 ];
 
+// --- Planning Cadence Types & Helpers --------------------------------------
+export type PlanningCadence = "monthly" | "quarterly" | "semi_annual" | "annual";
+
+export const MONTH_NAMES = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December"
+];
+export const MONTH_SHORT = [
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+];
+
 // --- Helpers --------------------------------------------------------------
 export function currentQuarter() {
   return Math.ceil((new Date().getMonth() + 1) / 3);
@@ -718,6 +730,8 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
   // the saved values instead of silently overwriting them.
   const [year, setYear] = useState(new Date().getFullYear());
   const [quarter, setQuarter] = useState(currentQuarter());
+  const [planningCadence, setPlanningCadence] = useState<PlanningCadence>("quarterly");
+  const [periodNumber, setPeriodNumber] = useState<number>(() => currentQuarter());
 
   // Resume an existing draft via either the path param (/microplans/routine/:id,
   // /microplans/campaigns/:id) or the legacy `?id=` query string. The path-param
@@ -972,7 +986,25 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
       // existing microplan shows it exactly as the author left it instead of
       // silently snapping back to "today's" period or the default plan type.
       if (typeof microplan.year === "number") setYear(microplan.year);
-      if (typeof microplan.quarter === "number") setQuarter(microplan.quarter);
+      if (typeof microplan.quarter === "number") {
+        setQuarter(microplan.quarter);
+        setPeriodNumber(microplan.quarter);
+      }
+      const planScope = (microplan as any).campaignScopeDetails;
+      if (planScope?.planningCadence) {
+        setPlanningCadence(planScope.planningCadence);
+        if (typeof planScope.periodNumber === "number") {
+          setPeriodNumber(planScope.periodNumber);
+        }
+      } else if (microplan.name?.toLowerCase().includes("monthly") || microplan.name?.includes(" M")) {
+        setPlanningCadence("monthly");
+      } else if (microplan.name?.toLowerCase().includes("6-month") || microplan.name?.includes(" H")) {
+        setPlanningCadence("semi_annual");
+      } else if (microplan.name?.toLowerCase().includes("annual")) {
+        setPlanningCadence("annual");
+      } else {
+        setPlanningCadence("quarterly");
+      }
       if (microplan.planType) {
         // DB enum values are `facility_routine` / `sia_campaign`; the wizard
         // works in the shorter `routine` / `campaign` vocabulary.
@@ -1191,27 +1223,35 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
   const existingPeriodPlan = useMemo(() => {
     if (microplanId || !facilityId) return null;
     const pt = planType === "campaign" ? "sia_campaign" : "facility_routine";
-    return (allMicroplans ?? []).find(
-      (p) =>
-        Number(p.facilityId) === Number(facilityId) &&
-        (p.planType === pt ||
-          (planType === "campaign"
-            ? String(p.planType).includes("campaign")
-            : !String(p.planType).includes("campaign"))) &&
-        Number(p.year) === Number(year) &&
-        Number(p.quarter) === Number(quarter) &&
-        !["rejected", "archived", "superseded"].includes(String(p.status ?? "").toLowerCase())
-    );
-  }, [allMicroplans, microplanId, facilityId, planType, year, quarter]);
+    return (allMicroplans ?? []).find((p) => {
+      if (Number(p.facilityId) !== Number(facilityId)) return false;
+      const isMatch =
+        p.planType === pt ||
+        (planType === "campaign"
+          ? String(p.planType).includes("campaign")
+          : !String(p.planType).includes("campaign"));
+      if (!isMatch) return false;
+      if (["rejected", "archived", "superseded"].includes(String(p.status ?? "").toLowerCase())) return false;
+      if (Number(p.year) !== Number(year)) return false;
 
-  // Calculate period status, remaining open quarters, and next-year planning availability for this facility
+      const scope = (p as any).campaignScopeDetails;
+      if (scope?.planningCadence) {
+        if (scope.planningCadence === planningCadence) {
+          return Number(scope.periodNumber) === Number(periodNumber);
+        }
+      }
+      return Number(p.quarter) === Number(quarter);
+    });
+  }, [allMicroplans, microplanId, facilityId, planType, year, quarter, planningCadence, periodNumber]);
+
+  // Calculate period status, remaining open periods, and next-year planning availability for this facility
   const currentCalendarYear = useMemo(() => new Date().getFullYear(), []);
   const currentCalendarQuarter = useMemo(() => currentQuarter(), []);
+  const currentCalendarMonth = useMemo(() => new Date().getMonth() + 1, []);
   const isQ3OrLater = currentCalendarQuarter >= 3;
 
   const facilityPeriodAvailability = useMemo(() => {
     const isCampaign = planType === "campaign";
-    const pt = isCampaign ? "sia_campaign" : "facility_routine";
 
     // All active or draft plans for this facility and type
     const facilityPlans = (allMicroplans ?? []).filter(
@@ -1221,7 +1261,6 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
         !["rejected", "archived", "superseded"].includes(String(p.status ?? "").toLowerCase())
     );
 
-    // Available years: current year, next year (always available, especially in Q3/Q4), and previous year
     const availableYears = [currentCalendarYear, currentCalendarYear + 1];
 
     const quartersMeta: Record<number, { label: string; months: string }> = {
@@ -1231,69 +1270,148 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
       4: { label: "Q4", months: "Oct – Dec" },
     };
 
-    const quartersByYear: Record<
-      number,
-      Array<{
-        quarter: number;
-        label: string;
-        months: string;
-        existingPlan: Microplan | null;
-        isAvailable: boolean;
-        isRecommended: boolean;
-      }>
-    > = {};
+    const periodsByCadence: Record<
+      PlanningCadence,
+      Record<
+        number,
+        Array<{
+          periodNumber: number;
+          quarter: number;
+          label: string;
+          shortLabel: string;
+          months: string;
+          existingPlan: Microplan | null;
+          isAvailable: boolean;
+          isRecommended: boolean;
+        }>
+      >
+    > = {
+      monthly: {},
+      quarterly: {},
+      semi_annual: {},
+      annual: {},
+    };
 
-    let recommendedPeriod: { year: number; quarter: number } | null = null;
+    let recommendedPeriod: { year: number; quarter: number; cadence: PlanningCadence; periodNumber: number } | null = null;
 
     for (const y of availableYears) {
-      quartersByYear[y] = [];
-      for (let q = 1; q <= 4; q++) {
-        const plan = facilityPlans.find((p) => Number(p.year) === y && Number(p.quarter) === q) || null;
+      // 1. Monthly (12 months)
+      periodsByCadence.monthly[y] = [];
+      for (let m = 1; m <= 12; m++) {
+        const q = Math.ceil(m / 3);
+        const plan = facilityPlans.find((p) => {
+          if (Number(p.year) !== y) return false;
+          const scope = (p as any).campaignScopeDetails;
+          if (scope?.planningCadence === "monthly" && Number(scope.periodNumber) === m) return true;
+          if (p.name?.toLowerCase().includes(`m${m} `) || p.name?.toLowerCase().includes(`(${MONTH_SHORT[m - 1].toLowerCase()})`)) return true;
+          return false;
+        }) || null;
         const isAvailable = !plan;
+        const isRec = isAvailable && (y === currentCalendarYear ? m >= currentCalendarMonth : true);
 
-        let isRec = false;
-        if (isAvailable && !recommendedPeriod) {
-          // If current year: prioritize upcoming quarters (>= current quarter)
-          if (y === currentCalendarYear && q >= currentCalendarQuarter) {
-            isRec = true;
-            recommendedPeriod = { year: y, quarter: q };
-          } else if (y === currentCalendarYear + 1 && isQ3OrLater) {
-            // If in Q3/Q4 or remaining quarters in current year are taken
-            isRec = true;
-            recommendedPeriod = { year: y, quarter: q };
-          }
+        if (isRec && !recommendedPeriod && planningCadence === "monthly") {
+          recommendedPeriod = { year: y, quarter: q, cadence: "monthly", periodNumber: m };
         }
 
-        quartersByYear[y].push({
+        periodsByCadence.monthly[y].push({
+          periodNumber: m,
+          quarter: q,
+          label: `M${m} (${MONTH_SHORT[m - 1]})`,
+          shortLabel: MONTH_SHORT[m - 1],
+          months: MONTH_NAMES[m - 1],
+          existingPlan: plan,
+          isAvailable,
+          isRecommended: isRec,
+        });
+      }
+
+      // 2. Quarterly (4 quarters)
+      periodsByCadence.quarterly[y] = [];
+      for (let q = 1; q <= 4; q++) {
+        const plan = facilityPlans.find((p) => {
+          if (Number(p.year) !== y) return false;
+          const scope = (p as any).campaignScopeDetails;
+          if (scope?.planningCadence && scope.planningCadence !== "quarterly") return false;
+          return Number(p.quarter) === q;
+        }) || null;
+        const isAvailable = !plan;
+        const isRec = isAvailable && (y === currentCalendarYear ? q >= currentCalendarQuarter : isQ3OrLater);
+
+        if (isRec && !recommendedPeriod && planningCadence === "quarterly") {
+          recommendedPeriod = { year: y, quarter: q, cadence: "quarterly", periodNumber: q };
+        }
+
+        periodsByCadence.quarterly[y].push({
+          periodNumber: q,
           quarter: q,
           label: quartersMeta[q].label,
+          shortLabel: quartersMeta[q].label,
           months: quartersMeta[q].months,
           existingPlan: plan,
           isAvailable,
           isRecommended: isRec,
         });
       }
-    }
 
-    // Fallback recommendation if upcoming quarters were filled: pick earliest open quarter in available years
-    if (!recommendedPeriod) {
-      for (const y of availableYears) {
-        const firstOpen = quartersByYear[y]?.find((item) => item.isAvailable);
-        if (firstOpen) {
-          firstOpen.isRecommended = true;
-          recommendedPeriod = { year: y, quarter: firstOpen.quarter };
-          break;
+      // 3. Semi-Annual (2 periods: H1, H2)
+      periodsByCadence.semi_annual[y] = [
+        {
+          periodNumber: 1,
+          quarter: 1,
+          label: "H1 (1st Half)",
+          shortLabel: "H1",
+          months: "Jan – Jun (6 Months)",
+          existingPlan: facilityPlans.find((p) => Number(p.year) === y && ((p as any).campaignScopeDetails?.periodNumber === 1 || p.name?.includes("H1"))) || null,
+          isAvailable: true,
+          isRecommended: y === currentCalendarYear ? currentCalendarQuarter <= 2 : false,
+        },
+        {
+          periodNumber: 2,
+          quarter: 3,
+          label: "H2 (2nd Half)",
+          shortLabel: "H2",
+          months: "Jul – Dec (6 Months)",
+          existingPlan: facilityPlans.find((p) => Number(p.year) === y && ((p as any).campaignScopeDetails?.periodNumber === 2 || p.name?.includes("H2"))) || null,
+          isAvailable: true,
+          isRecommended: y === currentCalendarYear ? currentCalendarQuarter >= 3 : true,
+        },
+      ];
+      periodsByCadence.semi_annual[y].forEach((p) => {
+        p.isAvailable = !p.existingPlan;
+        if (p.isRecommended && p.isAvailable && !recommendedPeriod && planningCadence === "semi_annual") {
+          recommendedPeriod = { year: y, quarter: p.quarter, cadence: "semi_annual", periodNumber: p.periodNumber };
         }
+      });
+
+      // 4. Annual (1 full year)
+      const annualPlan = facilityPlans.find((p) => Number(p.year) === y && ((p as any).campaignScopeDetails?.planningCadence === "annual" || p.name?.toLowerCase().includes("annual"))) || null;
+      const annualAvail = !annualPlan;
+      const annualRec = y === currentCalendarYear + 1 || currentCalendarQuarter === 1;
+      if (annualRec && annualAvail && !recommendedPeriod && planningCadence === "annual") {
+        recommendedPeriod = { year: y, quarter: 1, cadence: "annual", periodNumber: 1 };
       }
+      periodsByCadence.annual[y] = [
+        {
+          periodNumber: 1,
+          quarter: 1,
+          label: `Annual ${y}`,
+          shortLabel: `Full Year`,
+          months: `Jan – Dec (${y} Calendar Year)`,
+          existingPlan: annualPlan,
+          isAvailable: annualAvail,
+          isRecommended: annualRec,
+        },
+      ];
     }
 
     return {
       availableYears,
-      quartersByYear,
+      periodsByCadence,
+      quartersByYear: periodsByCadence.quarterly,
       recommendedPeriod,
       totalExistingPlans: facilityPlans.length,
     };
-  }, [allMicroplans, facilityId, planType, currentCalendarYear, currentCalendarQuarter, isQ3OrLater]);
+  }, [allMicroplans, facilityId, planType, currentCalendarYear, currentCalendarQuarter, currentCalendarMonth, isQ3OrLater, planningCadence]);
 
   // Automatically switch to the next available period when a conflict is detected on new microplans
   const lastResolvedConflictKey = useRef<string | null>(null);
@@ -1301,21 +1419,28 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
     if (microplanId || !facilityId) return;
     if (!existingPeriodPlan) return;
 
-    const conflictKey = `${facilityId}-${year}-${quarter}-${planType}`;
+    const conflictKey = `${facilityId}-${year}-${quarter}-${planningCadence}-${periodNumber}-${planType}`;
     if (lastResolvedConflictKey.current === conflictKey) return;
 
     if (facilityPeriodAvailability.recommendedPeriod) {
-      const { year: recY, quarter: recQ } = facilityPeriodAvailability.recommendedPeriod;
-      if (recY !== year || recQ !== quarter) {
+      const { year: recY, quarter: recQ, cadence: recCad, periodNumber: recNum } = facilityPeriodAvailability.recommendedPeriod;
+      if (recY !== year || recQ !== quarter || recNum !== periodNumber) {
         lastResolvedConflictKey.current = conflictKey;
         setYear(recY);
         setQuarter(recQ);
+        setPlanningCadence(recCad);
+        setPeriodNumber(recNum);
 
         const fac = facilities?.find((f) => f.id === facilityId);
         const facName = fac?.name?.trim();
         const isCampaign = planType === "campaign";
-        const autoName = `${facName ? `${facName} — ` : ""}${isCampaign ? "SIA" : "Routine"} microplan Q${recQ} ${recY}`;
-        if (!name || name.includes("microplan Q") || name.includes("Microplan Q")) {
+        let cadenceTag = `Q${recQ}`;
+        if (recCad === "monthly") cadenceTag = `M${recNum} (${MONTH_SHORT[recNum - 1]})`;
+        else if (recCad === "semi_annual") cadenceTag = `H${recNum} (6-Month)`;
+        else if (recCad === "annual") cadenceTag = `Annual`;
+
+        const autoName = `${facName ? `${facName} — ` : ""}${isCampaign ? "SIA" : "Routine"} ${recCad === "annual" ? "Annual" : recCad === "semi_annual" ? "6-Month" : recCad === "monthly" ? "Monthly" : "Quarterly"} Microplan ${cadenceTag} ${recY}`;
+        if (!name || name.includes("microplan") || name.includes("Microplan") || name.includes("SIA") || name.includes("Routine")) {
           setName(autoName);
         }
       }
@@ -1327,19 +1452,39 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
     facilityPeriodAvailability,
     year,
     quarter,
+    planningCadence,
+    periodNumber,
     planType,
     facilities,
     name,
   ]);
 
-  const handleSelectPeriod = (newYear: number, newQuarter: number) => {
+  const handleSelectPeriod = (
+    newYear: number,
+    newQuarter: number,
+    newCadence: PlanningCadence = planningCadence,
+    newPeriodNumber: number = periodNumber
+  ) => {
     setYear(newYear);
     setQuarter(newQuarter);
+    setPlanningCadence(newCadence);
+    setPeriodNumber(newPeriodNumber);
+
     const fac = facilities?.find((f) => f.id === facilityId);
     const facName = fac?.name?.trim();
     const isCampaign = planType === "campaign";
-    const autoName = `${facName ? `${facName} — ` : ""}${isCampaign ? "SIA" : "Routine"} microplan Q${newQuarter} ${newYear}`;
-    if (!name || name.includes("microplan Q") || name.includes("Microplan Q")) {
+
+    let cadenceTag = `Q${newQuarter}`;
+    if (newCadence === "monthly") {
+      cadenceTag = `M${newPeriodNumber} (${MONTH_SHORT[newPeriodNumber - 1]})`;
+    } else if (newCadence === "semi_annual") {
+      cadenceTag = `H${newPeriodNumber} (6-Month)`;
+    } else if (newCadence === "annual") {
+      cadenceTag = `Annual`;
+    }
+
+    const autoName = `${facName ? `${facName} — ` : ""}${isCampaign ? "SIA" : "Routine"} ${newCadence === "annual" ? "Annual" : newCadence === "semi_annual" ? "6-Month" : newCadence === "monthly" ? "Monthly" : "Quarterly"} Microplan ${cadenceTag} ${newYear}`;
+    if (!name || name.includes("microplan") || name.includes("Microplan") || name.includes("SIA") || name.includes("Routine")) {
       setName(autoName);
     }
   };
@@ -1351,7 +1496,7 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
     if (!facilityId) throw new Error("Pick a facility first.");
     if (existingPeriodPlan) {
       const err = new Error(
-        `A microplan already exists for this facility and period (Q${quarter} ${year}): "${existingPeriodPlan.name}". Only one active versioned plan is permitted per period.`
+        `A microplan already exists for this facility and period (${planningCadence.toUpperCase()} ${periodNumber} / ${year}): "${existingPeriodPlan.name}". Only one active versioned plan is permitted per period.`
       );
       if (!opts?.silent) {
         toast({
@@ -1366,22 +1511,43 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
       const isCampaign = planType === "campaign";
       const fac = facilities?.find((f) => f.id === facilityId);
       const facName = fac?.name?.trim();
-      const defaultPlanName = `${facName ? `${facName} — ` : ""}${isCampaign ? "SIA" : "Routine"} microplan Q${quarter} ${year}`;
+
+      let cadenceTag = `Q${quarter}`;
+      if (planningCadence === "monthly") {
+        cadenceTag = `M${periodNumber} (${MONTH_SHORT[periodNumber - 1] || 'Month'})`;
+      } else if (planningCadence === "semi_annual") {
+        cadenceTag = `H${periodNumber}`;
+      } else if (planningCadence === "annual") {
+        cadenceTag = `Annual`;
+      }
+
+      const defaultPlanName = `${facName ? `${facName} — ` : ""}${isCampaign ? "SIA" : "Routine"} ${
+        planningCadence === "annual"
+          ? "Annual"
+          : planningCadence === "semi_annual"
+          ? "6-Month"
+          : planningCadence === "monthly"
+          ? "Monthly"
+          : "Quarterly"
+      } Microplan ${cadenceTag} ${year}`;
+
       const created = await apiRequest<Microplan>("POST", "/api/microplans", {
         facilityId,
-        name:
-          name.trim() ||
-          defaultPlanName,
+        name: name.trim() || defaultPlanName,
         planType: isCampaign ? "sia_campaign" : "facility_routine",
         year,
         quarter,
         status: "draft",
+        campaignScopeDetails: {
+          ...(isCampaign && campaignScope !== "National" ? campaignScopeDetails : {}),
+          planningCadence,
+          periodNumber,
+        },
         ...(isCampaign
           ? {
               campaignAntigen,
               campaignTargetAge,
               campaignScope,
-              campaignScopeDetails: campaignScope !== "National" ? campaignScopeDetails : null,
             }
           : {}),
       });
@@ -5185,7 +5351,7 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
 
                   {/* Planning Period & Target Cadence Selector */}
                   {facilityId && (
-                    <div className="space-y-3 rounded-lg border bg-background/80 p-3.5" data-testid="container-period-selector">
+                    <div className="space-y-3.5 rounded-lg border bg-background/80 p-3.5" data-testid="container-period-selector">
                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                         <div className="flex items-center gap-2">
                           <Calendar className="h-4 w-4 text-primary" />
@@ -5198,6 +5364,47 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
                         )}
                       </div>
 
+                      {/* Cadence Category Selector Tabs */}
+                      <div className="space-y-1.5 pt-1">
+                        <span className="text-xs text-muted-foreground font-medium block">Planning Cadence:</span>
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 p-1 bg-muted/40 rounded-lg border">
+                          {[
+                            { id: "monthly" as PlanningCadence, label: "Monthly", duration: "1 Month", icon: "📅" },
+                            { id: "quarterly" as PlanningCadence, label: "Quarterly", duration: "3 Months (Standard)", icon: "📊" },
+                            { id: "semi_annual" as PlanningCadence, label: "6-Monthly", duration: "6 Months", icon: "⏳" },
+                            { id: "annual" as PlanningCadence, label: "Annual", duration: "12 Months", icon: "🗓️" },
+                          ].map((cad) => {
+                            const isCadSelected = planningCadence === cad.id;
+                            return (
+                              <button
+                                key={cad.id}
+                                type="button"
+                                onClick={() => {
+                                  setPlanningCadence(cad.id);
+                                  const options = facilityPeriodAvailability.periodsByCadence[cad.id]?.[year] ?? [];
+                                  const rec = options.find((o) => o.isRecommended && o.isAvailable) || options.find((o) => o.isAvailable) || options[0];
+                                  if (rec) {
+                                    handleSelectPeriod(year, rec.quarter, cad.id, rec.periodNumber);
+                                  }
+                                }}
+                                className={`flex flex-col items-center justify-center p-2 rounded-md text-xs transition-all ${
+                                  isCadSelected
+                                    ? "bg-primary text-primary-foreground font-semibold shadow-xs"
+                                    : "text-muted-foreground hover:text-foreground hover:bg-muted/80 font-medium"
+                                }`}
+                                data-testid={`button-cadence-${cad.id}`}
+                              >
+                                <span className="text-sm mb-0.5">{cad.icon}</span>
+                                <span className="font-bold">{cad.label}</span>
+                                <span className={`text-[10px] ${isCadSelected ? "text-primary-foreground/80" : "text-muted-foreground"}`}>
+                                  {cad.duration}
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+
                       {/* Year Selector */}
                       <div className="flex flex-wrap items-center gap-2 pt-1">
                         <span className="text-xs text-muted-foreground font-medium">Target Year:</span>
@@ -5208,7 +5415,13 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
                               type="button"
                               onClick={() => {
                                 setYear(y);
-                                handleSelectPeriod(y, quarter);
+                                const options = facilityPeriodAvailability.periodsByCadence[planningCadence]?.[y] ?? [];
+                                const rec = options.find((o) => o.isRecommended && o.isAvailable) || options.find((o) => o.isAvailable) || options[0];
+                                if (rec) {
+                                  handleSelectPeriod(y, rec.quarter, planningCadence, rec.periodNumber);
+                                } else {
+                                  handleSelectPeriod(y, quarter, planningCadence, periodNumber);
+                                }
                               }}
                               className={`px-3 py-1 text-xs font-semibold rounded-md transition-all ${
                                 year === y
@@ -5228,53 +5441,72 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
                         )}
                       </div>
 
-                      {/* Quarters Grid */}
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 pt-1">
-                        {(facilityPeriodAvailability.quartersByYear[year] ?? []).map((qInfo) => {
-                          const isSelected = quarter === qInfo.quarter;
-                          const hasPlan = !!qInfo.existingPlan;
+                      {/* Dynamic Period Options Grid based on Selected Cadence */}
+                      <div className="space-y-1.5 pt-1">
+                        <div className="flex items-center justify-between text-xs text-muted-foreground">
+                          <span>Select {planningCadence === "monthly" ? "Month" : planningCadence === "quarterly" ? "Quarter" : planningCadence === "semi_annual" ? "Semi-Annual Period" : "Annual Planning Cycle"}:</span>
+                          <span className="text-[11px] text-primary font-medium">
+                            {planningCadence === "monthly" ? "12 Monthly Periods" : planningCadence === "quarterly" ? "4 Quarters" : planningCadence === "semi_annual" ? "2 Six-Month Terms" : "1 Annual Plan"}
+                          </span>
+                        </div>
 
-                          return (
-                            <button
-                              key={qInfo.quarter}
-                              type="button"
-                              onClick={() => handleSelectPeriod(year, qInfo.quarter)}
-                              className={`flex flex-col text-left p-2.5 rounded-lg border transition-all relative ${
-                                isSelected
-                                  ? hasPlan
-                                    ? "border-amber-500 bg-amber-500/10 ring-1 ring-amber-500"
-                                    : "border-primary bg-primary/10 ring-1 ring-primary"
-                                  : hasPlan
-                                  ? "border-border/60 bg-muted/20 opacity-80 hover:opacity-100"
-                                  : "border-border/80 bg-card hover:border-primary/50 hover:bg-accent/30"
-                              }`}
-                              data-testid={`button-quarter-${qInfo.quarter}-${year}`}
-                            >
-                              <div className="flex items-center justify-between w-full mb-1">
-                                <span className="font-bold text-sm">{qInfo.label}</span>
-                                {hasPlan ? (
-                                  <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30">
-                                    Has Plan
-                                  </Badge>
-                                ) : qInfo.isRecommended ? (
-                                  <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30">
-                                    Recommended
-                                  </Badge>
-                                ) : (
-                                  <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-blue-500/10 text-blue-700 dark:text-blue-300 border-blue-500/20">
-                                    Available
-                                  </Badge>
+                        <div
+                          className={`grid gap-2 ${
+                            planningCadence === "monthly"
+                              ? "grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6"
+                              : planningCadence === "semi_annual"
+                              ? "grid-cols-1 sm:grid-cols-2"
+                              : planningCadence === "annual"
+                              ? "grid-cols-1"
+                              : "grid-cols-2 md:grid-cols-4"
+                          }`}
+                        >
+                          {(facilityPeriodAvailability.periodsByCadence[planningCadence]?.[year] ?? []).map((pInfo) => {
+                            const isSelected = periodNumber === pInfo.periodNumber;
+                            const hasPlan = !!pInfo.existingPlan;
+
+                            return (
+                              <button
+                                key={`${planningCadence}-${pInfo.periodNumber}-${year}`}
+                                type="button"
+                                onClick={() => handleSelectPeriod(year, pInfo.quarter, planningCadence, pInfo.periodNumber)}
+                                className={`flex flex-col text-left p-2.5 rounded-lg border transition-all relative ${
+                                  isSelected
+                                    ? hasPlan
+                                      ? "border-amber-500 bg-amber-500/10 ring-1 ring-amber-500"
+                                      : "border-primary bg-primary/10 ring-1 ring-primary"
+                                    : hasPlan
+                                    ? "border-border/60 bg-muted/20 opacity-80 hover:opacity-100"
+                                    : "border-border/80 bg-card hover:border-primary/50 hover:bg-accent/30"
+                                }`}
+                                data-testid={`button-period-${planningCadence}-${pInfo.periodNumber}-${year}`}
+                              >
+                                <div className="flex items-center justify-between w-full mb-1">
+                                  <span className="font-bold text-sm">{pInfo.label}</span>
+                                  {hasPlan ? (
+                                    <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30">
+                                      Has Plan
+                                    </Badge>
+                                  ) : pInfo.isRecommended ? (
+                                    <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30">
+                                      Recommended
+                                    </Badge>
+                                  ) : (
+                                    <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-blue-500/10 text-blue-700 dark:text-blue-300 border-blue-500/20">
+                                      Available
+                                    </Badge>
+                                  )}
+                                </div>
+                                <span className="text-[11px] text-muted-foreground">{pInfo.months}</span>
+                                {hasPlan && (
+                                  <span className="text-[10px] text-amber-800 dark:text-amber-300 truncate mt-1 block">
+                                    {pInfo.existingPlan?.name || "Active plan"}
+                                  </span>
                                 )}
-                              </div>
-                              <span className="text-[11px] text-muted-foreground">{qInfo.months}</span>
-                              {hasPlan && (
-                                <span className="text-[10px] text-amber-800 dark:text-amber-300 truncate mt-1 block">
-                                  {qInfo.existingPlan?.name || "Active plan"}
-                                </span>
-                              )}
-                            </button>
-                          );
-                        })}
+                              </button>
+                            );
+                          })}
+                        </div>
                       </div>
 
                       {/* Period Status Indicator */}
@@ -5282,7 +5514,7 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
                         <div className="flex items-center gap-2 text-xs text-emerald-700 dark:text-emerald-300 bg-emerald-500/10 border border-emerald-500/20 rounded-md p-2">
                           <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
                           <span>
-                            <strong>Ready for planning:</strong> Q{quarter} {year} is open and available for this facility. No duplicate period conflict.
+                            <strong>Ready for planning:</strong> {planningCadence.replace(/_/g, " ").toUpperCase()} period ({planningCadence === "monthly" ? `M${periodNumber} ${MONTH_SHORT[periodNumber - 1]}` : planningCadence === "semi_annual" ? `H${periodNumber}` : planningCadence === "annual" ? "Annual" : `Q${quarter}`} {year}) is open and available for this facility. No duplicate period conflict.
                           </span>
                         </div>
                       ) : (
@@ -5291,10 +5523,10 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
                             <div className="flex items-start gap-1.5">
                               <AlertCircle className="h-3.5 w-3.5 shrink-0 text-amber-600 mt-0.5" />
                               <div>
-                                <strong>Active plan already recorded for Q{quarter} {year}:</strong> "{existingPeriodPlan.name}" (Status: {existingPeriodPlan.status}).
+                                <strong>Active plan already recorded for {planningCadence.replace(/_/g, " ").toUpperCase()} period ({planningCadence === "monthly" ? `M${periodNumber}` : planningCadence === "semi_annual" ? `H${periodNumber}` : planningCadence === "annual" ? "Annual" : `Q${quarter}`} {year}):</strong> "{existingPeriodPlan.name}" (Status: {existingPeriodPlan.status}).
                                 {facilityPeriodAvailability.recommendedPeriod && (
                                   <div className="mt-1">
-                                    Pick an open quarter above (e.g. <strong>Q{facilityPeriodAvailability.recommendedPeriod.quarter} {facilityPeriodAvailability.recommendedPeriod.year}</strong>) or open the existing plan.
+                                    Pick an open period above or open the existing plan.
                                   </div>
                                 )}
                               </div>
@@ -5309,11 +5541,13 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
                                   onClick={() =>
                                     handleSelectPeriod(
                                       facilityPeriodAvailability.recommendedPeriod!.year,
-                                      facilityPeriodAvailability.recommendedPeriod!.quarter
+                                      facilityPeriodAvailability.recommendedPeriod!.quarter,
+                                      facilityPeriodAvailability.recommendedPeriod!.cadence,
+                                      facilityPeriodAvailability.recommendedPeriod!.periodNumber
                                     )
                                   }
                                 >
-                                  Switch to Q{facilityPeriodAvailability.recommendedPeriod.quarter} {facilityPeriodAvailability.recommendedPeriod.year}
+                                  Switch to Open Period
                                 </Button>
                               )}
                               <Button

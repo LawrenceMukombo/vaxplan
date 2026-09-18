@@ -87,7 +87,7 @@ import { usePersistedBasemap, BasemapTileLayer, BasemapSwitcher } from "@/compon
 import { canApproveSessionPlan } from "@/lib/permissions";
 import { FacilityCascadePicker } from "@/components/FacilityCascadePicker";
 import { SubmissionConfirmation } from "@/components/SubmissionConfirmation";
-import { intersect as turfIntersect, polygon as turfPolygon, multiPolygon as turfMultiPolygon } from "@turf/turf";
+import { intersect as turfIntersect, polygon as turfPolygon, multiPolygon as turfMultiPolygon, circle as turfCircle, convex as turfConvex, points as turfPoints, area as turfArea } from "@turf/turf";
 import { DeleteConfirmDialog } from "@/components/DeleteConfirmDialog";
 import {
   Dialog,
@@ -4178,6 +4178,103 @@ export function Step2Map({
 
   const { MapContainer, TileLayer, WMSTileLayer, Marker, Popup, Circle: LCircle, Rectangle: LRectangle, Tooltip: LTooltip, useMapEvents, useMap, Polygon: LPolygon, GeoJSON: LGeoJSON, Polyline: LPolyline } = leaflet.rl;
 
+  // Dynamic Catchment Polygon Area Calculations
+  const polygonAreaStats = useMemo(() => {
+    try {
+      if (drawVertices.length >= 3) {
+        const coords = [...drawVertices, drawVertices[0]].map(([la, ln]) => [ln, la] as [number, number]);
+        const poly = turfPolygon([coords]);
+        const sqM = turfArea(poly);
+        return { km2: sqM / 1_000_000, ha: sqM / 10_000 };
+      }
+      if (facilityPolygon && facilityPolygon.type === "Polygon" && Array.isArray(facilityPolygon.coordinates)) {
+        const sqM = turfArea(facilityPolygon);
+        return { km2: sqM / 1_000_000, ha: sqM / 10_000 };
+      }
+    } catch {
+      // ignore calculation errors
+    }
+    return null;
+  }, [drawVertices, facilityPolygon]);
+
+  // 1-Click Catchment Presets
+  const generateCircularBuffer = (radiusKm: number) => {
+    if (facilityLat == null || facilityLng == null || isNaN(facilityLat) || isNaN(facilityLng)) {
+      toast({ title: "Facility coordinates missing", description: "Please ensure health facility coordinates are recorded first.", variant: "destructive" });
+      return;
+    }
+    try {
+      const circleGeo = turfCircle([facilityLng, facilityLat], radiusKm, { steps: 48, units: "kilometers" });
+      onPolygonDrawn?.(circleGeo.geometry);
+      setDrawVertices([]);
+      toast({
+        title: `${radiusKm}km Catchment Generated`,
+        description: `Created a circular boundary of ${radiusKm}km (${(Math.PI * radiusKm * radiusKm).toFixed(1)} km²) around ${facility?.name || "facility"}.`,
+      });
+    } catch (e: any) {
+      toast({ title: "Failed to generate buffer", description: e.message, variant: "destructive" });
+    }
+  };
+
+  const generateConvexCatchment = () => {
+    const pts: [number, number][] = [];
+    if (facilityLat != null && facilityLng != null && !isNaN(facilityLat) && !isNaN(facilityLng)) {
+      pts.push([facilityLng, facilityLat]);
+    }
+    for (const c of communities) {
+      if (c.latitude && c.longitude) {
+        const lat = parseFloat(c.latitude);
+        const lng = parseFloat(c.longitude);
+        if (!isNaN(lat) && !isNaN(lng)) {
+          pts.push([lng, lat]);
+        }
+      }
+    }
+    if (pts.length < 3) {
+      generateCircularBuffer(5);
+      return;
+    }
+    try {
+      const featColl = turfPoints(pts);
+      const hull = turfConvex(featColl);
+      if (hull?.geometry) {
+        onPolygonDrawn?.(hull.geometry);
+        setDrawVertices([]);
+        toast({
+          title: "Community Boundary Enclosed",
+          description: `Created a catchment polygon enclosing all ${pts.length} pinned sites and the health facility.`,
+        });
+      }
+    } catch (e: any) {
+      toast({ title: "Could not enclose points", description: e.message, variant: "destructive" });
+    }
+  };
+
+  const undoLastVertex = () => {
+    setDrawVertices((prev) => prev.slice(0, -1));
+  };
+
+  const finishDrawingPolygon = () => {
+    if (drawVertices.length < 3) {
+      toast({ title: "At least 3 points required", description: "Click on the map to add at least 3 polygon boundary points.", variant: "destructive" });
+      return;
+    }
+    const coords = [...drawVertices, drawVertices[0]].map(([la, ln]) => [ln, la] as [number, number]);
+    const geojson = { type: "Polygon", coordinates: [coords] };
+    onPolygonDrawn?.(geojson);
+    setDrawVertices([]);
+    toast({ title: "Catchment Polygon Saved", description: "Facility catchment boundary drawn. Population will be estimated from this area." });
+  };
+
+  const startEditingExisting = () => {
+    if (facilityPolygon && facilityPolygon.type === "Polygon" && Array.isArray(facilityPolygon.coordinates?.[0])) {
+      const ring = facilityPolygon.coordinates[0];
+      const pts: [number, number][] = ring.slice(0, -1).map((pt: any) => [pt[1], pt[0]]);
+      setDrawVertices(pts);
+      toast({ title: "Catchment Edit Mode Active", description: "Drag boundary vertex handles to adjust the catchment boundary, or click on the map to add more points." });
+    }
+  };
+
   /* Original Code commented out to prevent Leaflet infinite tile crashes:
   function Recenter({ center }: { center: [number, number] }) {
     const map = useMap();
@@ -4647,32 +4744,74 @@ export function Step2Map({
           />
         )}
 
-        {/* Draw-in-progress: vertices polyline */}
+        {/* Draw-in-progress: live filled polygon preview & draggable vertices */}
         {drawMode === "facility" && drawVertices.length > 0 && (
           <>
-            <LPolyline
-              positions={drawVertices}
-              pathOptions={{ color: "#f97316", weight: 2.5, dashArray: "4 4" }}
-            />
-            {drawVertices.map((pt, i) => (
-              <LCircle
-                key={i}
-                center={pt}
-                radius={50}
+            {drawVertices.length >= 3 ? (
+              <LPolygon
+                positions={drawVertices}
                 pathOptions={{
-                  color: i === 0 ? "#dc2626" : "#f97316",
-                  fillColor: i === 0 ? "#dc2626" : "#fff",
-                  fillOpacity: 1,
-                  weight: 2,
+                  color: "#16a34a",
+                  weight: 2.5,
+                  fillColor: "#16a34a",
+                  fillOpacity: 0.18,
+                  dashArray: "4 4",
                 }}
               />
-            ))}
-            {drawVertices.length >= 3 && (
+            ) : (
               <LPolyline
-                positions={[drawVertices[drawVertices.length - 1], drawVertices[0]]}
-                pathOptions={{ color: "#f97316", weight: 1.5, dashArray: "2 6", opacity: 0.5 }}
+                positions={drawVertices}
+                pathOptions={{ color: "#16a34a", weight: 2.5, dashArray: "4 4" }}
               />
             )}
+            {drawVertices.map((pt, i) => {
+              const isStart = i === 0;
+              const canClose = isStart && drawVertices.length >= 3;
+              const vertexIcon = L.divIcon({
+                className: "vertex-handle",
+                html: `<div style="width:16px;height:16px;border-radius:50%;background:${
+                  canClose ? "#16a34a" : isStart ? "#2563eb" : "#f97316"
+                };border:2px solid #ffffff;box-shadow:0 0 4px rgba(0,0,0,0.5);cursor:pointer;display:flex;align-items:center;justify-content:center;color:#fff;font-size:9px;font-weight:bold;">${
+                  canClose ? "✓" : i + 1
+                }</div>`,
+                iconSize: [16, 16],
+                iconAnchor: [8, 8],
+              });
+
+              return (
+                <Marker
+                  key={`vertex-${i}`}
+                  position={pt}
+                  icon={vertexIcon}
+                  draggable={!readOnly}
+                  eventHandlers={{
+                    dragend: (e: any) => {
+                      const ll = e.target.getLatLng();
+                      setDrawVertices((prev) => {
+                        const next = [...prev];
+                        next[i] = [ll.lat, ll.lng];
+                        return next;
+                      });
+                    },
+                    click: () => {
+                      if (canClose) {
+                        finishDrawingPolygon();
+                      } else if (drawVertices.length > 3) {
+                        setDrawVertices((prev) => prev.filter((_, idx) => idx !== i));
+                      }
+                    },
+                  }}
+                >
+                  <LTooltip direction="top" offset={[0, -8]}>
+                    <span className="text-xs">
+                      {canClose
+                        ? "Click to close & save catchment polygon"
+                        : `Point ${i + 1} • Drag to move${drawVertices.length > 3 ? " • Click to delete" : ""}`}
+                    </span>
+                  </LTooltip>
+                </Marker>
+              );
+            })}
           </>
         )}
 
@@ -4776,6 +4915,139 @@ export function Step2Map({
         {/* Unused colour locals kept for tree-shaking-friendly variable usage */}
         <span style={{ display: "none" }}>{[pinBlue, pinGreen, pinAmber].length}</span>
       </MapContainer>
+
+      {/* Interactive Catchment Toolbar / HUD Overlay */}
+      {(drawMode === "facility" || facilityPolygon) && (
+        <div
+          className="absolute top-3 left-3 z-[400] max-w-[340px] sm:max-w-md rounded-xl border border-border/80 bg-background/95 backdrop-blur shadow-lg p-2.5 space-y-2 text-xs"
+          data-testid="hud-catchment-toolbar"
+        >
+          <div className="flex items-center justify-between gap-2 border-b pb-1.5">
+            <div className="flex items-center gap-1.5 font-bold text-foreground">
+              <svg className="h-4 w-4 text-emerald-600 dark:text-emerald-400 shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                <polygon points="3,12 9,3 21,3 21,21 3,21" />
+              </svg>
+              <span>Facility Catchment Area</span>
+            </div>
+            {polygonAreaStats && (
+              <Badge variant="outline" className="bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/30 text-[11px] font-semibold py-0 px-2">
+                {polygonAreaStats.km2.toFixed(1)} km² ({Math.round(polygonAreaStats.ha).toLocaleString()} ha)
+              </Badge>
+            )}
+          </div>
+
+          {drawMode === "facility" ? (
+            <div className="space-y-2">
+              <div className="text-[11px] text-muted-foreground flex items-center justify-between">
+                <span>{drawVertices.length} vertices added (drag handles to tweak)</span>
+                {drawVertices.length >= 3 ? (
+                  <span className="text-emerald-600 font-medium">● Ready to save</span>
+                ) : (
+                  <span className="text-amber-600 font-medium">● Need ≥ 3 points</span>
+                )}
+              </div>
+
+              {/* 1-Click Catchment Presets */}
+              <div className="space-y-1">
+                <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider block">
+                  1-Click Presets:
+                </span>
+                <div className="flex flex-wrap gap-1">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="h-6 text-[11px] px-2 bg-muted/40 hover:bg-emerald-500/10 hover:text-emerald-700"
+                    onClick={() => generateCircularBuffer(5)}
+                  >
+                    ⚡ 5km Radius
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="h-6 text-[11px] px-2 bg-muted/40 hover:bg-emerald-500/10 hover:text-emerald-700"
+                    onClick={() => generateCircularBuffer(10)}
+                  >
+                    ⚡ 10km Radius
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="h-6 text-[11px] px-2 bg-muted/40 hover:bg-emerald-500/10 hover:text-emerald-700"
+                    onClick={generateConvexCatchment}
+                  >
+                    ⚡ Enclose All Sites
+                  </Button>
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex items-center justify-between gap-1.5 pt-1 border-t">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 text-xs px-2 text-muted-foreground hover:text-foreground"
+                  onClick={undoLastVertex}
+                  disabled={drawVertices.length === 0}
+                >
+                  ↩ Undo Point
+                </Button>
+                <div className="flex items-center gap-1">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="h-7 text-xs px-2"
+                    onClick={() => setDrawVertices([])}
+                  >
+                    Clear
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="default"
+                    className="h-7 text-xs px-3 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold"
+                    onClick={finishDrawingPolygon}
+                    disabled={drawVertices.length < 3}
+                  >
+                    Save Catchment
+                  </Button>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[11px] text-muted-foreground">
+                Boundary established. Population will be computed within this zone.
+              </span>
+              <div className="flex items-center gap-1 shrink-0">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-6 text-[11px] px-2"
+                  onClick={startEditingExisting}
+                >
+                  ✏️ Adjust
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  className="h-6 text-[11px] px-1.5 text-destructive hover:bg-destructive/10"
+                  onClick={() => onPolygonDrawn?.(null)}
+                >
+                  Remove
+                </Button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="absolute top-2 right-2 z-[400] flex flex-col items-end gap-2">
         <button
           type="button"
