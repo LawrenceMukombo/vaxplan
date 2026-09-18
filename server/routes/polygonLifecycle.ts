@@ -667,7 +667,7 @@ export function registerPolygonLifecycleRoutes(app: Express, deps: LifecycleDepe
       name: villages.name,
       latitude: villages.latitude,
       longitude: villages.longitude,
-      targetPopulation: villages.targetPopulation,
+      targetPopulation: villages.griddedPopulation,
       assignedFacilityId: villages.assignedFacilityId,
     }).from(villages).where(and(
       eq(villages.tenantId, req.tenantId),
