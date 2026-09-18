@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import guideContent from "../../../docs/USER_GUIDE.md?raw";
 import quickstartContent from "../../../docs/QUICKSTART_FACILITY.md?raw";
+import polygonWalkthroughContent from "../../../docs/modules/polygon-drawing-walkthrough.md?raw";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -62,6 +63,7 @@ interface QuizConfig {
 
 const BADGES: BadgeConfig[] = [
   { id: "quickstart", name: "Quick-Start Pro", description: "Read the Facility Quick-Start guide.", icon: "⚡", color: "from-amber-400 to-orange-500" },
+  { id: "polygon_guide", name: "GIS Cartographer", description: "Master polygon drawing, live snapping, and auto-clipping.", icon: "📐", color: "from-emerald-400 to-teal-500" },
   { id: "gis_intel", name: "GIS Navigator", description: "Complete the Settlement Intelligence section and pass the quiz.", icon: "🛰️", color: "from-sky-400 to-indigo-500" },
   { id: "routine_plan", name: "Field Commander", description: "Complete the Routine Microplanning section and pass the quiz.", icon: "🗺️", color: "from-emerald-400 to-teal-500" },
   { id: "scholar", name: "Wiki Scholar", description: "Mark all available wiki user guide sections as read.", icon: "🎓", color: "from-violet-400 to-purple-500" },
@@ -171,6 +173,7 @@ export default function UserGuideSection({ isFacilityRole }: Props) {
   const [quizAnswers, setQuizAnswers] = useState<Record<string, number>>({});
   const [quizChecked, setQuizChecked] = useState<Record<string, boolean>>({});
   const [lightboxImg, setLightboxImg] = useState<string | null>(null);
+  const [expandPolygonGuide, setExpandPolygonGuide] = useState(false);
 
   // Load progress and achievements from local storage
   useEffect(() => {
@@ -457,6 +460,77 @@ export default function UserGuideSection({ isFacilityRole }: Props) {
           </CardContent>
         </Card>
       )}
+
+      {/* ── Step-by-Step Polygon Drawing & Catchment Walkthrough Card ─────────── */}
+      <Card className="border-emerald-500/30 bg-gradient-to-br from-emerald-500/5 to-teal-500/5">
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between gap-4 flex-wrap">
+            <div className="space-y-1">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <span className="text-lg">📐</span>
+                Step-by-Step Polygon Drawing & Catchment Guide
+                {readSections.includes("polygon_guide") && (
+                  <Badge variant="secondary" className="ml-1 text-xs bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-0 flex items-center gap-0.5">
+                    <CheckCircle2 className="h-3 w-3" /> Completed
+                  </Badge>
+                )}
+              </CardTitle>
+              <p className="text-xs text-muted-foreground">
+                Learn how to trace Health Facility catchments, use live emerald snapping, 1-click auto-clip overlaps, and detect zero-dose gaps.
+              </p>
+            </div>
+            <div className="flex gap-2">
+              <Button
+                size="sm"
+                variant={expandPolygonGuide ? "default" : "outline"}
+                className={expandPolygonGuide ? "text-xs font-semibold bg-emerald-600 text-white hover:bg-emerald-700" : "text-xs"}
+                onClick={() => setExpandPolygonGuide(!expandPolygonGuide)}
+              >
+                {expandPolygonGuide ? "Collapse Guide" : "📖 Read Step-by-Step Guide"}
+              </Button>
+              <Button
+                size="sm"
+                variant={readSections.includes("polygon_guide") ? "ghost" : "default"}
+                className={readSections.includes("polygon_guide") ? "text-muted-foreground text-xs" : "text-xs font-semibold bg-emerald-600 text-white hover:bg-emerald-700"}
+                onClick={() => {
+                  const active = readSections.includes("polygon_guide");
+                  persistRead(active ? readSections.filter(id => id !== "polygon_guide") : [...readSections, "polygon_guide"]);
+                }}
+              >
+                {readSections.includes("polygon_guide") ? "Mark Unread" : "Mark as Read"}
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => window.print()}
+              >
+                Print
+              </Button>
+            </div>
+          </div>
+        </CardHeader>
+        {expandPolygonGuide && (
+          <CardContent className="border-t pt-4">
+            <article className="prose prose-sm max-w-none dark:prose-invert">
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                components={{
+                  img: ({ src, alt }) => (
+                    <img
+                      src={src}
+                      alt={alt}
+                      className="rounded-lg shadow-md max-h-96 object-cover cursor-zoom-in transition-transform hover:scale-[1.01]"
+                      onClick={() => setLightboxImg(src || null)}
+                    />
+                  )
+                }}
+              >
+                {polygonWalkthroughContent}
+              </ReactMarkdown>
+            </article>
+          </CardContent>
+        )}
+      </Card>
 
       {/* ── Main End-User Wiki Card ───────────────────────────────────────────── */}
       <Card>

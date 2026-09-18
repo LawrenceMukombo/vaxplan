@@ -34,6 +34,26 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import { hasAnyPermission } from "@/lib/accessControl";
 import { PolygonIntelligenceCard, type IntelligenceResult } from "@/components/PolygonIntelligenceCard";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  BookOpen,
+  HelpCircle,
+  Zap,
+  CheckCircle2,
+  AlertTriangle,
+  MousePointer,
+  Layers,
+  Sparkles,
+  Scissors,
+  Crosshair,
+} from "lucide-react";
 import "leaflet/dist/leaflet.css";
 
 // --- Colour palette for community polygons ------------------------------------
@@ -538,6 +558,7 @@ export function CatchmentMapPanel({
   const [missedAnalysis, setMissedAnalysis] = useState<any | null>(null);
   const [loadingMissed, setLoadingMissed] = useState(false);
   const [autoClipping, setAutoClipping] = useState(false);
+  const [showGuideModal, setShowGuideModal] = useState(false);
 
   const fetchMissedCommunities = useCallback(async () => {
     if (!facilityId) return;
@@ -1234,6 +1255,15 @@ export function CatchmentMapPanel({
           className="rounded-md bg-emerald-600 px-3 py-1.5 text-white text-xs font-medium hover:bg-emerald-700 disabled:opacity-50">
            Save All
         </button>
+        <button
+          type="button"
+          onClick={() => setShowGuideModal(true)}
+          className="rounded-md border border-indigo-300 bg-indigo-50 text-indigo-700 px-2.5 py-1.5 text-xs font-semibold hover:bg-indigo-100 flex items-center gap-1.5 shadow-sm"
+          title="Open step-by-step polygon drawing guide and shortcuts"
+        >
+          <BookOpen className="h-3.5 w-3.5" />
+          <span>Step-by-Step Guide</span>
+        </button>
       </div>
 
       {lifecycleEdit && (
@@ -1690,6 +1720,159 @@ export function CatchmentMapPanel({
           )}
         </div>
       )}
+
+      {/* -- Step-by-Step Polygon Drawing Guide Dialog -- */}
+      <Dialog open={showGuideModal} onOpenChange={setShowGuideModal}>
+        <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto p-6">
+          <DialogHeader className="border-b pb-3">
+            <div className="flex items-center gap-2 text-indigo-600">
+              <BookOpen className="h-5 w-5" />
+              <DialogTitle className="text-lg font-bold text-foreground">
+                Catchment Mapping & Polygon Drawing Guide
+              </DialogTitle>
+            </div>
+            <DialogDescription className="text-xs text-muted-foreground">
+              Master the tools for tracing topological boundaries, auto-clipping overlaps, and targeting missed communities.
+            </DialogDescription>
+          </DialogHeader>
+
+          <Tabs defaultValue="workflow" className="mt-3 space-y-4">
+            <TabsList className="grid grid-cols-3 w-full">
+              <TabsTrigger value="workflow" className="text-xs font-semibold">
+                🚀 5-Step Workflow
+              </TabsTrigger>
+              <TabsTrigger value="shortcuts" className="text-xs font-semibold">
+                ⌨️ Shortcuts & Controls
+              </TabsTrigger>
+              <TabsTrigger value="gaps" className="text-xs font-semibold">
+                🛡️ Overlaps & Gaps
+              </TabsTrigger>
+            </TabsList>
+
+            {/* Tab 1: Workflow */}
+            <TabsContent value="workflow" className="space-y-3.5 text-xs text-foreground">
+              <div className="space-y-3">
+                <div className="flex gap-3 p-3 rounded-lg border bg-muted/40">
+                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-blue-600 text-[11px] font-bold text-white">1</span>
+                  <div className="space-y-1">
+                    <p className="font-semibold text-sm text-foreground">Draw the Health Facility Catchment</p>
+                    <p className="text-muted-foreground leading-relaxed">
+                      Click <strong className="text-blue-600">Draw HF Catchment</strong> on the toolbar. Click on the map to outline the outer perimeter of your facility’s responsibility. Double-click the last vertex to close the shape, review the gridded WorldPop headcount, and click <strong className="text-green-600">Save & Lock</strong>.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex gap-3 p-3 rounded-lg border bg-muted/40">
+                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-orange-500 text-[11px] font-bold text-white">2</span>
+                  <div className="space-y-1">
+                    <p className="font-semibold text-sm text-foreground">Demarcate Community Sub-Polygons</p>
+                    <p className="text-muted-foreground leading-relaxed">
+                      Select a village or community from the <strong className="text-foreground">Community dropdown</strong> and click <strong className="text-orange-500">Draw Polygon</strong>. Trace the community territory within the facility boundary.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex gap-3 p-3 rounded-lg border bg-emerald-50/70 border-emerald-200">
+                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-[11px] font-bold text-white">3</span>
+                  <div className="space-y-1">
+                    <p className="font-semibold text-sm text-emerald-900">Live Snapping & 1-Click Auto-Clipping</p>
+                    <p className="text-emerald-800 leading-relaxed">
+                      As you draw, an <strong className="text-emerald-700">emerald green marker</strong> automatically locks vertices to neighboring boundaries. If a drawn polygon accidentally overlaps adjacent villages, click <strong className="text-emerald-700">⚡ Auto-Clip to Free Space</strong> to cleanly trim away the overlapping segments in one click!
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex gap-3 p-3 rounded-lg border bg-muted/40">
+                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-purple-600 text-[11px] font-bold text-white">4</span>
+                  <div className="space-y-1">
+                    <p className="font-semibold text-sm text-foreground">Audit Missed Communities & Interior Gaps</p>
+                    <p className="text-muted-foreground leading-relaxed">
+                      Inspect the <strong className="text-foreground">🎯 Missed Communities</strong> panel below the map. Any uncovered territory inside the catchment appears as a red hatched zone. Red markers highlight orphaned zero-dose hamlets outside all catchment zones.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex gap-3 p-3 rounded-lg border bg-muted/40">
+                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-emerald-700 text-[11px] font-bold text-white">5</span>
+                  <div className="space-y-1">
+                    <p className="font-semibold text-sm text-foreground">Save & Collaborate</p>
+                    <p className="text-muted-foreground leading-relaxed">
+                      Check the <strong className="text-foreground">Population Balance</strong> bar. Once all communities are accounted for, click <strong className="text-emerald-600">Save All</strong>. Polygons are immediately synchronized and visible across the national platform.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </TabsContent>
+
+            {/* Tab 2: Shortcuts */}
+            <TabsContent value="shortcuts" className="space-y-3 text-xs">
+              <div className="rounded-lg border overflow-hidden">
+                <table className="w-full text-left">
+                  <thead className="bg-muted text-[11px] uppercase tracking-wider font-semibold text-muted-foreground">
+                    <tr>
+                      <th className="p-2.5">Action</th>
+                      <th className="p-2.5">Shortcut / Control</th>
+                      <th className="p-2.5">Description</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y text-xs">
+                    <tr>
+                      <td className="p-2.5 font-semibold">Place Vertex</td>
+                      <td className="p-2.5"><kbd className="rounded border bg-muted px-1.5 py-0.5 text-[11px] font-mono">Left Click</kbd></td>
+                      <td className="p-2.5 text-muted-foreground">Adds a vertex point along boundaries or rivers.</td>
+                    </tr>
+                    <tr>
+                      <td className="p-2.5 font-semibold">Finish Polygon</td>
+                      <td className="p-2.5"><kbd className="rounded border bg-muted px-1.5 py-0.5 text-[11px] font-mono">Double Click</kbd></td>
+                      <td className="p-2.5 text-muted-foreground">Closes the shape and triggers population extraction.</td>
+                    </tr>
+                    <tr>
+                      <td className="p-2.5 font-semibold">Undo Last Vertex</td>
+                      <td className="p-2.5"><kbd className="rounded border bg-muted px-1.5 py-0.5 text-[11px] font-mono">Ctrl + Z</kbd></td>
+                      <td className="p-2.5 text-muted-foreground">Removes the most recent vertex while drawing.</td>
+                    </tr>
+                    <tr>
+                      <td className="p-2.5 font-semibold">Cancel Drawing</td>
+                      <td className="p-2.5"><kbd className="rounded border bg-muted px-1.5 py-0.5 text-[11px] font-mono">Escape (Esc)</kbd></td>
+                      <td className="p-2.5 text-muted-foreground">Aborts the current drawing session without saving.</td>
+                    </tr>
+                    <tr>
+                      <td className="p-2.5 font-semibold">Edge Snapping</td>
+                      <td className="p-2.5"><span className="inline-flex items-center gap-1 font-semibold text-emerald-600">🟢 Emerald Lock</span></td>
+                      <td className="p-2.5 text-muted-foreground">Magnetically aligns points within 18px of existing boundaries.</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </TabsContent>
+
+            {/* Tab 3: Overlaps & Gaps */}
+            <TabsContent value="gaps" className="space-y-3 text-xs">
+              <div className="space-y-2.5">
+                <div className="p-3 rounded-lg border border-amber-200 bg-amber-50/60 space-y-1">
+                  <p className="font-semibold text-amber-900 flex items-center gap-1.5">
+                    <AlertTriangle className="h-4 w-4 text-amber-600" />
+                    How Overlap Prevention Works
+                  </p>
+                  <p className="text-amber-800 leading-relaxed text-[11px]">
+                    VaxPlan strictly prohibits community overlap collisions. If a drawn polygon intersects a neighboring boundary, use the <strong>⚡ Auto-Clip to Free Space</strong> tool. The system computes Boolean spatial differences to trim overlaps automatically without destroying boundary integrity.
+                  </p>
+                </div>
+
+                <div className="p-3 rounded-lg border border-red-200 bg-red-50/60 space-y-1">
+                  <p className="font-semibold text-red-900 flex items-center gap-1.5">
+                    <Crosshair className="h-4 w-4 text-red-600" />
+                    Targeting Orphaned Zero-Dose Settlements
+                  </p>
+                  <p className="text-red-800 leading-relaxed text-[11px]">
+                    Settlements flagged as <strong>Orphaned Zero-Dose</strong> are completely unserved by any health facility. Expand or redraw your catchment to encompass these communities and ensure no child is left unreached.
+                  </p>
+                </div>
+              </div>
+            </TabsContent>
+          </Tabs>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
