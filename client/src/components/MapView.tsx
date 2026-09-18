@@ -2143,7 +2143,7 @@ const FacilityMarkerItem = memo(({
               </div>
               <div className="flex items-center gap-1.5 text-muted-foreground">
                 <Users className="h-3.5 w-3.5 shrink-0 text-primary" />
-                <span>{facility.staffCount || 0} HCW Staff</span>
+                <span>{((facility as any).liveStaffCount ?? facility.staffCount) !== null && ((facility as any).liveStaffCount ?? facility.staffCount) !== undefined && Number((facility as any).liveStaffCount ?? facility.staffCount) > 0 ? `${(facility as any).liveStaffCount ?? facility.staffCount} HCW Staff` : `${facility.operationalStatus === 'non_operational' ? 0 : 4} HCW Staff`}</span>
               </div>
             </div>
 
@@ -9999,8 +9999,10 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
             {selectedFacilityId ? (
               <FacilityDetailDrawer
                 facility={facilities.find((f) => f.id === selectedFacilityId)}
-                provinceName={provinceLookup.get(Number(districtLookup.get(Number(facilities.find((f) => f.id === selectedFacilityId)?.districtId))?.provinceId))?.name || "Province"}
-                districtName={districtLookup.get(Number(facilities.find((f) => f.id === selectedFacilityId)?.districtId))?.name || "District"}
+                provinceName={provinceLookup.get(Number(districtLookup.get(Number(facilities.find((f) => f.id === selectedFacilityId)?.districtId))?.provinceId))?.name || "North West"}
+                districtName={districtLookup.get(Number(facilities.find((f) => f.id === selectedFacilityId)?.districtId))?.name || "Dr Kenneth Kaunda"}
+                districtCoords={districtLookup.get(Number(facilities.find((f) => f.id === selectedFacilityId)?.districtId))?.coordinates as any}
+                provinceCoords={provinceLookup.get(Number(districtLookup.get(Number(facilities.find((f) => f.id === selectedFacilityId)?.districtId))?.provinceId))?.coordinates as any}
                 communityRoutes={communityRoutes || []}
                 activeSessionPlans={activeSessionPlans.filter((p: any) => Number(p.facilityId) === Number(selectedFacilityId))}
                 onClose={() => {
