@@ -222,9 +222,43 @@ Platform Super Admins can rapidly onboard new Ministries of Health:
 ## 10. Map, Boundary & Polygon Management
 
 - **Dual-Source Boundaries**: Automated ingestion from the GeoBoundaries API combined with custom GeoJSON file uploads for sub-district health boundaries (e.g., Payams or Health Areas).
-- **Interactive Polygon Catchment Builder**: Draw, edit, and save custom geographic catchment polygons directly in the browser.
+- **Interactive Polygon Catchment & Community Builder**: Draw, edit, and save custom geographic catchment polygons directly in the browser with real-time topological validation.
+- **Live Vertex & Boundary Edge Snapping**: 18px cursor magnetic lock to existing borders eliminates slivers and overlapping boundaries.
+- **1-Click Auto-Clipping (`⚡ Auto-Clip to Free Space`)**: Instantly removes boundary overlap collisions against adjacent communities and clips polygons cleanly to parent health facility perimeters.
+- **Missed Communities & Spatial Gap Detection**: Automatically isolates uncovered interior zones (red-hatched overlay) and categorizes unreached zero-dose settlements.
 - **Custom Spatial Layers**: Overlay health infrastructure, water points, road networks, and elevation layers onto standard map views.
 - **Boundary Disclaimer Policy**: Prominent disclaimers indicate that digital boundaries are operational planning aids and do not imply official sovereignty endorsements.
+
+### 10.1 Step-by-Step Polygon Digitization & Catchment Workflow
+
+```
+[Facilities Detail View]
+         │
+         ▼
+[Catchment Map Panel] ───► Click "Draw Catchment" ───► Trace border with live edge snapping ───► Double-click to close
+         │
+         ├───► Select Community from dropdown ───► Click "Draw Polygon"
+         │            │
+         │            ▼
+         │     [Trace Border] (Emerald snap marker locks onto adjacent edges)
+         │            │
+         │            ▼
+         │     [Double-Click to Close]
+         │            │
+         │            ▼
+         │     [Overlap Detected?] ───► Click "⚡ Auto-Clip to Free Space" ───► Clean Non-Overlapping Shape
+         │
+         ├───► Review "🎯 Missed Communities & Gap Analysis" panel below map
+         │
+         └───► Verify Population Balance Bar (>=90%) ───► Click "Save All"
+```
+
+1. **Step 1: Open Facility Catchment Map**: Go to **Facilities** -> Select Facility -> Open **Catchment Map & Communities**.
+2. **Step 2: Draw Facility Catchment**: Click **"Draw Catchment"** (or **"Extract Communities"** for automated buffer generation). Place vertices along natural boundaries (`Ctrl+Z` to undo a vertex). Double-click to close and click **Save Catchment**.
+3. **Step 3: Draw Community Sub-Polygon**: Select a community from the dropdown and click **"Draw Polygon"**. As you move the mouse near the facility perimeter or neighboring villages, an **emerald green snap marker** will guide exact edge alignment. Double-click to finalize.
+4. **Step 4: Resolve Any Overlap in 1-Click**: If a warning indicates an overlap with a neighboring boundary, click **"⚡ Auto-Clip to Free Space"**. The server trims the overlapping segments instantly with zero manual vertex editing.
+5. **Step 5: Audit Missed Communities & Gaps**: Review the **"Missed Communities & Gap Analysis"** panel to inspect orphaned zero-dose settlements and uncovered interior territory (red hatched area).
+6. **Step 6: Confirm Population Balance & Save**: Check the population attribution bar and click **"Save All"** to persist the synchronized boundaries across the platform.
 
 ---
 

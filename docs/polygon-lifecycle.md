@@ -49,6 +49,33 @@ Warnings require reviewer attention and, where configured, an override reason:
 
 Area and centroid calculations are informational. Population is recalculated for every proposed version from the tenant's configured population cascade.
 
+## Auto-Clipping and Live Edge Snapping
+
+To ensure clean topological relationships without tedious manual digitization:
+
+1. **Live Vertex & Edge Snapping**:
+   - The drawing interface calculates screen-space pixel distance against neighboring boundary edges (`map.latLngToLayerPoint`) with an 18px snap radius.
+   - An emerald green visual marker indicates snap lock, eliminating micro-gaps and unintentional slivers.
+
+2. **1-Click Auto-Clip (`clipToAvailableSpace`)**:
+   - `POST /api/polygons/:entityType/:entityId/auto-clip`
+   - Executes Boolean difference operations (`turf.difference`) against all existing sibling polygons and clips the result inside the parent facility boundary (`turf.intersect`).
+   - Automatically returns a sanitized, non-overlapping polygon geometry with zero manual adjustments.
+
+3. **Missed Communities & Spatial Gap Detection**:
+   - `GET /api/facilities/:id/missed-communities`
+   - Performs Point-in-Polygon spatial analysis against all registered and extracted settlements within the facility and district.
+   - Categorizes settlements into:
+     - **Enclosed**: Contained within an active community sub-polygon.
+     - **Unzoned In-Catchment**: Inside the health facility catchment but outside all community sub-polygons.
+     - **Orphaned / Zero-Dose**: Located outside all known health facility catchments across the district.
+   - Generates an `uncoveredInteriorGeoJson` polygon representing uncovered interior catchment territory for visual gap overlay.
+
+4. **High-Performance Viewport & Simplification**:
+   - `GET /api/gis/polygons/viewport?bbox=minLng,minLat,maxLng,maxLat&zoom=14`
+   - Filters active boundaries within the user's active map viewport.
+   - Applies zoom-dependent Douglas-Peucker simplification (`turf.simplify`) to prevent memory exhaustion when rendering large regional maps.
+
 ## Approval and historical integrity
 
 Approval runs in a database transaction. The prior active version becomes replaced, receives valid_to, and points to the replacement. The approved proposal becomes the sole active version and receives valid_from. Legacy facility or village geometry columns are updated only at approval so existing application modules continue to read the current official boundary.
@@ -57,18 +84,21 @@ Existing microplans, sessions, reports, and population records are not rewritten
 
 ## API summary
 
-- GET /api/polygons/:entityType/:entityId/current
-- GET /api/polygons/:entityType/:entityId/history
-- POST /api/polygons/:entityType/:entityId/validate
-- POST /api/polygons/:entityType/:entityId/create
-- POST /api/polygons/:entityType/:entityId/edit
-- POST /api/polygons/:entityType/:entityId/replace
-- POST /api/polygons/:polygonVersionId/submit
-- POST /api/polygons/:polygonVersionId/approve
-- POST /api/polygons/:polygonVersionId/reject
-- POST /api/polygons/:polygonVersionId/archive
-- DELETE /api/polygons/:polygonVersionId/draft
-- GET /api/polygons/:entityType/:entityId/compare
-- POST /api/polygons/:polygonVersionId/recalculate-population
+- `GET /api/polygons/:entityType/:entityId/current`
+- `GET /api/polygons/:entityType/:entityId/history`
+- `POST /api/polygons/:entityType/:entityId/validate`
+- `POST /api/polygons/:entityType/:entityId/auto-clip` (1-click overlap trimming)
+- `GET /api/facilities/:id/missed-communities` (Point-in-Polygon zero-dose detection)
+- `GET /api/gis/polygons/viewport` (Viewport bounding box & simplification)
+- `POST /api/polygons/:entityType/:entityId/create`
+- `POST /api/polygons/:entityType/:entityId/edit`
+- `POST /api/polygons/:entityType/:entityId/replace`
+- `POST /api/polygons/:polygonVersionId/submit`
+- `POST /api/polygons/:polygonVersionId/approve`
+- `POST /api/polygons/:polygonVersionId/reject`
+- `POST /api/polygons/:polygonVersionId/archive`
+- `DELETE /api/polygons/:polygonVersionId/draft`
+- `GET /api/polygons/:entityType/:entityId/compare`
+- `POST /api/polygons/:polygonVersionId/recalculate-population`
 
 All write actions create audit log entries. Submit, approve, and correction actions notify affected district, provincial, GIS, and national users.
