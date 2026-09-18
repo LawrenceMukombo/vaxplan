@@ -1261,7 +1261,12 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
         !["rejected", "archived", "superseded"].includes(String(p.status ?? "").toLowerCase())
     );
 
-    const availableYears = [currentCalendarYear, currentCalendarYear + 1];
+    const availableYears = [
+      currentCalendarYear,
+      currentCalendarYear + 1,
+      currentCalendarYear + 2,
+      currentCalendarYear + 3,
+    ];
 
     const quartersMeta: Record<number, { label: string; months: string }> = {
       1: { label: "Q1", months: "Jan – Mar" },
@@ -1439,7 +1444,9 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
         else if (recCad === "semi_annual") cadenceTag = `H${recNum} (6-Month)`;
         else if (recCad === "annual") cadenceTag = `Annual`;
 
-        const autoName = `${facName ? `${facName} — ` : ""}${isCampaign ? "SIA" : "Routine"} ${recCad === "annual" ? "Annual" : recCad === "semi_annual" ? "6-Month" : recCad === "monthly" ? "Monthly" : "Quarterly"} Microplan ${cadenceTag} ${recY}`;
+        const autoName = isCampaign
+          ? `${facName ? `${facName} — ` : ""}${campaignAntigen ? `${campaignAntigen} ` : ""}SIA Campaign ${recY}`
+          : `${facName ? `${facName} — ` : ""}Routine ${recCad === "annual" ? "Annual" : recCad === "semi_annual" ? "6-Month" : recCad === "monthly" ? "Monthly" : "Quarterly"} Microplan ${cadenceTag} ${recY}`;
         if (!name || name.includes("microplan") || name.includes("Microplan") || name.includes("SIA") || name.includes("Routine")) {
           setName(autoName);
         }
@@ -1457,6 +1464,7 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
     planType,
     facilities,
     name,
+    campaignAntigen,
   ]);
 
   const handleSelectPeriod = (
@@ -1483,7 +1491,9 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
       cadenceTag = `Annual`;
     }
 
-    const autoName = `${facName ? `${facName} — ` : ""}${isCampaign ? "SIA" : "Routine"} ${newCadence === "annual" ? "Annual" : newCadence === "semi_annual" ? "6-Month" : newCadence === "monthly" ? "Monthly" : "Quarterly"} Microplan ${cadenceTag} ${newYear}`;
+    const autoName = isCampaign
+      ? `${facName ? `${facName} — ` : ""}${campaignAntigen ? `${campaignAntigen} ` : ""}SIA Campaign ${newYear}`
+      : `${facName ? `${facName} — ` : ""}Routine ${newCadence === "annual" ? "Annual" : newCadence === "semi_annual" ? "6-Month" : newCadence === "monthly" ? "Monthly" : "Quarterly"} Microplan ${cadenceTag} ${newYear}`;
     if (!name || name.includes("microplan") || name.includes("Microplan") || name.includes("SIA") || name.includes("Routine")) {
       setName(autoName);
     }
@@ -5349,223 +5359,280 @@ export default function MicroplanWizard({ prePlanType }: MicroplanWizardProps = 
                     )}
                   </div>
 
-                  {/* Planning Period & Target Cadence Selector */}
+                  {/* Planning Period & Target Cadence / SIA Scheduling Container */}
                   {facilityId && (
                     <div className="space-y-3.5 rounded-lg border bg-background/80 p-3.5" data-testid="container-period-selector">
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                        <div className="flex items-center gap-2">
-                          <Calendar className="h-4 w-4 text-primary" />
-                          <span className="font-semibold text-sm">Planning Period & Target Cadence</span>
-                        </div>
-                        {isQ3OrLater && (
-                          <Badge variant="outline" className="bg-primary/10 text-primary border-primary/20 text-xs py-0.5 px-2">
-                            Q{currentCalendarQuarter} Active • {currentCalendarYear + 1} Planning Open
-                          </Badge>
-                        )}
-                      </div>
+                      {planType === "campaign" ? (
+                        /* ─── SIA Campaign Scheduling (No Routine Cadence Needed) ─── */
+                        <div className="space-y-3">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                            <div className="flex items-center gap-2">
+                              <Calendar className="h-4 w-4 text-primary" />
+                              <span className="font-semibold text-sm">Campaign Target Year & Multi-Year Horizon</span>
+                            </div>
+                            <Badge variant="outline" className="bg-primary/10 text-primary border-primary/20 text-xs py-0.5 px-2">
+                              SIA Campaign • Multi-Year Horizon
+                            </Badge>
+                          </div>
 
-                      {/* Cadence Category Selector Tabs */}
-                      <div className="space-y-1.5 pt-1">
-                        <span className="text-xs text-muted-foreground font-medium block">Planning Cadence:</span>
-                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 p-1 bg-muted/40 rounded-lg border">
-                          {[
-                            { id: "monthly" as PlanningCadence, label: "Monthly", duration: "1 Month", icon: "📅" },
-                            { id: "quarterly" as PlanningCadence, label: "Quarterly", duration: "3 Months (Standard)", icon: "📊" },
-                            { id: "semi_annual" as PlanningCadence, label: "6-Monthly", duration: "6 Months", icon: "⏳" },
-                            { id: "annual" as PlanningCadence, label: "Annual", duration: "12 Months", icon: "🗓️" },
-                          ].map((cad) => {
-                            const isCadSelected = planningCadence === cad.id;
-                            return (
-                              <button
-                                key={cad.id}
-                                type="button"
-                                onClick={() => {
-                                  setPlanningCadence(cad.id);
-                                  const options = facilityPeriodAvailability.periodsByCadence[cad.id]?.[year] ?? [];
-                                  const rec = options.find((o) => o.isRecommended && o.isAvailable) || options.find((o) => o.isAvailable) || options[0];
-                                  if (rec) {
-                                    handleSelectPeriod(year, rec.quarter, cad.id, rec.periodNumber);
-                                  }
-                                }}
-                                className={`flex flex-col items-center justify-center p-2 rounded-md text-xs transition-all ${
-                                  isCadSelected
-                                    ? "bg-primary text-primary-foreground font-semibold shadow-xs"
-                                    : "text-muted-foreground hover:text-foreground hover:bg-muted/80 font-medium"
-                                }`}
-                                data-testid={`button-cadence-${cad.id}`}
-                              >
-                                <span className="text-sm mb-0.5">{cad.icon}</span>
-                                <span className="font-bold">{cad.label}</span>
-                                <span className={`text-[10px] ${isCadSelected ? "text-primary-foreground/80" : "text-muted-foreground"}`}>
-                                  {cad.duration}
-                                </span>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
+                          {/* Multi-Year Selector for SIA */}
+                          <div className="flex flex-wrap items-center gap-2 pt-1">
+                            <span className="text-xs text-muted-foreground font-medium">Campaign Year:</span>
+                            <div className="inline-flex flex-wrap rounded-lg border p-0.5 bg-muted/40 gap-1">
+                              {facilityPeriodAvailability.availableYears.map((y) => (
+                                <button
+                                  key={y}
+                                  type="button"
+                                  onClick={() => {
+                                    setYear(y);
+                                    const fac = facilities?.find((f) => f.id === facilityId);
+                                    const facName = fac?.name?.trim();
+                                    setName(`${facName ? `${facName} — ` : ""}${campaignAntigen ? `${campaignAntigen} ` : ""}SIA Campaign ${y}`);
+                                  }}
+                                  className={`px-3 py-1 text-xs font-semibold rounded-md transition-all ${
+                                    year === y
+                                      ? "bg-primary text-primary-foreground shadow-xs"
+                                      : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                                  }`}
+                                  data-testid={`button-select-year-${y}`}
+                                >
+                                  {y} {y === currentCalendarYear ? "(Current)" : y === currentCalendarYear + 1 ? "(Next Year)" : `(+${y - currentCalendarYear} Yrs)`}
+                                </button>
+                              ))}
+                            </div>
+                            {year > currentCalendarYear && (
+                              <span className="text-[11px] text-primary font-medium">
+                                ★ Preparing upcoming multi-year campaign cycle
+                              </span>
+                            )}
+                          </div>
 
-                      {/* Year Selector */}
-                      <div className="flex flex-wrap items-center gap-2 pt-1">
-                        <span className="text-xs text-muted-foreground font-medium">Target Year:</span>
-                        <div className="inline-flex rounded-lg border p-0.5 bg-muted/40">
-                          {facilityPeriodAvailability.availableYears.map((y) => (
-                            <button
-                              key={y}
-                              type="button"
-                              onClick={() => {
-                                setYear(y);
-                                const options = facilityPeriodAvailability.periodsByCadence[planningCadence]?.[y] ?? [];
-                                const rec = options.find((o) => o.isRecommended && o.isAvailable) || options.find((o) => o.isAvailable) || options[0];
-                                if (rec) {
-                                  handleSelectPeriod(y, rec.quarter, planningCadence, rec.periodNumber);
-                                } else {
-                                  handleSelectPeriod(y, quarter, planningCadence, periodNumber);
-                                }
-                              }}
-                              className={`px-3 py-1 text-xs font-semibold rounded-md transition-all ${
-                                year === y
-                                  ? "bg-primary text-primary-foreground shadow-xs"
-                                  : "text-muted-foreground hover:text-foreground hover:bg-muted"
-                              }`}
-                              data-testid={`button-select-year-${y}`}
-                            >
-                              {y} {y === currentCalendarYear ? "(Current)" : "(Next Year)"}
-                            </button>
-                          ))}
-                        </div>
-                        {year === currentCalendarYear + 1 && (
-                          <span className="text-[11px] text-primary font-medium">
-                            ★ Preparing upcoming annual planning cycle
-                          </span>
-                        )}
-                      </div>
-
-                      {/* Dynamic Period Options Grid based on Selected Cadence */}
-                      <div className="space-y-1.5 pt-1">
-                        <div className="flex items-center justify-between text-xs text-muted-foreground">
-                          <span>Select {planningCadence === "monthly" ? "Month" : planningCadence === "quarterly" ? "Quarter" : planningCadence === "semi_annual" ? "Semi-Annual Period" : "Annual Planning Cycle"}:</span>
-                          <span className="text-[11px] text-primary font-medium">
-                            {planningCadence === "monthly" ? "12 Monthly Periods" : planningCadence === "quarterly" ? "4 Quarters" : planningCadence === "semi_annual" ? "2 Six-Month Terms" : "1 Annual Plan"}
-                          </span>
-                        </div>
-
-                        <div
-                          className={`grid gap-2 ${
-                            planningCadence === "monthly"
-                              ? "grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6"
-                              : planningCadence === "semi_annual"
-                              ? "grid-cols-1 sm:grid-cols-2"
-                              : planningCadence === "annual"
-                              ? "grid-cols-1"
-                              : "grid-cols-2 md:grid-cols-4"
-                          }`}
-                        >
-                          {(facilityPeriodAvailability.periodsByCadence[planningCadence]?.[year] ?? []).map((pInfo) => {
-                            const isSelected = periodNumber === pInfo.periodNumber;
-                            const hasPlan = !!pInfo.existingPlan;
-
-                            return (
-                              <button
-                                key={`${planningCadence}-${pInfo.periodNumber}-${year}`}
-                                type="button"
-                                onClick={() => handleSelectPeriod(year, pInfo.quarter, planningCadence, pInfo.periodNumber)}
-                                className={`flex flex-col text-left p-2.5 rounded-lg border transition-all relative ${
-                                  isSelected
-                                    ? hasPlan
-                                      ? "border-amber-500 bg-amber-500/10 ring-1 ring-amber-500"
-                                      : "border-primary bg-primary/10 ring-1 ring-primary"
-                                    : hasPlan
-                                    ? "border-border/60 bg-muted/20 opacity-80 hover:opacity-100"
-                                    : "border-border/80 bg-card hover:border-primary/50 hover:bg-accent/30"
-                                }`}
-                                data-testid={`button-period-${planningCadence}-${pInfo.periodNumber}-${year}`}
-                              >
-                                <div className="flex items-center justify-between w-full mb-1">
-                                  <span className="font-bold text-sm">{pInfo.label}</span>
-                                  {hasPlan ? (
-                                    <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30">
-                                      Has Plan
-                                    </Badge>
-                                  ) : pInfo.isRecommended ? (
-                                    <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30">
-                                      Recommended
-                                    </Badge>
-                                  ) : (
-                                    <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-blue-500/10 text-blue-700 dark:text-blue-300 border-blue-500/20">
-                                      Available
-                                    </Badge>
-                                  )}
-                                </div>
-                                <span className="text-[11px] text-muted-foreground">{pInfo.months}</span>
-                                {hasPlan && (
-                                  <span className="text-[10px] text-amber-800 dark:text-amber-300 truncate mt-1 block">
-                                    {pInfo.existingPlan?.name || "Active plan"}
-                                  </span>
-                                )}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
-
-                      {/* Period Status Indicator */}
-                      {!existingPeriodPlan ? (
-                        <div className="flex items-center gap-2 text-xs text-emerald-700 dark:text-emerald-300 bg-emerald-500/10 border border-emerald-500/20 rounded-md p-2">
-                          <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
-                          <span>
-                            <strong>Ready for planning:</strong> {planningCadence.replace(/_/g, " ").toUpperCase()} period ({planningCadence === "monthly" ? `M${periodNumber} ${MONTH_SHORT[periodNumber - 1]}` : planningCadence === "semi_annual" ? `H${periodNumber}` : planningCadence === "annual" ? "Annual" : `Q${quarter}`} {year}) is open and available for this facility. No duplicate period conflict.
-                          </span>
+                          <div className="flex items-center gap-2 text-xs text-emerald-700 dark:text-emerald-300 bg-emerald-500/10 border border-emerald-500/20 rounded-md p-2">
+                            <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
+                            <span>
+                              <strong>SIA Campaign target set for {year}:</strong> Operational horizon is open for facility outreach and campaign session scheduling.
+                            </span>
+                          </div>
                         </div>
                       ) : (
-                        <div className="space-y-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-2.5 text-xs text-amber-900 dark:text-amber-200">
+                        /* ─── Routine Microplanning (Full 4-Cadence & Period Grid) ─── */
+                        <div className="space-y-3.5">
                           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                            <div className="flex items-start gap-1.5">
-                              <AlertCircle className="h-3.5 w-3.5 shrink-0 text-amber-600 mt-0.5" />
-                              <div>
-                                <strong>Active plan already recorded for {planningCadence.replace(/_/g, " ").toUpperCase()} period ({planningCadence === "monthly" ? `M${periodNumber}` : planningCadence === "semi_annual" ? `H${periodNumber}` : planningCadence === "annual" ? "Annual" : `Q${quarter}`} {year}):</strong> "{existingPeriodPlan.name}" (Status: {existingPeriodPlan.status}).
-                                {facilityPeriodAvailability.recommendedPeriod && (
-                                  <div className="mt-1">
-                                    Pick an open period above or open the existing plan.
-                                  </div>
-                                )}
-                              </div>
+                            <div className="flex items-center gap-2">
+                              <Calendar className="h-4 w-4 text-primary" />
+                              <span className="font-semibold text-sm">Planning Period & Target Cadence</span>
                             </div>
-                            <div className="flex items-center gap-1.5 shrink-0 self-end sm:self-auto">
-                              {facilityPeriodAvailability.recommendedPeriod && (
-                                <Button
-                                  type="button"
-                                  size="sm"
-                                  variant="outline"
-                                  className="h-7 text-xs border-amber-500/50 bg-background hover:bg-amber-500/10"
-                                  onClick={() =>
-                                    handleSelectPeriod(
-                                      facilityPeriodAvailability.recommendedPeriod!.year,
-                                      facilityPeriodAvailability.recommendedPeriod!.quarter,
-                                      facilityPeriodAvailability.recommendedPeriod!.cadence,
-                                      facilityPeriodAvailability.recommendedPeriod!.periodNumber
-                                    )
-                                  }
-                                >
-                                  Switch to Open Period
-                                </Button>
-                              )}
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant="default"
-                                className="h-7 text-xs"
-                                onClick={() =>
-                                  setLocation(
-                                    `/microplans/${planType === "campaign" ? "campaigns" : "routine"}/${existingPeriodPlan.id}`
-                                  )
-                                }
-                              >
-                                <Eye className="h-3 w-3 mr-1" />
-                                Open Plan
-                              </Button>
+                            {isQ3OrLater && (
+                              <Badge variant="outline" className="bg-primary/10 text-primary border-primary/20 text-xs py-0.5 px-2">
+                                Q{currentCalendarQuarter} Active • {currentCalendarYear + 1} Planning Open
+                              </Badge>
+                            )}
+                          </div>
+
+                          {/* Cadence Category Selector Tabs */}
+                          <div className="space-y-1.5 pt-1">
+                            <span className="text-xs text-muted-foreground font-medium block">Planning Cadence:</span>
+                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 p-1 bg-muted/40 rounded-lg border">
+                              {[
+                                { id: "monthly" as PlanningCadence, label: "Monthly", duration: "1 Month", icon: "📅" },
+                                { id: "quarterly" as PlanningCadence, label: "Quarterly", duration: "3 Months (Standard)", icon: "📊" },
+                                { id: "semi_annual" as PlanningCadence, label: "6-Monthly", duration: "6 Months", icon: "⏳" },
+                                { id: "annual" as PlanningCadence, label: "Annual", duration: "12 Months", icon: "🗓️" },
+                              ].map((cad) => {
+                                const isCadSelected = planningCadence === cad.id;
+                                return (
+                                  <button
+                                    key={cad.id}
+                                    type="button"
+                                    onClick={() => {
+                                      setPlanningCadence(cad.id);
+                                      const options = facilityPeriodAvailability.periodsByCadence[cad.id]?.[year] ?? [];
+                                      const rec = options.find((o) => o.isRecommended && o.isAvailable) || options.find((o) => o.isAvailable) || options[0];
+                                      if (rec) {
+                                        handleSelectPeriod(year, rec.quarter, cad.id, rec.periodNumber);
+                                      }
+                                    }}
+                                    className={`flex flex-col items-center justify-center p-2 rounded-md text-xs transition-all ${
+                                      isCadSelected
+                                        ? "bg-primary text-primary-foreground font-semibold shadow-xs"
+                                        : "text-muted-foreground hover:text-foreground hover:bg-muted/80 font-medium"
+                                    }`}
+                                    data-testid={`button-cadence-${cad.id}`}
+                                  >
+                                    <span className="text-sm mb-0.5">{cad.icon}</span>
+                                    <span className="font-bold">{cad.label}</span>
+                                    <span className={`text-[10px] ${isCadSelected ? "text-primary-foreground/80" : "text-muted-foreground"}`}>
+                                      {cad.duration}
+                                    </span>
+                                  </button>
+                                );
+                              })}
                             </div>
                           </div>
+
+                          {/* Year Selector */}
+                          <div className="flex flex-wrap items-center gap-2 pt-1">
+                            <span className="text-xs text-muted-foreground font-medium">Target Year:</span>
+                            <div className="inline-flex flex-wrap rounded-lg border p-0.5 bg-muted/40 gap-1">
+                              {facilityPeriodAvailability.availableYears.map((y) => (
+                                <button
+                                  key={y}
+                                  type="button"
+                                  onClick={() => {
+                                    setYear(y);
+                                    const options = facilityPeriodAvailability.periodsByCadence[planningCadence]?.[y] ?? [];
+                                    const rec = options.find((o) => o.isRecommended && o.isAvailable) || options.find((o) => o.isAvailable) || options[0];
+                                    if (rec) {
+                                      handleSelectPeriod(y, rec.quarter, planningCadence, rec.periodNumber);
+                                    } else {
+                                      handleSelectPeriod(y, quarter, planningCadence, periodNumber);
+                                    }
+                                  }}
+                                  className={`px-3 py-1 text-xs font-semibold rounded-md transition-all ${
+                                    year === y
+                                      ? "bg-primary text-primary-foreground shadow-xs"
+                                      : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                                  }`}
+                                  data-testid={`button-select-year-${y}`}
+                                >
+                                  {y} {y === currentCalendarYear ? "(Current)" : y === currentCalendarYear + 1 ? "(Next Year)" : `(+${y - currentCalendarYear} Yrs)`}
+                                </button>
+                              ))}
+                            </div>
+                            {year > currentCalendarYear && (
+                              <span className="text-[11px] text-primary font-medium">
+                                ★ Preparing upcoming annual planning cycle
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Dynamic Period Options Grid based on Selected Cadence */}
+                          <div className="space-y-1.5 pt-1">
+                            <div className="flex items-center justify-between text-xs text-muted-foreground">
+                              <span>Select {planningCadence === "monthly" ? "Month" : planningCadence === "quarterly" ? "Quarter" : planningCadence === "semi_annual" ? "Semi-Annual Period" : "Annual Planning Cycle"}:</span>
+                              <span className="text-[11px] text-primary font-medium">
+                                {planningCadence === "monthly" ? "12 Monthly Periods" : planningCadence === "quarterly" ? "4 Quarters" : planningCadence === "semi_annual" ? "2 Six-Month Terms" : "1 Annual Plan"}
+                              </span>
+                            </div>
+
+                            <div
+                              className={`grid gap-2 ${
+                                planningCadence === "monthly"
+                                  ? "grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6"
+                                  : planningCadence === "semi_annual"
+                                  ? "grid-cols-1 sm:grid-cols-2"
+                                  : planningCadence === "annual"
+                                  ? "grid-cols-1"
+                                  : "grid-cols-2 md:grid-cols-4"
+                              }`}
+                            >
+                              {(facilityPeriodAvailability.periodsByCadence[planningCadence]?.[year] ?? []).map((pInfo) => {
+                                const isSelected = periodNumber === pInfo.periodNumber;
+                                const hasPlan = !!pInfo.existingPlan;
+
+                                return (
+                                  <button
+                                    key={`${planningCadence}-${pInfo.periodNumber}-${year}`}
+                                    type="button"
+                                    onClick={() => handleSelectPeriod(year, pInfo.quarter, planningCadence, pInfo.periodNumber)}
+                                    className={`flex flex-col text-left p-2.5 rounded-lg border transition-all relative ${
+                                      isSelected
+                                        ? hasPlan
+                                          ? "border-amber-500 bg-amber-500/10 ring-1 ring-amber-500"
+                                          : "border-primary bg-primary/10 ring-1 ring-primary"
+                                        : hasPlan
+                                        ? "border-border/60 bg-muted/20 opacity-80 hover:opacity-100"
+                                        : "border-border/80 bg-card hover:border-primary/50 hover:bg-accent/30"
+                                    }`}
+                                    data-testid={`button-period-${planningCadence}-${pInfo.periodNumber}-${year}`}
+                                  >
+                                    <div className="flex items-center justify-between w-full mb-1">
+                                      <span className="font-bold text-sm">{pInfo.label}</span>
+                                      {hasPlan ? (
+                                        <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30">
+                                          Has Plan
+                                        </Badge>
+                                      ) : pInfo.isRecommended ? (
+                                        <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30">
+                                          Recommended
+                                        </Badge>
+                                      ) : (
+                                        <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-blue-500/10 text-blue-700 dark:text-blue-300 border-blue-500/20">
+                                          Available
+                                        </Badge>
+                                      )}
+                                    </div>
+                                    <span className="text-[11px] text-muted-foreground">{pInfo.months}</span>
+                                    {hasPlan && (
+                                      <span className="text-[10px] text-amber-800 dark:text-amber-300 truncate mt-1 block">
+                                        {pInfo.existingPlan?.name || "Active plan"}
+                                      </span>
+                                    )}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+
+                          {/* Period Status Indicator */}
+                          {!existingPeriodPlan ? (
+                            <div className="flex items-center gap-2 text-xs text-emerald-700 dark:text-emerald-300 bg-emerald-500/10 border border-emerald-500/20 rounded-md p-2">
+                              <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
+                              <span>
+                                <strong>Ready for planning:</strong> {planningCadence.replace(/_/g, " ").toUpperCase()} period ({planningCadence === "monthly" ? `M${periodNumber} ${MONTH_SHORT[periodNumber - 1]}` : planningCadence === "semi_annual" ? `H${periodNumber}` : planningCadence === "annual" ? "Annual" : `Q${quarter}`} {year}) is open and available for this facility. No duplicate period conflict.
+                              </span>
+                            </div>
+                          ) : (
+                            <div className="space-y-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-2.5 text-xs text-amber-900 dark:text-amber-200">
+                              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                                <div className="flex items-start gap-1.5">
+                                  <AlertCircle className="h-3.5 w-3.5 shrink-0 text-amber-600 mt-0.5" />
+                                  <div>
+                                    <strong>Active plan already recorded for {planningCadence.replace(/_/g, " ").toUpperCase()} period ({planningCadence === "monthly" ? `M${periodNumber}` : planningCadence === "semi_annual" ? `H${periodNumber}` : planningCadence === "annual" ? "Annual" : `Q${quarter}`} {year}):</strong> "{existingPeriodPlan.name}" (Status: {existingPeriodPlan.status}).
+                                    {facilityPeriodAvailability.recommendedPeriod && (
+                                      <div className="mt-1">
+                                        Pick an open period above or open the existing plan.
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-1.5 shrink-0 self-end sm:self-auto">
+                                  {facilityPeriodAvailability.recommendedPeriod && (
+                                    <Button
+                                      type="button"
+                                      size="sm"
+                                      variant="outline"
+                                      className="h-7 text-xs border-amber-500/50 bg-background hover:bg-amber-500/10"
+                                      onClick={() =>
+                                        handleSelectPeriod(
+                                          facilityPeriodAvailability.recommendedPeriod!.year,
+                                          facilityPeriodAvailability.recommendedPeriod!.quarter,
+                                          facilityPeriodAvailability.recommendedPeriod!.cadence,
+                                          facilityPeriodAvailability.recommendedPeriod!.periodNumber
+                                        )
+                                      }
+                                    >
+                                      Switch to Open Period
+                                    </Button>
+                                  )}
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="default"
+                                    className="h-7 text-xs"
+                                    onClick={() =>
+                                      setLocation(
+                                        `/microplans/routine/${existingPeriodPlan.id}`
+                                      )
+                                    }
+                                  >
+                                    <Eye className="h-3 w-3 mr-1" />
+                                    Open Plan
+                                  </Button>
+                                </div>
+                              </div>
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
