@@ -314,6 +314,7 @@ function DrawingController({
 
   useEffect(() => {
     if (!mode) return;
+    map.closePopup();
     pointsRef.current = [];
     onPointCountChangeRef.current?.(0);
 
