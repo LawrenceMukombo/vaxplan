@@ -8,6 +8,8 @@ This document tracks technical releases, architectural updates, database migrati
 
 ### Highlights
 
+- **DHIS2 country connector hardening:** added tenant-specific root OU, data set, facility-level and authentication configuration; read-only connection testing; compatible facility UID mapping; URL normalization; and fail-closed production imports/exports. Individual-level Tracker remains outside the supported scope.
+
 - **End-to-end planning assurance:** routine and campaign microplans now connect to Plan Health, action ownership, evidence records, field-readiness review, approvals, version history, and printable outputs.
 - **Campaign operations:** added readiness assessment, summary sheets, target quotas, RED-aligned planning, and a real-time campaign dashboard.
 - **Surveillance and risk:** added VPD case/laboratory workflows and configurable assessment methodologies with district input, mapped results, vulnerability review, and linked actions.

@@ -204,7 +204,12 @@ VaxPlan uses strict Role-Based Access Control (RBAC). A user can only access dat
 
 ## 22. HIS Integrations
 **Purpose:** Interoperability with broader Health Information Systems.
-- VaxPlan can be configured to push aggregate indicator data (e.g., Doses Administered) to a national DHIS2 instance using standard API payloads.
+- Open **Administration → HIS Integrations** or `/his-integrations`. The tenant interoperability module and HIS integration permission must be enabled.
+- National administrators configure the country DHIS2 URL, secret reference, root organisation unit, immunization data set, facility organisation-unit level, and authentication scheme.
+- Use **Test** before synchronization. It validates credentials, the DHIS2 version, root organisation unit, and data set without writing data.
+- VaxPlan can pull facility organisation units, routine coverage, and population denominators, and can push approved aggregate immunization and microplanning indicators.
+- Preview inbound data before committing it. Missing credentials, facility mappings, or required data elements stop production synchronization.
+- Individual-level DHIS2 Tracker synchronization is not currently supported. See the [DHIS2 country integration guide](../DHIS2_INTEGRATION.md).
 
 ---
 

@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.9.4] - 2026-09-14
 
 ### Added
+- Country-specific DHIS2 configuration fields, readiness testing, operator documentation, and deployment environment examples.
 - Campaign summary sheets, readiness assessment, real-time campaign monitoring, target quotas, and expanded RED microplanning.
 - Plan Health, Planning Actions, Planning Evidence, and Field Readiness workspaces.
 - VPD surveillance and configurable geographic risk-assessment workspaces with mapped results and action links.
@@ -15,11 +16,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Canonical platform, developer, and offline/synchronization documentation.
 
 ### Changed
+- DHIS2 aggregate synchronization now normalizes API URLs, supports ApiToken/Basic/Bearer authentication, scopes organisation units to the configured country root, and recognizes both facility DHIS2 identifier keys.
 - Unified routine and campaign navigation around the microplan builder while retaining routed session-planning detail views.
 - Expanded tenant module configuration, dynamic role/permission administration, geographic scope enforcement, and temporal/audit history.
 - Synchronization now supports offline authentication state, batch handlers, forced retry for stuck items, warning propagation, and tenant-local cache isolation.
 
 ### Fixed
+- Removed implicit DHIS2 demo fallback and placeholder production values when credentials, facility mappings, or data-element mappings are missing.
 - Corrected offline queue replay, identity sequence alignment, missing production columns, and resilient sync-pull behavior.
 - Corrected campaign, risk, surveillance, facility, settlement, population, map visibility, and tenant-geography edge cases.
 - Restricted editable landing-page field stories to administrators.

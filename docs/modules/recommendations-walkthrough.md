@@ -1,34 +1,32 @@
 ---
 title: "Recommendations Walkthrough"
-version: 1.0.0
-status: Final
-last_updated: 2026-06-21
-audience: District Managers, Facility In-Charges
+version: 1.9.4
+status: Active
+last_updated: 2026-09-18
+audience: District Managers, Provincial Coordinators, Facility In-Charges, National Planners
 ---
 
 # Recommendations Walkthrough
 
 ## 1. Module Purpose
-Surfaces AI and rule-based suggestions to improve coverage, such as identifying zero-dose clusters that need a new outreach post.
+The VaxPlan Geospatial Intelligence Engine (VGIE) provides intelligent operational recommendations to eliminate zero-dose clusters, resolve geographic coverage gaps, and optimize field resource allocation.
 
-## 2. Who Uses It
-- **District Managers:** Review and prioritize recommendations across the district.
-- **Facility In-Charges:** Implement the recommendation in their microplan.
+---
 
-## 3. Main Screens and Navigation
-- **Recommendations Inbox:** Found in the sidebar. Displays cards for each pending suggestion.
+## 2. Dual Recommendation Channels
 
-## 4. Key Actions
-### 4.1. Actioning a Recommendation
-1. Click on a recommendation card.
-2. Read the justification (e.g., "Settlement X is 15km away with 50 estimated zero-dose children").
-3. Change the status to **Approved** to mandate action, or **Dismissed** if invalid.
+### 2.1 Rule-Based Catchment Analysis
+- Evaluates spatial distance, catchment assignment, and historical session frequency:
+  - *High-Priority*: Unassigned settlements or hard-to-reach clusters with estimated unserved populations.
+  - *Medium-Priority*: Settlements >5km from a facility with high dropout rates.
+  - *Low-Priority*: Minor schedule rebalancing to improve seasonal outreach access.
 
-## 5. Permissions and RBAC
-- Facility users can view recommendations but cannot dismiss them without District approval.
+### 2.2 Generative AI Decision Support (`/api/ai/recommendations/generate`)
+- Analyzes multi-dimensional national and district metrics (demographics, vaccine stock, historical outbreaks, supervision scores) to generate contextual operational strategies.
 
-## 6. Troubleshooting
-> **Baby steps:** If the inbox is empty, it means the system has not detected any immediate anomalies in your catchment.
+---
 
-## 7. Related Modules
-- [GIS Microplanning Walkthrough](./gis-microplanning-walkthrough.md)
+## 3. Workflow & Lifecycle
+1. **Inbox Review**: View prioritized recommendation cards with evidence rationale.
+2. **Actioning**: Convert recommendations into actionable items in the **Planning Actions** register (`/planning-actions`) with assigned owners and due dates.
+3. **Status Tracking**: Transition status from `pending` → `actioned` or `dismissed`.

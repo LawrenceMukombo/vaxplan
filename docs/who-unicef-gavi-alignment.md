@@ -176,7 +176,7 @@ WHO/UNICEF *Microplanning for Immunization Service Delivery using the RED Strate
 |---|---|---|
 | **Zero-dose children** (DTP1 = 0 in target age) | ✅ Aligned | Promoted to prime Executive Dashboard indicator |
 | Sub-national equity (district-level dropout) | ✅ Aligned | District and facility dropouts with WUENIC CSV exports |
-| HMIS / DHIS2 reporting | ✅ Aligned | Tenant-configurable DHIS2 aggregate and tracker mappings |
+| HMIS / DHIS2 reporting | ✅ Aligned for aggregate exchange | Tenant-configurable DHIS2 aggregate mappings and live readiness checks; Tracker is not implemented |
 | Supply chain / EVM | ✅ Aligned | Cold chain functionality and batch management metrics |
 | Financial sustainability | ✅ Aligned | Planned-vs-actual execution rates computed per quarter |
 | Health workforce | ✅ Aligned | Staffing logs tied to facility HR profiles |
@@ -204,8 +204,8 @@ WHO/UNICEF *Microplanning for Immunization Service Delivery using the RED Strate
 
 | Standard | Status | Evidence | Gap-closure |
 |---|---|---|---|
-| DHIS2 Aggregate (`/api/dataValueSets`) | ✅ Aligned | Configurable aggregate mappings | — |
-| DHIS2 Tracker (individual-level) | ✅ Aligned | Shipped `Dhis2TrackerAdapter` for vaccine sync | — |
+| DHIS2 Aggregate (`/api/dataValueSets`) | ✅ Aligned | Tenant-specific endpoint, root OU, data set, facility level, authentication, readiness checks, inbound coverage/denominators, and outbound aggregate indicators | Country metadata and data-element mappings must be validated before production use |
+| DHIS2 Tracker (individual-level) | ⏳ Not implemented | Aggregate adapter intentionally rejects patient pushes | Define country program, tracked-entity attributes, identity matching, consent, and governance before implementation |
 | HL7 FHIR R4 Patient + Immunization | ✅ Aligned | `FhirR4Adapter` supports comprehensive profiles | — |
 | WHO SMART Guidelines IMMZ (DAK→L2→L3) | ✅ Aligned | Adopted IMMZ L2 age bands and interval decision tables | — |
 | SMART Vaccination Certificates (DDCC-VS) | ✅ Aligned | Digital vaccination certificate compatibility implemented | — |
@@ -296,7 +296,7 @@ WHO/UNICEF *Microplanning for Immunization Service Delivery using the RED Strate
 - **Gavi 5.0 Strategy** + **Full Country Evaluation (FCE)** indicators
 - **Principles for Digital Development** (digitalprinciples.org)
 - **HL7 FHIR R4** + International Patient Summary + Immunization profile
-- **DHIS2** Aggregate & Tracker APIs; WHO DHIS2 Immunization package
+- **DHIS2 Aggregate API** and WHO DHIS2 Immunization package; Tracker remains a governed future integration
 - **GS1 Healthcare** standards (GTIN, 2D barcoding for vaccines)
 - **CVX**, **SNOMED CT**, **ICD-11**, **LOINC**
 - **GRID3 / WorldPop / LandScan** gridded population

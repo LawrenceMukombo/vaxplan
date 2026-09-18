@@ -33,6 +33,8 @@ Every tenant-owned server operation must resolve tenant context. Sensitive opera
 
 Optional services and integrations include Redis, SMTP or SendGrid, SMS/WhatsApp providers, OpenRouteService, DHIS2 mappings, release download URLs, and Gemini-backed features. Keep secrets outside source control.
 
+For DHIS2 deployments, tenant settings contain only the endpoint, mapping identifiers, authentication scheme, and environment-variable reference. The credential itself must remain in the server environment. Missing credentials and mappings fail closed; simulation must be explicitly enabled. See [DHIS2 country integration](./DHIS2_INTEGRATION.md).
+
 ## Validation
 
 Run the checks proportionate to the change:

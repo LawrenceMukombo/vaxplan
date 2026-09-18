@@ -12,6 +12,7 @@ This directory documents version 1.9.4 of the repository. Use the documents unde
 | [Offline and sync](./OFFLINE_AND_SYNC.md) | Field users, support, engineers | Offline sign-in, local data, outbox, retry, conflicts, and troubleshooting |
 | [Indicator manual](./INDICATOR_MANUAL.md) | M&E and program teams | Indicator definitions and interpretation |
 | [Country onboarding](./COUNTRY_ONBOARDING.md) | Platform and national administrators | Tenant, geography, facility, catalogue, and user setup |
+| [DHIS2 country integration](./DHIS2_INTEGRATION.md) | National administrators and integration engineers | Configure, validate, map, and operate a country DHIS2 connection |
 | [Safe deployment guide](./deployment/vaxplan-safe-deployment-guide.md) | Operators | Data-safe production deployment |
 | [Release notes](./releases.md) | Users and operators | Release highlights and upgrade implications |
 

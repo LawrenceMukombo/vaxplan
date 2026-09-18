@@ -1,36 +1,38 @@
 ---
 title: "Sessions Walkthrough"
-version: 1.0.0
-status: Final
-last_updated: 2026-06-21
-audience: Facility Users
+version: 1.9.4
+status: Active
+last_updated: 2026-09-18
+audience: Facility Clerks, Facility In-Charges, Field Teams, District Managers
 ---
 
 # Sessions Walkthrough
 
 ## 1. Module Purpose
-For tracking the execution of the microplan by recording vaccinations administered during planned sessions.
+The Sessions module coordinates the scheduling, geographic routing, field execution, and closeout reconciliation of all planned immunization delivery sessions (Fixed, Outreach, and Mobile).
 
-## 2. Who Uses It
-- **Facility Clerks:** Daily data entry.
-- **Facility In-Charges:** Weekly review.
+---
 
-## 3. Main Screens and Navigation
-- **Session Calendar:** Visual representation of planned outreach and fixed sessions.
-- **Session Detail:** Data entry form.
+## 2. Key Capabilities & Workflows
 
-## 4. Key Actions
-### 4.1. Recording a Completed Session
-1. Click the session on the calendar.
-2. Select **Mark as Achieved**.
-3. Input the tallies for each antigen.
-4. Save. This automatically deducts from the facility's stock ledger.
+### 2.1 Scheduling & 5km Proximity Conflict Validator
+- **Spatial Clash Detection**: When creating or rescheduling an outreach session, the system automatically checks for conflicting sessions within a 5 km radius on the same date (`/api/sessions/validate-proximity`).
+- **Conflict Warning**: Prevents duplicate deployments and ensures health teams do not compete for the same community attendance.
 
-## 5. Permissions and RBAC
-- Users can only edit sessions belonging to their own facility.
+### 2.2 Multi-Day Field Logistics & Day Plans
+- Configure multi-day itineraries for remote mobile teams (e.g., riverine or island communities).
+- Assign vaccinators, community health workers, transport modes (4WD, motorbike, boat, foot), and cold chain carriers.
 
-## 6. Troubleshooting
-> **Baby steps:** If a session is missing, ensure the Microplan for this quarter has been fully approved by the District.
+### 2.3 Real-Time Vaccination Logging & Client Registry
+- In the field, clerks record child attendance in the electronic logbook or capture aggregate tally tallies by antigen dose.
+- Real-time dose deduction from the facility's local stock ledger.
 
-## 7. Related Modules
-- [Microplan Wizard Walkthrough](./microplan-wizard-walkthrough.md)
+### 2.4 Session Closeout & Daily Summary Sheets
+- Record vials opened, doses administered, doses wasted, and unopened vials returned to the cold chain.
+- Generate and export standard Daily Summary Sheets for official record-keeping.
+
+---
+
+## 3. Permissions & Scoping
+- **Facility Clerks & In-Charges**: Manage and record sessions strictly within their assigned health facility.
+- **District Managers**: Read-only oversight of all district sessions, status monitoring (planned, conducted, overdue, cancelled), and spatial conflict auditing.

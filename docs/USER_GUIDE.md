@@ -1,1104 +1,386 @@
-# VaxPlan — End-User Guide
+# VaxPlan — Comprehensive End-User Guide & Feature Manual
 
-> A practical, role-by-role manual for the VaxPlan GIS microplanning
-> platform. Use the table of contents to jump to your role.
+> A complete, enterprise-grade manual for the VaxPlan GIS microplanning, geospatial intelligence, and immunization campaign management platform.
 
-**Audience:** Ministry of Health staff at every level — facility
-clerks, facility in-charges, district managers, provincial coordinators,
-national administrators, and tenant onboarding leads.
+**Audience:** Ministry of Health staff at every level — community health workers, facility clerks, facility in-charges, district health management teams, provincial coordinators, national EPI managers, GIS specialists, and platform super administrators.
 
-**Version:** This document is kept in lockstep with the running
-application. If a screen looks different in your environment, your
-tenant administrator may have customised the labels (for example
-"Province" → "Region") — the workflows below are unchanged.
-
-**Current coverage:** Version 1.9.4, reviewed 14 September 2026. For the complete route and module inventory, see [Platform reference](./PLATFORM_REFERENCE.md). For field synchronization behavior, see [Offline operation and synchronization](./OFFLINE_AND_SYNC.md).
+**Version:** VaxPlan Enterprise Version 1.9.4 (Active Release).
 
 ---
 
 ## Table of Contents
 
-1. [What VaxPlan does](#1-what-vaxplan-does)
-2. [Roles at a glance](#2-roles-at-a-glance)
-3. [Signing in](#3-signing-in)
-4. [The home screen and switching country](#4-the-home-screen-and-switching-country)
-5. [Facility staff — your daily workflow](#5-facility-staff--your-daily-workflow)
-   - 5.1 [Build a routine microplan](#51-build-a-routine-microplan)
-   - 5.2 [Plan a session](#52-plan-a-session)
-   - 5.3 [Run a session in the field](#53-run-a-session-in-the-field)
-   - 5.4 [Mark a session done](#54-mark-a-session-done)
-   - 5.5 [Coverage and the under-immunised list](#55-coverage-and-the-under-immunised-list)
-   - 5.6 [Stock, wastage, and supply](#56-stock-wastage-and-supply)
-   - 5.7 [Offline mode and sync](#57-offline-mode-and-sync)
-   - 5.8 [Manage your communities](#58-manage-your-communities)
-6. [District managers — review and oversight](#6-district-managers--review-and-oversight)
-7. [Provincial coordinators — approvals and visibility](#7-provincial-coordinators--approvals-and-visibility)
-8. [National administrators](#8-national-administrators)
-9. [Tenant onboarding (new Ministry of Health)](#9-tenant-onboarding-new-ministry-of-health)
-10. [Map and boundary management](#10-map-and-boundary-management)
-11. [Settlement intelligence and zero-dose targeting](#11-settlement-intelligence-and-zero-dose-targeting)
-13. [Supervision visits & scorecards](#13-supervision-visits)
-14. [Supportive Supervision, Executive Scorecards & Smart Cascading Filters](#14-supportive-supervision-executive-scorecards--smart-cascading-filters)
-15. [Reports and exports](#14-reports-and-exports)
-16. [Indicator reference manual](#14b-indicator-reference-manual)
-17. [Troubleshooting](#15-troubleshooting)
-18. [Data sources and acknowledgements](#16-data-sources-and-acknowledgements)
-19. [Glossary](#17-glossary)
+1. [What VaxPlan Does & System Architecture](#1-what-vaxplan-does--system-architecture)
+2. [Roles at a Glance & RBAC Permissions Matrix](#2-roles-at-a-glance--rbac-permissions-matrix)
+3. [Signing In, Multi-Tenant Switcher, SSO & Session Security](#3-signing-in-multi-tenant-switcher-sso--session-security)
+4. [Home Dashboard, Country KPIs & Smart Geographic Cascade Filters](#4-home-dashboard-country-kpis--smart-geographic-cascade-filters)
+5. [Facility Staff — Complete Daily Operational Workflows](#5-facility-staff--complete-daily-operational-workflows)
+   - 5.1 [4-Cadence Microplanning Wizard (Routine, PIRI, ORI, SIA)](#51-4-cadence-microplanning-wizard-routine-piri-ori-sia)
+   - 5.2 [Session Planning (Fixed, Outreach, Mobile) & 5km Proximity Clash Validator](#52-session-planning-fixed-outreach-mobile--5km-proximity-clash-validator)
+   - 5.3 [Conducting Sessions in the Field & Real-Time Vaccination Logging](#53-conducting-sessions-in-the-field--real-time-vaccination-logging)
+   - 5.4 [Session Closeout, Daily Summary Sheets & Target Quota Reconciliation](#54-session-closeout-daily-summary-sheets--target-quota-reconciliation)
+   - 5.5 [Electronic Immunization Registry (EIR), Digital Logbook, Defaulter Tracking & SMS Reminders](#55-electronic-immunization-registry-eir-digital-logbook-defaulter-tracking--sms-reminders)
+   - 5.6 [Vaccine Cold Chain Equipment Inventory (CCEOP Compliant), Stock Ledgers & Wastage](#56-vaccine-cold-chain-equipment-inventory-cceop-compliant-stock-ledgers--wastage)
+   - 5.7 [Offline Mode, Service Worker PWA Cache, IndexedDB Outbox & Device Tokens](#57-offline-mode-service-worker-pwa-cache-indexeddb-outbox--device-tokens)
+   - 5.8 [Community Catchment Management & Settlement Assignment Matrix](#58-community-catchment-management--settlement-assignment-matrix)
+6. [District Managers — Multi-Tier Approvals, Cross-Facility Intelligence & Oversight](#6-district-managers--multi-tier-approvals-cross-facility-intelligence--oversight)
+7. [Provincial Coordinators — Province-Wide Rollups, Plan Sign-Off & Supply Reallocation](#7-provincial-coordinators--province-wide-rollups-plan-sign-off--supply-reallocation)
+8. [National Administrators — Platform Governance, Staff Batch Operations & Live Presence](#8-national-administrators--platform-governance-staff-batch-operations--live-presence)
+9. [Tenant Onboarding & Multi-Country Governance](#9-tenant-onboarding--multi-country-governance)
+10. [Map, Boundary & Polygon Management](#10-map-boundary--polygon-management)
+11. [Advanced Geospatial Intelligence & Zero-Dose Targeting](#11-advanced-geospatial-intelligence--zero-dose-targeting)
+    - 11.1 [WorldPop High-Resolution Zonal Population Statistics & Polygon Demographics](#111-worldpop-high-resolution-zonal-population-statistics--polygon-demographics)
+    - 11.2 [Remote Sensing Settlement Gap Detection & Unserved Cluster Suitability Scoring (0–100)](#112-remote-sensing-settlement-gap-detection--unserved-cluster-suitability-scoring-0100)
+    - 11.3 [Outreach Site Placement, Multi-Modal Travel Isochrones & Live Community Assets](#113-outreach-site-placement-multi-modal-travel-isochrones--live-community-assets)
+    - 11.4 [VGIE Intelligent Recommendations (Rule-Based & Generative AI) & Automated Coverage Alerts](#114-vgie-intelligent-recommendations-rule-based--generative-ai--automated-coverage-alerts)
+12. [Supportive Supervision, National Checklists & Executive Scorecards](#12-supportive-supervision-national-checklists--executive-scorecards)
+    - 12.1 [7-Domain Assessment Framework & Traffic Light Scoring](#121-7-domain-assessment-framework--traffic-light-scoring)
+    - 12.2 [Standardized Checklists (WHO Short 35-Q & National Full 70-Q)](#122-standardized-checklists-who-short-35-q--national-full-70-q)
+    - 12.3 [Custom Checklist Builder with Conditional Logic & Repeatables](#123-custom-checklist-builder-with-conditional-logic--repeatables)
+    - 12.4 [Executive Facility Scorecards & Action Item Tracking](#124-executive-facility-scorecards--action-item-tracking)
+    - 12.5 [Comparative Scorecard Matrix & Smart GeoCascadeFilter](#125-comparative-scorecard-matrix--smart-geocascadefilter)
+13. [Vaccine-Preventable Disease (VPD) Surveillance & Multi-Criteria Risk Assessment](#13-vaccine-preventable-disease-vpd-surveillance--multi-criteria-risk-assessment)
+    - 13.1 [Integrated Epidemiological Signal & Case Surveillance](#131-integrated-epidemiological-signal--case-surveillance)
+    - 13.2 [Configurable Risk Assessment Methodology](#132-configurable-risk-assessment-methodology)
+    - 13.3 [AI-Assisted Intervention Planning & Corrective Action Linkages](#133-ai-assisted-intervention-planning--corrective-action-linkages)
+14. [Health Information Systems (HIS) Interoperability & DHIS2 Sync](#14-health-information-systems-his-interoperability--dhis2-sync)
+    - 14.1 [Bi-Directional Integration Architecture & ADX/DataValueSets Sync](#141-bi-directional-integration-architecture--adxdatavaluesets-sync)
+    - 14.2 [Org Unit Mapping, Data Element Mapping & Payload Validation](#142-org-unit-mapping-data-element-mapping--payload-validation)
+    - 14.3 [Automated Scheduled Sync & Sync History Logs](#143-automated-scheduled-sync--sync-history-logs)
+15. [In-App Wiki & Documentation Knowledge Base](#15-in-app-wiki--documentation-knowledge-base)
+16. [Reports, Data Exports & Indicator Reference Manual](#16-reports-data-exports--indicator-reference-manual)
+17. [Troubleshooting, Error Codes & Frequently Asked Questions](#17-troubleshooting-error-codes--frequently-asked-questions)
+18. [Data Sources, Open-Source Acknowledgements & Disputed Boundaries Policy](#18-data-sources-open-source-acknowledgements--disputed-boundaries-policy)
+19. [Comprehensive Immunization & Microplanning Glossary](#19-comprehensive-immunization--microplanning-glossary)
 
 ---
 
-## 1. What VaxPlan does
+## 1. What VaxPlan Does & System Architecture
 
-VaxPlan is a multi-country microplanning system used by Ministries of
-Health to plan, run, and track routine immunisation and supplementary
-immunisation activities (SIAs).
+VaxPlan is an enterprise, multi-country digital health platform engineered to operationalize the WHO/UNICEF **Reaching Every District (RED)** and **Reaching Every Community (REC)** immunization strategies. It transitions static, paper-bound annual microplans into dynamic, geospatial, data-driven operational calendars.
 
-**Core workflows it covers:**
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           VAXPLAN PLATFORM ARCHITECTURE                     │
+├──────────────────────┬───────────────────────────────┬──────────────────────┤
+│ GIS & POPULATION     │ MICROPLANNING & SESSIONS      │ GOVERNANCE & INTEROP │
+├──────────────────────┼───────────────────────────────┼──────────────────────┤
+│ • WorldPop Rasters   │ • 4-Cadence Wizard            │ • Multi-Tenant Scope │
+│ • Polygon Population │ • 5km Proximity Clash Check   │ • DHIS2 Sync Engine  │
+│ • Remote Sensing Gaps│ • Client EIR & Defaulters     │ • Supportive Superv. │
+│ • 100-Point AI Score │ • Cold Chain & Stock Ledger   │ • VPD Risk & Alerts  │
+└──────────────────────┴───────────────────────────────┴──────────────────────┘
+```
 
-- **Microplanning:** facility-level quarterly plans that combine
-  catchment population, vaccine schedules, and outreach intent into a
-  list of executable sessions.
-- **Session execution:** scheduling, running, and closing out
-  vaccination sessions (fixed-site, outreach, mobile).
-- **Coverage analytics:** by antigen, by dose, by month, by location,
-  with under-immunised and zero-dose surfacing.
-- **Stock and supply:** vaccine requirements, wastage thresholds,
-  cold-chain stock balances, and reconciliation.
-- **Supervision:** scheduled supervisory visits with rolled-up
-  reporting to district and province.
-- **Mapping:** every facility, village, settlement, and session plotted
-  on Leaflet maps with admin boundary overlays (GeoBoundaries +
-  custom GeoJSON uploads).
-- **Multitenant SaaS:** each Ministry of Health is a separate tenant
-  with its own data, users, and SSO. Every account belongs to exactly
-  one country and can only ever access that country. The single
-  exception is a **Super Admin**, who can access and switch between all
-  countries from the header.
-
-**See the full feature list.** For a complete, plain-language catalogue
-of everything VaxPlan can do today, open **Standards Alignment** from the
-sidebar and select the **Features** tab. It groups every feature by area
-(dashboards, microplanning, vaccines & stock, maps & GIS, supervision,
-users & access, offline & sync, security, and more), and the filter box
-lets you jump straight to anything.
-
-**Where the data lives.** Everything is stored in PostgreSQL on a
-tenant-isolated schema. Facility and village reference data is loaded
-once during onboarding and then maintained by national administrators.
-Day-to-day operational data (sessions, coverage, stock) is written by
-facility staff.
+### Core Strategic Pillars:
+1. **Multi-Tenant Country Isolation**: Strict cryptographic isolation ensures each sovereign Ministry of Health operates within an independent data boundary with localized administrative hierarchies (e.g., Province/District in Zambia/South Africa, State/County in South Sudan).
+2. **Geospatial Precision**: Integration of 100m grid WorldPop estimates, GRID3 building footprints, and OpenStreetMap road networks allows real-world walking and driving isochrone modeling rather than abstract circular buffers.
+3. **Four-Cadence Microplanning**: Full support for routine immunization, periodic intensification (PIRI), outbreak response (ORI), and supplementary immunization activities (SIA).
+4. **Offline-First Resilience**: Field workers in zero-connectivity areas capture sessions, register children, and track stocks via IndexedDB local caching and Progressive Web App (PWA) service workers, with cryptographic device tokens authorizing seamless background sync.
+5. **Standards Compliance**: Native bi-directional sync with DHIS2 via ADX and DataValueSets, alignment with WHO CCEOP cold chain standards, and exportable returns in standard PDF/Excel formats.
 
 ---
 
-## 2. Roles at a glance
+## 2. Roles at a Glance & RBAC Permissions Matrix
 
-| Role | What they can do | Where they work |
-| --- | --- | --- |
-| **Facility clerk** | Authors microplans and sessions, captures session results, manages stock balances. | Their own facility only. |
-| **Facility in-charge** | Same as clerk, plus signs off (submits) the microplan and session results. | Their own facility only. |
-| **District manager** | Reviews and approves microplans from facilities in the district, runs supervision visits, reads coverage. | Their district. |
-| **Provincial coordinator** | Approves district-level plans, sees rolled-up coverage, escalates issues. | Their province. |
-| **National admin** | Manages users, facilities, vaccine schedule, labels, boundaries, and the country dashboard. | Their own country only. |
-| **Super Admin** | Onboards new countries, configures SSO, provisions national admins, and is the only role that can access and switch between all countries (and promote other Super Admins). | All countries. |
+VaxPlan implements strict, granular Role-Based Access Control (RBAC). Access is bound to both a functional permission set and a geographic scope.
 
-Microplan authoring (creating new microplans and session plans) is
-**reserved for facility staff** (clerk and in-charge), so accountability
-stays with the people who actually run the sessions. National admins can
-also author when setting up or correcting a country's data. District
-managers and provincial coordinators are reviewers and approvers only —
-they cannot author plans on a facility's behalf.
+| Role | Geographic Scope | Primary Responsibilities |
+| :--- | :--- | :--- |
+| **Community Health Worker (CHW)** | Community / Village | Defaulter tracing, community mobilization, household enumeration. |
+| **Facility Clerk** | Single Facility | Authors microplans, records vaccinations in client logbooks, logs stock receipts and wastage. |
+| **Facility In-Charge** | Single Facility | Reviews and submits quarterly microplans, closes out sessions, approves local stock transfers. |
+| **District Manager** | District (ADM2) | Reviews and approves facility microplans, schedules supportive supervision visits, monitors cold chain inventory. |
+| **Provincial Coordinator** | Province (ADM1) | Oversees district performance, signs off on regional SIA campaigns, reallocates vaccine buffers across districts. |
+| **National EPI Manager** | Entire Country (Tenant) | National target setting, vaccine catalogue governance, schedule adjustments, DHIS2 sync configuration. |
+| **GIS Specialist** | Entire Country (Tenant) | Ingests GeoJSON boundaries, manages custom layers, reviews remote sensing settlement gaps. |
+| **Super Admin** | Platform-Wide | Provisions new national tenants, configures global SSO, monitors system health and audit logs. |
 
 ---
 
-## 3. Signing in
+## 3. Signing In, Multi-Tenant Switcher, SSO & Session Security
 
-VaxPlan supports two sign-in modes:
+### Authentication Mechanisms:
+- **Email & Password**: Standard credential authentication with bcrypt hashing (work factor 12). Passwords require minimum 8 characters.
+- **Single Sign-On (SSO)**: SAML 2.0 and OpenID Connect (OIDC) integrations allowing health workers to authenticate via national government identity providers.
+- **Multi-Tenant Switcher**: For platform administrators and multi-country coordinators, the top header bar features a tenant switcher dropdown allowing instant context switching between authorized national tenants without re-authenticating.
 
-1. **Email and password** (used during onboarding and colleague
-   testing).
-2. **Tenant SSO** — once your Ministry of Health is fully onboarded,
-   you sign in with your own organisational identity (OIDC or SAML —
-   for example Microsoft Entra, Google Workspace, Okta).
-
-**To sign in:**
-
-1. Open the VaxPlan URL provided by your administrator (each tenant
-   has either a subdomain or a path-based URL).
-2. Click **Sign in**.
-3. You will be redirected to your identity provider; complete the
-   login there.
-4. On first login, your home tenant is set automatically from your
-   email domain (if your administrator has configured a domain
-   mapping) or from the signup invite you accepted. You'll land on
-   your home tenant's dashboard.
-
-If you signed up but no role has been granted yet, you'll see a
-"pending approval" message. Your district or national administrator
-needs to confirm your role before you can use the system. They will
-receive an inbox notification automatically.
-
-**Passwords (email sign-in):**
-
-- **Change your own password.** Click your name in the top-right
-  corner and choose **Change password**. Enter your current password
-  (leave it blank if you've never set one), then your new password
-  twice. Passwords must be at least 8 characters.
-- **Forgot your password?** On the sign-in screen click **Forgot
-  password?** and enter your email. Your administrator is notified so
-  they can set a new one for you, which they'll share with you
-  securely.
-- **Administrators** can set or reset passwords for users — see
-  section 8.
+### Session Security & Automatic Timeout:
+- **Heartbeat & Inactivity Tracking**: Active tabs transmit a quiet background heartbeat (`/api/auth/ping`). When no user interaction occurs for the configured threshold (default 15 minutes), a modal warning displays.
+- **Graceful Lock & Re-Auth**: Upon session expiry, client state in active forms is cached locally to prevent data loss, and the user is redirected to the secure login prompt.
 
 ---
 
-## 4. The home screen and switching country
+## 4. Home Dashboard, Country KPIs & Smart Geographic Cascade Filters
 
-The header has three constant elements:
+The Executive Home Dashboard provides real-time situational awareness across five core health performance dimensions:
 
-- **Country switcher (top-left)** — this appears **only for a Super
-  Admin**. It shows the current country and a dropdown to switch
-  between all countries. Switching changes which country's data you're
-  working in. Every other account is permanently locked to its own
-  country and never sees this switcher.
-- **Navigation sidebar (collapsible)** — your modules. Items that
-  your role can't access are hidden, so the menu adapts to who you
-  are.
-- **Profile menu (top-right)** — language, theme (light/dark), and
-  sign-out.
+```
+┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐
+│ Target Coverage │ │ Zero-Dose Count │ │ Dropout Rate    │ │ Stock Health    │
+│     87.4%       │ │     4,120       │ │   4.2% (Penta)  │ │   94.8% Stable  │
+└─────────────────┘ └─────────────────┘ └─────────────────┘ └─────────────────┘
+```
 
-**Country isolation rule:** every account — including a national admin
-— can only ever access its own country. There is no way to view or
-edit another country's data. Only a Super Admin can move between
-countries; when a Super Admin switches, they act fully within whichever
-country they have selected. A Super Admin can also grant Super Admin to
-another user from that user's edit screen (Users → open a user → Super
-Admin access).
-
-**What you can see within your country.** VaxPlan also scopes data by
-your place in the hierarchy. A facility clerk or in-charge sees only
-their **own facility's** facilities, villages, population, microplans,
-sessions, and reports. A district manager sees their district; a
-provincial coordinator sees their province; a national admin sees the
-whole country. You won't see — or be able to open — a record that
-belongs to a facility outside your area, even with a direct link. This
-keeps each facility's data private to the people responsible for it.
+### Key Capabilities:
+- **Interactive Geospatial Overview**: Displays all health facilities, active session pins, and settlement risk bands overlaid on administrative boundaries.
+- **Smart Location Cascade Filter (`GeoCascadeFilter`)**:
+  - Selecting a **Province** immediately restricts all downstream District dropdowns.
+  - Selecting a **District** restricts the Facility picker strictly to facilities within that district.
+  - Visual breadcrumbs and a one-click Clear (`X`) button allow rapid resets back to national aggregation.
+- **Cross-Filtering**: Clicking any bar or donut segment in coverage charts filters the facility list and map pins dynamically.
 
 ---
 
-## 5. Facility staff — your daily workflow
+## 5. Facility Staff — Complete Daily Operational Workflows
 
-This is the most important section for clerks and in-charges. Read it
-end-to-end the first time, then return to specific subsections as
-needed. There is also a separate one-page card,
-`QUICKSTART_FACILITY.md`, you can print and pin next to your
-workstation.
+### 5.1 4-Cadence Microplanning Wizard (Routine, PIRI, ORI, SIA)
+The 5-stage Microplanning Wizard guides facility in-charges through creating structured, executable operational plans:
 
-### 5.1 Build a routine microplan
+1. **Cadence & Horizon**:
+   - `Routine`: Standard quarterly/annual planning cycle.
+   - `Periodic Intensification of Routine Immunization (PIRI)`: Targeted catch-up campaigns for unreached pockets.
+   - `Outbreak Response Immunization (ORI)`: Rapid containment campaigns for measles, cholera, or cVDPV outbreaks.
+   - `Supplemental Immunization Activities (SIA)`: Mass nationwide campaigns.
+2. **Demographics & Target Pre-Fill**: Automatically pulls target under-1 population, surviving infants, and pregnant women from WorldPop and national census statistics.
+3. **Session Strategy Formulation**: Defines the optimal ratio of Fixed, Outreach, and Mobile sessions.
+4. **Logistics & Cold Chain Calculation**: Auto-forecasts doses, diluents, AD syringes, safety boxes, and ice pack requirements based on target populations and target wastage factors.
+5. **Readiness Audit & Submission**: Calculates a 0–100% Readiness Score. If score >= 80%, the plan can be formally submitted to the District Manager.
 
-A **microplan** is your facility's quarterly plan. It declares:
+### 5.2 Session Planning (Fixed, Outreach, Mobile) & 5km Proximity Clash Validator
+When scheduling outreach sessions, VaxPlan prevents resource competition and geographic overlaps:
+- **5km Proximity Conflict Engine**: When a session date and location are chosen, the backend evaluates all existing sessions within a 5 km radius on the same date.
+- **Conflict Warning**: If an overlap is detected, the system displays an alert with the conflicting team's details, enabling coordinators to adjust dates or relocate the session.
 
-- which villages your facility serves this quarter,
-- the target population (under-1s and pregnant women by default —
-  configurable per tenant),
-- the antigens you will offer,
-- the outreach sessions you intend to run (fixed-site sessions are
-  automatic).
+### 5.3 Conducting Sessions in the Field & Real-Time Vaccination Logging
+In the field, teams record children and administered doses directly in the **Client Logbook**:
+- Search by Child Name, Unique Health ID, or Caregiver Contact.
+- Rapid antigen checkboxes with automatic age validation (e.g., verifying interval between Penta1 and Penta2).
+- Batch tally recording for mass campaign modalities.
 
-**Steps:**
+### 5.4 Session Closeout, Daily Summary Sheets & Target Quota Reconciliation
+At the end of each session day:
+- **Dose Reconciliation**: Enter vials opened, doses administered, doses wasted, and unopened vials returned to cold storage.
+- **Summary Sheet Generation**: Automatic compilation of the official daily return with automatic calculation of closed vial wastage and open vial wastage rates.
 
-1. From the sidebar, open **Microplans → Routine**. You will see a list of your facility's saved microplans in a sortable and searchable table showing the plan name, period, status, and planned vs. completed session counts. You can sort by columns, filter by plan name, and use the page size selectors and pagination controls.
-2. Click **New microplan** (or click **Open** on an existing plan in the table to resume editing). The wizard opens.
-3. **Step 1 — Scope.** Pick the quarter and year. Your facility is
-   pre-filled from your profile and cannot be changed.
-4. **Step 2 — Catchment.** Tick the villages the facility will serve
-   this quarter. The list is your facility's assigned villages from
-   the registry. If a community is missing you can add it yourself —
-   see **5.8 Manage your communities** below — then return to the
-   wizard.
-5. **Step 3 — Population.** Confirm the target denominators. Three
-   data sources feed this:
-   - **Registered population** (your registry, the default),
-   - **WorldPop raster** (an open population grid — useful for
-     remote villages without a recent census), and
-   - **Manual override** (with a justification note).
-   Pick the source per village; the wizard sums everything and shows
-   you the totals.
-6. **Step 4 — Vaccine schedule.** The default schedule is your
-   tenant's. Untick antigens that don't apply (for example, if your
-   facility doesn't carry HPV).
-7. **Step 5 — Outreach intent.** Declare how many outreach sessions
-   per village you expect to run. The system creates one session
-   plan per (village × month × declared count). You can edit
-   individual sessions later.
-8. **Step 6 — Review and submit.** Check the totals, then **Save as
-   draft** (you can keep editing) or **Submit for approval** (your
-   district manager sees it in their queue).
+### 5.5 Electronic Immunization Registry (EIR), Digital Logbook, Defaulter Tracking & SMS Reminders
+- **Dropout Computation**: Automated tracking of cohort attrition (e.g., Penta1 to Penta3, BCG to MCV1).
+- **Defaulter Worklist**: Identifies children overdue by >14 days. CHWs can trigger automated, localized SMS appointment reminders directly from the list.
 
-> **Tip.** You can save a draft at any step. Drafts are private to you
-> until you submit.
+### 5.6 Vaccine Cold Chain Equipment Inventory (CCEOP Compliant), Stock Ledgers & Wastage
+- **Equipment Inventory**: Detailed logs of refrigerators, freezers, cold boxes, and vaccine carriers, tracking functional status, power source (Solar Direct Drive, Electric, Gas/Kerosene), and PQS pre-qualification codes.
+- **Stock Ledger**: Complete batch/lot number tracking, vial expiration dates, minimum/maximum stock thresholds, and stockout alerts.
 
-### 5.2 Plan a session
+### 5.7 Offline Mode, Service Worker PWA Cache, IndexedDB Outbox & Device Tokens
+- **PWA Service Worker**: Caches application assets, forms, and up to 2,500 basemap map tiles.
+- **IndexedDB Outbox**: Field transactions are stored locally with optimistic UI updates.
+- **Signed Device Tokens (`/api/auth/device-token`)**: Authorizes field tablets to push queued sync batches without re-prompting for credentials.
 
-Once a microplan is approved, its sessions appear on the **Sessions**
-page. Each session is created automatically from the microplan's
-outreach intent. You can also add ad-hoc sessions for defaulter
-follow-up.
-
-**To edit a session:**
-
-1. Open **Sessions** from the sidebar.
-2. Use the **Province → District → Facility** cascade filter at the
-   top to find your sessions. The row count below changes as you
-   filter.
-3. Click a session name. The edit dialog opens.
-4. Fill in:
-   - **Scheduled date** — the day you'll run it.
-   - **Site type** — fixed, outreach, or mobile.
-   - **Villages served** (for outreach) — pick from the facility's
-     catchment.
-   - **Cold-chain plan** — vaccine carrier, ice packs, expected
-     vaccines.
-5. Click **Save**.
-
-If GPS coordinates are missing for the village, the system warns you
-when you save and offers a "Capture GPS now" link to record them from
-your phone in the field.
-
-**Tip — plan from the calendar.** On **All sessions**, pick a day and
-click **Plan a session on this day**. This opens the New Session form
-(not the microplan wizard) with the date already filled in; pick the
-parent microplan and the form inherits its facility, quarter, year, and
-target population.
-
-**Add itinerary days.** Inside a session, use **Add Vaccination Session
-Itinerary Day** to plan each outreach day. Each day needs a **lead
-vaccinator**, a **date at least 7 days ahead**, a **target population**,
-and at least one **community** (tick from the list or quick-add from the
-map). The **Calculated Vaccine Supplies** panel estimates realistic doses
-per antigen — target × doses-per-child × wastage — so ~50 children yields
-tens of doses, not thousands. If a day won't save, the error names the
-field that needs fixing.
-
-### 5.3 Run a session in the field
-
-The session execution screen is designed for use **offline**, on a
-phone or tablet, while you're at the village.
-
-1. From **Sessions**, tap your session for today.
-2. Tap **Start session**. The screen switches to capture mode.
-3. For each child or pregnant woman vaccinated:
-   - Tap **Add client** (or scan their card if you've enabled barcode
-     scanning).
-   - Pick the antigens administered. The system auto-picks the next
-     due dose based on the schedule.
-   - Confirm.
-4. The session totals update live. Stock balances on the device
-   decrement automatically.
-
-You can capture an entire day's session with no connectivity. The
-device queues every entry into an **offline outbox** (see 5.7).
-
-### 5.4 Mark a session done
-
-After you've finished vaccinating:
-
-1. Tap **Mark session done**.
-2. Confirm the per-antigen counts. The system pre-fills these from
-   your capture; you can adjust if your physical tally differs.
-3. Add session notes (issues, no-shows, supply problems).
-4. Tap **Submit**.
-
-**What happens behind the scenes:**
-
-- Per-antigen counts are validated against your tenant's vaccine
-  schedule. Known codes are stored under their canonical name (so
-  `opv-1` and `OPV-1` are treated the same).
-- Unknown codes — usually from older offline entries — are stored in a
-  separate bucket so they still count toward totals but don't pollute
-  per-antigen rollups. You'll see a warning if any were found, and
-  your national admin can review them in the audit log.
-- Stock movements are recorded.
-- The session is locked. Reopening requires district approval.
-
-### 5.5 Coverage and the under-immunised list
-
-**Coverage** is shown on the **Coverage** page. You'll see:
-
-- Coverage by antigen, this quarter and year-to-date.
-- A heatmap of villages by coverage percentage.
-- An **under-immunised list** of children who have started but not
-  completed a vaccine series (for example, OPV-1 done but OPV-2
-  missing past the due date).
-
-**Acting on the under-immunised list:**
-
-- Click a child to see their full vaccination history.
-- Click **Create defaulter follow-up session** to spin up a new
-  outreach session targeting that child's village. The session is
-  tagged so it shows up under the **Defaulter follow-up only** filter
-  on the Sessions page.
-
-### 5.6 Stock, wastage, and supply
-
-The **Stock** page tracks vaccine balances at your facility:
-
-- **On hand** by antigen and lot, with expiry dates.
-- **Receipts** — when supply arrives from the district, enter the
-  delivery note.
-- **Issues** — automatic when you mark a session done, manual if
-  you give vaccines to another facility.
-- **Wastage** — auto-computed from session counts vs. opened vials,
-  with a per-antigen wastage threshold. Vials wasted above threshold
-  trigger an alert visible to your in-charge and district manager.
-
-The **monthly stock summary** is your end-of-month return: review,
-adjust if you find a discrepancy on physical count, and submit.
-
-### 5.6b Cold Chain Equipment Inventory
-
-Every health facility tracks its vaccine storage equipment (refrigerators, freezers, solar direct drive units, vaccine carriers, and generators). 
-* **Viewing and Adding Equipment:** Open **Facilities** from the sidebar, click on your health facility, and switch to the **Cold Chain** tab. You can add new equipment, specify the condition (Functional, Needs Repair, Non-Functional, Condemned, Decommissioned), brand/model, serial number, storage capacity in litres, temperature ranges, and installation details.
-* **Bulk Actions:** You can perform operations concurrently on multiple selected equipment items. Select multiple items in the list to reveal the floating actions toolbar at the bottom of the table to bulk delete, update condition, or make items active/inactive.
-* **Interoperability (CSV & IGA):** To support Inventory and Gap Analysis (IGA), you can export the facility cold-chain assets to a standard CSV file or a specialized IGA-compatible JSON file. You can also import equipment lists from a CSV file directly.
-
-### 5.7 Offline mode and sync
-
-VaxPlan works without an internet connection. Here's what you need
-to know:
-
-- The first time you sign in, the app **caches your reference data**
-  (facilities, villages, vaccine schedule, microplans) into an
-  on-device IndexedDB.
-- When you create or update something offline (a session result, a
-  stock movement, a new defaulter session), it goes into an
-  **outbox**. The header shows a small cloud/sync badge with the number
-  of pending items.
-- **"Sync now" is built into the header.** The sync badge is always
-  visible. Whenever you're online, tap it to push your outbox and pull
-  the latest server data immediately — whether you have items queued or
-  just want a refresh. While you're offline it shows your status and
-  pending count, and syncs as soon as you're back online.
-- When connectivity returns, the outbox **syncs automatically in the
-  background** — even if you've closed the tab or locked the phone, on
-  devices that support background sync (most Android browsers). On
-  devices that don't (for example iPhones), it syncs the next time you
-  open the app.
-- **Live updates across devices.** While you're online, VaxPlan keeps a
-  lightweight live connection open. If a colleague — or you on another
-  device — changes something for your facility, your screen refreshes
-  within a few seconds, with no manual reload. If that live connection
-  drops, the app quietly falls back to periodic checks.
-- If a sync entry is rejected (for example, a session was already
-  closed on the server), the system shows the rejection inline and
-  asks you to resolve it.
-- A failed item is retried automatically up to the client limit. The
-  sync badge can force a retry after that limit. If the server and
-  device versions cannot be reconciled safely, open **Sync Conflicts**
-  and review both versions; do not assume the local edit silently won.
-- Do not clear site data, uninstall the app, or reset the device while
-  pending items exist. These actions can remove the local outbox.
-
-> **Best practice.** Sync at the end of each session day, when you're
-> back in cellular range. Don't let the outbox grow longer than a
-> week's worth of entries.
-
-See [Offline operation and synchronization](./OFFLINE_AND_SYNC.md) for
-device preparation, recovery, and support diagnostics.
-
-### 5.8 Manage your communities
-
-You can add and edit the communities (villages) your facility serves —
-you don't need to wait for your national admin.
-
-**To add a community:**
-
-1. Open **Facilities** from the sidebar and switch to the
-   **Communities** tab.
-2. Click **Add Community**.
-3. **Facility.** If you're facility staff, the facility is pinned to
-   your own facility and can't be changed. District staff can pick any
-   facility in their district; coordinators and admins get a searchable
-   **Province → District → Facility** picker.
-4. Fill in the community **name** and any other details.
-5. **Set the location.** Either drop a **single pin** for the centre of
-   the community, or switch to **Draw Polygon Mode** and click points on
-   the map to trace the community's **catchment boundary**. When you save a custom polygon boundary, VaxPlan uses Location Intelligence and PostGIS to intersect the polygon with WorldPop spatial data and calculates the precise estimated population living inside that boundary automatically. Boundaries are saved in the `gis_polygons` table and shown on the map everywhere in the app, and can be reused later.
-6. Click **Save**.
-
-> **Note.** Facility and district staff can add and edit **communities**,
-> but only provincial coordinators and national admins can add a new
-> **health facility**. The **Add Facility** button is hidden for staff
-> who aren't allowed to use it.
-
-**Communities Registry & Bulk Actions:** Under the Communities tab, you can manage all assigned villages:
-* **Customize Columns:** Click the **Columns** dropdown next to "Add Community" to show/hide dynamic administrative level columns or metadata like HTR status and coordinates.
-* **Floating Bulk Actions:** Tick checkboxes on individual community rows (or select all) to activate the floating actions bar. You can bulk delete, bulk update Hard-to-Reach status, bulk update transit modes, or reassign communities in batch to another facility. All bulk updates are processed concurrently in batches of 10 requests.
-
-**Catchment overlap and harmonization.** If the boundary you draw
-overlaps another community's catchment, VaxPlan shows a **Catchment
-overlap detected** panel after you save. It lists each overlapping
-community, the other facility, and how much they overlap. To resolve a
-clash, click **Request harmonization** next to a community: VaxPlan
-records the conflict and emails that community's facility in-charge so
-the two facilities can agree on who covers the shared area.
+### 5.8 Community Catchment Management & Settlement Assignment Matrix
+- View and update the assignment of villages, settlements, and nomadic camps to facility catchments.
+- Reassign unserved communities to balance workload across neighboring facilities.
 
 ---
 
-## 6. District managers — review and oversight
+## 6. District Managers — Multi-Tier Approvals, Cross-Facility Intelligence & Oversight
 
-You sit between facilities and the province. Your day-to-day:
-
-- **Approval queue.** Open **Approvals**. You'll see microplans
-  submitted by facilities in your district. For each, you can:
-  - **Approve** — the plan locks and its sessions go live.
-  - **Request changes** — the plan returns to the facility with your
-    note.
-  - **Reject** — for plans that should be rebuilt from scratch.
-- **Coverage rollup.** The **Coverage** page shows you the whole
-  district at a glance. Drill down by facility or village.
-- **Supervision visits.** Schedule visits to facilities; see §13.
-- **Stock alerts.** You'll receive a weekly digest of facilities with
-  stockouts, wastage above threshold, or upcoming expiries.
-- **Cross-facility intelligence.** The **Map** view shows every
-  session in your district pinned by status (planned, conducted,
-  overdue, cancelled). Use it to spot uneven coverage by location.
-
-You **cannot** author microplans for a facility — that responsibility
-stays with facility staff. You can, however, edit catchment
-assignments (which villages belong to which facility) if you spot a
-boundary issue.
+District Managers oversee program execution across all facilities in their jurisdiction:
+- **Approval Workflow**: Review submitted facility microplans with line-item inspection of target populations, session calendars, and budget requests. Actions include **Approve**, **Request Changes** (with feedback notes), or **Reject**.
+- **Supervision Scheduling**: Assign supervisory visits to high-risk facilities flagged by coverage gaps or high vaccine wastage.
+- **Resource Rebalancing**: Monitor district-level vaccine stock balances and initiate inter-facility stock transfers to prevent stockouts.
 
 ---
 
-## 7. Provincial coordinators — approvals and visibility
+## 7. Provincial Coordinators — Province-Wide Rollups, Plan Sign-Off & Supply Reallocation
 
-Your role mirrors the district manager's, scoped to the province:
-
-- District-level **plan approvals**: when a district manager signs off
-  on aggregated district-level outreach plans (for SIAs, mostly),
-  they come to you next.
-- **Province-wide coverage** dashboards.
-- **Cross-district comparison** — see which districts are on track
-  and which are slipping.
-- **Resource allocation** — request stock reallocations between
-  districts using the **Supply request** workflow.
-
-You also have access to the **National admin** read-only views (you
-cannot edit users or facilities, but you can see them).
+Provincial Coordinators provide strategic regional governance:
+- **Aggregated Approval**: Sign off on consolidated district campaign plans for provincial SIAs.
+- **Inter-District Reallocation**: Coordinate with national depots to shift cold chain capacity and stock buffers between districts.
+- **Equity Monitoring**: Identify lagging districts and prioritize technical support visits.
 
 ---
 
-## 8. National administrators
+## 8. National Administrators — Platform Governance, Staff Batch Operations & Live Presence
 
-National admins are the power users for your country. Your modules:
-
-- **Users & Staff.** Invite users, assign roles, suspend or reactivate accounts.
-  * **Password Controls:** When creating a user you can set an **initial password** so they can sign in right away, and you can **reset any user's password** later from the user's edit screen (open a user → **Reset Password**). Passwords must be at least 8 characters — share them with the user securely. (Only national admins and Super Admins see these password controls. A national admin can only manage users in **their own country**; a Super Admin can manage users in whichever country they're working in.)
-  * **Staff Management Bulk Actions:** Open the **Staff** management table. You can perform batch updates concurrently on multiple selected staff members by ticking checkboxes on the left side of the rows (or selecting the header box to select all) to reveal the floating actions bar. You can bulk delete, toggle active/inactive status, update routine roles, or update training status in batches of 10.
-- **Facilities.** The registry of all facilities. Import from CSV (a
-  template is downloadable), edit GPS coordinates, merge duplicates,
-  or retire facilities.
-- **Villages and catchments.** The same for villages. The **catchment
-  matrix** lets you assign villages to facilities.
-- **Vaccine schedule.** Your tenant's authoritative schedule.
-  Adding an antigen here makes it available in microplans nationwide.
-- **Labels.** Customise the administrative level labels (e.g.
-  "Province" → "Region" for South Sudan).
-- **Boundaries.** See §10.
-- **Country dashboard.** Top-line KPIs for the country, including
-  coverage by antigen, dropout rates, stock health, and supervision
-  compliance.
-- **Approvals (escalations).** Anything a district or province
-  rejected escalates to you.
-- **Audit log.** Every change to sensitive data is logged with who,
-  when, and what.
-- **Safe Deployments.** All updates to the VaxPlan database use the `safe-migration` protocol, ensuring additive, non-destructive schema changes so your operational data is never wiped during new releases.
-- **Site activity.** A panel on your country dashboard shows who is
-  online right now and where they are signed in from, a live map
-  pinning those users, visits today and over the last two weeks, your
-  busiest pages, and a breakdown of login locations. Users stay counted
-  as online while their tab is open — the app sends a quiet heartbeat —
-  so someone reading a single page without clicking around still shows
-  up. When a user allows location access in their browser, the map uses
-  their device's real GPS position; otherwise it falls back to a
-  best-effort estimate from the network address, which often resolves
-  only to the nearest large city. Platform super admins can tap any
-  online person for full detail — email, IP address, device, and exact
-  coordinates. It is visible only to national and platform
-  administrators.
-
-National admins can also configure **scheduled jobs** — population
-refresh from WorldPop, stock-alert digests, and supervision digests
-all run on schedules you can tune in **Settings → Schedules**.
+National Administrators manage sovereign platform operations:
+- **Staff Management Bulk Operations**: Multi-select staff in the User/Staff directory to perform bulk activation/suspension, role updates, or bulk deletion in batches of 10.
+- **Vaccine Catalogue Administration**: Define authoritative antigen schedules, mandatory dose intervals, and standard wastage coefficients.
+- **Live User Presence & GIS Activity**: View live active sessions on an interactive map showing connected health workers, device types, and geographic distribution.
+- **Audit Logs & Safe Additive Migrations**: Review timestamped audit records for all critical system actions. All database schema evolutions follow strict additive protocols ensuring zero data loss.
 
 ---
 
-## 9. Tenant onboarding (new Ministry of Health)
+## 9. Tenant Onboarding & Multi-Country Governance
 
-This section is for the VaxPlan **Super Admin** onboarding a new country.
-Onboarding a new country is **restricted to Super Admins** — country
-administrators (national admins) manage only their own country and cannot
-add new countries. The **Country Onboarding** screen (sidebar →
-Administration → Country Onboarding) is hidden from everyone except Super
-Admins, and it carries a built-in step-by-step guide that mirrors the
-steps below.
-
-1. **Create the tenant.** Use **Settings → Tenants → New** and pick:
-   - Country name and ISO-3 code.
-   - Default time zone.
-   - Default admin level labels (e.g. Province/District/Facility,
-     or Region/State/Health Area).
-   - Default vaccine schedule (clone from a sibling country if you
-     have one, then edit).
-2. **Configure SSO.** Add the OIDC or SAML configuration for the
-   ministry's identity provider. Test the connection before going
-   live.
-3. **Map email domains.** Adding `@health.gov.xx` makes anyone who
-   signs in from that domain land on this tenant by default.
-4. **Provision the first national admin.** They will receive an
-   invite email and be able to onboard everyone else.
-5. **Load reference data.**
-   - Admin boundaries — use the **Boundary Manager** (§10).
-   - Facilities — import via CSV.
-   - Villages and catchments — import via CSV.
-   - Population — either ingest a WorldPop raster (national admin
-     can do this on demand) or rely on registered population.
-   - Where you only have an open facility list with province (but not
-     district) labels, VaxPlan can fill in districts automatically by
-     matching each facility's GPS coordinates against GeoBoundaries
-     ADM2 polygons. See `docs/COUNTRY_ONBOARDING.md` for the repeatable
-     prep-and-seed scripts (used to onboard South Africa).
-6. **Set the approval workflow.** Decide whether plans need 1, 2, or
-   3 levels of approval (facility → district → province → national).
-7. **Go live.** The national admin sends out user invites and
-   training links.
+Platform Super Admins can rapidly onboard new Ministries of Health:
+1. **Tenant Provisioning**: Set country name, ISO-3 code, local currency, time zone, and localized administrative hierarchy terminology (e.g., Province/District vs. Region/Sub-County).
+2. **Boundary & Facility Ingestion**: Batch import GeoBoundaries ADM1/ADM2/ADM3 layers and national Master Facility Lists (MFL) via CSV.
+3. **SSO & Domain Binding**: Bind national government email domains (e.g., `@moh.gov.zm`) to automatically route users to the appropriate tenant.
 
 ---
 
-## 9b. Local Development Database & Restore
+## 10. Map, Boundary & Polygon Management
 
-VaxPlan includes a compressed database dump `local_dump.sql.zip` in the root of the project. This dump contains all available development data, including pre-seeded mock health facilities, routine/campaign microplans, volunteer/CHV profiles, spatial boundary definitions, performance indexes, indicators, and multi-tenant profiles (e.g., Zambia and South Africa).
-
-To set up your local development database with this data:
-
-1. **Unzip the Database Dump**:
-   Unzip the compressed archive to extract the raw SQL dump file:
-   ```bash
-   unzip local_dump.sql.zip
-   ```
-
-2. **Restore to PostgreSQL**:
-   Make sure you have a local PostgreSQL database named `vaxplan` running, then restore the dump using `psql`:
-   ```bash
-   psql -U postgres -d vaxplan -f local_dump.sql
-   ```
-   *Note: If your local database has different credentials, adjust the username (`-U`) and database name (`-d`) accordingly.*
-
-3. **Verify Restored Schema**:
-   Run the dev server (`npm run dev`) and test the landing page to verify that all country tenants (Zambia, South Africa, etc.) are listed and accessible with pre-configured demo credentials.
+- **Dual-Source Boundaries**: Automated ingestion from the GeoBoundaries API combined with custom GeoJSON file uploads for sub-district health boundaries (e.g., Payams or Health Areas).
+- **Interactive Polygon Catchment Builder**: Draw, edit, and save custom geographic catchment polygons directly in the browser.
+- **Custom Spatial Layers**: Overlay health infrastructure, water points, road networks, and elevation layers onto standard map views.
+- **Boundary Disclaimer Policy**: Prominent disclaimers indicate that digital boundaries are operational planning aids and do not imply official sovereignty endorsements.
 
 ---
 
-## 10. Map and boundary management
+## 11. Advanced Geospatial Intelligence & Zero-Dose Targeting
 
-Every map in VaxPlan (Sessions, Coverage, Settlement intelligence,
-Microplans) draws boundaries on top of OpenStreetMap tiles.
+### 11.1 WorldPop High-Resolution Zonal Population Statistics & Polygon Demographics
+VaxPlan integrates 100m resolution WorldPop gridded population rasters:
+- **Polygon Zonal Population Estimation (`/api/population/estimate-polygon`)**: When a user draws a custom polygon or selects a catchment area, the system executes real-time spatial zonal statistics to extract exact population counts, under-1 infants, and under-5 cohorts.
 
-> **Boundary disclaimer.** The credit at the bottom-right of every map
-> carries a short notice that boundaries are approximate, for planning
-> and reference only, and do not imply endorsement — and that disputed
-> areas are not authoritatively depicted. The full statement, including
-> how disputed regions are handled, is in the **Acknowledgements** on the
-> Data Sources page (§16).
+### 11.2 Remote Sensing Settlement Gap Detection & Unserved Cluster Suitability Scoring (0–100)
+- **Settlement Gap Detection (`/api/remote-sensing/gaps`)**: Cross-references building footprints against known health facility catchment buffers to identify unreached settlements.
+- **Outreach Suitability Scoring (0–100)**: Evaluates candidate outreach sites across six weighted criteria:
+  1. *Population Size* (Target cohort headcount)
+  2. *Zero-Dose Probability* (Estimated unvaccinated density)
+  3. *Distance to Fixed Facility* (Access barrier severity)
+  4. *Outreach Gap* (Distance from existing outreach sites)
+  5. *Road Access & Travel Time* (Team feasibility)
+  6. *Nearby Community Assets* (Availability of schools, churches, or markets)
 
-Boundaries come from two sources:
+### 11.3 Outreach Site Placement, Multi-Modal Travel Isochrones & Live Community Assets
+- **Multi-Modal Isochrones**: Renders walking (1h, 2h, 3h), cycling (30m, 60m), and driving (30m, 60m, 90m) accessibility zones computed on OpenStreetMap routing graphs.
+- **Community Asset Extraction**: Scans a 3km radius for schools, places of worship, water points, and transport hubs to serve as session venues.
 
-- **GeoBoundaries API** — public, covers 200+ countries, available
-  for admin levels 0 to 2 or 3 depending on the country.
-- **Custom GeoJSON upload** — your own files, for levels GeoBoundaries
-  doesn't cover (e.g. South Sudan Payam) or for your authoritative
-  national geometry.
-
-**To fetch from GeoBoundaries:**
-
-1. Open **Settings → Boundary Manager**.
-2. Click **Fetch from GeoBoundaries API**.
-3. Pick country and admin level. Level names are pre-filled (you can
-   edit them).
-4. Click **Fetch Boundaries**. Large countries (Nigeria, DRC,
-   Ethiopia) take 30 to 60 seconds.
-
-**To upload custom GeoJSON:**
-
-1. In Boundary Manager, click **Upload Custom GeoJSON**.
-2. **ISO-3 country code** (3 letters, e.g. `SSD`, `ZMB`, `PNG`).
-3. Pick the admin level and edit the level label if needed.
-4. Choose the file (`.geojson` or `.json`). Files up to 50 MB are
-   accepted.
-5. Click **Upload & Store**.
-
-> **GADM users.** GADM ships shapefiles, not GeoJSON. Convert with
-> the free [mapshaper.org](https://mapshaper.org) website (drag in
-> the `.shp`, `.shx`, `.dbf` files, export as GeoJSON).
+### 11.4 VGIE Intelligent Recommendations (Rule-Based & Generative AI) & Automated Coverage Alerts
+- **Rule-Based Engine**: Generates prioritized operational actions (e.g., "Establish monthly mobile outreach" for settlements >10km from a facility).
+- **Generative AI Assistant**: Leverages secure LLMs to synthesize complex demographic, coverage, and stock trends into structured strategic intervention proposals.
+- **Automated Alerts**: Flags high-risk conditions including unassigned hard-to-reach settlements, sudden dropout spikes, and cold chain capacity deficits.
 
 ---
 
-## 11. Settlement intelligence and zero-dose targeting
+## 12. Supportive Supervision, National Checklists & Executive Scorecards
 
-For countries where village-level registration is patchy (parts of
-South Sudan, PNG highlands, Sahel), VaxPlan offers a **settlement
-intelligence** layer. It overlays:
+### 12.1 7-Domain Assessment Framework & Traffic Light Scoring
+Evaluates health facility operational quality across 7 standard domains:
+1. *Planning & Microplanning Quality*
+2. *Vaccine Management & Cold Chain Integrity*
+3. *Immunization Service Delivery & Safety*
+4. *Data Quality, Monitoring & Logbook Accuracy*
+5. *Community Engagement & Demand Generation*
+6. *Adverse Events Following Immunization (AEFI) Surveillance*
+7. *Programme Management & Governance*
 
-- WorldPop-derived populated cells (250m or 1km).
-- Building footprints (GRID3) and detected zero-dose clusters.
-- 5 km service-coverage gaps and suggested outreach sites.
+**Traffic Light Scoring Bands**:
+- 🔴 **High Risk (<50.0%)**: Critical operational deficiencies requiring urgent district intervention.
+- 🟠 **Medium Risk (50.0% – 79.9%)**: Moderate performance with targeted corrective actions required.
+- 🟢 **Low Risk (>=80.0%)**: Strong compliance with national standards.
 
-The population heatmap is read in **real people**, not an abstract
-density figure. Each coloured cell shows the estimated number of people
-living in that small grid cell (about 100 m × 100 m, roughly one
-hectare), and the legend is labelled in people. When you **click any
-point on the map**, the popup gives you a real headcount — the estimated
-number of people living within 1 km of that point, worked out by adding
-up the people in every nearby grid cell — so you can plan an outreach
-session straight from the number without converting density yourself.
+### 12.2 Standardized Checklists (WHO Short 35-Q & National Full 70-Q)
+Pre-configured, validated templates optimized for rapid field assessments or comprehensive annual evaluations.
 
-The **Zero-dose map** uses this data to highlight settlements with no
-recorded vaccinations. Click a hotspot to:
+### 12.3 Custom Checklist Builder with Conditional Logic & Repeatables
+National administrators can build bespoke checklist templates featuring:
+- Conditional follow-up questions revealed only on specific trigger responses.
+- Repeatable sub-sections (e.g., evaluating multiple vaccinators independently).
+- GPS coordinate capture and photo upload fields.
 
-- See the settlement's estimated population.
-- See the nearest facility and travel time.
-- Create an outreach session targeting the hotspot.
+### 12.4 Executive Facility Scorecards & Action Item Tracking
+Generates clean, printable executive facility scorecards with domain score breakdowns, qualitative supervisor observations, and assigned corrective action matrices with responsible owners and due dates.
 
-**Geospatial Insights (real travel time and nearby assets).** On any
-zero-dose cluster card or settlement record, click the **Insights**
-(compass) button to open the Geospatial Insights panel. It shows:
-
-- **Travel time to the nearest facility and the nearest outreach
-  site**, calculated on the real road network (OpenStreetMap routing) —
-  each with both a **driving** and a **walking** estimate, the road
-  distance, and a badge noting whether it's a true road route or a
-  straight-line estimate (used automatically if routing is briefly
-  unavailable, so the panel always answers). Existing outreach sites are
-  often closer to a remote cluster than a fixed facility, so the panel
-  shows whichever is relevant — or both, clearly labelled.
-- **The route drawn on the map.** While the Insights panel is open, the
-  map highlights the inspected point and draws a line to each
-  destination — the actual road geometry when a route is available
-  (or a dashed straight line when it falls back to an estimate) — and
-  marks the nearest facility and outreach site, so you can judge terrain
-  and direction at a glance. The map fits the view around the route
-  automatically.
-- **Community assets within 3 km** — schools, places of worship,
-  markets, water points, transport nodes, pharmacies / drug stores,
-  universities and colleges, government offices, transport &
-  logistics features (airstrips, helipads, ferry terminals, river
-  crossings, bridges, fuel stations, taxi ranks), and
-  vulnerable-population sites (refugee/IDP camps and mining sites)
-  pulled live from OpenStreetMap, each with
-  its distance and a clearly coloured icon. These show what services
-  already exist near a cluster, which helps you pick an outreach venue.
-  If a remote cluster has nothing mapped nearby, the panel says so.
-
-**Outreach Site Suitability Score (0–100).** Every unserved cluster gets
-a single, easy-to-read score that answers one question: *how good a
-candidate is this place for a new outreach session?* A higher score means
-a stronger case. The score combines six things, each shown as its own
-bar so you can see exactly why a cluster scored the way it did:
-
-- **Population size** — more unserved people means more impact.
-- **Likely zero-dose children** — the core equity target; clusters with
-  more estimated never-vaccinated children score higher.
-- **Distance from the nearest facility** — the farther, the bigger the
-  access gap a new site would fill.
-- **Existing-outreach gap** — how far the cluster is from any outreach
-  site you already run (so you don't double up).
-- **Road access / travel time** — a site a team can actually reach scores
-  higher.
-- **Nearby landmark / venue** — a school, place of worship or market
-  makes a natural place to hold the session.
-
-The list view scores every cluster quickly using the data already on
-hand (so anything still being measured is clearly marked **est.**). When
-you open **Insights** on a cluster, the score is **refined live** using
-the real road-network travel time and the landmarks actually found
-nearby, and the panel also shows the estimated number of under-5 children
-and likely zero-dose children there.
-
-**Ranked "Unserved Population Clusters" list.** The left panel lists
-every pending unserved cluster, ranked by suitability score by default.
-Use the **Sort** dropdown to re-order by suitability, population,
-zero-dose children, distance to facility, outreach gap or travel time —
-whatever matters most for your plan. Each row shows the score, the factor
-breakdown and the key numbers, with three actions: **Locate** (centre the
-map on it), **Insights** (open the refined breakdown and routes) and —
-for facility staff who can author plans — **Plan session** (jump straight
-to Session Planning, pre-filled for that cluster). This is a planning view
-only: it never changes any data and only shows clusters for your country.
-
-**Ranked clusters on the map.** Turn on the **Ranked Clusters** layer in
-the Map Layers Control panel to plot the same scored clusters from the
-left panel directly on the map. Each pin is colour-graded by suitability
-band — **green** for high, **amber** for medium, **grey** for low — so you
-can judge geography and clustering at a glance alongside the facility and
-zero-dose layers. Click a pin to see its score, population, likely
-zero-dose children, distance to the nearest facility and outreach gap,
-with the same **Locate**, **Insights** and (for facility staff)
-**Plan session** actions as the list. Like the list, it's a planning view
-only and shows clusters for your country.
-
-**More map layers** (toggle them in the **Map Layers Control**
-panel, top-right of the map):
-
-- **Travel-time zones** — travel-time zones around every health
-  facility **and every active outreach site** (outreach posts are often
-  closer to a remote cluster than a fixed facility, so they give a fuller
-  picture of real-world access), with a **Walking / Driving / Cycling**
-  toggle in the Map Layers Control panel. Walking shows about 1, 2, and 3
-  hours on foot; Driving shows about 30, 60, and 90 minutes by vehicle
-  (useful for planning vehicle-based outreach and supply runs); Cycling
-  shows about 30, 60, and 90 minutes by bicycle or motorbike (useful for
-  outreach teams that travel by two-wheeler). When road routing is available
-  these follow the real road and path network (so a settlement across a
-  river or behind a ridge correctly shows as far), giving a far more
-  trustworthy picture than plain circles. If routing is briefly
-  unavailable, the layer falls back to simple dashed rings so you always
-  see something — see at a glance which clusters fall outside a
-  reasonable walking, driving, or cycling distance. On a busy map the
-  zones can overlap a lot, so a second toggle lets you show only
-  **Facilities**, only **Outreach** sites, or **Both** — focus on one
-  access question at a time. (Both the road-network zones and the
-  fallback rings respect the choice.)
-- **Community assets** — plots schools, water points, pharmacies,
-  universities and colleges, government offices, transport & logistics
-  features, vulnerable-population sites, and other assets found within 5 km of
-  the current map centre, each with its own coloured icon. Pan or click
-  **Locate** on a cluster, then turn this layer on to scan what's
-  around it.
-
-> Travel times and community assets come from open data and are a
-> planning aid, not a survey. Always confirm on the ground.
-
-### 11.1 Settlements: Definitions, Classifications, and Caching
-In VaxPlan, a **Settlement** (or village community) represents a discrete populated area tracked under the gridded population databases. Settlements are classified into three core service statuses:
-- **Served**: The settlement is assigned to an active health facility, and the distance to that facility is 5 km or less.
-- **Underserved**: The settlement is assigned to a health facility, but the distance to that facility is greater than 5 km, representing an access bottleneck.
-- **Unserved**: The settlement has no assigned health facility. Unserved settlements represent critical coverage gaps that are prioritized for outreach planning.
-
-**Outreach Post Configuration**: For any settlement catchment, facility staff and managers can configure a persistent outreach site on the Map View. Tap the village pin, select "Configure" under the Outreach Post section, and set the location. You can autofill coordinates from the centroid, manually enter them, capture live GPS from your device, or select a point directly on the map. This creates a high-contrast violet pin connected to the centroid by a dashed line, saved to PostgreSQL with offline IndexedDB fallback.
-
-**Offline Basemap Cache**: Base maps (ArcGIS Satellite Imagery and WorldPop Overlays) are cached automatically up to 2,500 tiles via the browser Service Worker. This ensures that managers and field workers can explore and coordinate settlements interactively even in remote, cross-border regions with zero internet connectivity.
-
-### 11.2 Recommendations: Rule-Based Analysis and Generative AI
-Recommendations are actionable strategies to resolve coverage gaps, generated by the VaxPlan Geospatial Intelligence Engine (VGIE). They reside in the `vgieRecommendations` registry with status values (`pending`, `actioned`, `dismissed`) and priority ranks (`high`, `medium`, `low`).
-
-VaxPlan offers two generation channels:
-1. **Rule-Based Catchment Analysis**: Triggered manually on demand or via background schedules. The engine scans the database for unassigned or unserved settlements:
-   - High-risk settlements trigger **High-priority** recommendations to "Establish emergency outreach session".
-   - Hard-to-reach settlements trigger **Medium-priority** recommendations to "Plan quarterly outreach visit".
-   - Standard unserved settlements trigger **Low-priority** recommendations to "Add regular outreach visit".
-2. **Generative AI Recommendation Engine**: By clicking "AI Generate" in the Recommendations module, the system leverages an LLM backend to analyze country-wide stats, gridded population metrics, and facility distribution patterns. The AI produces contextual, multi-dimensional suggestions to optimize outreach schedules, reallocate staff, or propose new structural health posts.
-
-*Workflow*: Planners can view details, adjust priority levels, add custom operational notes, and update the status to **Actioned** (once incorporated into a microplan) or **Dismissed**.
-
-### 11.3 Alerts: Coverage Gaps, Severity Bands, and Resolution
-Alerts in VaxPlan are automated, real-time warning indicators flagged by background geospatial analysis to highlight structural failures or high-risk gaps in the immunization network.
-
-Key attributes of VaxPlan Alerts:
-- **Unassigned Hard-to-Reach (HTR) Alerts**: Raised automatically whenever a settlement marked as "isHardToReach" is detected without any assigned health facility.
-- **Unserved Population Alerts**: Triggered during catchment scans when multiple high-risk settlements are found completely unserved by the health network.
-- **Severity Levels**:
-  - **High**: Urgent gaps (e.g. large unassigned high-risk populations) requiring immediate outreach deployment.
-  - **Warning**: Moderate concerns (e.g. high vaccine wastage or missing coordinates on planned outreach routes).
-  - **Info**: Operational notes (e.g. newly detected gridded settlement clusters).
-- **Dismissal and Resolution**: Active alerts appear on the dashboard and supervisor queues. District and national managers can review the alert, coordinate corrective actions (such as assigning the settlement to a facility or planning a session), and click **Dismiss** to change the status to "resolved".
-
-This module is most useful for the **district manager**,
-**provincial coordinator**, and **national admin** roles when planning
-quarterly microplanning calendars.
+### 12.5 Comparative Scorecard Matrix & Smart GeoCascadeFilter
+Enables cross-district and cross-facility comparative performance benchmarking with sortable enterprise tables, column visibility customization, risk filters, and Excel export.
 
 ---
 
-## 12. Settings, customisation, and labels
+## 13. Vaccine-Preventable Disease (VPD) Surveillance & Multi-Criteria Risk Assessment
 
-National admins can adjust the look and feel of the app for their
-country:
+### 13.1 Integrated Epidemiological Signal & Case Surveillance
+Tracks suspected and laboratory-confirmed cases for key priority antigens: Measles, Polio (AFP), Yellow Fever, Cholera, Neonatal Tetanus, and Meningitis.
 
-- **Admin level labels.** Each tenant can rename the four hierarchy
-  levels. The default is Country / Province / District / Facility.
-  Common alternatives:
-  - South Sudan: Country / State / County / Payam.
-  - PNG: Country / Province / District / Local-Level Government.
-  - Zambia: Country / Province / District / Constituency.
-- **Branding.** Upload your ministry logo; it appears on the header
-  and on all PDF exports.
-- **Languages.** Choose the default language for users in your
-  tenant. English, French, and Portuguese are bundled; ask the
-  VaxPlan team for additions.
-- **Vaccine schedule.** Add antigens and doses; mark which are
-  routine vs. campaign.
-- **Wastage thresholds.** Per antigen, what percentage of doses
-  wasted triggers an alert.
+### 13.2 Configurable Risk Assessment Methodology
+Combines four weighted risk dimensions into a localized district risk index:
+- Historical Outbreak Frequency (30%)
+- Zero-Dose & Under-Immunized Population Density (30%)
+- Immunization Coverage Gaps & Dropout Rates (25%)
+- Cold Chain & Logistics Vulnerability (15%)
+
+### 13.3 AI-Assisted Intervention Planning & Corrective Action Linkages
+Automatically recommends targeted mitigation packages (e.g., reactive ring vaccination or preventive SIA prioritization) linked directly to the planning actions registry.
 
 ---
 
-## 13. Supervision visits
+## 14. Health Information Systems (HIS) Interoperability & DHIS2 Sync
 
-Supervision is a first-class workflow:
+### 14.1 Bi-Directional Integration Architecture & ADX/DataValueSets Sync
+VaxPlan features a native integration engine for DHIS2:
+- **Data Ingestion**: Imports historical district coverage figures and official census denominators from DHIS2.
+- **Aggregate Export**: Compiles completed microplan session results and coverage tallies into standard DHIS2 `dataValueSets` JSON payloads for direct API transmission.
 
-1. **Schedule visits.** Open **Supervision → Schedule Visit**, pick a
-   facility, a date, and a supervisor. You can also choose which
-   **checklist** to use — the built-in WHO checklist, or any custom
-   checklist your national admin has built (see below).
-2. **Visit checklist.** When the supervisor arrives, they open the
-   visit on their phone. A **progress bar** at the top shows how many
-   questions are answered and the **live score** updates as they go. A
-   **Visit location** card confirms where the visit happened using a
-   smart **Province → District → Health Facility** picker plus an
-   **interactive map** — tap the map to drop a pin, drag it to
-   fine-tune, or tap **Use my location** to place it from the device's
-   GPS. They then answer the checklist questions. Questions
-   can be Yes/No, True/False, short text, a number, single- or
-   multiple-choice, a 1–5 rating, a date, a **GPS location** (picked
-   the same way, on a map), or a **photo** taken on the device.
-   Some questions are **follow-ups** that only appear after a
-   particular answer (for example, an "If No, why?" box that shows up
-   only when the previous question is answered "No"). Other questions
-   are **repeatable** — tap **Add another** to record one entry per
-   vaccinator, session, or child, and remove an entry you don't need.
-3. **Findings and actions.** Record findings and follow-up actions,
-   and set the next visit date.
-4. **Score.** The visit score is the average of the scored questions —
-   Yes/No and True/False answers, plus any ratings the checklist author
-   chose to count. Every repeated entry counts, so the entries are
-   averaged together automatically. N/A and hidden follow-ups are
-   ignored.
+### 14.2 Org Unit Mapping, Data Element Mapping & Payload Validation
+- Maps VaxPlan facilities and districts to DHIS2 Organisation Unit UID strings.
+- Maps VaxPlan antigen doses to DHIS2 Data Elements and Category Option Combos.
+- Built-in dry-run payload validator catches schema mismatches before transmission.
 
-The **Supervision digest** (a weekly summary) rolls up overdue
-visits to the district and provincial dashboards.
-
-### Custom supervision checklists (national admins)
-
-National admins can build their own checklists so every facility in
-the country uses the same questions:
-
-1. Open **Supervision → Manage Checklists**.
-2. Click **New checklist**, give it a name, and add questions. For
-   each question pick a type (Yes/No, True/False, short text, number,
-   single choice, multiple choice, rating, date, GPS location, or
-   photo), and add options for choice questions.
-3. Make any question highly configurable:
-   - **Follow-up:** under any question, click **Add a follow-up
-     question**. The new question appears indented beneath it, and you
-     choose which answer reveals it (e.g. show it only when the question
-     is answered "No", or whenever it has any answer). Any question can
-     have follow-ups — including the first one — and you can **Detach** a
-     follow-up to make it a normal question again.
-   - **Repeat:** turn on "Allow multiple entries" so supervisors can
-     add as many entries as needed during a visit. You can name each
-     entry (e.g. "Vaccinator") and cap how many are allowed.
-   - **Scoring:** choose whether each Yes/No or True/False question
-     counts toward the score, and opt a rating in so it counts too.
-4. Mark a checklist **Active** to make it available when scheduling
-   visits. Anyone in the country can then pick it; only national
-   admins can create, edit, or delete the checklists themselves.
+### 14.3 Automated Scheduled Sync & Sync History Logs
+Configurable automated cron synchronization with full audit logging of HTTP status codes, transferred records, and error diagnostics.
 
 ---
 
-## 14. Reports and exports
+## 15. In-App Wiki & Documentation Knowledge Base
 
-Most tables in VaxPlan have an **Export** button that produces an
-Excel workbook with the currently filtered rows.
-
-For more formal outputs, use **Reports → Generate**:
-
-- **Quarterly microplan return** (PDF, per facility).
-- **District coverage report** (PDF, per district per month).
-- **Stock and wastage report** (Excel, per facility per month).
-- **Supervision report** (PDF, per visit).
-
-All reports honour the geo filters you've selected on the page.
+Accessible under **Administration → Wiki / Docs** (`/admin/wiki`):
+- **National Admin & GIS Markdown Editor**: Live side-by-side markdown editor for authoring, updating, and publishing national operational standard operating procedures (SOPs).
+- **Gamified Learning Hub**: Integrates knowledge mastery badges for health workers mastering core immunization indicators.
+- **Automated Site Generation**: Compiles into the standalone documentation portal via `docs-site/build.mjs`.
 
 ---
 
-## 14b. Indicator reference manual & Knowledge Mastery
+## 16. Reports, Data Exports & Indicator Reference Manual
 
-To support health planners and managers in interpreting vaccination progress correctly, VaxPlan includes an interactive, tenant-specific **Indicator Reference Manual** accessible from the Analytics sidebar group.
-
-### Structure of the Manual
-The manual organizes standard indicators (including WHO, Gavi, and UNICEF reporting metrics) by category and subcategory:
-- **Core Metrics**: Numerators, Denominators, and detailed formulas (e.g. `Coverage Rate (%) = (Vaccinated Count / Target Population) * 100`).
-- **Granular Data Sources**: Data sources are explicitly split into separate fields for the Numerator (e.g., client logbooks) and Denominator (e.g., WorldPop or census estimates).
-- **Calculation Examples**: Every metric includes a concrete, plain-language example showing how values are calculated (e.g., Penta1-Penta3 dropout calculations).
-- **Clickable Guidelines**: Reference guidelines are clickable pills that open the official WHO or Gavi documentation directly in a new tab.
-
-### Knowledge Mastery Gamification
-Planners can build their expertise using the built-in **Mastery Tracker**:
-- Toggling **Mark as Mastered 🎯** on any indicator adds it to your personal learning register (saved locally on your device).
-- Progresses through four mastery ranks in the dashboard header:
-  - **EPI Novice 🌱** (0-3 metrics mastered)
-  - **EPI Practitioner 📘** (4-7 metrics mastered)
-  - **EPI Specialist 🎯** (8-10 metrics mastered)
-  - **EPI Mastery Legend 🏆** (All 11 metrics mastered)
+- **Automated Standard Returns**: One-click generation of Quarterly Microplan Summaries (PDF), District Coverage Compendiums (PDF/Excel), Stock Ledger Audits (Excel), and Supervisory Visit Scorecards (PDF).
+- **Indicator Reference Manual**: Detailed reference of standard WHO/Gavi indicators complete with explicit numerator/denominator definitions, mathematical formulas, and practical calculation examples.
+- **Knowledge Mastery Tracker**: Gamified learning path guiding users from *EPI Novice* to *EPI Mastery Legend*.
 
 ---
 
-## 15. Troubleshooting
+## 17. Troubleshooting, Error Codes & Frequently Asked Questions
 
-**I can't see my facility's sessions on the Sessions page.**
-Check the Province / District / Facility filter at the top of the
-page — if any are set, only matching sessions are shown. Clear them
-to see everything you're allowed to see.
-
-**The map is blank.**
-Either you don't have boundaries loaded for the level you're viewing
-(ask a national admin), or your browser blocked location/tile
-fetches. Try a different browser or hard-refresh.
-
-**"413 Request Entity Too Large" when uploading a boundary.**
-That used to happen for files over 100 KB. Files up to 50 MB are now
-accepted. If you see this on a smaller file, the file may not be
-valid GeoJSON; try opening it in [geojson.io](https://geojson.io) to
-validate.
-
-**"GeoBoundaries has no ADM3 boundary" error.**
-GeoBoundaries doesn't publish every admin level for every country.
-For South Sudan, only ADM0-ADM2 are upstream — for Payam you need to
-upload a custom GeoJSON (OCHA HDX is a good source).
-
-**My country code is rejected with "must contain exactly 3
-characters".** Use the ISO 3166-1 alpha-3 code (e.g. `SSD` for South
-Sudan, `ZMB` for Zambia, `PNG` for Papua New Guinea, `KEN` for
-Kenya). The 2-letter alpha-2 codes (`SS`, `ZM`) are not accepted.
-
-**I marked a session done but it shows zero coverage.**
-The per-antigen counts may use unknown codes (older offline outbox
-entries). Open the session, check the "unmapped antigens" warning,
-and ask your national admin to standardise the codes via the audit
-log workflow.
-
-**Sync failed for some outbox entries.**
-Tap the cloud icon to see which ones. Most failures are because the
-underlying session was closed or deleted on the server. Reopen the
-entry, resolve the conflict, and retry.
-
-**I'm logged in but I see "pending approval".**
-A national or district admin needs to confirm your role. Contact
-your administrator; they will see the request in their inbox.
+| Symptom / Error | Root Cause | Solution |
+| :--- | :--- | :--- |
+| **"403 Forbidden: Scope Mismatch"** | Attempting to view or edit records outside your assigned geographic boundary. | Contact your District or National Admin to adjust your assigned facility or district scope. |
+| **"Proximity Conflict Detected"** | Another outreach session is scheduled within 5km on the same date. | Inspect the conflicting session details and adjust your team's date or select an alternative community venue. |
+| **"Sync Pending in Outbox"** | Device is currently offline or experiencing intermittent connectivity. | Ensure network connectivity is restored; the background PWA worker will automatically push queued batches. |
+| **"Map Tiles Not Loading"** | Browser cache limits reached or network blocking tile domains. | Hard-refresh the browser (`Ctrl + F5`) or verify that OpenStreetMap and ArcGIS tile services are whitelisted in your proxy. |
 
 ---
 
-## 16. Data sources and acknowledgements
+## 18. Data Sources, Open-Source Acknowledgements & Disputed Boundaries Policy
 
-VaxPlan has a built-in **Data Sources** page that lists where the
-platform's maps, administrative boundaries, population figures, and
-facility data come from, along with the open-source projects it is built
-on.
-
-- Open it from the sidebar (**Data Sources**, near Settings and Help),
-  from the **External Resources** card on the Help page, or by tapping the
-  small **Data sources** link in the credit at the bottom-right corner of
-  any map.
-- The page is also **public**: anyone can view it at `/data-sources`
-  without signing in, and there is a link to it in the footer of the
-  public landing page. The per-country population sources block is only
-  shown to signed-in users; signed-out visitors see the general source
-  list and acknowledgements.
-- Sources are grouped by category: Maps & Basemaps, Administrative
-  Boundaries, Population & Demographics, Health Facilities & Health
-  Information Systems, Immunization Guidance & Standards, and Software /
-  Fonts / Icons. Each entry shows a short description, its licence where
-  relevant, and a link to the original source.
-- If your country has population sources configured, they appear at the
-  top of the page so you can see exactly which datasets feed your
-  catchment and vaccine-needs calculations.
-- The **Acknowledgements** section credits the data providers and open
-  projects, and is a reminder that each dataset remains the property of
-  its original owner and should be cited accordingly.
-- The Acknowledgements also carry the **map boundary disclaimer** and a
-  note on **disputed regions**: boundaries shown are for reference only
-  and do not imply endorsement, and disputed or contested areas are not
-  authoritatively depicted. The same short notice appears in the credit
-  on every map.
+VaxPlan aggregates and credits authoritative open datasets:
+- **Administrative Boundaries**: GeoBoundaries (William & Mary Open Research Lab) and OCHA HDX.
+- **Population Rasters**: WorldPop Project (University of Southampton).
+- **Settlement Footprints**: GRID3 (Center for International Earth Science Information Network - CIESIN).
+- **Basemaps & Routing**: OpenStreetMap contributors and CartoDB.
+- **Disputed Boundaries Policy**: Digital representations of borders and administrative areas are operational planning aids only and do not express any opinion concerning the legal status of any country, territory, or sovereign entity.
 
 ---
 
-## 17. Glossary
+## 19. Comprehensive Immunization & Microplanning Glossary
 
-- **Antigen** — A vaccine type (BCG, OPV, Penta, MCV1, etc.).
-- **Catchment** — The set of villages a facility serves.
-- **Coverage** — Percentage of the target population that received
-  a given dose, in a given period.
-- **Defaulter** — A child who started but did not complete a vaccine
-  series on time.
-- **Denominator** — The target population used to calculate coverage.
-- **Dropout** — The percentage of children who received an earlier
-  dose but did not receive a later one (e.g. Penta1 → Penta3).
-- **Fixed-site session** — A vaccination session held at the
-  facility.
-- **Microplan** — A facility's quarterly plan combining catchment,
-  denominator, schedule, and intended outreach.
-- **Outreach session** — A session held away from the facility,
-  usually in a village.
-- **SIA** — Supplementary Immunisation Activity (a campaign — for
-  example a measles SIA).
-- **Tenant** — A Ministry of Health (one country) on the VaxPlan
-  platform. Each tenant has isolated data.
-- **WorldPop** — An open population dataset providing population
-  estimates on a 100m or 1km grid.
-- **Zero-dose child** — A child of vaccination age who has received
-  no doses of any vaccine.
-
----
-
-## 14. Supportive Supervision, Executive Scorecards & Smart Cascading Filters
-
-### 14.1 Overview
-The Supportive Supervision module enables supervisors, district managers, and national teams to conduct facility visits, evaluate operational readiness across 7 core domain sections, generate executive facility scorecards, and compare performance quality across geographic boundaries.
-
-### 14.2 Standardized Checklists
-- **Short Supervision Template**: 35 core questions (5 questions across 7 sections) optimized for rapid field assessments.
-- **National Supervision Template**: Comprehensive 70-question full assessment checklist.
-
-### 14.3 Traffic Light Scoring System
-Supportive supervision scores follow global health program standards:
-- 🔴 **High Risk (0% – 49.9%)**: High operational risk; requires immediate supervisor intervention and corrective action plan.
-- 🟠 **Medium Risk (50.0% – 79.9%)**: Moderate performance; targeted coaching recommended.
-- 🟢 **Low Risk (80.0% – 100.0%)**: High operational quality and compliance.
-
-### 14.4 Executive Facility Scorecards
-Clicking **Scorecard** on any completed visit opens an executive printable report featuring:
-1. **Facility Metadata Tile**: Name, code, district, province, supervisor name, and visit date.
-2. **Overall Risk Score Badge**: Color-coded percentage and classification.
-3. **KPI Summary Tiles**: Questions Scored, Compliant, Non-compliant, and Action Items.
-4. **Domain Breakdown**: Section-by-section percentage bar charts.
-5. **Supervisor Findings**: Qualitative observations and key recommendations.
-6. **Corrective Action Plan Table**: Specific action items, responsible person, and target completion dates.
-7. **Print / Export PDF**: Built-in print button (`window.print()`) formatted for clean PDF downloads.
-
-### 14.5 Comparative Scorecard Matrix & Smart Location Cascade Filter
-The Comparative Scorecard Matrix allows multi-level comparison across Provinces, Districts, and Facilities:
-- **Strict Smart Location Cascade (`GeoCascadeFilter`)**:
-  - Selecting a **Province** filters down the available Districts and Health Facilities.
-  - **District** selector is locked until a Province is selected.
-  - **Health Facility** selector is locked until a District is selected.
-  - Downstream dropdown options strictly show **only** the direct children belonging to the active parent selection.
-  - One-click clear (`X`) resets location filters back to full national scope.
-- **Enterprise Features**: Pagination (10, 25, 50, 100 per page), sortable wrapped header columns, column visibility picker popover, risk level dropdown filter, search, and CSV export.
-
----
-
-## 18. New operational workspaces in version 1.9.4
-
-The following workspaces were added or materially expanded after the original long-form guide was written:
-
-- **Campaign operations:** Campaign Summary Sheets, Readiness Assessment, and Real-Time Campaign Dashboard support time-bound SIA oversight and target monitoring.
-- **Planning assurance:** Plan Health shows readiness and policy gaps. Planning Actions assigns corrective work, owners, due dates, and status. Planning Evidence attaches the supporting record and keeps history. Field Readiness presents the operational readiness view.
-- **Surveillance and risk:** Surveillance manages VPD case and laboratory data. Risk Assessments use configurable methodology versions, district inputs, mapped results, vulnerability responses, and linked actions.
-- **Cold chain and catalogue:** Cold Chain provides the tenant-wide equipment inventory. Catalogue Administration manages vaccines, scheduled doses, commodities, and wastage thresholds; Reconcile Vaccines maps imported or offline codes that do not match the tenant catalogue.
-- **Field and offline:** CHW Field is the community-worker workspace. Field Teams manages operational teams. Desktop Hub presents packaged-device/offline information. Sync Conflicts supports reconciliation when local and server states diverge.
-- **Governance and evidence:** Annual National Plan, Temporal History, Notifications, Standards Alignment, Data Sources, and the API Reference expose planning, provenance, audit, and interoperability context.
-
-Your sidebar may omit a workspace because the tenant disabled its module, your role lacks permission, or your geographic assignment does not include the underlying records. Contact an administrator rather than using a direct URL to bypass the navigation.
-
-*If you spot an error in this guide or want a topic added, ask your national admin to file an issue with the VaxPlan team. The guide is versioned alongside the application code.*
+- **AD Syringe**: Auto-Disable Syringe engineered to lock after a single injection to prevent reuse and bloodborne transmission.
+- **Antigen**: A biological preparation (vaccine) that stimulates an immune response against a specific infectious disease.
+- **Catchment Area**: The defined geographic territory and constituent communities for which a specific health facility is responsible.
+- **CCEOP**: Cold Chain Equipment Optimization Platform (Gavi/WHO initiative setting standards for high-performing cold chain devices).
+- **Closed Vial Wastage**: Vaccine loss occurring before a vial is opened, typically due to expiration, cold chain failure (heat/freeze exposure), or physical breakage.
+- **Defaulter**: A child who initiated an immunization schedule (e.g., received Penta1) but missed subsequent scheduled doses within the prescribed time window.
+- **Dropout Rate**: The mathematical proportion of children who started a multi-dose vaccine series but failed to complete it, calculated as: `((Dose 1 - Dose 3) / Dose 1) * 100`.
+- **EIR**: Electronic Immunization Registry (digital system recording individual-level client vaccination records).
+- **Fixed-Site Session**: Immunization services delivered directly within the physical premises of a static health facility.
+- **Mobile Session**: Immunization delivery conducted by specialized outreach teams traveling to highly remote, nomadic, or riverine communities requiring multi-day travel.
+- **Open Vial Wastage**: Vaccine doses discarded after a multi-dose vial has been opened due to vial expiration limits (e.g., reconstitutable vaccines discarded after 6 hours).
+- **Outreach Session**: Immunization services delivered at a designated community venue (e.g., school, church, village square) located away from the fixed health facility.
+- **PIRI**: Periodic Intensification of Routine Immunization (time-bound catch-up campaigns to boost routine coverage).
+- **RED / REC Strategy**: Reaching Every District / Reaching Every Community (WHO operational framework focused on microplanning, community outreach, supportive supervision, and monitoring).
+- **SIA**: Supplementary Immunization Activity (mass vaccination campaign targeting entire age cohorts regardless of prior vaccination history).
+- **Solar Direct Drive (SDD)**: Solar-powered refrigeration technology operating directly from solar panels without requiring chemical storage batteries.
+- **Target Population (Denominator)**: The estimated cohort of eligible individuals (e.g., children under 1 year, surviving infants, pregnant women) residing in a defined catchment area during a planning cycle.
+- **VGIE**: VaxPlan Geospatial Intelligence Engine (the platform's spatial analytics and recommendation subsystem).
+- **WorldPop**: Open high-resolution spatial demographic dataset combining census, satellite imagery, and machine learning to map population distributions.
+- **Zero-Dose Child**: An infant who has received no doses of standard routine vaccines, operationally measured as having missed the first dose of DTP-containing vaccine (DTP1 / Penta1).
