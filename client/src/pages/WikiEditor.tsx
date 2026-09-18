@@ -15,6 +15,7 @@
  */
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import DOMPurify from "dompurify";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
@@ -83,21 +84,30 @@ function slugify(s: string): string {
     .slice(0, 120);
 }
 
-/** Render Markdown to HTML via the window.marked object (loaded from CDN in build.mjs / index.html).
+/** Render Markdown to HTML via the window.marked object (loaded from CDN in build.mjs / index.html),
+ *  then strictly sanitize with DOMPurify against XSS attacks.
  *  Falls back to a plain <pre> if marked is not available. */
 function renderMarkdown(md: string): string {
+  let rawHtml = "";
   try {
     if (typeof (window as any).marked !== "undefined") {
-      return (window as any).marked.parse(md);
+      rawHtml = (window as any).marked.parse(md);
+    } else {
+      rawHtml = `<pre style="white-space:pre-wrap;word-break:break-word">${md
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")}</pre>`;
     }
   } catch {
-    /* ignore */
+    rawHtml = `<pre style="white-space:pre-wrap;word-break:break-word">${md
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")}</pre>`;
   }
-  // Simple fallback: escape and wrap
-  return `<pre style="white-space:pre-wrap;word-break:break-word">${md
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")}</pre>`;
+  return DOMPurify.sanitize(rawHtml, {
+    ADD_TAGS: ["video"],
+    ADD_ATTR: ["controls", "src", "style", "target", "rel"],
+  });
 }
 
 // ── API helpers ───────────────────────────────────────────────────────────────

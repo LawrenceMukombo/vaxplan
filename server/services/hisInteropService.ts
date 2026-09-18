@@ -212,8 +212,69 @@ export function resolveTokenForRef(secretRef: string, simulationMode = false): s
   return resolveToken(secretRef, simulationMode);
 }
 
+/**
+ * Validate outbound HIS URL to prevent SSRF (Server-Side Request Forgery).
+ * Enforces:
+ * - Valid HTTP/HTTPS protocol
+ * - Blocks AWS/GCP/Azure link-local metadata endpoints (169.254.169.254, 169.254.0.0/16, metadata.google.internal)
+ * - In production mode, blocks loopback and private RFC1918 addresses unless explicitly in dev/test
+ */
+export function validateOutboundUrl(urlStr: string): void {
+  if (!urlStr || typeof urlStr !== "string") {
+    throw new Error("Invalid URL: URL string is empty or undefined");
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(urlStr);
+  } catch {
+    throw new Error(`Invalid URL format: "${urlStr}"`);
+  }
+
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error(`Invalid protocol "${parsed.protocol}": Only HTTP and HTTPS are allowed`);
+  }
+
+  const hostname = parsed.hostname.toLowerCase();
+
+  // Cloud metadata protection (always blocked across all environments)
+  const isCloudMetadata =
+    hostname === "169.254.169.254" ||
+    hostname.startsWith("169.254.") ||
+    hostname === "metadata.google.internal" ||
+    hostname.endsWith(".metadata.google.internal") ||
+    hostname === "instance-data";
+
+  if (isCloudMetadata) {
+    throw new Error(`Access to cloud metadata service (${hostname}) is blocked for security`);
+  }
+
+  // In production, block loopback and local private networks
+  if (process.env.NODE_ENV === "production") {
+    const isLoopback =
+      hostname === "localhost" ||
+      hostname === "127.0.0.1" ||
+      hostname === "0.0.0.0" ||
+      hostname === "::1" ||
+      hostname.endsWith(".localhost") ||
+      hostname.endsWith(".internal") ||
+      hostname.endsWith(".local");
+
+    const isPrivateIp =
+      /^10\./.test(hostname) ||
+      /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(hostname) ||
+      /^192\.168\./.test(hostname);
+
+    if (isLoopback || isPrivateIp) {
+      throw new Error(`Access to local/private network endpoint (${hostname}) is blocked in production`);
+    }
+  }
+}
+
 export function normalizeDhis2BaseUrl(baseUrl: string): string {
-  return baseUrl.trim().replace(/\/+$/, "").replace(/\/api$/i, "");
+  const normalized = baseUrl.trim().replace(/\/+$/, "").replace(/\/api$/i, "");
+  validateOutboundUrl(normalized);
+  return normalized;
 }
 
 export function buildDhis2Headers(
@@ -892,7 +953,9 @@ export class FhirR4Adapter implements HisAdapter {
   }
 
   private get fhirBase(): string {
-    return this.config.fhirBaseUrl ?? `${this.config.baseUrl}/fhir`;
+    const url = (this.config.fhirBaseUrl ?? `${this.config.baseUrl}/fhir`).trim().replace(/\/+$/, "");
+    validateOutboundUrl(url);
+    return url;
   }
 
   async pushImmunizations(records: ImmunizationRecord[]): Promise<HisOperationResult> {
@@ -1316,6 +1379,7 @@ export class HmisGenericAdapter implements HisAdapter {
       // Simulate mock success immediately
       return { ok: true, status: 200, body: JSON.stringify({ message: "SIMULATION SUCCESS", source: "Mock REST Gateway" }) };
     }
+    validateOutboundUrl(this.config.baseUrl);
     const response = await fetch(this.config.baseUrl, {
       method: "POST",
       headers: buildHeaders(token),
