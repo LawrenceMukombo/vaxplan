@@ -2993,6 +2993,8 @@ export function registerFacilityRoutes(app: Express) {
           inArray(gisPolygons.status, ["draft", "submitted_for_review", "needs_correction"])
         )).orderBy(desc(gisPolygons.version)).limit(1);
 
+      const isMicroplanLocked = await isFacilityMicroplanLocked(req.tenantId, facilityId);
+
       res.json({
         catchmentPolygon: activeGeo?.geometry || row.catchmentPolygon || null,
         catchmentGridPopulation: activeGeo?.populationEstimate || row.catchmentGridPopulation || null,
@@ -3009,6 +3011,7 @@ export function registerFacilityRoutes(app: Express) {
         updatedAt: activeGeo?.updatedAt || null,
         draftPolygon: draftRow?.geometry || null,
         draftPolygonDetails: draftRow || null,
+        isMicroplanLocked,
         population: activeGeo ? {
           totalPopulation: activeGeo.populationEstimate,
           targetInfants: Math.round((activeGeo.populationEstimate || 0) * 0.04),
@@ -3034,18 +3037,28 @@ export function registerFacilityRoutes(app: Express) {
       const facilityId = parseInt(req.params.id, 10);
       if (isNaN(facilityId)) return res.status(400).json({ message: "Invalid facility id" });
 
-      const locked = await isFacilityMicroplanLocked(req.tenantId, facilityId);
-      if (locked) {
-        return res.status(400).json({
-          message: "Facility's catchment area editing is locked because there is a submitted microplan."
-        });
-      }
-
       const dbUser = req.dbUser ?? (await storage.getUser(getCurrentUserId(req)));
       if (!dbUser) return res.status(403).json({ message: "Forbidden: User context not resolved" });
       req.dbUser = dbUser;
       if (!(await userCanAccessGeo(dbUser, req.tenantId, { facilityId }))) {
         return res.status(403).json({ message: "Forbidden: no access to save this facility catchment polygon." });
+      }
+
+      const locked = await isFacilityMicroplanLocked(req.tenantId, facilityId);
+      const isPrivileged = [
+        "platform_admin",
+        "national_admin",
+        "national_manager",
+        "super_admin",
+        "gis_specialist",
+        "provincial_coordinator",
+        "district_manager",
+      ].includes(dbUser.role) || hasPermission(dbUser.role, "polygon.edit") || hasPermission(dbUser.role, "manage_boundaries");
+
+      if (locked && !isPrivileged && !req.body.overrideLock) {
+        return res.status(400).json({
+          message: "Facility's catchment area editing is locked because there is a submitted microplan."
+        });
       }
 
       const { geojson, gridPopulation, status = 'active' } = req.body;
@@ -3060,7 +3073,7 @@ export function registerFacilityRoutes(app: Express) {
             eq(gisPolygons.isActive, true),
             eq(gisPolygons.status, "active")
           )).limit(1);
-        if (currentActive) {
+        if (currentActive && !req.body.replaceActive && !req.body.overrideLock && !isPrivileged) {
           return res.status(409).json({
             code: "POLYGON_VERSION_REQUIRED",
             message: "This approved catchment cannot be overwritten. Use the polygon edit or replace workflow to create a reviewable version."
