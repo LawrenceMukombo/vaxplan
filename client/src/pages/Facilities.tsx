@@ -3911,6 +3911,8 @@ export default function Facilities({ initialTab, initialView }: FacilitiesProps 
                               id: v.id,
                               villageId: v.id,
                               name: v.name,
+                              latitude: v.latitude ? parseFloat(v.latitude.toString()) : undefined,
+                              longitude: v.longitude ? parseFloat(v.longitude.toString()) : undefined,
                               targetPopulation: (v as any).targetPopulation?.toString(),
                             }))}
                             onCommunityPopUpdate={(name, population) => {

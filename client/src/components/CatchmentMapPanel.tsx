@@ -146,7 +146,14 @@ interface Props {
   facilityName: string;
   facilityLat?: number;
   facilityLng?: number;
-  communities: { id?: number; villageId?: number; name: string; targetPopulation?: string }[];
+  communities: {
+    id?: number;
+    villageId?: number;
+    name: string;
+    latitude?: number;
+    longitude?: number;
+    targetPopulation?: string;
+  }[];
   onCommunityPopUpdate: (name: string, population: number) => void;
   onExtractedCommunities?: (names: string[]) => void;
 }
@@ -524,6 +531,7 @@ export function CatchmentMapPanel({
   const [loadingMissed, setLoadingMissed] = useState(false);
   const [autoClipping, setAutoClipping] = useState(false);
   const [showGuideModal, setShowGuideModal] = useState(false);
+  const [showCommunityPins, setShowCommunityPins] = useState(true);
 
   const selectedCommunityRecord = useMemo(() => {
     return communities.find((c) => c.name === selectedCommunity);
@@ -532,6 +540,48 @@ export function CatchmentMapPanel({
   const selectedCommunityPolygon = useMemo(() => {
     return communityPolygons.find((p) => p.communityName === selectedCommunity);
   }, [communityPolygons, selectedCommunity]);
+
+  // --- Distinct Pin Icons for Health Facility & Communities -----------------
+  const facilityPinIcon = useMemo(() => {
+    return L.divIcon({
+      className: "custom-hf-pin",
+      html: `
+        <div style="display:flex; flex-direction:column; align-items:center; transform: translate(-50%, -100%); cursor:pointer;">
+          <div style="background-color:#1e40af; color:white; font-size:13px; font-weight:bold; width:28px; height:28px; border-radius:50%; border:2.5px solid white; display:flex; align-items:center; justify-content:center; box-shadow:0 3px 8px rgba(0,0,0,0.4);">
+            🏥
+          </div>
+          <div style="background:#1e3a8a; color:#fff; font-size:10px; font-weight:700; padding:1px 6px; border-radius:4px; margin-top:2px; white-space:nowrap; border:1px solid rgba(255,255,255,0.3); box-shadow:0 2px 4px rgba(0,0,0,0.3);">
+            ${facilityName}
+          </div>
+        </div>
+      `,
+      iconSize: [0, 0],
+      iconAnchor: [0, 0],
+      popupAnchor: [0, -32],
+    });
+  }, [facilityName]);
+
+  const communityPinIcon = useCallback((name: string, isSelected: boolean, isMapped: boolean) => {
+    const color = isSelected ? "#8b5cf6" : isMapped ? "#10b981" : "#f59e0b";
+    const ringStyle = isSelected ? "box-shadow: 0 0 0 3px #c4b5fd, 0 3px 8px rgba(0,0,0,0.4);" : "box-shadow: 0 2px 6px rgba(0,0,0,0.35);";
+    const badgeSymbol = isSelected ? "🎯" : isMapped ? "✓" : "📍";
+    return L.divIcon({
+      className: "custom-comm-pin",
+      html: `
+        <div style="display:flex; flex-direction:column; align-items:center; transform: translate(-50%, -100%); cursor:pointer;">
+          <div style="background-color:${color}; color:white; font-size:11px; font-weight:bold; width:22px; height:22px; border-radius:50%; border:2px solid white; display:flex; align-items:center; justify-content:center; ${ringStyle}">
+            ${badgeSymbol}
+          </div>
+          <div style="background:rgba(15,23,42,0.85); color:#fff; font-size:10px; font-weight:600; padding:1px 5px; border-radius:4px; margin-top:2px; white-space:nowrap; border:1px solid rgba(255,255,255,0.2); box-shadow:0 1px 3px rgba(0,0,0,0.2);">
+            ${name}
+          </div>
+        </div>
+      `,
+      iconSize: [0, 0],
+      iconAnchor: [0, 0],
+      popupAnchor: [0, -28],
+    });
+  }, []);
 
   // --- Load existing polygons on mount ---------------------------------------
   useEffect(() => {
@@ -611,8 +661,14 @@ export function CatchmentMapPanel({
         coords.push(...poly.coords);
       }
     }
+    // Include community pin locations for magnetic vertex referencing!
+    for (const com of communities) {
+      if (com.latitude != null && com.longitude != null && !isNaN(com.latitude) && !isNaN(com.longitude)) {
+        coords.push([com.latitude, com.longitude]);
+      }
+    }
     return coords;
-  }, [catchment, communityPolygons, selectedCommunity]);
+  }, [catchment, communityPolygons, selectedCommunity, communities]);
 
   // --- Overlap check ----------------------------------------------------------
   const hasOverlap = useCallback((newCoords: [number, number][]): boolean => {
@@ -1438,7 +1494,7 @@ export function CatchmentMapPanel({
           ))}
 
           {/* Facility Pin Marker */}
-          <Marker position={center}>
+          <Marker position={center} icon={facilityPinIcon}>
             <Popup>
               <div className="p-1.5 space-y-1 text-xs select-none">
                 <div className="border-b border-border/50 pb-1">
@@ -1455,6 +1511,85 @@ export function CatchmentMapPanel({
             </Popup>
           </Marker>
 
+          {/* Community Settlement Location Pins */}
+          {showCommunityPins &&
+            communities.map((c) => {
+              if (c.latitude == null || c.longitude == null || isNaN(c.latitude) || isNaN(c.longitude)) return null;
+              const poly = communityPolygons.find((p) => p.communityName === c.name);
+              const isSelected = selectedCommunity === c.name;
+              const isMapped = !!poly?.saved;
+              return (
+                <Marker
+                  key={`comm-pin-${c.id ?? c.villageId ?? c.name}`}
+                  position={[c.latitude, c.longitude]}
+                  icon={communityPinIcon(c.name, isSelected, isMapped)}
+                  eventHandlers={{
+                    click: () => {
+                      setSelectedCommunity(c.name);
+                    },
+                  }}
+                >
+                  <Popup>
+                    <div className="text-xs space-y-1.5 p-1 select-none min-w-[170px]">
+                      <div className="flex items-center justify-between gap-2 border-b border-border/50 pb-1">
+                        <strong className="font-bold text-foreground text-sm">{c.name}</strong>
+                        <span
+                          className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                            poly?.saved
+                              ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300"
+                              : poly
+                                ? "bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300"
+                                : "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300"
+                          }`}
+                        >
+                          {poly?.saved ? "🟢 Mapped" : poly ? "🟠 Draft Polygon" : "⚪ No Boundary"}
+                        </span>
+                      </div>
+                      {c.targetPopulation && (
+                        <p className="text-muted-foreground text-[11px]">
+                          Target Headcount: <strong className="text-foreground">~{parseInt(c.targetPopulation).toLocaleString()}</strong>
+                        </p>
+                      )}
+                      {poly?.areaSqKm && (
+                        <p className="text-muted-foreground text-[11px]">
+                          Demarcated Area: <strong className="text-foreground">{poly.areaSqKm.toFixed(2)} km²</strong>
+                        </p>
+                      )}
+                      {facilityLat != null && facilityLng != null && (
+                        <p className="text-muted-foreground text-[11px]">
+                          Dist to HF:{" "}
+                          <strong className="text-foreground">
+                            {turf
+                              .distance(
+                                turf.point([facilityLng, facilityLat]),
+                                turf.point([c.longitude, c.latitude]),
+                                { units: "kilometers" }
+                              )
+                              .toFixed(1)}{" "}
+                            km
+                          </strong>
+                        </p>
+                      )}
+                      <div className="pt-1">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedCommunity(c.name);
+                            if (!poly && catchment) {
+                              setDrawMode("community");
+                            }
+                          }}
+                          className="w-full rounded-md bg-primary px-2.5 py-1 text-primary-foreground text-xs font-semibold hover:bg-primary/90 transition-colors shadow-xs"
+                        >
+                          {poly ? "🔍 Focus Community" : "✏️ Draw Boundary"}
+                        </button>
+                      </div>
+                    </div>
+                  </Popup>
+                </Marker>
+              );
+            })}
+
           <DrawingController
             mode={drawMode}
             onClose={() => setDrawMode(null)}
@@ -1470,13 +1605,25 @@ export function CatchmentMapPanel({
 
         <BasemapSwitcher basemap={basemap} onChange={setBasemap} />
 
-        {/* Top-Left Gap Layer Toggle */}
-        <div className="absolute top-2 left-2 z-[1000] flex flex-col gap-1">
+        {/* Top-Left Overlays & Pin Controls */}
+        <div className="absolute top-2 left-2 z-[1000] flex flex-col gap-1.5">
+          <button
+            type="button"
+            onClick={() => setShowCommunityPins((v) => !v)}
+            className={`rounded-lg px-2.5 py-1 text-xs font-semibold shadow-md border backdrop-blur-sm transition-colors flex items-center gap-1.5 ${
+              showCommunityPins ? "bg-blue-50 border-blue-300 text-blue-700 font-bold" : "bg-white/90 border-gray-200 text-muted-foreground"
+            }`}
+          >
+            <span>📍 Community Pins</span>
+            <span className="text-[10px] opacity-75 font-normal">
+              ({communities.filter((c) => c.latitude != null && !isNaN(c.latitude)).length})
+            </span>
+          </button>
           <button
             type="button"
             onClick={() => setShowGap((v) => !v)}
             className={`rounded-lg px-2.5 py-1 text-xs font-semibold shadow-md border backdrop-blur-sm transition-colors ${
-              showGap ? "bg-red-50 border-red-300 text-red-700" : "bg-white/90 border-gray-200 text-muted-foreground"
+              showGap ? "bg-red-50 border-red-300 text-red-700 font-bold" : "bg-white/90 border-gray-200 text-muted-foreground"
             }`}
           >
             {showGap ? "Hide Gaps" : "Show Gaps"}
@@ -1484,7 +1631,7 @@ export function CatchmentMapPanel({
         </div>
 
         {/* Map Legend */}
-        <div className="absolute bottom-4 left-4 z-[1000] rounded-xl border bg-white/95 dark:bg-slate-900/95 p-3 shadow-md backdrop-blur-sm text-[11px] font-medium space-y-1.5 min-w-[150px] pointer-events-auto">
+        <div className="absolute bottom-4 left-4 z-[1000] rounded-xl border bg-white/95 dark:bg-slate-900/95 p-3 shadow-md backdrop-blur-sm text-[11px] font-medium space-y-1.5 min-w-[160px] pointer-events-auto">
           <div className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-1">Map Legend</div>
           <div className="flex items-center gap-2">
             <span className="inline-block h-3 w-3 rounded-sm border-2 border-[#1a56db] bg-[#1a56db]/15" />
@@ -1493,6 +1640,14 @@ export function CatchmentMapPanel({
           <div className="flex items-center gap-2">
             <span className="inline-block h-3 w-3 rounded-sm border-2 border-[#e67e22] bg-[#e67e22]/25" />
             <span>Community Sub-Polygon</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="inline-block h-2.5 w-2.5 rounded-full bg-emerald-500 border border-white shadow-xs" />
+            <span>Mapped Community Pin</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="inline-block h-2.5 w-2.5 rounded-full bg-amber-500 border border-white shadow-xs" />
+            <span>Pending Community Pin</span>
           </div>
           <div className="flex items-center gap-2">
             <span className="inline-block h-3 w-3 rounded-sm border border-dashed border-red-500 bg-red-500/20" />
