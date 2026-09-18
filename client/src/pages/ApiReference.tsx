@@ -6,7 +6,8 @@ import { Badge } from "@/components/ui/badge";
 import {
   Code2, Search, Copy, Check, Terminal, Shield, ArrowRight,
   Database, Users, Globe, ClipboardList, Package, Share2, Layers,
-  Lock, BookOpen, Key
+  Lock, BookOpen, Key, Building2, Stethoscope, Sparkles, Activity,
+  FileText, CheckCircle2, AlertTriangle, TrendingUp, Radio
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
@@ -40,13 +41,13 @@ const API_GROUPS: APIGroup[] = [
     id: "auth",
     title: "System & Authentication",
     icon: Key,
-    description: "Session tokens, device authentication for offline mobile sync, and platform stats.",
+    description: "Session tokens, user profiles, cryptographic device authentication, and system telemetry.",
     endpoints: [
       {
         method: "GET",
         path: "/api/auth/user",
         auth: "Authenticated",
-        description: "Fetch the active user profile session, including roles, tenant details, and specific granular permissions.",
+        description: "Fetch the active user profile session, including assigned role, permissions, home tenant, and geographic scope.",
         responseExample: `{
   "success": true,
   "data": {
@@ -65,9 +66,29 @@ const API_GROUPS: APIGroup[] = [
       },
       {
         method: "POST",
+        path: "/api/auth/login",
+        auth: "Public",
+        description: "Authenticates user credentials, sets HTTP-only session cookie, and establishes tenant security context.",
+        requestExample: `{
+  "email": "sarah.chola@moh.gov.zm",
+  "password": "••••••••••••"
+}`,
+        responseExample: `{
+  "success": true,
+  "message": "Signed in successfully",
+  "data": {
+    "id": 42,
+    "email": "sarah.chola@moh.gov.zm",
+    "role": "provincial_coordinator",
+    "tenantId": "tenant-zm-north"
+  }
+}`
+      },
+      {
+        method: "POST",
         path: "/api/auth/device-token",
         auth: "Authenticated",
-        description: "Request a highly secure cryptographically signed API/device token used to authorize the offline Android client. Tokens are private and should be kept secure.",
+        description: "Request a cryptographically signed API/device token used to authorize the offline Android client. Tokens are private and tenant-scoped.",
         requestExample: `{
   "deviceName": "Zebra TC26 Handheld",
   "purpose": "Routine Outreach Syncing"
@@ -84,9 +105,40 @@ const API_GROUPS: APIGroup[] = [
       },
       {
         method: "GET",
+        path: "/api/auth/session-config",
+        auth: "Public",
+        description: "Retrieves idle session timeout and countdown warning duration configured for the tenant.",
+        responseExample: `{
+  "idleTimeoutMinutes": 15,
+  "warningMinutes": 1
+}`
+      },
+      {
+        method: "POST",
+        path: "/api/auth/ping",
+        auth: "Authenticated",
+        description: "Keep-alive endpoint called during active usage to extend server session lifetime without altering user idle preferences.",
+        responseExample: `{
+  "success": true,
+  "timestamp": 1789643017000
+}`
+      },
+      {
+        method: "GET",
+        path: "/api/version",
+        auth: "Public",
+        description: "Query active software build version, release timestamp, and Git commit hash.",
+        responseExample: `{
+  "version": "1.9.4",
+  "builtAt": "2026-09-18T04:40:00.000Z",
+  "environment": "production"
+}`
+      },
+      {
+        method: "GET",
         path: "/api/stats",
         auth: "Authenticated",
-        description: "Aggregates overall tenant metrics for the dashboard, including total zero-dose children mapped, defaulters, session completion percentage, and active microplans.",
+        description: "Aggregates overall tenant metrics for dashboard KPIs, including zero-dose children mapped, defaulters, and session completion rate.",
         responseExample: `{
   "success": true,
   "data": {
@@ -97,25 +149,120 @@ const API_GROUPS: APIGroup[] = [
     "totalImmunizedThisMonth": 4812
   }
 }`
+      },
+      {
+        method: "GET",
+        path: "/api/presence/online-count",
+        auth: "Authenticated",
+        description: "Real-time count of active concurrent health workers and coordinators online within the active tenant.",
+        responseExample: `{
+  "onlineCount": 14,
+  "activeSessions": 6
+}`
+      }
+    ]
+  },
+  {
+    id: "tenants",
+    title: "Tenant & Multi-Country Governance",
+    icon: Building2,
+    description: "Tenant isolation, country configurations, multi-tenant switching, and ministry onboarding.",
+    endpoints: [
+      {
+        method: "GET",
+        path: "/api/me/tenant",
+        auth: "Authenticated",
+        description: "Retrieve active tenant organization profile, ISO country code, currency, and enabled feature modules.",
+        responseExample: `{
+  "success": true,
+  "data": {
+    "id": "tenant-zaf-national",
+    "name": "Republic of South Africa National Department of Health",
+    "countryCode": "ZAF",
+    "currency": "ZAR",
+    "settings": {
+      "security": { "idleTimeoutMinutes": 15 },
+      "modules": { "vgie": true, "supervision": true, "riskAssessment": true }
+    }
+  }
+}`
+      },
+      {
+        method: "POST",
+        path: "/api/me/switch-tenant",
+        auth: "Authenticated",
+        description: "Switch active tenant workspace for authorized multi-country administrators or global partners.",
+        requestExample: `{
+  "tenantId": "tenant-zaf-national"
+}`,
+        responseExample: `{
+  "success": true,
+  "message": "Switched tenant successfully",
+  "activeTenantId": "tenant-zaf-national"
+}`
+      },
+      {
+        method: "GET",
+        path: "/api/public/tenants",
+        auth: "Public",
+        description: "List public onboarding tenants and ministries available for self-service pilot registration.",
+        responseExample: `{
+  "success": true,
+  "data": [
+    { "id": "tenant-zm-north", "name": "Zambia Ministry of Health", "countryCode": "ZMB" },
+    { "id": "tenant-zaf-national", "name": "South Africa National Department of Health", "countryCode": "ZAF" },
+    { "id": "tenant-ssd-national", "name": "South Sudan Ministry of Health", "countryCode": "SSD" },
+    { "id": "tenant-png-national", "name": "Papua New Guinea National Department of Health", "countryCode": "PNG" }
+  ]
+}`
+      },
+      {
+        method: "GET",
+        path: "/api/admin/tenants",
+        auth: "Platform Admin",
+        description: "Enterprise management: list all system tenants with database isolation status, user counts, and tiers.",
+        responseExample: `{
+  "success": true,
+  "data": [
+    { "id": "tenant-zm-north", "name": "Zambia MoH", "countryCode": "ZMB", "tier": "enterprise", "activeUsers": 128 }
+  ]
+}`
+      },
+      {
+        method: "POST",
+        path: "/api/admin/tenants",
+        auth: "Platform Admin",
+        description: "Provision a new country tenant with default administrative levels, GIS bounds, and seed vaccine schedules.",
+        requestExample: `{
+  "name": "Kenya Ministry of Health",
+  "countryCode": "KEN",
+  "currency": "KES",
+  "adminEmail": "admin@health.go.ke"
+}`,
+        responseExample: `{
+  "success": true,
+  "message": "Tenant created successfully",
+  "data": { "id": "tenant-ken-national", "countryCode": "KEN" }
+}`
       }
     ]
   },
   {
     id: "geo",
-    title: "Geography & Facilities",
+    title: "Geography, Facilities & Population",
     icon: Globe,
-    description: "Hierarchical administrative bounds mapping: Province → District → Health Facility.",
+    description: "Hierarchical administrative bounds, health facility GIS coordinates, catchments, WorldPop extraction, and remote sensing.",
     endpoints: [
       {
         method: "GET",
         path: "/api/provinces",
         auth: "Authenticated",
-        description: "Lists all provinces in the country onboarding scope for the active tenant.",
+        description: "Lists all Level 1 administrative provinces/regions for the active tenant country.",
         responseExample: `{
   "success": true,
   "data": [
-    { "id": 1, "name": "Northern Province" },
-    { "id": 2, "name": "Southern Province" }
+    { "id": 1, "name": "Gauteng", "code": "GP", "countryCode": "ZAF" },
+    { "id": 2, "name": "KwaZulu-Natal", "code": "KZN", "countryCode": "ZAF" }
   ]
 }`
       },
@@ -123,15 +270,14 @@ const API_GROUPS: APIGroup[] = [
         method: "GET",
         path: "/api/districts",
         auth: "Authenticated",
-        description: "Lists districts. Returns all districts or filters them by parent province.",
+        description: "Lists Level 2 administrative districts. Optionally filter by parent province ID.",
         params: [
           { name: "provinceId", type: "number", required: false, description: "Filter districts belonging to a specific province" }
         ],
         responseExample: `{
   "success": true,
   "data": [
-    { "id": 12, "name": "Kasama District", "provinceId": 1 },
-    { "id": 13, "name": "Mbala District", "provinceId": 1 }
+    { "id": 12, "name": "City of Johannesburg", "provinceId": 1, "targetPopulation": 5635000 }
   ]
 }`
       },
@@ -139,15 +285,85 @@ const API_GROUPS: APIGroup[] = [
         method: "GET",
         path: "/api/facilities",
         auth: "Authenticated",
-        description: "Retrieves health facilities. Projects names and locations. Highly cached.",
+        description: "Retrieves health facilities with GPS locations, facility tiers, cold chain capacities, and catchment polygons.",
         params: [
           { name: "districtId", type: "number", required: false, description: "Filter facilities belonging to a specific district" }
         ],
         responseExample: `{
   "success": true,
   "data": [
-    { "id": 104, "name": "Kasama General Hospital", "districtId": 12, "latitude": -10.212, "longitude": 31.181 },
-    { "id": 105, "name": "Chiba Urban Clinic", "districtId": 12, "latitude": -10.224, "longitude": 31.195 }
+    {
+      "id": 104,
+      "name": "Alexandra Health Centre",
+      "districtId": 12,
+      "facilityType": "health_centre",
+      "latitude": -26.104,
+      "longitude": 28.093,
+      "targetPopulation": 14200
+    }
+  ]
+}`
+      },
+      {
+        method: "POST",
+        path: "/api/facilities",
+        auth: "District Manager+",
+        description: "Register a new health facility with verified coordinates and catchment area.",
+        requestExample: `{
+  "name": "Soweto Community Clinic",
+  "districtId": 12,
+  "facilityType": "clinic",
+  "latitude": -26.248,
+  "longitude": 27.854,
+  "targetPopulation": 8500
+}`,
+        responseExample: `{
+  "success": true,
+  "message": "Facility registered successfully",
+  "data": { "id": 108 }
+}`
+      },
+      {
+        method: "POST",
+        path: "/api/population/estimate-polygon",
+        auth: "Authenticated",
+        description: "Extracts high-resolution population totals directly from WorldPop 100m/1km satellite raster grids inside any custom GeoJSON polygon or radius.",
+        requestExample: `{
+  "polygon": {
+    "type": "Polygon",
+    "coordinates": [[[28.08, -26.11], [28.11, -26.11], [28.11, -26.09], [28.08, -26.09], [28.08, -26.11]]]
+  }
+}`,
+        responseExample: `{
+  "success": true,
+  "estimatedPopulation": 18450,
+  "areaKm2": 4.82,
+  "densityPerKm2": 3827.8,
+  "source": "WorldPop 2020 100m constrained raster"
+}`
+      },
+      {
+        method: "GET",
+        path: "/api/remote-sensing/gaps",
+        auth: "Authenticated",
+        description: "Retrieve satellite AI-detected settlement structures located >5km from any health facility (zero-dose candidate zones).",
+        responseExample: `{
+  "success": true,
+  "count": 42,
+  "features": [
+    { "id": "gap_81", "latitude": -26.18, "longitude": 28.14, "estimatedStructures": 115, "distanceToNearestHfKm": 7.4 }
+  ]
+}`
+      },
+      {
+        method: "GET",
+        path: "/api/custom-layers",
+        auth: "Authenticated",
+        description: "List custom vector GIS layers and boundary shapefiles uploaded for the tenant.",
+        responseExample: `{
+  "success": true,
+  "data": [
+    { "id": 4, "name": "Informal Settlements 2026", "layerType": "geojson", "featureCount": 38 }
   ]
 }`
       }
@@ -155,29 +371,33 @@ const API_GROUPS: APIGroup[] = [
   },
   {
     id: "microplans",
-    title: "Microplanning Engine",
+    title: "Microplanning & Campaign Engine",
     icon: ClipboardList,
-    description: "Target calculations, planning steps, budget summaries, and approval cycles.",
+    description: "Target calculations, planning steps, budget summaries, multi-cadence periods, and approval workflows.",
     endpoints: [
       {
         method: "GET",
         path: "/api/microplans",
         auth: "Authenticated",
-        description: "Lists all generated microplans for the active user's scope. Projection limits heavy columns for lists.",
+        description: "Lists microplans in user scope. Filter by status, planning cadence (monthly, quarterly, semi_annual, annual), or year.",
         params: [
-          { name: "status", type: "string", required: false, description: "Filter by status: 'draft', 'pending_approval', 'approved'" }
+          { name: "status", type: "string", required: false, description: "Filter: 'draft', 'pending_approval', 'approved', 'rejected'" },
+          { name: "cadence", type: "string", required: false, description: "Filter: 'monthly', 'quarterly', 'semi_annual', 'annual'" },
+          { name: "year", type: "number", required: false, description: "Planning cycle year (e.g. 2026, 2027)" }
         ],
         responseExample: `{
   "success": true,
   "data": [
     {
       "id": 7,
-      "name": "Q3 Routine Outreach Plan - Kasama",
-      "status": "pending_approval",
+      "name": "Microplan Q3 2026 - Alexandra",
+      "status": "approved",
       "planType": "routine",
+      "planningCadence": "quarterly",
+      "periodNumber": 3,
+      "year": 2026,
       "targetPopulation": 14200,
-      "createdBy": "sarah.chola",
-      "createdAt": "2026-05-15T08:30:00Z"
+      "createdAt": "2026-06-15T08:30:00Z"
     }
   ]
 }`
@@ -186,81 +406,165 @@ const API_GROUPS: APIGroup[] = [
         method: "POST",
         path: "/api/microplans",
         auth: "District Manager+",
-        description: "Creates a new microplan shell to coordinate geographic immunization campaigns or routine sessions.",
+        description: "Creates a new microplan shell supporting Monthly, Quarterly, 6-Monthly, or Annual planning cadences with duplicate period prevention.",
         requestExample: `{
-  "name": "2026 SIA Polio Campaign - Kasama",
-  "planType": "campaign",
-  "targetPopulation": 18500,
-  "districtId": 12
+  "name": "Microplan Q3 2026 - Alexandra Health Centre",
+  "facilityId": 104,
+  "districtId": 12,
+  "year": 2026,
+  "quarter": 3,
+  "planningCadence": "quarterly",
+  "periodNumber": 3,
+  "planType": "routine",
+  "targetPopulation": 14200
 }`,
         responseExample: `{
   "success": true,
   "message": "Microplan created successfully",
   "data": {
-    "id": 9,
-    "name": "2026 SIA Polio Campaign - Kasama",
+    "id": 14,
+    "name": "Microplan Q3 2026 - Alexandra Health Centre",
     "status": "draft",
-    "planType": "campaign"
+    "planningCadence": "quarterly"
   }
 }`
       },
       {
-        method: "PATCH",
-        path: "/api/monthly-reports/:id/approve",
-        auth: "National Admin+",
-        description: "Approves a submitted monthly microplanning execution report, committing indicators to permanent registry archives.",
+        method: "GET",
+        path: "/api/microplans/:id",
+        auth: "Authenticated",
+        description: "Retrieve comprehensive microplan document including all 10 wizard steps, session schedules, cold chain, and budgets.",
         responseExample: `{
   "success": true,
-  "message": "Report approved and archived successfully"
+  "data": {
+    "id": 14,
+    "name": "Microplan Q3 2026 - Alexandra Health Centre",
+    "status": "draft",
+    "targetPopulation": 14200,
+    "communitiesCount": 6,
+    "sessionsCount": 18,
+    "totalBudget": 42500
+  }
+}`
+      },
+      {
+        method: "POST",
+        path: "/api/microplans/:id/submit",
+        auth: "Authenticated",
+        description: "Submits completed microplan draft to district/provincial governance for review and formal approval.",
+        requestExample: `{
+  "submissionNotes": "Updated Q3 target with 2 new outreach posts for informal settlements."
+}`,
+        responseExample: `{
+  "success": true,
+  "message": "Microplan submitted for approval",
+  "status": "pending_approval"
+}`
+      },
+      {
+        method: "POST",
+        path: "/api/microplans/:id/approve",
+        auth: "District Manager+",
+        description: "Approves a submitted microplan, locking the target population, authorizing budgets, and scheduling field sessions.",
+        responseExample: `{
+  "success": true,
+  "message": "Microplan approved successfully",
+  "status": "approved"
+}`
+      },
+      {
+        method: "GET",
+        path: "/api/campaign/readiness",
+        auth: "Authenticated",
+        description: "Retrieve country/province campaign readiness assessment across the 6 standard WHO domains (Planning, Logistics, Training, Comms, Supervision, Finance).",
+        params: [
+          { name: "provinceId", type: "number", required: false, description: "Filter by province" },
+          { name: "campaignId", type: "string", required: false, description: "Campaign scope identifier" }
+        ],
+        responseExample: `{
+  "success": true,
+  "readinessScore": 84.5,
+  "status": "ready",
+  "domains": {
+    "planning": 92,
+    "logistics": 85,
+    "training": 78,
+    "communication": 90,
+    "supervision": 82,
+    "finance": 80
+  }
 }`
       }
     ]
   },
   {
     id: "sessions",
-    title: "Session Scheduling",
+    title: "Session Scheduling & Routing",
     icon: Code2,
-    description: "Session builder, daily operations, proximity validations, and completion logs.",
+    description: "Session builder, daily operations, spatial proximity validation, and AI route optimization.",
     endpoints: [
       {
         method: "GET",
         path: "/api/sessions",
         auth: "Authenticated",
-        description: "List scheduled outreach and fixed sessions. Supports coordinates bounding box for GIS overlays.",
+        description: "List scheduled fixed, outreach, and mobile sessions with GPS coordinates, target quotas, and session dates.",
         params: [
           { name: "microplanId", type: "number", required: false, description: "Scope to a specific microplan" },
-          { name: "bbox", type: "string", required: false, description: "Geo bbox: 'minLon,minLat,maxLon,maxLat'" }
+          { name: "facilityId", type: "number", required: false, description: "Scope to a specific facility" }
         ],
         responseExample: `{
   "success": true,
   "data": [
     {
       "id": 142,
-      "name": "Milima Outreach Day 1",
+      "name": "Tsutsumani Outreach Post",
+      "strategy": "outreach",
       "status": "scheduled",
-      "sessionDate": "2026-06-15",
-      "facilityId": 105,
-      "latitude": -10.182,
-      "longitude": 31.221
+      "sessionDate": "2026-07-15",
+      "facilityId": 104,
+      "targetInfants": 65,
+      "latitude": -26.112,
+      "longitude": 28.102
     }
   ]
 }`
       },
       {
         method: "POST",
+        path: "/api/sessions",
+        auth: "Authenticated",
+        description: "Schedule a new immunization session with location coordinates, team staffing, and antigen allocation.",
+        requestExample: `{
+  "name": "Tsutsumani Outreach Post",
+  "strategy": "outreach",
+  "sessionDate": "2026-07-15",
+  "facilityId": 104,
+  "targetInfants": 65,
+  "latitude": -26.112,
+  "longitude": 28.102,
+  "transportMode": "motorcycle"
+}`,
+        responseExample: `{
+  "success": true,
+  "message": "Session scheduled successfully",
+  "data": { "id": 142 }
+}`
+      },
+      {
+        method: "POST",
         path: "/api/sessions/validate-proximity",
         auth: "Authenticated",
-        description: "Validates if a newly planned outreach session location is too close (e.g. within 5km) to an existing schedule to eliminate vaccine provider overlap.",
+        description: "Validates whether a newly planned outreach location is within 5km of another scheduled session on the same date to avoid duplication.",
         requestExample: `{
-  "latitude": -10.185,
-  "longitude": 31.225,
-  "sessionDate": "2026-06-15"
+  "latitude": -26.114,
+  "longitude": 28.104,
+  "sessionDate": "2026-07-15"
 }`,
         responseExample: `{
   "success": true,
   "hasConflict": true,
   "conflicts": [
-    { "sessionId": 142, "name": "Milima Outreach Day 1", "distanceKm": 0.48 }
+    { "sessionId": 142, "name": "Tsutsumani Outreach Post", "distanceKm": 0.32 }
   ]
 }`
       }
@@ -268,30 +572,31 @@ const API_GROUPS: APIGroup[] = [
   },
   {
     id: "clients",
-    title: "Client Registry & Logbook",
+    title: "Client Registry & Defaulters",
     icon: Users,
-    description: "Child demographic logging, immunization schedules, and zero-dose tracking.",
+    description: "Child longitudinal logbook, zero-dose tracking, vaccination passport, and automated SMS reminders.",
     endpoints: [
       {
         method: "GET",
         path: "/api/clients",
         auth: "Authenticated",
-        description: "Search and retrieve registered children. Support pagination, full-text fuzzy matching, and target risk filter.",
+        description: "Search registered children. Supports fuzzy name matching, national ID lookup, and risk level filtering.",
         params: [
-          { name: "search", type: "string", required: false, description: "Fuzzy search by name or registry card ID" },
-          { name: "risk", type: "string", required: false, description: "Filter by risk level: 'zero_dose', 'dropout', 'default'" }
+          { name: "search", type: "string", required: false, description: "Fuzzy search by child or caregiver name" },
+          { name: "risk", type: "string", required: false, description: "Filter: 'zero_dose', 'dropout', 'fully_immunized'" }
         ],
         responseExample: `{
   "success": true,
   "data": [
     {
       "id": 1084,
-      "firstName": "Mutale",
-      "lastName": "Mwamba",
+      "firstName": "Thabo",
+      "lastName": "Molefe",
       "birthDate": "2025-11-04",
-      "caregiverName": "Joyce Mwamba",
+      "caregiverName": "Nomsa Molefe",
+      "caregiverPhone": "+27821234567",
       "riskStatus": "dropout",
-      "vaccinationCount": 3
+      "dosesAdministered": 3
     }
   ]
 }`
@@ -300,21 +605,48 @@ const API_GROUPS: APIGroup[] = [
         method: "POST",
         path: "/api/clients/:id/vaccinate",
         auth: "Authenticated",
-        description: "Records the administration of an antigen dose to a registered child, triggering system reminder status updates.",
+        description: "Records administration of an antigen dose, automatically updating child risk status and computing next appointment.",
         requestExample: `{
-  "antigenCode": "DTP-HepB-Hib-1",
-  "administeredDate": "2026-06-02",
-  "facilityId": 105,
-  "batchNumber": "B9032A"
+  "antigenCode": "HEXAXIM-1",
+  "administeredDate": "2026-07-02",
+  "facilityId": 104,
+  "batchNumber": "HEX_8921A"
 }`,
         responseExample: `{
   "success": true,
   "message": "Vaccination recorded successfully",
   "data": {
     "vaccinationId": 4821,
-    "nextScheduledDose": "2026-07-02",
-    "nextAntigen": "DTP-HepB-Hib-2"
+    "nextScheduledDose": "2026-08-02",
+    "nextAntigen": "HEXAXIM-2"
   }
+}`
+      },
+      {
+        method: "GET",
+        path: "/api/defaulters",
+        auth: "Authenticated",
+        description: "Lists defaulters and zero-dose infants who missed scheduled appointment windows, prioritized by days overdue.",
+        responseExample: `{
+  "success": true,
+  "count": 18,
+  "data": [
+    { "clientId": 1084, "name": "Thabo Molefe", "missedAntigen": "HEXAXIM-2", "daysOverdue": 24 }
+  ]
+}`
+      },
+      {
+        method: "POST",
+        path: "/api/defaulters/sms-reminder",
+        auth: "District Manager+",
+        description: "Sends an automated multilingual SMS appointment reminder to caregiver mobile phones.",
+        requestExample: `{
+  "clientId": 1084,
+  "template": "routine_catchup_reminder"
+}`,
+        responseExample: `{
+  "success": true,
+  "message": "SMS dispatched to +27821234567"
 }`
       }
     ]
@@ -323,15 +655,15 @@ const API_GROUPS: APIGroup[] = [
     id: "stock",
     title: "Vaccine Cold Chain & Stock",
     icon: Package,
-    description: "Antigen ledger management, wastage rates, stock transfers, and alerts.",
+    description: "Antigen ledger balances, wastage rates, stock transfers, and AI demand forecasting.",
     endpoints: [
       {
         method: "GET",
         path: "/api/stock/ledger",
         auth: "Authenticated",
-        description: "View localized balance sheets of active cold chain antigens at a facility or district store level.",
+        description: "View real-time antigen balances, minimum safety thresholds, and stock status across facilities.",
         params: [
-          { name: "facilityId", type: "number", required: true, description: "Scope to a specific facility warehouse" }
+          { name: "facilityId", type: "number", required: true, description: "Scope to a specific facility cold store" }
         ],
         responseExample: `{
   "success": true,
@@ -343,9 +675,27 @@ const API_GROUPS: APIGroup[] = [
       },
       {
         method: "POST",
+        path: "/api/stock/transaction",
+        auth: "Authenticated",
+        description: "Record stock receipts, administration consumption, or discarded damaged/expired vials.",
+        requestExample: `{
+  "facilityId": 104,
+  "antigen": "HEXAXIM",
+  "transactionType": "usage",
+  "doses": 45,
+  "batchNumber": "HEX_8921A"
+}`,
+        responseExample: `{
+  "success": true,
+  "message": "Stock transaction recorded",
+  "newBalance": 375
+}`
+      },
+      {
+        method: "POST",
         path: "/api/stock/transfer",
         auth: "District Manager+",
-        description: "Log dispatch/receipt stock transfers between supply line nodes.",
+        description: "Log inter-facility or depot-to-clinic stock transfers with digital delivery verification.",
         requestExample: `{
   "sourceFacilityId": 104,
   "destFacilityId": 105,
@@ -357,20 +707,156 @@ const API_GROUPS: APIGroup[] = [
   "success": true,
   "message": "Transfer logged and inventory balances updated dynamically"
 }`
+      },
+      {
+        method: "GET",
+        path: "/api/cold-chain/inventory",
+        auth: "Authenticated",
+        description: "Lists cold chain refrigeration assets, solar drives, and temperature logging history.",
+        responseExample: `{
+  "success": true,
+  "data": [
+    { "id": 12, "model": "B Medical TCW40SDD", "type": "solar_direct_drive", "capacityLitres": 45, "status": "functional" }
+  ]
+}`
+      }
+    ]
+  },
+  {
+    id: "supervision",
+    title: "Supportive Supervision & Checklists",
+    icon: Stethoscope,
+    description: "Facility supervision visits, structured WHO quality checklists, and action point monitoring.",
+    endpoints: [
+      {
+        method: "GET",
+        path: "/api/supervision-visits",
+        auth: "Authenticated",
+        description: "Retrieve facility supportive supervision assessments with scores, findings, and agreed action plans.",
+        responseExample: `{
+  "success": true,
+  "data": [
+    {
+      "id": 88,
+      "facilityId": 104,
+      "supervisorName": "Dr. Sarah Chola",
+      "visitDate": "2026-06-10",
+      "compositeScore": 87.5,
+      "openActionPoints": 2
+    }
+  ]
+}`
+      },
+      {
+        method: "POST",
+        path: "/api/supervision-visits",
+        auth: "Authenticated",
+        description: "Submit a completed supportive supervision assessment across cold chain, injection safety, data quality, and vaccine management.",
+        requestExample: `{
+  "facilityId": 104,
+  "visitDate": "2026-06-10",
+  "scores": { "coldChain": 90, "dataQuality": 85, "wasteManagement": 88 },
+  "actionPoints": [
+    { "action": "Calibrate fridge temperature sensor", "assignedTo": "Facility In-Charge", "dueDate": "2026-06-25" }
+  ]
+}`,
+        responseExample: `{
+  "success": true,
+  "message": "Supervision visit recorded successfully",
+  "data": { "id": 88 }
+}`
+      },
+      {
+        method: "GET",
+        path: "/api/supervision-templates",
+        auth: "Authenticated",
+        description: "List active supervision checklist modules and weighted criteria configured for the tenant.",
+        responseExample: `{
+  "success": true,
+  "data": [
+    { "id": 1, "name": "Standard National Routine EPI Checklist", "totalQuestions": 32 }
+  ]
+}`
+      }
+    ]
+  },
+  {
+    id: "risk",
+    title: "VPD Risk Assessment & AI",
+    icon: Sparkles,
+    description: "Disease risk assessments, triangulated scoring (hazard, vulnerability, capacity), and automated AI microplan interventions.",
+    endpoints: [
+      {
+        method: "GET",
+        path: "/api/risk/assessments",
+        auth: "Authenticated",
+        description: "List VPD risk assessment workbooks by country, province, and target disease (Measles, Polio, Cholera).",
+        responseExample: `{
+  "success": true,
+  "data": [
+    {
+      "id": 5,
+      "title": "2026 National Measles Risk Assessment",
+      "disease": "measles",
+      "year": 2026,
+      "status": "completed",
+      "highRiskDistrictsCount": 14
+    }
+  ]
+}`
+      },
+      {
+        method: "POST",
+        path: "/api/risk/assessments/:id/calculate",
+        auth: "District Manager+",
+        description: "Executes the WHO VPD risk scoring algorithm across all districts, generating composite risk indices and categorized maps.",
+        responseExample: `{
+  "success": true,
+  "message": "Risk indices calculated successfully",
+  "data": {
+    "districtsScored": 52,
+    "veryHighRisk": 4,
+    "highRisk": 10,
+    "mediumRisk": 22,
+    "lowRisk": 16
+  }
+}`
+      },
+      {
+        method: "POST",
+        path: "/api/ai/recommendations/generate",
+        auth: "Authenticated",
+        description: "Generates tailored operational interventions and session adjustments using AI models trained on local immunization data.",
+        requestExample: `{
+  "districtId": 12,
+  "riskCategory": "high",
+  "focusAntigens": ["MEASLES-1", "DTP3"]
+}`,
+        responseExample: `{
+  "success": true,
+  "recommendations": [
+    {
+      "priority": "high",
+      "strategy": "mobile_outreach",
+      "title": "Deploy weekend mobile team to informal settlements",
+      "rationale": "High dropout between DTP1 and DTP3 observed in informal settlements."
+    }
+  ]
+}`
       }
     ]
   },
   {
     id: "sync",
-    title: "Offline Sync & HIS Interop",
+    title: "Offline Sync & HIS Interop (DHIS2)",
     icon: Share2,
-    description: "Database sync endpoints for field tablets and push pipelines to national DHIS2.",
+    description: "Offline SQLite database replication for mobile tablets and national DHIS2 / OpenMRS data pipelines.",
     endpoints: [
       {
         method: "GET",
         path: "/api/sync/pull",
         auth: "Authenticated",
-        description: "Pull down delta changes made in the cloud since the client's last sync sequence timestamp. Essential for offline-first replication.",
+        description: "Pull down delta changes made in the cloud since the client's last sync sequence timestamp for offline-first operation.",
         params: [
           { name: "since", type: "string", required: true, description: "ISO timestamp of the client's last successful sync" }
         ],
@@ -378,7 +864,7 @@ const API_GROUPS: APIGroup[] = [
   "success": true,
   "data": {
     "clients": [
-      { "id": 1084, "firstName": "Mutale", "lastName": "Mwamba", "updatedAt": "2026-06-02T12:00:00Z" }
+      { "id": 1084, "firstName": "Thabo", "lastName": "Molefe", "updatedAt": "2026-06-02T12:00:00Z" }
     ],
     "sessions": [],
     "stockTransactions": [],
@@ -390,14 +876,14 @@ const API_GROUPS: APIGroup[] = [
         method: "POST",
         path: "/api/sync/batch",
         auth: "Authenticated",
-        description: "Batch uploads offline operations stored in the SQLite outbox of a field tablet. Transactions execute atomically.",
+        description: "Atomically uploads queued offline operations stored in field tablet SQLite outboxes.",
         requestExample: `{
   "deviceToken": "vp_sec_7a2b...",
   "operations": [
     {
       "action": "create_client",
       "tempId": "tmp_90211",
-      "payload": { "firstName": "Aaron", "lastName": "Phiri", "birthDate": "2026-01-10" }
+      "payload": { "firstName": "Lindiwe", "lastName": "Ndlovu", "birthDate": "2026-02-14" }
     }
   ]
 }`,
@@ -411,10 +897,27 @@ const API_GROUPS: APIGroup[] = [
 }`
       },
       {
-        method: "POST",
-        path: "/api/his/push-immunizations",
+        method: "GET",
+        path: "/api/his/instances",
         auth: "National Admin+",
-        description: "Triggers the pipeline to export aggregated monthly indicators (doses administered, drop-outs, wastage) to the National DHIS2 instance.",
+        description: "List configured external Health Information Systems (DHIS2, eLMIS, OpenMRS) with sync statuses.",
+        responseExample: `{
+  "success": true,
+  "data": [
+    { "id": "dhis2-prod", "name": "National DHIS2 Production", "type": "dhis2", "status": "connected" }
+  ]
+}`
+      },
+      {
+        method: "POST",
+        path: "/api/his/sync/execute",
+        auth: "National Admin+",
+        description: "Executes automated push of aggregated monthly immunization and microplan metrics directly to National DHIS2 Data Value Sets API.",
+        requestExample: `{
+  "instanceId": "dhis2-prod",
+  "period": "202607",
+  "orgUnitId": "OU_8921"
+}`,
         responseExample: `{
   "success": true,
   "dhis2Response": {
@@ -423,6 +926,67 @@ const API_GROUPS: APIGroup[] = [
     "ignored": 0,
     "status": "SUCCESS"
   }
+}`
+      }
+    ]
+  },
+  {
+    id: "research",
+    title: "Surveillance, Research & Evidence",
+    icon: Activity,
+    description: "Event-based disease surveillance signals, operational research documents, and qualitative barrier evidence.",
+    endpoints: [
+      {
+        method: "GET",
+        path: "/api/surveillance/signals",
+        auth: "Authenticated",
+        description: "List active epidemiological surveillance signals, AFP alerts, and suspect outbreak reports.",
+        responseExample: `{
+  "success": true,
+  "data": [
+    { "id": 19, "disease": "measles", "clusterSize": 3, "facilityId": 104, "status": "investigating" }
+  ]
+}`
+      },
+      {
+        method: "POST",
+        path: "/api/surveillance/signals",
+        auth: "Authenticated",
+        description: "Submit a new community case signal or suspect disease cluster detected during field immunization.",
+        requestExample: `{
+  "disease": "measles",
+  "suspectCases": 2,
+  "facilityId": 104,
+  "locationNotes": "Informal settlement Block C"
+}`,
+        responseExample: `{
+  "success": true,
+  "message": "Surveillance signal submitted and district alerted",
+  "data": { "id": 20 }
+}`
+      },
+      {
+        method: "GET",
+        path: "/api/research/articles",
+        auth: "Authenticated",
+        description: "Browse peer-reviewed vaccine equity publications, white papers, and operational research artifacts.",
+        responseExample: `{
+  "success": true,
+  "data": [
+    { "id": 1, "title": "Reaching Zero-Dose Children Through Spatial Microplanning in Sub-Saharan Africa", "year": 2026 }
+  ]
+}`
+      },
+      {
+        method: "GET",
+        path: "/api/planning-actions",
+        auth: "Authenticated",
+        description: "List prioritized microplan action items with status tracking, assignees, and target indicators.",
+        responseExample: `{
+  "success": true,
+  "data": [
+    { "id": 31, "title": "Engage community leaders in Ward 4", "status": "in_progress", "dueDate": "2026-07-20" }
+  ]
 }`
       }
     ]
@@ -575,7 +1139,7 @@ export default function ApiReference() {
               </CardContent>
             </Card>
 
-            <Card className="border-border/60 bg-indigo-500/5 border-indigo-500/10">
+            <Card className="border-indigo-500/20 bg-indigo-500/5">
               <CardContent className="p-4 space-y-2">
                 <div className="flex items-center gap-2 text-xs font-semibold text-indigo-700 dark:text-indigo-400">
                   <Lock className="h-4 w-4" />
