@@ -183,19 +183,8 @@ class SyncEngine {
     if (this._initializedTenantId === tenantId) return;
     this._initializedTenantId = tenantId;
 
-    // Detect active-tenant change across page loads and wipe the Dexie
-    // replica before syncing the new tenant.  Without this, records from
-    // previously-visited countries accumulate in the shared Dexie tables
-    // and show up as cross-country data mixing.
-    const _prevTenantRow = await offlineDb.syncMeta.get("syncedTenantId");
-    if (_prevTenantRow?.value && _prevTenantRow.value !== tenantId) {
-      if (navigator.onLine) {
-        // Only wipe local data when online — if offline, the user has no way
-        // to repopulate the new tenant and would see a blank app.
-        await clearLocalTenantCache();
-        await offlineDb.syncMeta.delete("lastSyncAt");
-      }
-    }
+    // Replicas coexist in tenant-scoped rows. Never wipe another country's
+    // field data merely because the operator changes the active tenant.
     await offlineDb.syncMeta.put({ key: "syncedTenantId", value: tenantId });
 
     // One-time recovery for vaccination rows that the old broad
@@ -237,7 +226,7 @@ class SyncEngine {
     }
 
     // Load persisted last-sync time
-    const lastSyncAt = await getLastSyncAt();
+    const lastSyncAt = await getLastSyncAt(tenantId);
     const { pendingCount, stuckCount } = await this._countOutbox(tenantId);
     this.setState({ lastSyncAt, pendingCount, stuckCount });
 
@@ -480,9 +469,11 @@ class SyncEngine {
   // ── Core: pull server changes → IndexedDB ─────────────────────────────────
 
   async pull(tenantId: string): Promise<void> {
-    const since = await getLastSyncAt();
+    const since = await getLastSyncAt(tenantId);
     const params = new URLSearchParams({ tenantId });
-    if (since) params.append("since", since);
+    // Pull a complete tenant snapshot. This is intentionally conservative:
+    // the server protocol does not yet emit deletion tombstones, so an
+    // incremental-only pull would retain deleted clinical and planning rows.
 
     this.setState({
       currentStage: "Fetching server updates...",
@@ -508,12 +499,12 @@ class SyncEngine {
 
     // Check database fingerprint to detect server database resets or seeding wipes
     const currentFingerprint = payload.databaseFingerprint;
-    const storedFingerprint = await getDbFingerprint();
+    const storedFingerprint = await getDbFingerprint(tenantId);
 
     if (currentFingerprint && currentFingerprint !== storedFingerprint) {
       console.warn("[sync] Database fingerprint mismatch! Clearing local cache.");
-      await clearLocalTenantCache();
-      await setDbFingerprint(currentFingerprint);
+      await clearLocalTenantCache(tenantId);
+      await setDbFingerprint(currentFingerprint, tenantId);
 
       // If since was not null, we need to fetch a fresh full replica of all data
       if (since !== null) {
@@ -530,7 +521,7 @@ class SyncEngine {
       }
     } else if (currentFingerprint && !storedFingerprint) {
       // Save fingerprint on first sync without wiping cache
-      await setDbFingerprint(currentFingerprint);
+      await setDbFingerprint(currentFingerprint, tenantId);
     }
 
     this.setState({
@@ -541,85 +532,85 @@ class SyncEngine {
     // Sequentially write table changes to Dexie and update progress percentage
     if (payload.regions) {
       this.setState({ currentStage: `Syncing Regions (${payload.regions.length} records)...`, progressPercent: 72 });
-      await bulkSyncEntities(offlineDb.regions, payload.regions.map(stamp));
+      await bulkSyncEntities(offlineDb.regions, payload.regions.map(stamp), tenantId);
     }
     if (payload.provinces) {
       this.setState({ currentStage: `Syncing Provinces (${payload.provinces.length} records)...`, progressPercent: 74 });
-      await bulkSyncEntities(offlineDb.provinces, payload.provinces.map(stamp));
+      await bulkSyncEntities(offlineDb.provinces, payload.provinces.map(stamp), tenantId);
     }
     if (payload.districts) {
       this.setState({ currentStage: `Syncing Districts (${payload.districts.length} records)...`, progressPercent: 76 });
-      await bulkSyncEntities(offlineDb.districts, payload.districts.map(stamp));
+      await bulkSyncEntities(offlineDb.districts, payload.districts.map(stamp), tenantId);
     }
     if (payload.llgs) {
       this.setState({ currentStage: `Syncing LLGs/Wards (${payload.llgs.length} records)...`, progressPercent: 78 });
-      await bulkSyncEntities(offlineDb.llgs, payload.llgs.map(stamp));
+      await bulkSyncEntities(offlineDb.llgs, payload.llgs.map(stamp), tenantId);
     }
     if (payload.facilities) {
       this.setState({ currentStage: `Syncing Facilities (${payload.facilities.length} records)...`, progressPercent: 80 });
-      await bulkSyncEntities(offlineDb.facilities, payload.facilities.map(stamp));
+      await bulkSyncEntities(offlineDb.facilities, payload.facilities.map(stamp), tenantId);
     }
     if (payload.villages) {
       this.setState({ currentStage: `Syncing Villages/Communities (${payload.villages.length} records)...`, progressPercent: 82 });
-      await bulkSyncEntities(offlineDb.villages, payload.villages.map(stamp));
+      await bulkSyncEntities(offlineDb.villages, payload.villages.map(stamp), tenantId);
     }
     if (payload.clients) {
       this.setState({ currentStage: `Syncing Clients (${payload.clients.length} records)...`, progressPercent: 84 });
-      await bulkSyncEntities(offlineDb.clients, payload.clients.map(stamp));
+      await bulkSyncEntities(offlineDb.clients, payload.clients.map(stamp), tenantId);
     }
     if (payload.clientVaccinations) {
       this.setState({ currentStage: `Syncing Vaccinations (${payload.clientVaccinations.length} records)...`, progressPercent: 86 });
-      await bulkSyncEntities(offlineDb.clientVaccinations, payload.clientVaccinations.map(stamp));
+      await bulkSyncEntities(offlineDb.clientVaccinations, payload.clientVaccinations.map(stamp), tenantId);
     }
     if (payload.sessionPlans) {
       this.setState({ currentStage: `Syncing Session Plans (${payload.sessionPlans.length} records)...`, progressPercent: 88 });
-      await bulkSyncEntities(offlineDb.sessionPlans, payload.sessionPlans.map(stamp));
+      await bulkSyncEntities(offlineDb.sessionPlans, payload.sessionPlans.map(stamp), tenantId);
     }
     if (payload.sessionDayPlans) {
       this.setState({ currentStage: `Syncing Session Day Plans (${payload.sessionDayPlans.length} records)...`, progressPercent: 89 });
-      await bulkSyncEntities(offlineDb.sessionDayPlans, payload.sessionDayPlans.map(stamp));
+      await bulkSyncEntities(offlineDb.sessionDayPlans, payload.sessionDayPlans.map(stamp), tenantId);
     }
     if (payload.budgetItems) {
       this.setState({ currentStage: `Syncing Budget Items (${payload.budgetItems.length} records)...`, progressPercent: 90 });
-      await bulkSyncEntities(offlineDb.budgetItems, payload.budgetItems.map(stamp));
+      await bulkSyncEntities(offlineDb.budgetItems, payload.budgetItems.map(stamp), tenantId);
     }
     if (payload.mobilizationActivities) {
       this.setState({ currentStage: `Syncing Social Mobilization (${payload.mobilizationActivities.length} records)...`, progressPercent: 92 });
-      await bulkSyncEntities(offlineDb.mobilizationActivities, payload.mobilizationActivities.map(stamp));
+      await bulkSyncEntities(offlineDb.mobilizationActivities, payload.mobilizationActivities.map(stamp), tenantId);
     }
     if (payload.stockTransactions) {
       this.setState({ currentStage: `Syncing Stock Ledger (${payload.stockTransactions.length} records)...`, progressPercent: 94 });
-      await bulkSyncEntities(offlineDb.stockTransactions, payload.stockTransactions.map(stamp));
+      await bulkSyncEntities(offlineDb.stockTransactions, payload.stockTransactions.map(stamp), tenantId);
     }
     if (payload.monthlyReports) {
       this.setState({ currentStage: `Syncing Monthly Reports (${payload.monthlyReports.length} records)...`, progressPercent: 96 });
-      await bulkSyncEntities(offlineDb.monthlyReports, payload.monthlyReports.map(stamp));
+      await bulkSyncEntities(offlineDb.monthlyReports, payload.monthlyReports.map(stamp), tenantId);
     }
     if (payload.populationData) {
       this.setState({ currentStage: `Syncing Population Data (${payload.populationData.length} records)...`, progressPercent: 97 });
-      await bulkSyncEntities(offlineDb.populationData, payload.populationData.map(stamp));
+      await bulkSyncEntities(offlineDb.populationData, payload.populationData.map(stamp), tenantId);
     }
     if (payload.vaccineConfigs) {
       this.setState({ currentStage: `Syncing Vaccine Configurations (${payload.vaccineConfigs.length} records)...`, progressPercent: 98 });
-      await bulkSyncEntities(offlineDb.vaccineConfigs, payload.vaccineConfigs.map(stamp));
+      await bulkSyncEntities(offlineDb.vaccineConfigs, payload.vaccineConfigs.map(stamp), tenantId);
     }
     if (payload.microplans) {
       this.setState({ currentStage: `Syncing Microplans (${payload.microplans.length} records)...`, progressPercent: 98 });
-      await bulkSyncEntities(offlineDb.microplans, payload.microplans.map(stamp));
+      await bulkSyncEntities(offlineDb.microplans, payload.microplans.map(stamp), tenantId);
     }
     if (payload.supervisionVisits) {
       this.setState({ currentStage: `Syncing Supervision Visits (${payload.supervisionVisits.length} records)...`, progressPercent: 99 });
-      await bulkSyncEntities(offlineDb.supervisionVisits, payload.supervisionVisits.map(stamp));
+      await bulkSyncEntities(offlineDb.supervisionVisits, payload.supervisionVisits.map(stamp), tenantId);
     }
     if (payload.supervisionTemplates) {
-      await bulkSyncEntities(offlineDb.supervisionTemplates, payload.supervisionTemplates.map(stamp));
+      await bulkSyncEntities(offlineDb.supervisionTemplates, payload.supervisionTemplates.map(stamp), tenantId);
     }
     if (payload.coldChainEquipment) {
       this.setState({ currentStage: `Syncing Cold Chain Equipment (${payload.coldChainEquipment.length} records)...`, progressPercent: 99 });
-      await bulkSyncEntities(offlineDb.coldChainEquipment, payload.coldChainEquipment.map(stamp));
+      await bulkSyncEntities(offlineDb.coldChainEquipment, payload.coldChainEquipment.map(stamp), tenantId);
     }
 
-    await setLastSyncAt(payload.serverTime);
+    await setLastSyncAt(payload.serverTime, tenantId);
     this.setState({ lastSyncAt: payload.serverTime });
   }
 

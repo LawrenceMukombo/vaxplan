@@ -88,6 +88,7 @@ function PlanningMonthCard({
   onDate,
   onSession,
   onNationalEvent,
+  onShowMonth,
 }: {
   date: Date;
   sessions: any[];
@@ -95,6 +96,7 @@ function PlanningMonthCard({
   onDate: (date: string) => void;
   onSession: (session: any) => void;
   onNationalEvent: (event: NationalCalendarEvent) => void;
+  onShowMonth: (date: Date) => void;
 }) {
   const year = date.getFullYear();
   const month = date.getMonth();
@@ -118,14 +120,18 @@ function PlanningMonthCard({
       <CardHeader className="p-3 pb-2 bg-muted/25">
         <div className="flex items-start justify-between gap-2">
           <div>
-            <CardTitle className="text-sm">{date.toLocaleString(undefined, { month: "long" })} {year}</CardTitle>
+            <button type="button" onClick={() => onShowMonth(date)} className="text-left hover:text-emerald-700 hover:underline underline-offset-2">
+              <CardTitle className="text-sm">{date.toLocaleString(undefined, { month: "long" })} {year}</CardTitle>
+            </button>
             <CardDescription className="text-[10px] mt-0.5">
               {monthSessions.length} sessions · {target.toLocaleString()} target
             </CardDescription>
           </div>
-          <Badge variant={monthEvents.length ? "default" : "secondary"} className="text-[9px]">
-            {monthEvents.length} events
-          </Badge>
+          <button type="button" onClick={() => onShowMonth(date)} aria-label={`Open ${date.toLocaleString(undefined, { month: "long" })} ${year}`}>
+            <Badge variant={monthEvents.length ? "default" : "secondary"} className="text-[9px] cursor-pointer hover:ring-2 hover:ring-emerald-300">
+              {monthEvents.length} events
+            </Badge>
+          </button>
         </div>
       </CardHeader>
       <CardContent className="p-2">
@@ -173,7 +179,15 @@ function PlanningMonthCard({
                 {event.title}
               </button>
             ))}
-            {monthSessions.length + monthEvents.length > 3 && <p className="text-[9px] text-muted-foreground">+{monthSessions.length + monthEvents.length - 3} more</p>}
+            {monthSessions.length + monthEvents.length > 3 && (
+              <button
+                type="button"
+                onClick={() => onShowMonth(date)}
+                className="text-[10px] font-semibold text-emerald-700 hover:text-emerald-900 hover:underline underline-offset-2"
+              >
+                +{monthSessions.length + monthEvents.length - 3} more — view month
+              </button>
+            )}
           </div>
         )}
       </CardContent>
@@ -1146,6 +1160,10 @@ export function MasterSessionCalendar() {
               onDate={handleOpenInitiateModal}
               onSession={setSelectedSessionDetail}
               onNationalEvent={setSelectedEventDetail}
+              onShowMonth={(date) => {
+                setCurrentDate(new Date(date.getFullYear(), date.getMonth(), 1));
+                setCalendarView("month");
+              }}
             />
           ))}
         </div>

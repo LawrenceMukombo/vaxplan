@@ -32,6 +32,18 @@ export async function fetchOsrmRoute(
   startLat: number, startLng: number,
   endLat: number, endLng: number
 ): Promise<RouteResponse | null> {
+  const rounded = [startLat, startLng, endLat, endLng].map((value) => value.toFixed(5));
+  const cacheKey = `road-route:${rounded.join(":")}`;
+  let tenantId = "global";
+  try {
+    const active = JSON.parse(localStorage.getItem("vaxplan_active_tenant") || "null");
+    tenantId = String(active?.id || tenantId);
+    const { getCachedGisData } = await import("@/lib/offlineDb");
+    const cached = await getCachedGisData(cacheKey, tenantId);
+    if (!navigator.onLine && cached) return cached as RouteResponse;
+  } catch {
+    // Cache lookup is best effort; online routing can still proceed.
+  }
   try {
     const url = `https://router.project-osrm.org/route/v1/driving/${startLng},${startLat};${endLng},${endLat}?overview=full&geometries=geojson`;
     const response = await fetch(url);
@@ -47,12 +59,26 @@ export async function fetchOsrmRoute(
     // Convert GeoJSON [lng, lat] back to Leaflet's [lat, lng]
     const geometry = route.geometry.coordinates.map((coord: [number, number]) => [coord[1], coord[0]]);
 
-    return {
+    const result: RouteResponse = {
       distanceKm: route.distance / 1000,
       durationMinutes: route.duration / 60,
       geometry,
     };
+    try {
+      const { setCachedGisData } = await import("@/lib/offlineDb");
+      await setCachedGisData(cacheKey, tenantId, { geojson: result });
+    } catch {
+      // A route is still useful even if the cache quota is exhausted.
+    }
+    return result;
   } catch (error) {
+    try {
+      const { getCachedGisData } = await import("@/lib/offlineDb");
+      const cached = await getCachedGisData(cacheKey, tenantId);
+      if (cached) return cached as RouteResponse;
+    } catch {
+      // no cached route
+    }
     console.error("OSRM Routing Error:", error);
     return null;
   }

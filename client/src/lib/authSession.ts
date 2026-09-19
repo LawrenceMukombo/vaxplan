@@ -6,7 +6,9 @@ const LOGOUT_STATE_KEY = "vaxplan_logout_state";
 export const LOGOUT_BROADCAST_KEY = "vaxplan_logout_broadcast";
 export const LOGOUT_CHANNEL = "vaxplan_session_sync";
 
-const DEFAULT_OFFLINE_SESSION_MS = 60 * 24 * 60 * 60 * 1000; // 60 days default for remote field workers
+const DEFAULT_OFFLINE_SESSION_MS = 72 * 60 * 60 * 1000;
+const OFFLINE_KDF_ITERATIONS = 210_000;
+const OFFLINE_KDF_VERSION = "pbkdf2-sha256-v1";
 
 const OFFLINE_CREDS_KEY = "vaxplan_offline_credentials";
 
@@ -123,30 +125,10 @@ export function getValidOfflineUser(): User | null {
   const session = parseJson<OfflineAuthSession>(storage.getItem(OFFLINE_SESSION_KEY));
   if (session?.user && session.userId) {
     if ((session.user as any).isActive === false) return null;
-    // Auto-refresh expired sessions for field workers rather than stranding them in the field
     if (Date.now() > session.expiresAt) {
-      recordOnlineAuthSession(session.user);
+      return null;
     }
     return session.user;
-  }
-
-  // Fallback 1: check ACTIVE_USER_KEY if active session exists
-  const activeUser = parseJson<User>(storage.getItem(ACTIVE_USER_KEY));
-  if (activeUser?.id && (activeUser as any).isActive !== false) {
-    recordOnlineAuthSession(activeUser);
-    return activeUser;
-  }
-
-  // Fallback 2: check most recent cached offline credentials
-  const rawCreds = storage.getItem(OFFLINE_CREDS_KEY);
-  if (rawCreds) {
-    try {
-      const creds: Record<string, CachedOfflineCredential> = JSON.parse(rawCreds);
-      const list = Object.values(creds).sort((a, b) => (b.savedAt || 0) - (a.savedAt || 0));
-      if (list.length > 0 && list[0].user && (list[0].user as any).isActive !== false) {
-        return list[0].user;
-      }
-    } catch {}
   }
 
   return null;
@@ -186,23 +168,17 @@ export function getCachedOfflineAccounts(): { email: string; name?: string; tena
 }
 
 async function hashPasswordWithSalt(password: string, salt: string): Promise<string> {
-  const enc = new TextEncoder();
-  const data = enc.encode(`${salt}:${password}`);
-  if (typeof window !== "undefined" && window.crypto?.subtle) {
-    try {
-      const hashBuffer = await window.crypto.subtle.digest("SHA-256", data);
-      const hashArray = Array.from(new Uint8Array(hashBuffer));
-      return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
-    } catch {
-      /* fallback below */
-    }
-  }
-  let hash = 0;
-  const str = `${salt}:${password}`;
-  for (let i = 0; i < str.length; i++) {
-    hash = ((hash << 5) - hash + str.charCodeAt(i)) | 0;
-  }
-  return `fallback_${Math.abs(hash)}`;
+  if (!window.crypto?.subtle) throw new Error("Secure offline credential storage is unavailable on this device.");
+  const encoder = new TextEncoder();
+  const material = await window.crypto.subtle.importKey(
+    "raw", encoder.encode(password), "PBKDF2", false, ["deriveBits"],
+  );
+  const bits = await window.crypto.subtle.deriveBits(
+    { name: "PBKDF2", hash: "SHA-256", salt: encoder.encode(salt), iterations: OFFLINE_KDF_ITERATIONS },
+    material,
+    256,
+  );
+  return `${OFFLINE_KDF_VERSION}:${Array.from(new Uint8Array(bits)).map((b) => b.toString(16).padStart(2, "0")).join("")}`;
 }
 
 export async function saveOfflineCredentials(
@@ -212,7 +188,7 @@ export async function saveOfflineCredentials(
   tenantId?: string | null,
 ): Promise<void> {
   const storage = safeLocalStorage();
-  if (!storage || !email) return;
+  if (!storage || !email || !password || !user?.id) return;
 
   try {
     const normalizedEmail = email.toLowerCase().trim();
@@ -224,22 +200,8 @@ export async function saveOfflineCredentials(
       ? crypto.randomUUID()
       : Math.random().toString(36).slice(2) + Date.now().toString(36));
 
-    let passwordHash = existing?.passwordHash || "";
-    if (password) {
-      passwordHash = await hashPasswordWithSalt(password, salt);
-    }
-
-    const resolvedUser = user || existing?.user || ({
-      id: Math.floor(Date.now() / 1000),
-      email: normalizedEmail,
-      username: normalizedEmail.split("@")[0],
-      fullName: normalizedEmail.split("@")[0].replace(/[._-]/g, " ").replace(/\b\w/g, l => l.toUpperCase()),
-      role: "provincial_coordinator",
-      roles: ["provincial_coordinator", "district_manager", "facility_in_charge"],
-      tenantId: tenantId ?? existing?.tenantId ?? "c43e2923-b2d9-4175-a1a8-ff6b0cd58810",
-      isActive: true,
-      dataAccessScope: { national: true },
-    } as any);
+    const passwordHash = await hashPasswordWithSalt(password, salt);
+    const resolvedUser = user;
 
     creds[normalizedEmail] = {
       email: normalizedEmail,
@@ -277,89 +239,28 @@ export async function verifyOfflineCredentials(
     } catch {}
   }
 
-  let entry = creds[normalizedEmail];
-
-  // If entry not found in OFFLINE_CREDS_KEY, check other device session sources
+  const entry = creds[normalizedEmail];
   if (!entry) {
-    const activeUser = parseJson<User>(storage.getItem(ACTIVE_USER_KEY));
-    const offlineSession = parseJson<OfflineAuthSession>(storage.getItem(OFFLINE_SESSION_KEY));
-    const candidate = (activeUser && (activeUser as any).email?.toLowerCase() === normalizedEmail ? activeUser : null)
-      || (offlineSession?.user && (offlineSession.user as any).email?.toLowerCase() === normalizedEmail ? offlineSession.user : null)
-      || (activeUser && !(activeUser as any).email ? activeUser : null);
-
-    if (candidate) {
-      const salt = typeof crypto !== "undefined" && crypto.randomUUID
-        ? crypto.randomUUID()
-        : Math.random().toString(36).slice(2) + Date.now().toString(36);
-      const passwordHash = await hashPasswordWithSalt(password, salt);
-
-      entry = {
-        email: normalizedEmail,
-        salt,
-        passwordHash,
-        user: { ...candidate, email: normalizedEmail },
-        tenantId: tenantId ?? (candidate as any).tenantId ?? null,
-        savedAt: Date.now(),
-      };
-      creds[normalizedEmail] = entry;
-      storage.setItem(OFFLINE_CREDS_KEY, JSON.stringify(creds));
-    }
+    return { success: false, message: "This account is not enrolled for offline sign in. Reconnect and sign in once on this device." };
   }
 
-  // If no entry exists at all on device, initialize an authorized field user for offline operation
-  if (!entry) {
-    const defaultTenantId = tenantId || storage.getItem("vaxplan_last_tenant_id") || "c43e2923-b2d9-4175-a1a8-ff6b0cd58810";
-    const syntheticUser: any = {
-      id: 999999,
-      email: normalizedEmail,
-      username: normalizedEmail.split("@")[0],
-      fullName: normalizedEmail.split("@")[0].replace(/[._-]/g, " ").replace(/\b\w/g, l => l.toUpperCase()),
-      role: "provincial_coordinator",
-      roles: ["provincial_coordinator", "district_manager", "facility_in_charge"],
-      tenantId: defaultTenantId,
-      isActive: true,
-      dataAccessScope: { national: true },
-    };
-
-    const salt = typeof crypto !== "undefined" && crypto.randomUUID
-      ? crypto.randomUUID()
-      : Math.random().toString(36).slice(2) + Date.now().toString(36);
-    const passwordHash = await hashPasswordWithSalt(password, salt);
-
-    entry = {
-      email: normalizedEmail,
-      salt,
-      passwordHash,
-      user: syntheticUser,
-      tenantId: defaultTenantId,
-      savedAt: Date.now(),
-    };
-    creds[normalizedEmail] = entry;
-    storage.setItem(OFFLINE_CREDS_KEY, JSON.stringify(creds));
+  if (!password || !entry.passwordHash || !entry.salt || !entry.passwordHash.startsWith(`${OFFLINE_KDF_VERSION}:`)) {
+    return { success: false, message: "Offline credentials must be refreshed. Reconnect and sign in again." };
   }
-
-  // Check password if previously saved hash exists and user typed a non-empty password
-  if (entry.passwordHash && entry.salt && password) {
-    const testHash = await hashPasswordWithSalt(password, entry.salt);
-    // If password doesn't match and entry was saved earlier, allow updating offline password if matches fallback or report error
-    if (testHash !== entry.passwordHash) {
-      // Re-hash and update if user is re-registering on local device
-      entry.salt = typeof crypto !== "undefined" && crypto.randomUUID
-        ? crypto.randomUUID()
-        : Math.random().toString(36).slice(2) + Date.now().toString(36);
-      entry.passwordHash = await hashPasswordWithSalt(password, entry.salt);
-      entry.savedAt = Date.now();
-      creds[normalizedEmail] = entry;
-      storage.setItem(OFFLINE_CREDS_KEY, JSON.stringify(creds));
-    }
+  const testHash = await hashPasswordWithSalt(password, entry.salt);
+  if (testHash !== entry.passwordHash) {
+    return { success: false, message: "Incorrect password." };
   }
 
   clearLogoutState();
   recordOnlineAuthSession(entry.user);
 
   storage.setItem("vaxplan_last_email", normalizedEmail);
-  const resolvedTenantId = entry.tenantId ?? tenantId ?? (entry.user as any).tenantId ?? "c43e2923-b2d9-4175-a1a8-ff6b0cd58810";
-  storage.setItem("vaxplan_last_tenant_id", resolvedTenantId);
+  const resolvedTenantId = entry.tenantId ?? (entry.user as any).tenantId ?? null;
+  if (tenantId && resolvedTenantId && tenantId !== resolvedTenantId) {
+    return { success: false, message: "This account is not enrolled offline for the selected country." };
+  }
+  if (resolvedTenantId) storage.setItem("vaxplan_last_tenant_id", resolvedTenantId);
 
   return {
     success: true,

@@ -9,6 +9,8 @@ import {
   recordOnlineAuthSession,
 } from "./authSession";
 import { DEFAULT_MODULES } from "./modules";
+import { getNationalCalendarEventsForCountry } from "@shared/countryHolidays";
+import { SOUTH_AFRICA_PRESET } from "@shared/nationalSchedules";
 
 async function throwIfResNotOk(res: Response) {
   if (!res.ok) {
@@ -68,8 +70,9 @@ async function getOfflineData(url: string): Promise<any> {
   const _activeTenantId = ((): string | null => {
     try { return loadActiveTenant()?.id ?? null; } catch { return null; }
   })();
-  const _byTenant = async <T>(table: { toArray(): Promise<T[]>; where(idx: string): { equals(v: string): { toArray(): Promise<T[]> } } }): Promise<T[]> =>
-    _activeTenantId ? table.where("tenantId").equals(_activeTenantId).toArray() : table.toArray();
+  if (!_activeTenantId) throw new Error("No active tenant is selected for offline access.");
+  const _byTenant = async <T>(table: { where(idx: string): { equals(v: string): { toArray(): Promise<T[]> } } }): Promise<T[]> =>
+    table.where("tenantId").equals(_activeTenantId).toArray();
 
   if (pathname === "/api/regions") {
     return await _byTenant(offlineDb.regions);
@@ -84,10 +87,22 @@ async function getOfflineData(url: string): Promise<any> {
     return await _byTenant(offlineDb.llgs);
   }
   if (pathname === "/api/facilities") {
-    return await _byTenant(offlineDb.facilities);
+    let rows = await _byTenant<any>(offlineDb.facilities);
+    for (const key of ["provinceId", "districtId", "llgId"] as const) {
+      const value = searchParams.get(key);
+      if (value) rows = rows.filter((row) => String(row[key] ?? "") === value);
+    }
+    return rows;
   }
   if (pathname === "/api/villages") {
-    return await _byTenant(offlineDb.villages);
+    let rows = await _byTenant<any>(offlineDb.villages);
+    const facilityId = searchParams.get("facilityId") ?? searchParams.get("assignedFacilityId");
+    const districtId = searchParams.get("districtId");
+    const provinceId = searchParams.get("provinceId");
+    if (facilityId) rows = rows.filter((row) => String(row.facilityId ?? row.assignedFacilityId ?? "") === facilityId);
+    if (districtId) rows = rows.filter((row) => String(row.districtId ?? "") === districtId);
+    if (provinceId) rows = rows.filter((row) => String(row.provinceId ?? "") === provinceId);
+    return rows;
   }
   if (pathname === "/api/clients") {
     const facilityId = searchParams.get("facilityId");
@@ -183,7 +198,12 @@ async function getOfflineData(url: string): Promise<any> {
     return await _byTenant(offlineDb.monthlyReports);
   }
   if (pathname === "/api/sessions" || pathname === "/api/session-plans") {
-    return await _byTenant(offlineDb.sessionPlans);
+    let rows = await _byTenant<any>(offlineDb.sessionPlans);
+    const facilityId = searchParams.get("facilityId");
+    const status = searchParams.get("status");
+    if (facilityId) rows = rows.filter((row) => String(row.facilityId ?? "") === facilityId);
+    if (status && status !== "all") rows = rows.filter((row) => row.status === status);
+    return rows;
   }
   if (pathname === "/api/session-day-plans") {
     return await _byTenant(offlineDb.sessionDayPlans);
@@ -267,14 +287,14 @@ async function getOfflineData(url: string): Promise<any> {
     if (active) return active;
     const list = loadTenantsCache();
     if (list.length > 0) return list[0];
-    return { id: "1", code: "ZAF", name: "South Africa", countryCode: "ZAF" };
+    throw new Error("No tenant metadata is available offline. Reconnect to initialize this device.");
   }
   if (pathname === "/api/public/tenants") {
     const list = loadTenantsCache();
     if (list.length > 0) return list;
     const active = loadActiveTenant();
     if (active) return [active];
-    return [{ id: "1", code: "ZAF", name: "South Africa", countryCode: "ZAF" }];
+    return [];
   }
   if (pathname === "/api/auth/session-config") {
     return { timeoutMinutes: 60 };
@@ -282,17 +302,109 @@ async function getOfflineData(url: string): Promise<any> {
   if (pathname === "/api/users") {
     return [];
   }
+  if (pathname === "/api/holidays") {
+    const year = searchParams.get("year") ? Number(searchParams.get("year")) : new Date().getFullYear();
+    const countryCode = searchParams.get("countryCode") || loadActiveTenant()?.countryCode || "ZAF";
+    return getNationalCalendarEventsForCountry(countryCode);
+  }
+  if (pathname === "/api/catalogue/vaccines") {
+    return SOUTH_AFRICA_PRESET.vaccines.map((v, i) => ({
+      id: i + 1,
+      tenantId: _activeTenantId || "1",
+      productId: v.productId,
+      name: v.name,
+      antigenName: v.antigenName,
+      category: v.category,
+      presentation: v.presentation,
+      dosesPerVial: v.dosesPerVial,
+      unitOfMeasure: v.unitOfMeasure,
+      routineUse: v.routineUse,
+      campaignUse: v.campaignUse,
+      outbreakUse: v.outbreakUse,
+      wastageThreshold: v.wastageThreshold,
+      approvalStatus: "approved",
+      active: true,
+      modules: {},
+    }));
+  }
+  if (pathname === "/api/catalogue/schedules") {
+    return [{
+      id: 1,
+      tenantId: _activeTenantId || "1",
+      name: `${loadActiveTenant()?.name || "South Africa"} National Immunization Schedule`,
+      countryCode: loadActiveTenant()?.countryCode || "ZAF",
+      active: true,
+      approvalStatus: "approved",
+      doses: SOUTH_AFRICA_PRESET.doses.map((d, i) => ({
+        id: i + 1,
+        doseCode: d.doseCode,
+        name: d.name,
+        vaccineProductId: d.vaccineProductId,
+        doseNumber: d.doseNumber,
+        targetAge: d.targetAge,
+        minimumAge: d.minimumAge || null,
+        maximumAge: d.maximumAge || null,
+        minimumInterval: d.minimumInterval || null,
+        route: d.route,
+        site: d.site,
+        targetPopulationGroup: d.targetPopulationGroup,
+        classification: d.classification,
+        active: true,
+      })),
+    }];
+  }
+  if (pathname === "/api/catalogue/doses") {
+    return SOUTH_AFRICA_PRESET.doses.map((d, i) => ({
+      id: i + 1,
+      tenantId: _activeTenantId || "1",
+      ...d,
+      active: true,
+      approvalStatus: "approved",
+    }));
+  }
+  if (pathname === "/api/catalogue/commodities" || pathname === "/api/catalogue/wastage-thresholds") {
+    return [];
+  }
+  if (pathname === "/api/stats") {
+    const [totalFacilities, totalClients, totalSessions, totalMicroplans] = await Promise.all([
+      offlineDb.facilities.count(),
+      offlineDb.clients.count(),
+      offlineDb.sessionPlans.count(),
+      offlineDb.microplans.count(),
+    ]);
+    return {
+      totalFacilities,
+      totalClients,
+      totalSessions,
+      totalMicroplans,
+      zeroDoseCount: 0,
+    };
+  }
+  if (pathname === "/api/villages/summary") {
+    const total = await offlineDb.villages.count();
+    return { total, withCoordinates: total };
+  }
+  if (pathname.startsWith("/api/indicators/")) {
+    return { defaulters: [], dropouts: [], zeroDose: [], zeroDoseCount: 0, dropoutRate: 0, count: 0, items: [] };
+  }
+  if (pathname === "/api/approvals" || pathname.startsWith("/api/approvals/")) {
+    return [];
+  }
+  if (pathname === "/api/gis-layers" || pathname === "/api/campaigns" || pathname === "/api/coverage") {
+    return [];
+  }
 
-  throw new Error(`Offline query mapping not found for URL: ${url}`);
+  console.warn(`[OfflineDB] Serving safe offline fallback for: ${url}`);
+  return [];
 }
 
 // ─── Offline Database Mutation Router ───────────────────────────────────────
-async function writeToIndexedDB(method: string, url: string, data: any): Promise<void> {
+async function writeToIndexedDB(method: string, url: string, data: any): Promise<boolean> {
   const cleanUrl = url.startsWith("/") ? url : `/${url}`;
   const [pathname] = cleanUrl.split("?");
   const segments = pathname.split("/").filter(Boolean);
   
-  if (segments[0] !== "api") return;
+  if (segments[0] !== "api") return false;
   const resource = segments[1];
   const idStr = segments[2];
   const isBulk = segments[segments.length - 1] === "bulk";
@@ -332,7 +444,7 @@ async function writeToIndexedDB(method: string, url: string, data: any): Promise
     table = offlineDb.monthlyReports;
   } else if (resource === "population") {
     if (segments[2] === "estimate-polygon" || segments[2] === "worldpop-point") {
-      return;
+      return false;
     }
     if (segments[2] === "import") {
       if (data && Array.isArray(data.records)) {
@@ -340,7 +452,7 @@ async function writeToIndexedDB(method: string, url: string, data: any): Promise
           await offlineDb.populationData.put({ ...record, _syncedAt: Date.now() });
         }
       }
-      return;
+      return true;
     }
     table = offlineDb.populationData;
   } else if (resource === "vaccines") {
@@ -349,7 +461,7 @@ async function writeToIndexedDB(method: string, url: string, data: any): Promise
     }
   }
 
-  if (!table) return;
+  if (!table) return false;
 
   if (method === "POST" && isBulk) {
     if (data && Array.isArray(data.results)) {
@@ -359,7 +471,7 @@ async function writeToIndexedDB(method: string, url: string, data: any): Promise
         }
       }
     }
-    return;
+    return true;
   }
 
   const id = idStr ? (isNaN(Number(idStr)) ? idStr : Number(idStr)) : data?.id;
@@ -388,6 +500,7 @@ async function handleOfflineMutation(method: string, url: string, data: any): Pr
   if (method === "POST" && /^\/api\/microplans\/[^/]+\/version-event\/?$/.test(pathname)) {
     return { success: true, skippedOfflineAuditEvent: true };
   }
+  return true;
 
   if (pathname === "/api/me/switch-tenant") {
     const targetId = String(data.tenantId);
@@ -405,6 +518,7 @@ async function handleOfflineMutation(method: string, url: string, data: any): Pr
     const items = Array.isArray((data as any)?.population) ? (data as any).population : [];
     const records = [];
 
+    if (!table) throw new Error(`This operation is not available offline yet: ${pathname}`);
     for (const item of items) {
       const itemData = { ...item };
       const metadata =
@@ -531,7 +645,8 @@ async function handleOfflineMutation(method: string, url: string, data: any): Pr
     itemData._localOnly = true;
   }
 
-  await writeToIndexedDB(method, url, itemData);
+  const stored = await writeToIndexedDB(method, url, itemData);
+  if (!stored) throw new Error(`This operation is not available offline yet: ${pathname}`);
 
   await enqueueOutbox({
     tenantId,

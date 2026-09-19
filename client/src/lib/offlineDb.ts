@@ -712,55 +712,45 @@ export const offlineDb = new VaxPlanOfflineDb();
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 /** Get the last sync timestamp for the current tenant */
-export async function getLastSyncAt(): Promise<string | null> {
-  const row = await offlineDb.syncMeta.get("lastSyncAt");
+const tenantMetaKey = (name: string, tenantId?: string | null) => tenantId ? `${name}:${tenantId}` : name;
+
+export async function getLastSyncAt(tenantId?: string | null): Promise<string | null> {
+  const row = await offlineDb.syncMeta.get(tenantMetaKey("lastSyncAt", tenantId));
   return row?.value ?? null;
 }
 
 /** Persist the last sync timestamp */
-export async function setLastSyncAt(iso: string): Promise<void> {
-  await offlineDb.syncMeta.put({ key: "lastSyncAt", value: iso });
+export async function setLastSyncAt(iso: string, tenantId?: string | null): Promise<void> {
+  await offlineDb.syncMeta.put({ key: tenantMetaKey("lastSyncAt", tenantId), value: iso });
 }
 
 /** Clear all domain entity tables for local cache wiping on fingerprint mismatch */
-export async function clearLocalTenantCache(): Promise<void> {
-  await Promise.all([
-    offlineDb.regions.clear(),
-    offlineDb.provinces.clear(),
-    offlineDb.districts.clear(),
-    offlineDb.llgs.clear(),
-    offlineDb.facilities.clear(),
-    offlineDb.villages.clear(),
-    offlineDb.clients.clear(),
-    offlineDb.clientVaccinations.clear(),
-    offlineDb.sessionPlans.clear(),
-    offlineDb.sessionDayPlans.clear(),
-    offlineDb.sessionVillageLinks.clear(),
-    offlineDb.budgetItems.clear(),
-    offlineDb.mobilizationActivities.clear(),
-    offlineDb.stockTransactions.clear(),
-    offlineDb.monthlyReports.clear(),
-    offlineDb.populationData.clear(),
-    offlineDb.vaccineConfigs.clear(),
-    offlineDb.gisCache.clear(),
-    offlineDb.microplans.clear(),
-    offlineDb.supervisionVisits.clear(),
-    offlineDb.supervisionTemplates.clear(),
-    offlineDb.coldChainEquipment.clear(),
-    offlineDb.gisPolygons.clear(),
-    offlineDb.settlements.clear(),
-  ]);
+export async function clearLocalTenantCache(tenantId?: string | null): Promise<void> {
+  const tables: Table<any>[] = [
+    offlineDb.regions, offlineDb.provinces, offlineDb.districts, offlineDb.llgs,
+    offlineDb.facilities, offlineDb.villages, offlineDb.clients, offlineDb.clientVaccinations,
+    offlineDb.sessionPlans, offlineDb.sessionDayPlans, offlineDb.sessionVillageLinks,
+    offlineDb.budgetItems, offlineDb.mobilizationActivities, offlineDb.stockTransactions,
+    offlineDb.monthlyReports, offlineDb.populationData, offlineDb.vaccineConfigs,
+    offlineDb.microplans, offlineDb.supervisionVisits, offlineDb.supervisionTemplates,
+    offlineDb.coldChainEquipment, offlineDb.gisPolygons, offlineDb.settlements,
+  ];
+  if (!tenantId) {
+    await Promise.all([...tables.map((table) => table.clear()), offlineDb.gisCache.clear()]);
+    return;
+  }
+  await Promise.all(tables.map((table) => table.where("tenantId").equals(tenantId).delete()));
 }
 
 /** Get the database fingerprint */
-export async function getDbFingerprint(): Promise<string | null> {
-  const row = await offlineDb.syncMeta.get("dbFingerprint");
+export async function getDbFingerprint(tenantId?: string | null): Promise<string | null> {
+  const row = await offlineDb.syncMeta.get(tenantMetaKey("dbFingerprint", tenantId));
   return row?.value ?? null;
 }
 
 /** Persist the database fingerprint */
-export async function setDbFingerprint(fingerprint: string): Promise<void> {
-  await offlineDb.syncMeta.put({ key: "dbFingerprint", value: fingerprint });
+export async function setDbFingerprint(fingerprint: string, tenantId?: string | null): Promise<void> {
+  await offlineDb.syncMeta.put({ key: tenantMetaKey("dbFingerprint", tenantId), value: fingerprint });
 }
 
 // ─── Outbox flush lease (prevents SW + page from double-flushing) ────────────
@@ -851,9 +841,17 @@ export async function countPendingMutations(tenantId: string): Promise<number> {
 export async function bulkSyncEntities<T extends { id: any; tenantId: string }>(
   table: Table<T>,
   rows: T[],
+  replaceTenantId?: string,
 ): Promise<void> {
-  if (rows.length === 0) return;
-  await table.bulkPut(rows);
+  await offlineDb.transaction("rw", table, async () => {
+    if (replaceTenantId) {
+      const currentKeys = await table.where("tenantId").equals(replaceTenantId).primaryKeys();
+      const incomingKeys = new Set(rows.map((row) => String(row.id)));
+      const staleKeys = currentKeys.filter((key) => !incomingKeys.has(String(key)));
+      if (staleKeys.length) await table.bulkDelete(staleKeys as any[]);
+    }
+    if (rows.length) await table.bulkPut(rows);
+  });
 }
 
 /** Retrieve cached GIS vector (GeoJSON) or raster data from Dexie IndexedDB */

@@ -30,107 +30,16 @@ export default defineConfig({
     react(),
     // ─── Progressive Web App / Service Worker ─────────────────────────────
     VitePWA({
-      // We ship a hand-written Service Worker (client/public/sw.js) that
-      // implements Background Sync for the offline outbox. VitePWA is
-      // kept only for the web app manifest — its generated SW is
-      // emitted under a non-conflicting filename and we do not register
-      // it (injectRegister:false), so only our /sw.js takes the /
-      // scope at runtime.
-      strategies: "generateSW",
+      // The hand-written worker implements the outbox and caching policies;
+      // injectManifest adds every production asset to that same worker.
+      strategies: "injectManifest",
       registerType: "autoUpdate",
       injectRegister: false,
-      filename: "_vite-pwa-sw.js",
-      workbox: {
+      srcDir: "public",
+      filename: "sw.js",
+      injectManifest: {
         maximumFileSizeToCacheInBytes: 12 * 1024 * 1024, // 12 MB to support large Leaflet/GIS modules
-        // Cache the app shell (JS/CSS/fonts/HTML)
         globPatterns: ["**/*.{js,css,html,ico,png,svg,woff2}"],
-
-        // Runtime caching strategies
-        runtimeCaching: [
-          // API GET requests — NetworkFirst (5s timeout → fallback to cache)
-          {
-            urlPattern: /^https?:\/\/.*\/api\/(?!sync\/).*/i,
-            handler: "NetworkFirst",
-            options: {
-              cacheName: "api-cache",
-              networkTimeoutSeconds: 5,
-              cacheableResponse: { statuses: [0, 200] },
-              expiration: { maxEntries: 500, maxAgeSeconds: 60 * 60 * 24 * 7 },
-            },
-          },
-          // Leaflet / OpenStreetMap tiles — CacheFirst (offline maps)
-          {
-            urlPattern: /^https:\/\/tile\.openstreetmap\.org\/.*/i,
-            handler: "CacheFirst",
-            options: {
-              cacheName: "map-tiles",
-              cacheableResponse: { statuses: [0, 200] },
-              expiration: {
-                maxEntries: 1000,
-                maxAgeSeconds: 60 * 60 * 24 * 30, // 30 days
-              },
-            },
-          },
-          // Stamen / CartoDB tiles
-          {
-            urlPattern: /^https:\/\/(a|b|c)\.basemaps\.cartocdn\.com\/.*/i,
-            handler: "CacheFirst",
-            options: {
-              cacheName: "map-tiles-carto",
-              cacheableResponse: { statuses: [0, 200] },
-              expiration: {
-                maxEntries: 500,
-                maxAgeSeconds: 60 * 60 * 24 * 30,
-              },
-            },
-          },
-          // Esri ArcGIS Satellite & Transportation Tiles
-          {
-            urlPattern: /^https:\/\/server\.arcgisonline\.com\/ArcGIS\/rest\/services\/.*/i,
-            handler: "CacheFirst",
-            options: {
-              cacheName: "map-tiles-esri",
-              cacheableResponse: { statuses: [0, 200] },
-              expiration: {
-                maxEntries: 1000,
-                maxAgeSeconds: 60 * 60 * 24 * 30,
-              },
-            },
-          },
-          // WorldPop WMS Geoserver layers
-          {
-            urlPattern: /^https:\/\/ogc\.worldpop\.org\/geoserver\/.*/i,
-            handler: "CacheFirst",
-            options: {
-              cacheName: "map-tiles-worldpop",
-              cacheableResponse: { statuses: [0, 200] },
-              expiration: {
-                maxEntries: 500,
-                maxAgeSeconds: 60 * 60 * 24 * 30,
-              },
-            },
-          },
-          // Google Fonts stylesheets
-          {
-            urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
-            handler: "StaleWhileRevalidate",
-            options: { cacheName: "google-fonts-stylesheets" },
-          },
-          // Google Fonts files
-          {
-            urlPattern: /^https:\/\/fonts\.gstatic\.com\/.*/i,
-            handler: "CacheFirst",
-            options: {
-              cacheName: "google-fonts-webfonts",
-              cacheableResponse: { statuses: [0, 200] },
-              expiration: { maxEntries: 30, maxAgeSeconds: 60 * 60 * 24 * 365 },
-            },
-          },
-        ],
-
-        // Don't cache /api/sync/* — always live
-        navigateFallback: "/index.html",
-        navigateFallbackDenylist: [/^\/api\//],
       },
       manifest: {
         name: "VaxPlan · Health Microplanning",

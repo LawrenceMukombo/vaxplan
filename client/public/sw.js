@@ -1,24 +1,3 @@
-const IS_LOCAL_PREVIEW_SW = self.location.hostname === "localhost" || self.location.hostname === "127.0.0.1";
-
-if (IS_LOCAL_PREVIEW_SW) {
-  self.addEventListener("install", (event) => {
-    event.waitUntil(self.skipWaiting());
-  });
-
-  self.addEventListener("activate", (event) => {
-    event.waitUntil(
-      (async () => {
-        const keys = await caches.keys();
-        await Promise.all(keys.map((key) => caches.delete(key)));
-        await self.registration.unregister();
-      })(),
-    );
-  });
-
-  self.addEventListener("fetch", () => {
-    // Let the network handle all local preview traffic.
-  });
-} else {
 /**
  * VaxPlan Service Worker
  * Enables offline-first functionality, PWA installability, and
@@ -39,7 +18,7 @@ const TILES_CACHE = `${CACHE_VERSION}-tiles`;
 const API_CACHE = `${CACHE_VERSION}-api`;
 
 const STATIC_ASSETS = ["/", "/manifest.json", "/offline.html"];
-const TILE_HOSTS = ["tile.openstreetmap.org", "server.arcgisonline.com", "basemaps.cartocdn.com", "ogc.worldpop.org"];
+const TILE_HOSTS = ["tile.openstreetmap.org", "tile.openstreetmap.fr", "opentopomap.org", "server.arcgisonline.com", "basemaps.cartocdn.com", "ogc.worldpop.org"];
 const MAX_TILE_CACHE_ENTRIES = 2500;
 
 const OUTBOX_SYNC_TAG = "outbox-flush";
@@ -139,7 +118,6 @@ async function cacheFirst(request, cacheName) {
   const response = await fetch(request);
   if (response.ok) await cache.put(request, response.clone());
   return response;
-}
 
 async function networkFirst(request, cacheName) {
   const cache = await caches.open(cacheName);

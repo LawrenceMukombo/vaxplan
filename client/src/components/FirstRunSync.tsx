@@ -33,7 +33,7 @@ export function FirstRunSync({ tenantId, onReady }: FirstRunSyncProps) {
     let alive = true;
     (async () => {
       try {
-        const last = await offlineDb.syncMeta.get("lastSyncAt");
+        const last = tenantId ? await offlineDb.syncMeta.get(`lastSyncAt:${tenantId}`) : null;
         // Already initialised → skip the screen entirely.
         if (last?.value) {
           if (alive) {
@@ -50,7 +50,7 @@ export function FirstRunSync({ tenantId, onReady }: FirstRunSyncProps) {
     return () => {
       alive = false;
     };
-  }, [onReady]);
+  }, [onReady, tenantId]);
 
   useEffect(() => {
     if (!needsSync || !tenantId) return;
@@ -100,9 +100,7 @@ export function FirstRunSync({ tenantId, onReady }: FirstRunSyncProps) {
               You're offline. Connect to the internet to finish first-time
               setup.
             </p>
-            <Button variant="outline" onClick={onReady} data-testid="button-skip-first-run">
-              Continue offline (limited)
-            </Button>
+            <p className="text-xs text-muted-foreground">A verified first synchronization is required before offline work can begin on this device.</p>
           </div>
         ) : (
           <div className="space-y-2">
@@ -126,14 +124,6 @@ export function FirstRunSync({ tenantId, onReady }: FirstRunSyncProps) {
                     data-testid="button-retry-first-run"
                   >
                     Retry
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={onReady}
-                    data-testid="button-skip-first-run-error"
-                  >
-                    Continue anyway
                   </Button>
                 </div>
               </div>

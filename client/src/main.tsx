@@ -103,11 +103,19 @@ window.fetch = async (input, init) => {
 
 createRoot(document.getElementById("root")!).render(<App />);
 
+// Ask the browser not to evict the field replica under ordinary storage
+// pressure. Browsers may decline, so the Settings screen still reports quota.
+if (navigator.storage?.persist) {
+  void navigator.storage.persist().then((persisted) => {
+    if (!persisted) console.warn("[VaxPlan] Persistent offline storage was not granted.");
+  });
+}
+
 // ─── Register PWA Service Worker (production + staging only) ─────────────────
 // Surface SW lifecycle to the rest of the app via window events so
 // components like InstallPrompt can offer a "Reload to update" action,
 // and the Background Sync handler can find a ready registration.
-if ("serviceWorker" in navigator && import.meta.env.PROD && !isLocalhost) {
+if ("serviceWorker" in navigator && import.meta.env.PROD) {
   window.addEventListener("load", () => {
     navigator.serviceWorker
       .register("/sw.js", { scope: "/" })
