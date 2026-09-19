@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQueries, useQuery } from "@tanstack/react-query";
 import {
   MapContainer,
   Marker,
@@ -237,6 +237,32 @@ export function OutreachPostsMap({
     return Array.from(facMap.values());
   }, [filteredPosts, facilitiesMap]);
 
+  const routeQueries = useQueries({
+    queries: linkedFacilities.map(({ facility }) => ({
+      queryKey: ["/api/facilities", facility.id, "community-routes"],
+      queryFn: async () => {
+        const response = await fetch(`/api/facilities/${facility.id}/community-routes`, {
+          credentials: "include",
+        });
+        if (!response.ok) throw new Error("Failed to load outreach road routes");
+        return response.json() as Promise<any[]>;
+      },
+      staleTime: 6 * 60 * 60 * 1000,
+      enabled: showFlightLines,
+    })),
+  });
+
+  const routeByVillageId = useMemo(() => {
+    const map = new Map<number, any>();
+    routeQueries.forEach((query) => {
+      if (!Array.isArray(query.data)) return;
+      query.data.forEach((route: any) => {
+        if (route?.villageId != null) map.set(Number(route.villageId), route);
+      });
+    });
+    return map;
+  }, [routeQueries.map((query) => query.dataUpdatedAt).join("|")]);
+
   // Aggregate stats
   const metrics = useMemo(() => {
     const totalPop = filteredPosts.reduce((acc, v) => acc + (Number(v.population) || 0), 0);
@@ -307,63 +333,10 @@ export function OutreachPostsMap({
 
   return (
     <div className="space-y-4">
-      {/* Top Controls & Metrics Card */}
+      {/* Map Controls Toolbar */}
       <Card className="bg-card border-border/50 shadow-xs">
-        <CardContent className="p-4 space-y-4">
-          {/* Metrics summary bar */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <div className="bg-purple-500/10 border border-purple-500/20 rounded-lg p-3">
-              <div className="flex items-center justify-between text-purple-600 dark:text-purple-400 mb-1">
-                <span className="text-xs font-semibold uppercase tracking-wider">Configured Posts</span>
-                <Send className="h-4 w-4" />
-              </div>
-              <div className="text-xl font-bold text-foreground">
-                {metrics.displayed}
-                {metrics.displayed !== metrics.totalConfigured && (
-                  <span className="text-xs font-normal text-muted-foreground ml-1">
-                    of {metrics.totalConfigured}
-                  </span>
-                )}
-              </div>
-              <p className="text-[11px] text-muted-foreground">Mapped immunization sites</p>
-            </div>
-
-            <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-3">
-              <div className="flex items-center justify-between text-blue-600 dark:text-blue-400 mb-1">
-                <span className="text-xs font-semibold uppercase tracking-wider">Target Population</span>
-                <Users className="h-4 w-4" />
-              </div>
-              <div className="text-xl font-bold text-foreground">
-                {metrics.totalPop.toLocaleString()}
-              </div>
-              <p className="text-[11px] text-muted-foreground">Catchment reached</p>
-            </div>
-
-            <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-lg p-3">
-              <div className="flex items-center justify-between text-emerald-600 dark:text-emerald-400 mb-1">
-                <span className="text-xs font-semibold uppercase tracking-wider">Host Facilities</span>
-                <Hospital className="h-4 w-4" />
-              </div>
-              <div className="text-xl font-bold text-foreground">
-                {linkedFacilities.length}
-              </div>
-              <p className="text-[11px] text-muted-foreground">Supporting health facilities</p>
-            </div>
-
-            <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg p-3">
-              <div className="flex items-center justify-between text-amber-600 dark:text-amber-400 mb-1">
-                <span className="text-xs font-semibold uppercase tracking-wider">Avg HF Reach</span>
-                <Compass className="h-4 w-4" />
-              </div>
-              <div className="text-xl font-bold text-foreground">
-                {metrics.avgDist} <span className="text-xs font-normal text-muted-foreground">km</span>
-              </div>
-              <p className="text-[11px] text-muted-foreground">Mean distance from post to HF</p>
-            </div>
-          </div>
-
-          {/* Filter Bar */}
-          <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3 pt-1 border-t border-border/40">
+        <CardContent className="p-3">
+          <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3">
             <div className="flex flex-wrap items-center gap-2 flex-1">
               <div className="relative min-w-[200px] flex-1 max-w-sm">
                 <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
@@ -434,7 +407,7 @@ export function OutreachPostsMap({
                 className="h-8 text-xs gap-1.5"
               >
                 <Activity className="h-3.5 w-3.5 text-purple-600" />
-                Flight Lines
+                Road Routes
               </Button>
 
               <Button
@@ -456,18 +429,6 @@ export function OutreachPostsMap({
                 <Compass className="h-3.5 w-3.5 text-emerald-600" />
                 5km Radius
               </Button>
-
-              {onSwitchToTable && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={onSwitchToTable}
-                  className="h-8 text-xs gap-1.5"
-                >
-                  <List className="h-3.5 w-3.5" />
-                  Directory Table
-                </Button>
-              )}
             </div>
           </div>
         </CardContent>
@@ -503,7 +464,7 @@ export function OutreachPostsMap({
           {showFlightLines && (
             <div className="flex items-center gap-2">
               <div className="w-6 border-t-2 border-dashed border-purple-500 shrink-0"></div>
-              <span className="text-muted-foreground">Outreach Reach Line</span>
+              <span className="text-muted-foreground">Road route (dashed when estimated)</span>
             </div>
           )}
           {showReachRadius && (
@@ -606,7 +567,7 @@ export function OutreachPostsMap({
               );
             })}
 
-          {/* Flight Lines connecting Outreach Posts to Host Facilities */}
+          {/* Real road-network routes connecting host facilities to outreach posts. */}
           {showFlightLines &&
             filteredPosts.map((post) => {
               const postLat = parseFloat(String(post.outreachLatitude));
@@ -617,18 +578,24 @@ export function OutreachPostsMap({
               const facLng = parseFloat(String(fac.longitude));
               if (isNaN(postLat) || isNaN(postLng) || isNaN(facLat) || isNaN(facLng)) return null;
 
+              const route = routeByVillageId.get(Number(post.id));
+              const hasRoadGeometry = route?.hasRoadGeometry !== false &&
+                route?.routeSource !== "estimate" &&
+                Array.isArray(route?.routeGeometry) &&
+                route.routeGeometry.length >= 2;
+              const positions: [number, number][] = hasRoadGeometry
+                ? route.routeGeometry.map(([lng, lat]: [number, number]) => [Number(lat), Number(lng)])
+                : [[facLat, facLng], [postLat, postLng]];
+
               return (
                 <Polyline
                   key={`line-${post.id}-${fac.id}`}
-                  positions={[
-                    [postLat, postLng],
-                    [facLat, facLng],
-                  ]}
+                  positions={positions}
                   pathOptions={{
-                    color: "#8b5cf6",
-                    weight: 2,
-                    dashArray: "5, 6",
-                    opacity: 0.7,
+                    color: hasRoadGeometry ? "#2563eb" : "#8b5cf6",
+                    weight: hasRoadGeometry ? 4 : 2,
+                    dashArray: hasRoadGeometry ? undefined : "5, 6",
+                    opacity: hasRoadGeometry ? 0.85 : 0.6,
                   }}
                 />
               );
