@@ -12,12 +12,21 @@
  *   POST /api/sync/batch even when the page/PWA is closed.
  */
 
-const CACHE_VERSION = "vaxplan-v6";
+const CACHE_VERSION = "vaxplan-v8";
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
 const TILES_CACHE = `${CACHE_VERSION}-tiles`;
 const API_CACHE = `${CACHE_VERSION}-api`;
 
-const STATIC_ASSETS = ["/", "/manifest.json", "/offline.html"];
+const STATIC_ASSETS = [
+  "/",
+  "/index.html",
+  "/manifest.webmanifest",
+  "/offline.html",
+  "/favicon.ico",
+  "/favicon.png",
+  "/icons/icon-192.png",
+  "/icons/icon-512.png"
+];
 const TILE_HOSTS = ["tile.openstreetmap.org", "tile.openstreetmap.fr", "opentopomap.org", "server.arcgisonline.com", "basemaps.cartocdn.com", "ogc.worldpop.org"];
 const MAX_TILE_CACHE_ENTRIES = 2500;
 
@@ -37,7 +46,7 @@ const BATCH_ENDPOINT = "/api/sync/batch";
 // eslint-disable-next-line no-undef
 const WB_MANIFEST = self.__WB_MANIFEST || [];
 
-// â”€â”€â”€ Install: pre-cache critical assets â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Install: pre-cache critical assets ─────────────────────────────────────
 self.addEventListener("install", (event) => {
   event.waitUntil(
     (async () => {
@@ -61,7 +70,7 @@ self.addEventListener("install", (event) => {
   );
 });
 
-// â”€â”€â”€ Activate: clean up old cache versions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Activate: clean up old cache versions ──────────────────────────────────
 self.addEventListener("activate", (event) => {
   event.waitUntil(
     (async () => {
@@ -88,7 +97,7 @@ self.addEventListener("message", (event) => {
   }
 });
 
-// â”€â”€â”€ Fetch: routing logic â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Fetch: routing logic ───────────────────────────────────────────────────
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
   if (event.request.method !== "GET") return;
@@ -115,15 +124,24 @@ async function cacheFirst(request, cacheName) {
   const cache = await caches.open(cacheName);
   const cached = await cache.match(request);
   if (cached) return cached;
-  const response = await fetch(request);
-  if (response.ok) await cache.put(request, response.clone());
-  return response;
+  try {
+    const response = await fetch(request);
+    if (response && response.ok) {
+      await cache.put(request, response.clone());
+    }
+    return response;
+  } catch (err) {
+    return cached || new Response("", { status: 408 });
+  }
+}
 
 async function networkFirst(request, cacheName) {
   const cache = await caches.open(cacheName);
   try {
     const response = await fetch(request);
-    if (response.ok) await cache.put(request, response.clone());
+    if (response && response.ok) {
+      await cache.put(request, response.clone());
+    }
     return response;
   } catch {
     const cached = await cache.match(request);
@@ -138,19 +156,25 @@ async function networkFirst(request, cacheName) {
 async function navigationStrategy(request) {
   try {
     const response = await fetch(request);
-    if (response.ok) {
+    if (response && response.ok) {
       const cache = await caches.open(STATIC_CACHE);
       await cache.put(request, response.clone());
+      await cache.put("/index.html", response.clone());
+      await cache.put("/", response.clone());
     }
     return response;
   } catch {
     const cache = await caches.open(STATIC_CACHE);
-    const cached = (await cache.match("/")) || (await cache.match("/offline.html"));
+    const cached =
+      (await cache.match(request, { ignoreSearch: true })) ||
+      (await cache.match("/index.html")) ||
+      (await cache.match("/")) ||
+      (await cache.match("/offline.html"));
     return (
       cached ||
-      new Response("VaxPlan is offline. Please check your connection.", {
-        status: 503,
-        headers: { "Content-Type": "text/plain" },
+      new Response("<!DOCTYPE html><html><head><title>VaxPlan</title></head><body>VaxPlan is loading offline...</body></html>", {
+        status: 200,
+        headers: { "Content-Type": "text/html" },
       })
     );
   }
@@ -162,7 +186,7 @@ async function tileStrategy(request) {
   if (cached) return cached;
   try {
     const response = await fetch(request);
-    if (response.ok) {
+    if (response && response.ok) {
       const keys = await cache.keys();
       if (keys.length >= MAX_TILE_CACHE_ENTRIES) {
         await cache.delete(keys[0]);
@@ -175,7 +199,7 @@ async function tileStrategy(request) {
   }
 }
 
-// â”€â”€â”€ Background Sync: flush the offline outbox â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Background Sync: flush the offline outbox ───────────────────────────────
 self.addEventListener("sync", (event) => {
   if (event.tag === OUTBOX_SYNC_TAG) {
     event.waitUntil(drainOutbox());
@@ -187,12 +211,7 @@ async function notifyClients(type, payload = {}) {
   clients.forEach((c) => c.postMessage({ type, ...payload }));
 }
 
-/**
- * Open the Dexie-managed IndexedDB without creating/upgrading it.
- * We rely on the page having already created the DB with its schema â€”
- * the SW only reads/writes existing object stores.
- */
-function openOutboxDb() {
+function openDatabase() {
   return new Promise((resolve, reject) => {
     const req = indexedDB.open(OUTBOX_DB_NAME);
     req.onsuccess = () => resolve(req.result);
@@ -200,285 +219,142 @@ function openOutboxDb() {
   });
 }
 
-function idbAll(db, storeName) {
+function readAllOutbox(db) {
   return new Promise((resolve, reject) => {
-    let store;
     try {
-      store = db.transaction(storeName, "readonly").objectStore(storeName);
-    } catch (err) {
-      reject(err);
-      return;
+      const tx = db.transaction(OUTBOX_STORE, "readonly");
+      const store = tx.objectStore(OUTBOX_STORE);
+      const req = store.getAll();
+      req.onsuccess = () => resolve(req.result || []);
+      req.onerror = () => reject(req.error);
+    } catch (e) {
+      resolve([]);
     }
-    const req = store.getAll();
-    req.onsuccess = () => resolve(req.result || []);
-    req.onerror = () => reject(req.error);
   });
 }
 
-function idbDelete(db, storeName, key) {
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(storeName, "readwrite");
-    tx.objectStore(storeName).delete(key);
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
-  });
-}
-
-function idbPut(db, storeName, value) {
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(storeName, "readwrite");
-    tx.objectStore(storeName).put(value);
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
-  });
-}
-
-function idbUpdate(db, storeName, key, patch) {
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(storeName, "readwrite");
-    const store = tx.objectStore(storeName);
-    const getReq = store.get(key);
-    getReq.onsuccess = () => {
-      const existing = getReq.result;
-      if (!existing) {
-        resolve();
-        return;
-      }
-      store.put({ ...existing, ...patch });
-    };
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
-  });
-}
-
-function idbGet(db, storeName, key) {
-  return new Promise((resolve, reject) => {
-    let req;
-    try {
-      req = db.transaction(storeName, "readonly").objectStore(storeName).get(key);
-    } catch (err) {
-      reject(err);
-      return;
-    }
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-  });
-}
-
-async function acquireLease(db, owner) {
-  // Read-then-write inside one txn for atomicity.
-  return new Promise((resolve, reject) => {
-    let tx;
-    try {
-      tx = db.transaction(SYNC_META_STORE, "readwrite");
-    } catch (err) {
-      // syncMeta store missing â€” treat as no lease available rather than crash.
-      resolve(false);
-      return;
-    }
-    const store = tx.objectStore(SYNC_META_STORE);
-    const getReq = store.get(OUTBOX_LEASE_KEY);
-    let granted = false;
-    getReq.onsuccess = () => {
-      const existing = getReq.result;
-      const now = Date.now();
-      let parsed = null;
-      if (existing && typeof existing.value === "string") {
-        try { parsed = JSON.parse(existing.value); } catch { parsed = null; }
-      }
-      if (parsed && typeof parsed.expiresAt === "number" && parsed.expiresAt > now) {
-        granted = false;
-        return;
-      }
-      store.put({
-        key: OUTBOX_LEASE_KEY,
-        value: JSON.stringify({ ownerId: owner, expiresAt: now + OUTBOX_LEASE_TTL_MS }),
-      });
-      granted = true;
-    };
-    tx.oncomplete = () => resolve(granted);
-    tx.onerror = () => reject(tx.error);
-  });
-}
-
-async function releaseLease(db, owner) {
+async function acquireWorkerOutboxLease(db) {
   return new Promise((resolve) => {
-    let tx;
     try {
-      tx = db.transaction(SYNC_META_STORE, "readwrite");
+      const tx = db.transaction(SYNC_META_STORE, "readwrite");
+      const store = tx.objectStore(SYNC_META_STORE);
+      const getReq = store.get(OUTBOX_LEASE_KEY);
+      getReq.onsuccess = () => {
+        const now = Date.now();
+        const current = getReq.result?.value;
+        const expiresAt = current ? Number(current.split(":")[1]) : 0;
+        if (current && expiresAt > now) {
+          resolve(false);
+          return;
+        }
+        const leaseVal = `sw:${now + OUTBOX_LEASE_TTL_MS}`;
+        store.put({ key: OUTBOX_LEASE_KEY, value: leaseVal });
+        tx.oncomplete = () => resolve(true);
+        tx.onerror = () => resolve(false);
+      };
+      getReq.onerror = () => resolve(false);
+    } catch {
+      resolve(false);
+    }
+  });
+}
+
+async function releaseWorkerOutboxLease(db) {
+  return new Promise((resolve) => {
+    try {
+      const tx = db.transaction(SYNC_META_STORE, "readwrite");
+      const store = tx.objectStore(SYNC_META_STORE);
+      store.delete(OUTBOX_LEASE_KEY);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => resolve();
     } catch {
       resolve();
-      return;
     }
-    const store = tx.objectStore(SYNC_META_STORE);
-    const getReq = store.get(OUTBOX_LEASE_KEY);
-    getReq.onsuccess = () => {
-      const existing = getReq.result;
-      let parsed = null;
-      if (existing && typeof existing.value === "string") {
-        try { parsed = JSON.parse(existing.value); } catch { parsed = null; }
-      }
-      if (parsed && parsed.ownerId === owner) {
-        store.delete(OUTBOX_LEASE_KEY);
-      }
-    };
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => resolve();
   });
 }
 
 async function drainOutbox() {
-  await notifyClients("OUTBOX_SYNC_STARTED");
-
   let db;
   try {
-    db = await openOutboxDb();
-  } catch (err) {
-    await notifyClients("OUTBOX_SYNC_FINISHED", { ok: false, reason: "db-open-failed" });
-    return;
-  }
-
-  // Try to take the cross-context flush lease. If the page-side
-  // syncEngine.flush() currently holds it, bail â€” it will broadcast
-  // its own completion and the SW will be re-triggered if anything
-  // still needs flushing.
-  const owner = `sw-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  let leased = false;
-  try {
-    leased = await acquireLease(db, owner);
+    db = await openDatabase();
   } catch {
-    leased = false;
-  }
-  if (!leased) {
-    await notifyClients("OUTBOX_SYNC_FINISHED", { ok: false, reason: "leased" });
     return;
   }
-
-  let processed = 0;
-  let succeeded = 0;
-  let succeededFinish = false;
-  let earlyExitReason = null;
-  let conflicts = 0;
-
+  const hasLease = await acquireWorkerOutboxLease(db);
+  if (!hasLease) {
+    db.close();
+    return;
+  }
   try {
-    const all = await idbAll(db, OUTBOX_STORE);
-    // Group by tenantId so each batch matches what /api/sync/batch expects.
-    const byTenant = new Map();
-    for (const item of all) {
-      if ((item.retries || 0) >= MAX_RETRIES) continue;
-      const key = item.tenantId || "default";
-      if (!byTenant.has(key)) byTenant.set(key, []);
-      byTenant.get(key).push(item);
+    const items = await readAllOutbox(db);
+    const pending = items.filter((i) => i.retries < MAX_RETRIES);
+    if (pending.length === 0) return;
+
+    await notifyClients("OUTBOX_FLUSH_START", { count: pending.length });
+
+    const payload = {
+      items: pending.map((item) => ({
+        outboxId: item.id,
+        tenantId: item.tenantId,
+        entityType: item.entityType,
+        method: item.method,
+        url: item.url,
+        body: item.body ? JSON.parse(item.body) : undefined,
+        localId: item.localId,
+      })),
+    };
+
+    const res = await fetch(BATCH_ENDPOINT, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+
+    if (!res.ok) {
+      await notifyClients("OUTBOX_FLUSH_ERROR", { status: res.status });
+      return;
     }
 
-    for (const [tenantId, pending] of byTenant) {
-      if (!pending.length) continue;
-      processed += pending.length;
+    const data = await res.json();
+    const results = data.results || [];
 
-      let resp;
-      try {
-        resp = await fetch(BATCH_ENDPOINT, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "x-tenant-id": tenantId,
-          },
-          credentials: "include",
-          body: JSON.stringify({ mutations: pending }),
-        });
-      } catch {
-        // Network died mid-flight â€” the browser will fire 'sync' again
-        // automatically when connectivity returns. Bail without bumping
-        // retry counters so we don't burn the budget on transient errors.
-        earlyExitReason = "network";
-        break;
-      }
+    const tx = db.transaction([OUTBOX_STORE, CONFLICT_STORE], "readwrite");
+    const outboxStore = tx.objectStore(OUTBOX_STORE);
+    const conflictStore = tx.objectStore(CONFLICT_STORE);
 
-      if (resp.status === 401 || resp.status === 403) {
-        // Auth lost â€” leave items in place; user will log in and we
-        // try again on the next sync trigger.
-        earlyExitReason = "auth";
-        break;
-      }
-
-      if (!resp.ok) {
-        // Server-side error â€” bump retries on the whole batch.
-        for (const item of pending) {
-          if (item.id != null) {
-            await idbUpdate(db, OUTBOX_STORE, item.id, {
-              retries: (item.retries || 0) + 1,
-              lastError: `HTTP ${resp.status}`,
+    for (const r of results) {
+      if (r.success) {
+        outboxStore.delete(r.outboxId);
+      } else {
+        const item = pending.find((i) => i.id === r.outboxId);
+        if (item) {
+          item.retries += 1;
+          item.lastError = r.error;
+          if (item.retries >= MAX_RETRIES) {
+            conflictStore.put({
+              tenantId: item.tenantId,
+              entityType: item.entityType,
+              entityId: item.localId || String(item.id),
+              clientValue: item.body || "",
+              serverValue: JSON.stringify({ error: r.error }),
+              resolvedAt: Date.now(),
             });
           }
-        }
-        continue;
-      }
-
-      let parsed = { results: [] };
-      try {
-        parsed = await resp.json();
-      } catch {
-        /* tolerate empty body */
-      }
-      const results = (parsed && parsed.results) || [];
-
-      for (const result of results) {
-        const item = pending.find((p) => p.id === result.outboxId);
-        if (!item) continue;
-        if (result.success) {
-          succeeded += 1;
-          if (item.id != null) await idbDelete(db, OUTBOX_STORE, item.id);
-        } else {
-          // Treat 409-style errors as conflicts; everything else as retryable.
-          const isConflict =
-            result.error &&
-            /conflict|version|already exists|duplicate/i.test(String(result.error));
-          if (isConflict) {
-            conflicts += 1;
-            try {
-              await idbPut(db, CONFLICT_STORE, {
-                tenantId: item.tenantId,
-                entityType: item.entityType,
-                localId: item.localId,
-                serverError: String(result.error),
-                attemptedPayload: item.body,
-                detectedAt: Date.now(),
-                resolved: false,
-              });
-            } catch {
-              /* conflictLog store may not exist on older DB versions */
-            }
-            if (item.id != null) await idbDelete(db, OUTBOX_STORE, item.id);
-          } else if (item.id != null) {
-            await idbUpdate(db, OUTBOX_STORE, item.id, {
-              retries: (item.retries || 0) + 1,
-              lastError: String(result.error || "Unknown error"),
-            });
-          }
+          outboxStore.put(item);
         }
       }
     }
-    succeededFinish = !earlyExitReason;
+
+    await new Promise((resolve, reject) => {
+      tx.oncomplete = resolve;
+      tx.onerror = reject;
+    });
+
+    await notifyClients("OUTBOX_FLUSH_COMPLETE", { results });
   } catch (err) {
-    earlyExitReason = "exception";
+    await notifyClients("OUTBOX_FLUSH_ERROR", { message: err.message });
   } finally {
-    await releaseLease(db, owner);
-  }
-
-  if (succeededFinish) {
-    await notifyClients("OUTBOX_SYNC_FINISHED", {
-      ok: true,
-      processed,
-      succeeded,
-      conflicts,
-    });
-  } else {
-    await notifyClients("OUTBOX_SYNC_FINISHED", {
-      ok: false,
-      reason: earlyExitReason || "unknown",
-    });
+    await releaseWorkerOutboxLease(db);
+    db.close();
   }
 }
-
-}
-

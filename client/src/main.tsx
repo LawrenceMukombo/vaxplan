@@ -2,34 +2,9 @@ import { createRoot } from "react-dom/client";
 import App from "./App";
 import "./index.css";
 
-// ─── Dev-only Service Worker kill switch ────────────────────────────────────
-// The PWA service worker (/sw.js) is registered only in production, but once
-// installed it persists on the origin and serves stale, Cache-First assets —
-// which shows up as a blank screen in the dev preview. In dev we proactively
-// unregister any leftover worker and purge its caches so the preview always
-// loads fresh. No-op when no worker is present.
-const isLocalhost = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
-
-if ((import.meta.env.DEV || isLocalhost) && "serviceWorker" in navigator) {
-  navigator.serviceWorker
-    .getRegistrations()
-    .then((regs) => {
-      if (regs.length > 0) {
-        console.info("[VaxPlan] Dev mode: removing stale service worker(s).");
-      }
-      return Promise.all(regs.map((r) => r.unregister()));
-    })
-    .then(() => {
-      if ("caches" in window) {
-        return caches
-          .keys()
-          .then((keys) => Promise.all(keys.map((k) => caches.delete(k))));
-      }
-    })
-    .catch(() => {
-      /* best-effort cleanup */
-    });
-}
+// Service workers are supported on secure origins and localhost. Keeping the
+// worker enabled on localhost is essential: field/offline acceptance tests are
+// performed there before a release is deployed.
 
 // ─── Global Fetch Interceptor for Tenant Context Persistence ─────────────────
 import { resolveApiUrl, isNativeShell } from "./lib/apiBase";
@@ -111,11 +86,21 @@ if (navigator.storage?.persist) {
   });
 }
 
+// ─── Dev-only Service Worker kill switch ────────────────────────────────────
+// Only unregister service worker in Vite development mode (import.meta.env.DEV).
+// In production builds (including localhost:5000 and production VPS), allow SW to install and cache.
+if (import.meta.env.DEV && "serviceWorker" in navigator) {
+  navigator.serviceWorker
+    .getRegistrations()
+    .then((regs) => Promise.all(regs.map((r) => r.unregister())))
+    .catch(() => {});
+}
+
 // ─── Register PWA Service Worker (production + staging only) ─────────────────
 // Surface SW lifecycle to the rest of the app via window events so
 // components like InstallPrompt can offer a "Reload to update" action,
 // and the Background Sync handler can find a ready registration.
-if ("serviceWorker" in navigator && import.meta.env.PROD) {
+if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
     navigator.serviceWorker
       .register("/sw.js", { scope: "/" })
