@@ -933,14 +933,17 @@ export default function Facilities({ initialTab, initialView }: FacilitiesProps 
   // Global Boundary GIS Centroid Extractor mutation
   const globalExtractMutation = useMutation({
     mutationFn: async () => {
-      return apiRequest("POST", "/api/villages/extract", {});
+      return apiRequest("POST", "/api/villages/extract", {
+        provinceId: selectedProvinceId,
+        districtId: selectedDistrictId,
+      });
     },
     onSuccess: (res: any) => {
       queryClient.invalidateQueries({ queryKey: ["/api/villages"] });
       queryClient.invalidateQueries({ queryKey: ["/api/facilities"] });
       queryClient.invalidateQueries({ queryKey: ["/api/population"] });
       toast({
-        title: "GIS Extraction Successful",
+        title: "GIS Extraction Complete",
         description: res.message || "Communities successfully extracted from boundary map features.",
       });
     },

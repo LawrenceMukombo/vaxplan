@@ -670,16 +670,42 @@ export function registerCommunityRoutes(app: Express) {
         });
       }
 
-      const districtMap = new Map<string, number>();
-      allDistricts.forEach((d) => districtMap.set(d.name.toLowerCase().trim(), d.id));
+      const requestedProvinceId = Number(req.body?.provinceId) || null;
+      const requestedDistrictId = Number(req.body?.districtId) || null;
+      const scopedDistricts = requestedDistrictId
+        ? allDistricts.filter((d) => Number(d.id) === requestedDistrictId)
+        : requestedProvinceId
+          ? allDistricts.filter((d: any) => Number(d.provinceId) === requestedProvinceId)
+          : allDistricts;
 
-      const allFacilities = await storage.getFacilities(req.tenantId);
+      if (scopedDistricts.length === 0) {
+        extractionStatus.delete(req.tenantId);
+        return res.status(400).json({
+          success: false,
+          message: "The selected geographic scope does not contain any configured districts.",
+        });
+      }
+
+      const scopedDistrictIds = new Set(scopedDistricts.map((d) => Number(d.id)));
+      const districtMap = new Map<string, number>();
+      scopedDistricts.forEach((d) => districtMap.set(d.name.toLowerCase().trim(), d.id));
+
+      const allFacilities = (await storage.getFacilities(req.tenantId)).filter((facility) =>
+        scopedDistrictIds.has(Number(facility.districtId)),
+      );
 
       const existingVillages = await storage.getVillages(req.tenantId);
-      const existingNames = new Set(existingVillages.map((v) => v.name.toLowerCase().trim()));
+      const existingByDistrictAndName = new Map(
+        existingVillages.map((v) => [
+          `${Number(v.districtId)}:${v.name.toLowerCase().trim()}`,
+          v,
+        ]),
+      );
 
       const created: any[] = [];
+      const synchronized: any[] = [];
       const skipped: string[] = [];
+      const pendingKeys = new Set<string>();
 
       extractionStatus.set(req.tenantId, {
         current: 0,
@@ -714,11 +740,6 @@ export function registerCommunityRoutes(app: Express) {
           `Community Cluster ${i + 1}`;
         const name = String(rawName).trim();
 
-        if (existingNames.has(name.toLowerCase())) {
-          skipped.push(name);
-          continue;
-        }
-
         const centroid = getCentroid(feature.geometry);
         if (!centroid) {
           skipped.push(`${name} (No valid polygon coordinates)`);
@@ -746,8 +767,15 @@ export function registerCommunityRoutes(app: Express) {
             break;
           }
         }
-        if (!districtId && allDistricts.length > 0) {
-          districtId = allDistricts[0].id;
+        if (!districtId && requestedDistrictId) {
+          districtId = requestedDistrictId;
+        }
+        if (!districtId && scopedDistricts.length === 1) {
+          districtId = scopedDistricts[0].id;
+        }
+        if (!districtId || !scopedDistrictIds.has(Number(districtId))) {
+          skipped.push(`${name} (outside selected scope or district could not be resolved)`);
+          continue;
         }
 
         let assignedFacilityId: number | null = null;
@@ -775,7 +803,7 @@ export function registerCommunityRoutes(app: Express) {
         const village = {
           tenantId: req.tenantId,
           name,
-          districtId: districtId || allDistricts[0].id,
+          districtId,
           assignedFacilityId,
           latitude: lat.toFixed(6),
           longitude: lng.toFixed(6),
@@ -789,8 +817,32 @@ export function registerCommunityRoutes(app: Express) {
           notes: `Centroid extracted from administrative boundary layer: ${targetBoundary.levelName || "Admin"}`,
         };
 
+        const villageKey = `${Number(districtId)}:${name.toLowerCase()}`;
+        const existing = existingByDistrictAndName.get(villageKey);
+        if (existing) {
+          const updated = await storage.updateVillage(req.tenantId, existing.id, {
+            latitude: village.latitude,
+            longitude: village.longitude,
+            boundary: village.boundary,
+            assignedFacilityId: village.assignedFacilityId,
+            distanceToFacility: village.distanceToFacility,
+            travelTimeMinutes: village.travelTimeMinutes,
+            transportMode: village.transportMode,
+            seasonalAccessibility: village.seasonalAccessibility,
+            settlementType: village.settlementType,
+            isHardToReach: village.isHardToReach,
+            notes: village.notes,
+          } as any);
+          if (updated) synchronized.push(updated);
+          continue;
+        }
+        if (pendingKeys.has(villageKey)) {
+          skipped.push(`${name} (duplicate map feature)`);
+          continue;
+        }
+
         created.push(village);
-        existingNames.add(name.toLowerCase());
+        pendingKeys.add(villageKey);
       }
 
       const inserted: any[] = [];
@@ -819,16 +871,19 @@ export function registerCommunityRoutes(app: Express) {
 
       await logAudit(req, "extract_villages", "villages", null, null, {
         totalExtracted: inserted.length,
+        totalSynchronized: synchronized.length,
         skippedCount: skipped.length,
         boundaryLayer: targetBoundary.levelName || "Admin",
       });
 
       res.status(200).json({
         success: true,
-        message: `Successfully extracted and created ${inserted.length} spatial village centroids from ${targetBoundary.levelName || "Admin"}.`,
+        message: `Map extraction complete: ${inserted.length} created, ${synchronized.length} synchronized, ${skipped.length} skipped from ${targetBoundary.levelName || "Admin"}.`,
         createdCount: inserted.length,
+        updatedCount: synchronized.length,
         skippedCount: skipped.length,
         created: inserted,
+        updated: synchronized,
       });
     } catch (error: any) {
       extractionStatus.delete(req.tenantId);

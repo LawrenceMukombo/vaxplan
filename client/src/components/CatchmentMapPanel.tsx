@@ -285,6 +285,8 @@ function DrawingController({
   onClose,
   onPolygonComplete,
   snapCoords = [],
+  allowedBoundary,
+  onInvalidPoint,
   onPointCountChange,
   finishTriggerRef,
 }: {
@@ -292,6 +294,8 @@ function DrawingController({
   onClose: () => void;
   onPolygonComplete: (coords: [number, number][]) => void;
   snapCoords?: [number, number][];
+  allowedBoundary?: [number, number][];
+  onInvalidPoint?: () => void;
   onPointCountChange?: (count: number) => void;
   finishTriggerRef?: React.MutableRefObject<(() => void) | null>;
 }) {
@@ -312,6 +316,12 @@ function DrawingController({
   const snapCoordsRef = useRef(snapCoords);
   snapCoordsRef.current = snapCoords;
 
+  const allowedBoundaryRef = useRef(allowedBoundary);
+  allowedBoundaryRef.current = allowedBoundary;
+
+  const onInvalidPointRef = useRef(onInvalidPoint);
+  onInvalidPointRef.current = onInvalidPoint;
+
   useEffect(() => {
     if (!mode) return;
     map.closePopup();
@@ -320,6 +330,7 @@ function DrawingController({
 
     const lg = L.layerGroup().addTo(map);
     lgRef.current = lg;
+    map.getContainer().classList.add("catchment-polygon-drawing");
     map.getContainer().style.cursor = "crosshair";
     const color = mode === "catchment" ? "#1a56db" : "#e67e22";
 
@@ -329,6 +340,7 @@ function DrawingController({
       fillColor: "#10b981",
       fillOpacity: 0.85,
       weight: 2,
+      interactive: false,
     });
     snapMarkerRef.current = snapMarker;
 
@@ -336,10 +348,10 @@ function DrawingController({
       lg.clearLayers();
       const pts = pointsRef.current;
       if (pts.length > 1) {
-        L.polyline([...pts, pts[0]], { color, weight: 2.5, dashArray: "6,4", opacity: 0.85 }).addTo(lg);
+        L.polyline([...pts, pts[0]], { color, weight: 2.5, dashArray: "6,4", opacity: 0.85, interactive: false }).addTo(lg);
       }
       pts.forEach((pt) =>
-        L.circleMarker(pt, { radius: 5, color: "#fff", fillColor: color, fillOpacity: 1, weight: 2 }).addTo(lg)
+        L.circleMarker(pt, { radius: 5, color: "#fff", fillColor: color, fillOpacity: 1, weight: 2, interactive: false }).addTo(lg)
       );
     };
 
@@ -347,7 +359,7 @@ function DrawingController({
       const pts = pointsRef.current;
       if (pts.length < 3) return;
       lg.clearLayers();
-      L.polygon(pts, { color, fillOpacity: 0.18, weight: 3 }).addTo(lg);
+      L.polygon(pts, { color, fillOpacity: 0.18, weight: 3, interactive: false }).addTo(lg);
       onPolygonCompleteRef.current([...pts]);
       cleanup();
     };
@@ -372,6 +384,23 @@ function DrawingController({
     const onClick = (e: L.LeafletMouseEvent) => {
       const currentSnap = snapCoordsRef.current;
       const snapped = findSnapPoint(e.latlng.lat, e.latlng.lng, currentSnap, map, 18);
+      const boundary = allowedBoundaryRef.current;
+      if (mode === "community" && boundary && boundary.length >= 3) {
+        try {
+          const inside = turf.booleanPointInPolygon(
+            turf.point([snapped[1], snapped[0]]),
+            turf.polygon([toGeoRing(boundary)]),
+            { ignoreBoundary: false },
+          );
+          if (!inside) {
+            onInvalidPointRef.current?.();
+            return;
+          }
+        } catch {
+          onInvalidPointRef.current?.();
+          return;
+        }
+      }
       pointsRef.current = [...pointsRef.current, snapped];
       onPointCountChangeRef.current?.(pointsRef.current.length);
       redraw();
@@ -401,6 +430,7 @@ function DrawingController({
       map.off("mousemove", onMouseMove);
       map.off("dblclick", onDblClick);
       document.removeEventListener("keydown", onKey);
+      map.getContainer().classList.remove("catchment-polygon-drawing");
       map.getContainer().style.cursor = "";
       if (finishTriggerRef) finishTriggerRef.current = null;
       onPointCountChangeRef.current?.(0);
@@ -1050,9 +1080,19 @@ export function CatchmentMapPanel({
   };
 
   // --- Population balance ------------------------------------------------------
-  const communityPopSum = communityPolygons.reduce((s, p) => s + (p.griddedPopulation ?? 0), 0);
+  const rawCommunityPopSum = communityPolygons.reduce((s, p) => s + (p.griddedPopulation ?? 0), 0);
   const catchmentPop = catchment?.gridPopulation ?? 0;
+  const populationScale = catchmentPop > 0 && rawCommunityPopSum > catchmentPop
+    ? catchmentPop / rawCommunityPopSum
+    : 1;
+  const communityPopSum = Math.round(rawCommunityPopSum * populationScale);
+  const isPopulationOverAllocated = catchmentPop > 0 && rawCommunityPopSum > catchmentPop;
+  const rawBalancePct = catchmentPop > 0 ? Math.round((rawCommunityPopSum / catchmentPop) * 100) : 0;
   const balancePct = catchmentPop > 0 ? Math.min(100, Math.round((communityPopSum / catchmentPop) * 100)) : 0;
+  const displayCommunityPopulation = (polygon?: CommunityPolygon) =>
+    polygon?.griddedPopulation
+      ? Math.round(polygon.griddedPopulation * populationScale)
+      : 0;
 
   const center: [number, number] = [facilityLat, facilityLng];
 
@@ -1382,6 +1422,7 @@ export function CatchmentMapPanel({
 
       {/* ── Interactive Map Container ── */}
       <div className="relative h-[440px] w-full overflow-hidden rounded-xl border shadow-sm sm:h-[520px]">
+        <style>{`.catchment-polygon-drawing .leaflet-interactive { pointer-events: none !important; }`}</style>
         <MapContainer center={center} zoom={13} style={{ height: "100%", width: "100%" }} doubleClickZoom={false}>
           <BasemapTileLayer basemap={basemap} />
 
@@ -1389,6 +1430,7 @@ export function CatchmentMapPanel({
           {catchment && catchment.coords && catchment.coords.length >= 3 && (
             <Polygon
               positions={catchment.coords}
+              interactive={!drawMode}
               pathOptions={{
                 color: catchment.locked ? "#1a56db" : "#3b82f6",
                 fillColor: "#1a56db",
@@ -1417,6 +1459,7 @@ export function CatchmentMapPanel({
               <Polygon
                 key={poly.communityName}
                 positions={poly.coords}
+                interactive={!drawMode}
                 pathOptions={{
                   color: poly.color,
                   fillColor: poly.color,
@@ -1457,6 +1500,7 @@ export function CatchmentMapPanel({
             <Polygon
               key={`gap-${i}`}
               positions={ring}
+              interactive={!drawMode}
               pathOptions={{ color: "#ef4444", fillColor: "#ef4444", fillOpacity: 0.16, weight: 1.5, dashArray: "5,4" }}
             >
               <Popup>
@@ -1472,6 +1516,7 @@ export function CatchmentMapPanel({
             <GeoJSON
               key={JSON.stringify(missedAnalysis.uncoveredInteriorGeoJson)}
               data={missedAnalysis.uncoveredInteriorGeoJson}
+              interactive={!drawMode}
               style={{ color: "#dc2626", fillColor: "#ef4444", fillOpacity: 0.22, weight: 2, dashArray: "4,4" }}
             />
           )}
@@ -1481,6 +1526,7 @@ export function CatchmentMapPanel({
             <CircleMarker
               key={`missed-${mc.id}`}
               center={[mc.latitude, mc.longitude]}
+              interactive={!drawMode}
               radius={mc.category === "orphaned_zero_dose" ? 7 : 5}
               pathOptions={{
                 color: mc.category === "orphaned_zero_dose" ? "#dc2626" : "#f59e0b",
@@ -1505,18 +1551,18 @@ export function CatchmentMapPanel({
 
           {/* Extracted place markers */}
           {extractResult?.unmapped.map((u, i) => (
-            <Marker key={`osm-${i}`} position={[u.latitude, u.longitude]}>
+            <Marker key={`osm-${i}`} position={[u.latitude, u.longitude]} interactive={!drawMode}>
               <Popup><strong>{u.name}</strong><br />{u.placeType} - OpenStreetMap</Popup>
             </Marker>
           ))}
           {extractResult?.settlements.map((s) => (
-            <Marker key={`settle-${s.id}`} position={[s.latitude, s.longitude]}>
+            <Marker key={`settle-${s.id}`} position={[s.latitude, s.longitude]} interactive={!drawMode}>
               <Popup><strong>{s.name}</strong><br />Pop est: {s.populationEstimate?.toLocaleString() ?? "?"}</Popup>
             </Marker>
           ))}
 
           {/* Facility Pin Marker */}
-          <Marker position={center} icon={facilityPinIcon}>
+          <Marker position={center} icon={facilityPinIcon} interactive={!drawMode}>
             <Popup>
               <div className="p-1.5 space-y-1 text-xs select-none">
                 <div className="border-b border-border/50 pb-1">
@@ -1545,6 +1591,7 @@ export function CatchmentMapPanel({
                   key={`comm-pin-${c.id ?? c.villageId ?? c.name}`}
                   position={[c.latitude, c.longitude]}
                   icon={communityPinIcon(c.name, isSelected, isMapped)}
+                  interactive={!drawMode}
                   eventHandlers={{
                     click: () => {
                       setSelectedCommunity(c.name);
@@ -1617,6 +1664,12 @@ export function CatchmentMapPanel({
             onClose={() => setDrawMode(null)}
             onPolygonComplete={handlePolygonComplete}
             snapCoords={snapCoords}
+            allowedBoundary={drawMode === "community" ? catchment?.coords : undefined}
+            onInvalidPoint={() => toast({
+              title: "Point outside HF catchment",
+              description: "Community sub-polygons must remain inside the locked facility catchment.",
+              variant: "destructive",
+            })}
             onPointCountChange={setActiveVertexCount}
             finishTriggerRef={finishTriggerRef}
           />
@@ -1687,19 +1740,21 @@ export function CatchmentMapPanel({
         <div className="rounded-xl border bg-card p-3.5 space-y-2 shadow-xs">
           <div className="flex items-center justify-between text-xs">
             <span className="font-bold text-foreground">Population Attribution Balance</span>
-            <span className={`font-extrabold tabular-nums ${balancePct >= 90 ? "text-green-600" : balancePct >= 50 ? "text-amber-600" : "text-red-600"}`}>
+            <span className={`font-extrabold tabular-nums ${isPopulationOverAllocated ? "text-red-600" : balancePct >= 90 ? "text-green-600" : balancePct >= 50 ? "text-amber-600" : "text-red-600"}`}>
               {communityPopSum.toLocaleString()} / {catchmentPop.toLocaleString()} ({balancePct}%)
             </span>
           </div>
           <div className="h-2.5 w-full overflow-hidden rounded-full bg-muted">
             <div
-              className={`h-full transition-all duration-500 ${balancePct >= 90 ? "bg-green-500" : balancePct >= 50 ? "bg-amber-500" : "bg-red-500"}`}
+              className={`h-full transition-all duration-500 ${isPopulationOverAllocated ? "bg-red-500" : balancePct >= 90 ? "bg-green-500" : balancePct >= 50 ? "bg-amber-500" : "bg-red-500"}`}
               style={{ width: `${balancePct}%` }}
             />
           </div>
           <p className="text-[11px] text-muted-foreground">
             {communityPolygons.length} of {communities.length} community polygons demarcated •{" "}
-            {catchmentPop > communityPopSum
+            {isPopulationOverAllocated
+              ? `⚠ Raw sub-polygon estimates total ${rawCommunityPopSum.toLocaleString()} (${rawBalancePct}%). Values are normalized to the HF catchment total; review polygon overlaps and population sources.`
+              : catchmentPop > communityPopSum
               ? `~${(catchmentPop - communityPopSum).toLocaleString()} population remaining unassigned in catchment area`
               : communityPolygons.length > 0
                 ? "✓ 100% of catchment population attributed to community sub-polygons"
@@ -1760,7 +1815,9 @@ export function CatchmentMapPanel({
                 >
                   <span>{poly ? "🟢" : "🔴"}</span>
                   <span>{c.name}</span>
-                  {poly?.griddedPopulation ? ` (~${poly.griddedPopulation.toLocaleString()})` : ""}
+                  {poly?.griddedPopulation
+                    ? ` (~${displayCommunityPopulation(poly).toLocaleString()}${isPopulationOverAllocated ? " adjusted" : ""})`
+                    : ""}
                 </button>
               );
             })}

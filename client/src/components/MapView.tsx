@@ -3532,6 +3532,18 @@ export function MapView({
     enabled: !!selectedFacilityId,
   });
 
+  const { data: facilityNetworkContext } = useQuery<any>({
+    queryKey: ["/api/facilities", selectedFacilityId, "network-context"],
+    queryFn: async () => {
+      if (!selectedFacilityId) return null;
+      const res = await fetch(`/api/facilities/${selectedFacilityId}/network-context`, { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to fetch facility network context");
+      return res.json();
+    },
+    enabled: !!selectedFacilityId,
+    staleTime: 30 * 60 * 1000,
+  });
+
   const hasFittedRouteFacilityIdRef = useRef<number | null>(null);
 
   // Fit bounds to show facility and all its routed communities ONLY once upon initial facility selection
@@ -4904,6 +4916,20 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
     },
     enabled: layers.hcwCatchments,
   });
+
+  const { data: lifecyclePolygonResponse } = useQuery<any>({
+    queryKey: ["/api/gis/polygons/viewport", tenantInfo?.id],
+    queryFn: async () => {
+      const res = await fetch("/api/gis/polygons/viewport?zoom=12", { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to fetch saved facility and community polygons");
+      return res.json();
+    },
+    enabled: layers.hcwCatchments && !!tenantInfo?.id,
+    staleTime: 60 * 1000,
+  });
+  const lifecyclePolygons = Array.isArray(lifecyclePolygonResponse?.polygons)
+    ? lifecyclePolygonResponse.polygons
+    : [];
 
   // Fetch full GeoJSON for each active boundary
 // Population choropleth source toggle
@@ -7547,7 +7573,36 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
               );
             })}
 
-        {/* Render HCW Catchments (Drawn catchment areas) */}
+        {/* Active lifecycle polygons saved by the facility/community polygon editor. */}
+        {layers.hcwCatchments && lifecyclePolygons.map((polygon: any) => {
+          const isFacilityPolygon = polygon.ownerType === "facility";
+          if (selectedFacilityId && isFacilityPolygon && Number(polygon.ownerId) !== Number(selectedFacilityId)) return null;
+          if (selectedFacilityId && !isFacilityPolygon && Number(polygon.parentFacilityId) !== Number(selectedFacilityId)) return null;
+          return (
+            <GeoJSON
+              key={`lifecycle-polygon-${polygon.id}-${polygon.version}`}
+              data={polygon.geometry as any}
+              style={{
+                color: isFacilityPolygon ? "#1d4ed8" : "#16a34a",
+                weight: isFacilityPolygon ? 3 : 2,
+                fillColor: isFacilityPolygon ? "#3b82f6" : "#22c55e",
+                fillOpacity: isFacilityPolygon ? 0.08 : 0.2,
+              }}
+              onEachFeature={(_feature, layer) => {
+                layer.bindPopup(`
+                  <div class="p-2 min-w-[180px] text-xs">
+                    <strong>${polygon.name || (isFacilityPolygon ? "HF Catchment" : "Community Boundary")}</strong>
+                    <p>${isFacilityPolygon ? "Health facility catchment" : "Community sub-polygon"}</p>
+                    <p>Area: ${polygon.areaSqKm ? Number(polygon.areaSqKm).toFixed(2) + " km²" : "N/A"}</p>
+                    <p>Population: ${polygon.populationEstimate ? Number(polygon.populationEstimate).toLocaleString() : "N/A"}</p>
+                  </div>
+                `);
+              }}
+            />
+          );
+        })}
+
+        {/* Render legacy HCW Catchments (Drawn catchment areas) */}
         {layers.hcwCatchments &&
           visibleHcwCatchments.map((catchment) => {
             const facility = facilities.find((f) => f.id === catchment.facilityId);
@@ -7675,6 +7730,58 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
               />
             );
           })}
+
+        {/* Real road-network routes from the selected facility to administrative HQs. */}
+        {selectedFacilityId && facilityNetworkContext?.headquarters?.map((hq: any) => {
+          const colors: Record<string, string> = { district: "#2563eb", province: "#d97706", national: "#7c3aed" };
+          const selected = facilities.find((facility) => Number(facility.id) === Number(selectedFacilityId));
+          const fallback = selected?.latitude && selected?.longitude
+            ? [[Number(selected.latitude), Number(selected.longitude)], [Number(hq.latitude), Number(hq.longitude)]]
+            : [];
+          const positions = Array.isArray(hq.routeGeometry) && hq.routeGeometry.length >= 2
+            ? hq.routeGeometry.map(([lng, lat]: [number, number]) => [lat, lng] as [number, number])
+            : fallback;
+          if (positions.length < 2) return null;
+          return (
+            <Fragment key={`hq-network-${hq.level}`}>
+              <Polyline
+                positions={positions}
+                color={colors[hq.level] || "#475569"}
+                weight={4}
+                opacity={0.8}
+                dashArray={hq.routeSource === "osrm" ? undefined : "7,7"}
+              >
+                <Tooltip sticky>{hq.level} HQ · {hq.roadDistanceKm} km{hq.routeSource !== "osrm" ? " (estimated)" : " by road"}</Tooltip>
+              </Polyline>
+              <CircleMarker
+                center={[Number(hq.latitude), Number(hq.longitude)]}
+                radius={7}
+                pathOptions={{ color: colors[hq.level] || "#475569", fillColor: colors[hq.level] || "#475569", fillOpacity: 0.9, weight: 2 }}
+              >
+                <Popup><strong>{hq.name}</strong><br />{hq.officeName}<br />Road distance: {hq.roadDistanceKm} km</Popup>
+              </CircleMarker>
+            </Fragment>
+          );
+        })}
+
+        {/* Nearest neighboring health facilities remain visible despite the facility filter. */}
+        {selectedFacilityId && facilityNetworkContext?.neighbors?.map((neighbor: any) => (
+          <CircleMarker
+            key={`neighbor-facility-${neighbor.id}`}
+            center={[Number(neighbor.latitude), Number(neighbor.longitude)]}
+            radius={8}
+            pathOptions={{ color: "#0891b2", fillColor: "#06b6d4", fillOpacity: 0.9, weight: 3 }}
+          >
+            <Tooltip direction="top" offset={[0, -6]} permanent>
+              {neighbor.name} · {neighbor.distanceKm} km
+            </Tooltip>
+            <Popup>
+              <strong>Nearest facility: {neighbor.name}</strong><br />
+              {neighbor.facilityType || "Health facility"}<br />
+              {neighbor.distanceKm} km from the selected facility
+            </Popup>
+          </CircleMarker>
+        ))}
 
         {layers.facilities && (
           <MarkerClusterGroup
@@ -10004,6 +10111,7 @@ const { data: hcwCatchments } = useQuery<FacilityCatchment[]>({
                 districtCoords={districtLookup.get(Number(facilities.find((f) => f.id === selectedFacilityId)?.districtId))?.coordinates as any}
                 provinceCoords={provinceLookup.get(Number(districtLookup.get(Number(facilities.find((f) => f.id === selectedFacilityId)?.districtId))?.provinceId))?.coordinates as any}
                 communityRoutes={communityRoutes || []}
+                networkContext={facilityNetworkContext}
                 activeSessionPlans={activeSessionPlans.filter((p: any) => Number(p.facilityId) === Number(selectedFacilityId))}
                 onClose={() => {
                   setSelectedFacilityId(null);

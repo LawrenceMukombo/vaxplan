@@ -40,6 +40,7 @@ import { safeErrorMessage } from '../errorUtils';
 import { getCountryFormat } from '@shared/countryFormats';
 import { normalizeStockVaccineName } from '@shared/vaccineSchedule';
 import { fetchOsrmRoute } from '../services/routing';
+import { getAdministrativeHqTravelAnalysis } from '@shared/administrativeHq';
 import { EntityHistoryService } from '../services/entityHistoryService';
 import {
   requireGeoAccess,
@@ -498,6 +499,88 @@ export function registerFacilityRoutes(app: Express) {
     } catch (error) {
       console.error("Error fetching community routes:", error);
       res.status(500).json({ message: "Failed to fetch community routes" });
+    }
+  });
+
+  // Main-map context for a selected facility: real road routes to each
+  // administrative HQ plus the nearest neighboring health facilities.
+  app.get("/api/facilities/:id/network-context", ...auth, async (req: any, res) => {
+    try {
+      const facilityId = Number(req.params.id);
+      const facility = await storage.getFacility(req.tenantId, facilityId);
+      if (!facility || !facility.latitude || !facility.longitude) {
+        return res.status(404).json({ message: "Facility or facility coordinates not found" });
+      }
+      if (!(await userCanAccessGeo(req.dbUser!, req.tenantId, { facilityId }))) {
+        return res.status(404).json({ message: "Facility not found" });
+      }
+
+      const district = facility.districtId
+        ? await storage.getDistrict(req.tenantId, Number(facility.districtId))
+        : undefined;
+      const province = district?.provinceId
+        ? await storage.getProvince(req.tenantId, Number(district.provinceId))
+        : undefined;
+      const tenant = await storage.getTenant(req.tenantId);
+      const fromLat = Number(facility.latitude);
+      const fromLng = Number(facility.longitude);
+      const analysis = getAdministrativeHqTravelAnalysis({
+        facilityLat: fromLat,
+        facilityLng: fromLng,
+        countryCode: tenant?.countryCode || tenant?.code,
+        districtName: district?.name,
+        provinceName: province?.name,
+      });
+
+      const headquarters = [];
+      for (const [level, destination] of Object.entries({
+        district: analysis.district,
+        province: analysis.provincial,
+        national: analysis.capital,
+      })) {
+        const route = await fetchOsrmRoute(fromLng, fromLat, destination.lng, destination.lat);
+        headquarters.push({
+          level,
+          name: destination.name,
+          officeName: destination.officeName,
+          latitude: destination.lat,
+          longitude: destination.lng,
+          directDistanceKm: destination.directKm,
+          roadDistanceKm: route?.roadDistanceKm ?? destination.roadKm,
+          drivingTimeMinutes: route?.drivingMin ?? null,
+          routeGeometry: route?.geometry ?? null,
+          routeSource: route?.geometry ? "osrm" : "estimate",
+        });
+      }
+
+      const neighbors = (await storage.getFacilities(req.tenantId))
+        .filter((candidate) =>
+          Number(candidate.id) !== facilityId &&
+          candidate.latitude != null &&
+          candidate.longitude != null,
+        )
+        .map((candidate) => ({
+          id: candidate.id,
+          name: candidate.name,
+          hmisCode: candidate.hmisCode,
+          facilityType: candidate.facilityType,
+          districtId: candidate.districtId,
+          latitude: Number(candidate.latitude),
+          longitude: Number(candidate.longitude),
+          distanceKm: Number(calculateHaversineDistance(
+            fromLat,
+            fromLng,
+            Number(candidate.latitude),
+            Number(candidate.longitude),
+          ).toFixed(2)),
+        }))
+        .sort((a, b) => a.distanceKm - b.distanceKm)
+        .slice(0, 5);
+
+      res.json({ facilityId, headquarters, neighbors });
+    } catch (error) {
+      console.error("Error fetching facility network context:", error);
+      res.status(500).json({ message: "Failed to load facility network context" });
     }
   });
 

@@ -45,6 +45,7 @@ interface FacilityDetailDrawerProps {
   districtCoords?: { lat: number; lng: number };
   provinceCoords?: { lat: number; lng: number };
   communityRoutes?: any[];
+  networkContext?: { neighbors?: any[]; headquarters?: any[] } | null;
   activeSessionPlans?: any[];
   onClose: () => void;
   onEdit?: (facility: any) => void;
@@ -60,6 +61,7 @@ export function FacilityDetailDrawer({
   districtCoords,
   provinceCoords,
   communityRoutes = [],
+  networkContext,
   activeSessionPlans = [],
   onClose,
   onEdit,
@@ -227,6 +229,27 @@ export function FacilityDetailDrawer({
             </h3>
             <span className="text-[10px] text-muted-foreground">{facility.name}</span>
           </div>
+
+          {Array.isArray(networkContext?.neighbors) && networkContext.neighbors.length > 0 && (
+            <div className="rounded-xl border border-cyan-500/30 bg-cyan-500/5 p-3.5 space-y-2 shadow-sm">
+              <h4 className="text-xs font-extrabold uppercase tracking-wider text-cyan-800 dark:text-cyan-300 flex items-center gap-1.5">
+                <Building2 className="h-4 w-4" /> Nearest Health Facilities
+              </h4>
+              <div className="space-y-1.5">
+                {networkContext.neighbors.map((neighbor: any, index: number) => (
+                  <div key={neighbor.id} className="flex items-center justify-between gap-2 rounded-lg border bg-background/80 px-2.5 py-2 text-[11px]">
+                    <div className="min-w-0">
+                      <p className="font-bold truncate">{index + 1}. {neighbor.name}</p>
+                      <p className="text-muted-foreground truncate">{neighbor.facilityType || "Health facility"}{neighbor.hmisCode ? ` · ${neighbor.hmisCode}` : ""}</p>
+                    </div>
+                    <Badge variant="outline" className="shrink-0 border-cyan-500/30 text-cyan-700 dark:text-cyan-300">
+                      {neighbor.distanceKm} km
+                    </Badge>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Card 1: Real District HQ */}
           <div className="rounded-xl border bg-card p-3.5 space-y-2.5 shadow-sm border-blue-500/30 bg-blue-500/5">
