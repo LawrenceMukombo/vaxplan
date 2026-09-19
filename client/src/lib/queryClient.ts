@@ -1,6 +1,6 @@
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
 import { offlineDb, enqueueOutbox } from "./offlineDb";
-import { loadActiveTenant } from "./tenantCache";
+import { loadActiveTenant, loadTenantsCache } from "./tenantCache";
 import {
   broadcastLogout,
   clearClientAuthStorage,
@@ -8,6 +8,7 @@ import {
   hasValidOfflineSession,
   recordOnlineAuthSession,
 } from "./authSession";
+import { DEFAULT_MODULES } from "./modules";
 
 async function throwIfResNotOk(res: Response) {
   if (!res.ok) {
@@ -261,240 +262,29 @@ async function getOfflineData(url: string): Promise<any> {
   if (pathname === "/api/auth/user") {
     return getValidOfflineUser();
   }
-
   if (pathname === "/api/me/tenant") {
-    const cachedActiveTenant = loadActiveTenant();
-    if (cachedActiveTenant && cachedActiveTenant.id) {
-      return cachedActiveTenant;
-    }
-    const tenantIdRow = await offlineDb.syncMeta.get("tenantId");
-    const tenantId = tenantIdRow?.value || "1";
-    // Resolve dynamically based on offline active tenant ID as well as URL path fallbacks
-    const isZambia = tenantId === "2" || tenantId === "4bb7abba-11cd-4c99-96c2-eedc8a4dfd06" || (typeof window !== "undefined" && (window.location.hostname.includes("zambia") || window.location.href.includes("ZMB")));
-    const isSSD = tenantId === "3" || tenantId === "705728db-4892-49d7-9b67-35aa67c7574b" || (typeof window !== "undefined" && (window.location.hostname.includes("sudan") || window.location.href.includes("SSD")));
-    const isZAF = tenantId === "4" || tenantId === "c43e2923-b2d9-4175-a1a8-ff6b0cd58810" || (typeof window !== "undefined" && (window.location.hostname.includes("south-africa") || window.location.href.includes("ZAF")));
-
-    // Original Code (Mock returning Zambia vs South Sudan with 4-level/5-level mismatch):
-    /*
-    const isZambia = tenantId === "2" || (typeof window !== "undefined" && (window.location.hostname.includes("zambia") || window.location.href.includes("ZMB")));
-    return {
-      id: Number(tenantId) || tenantId,
-      name: isZambia ? "Republic of Zambia Ministry of Health" : "Republic of South Sudan Ministry of Health",
-      countryCode: isZambia ? "ZMB" : "SSD",
-      settings: {
-        skipRegionLevel: isZambia,
-        adminLevelLabels: {
-          level1: isZambia ? "Province" : "Region",
-          level2: isZambia ? "District" : "Province",
-          level3: isZambia ? "Facility" : "District",
-          level4: isZambia ? "Ward" : "LLG",
-          level5: "Village"
-        }
-      }
-    };
-    */
-
-    /*
-    // Updated Code: Fully aligned offline dynamic mock tenant details for PNG, SSD, and Zambia
-    return {
-      id: Number(tenantId) || tenantId,
-      name: isZambia 
-        ? "Republic of Zambia Ministry of Health" 
-        : isSSD 
-          ? "Republic of South Sudan Ministry of Health" 
-          : "Papua New Guinea National Department of Health",
-      countryCode: isZambia ? "ZMB" : isSSD ? "SSD" : "PNG",
-      settings: {
-        skipRegionLevel: true, // skip region level for all countries to start Level 1 at Province/State
-        adminLevelLabels: {
-          level1: "Region",
-          level2: isZambia ? "Province" : isSSD ? "State" : "Province",
-          level3: isZambia ? "District" : isSSD ? "County" : "District",
-          level4: isZambia ? "Ward" : isSSD ? "Payam" : "LLG",
-          level5: "Village"
-        }
-      }
-    };
-    */
-
-    // Refactored Code: Fully aligned offline dynamic mock tenant details for PNG, SSD, Zambia, and South Africa (ZAF)
-    return {
-      id: Number(tenantId) || tenantId,
-      name: isZambia 
-        ? "Republic of Zambia Ministry of Health" 
-        : isSSD 
-          ? "Republic of South Sudan Ministry of Health" 
-          : isZAF
-            ? "Republic of South Africa National Department of Health"
-            : "Papua New Guinea National Department of Health",
-      countryCode: isZambia ? "ZMB" : isSSD ? "SSD" : isZAF ? "ZAF" : "PNG",
-      settings: {
-        skipRegionLevel: true, // skip region level for all countries to start Level 1 at Province/State
-        adminLevelLabels: {
-          level1: "Region",
-          level2: isZambia ? "Province" : isSSD ? "State" : isZAF ? "Province" : "Province",
-          level3: isZambia ? "District" : isSSD ? "County" : isZAF ? "District" : "District",
-          level4: isZambia ? "Ward" : isSSD ? "Payam" : isZAF ? "Sub-district" : "LLG",
-          level5: "Village"
-        }
-      }
-    };
+    const active = loadActiveTenant();
+    if (active) return active;
+    const list = loadTenantsCache();
+    if (list.length > 0) return list[0];
+    return { id: "1", code: "ZAF", name: "South Africa", countryCode: "ZAF" };
   }
-
   if (pathname === "/api/public/tenants") {
-    /*
-    return [
-      { id: 1, name: "South Sudan EPI", countryCode: "SSD" },
-      { id: 2, name: "Zambia EPI", countryCode: "ZMB" }
-    ];
-    */
-    return [
-      { id: "8c2f81fb-06f3-4688-90ea-e9ae27d73191", name: "Papua New Guinea National Department of Health", countryCode: "PNG" },
-      { id: "705728db-4892-49d7-9b67-35aa67c7574b", name: "Republic of South Sudan Ministry of Health", countryCode: "SSD" },
-      { id: "4bb7abba-11cd-4c99-96c2-eedc8a4dfd06", name: "Republic of Zambia Ministry of Health", countryCode: "ZMB" },
-      { id: "c43e2923-b2d9-4175-a1a8-ff6b0cd58810", name: "Republic of South Africa National Department of Health", countryCode: "ZAF" }
-    ];
+    const list = loadTenantsCache();
+    if (list.length > 0) return list;
+    const active = loadActiveTenant();
+    if (active) return [active];
+    return [{ id: "1", code: "ZAF", name: "South Africa", countryCode: "ZAF" }];
   }
-
+  if (pathname === "/api/auth/session-config") {
+    return { timeoutMinutes: 60 };
+  }
   if (pathname === "/api/users") {
     return [];
   }
 
   throw new Error(`Offline query mapping not found for URL: ${url}`);
 }
-
-/* Original Code commented out for backward-compatibility and strict traceability:
-// ─── Offline Database Mutation Router ───────────────────────────────────────
-async function writeToIndexedDB(method: string, url: string, data: any): Promise<void> {
-  const cleanUrl = url.startsWith("/") ? url : `/${url}`;
-  const [pathname] = cleanUrl.split("?");
-  const segments = pathname.split("/").filter(Boolean);
-  
-  if (segments[0] !== "api") return;
-  const resource = segments[1];
-  const idStr = segments[2];
-
-  let table: any = null;
-  if (resource === "regions") table = offlineDb.regions;
-  else if (resource === "provinces") table = offlineDb.provinces;
-  else if (resource === "districts") table = offlineDb.districts;
-  else if (resource === "llgs") table = offlineDb.llgs;
-  else if (resource === "facilities") table = offlineDb.facilities;
-  else if (resource === "villages") table = offlineDb.villages;
-  else if (resource === "clients") {
-    if (segments[3] === "vaccinations") {
-      table = offlineDb.clientVaccinations;
-    } else {
-      table = offlineDb.clients;
-    }
-  } 
-  else if (resource === "sessionPlans" || resource === "sessions") {
-    table = offlineDb.sessionPlans;
-  } else if (resource === "session-day-plans" || resource === "sessionDayPlans") {
-    table = offlineDb.sessionDayPlans;
-  }
-  else if (resource === "budgetItems" || resource === "budget-items") {
-    table = offlineDb.budgetItems;
-  } else if (resource === "mobilization") {
-    table = offlineDb.mobilizationActivities;
-  } else if (resource === "stock") {
-    if (segments[2] === "transaction") {
-      table = offlineDb.stockTransactions;
-    }
-  } else if (resource === "monthly-reports") {
-    table = offlineDb.monthlyReports;
-  } else if (resource === "microplans") {
-    table = offlineDb.microplans;
-  } else if (resource === "supervision-visits") {
-    table = offlineDb.supervisionVisits;
-  } else if (resource === "supervision-checklist-templates") {
-    table = offlineDb.supervisionTemplates;
-  } else if (resource === "cold-chain") {
-    table = offlineDb.coldChainEquipment;
-  } else if (resource === "gis-polygons") {
-    table = offlineDb.gisPolygons;
-  } else if (resource === "settlements") {
-    table = offlineDb.settlements;
-  } else if (resource === "population") {
-    table = offlineDb.populationData;
-  } else if (resource === "vaccines") {
-    if (segments[2] === "config") {
-      table = offlineDb.vaccineConfigs;
-    }
-  }
-
-  if (!table) return;
-
-  const id = idStr ? (isNaN(Number(idStr)) ? idStr : Number(idStr)) : data?.id;
-
-  if (method === "POST") {
-    await table.put({ ...data, _syncedAt: Date.now() });
-  } else if (method === "PUT" || method === "PATCH") {
-    if (id !== undefined) {
-      const existing = await table.get(id);
-      await table.put({ ...existing, ...data, _syncedAt: Date.now() });
-    }
-  } else if (method === "DELETE") {
-    if (id !== undefined) {
-      await table.delete(id);
-    }
-  }
-}
-
-async function handleOfflineMutation(method: string, url: string, data: any): Promise<any> {
-  const cleanUrl = url.startsWith("/") ? url : `/${url}`;
-  const [pathname] = cleanUrl.split("?");
-
-  // Microplan version events are best-effort server audit snapshots. Queuing
-  // them offline is both misleading (there is no server snapshot yet) and used
-  // to poison the outbox by falling through to the generic microplan creator.
-  if (method === "POST" && /^\/api\/microplans\/[^/]+\/version-event\/?$/.test(pathname)) {
-    return { success: true, skippedOfflineAuditEvent: true };
-  }
-
-  if (pathname === "/api/me/switch-tenant") {
-    const targetId = String(data.tenantId);
-    await offlineDb.syncMeta.put({ key: "tenantId", value: targetId });
-    return { success: true };
-  }
-
-  const tenantRow = await offlineDb.syncMeta.get("tenantId");
-  const tenantId = tenantRow?.value || "1";
-  const segments = pathname.split("/").filter(Boolean);
-  const resource = segments[1];
-
-  let itemData = { ...data };
-  if (method === "POST" && !itemData.id) {
-    if (resource === "clients") {
-      itemData.id = crypto.randomUUID();
-    } else {
-      itemData.id = Math.floor(Date.now() + Math.random() * 1000);
-    }
-    itemData.tenantId = tenantId;
-    itemData._localOnly = true;
-  }
-
-  await writeToIndexedDB(method, url, itemData);
-
-  await enqueueOutbox({
-    tenantId,
-    entityType: resource,
-    method: method as any,
-    url: cleanUrl,
-    body: JSON.stringify(itemData),
-    localId: itemData.id ? String(itemData.id) : undefined,
-  });
-
-  // Dynamic status refresh in background
-  setTimeout(() => {
-    import("./syncEngine").then(({ syncEngine }) => {
-      syncEngine.refreshPendingCount(tenantId);
-    });
-  }, 100);
-
-  return itemData;
-}
-*/
 
 // ─── Offline Database Mutation Router ───────────────────────────────────────
 async function writeToIndexedDB(method: string, url: string, data: any): Promise<void> {

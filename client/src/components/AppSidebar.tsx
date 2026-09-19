@@ -146,6 +146,8 @@ const overviewNavItems: NavItem[] = [
 // 2. Routine Microplanning & Sessions
 const planningNavItems: NavItem[] = [
   { title: "Routine Microplan", path: "/microplans/routine", icon: Calendar, moduleKey: "routine" },
+  { title: "Immunization Schedule", path: "/immunization-schedule", icon: Calendar, moduleKey: "routine" },
+  { title: "Calendar", path: "/calendar", icon: CalendarDays, moduleKey: "sessions" },
   { title: "Sessions Hub", path: "/all-sessions", icon: CalendarDays, moduleKey: "sessions" },
   { title: "Plan Health", path: "/plan-health", icon: ClipboardCheck, moduleKey: "planHealth" },
   { title: "Planning Actions", path: "/planning-actions", icon: ClipboardList, moduleKey: "planningActions" },

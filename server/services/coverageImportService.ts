@@ -455,6 +455,7 @@ export interface ScoreMissedParams {
   period: string; // YYYYMM
   provinceId?: number;
   districtId?: number;
+  facilityId?: number;
   weights?: { unserved?: number; htr?: number; distance?: number; grid3?: number };
 }
 
@@ -476,6 +477,7 @@ export async function scoreMissedCommunities(
   // 1. Pull all villages in scope
   const villageConditions: any[] = [eq(villages.tenantId, params.tenantId)];
   if (params.districtId) villageConditions.push(eq(villages.districtId, params.districtId));
+  if (params.facilityId) villageConditions.push(eq(villages.assignedFacilityId, params.facilityId));
   const villageRows = await db
     .select()
     .from(villages)
@@ -527,6 +529,10 @@ export async function scoreMissedCommunities(
   // most-recent / most-authoritative figure to avoid double-counting.
   const dosesByFacility = new Map<number, number>();
   for (const c of coverageRows) {
+    // Seed rows exist to populate local demonstrations. They must never be
+    // presented as country surveillance evidence on operational dashboards.
+    const sourceRef = String(c.sourceRef ?? "").toLowerCase();
+    if (sourceRef === "demo-seed" || sourceRef.startsWith("demo-missed-")) continue;
     const prev = dosesByFacility.get(c.facilityId) ?? 0;
     if (c.dosesAdministered > prev) dosesByFacility.set(c.facilityId, c.dosesAdministered);
   }
@@ -568,14 +574,14 @@ export async function scoreMissedCommunities(
     htrByVillage.set(h.villageId, Number(h.compositeScore ?? 0));
   }
 
-  // 6. Compute per-village registered population share of facility coverage
-  //    so a facility's reported doses are distributed across its villages.
-  const villageCountByFacility = new Map<number, number>();
+  // 6. Compute each facility's registered denominator. Facility-level doses
+  //    are apportioned by village population, not by village count.
+  const populationByFacility = new Map<number, number>();
   for (const v of villageRows) {
     if (v.assignedFacilityId) {
-      villageCountByFacility.set(
+      populationByFacility.set(
         v.assignedFacilityId,
-        (villageCountByFacility.get(v.assignedFacilityId) ?? 0) + 1,
+        (populationByFacility.get(v.assignedFacilityId) ?? 0) + (popByVillage.get(v.id) ?? 0),
       );
     }
   }
@@ -602,10 +608,21 @@ export async function scoreMissedCommunities(
     const fac = v.assignedFacilityId ? facById.get(v.assignedFacilityId) : undefined;
     if (!fac) continue;
 
+    // Missing evidence is unknown, not zero coverage. Previously the fallback
+    // below converted every village at a facility without an import into a
+    // 100% missed community. Only score facilities backed by a real import.
+    if (!dosesByFacility.has(fac.id)) continue;
+
+    // Explicit demonstration geography is kept for training, but excluded
+    // from operational missed-community analysis.
+    const villageCode = String(v.code ?? "").toUpperCase();
+    if (villageCode.startsWith("DEMO-") || villageCode.startsWith("MC-")) continue;
+
     const registered = popByVillage.get(v.id) ?? 0;
-    const facilityDoses = dosesByFacility.get(fac.id) ?? 0;
-    const villageShare = villageCountByFacility.get(fac.id) ?? 1;
-    const villageDoses = facilityDoses / villageShare;
+    const facilityDoses = dosesByFacility.get(fac.id)!;
+    const facilityPopulation = populationByFacility.get(fac.id) ?? 0;
+    if (registered <= 0 || facilityPopulation <= 0) continue;
+    const villageDoses = facilityDoses * (registered / facilityPopulation);
     const unservedEstimate = Math.max(0, registered - villageDoses);
     const htrFlag = v.isHardToReach ? 1 : 0;
     const distanceKm = Number(v.distanceToFacility ?? 0);

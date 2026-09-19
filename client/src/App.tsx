@@ -62,6 +62,9 @@ const Facilities = lazy(() => import("@/pages/Facilities"));
 const Population = lazy(() => import("@/pages/Population"));
 const SessionPlanning = lazy(() => import("@/pages/SessionPlanning"));
 const SessionsHub = lazy(() => import("@/pages/SessionsHub"));
+const MasterSessionCalendar = lazy(() =>
+  import("@/pages/MasterSessionCalendar").then((module) => ({ default: module.MasterSessionCalendar })),
+);
 const HardToReach = lazy(() => import("@/pages/HardToReach"));
 // BudgetPlanning / VaccineCalculator / SocialMobilization are no longer
 // mounted as standalone pages - those concerns are now Steps 9 / 6 / 7 of the
@@ -108,6 +111,7 @@ const AnnualNationalPlan = lazy(() => import("@/pages/AnnualNationalPlan"));
 const MicroplanPrintView = lazy(() => import("@/pages/MicroplanPrintView"));
 const DataSources = lazy(() => import("@/pages/DataSources"));
 const FieldTeams = lazy(() => import("@/pages/FieldTeams"));
+const ImmunizationSchedule = lazy(() => import("@/pages/ImmunizationSchedule"));
 const Reports = lazy(() => import("@/pages/Reports"));
 const ApiReference = lazy(() => import("@/pages/ApiReference"));
 const IndicatorManual = lazy(() => import("@/pages/IndicatorManual"));
@@ -378,6 +382,12 @@ function AuthenticatedRouter({ user }: { user: User }) {
       <Route path="/sessions/campaign/:id">
         {modules.sessions !== false ? (canPlanSessions(user) ? <SessionPlanningDetailRoute planTypeFilter="campaign" /> : <AccessDeniedPage moduleName="Session Planning" />) : <ModuleDisabled moduleName="Sessions Hub" />}
       </Route>
+      <Route path="/calendar">
+        {modules.sessions !== false ? (canAccessSessionPlanning(user) ? <MasterSessionCalendar /> : <AccessDeniedPage moduleName="Calendar" />) : <ModuleDisabled moduleName="Sessions Hub" />}
+      </Route>
+      <Route path="/session-calendar">
+        <PreserveQueryRedirect to="/calendar" />
+      </Route>
       <Route path="/all-sessions">
         {modules.sessions !== false ? (canAccessSessionPlanning(user) ? <SessionsHub /> : <AccessDeniedPage moduleName="Sessions Hub" />) : <ModuleDisabled moduleName="Sessions Hub" />}
       </Route>
@@ -453,6 +463,7 @@ function AuthenticatedRouter({ user }: { user: User }) {
       <Route path="/admin/boundaries" component={BoundaryManager} />
       <Route path="/admin/custom-layers" component={CustomLayers} />
       <Route path="/admin/catalogue" component={CatalogueAdmin} />
+      <Route path="/immunization-schedule" component={ImmunizationSchedule} />
       <Route path="/admin/partners" component={PartnerEnquiriesAdmin} />
       <Route path="/admin/wiki" component={WikiEditor} />
       <Route path="/his-integrations">

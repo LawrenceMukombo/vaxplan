@@ -37,6 +37,8 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import { getAdministrativeHqTravelAnalysis } from "@shared/administrativeHq";
 
+import { FacilitySessionCalendar } from "./FacilitySessionCalendar";
+
 interface FacilityDetailDrawerProps {
   facility: any;
   provinceName?: string;
@@ -68,7 +70,7 @@ export function FacilityDetailDrawer({
   onDeletePolygon,
   canDeletePolygon = false,
 }: FacilityDetailDrawerProps) {
-  const [activeTab, setActiveTab] = useState<"overview" | "location" | "services" | "staff">("location");
+  const [activeTab, setActiveTab] = useState<"overview" | "location" | "services" | "staff" | "calendar">("calendar");
   const { toast } = useToast();
 
   const { data: activeTenant } = useQuery<any>({
@@ -158,12 +160,25 @@ export function FacilityDetailDrawer({
 
       {/* Navigation Tabs Header */}
       <Tabs value={activeTab} onValueChange={(val: any) => setActiveTab(val)} className="flex-1 flex flex-col overflow-hidden">
-        <TabsList className="grid grid-cols-4 bg-muted/60 p-1 border-b rounded-none shrink-0 h-10">
-          <TabsTrigger value="overview" className="text-[11px] py-1">Overview</TabsTrigger>
+        <TabsList className="grid grid-cols-5 bg-muted/60 p-1 border-b rounded-none shrink-0 h-10">
+          <TabsTrigger value="calendar" className="text-[11px] py-1 font-bold text-emerald-700 dark:text-emerald-400">
+            <CalendarDays className="w-3.5 h-3.5 mr-1 text-emerald-600 shrink-0" />
+            Calendar
+          </TabsTrigger>
           <TabsTrigger value="location" className="text-[11px] py-1 font-semibold">Location</TabsTrigger>
+          <TabsTrigger value="overview" className="text-[11px] py-1">Overview</TabsTrigger>
           <TabsTrigger value="services" className="text-[11px] py-1">Services</TabsTrigger>
-          <TabsTrigger value="staff" className="text-[11px] py-1 font-semibold">Staff & Equip</TabsTrigger>
+          <TabsTrigger value="staff" className="text-[11px] py-1 font-semibold">Staff</TabsTrigger>
         </TabsList>
+
+        {/* Tab 0: Calendar & Sessions */}
+        <TabsContent value="calendar" className="flex-1 overflow-y-auto p-3 space-y-4 m-0 custom-scrollbar">
+          <FacilitySessionCalendar
+            facility={facility}
+            countryCode={effectiveCountryCode}
+            activeSessionPlans={activeSessionPlans}
+          />
+        </TabsContent>
 
         {/* Tab 1: Overview */}
         <TabsContent value="overview" className="flex-1 overflow-y-auto p-4 space-y-4 m-0 custom-scrollbar">

@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Badge } from "@/components/ui/badge";
 import {
   HeartPulse,
   Shield,
@@ -13,11 +14,18 @@ import {
   EyeOff,
   WifiOff,
   ArrowLeft,
+  UserCheck,
 } from "lucide-react";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { PageHead } from "@/components/PageHead";
 import { saveTenantsCache, loadTenantsCache, saveActiveTenant, loadActiveTenant } from "@/lib/tenantCache";
-import { clearLogoutState, recordOnlineAuthSession, saveOfflineCredentials, verifyOfflineCredentials } from "@/lib/authSession";
+import {
+  clearLogoutState,
+  recordOnlineAuthSession,
+  saveOfflineCredentials,
+  verifyOfflineCredentials,
+  getCachedOfflineAccounts,
+} from "@/lib/authSession";
 import { queryClient } from "@/lib/queryClient";
 
 interface PublicTenant {
@@ -28,13 +36,13 @@ interface PublicTenant {
 }
 
 const DEFAULT_TENANTS: PublicTenant[] = [
-  { id: "8c2f81fb-06f3-4688-90ea-e9ae27d73191", code: "PNG", name: "Papua New Guinea National Department of Health", countryCode: "PNG" },
-  { id: "705728db-4892-49d7-9b67-35aa67c7574b", code: "SSD", name: "Republic of South Sudan Ministry of Health", countryCode: "SSD" },
+  { id: "c43e2923-b2d9-4175-a1a8-ff6b0cd58810", code: "ZAF", name: "Republic of South Africa National Department of Health", countryCode: "ZAF" },
   { id: "4bb7abba-11cd-4c99-96c2-eedc8a4dfd06", code: "ZMB", name: "Republic of Zambia Ministry of Health", countryCode: "ZMB" },
+  { id: "705728db-4892-49d7-9b67-35aa67c7574b", code: "SSD", name: "Republic of South Sudan Ministry of Health", countryCode: "SSD" },
+  { id: "8c2f81fb-06f3-4688-90ea-e9ae27d73191", code: "PNG", name: "Papua New Guinea National Department of Health", countryCode: "PNG" },
   { id: "22571429-f7dd-4f1d-9dea-abdfbf4dc115", code: "BW", name: "Republic of Botswana Ministry of Health", countryCode: "BWA" },
   { id: "08083581-cf5e-47d7-b3ed-a97b10be01ba", code: "KEN", name: "Republic of Kenya Ministry of Health", countryCode: "KEN" },
   { id: "1a39bf12-bf10-4415-b2dd-96f1ece09b75", code: "VNM", name: "Republic of Vietnam Ministry of Health", countryCode: "VNM" },
-  { id: "c43e2923-b2d9-4175-a1a8-ff6b0cd58810", code: "ZAF", name: "Republic of South Africa National Department of Health", countryCode: "ZAF" },
 ];
 
 export default function LoginPage() {
@@ -47,15 +55,28 @@ export default function LoginPage() {
   const [busy, setBusy] = useState(false);
   const [selectedTenantId, setSelectedTenantId] = useState("");
   const [keepMeSignedIn, setKeepMeSignedIn] = useState(false);
+  const [cachedAccounts, setCachedAccounts] = useState<{ email: string; name?: string; tenantId?: string | null }[]>([]);
   const isOffline = typeof navigator !== "undefined" && !navigator.onLine;
 
   useEffect(() => {
     // Clear any stale pending logout flag so the user is never trapped
     clearLogoutState();
-    // Pre-populate active tenant from cache if available
+
+    // Check cached offline accounts
+    const accounts = getCachedOfflineAccounts();
+    setCachedAccounts(accounts);
+
+    // Pre-populate email from last session or cached accounts if available
+    const lastEmail = localStorage.getItem("vaxplan_last_email") || (accounts.length > 0 ? accounts[0].email : "");
+    if (lastEmail && !email) {
+      setEmail(lastEmail);
+    }
+
+    // Pre-populate active tenant from cache or last tenant if available
     const active = loadActiveTenant();
-    if (active?.id) {
-      setSelectedTenantId(String(active.id));
+    const lastTenantId = active?.id ? String(active.id) : localStorage.getItem("vaxplan_last_tenant_id") || DEFAULT_TENANTS[0].id;
+    if (lastTenantId) {
+      setSelectedTenantId(lastTenantId);
     }
   }, []);
 
@@ -101,10 +122,13 @@ export default function LoginPage() {
     setBusy(true);
     setError(null);
 
+    const targetEmail = email.trim();
+    const targetTenantId = selectedTenantId || localStorage.getItem("vaxplan_last_tenant_id") || DEFAULT_TENANTS[0].id;
+
     // If device is offline, authenticate against cached credentials
     if (!navigator.onLine) {
       try {
-        const offlineResult = await verifyOfflineCredentials(email, password, selectedTenantId);
+        const offlineResult = await verifyOfflineCredentials(targetEmail, password, targetTenantId);
         if (!offlineResult.success) {
           setError(offlineResult.message || "Offline authentication failed.");
           return;
@@ -113,12 +137,15 @@ export default function LoginPage() {
         clearLogoutState();
         if (offlineResult.user) {
           recordOnlineAuthSession(offlineResult.user);
-          const tId = selectedTenantId || offlineResult.tenantId;
+          const tId = targetTenantId || offlineResult.tenantId || DEFAULT_TENANTS[0].id;
           if (tId) {
-            const matchedTenant = activeTenants.find((t) => t.id === tId);
-            if (matchedTenant) {
-              saveActiveTenant(matchedTenant);
-            }
+            const matchedTenant = activeTenants.find((t) => t.id === tId) || DEFAULT_TENANTS.find(t => t.id === tId) || {
+              id: tId,
+              name: "Republic of South Africa National Department of Health",
+              code: "ZAF",
+              countryCode: "ZAF"
+            };
+            saveActiveTenant(matchedTenant);
           }
           queryClient.setQueryData(["/api/auth/user"], offlineResult.user);
         }
@@ -150,9 +177,9 @@ export default function LoginPage() {
         headers: { "Content-Type": "application/json" },
         credentials: "include",
         body: JSON.stringify({
-          email: email.trim(),
+          email: targetEmail,
           password,
-          tenantId: selectedTenantId,
+          tenantId: targetTenantId,
           keepMeSignedIn,
           userIdleTimeout: localStorage.getItem("vaxplan_user_idle_timeout") || "default",
         }),
@@ -166,9 +193,9 @@ export default function LoginPage() {
       if (data?.user) {
         recordOnlineAuthSession(data.user);
         // Securely cache hashed offline credentials for seamless offline access
-        void saveOfflineCredentials(email, password, data.user, selectedTenantId);
-        if (selectedTenantId) {
-          const matchedTenant = activeTenants.find((t) => t.id === selectedTenantId);
+        void saveOfflineCredentials(targetEmail, password, data.user, targetTenantId);
+        if (targetTenantId) {
+          const matchedTenant = activeTenants.find((t) => t.id === targetTenantId);
           if (matchedTenant) {
             saveActiveTenant(matchedTenant);
           }
@@ -190,11 +217,11 @@ export default function LoginPage() {
     } catch (err) {
       // Graceful fallback to cached credentials if network drops mid-request
       try {
-        const offlineResult = await verifyOfflineCredentials(email, password, selectedTenantId);
+        const offlineResult = await verifyOfflineCredentials(targetEmail, password, targetTenantId);
         if (offlineResult.success && offlineResult.user) {
           clearLogoutState();
           recordOnlineAuthSession(offlineResult.user);
-          const tId = selectedTenantId || offlineResult.tenantId;
+          const tId = targetTenantId || offlineResult.tenantId;
           if (tId) {
             const matchedTenant = activeTenants.find((t) => t.id === tId);
             if (matchedTenant) {
@@ -250,21 +277,22 @@ export default function LoginPage() {
           <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary text-primary-foreground">
             <HeartPulse className="h-5 w-5" />
           </div>
-          <div className="flex flex-col">
-            <span className="font-semibold text-sm leading-tight">VaxPlan</span>
-            <span className="text-[11px] text-muted-foreground leading-tight">
+          <div className="flex flex-col leading-tight">
+            <span className="font-semibold text-sm">VaxPlan</span>
+            <span className="text-[10px] text-muted-foreground">
               Health microplanning for Ministries
             </span>
           </div>
         </a>
         <div className="flex items-center gap-3">
           <ThemeToggle />
-          <Button variant="ghost" size="sm" asChild>
-            <a href="/" className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground">
-              <ArrowLeft className="h-3.5 w-3.5" />
-              Back to home
-            </a>
-          </Button>
+          <a
+            href="/"
+            className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors"
+          >
+            <ArrowLeft className="h-3.5 w-3.5" />
+            Back to home
+          </a>
         </div>
       </header>
 
@@ -309,9 +337,32 @@ export default function LoginPage() {
           {/* Form Panel (Right Column) */}
           <div className="p-6 sm:p-8 flex flex-col justify-center">
             {isOffline && (
-              <div className="mb-4 flex items-center gap-2 rounded-lg bg-emerald-500/10 border border-emerald-500/30 px-3 py-2 text-xs text-emerald-800 dark:text-emerald-300">
-                <WifiOff className="h-4 w-4 shrink-0" />
-                <span>Offline Mode — Sign in with credentials previously used on this device.</span>
+              <div className="mb-4 space-y-2">
+                <div className="flex items-center gap-2 rounded-lg bg-emerald-500/10 border border-emerald-500/30 px-3 py-2 text-xs text-emerald-800 dark:text-emerald-300">
+                  <WifiOff className="h-4 w-4 shrink-0" />
+                  <span>Offline Mode — Sign in to access your local field data.</span>
+                </div>
+
+                {cachedAccounts.length > 0 && (
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="text-[11px] text-muted-foreground flex items-center gap-1">
+                      <UserCheck className="w-3 h-3" /> Recent:
+                    </span>
+                    {cachedAccounts.slice(0, 3).map((acc) => (
+                      <Badge
+                        key={acc.email}
+                        variant="outline"
+                        onClick={() => {
+                          setEmail(acc.email);
+                          if (acc.tenantId) setSelectedTenantId(acc.tenantId);
+                        }}
+                        className="cursor-pointer text-[11px] hover:bg-muted py-0.5"
+                      >
+                        {acc.email}
+                      </Badge>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
 
@@ -330,13 +381,11 @@ export default function LoginPage() {
                     </Label>
                     <select
                       id="login-tenant"
-                      required
                       value={selectedTenantId}
                       onChange={(e) => setSelectedTenantId(e.target.value)}
                       className="flex h-10 w-full rounded-xl border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 text-foreground"
                       data-testid="select-tenant"
                     >
-                      <option value="">Select country / program...</option>
                       {activeTenants.map((t) => (
                         <option key={t.id} value={t.id}>
                           {t.name} ({t.code || t.countryCode})
@@ -364,17 +413,19 @@ export default function LoginPage() {
                       <Label htmlFor="login-password" className="text-xs font-medium">
                         Password
                       </Label>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          resetState();
-                          setMode("forgot");
-                        }}
-                        className="text-xs text-primary hover:underline"
-                        data-testid="button-forgot-password"
-                      >
-                        Forgot password?
-                      </button>
+                      {!isOffline && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            resetState();
+                            setMode("forgot");
+                          }}
+                          className="text-xs text-primary hover:underline"
+                          data-testid="button-forgot-password"
+                        >
+                          Forgot password?
+                        </button>
+                      )}
                     </div>
                     <div className="relative">
                       <Input
@@ -420,7 +471,7 @@ export default function LoginPage() {
                   <Button
                     type="submit"
                     size="lg"
-                    className="w-full"
+                    className="w-full bg-primary hover:bg-primary/90 text-primary-foreground font-semibold"
                     disabled={busy}
                     data-testid="button-submit-login"
                   >

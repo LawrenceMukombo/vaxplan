@@ -12,6 +12,7 @@ import {
   clients,
   clientVaccinations,
   budgetItems,
+  populationData,
 } from "@shared/schema";
 import { hasPermission } from "../auth/authorization";
 import { expandVaccineSchedule, canonicalizePerAntigen } from "@shared/vaccineSchedule";
@@ -63,6 +64,10 @@ export async function overlayCampaignFromParent<T extends { microplanId: number 
       campaignAntigen: isCampaign ? p.campaignAntigen ?? null : null,
       campaignTargetAge: isCampaign ? p.campaignTargetAge ?? null : null,
       campaignScope: isCampaign ? p.campaignScope ?? null : null,
+      microplanName: p.name,
+      microplanStatus: p.status,
+      microplanYear: p.year,
+      microplanQuarter: p.quarter,
     } as T;
   });
 }
@@ -166,7 +171,81 @@ export function registerSessionRoutes(app: Express) {
       }
 
       const overlaid = await overlayCampaignFromParent(req.tenantId, list);
-      res.json(overlaid);
+
+      // Attach the real linked communities in one bulk query. The master
+      // calendar needs this context to describe where a session will run;
+      // `session_plans` intentionally stores that relation in the junction
+      // table rather than in presentation-only `location` fields.
+      const sessionIds = overlaid.map((s: any) => Number(s.id)).filter(Number.isFinite);
+      const linkedRows = sessionIds.length
+        ? await db
+            .select({
+              sessionId: sessionVillages.sessionId,
+              villageId: villages.id,
+              name: villages.name,
+              isHardToReach: villages.isHardToReach,
+              distanceKm: villages.distanceToFacility,
+            })
+            .from(sessionVillages)
+            .innerJoin(villages, eq(villages.id, sessionVillages.villageId))
+            .where(and(
+              eq(sessionVillages.tenantId, req.tenantId),
+              inArray(sessionVillages.sessionId, sessionIds),
+            ))
+        : [];
+      const communitiesBySession = new Map<number, any[]>();
+      const linkedVillageIds = Array.from(new Set(linkedRows.map((row) => row.villageId)));
+      const populationRows = linkedVillageIds.length
+        ? await db
+            .select({
+              villageId: populationData.villageId,
+              under1Population: populationData.under1Population,
+              year: populationData.year,
+            })
+            .from(populationData)
+            .where(and(
+              eq(populationData.tenantId, req.tenantId),
+              inArray(populationData.villageId, linkedVillageIds),
+            ))
+        : [];
+      const under1ByVillage = new Map<number, { year: number; value: number }>();
+      for (const row of populationRows) {
+        if (row.villageId == null || row.under1Population == null) continue;
+        const candidate = { year: Number(row.year), value: Number(row.under1Population) };
+        const existing = under1ByVillage.get(row.villageId);
+        if (!existing || candidate.year > existing.year) under1ByVillage.set(row.villageId, candidate);
+      }
+      for (const row of linkedRows) {
+        const entries = communitiesBySession.get(row.sessionId) ?? [];
+        entries.push({
+          id: row.villageId,
+          name: row.name,
+          isHardToReach: Boolean(row.isHardToReach),
+          distanceKm: row.distanceKm == null ? null : Number(row.distanceKm),
+          registeredUnder1: under1ByVillage.get(row.villageId)?.value ?? null,
+        });
+        communitiesBySession.set(row.sessionId, entries);
+      }
+
+      res.json(overlaid.map((session: any) => {
+        const communities = communitiesBySession.get(session.id) ?? [];
+        const registeredUnder1 = communities.reduce(
+          (sum: number, community: any) => sum + (Number(community.registeredUnder1) || 0),
+          0,
+        );
+        const plannedTarget = Number(session.targetPopulation) || 0;
+        return {
+          ...session,
+          communities,
+          registeredUnder1,
+          effectiveTargetPopulation: plannedTarget > 0 ? plannedTarget : registeredUnder1,
+          targetPopulationSource: plannedTarget > 0
+            ? "session_plan"
+            : registeredUnder1 > 0
+              ? "linked_community_under1"
+              : "not_available",
+        };
+      }));
     } catch (error) {
       console.error("Error fetching sessions:", error);
       res.status(500).json({ message: "Failed to fetch sessions" });
@@ -1464,6 +1543,86 @@ export function registerSessionRoutes(app: Express) {
     } catch (err: any) {
       console.error("POST /api/sessions/days/bulk failed:", err);
       res.status(500).json({ message: safeErrorMessage(err, "Bulk save failed") });
+    }
+  });
+
+  // ─── National Calendar Events & Custom Health Days ──────────────────────────
+  const customTenantEventsMap = new Map<string, any[]>();
+
+  app.get("/api/national/calendar-events", ...auth, async (req: any, res) => {
+    try {
+      const { getNationalCalendarEventsForCountry } = await import("../../shared/countryHolidays");
+      const tenant = await storage.getTenant(req.tenantId);
+      const countryCode = (req.query.countryCode as string) || tenant?.countryCode || tenant?.code || "ZAF";
+      const standardEvents = getNationalCalendarEventsForCountry(countryCode);
+      const tenantCustom = customTenantEventsMap.get(req.tenantId) || [];
+
+      // Merge standard country events with tenant custom events
+      const allEvents = [...standardEvents, ...tenantCustom];
+      res.json({
+        countryCode,
+        events: allEvents,
+      });
+    } catch (error: any) {
+      console.error("Error fetching national calendar events:", error);
+      res.status(500).json({ message: "Failed to fetch national calendar events" });
+    }
+  });
+
+  app.post("/api/national/calendar-events", ...auth, async (req: any, res) => {
+    try {
+      const { title, eventType, startDate, endDate, description, impactOnSessions, color } = req.body;
+      if (!title || !startDate) {
+        return res.status(400).json({ message: "Title and start date are required" });
+      }
+
+      const tenant = await storage.getTenant(req.tenantId);
+      const countryCode = tenant?.countryCode || tenant?.code || "ZAF";
+
+      const newEvent = {
+        id: `custom_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+        tenantId: req.tenantId,
+        countryCode,
+        title: String(title).trim(),
+        eventType: eventType || "health_event",
+        startDate: String(startDate).trim(),
+        endDate: endDate ? String(endDate).trim() : undefined,
+        isNational: true,
+        description: description ? String(description).trim() : "",
+        impactOnSessions: impactOnSessions || "routine",
+        color: color || "#4f46e5",
+        customized: true,
+      };
+
+      const existing = customTenantEventsMap.get(req.tenantId) || [];
+      existing.push(newEvent);
+      customTenantEventsMap.set(req.tenantId, existing);
+
+      res.json({
+        success: true,
+        message: "National calendar event created successfully",
+        event: newEvent,
+      });
+    } catch (error: any) {
+      console.error("Error creating national calendar event:", error);
+      res.status(500).json({ message: "Failed to save national calendar event" });
+    }
+  });
+
+  app.delete("/api/national/calendar-events/:id", ...auth, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const existing = customTenantEventsMap.get(req.tenantId) || [];
+      const filtered = existing.filter((e) => e.id !== id);
+      customTenantEventsMap.set(req.tenantId, filtered);
+
+      res.json({
+        success: true,
+        message: "Calendar event deleted successfully",
+      });
+    } catch (error: any) {
+      console.error("Error deleting calendar event:", error);
+      res.status(500).json({ message: "Failed to delete calendar event" });
     }
   });
 }

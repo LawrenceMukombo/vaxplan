@@ -1,13 +1,7 @@
 import { useMemo, useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/useAuth";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import { Button } from "@/components/ui/button";
 import { X, MapPin, Lock } from "lucide-react";
 import { pluralize } from "@/lib/utils";
@@ -380,42 +374,73 @@ export function GeoCascadeFilter({
     onFacilityChange(id);
   };
 
+  // Searchable Select Options for each cascading level
+  const regionOptions = useMemo(() => [
+    { value: "all", label: `All ${regionLabel}s` },
+    ...sortedRegions.map((r) => ({ value: r.id.toString(), label: r.name }))
+  ], [sortedRegions, regionLabel]);
+
+  const provinceOptions = useMemo(() => [
+    { value: "all", label: `All ${provinceLabel}s` },
+    ...sortedProvinces.map((p) => {
+      const stats = provinceStats.get(Number(p.id));
+      return {
+        value: p.id.toString(),
+        label: p.name,
+        subLabel: stats && stats.districts > 0 ? `${stats.districts} ${stats.districts === 1 ? districtLabel : `${districtLabel}s`}` : undefined
+      };
+    })
+  ], [sortedProvinces, provinceLabel, provinceStats, districtLabel]);
+
+  const districtOptions = useMemo(() => [
+    { value: "all", label: `All ${districtLabel}s` },
+    ...filteredDistricts.map((d) => {
+      const facCount = districtStats.get(Number(d.id));
+      return {
+        value: d.id.toString(),
+        label: d.name,
+        subLabel: facCount !== undefined && facCount > 0 ? `${facCount} ${facCount === 1 ? facilityLabel : `${facilityLabel}s`}` : undefined
+      };
+    })
+  ], [filteredDistricts, districtLabel, districtStats, facilityLabel]);
+
+  const facilityOptions = useMemo(() => [
+    { value: "all", label: `All ${pluralize(facilityLabel)}` },
+    ...filteredFacilities.map((f) => ({
+      value: f.id.toString(),
+      label: f.name,
+      subLabel: f.facilityType ? f.facilityType.toUpperCase() : undefined
+    }))
+  ], [filteredFacilities, facilityLabel]);
+
   return (
     <div
-      className={`flex flex-wrap items-end gap-3 ${className ?? ""}`}
+      className={`flex flex-wrap items-end gap-3 w-full ${className ?? ""}`}
       data-testid={`${testIdPrefix}-cascade-filter`}
     >
-      <div className="flex items-center gap-1.5 text-xs font-semibold uppercase text-muted-foreground self-end pb-2.5">
+      <div className="flex items-center gap-1.5 text-xs font-semibold uppercase text-muted-foreground self-center sm:self-end pb-0 sm:pb-2.5 shrink-0">
         <MapPin className="h-3.5 w-3.5 text-primary" />
         Filter by location
       </div>
 
       {showRegion && (
-        <div className="min-w-[180px] flex-1 max-w-[240px]">
+        <div className="w-full sm:w-auto flex-1 min-w-[170px] max-w-full sm:max-w-[260px]">
           <label className="text-xs font-medium text-muted-foreground mb-1 block">
             {regionLabel}
           </label>
-          <Select
+          <SearchableSelect
             value={regionId?.toString() ?? "all"}
             onValueChange={handleRegion}
-          >
-            <SelectTrigger data-testid={`${testIdPrefix}-select-region`}>
-              <SelectValue placeholder={`All ${regionLabel}s`} />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All {regionLabel}s</SelectItem>
-              {sortedRegions.map((r) => (
-                <SelectItem key={r.id} value={r.id.toString()}>
-                  {r.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+            options={regionOptions}
+            placeholder={`All ${regionLabel}s`}
+            searchPlaceholder={`Search ${regionLabel.toLowerCase()}...`}
+            sortAlphabetical={false}
+          />
         </div>
       )}
 
       {/* Province — top of cascade */}
-      <div className="min-w-[180px] flex-1 max-w-[240px]">
+      <div className="w-full sm:w-auto flex-1 min-w-[170px] max-w-full sm:max-w-[260px]">
         <label className={`text-xs font-medium mb-1 flex items-center justify-between ${provinceLocked ? "text-muted-foreground/50" : "text-muted-foreground"}`}>
           <span className="flex items-center gap-1">
             {provinceLabel}
@@ -423,40 +448,19 @@ export function GeoCascadeFilter({
           </span>
           <span className="text-[9px] text-primary/70 font-mono">Level 1</span>
         </label>
-        <Select
+        <SearchableSelect
           value={provinceId?.toString() ?? "all"}
           onValueChange={handleProvince}
+          options={provinceOptions}
           disabled={provinceLocked || sortedProvinces.length === 0}
-        >
-          <SelectTrigger
-            data-testid={`${testIdPrefix}-select-province`}
-            className={provinceLocked ? "opacity-50 cursor-not-allowed" : ""}
-          >
-            <SelectValue placeholder={`All ${provinceLabel}s`} />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All {provinceLabel}s</SelectItem>
-            {sortedProvinces.map((p) => {
-              const stats = provinceStats.get(Number(p.id));
-              return (
-                <SelectItem key={p.id} value={p.id.toString()}>
-                  <div className="flex items-center justify-between w-full gap-2">
-                    <span>{p.name}</span>
-                    {stats && stats.districts > 0 && (
-                      <span className="text-[10px] text-muted-foreground font-mono">
-                        ({stats.districts} {stats.districts === 1 ? districtLabel : `${districtLabel}s`})
-                      </span>
-                    )}
-                  </div>
-                </SelectItem>
-              );
-            })}
-          </SelectContent>
-        </Select>
+          placeholder={`All ${provinceLabel}s`}
+          searchPlaceholder={`Search ${provinceLabel.toLowerCase()}...`}
+          sortAlphabetical={false}
+        />
       </div>
 
       {usesDistrictLevel && (
-        <div className="min-w-[180px] flex-1 max-w-[240px]">
+        <div className="w-full sm:w-auto flex-1 min-w-[170px] max-w-full sm:max-w-[260px]">
           <label className={`text-xs font-medium mb-1 flex items-center justify-between ${districtLocked ? "text-muted-foreground/50" : "text-muted-foreground"}`}>
             <span className="flex items-center gap-1">
               {districtLabel}
@@ -464,48 +468,25 @@ export function GeoCascadeFilter({
             </span>
             <span className="text-[9px] text-primary/70 font-mono">Level 2</span>
           </label>
-          <Select
+          <SearchableSelect
             value={districtId?.toString() ?? "all"}
             onValueChange={handleDistrict}
+            options={districtOptions}
             disabled={districtLocked || filteredDistricts.length === 0}
-          >
-            <SelectTrigger
-              data-testid={`${testIdPrefix}-select-district`}
-              className={districtLocked ? "opacity-50 cursor-not-allowed" : ""}
-            >
-              <SelectValue
-                placeholder={
-                  districtLocked
-                    ? `🔒 Select ${provinceLabel.toLowerCase()} first`
-                    : `All ${districtLabel}s`
-                }
-              />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All {districtLabel}s</SelectItem>
-              {filteredDistricts.map((d) => {
-                const facCount = districtStats.get(Number(d.id));
-                return (
-                  <SelectItem key={d.id} value={d.id.toString()}>
-                    <div className="flex items-center justify-between w-full gap-2">
-                      <span>{d.name}</span>
-                      {facCount !== undefined && facCount > 0 && (
-                        <span className="text-[10px] text-muted-foreground font-mono">
-                          ({facCount} {facCount === 1 ? facilityLabel : `${facilityLabel}s`})
-                        </span>
-                      )}
-                    </div>
-                  </SelectItem>
-                );
-              })}
-            </SelectContent>
-          </Select>
+            placeholder={
+              districtLocked
+                ? `🔒 Select ${provinceLabel.toLowerCase()} first`
+                : `All ${districtLabel}s`
+            }
+            searchPlaceholder={`Search ${districtLabel.toLowerCase()}...`}
+            sortAlphabetical={false}
+          />
         </div>
       )}
 
       {/* Facility — locked until District selected in strict mode */}
       {showFacility && (
-        <div className="min-w-[200px] flex-1 max-w-[280px]">
+        <div className="w-full sm:w-auto flex-1 min-w-[190px] max-w-full sm:max-w-[300px]">
           <label className={`text-xs font-medium mb-1 flex items-center justify-between ${facilityLocked ? "text-muted-foreground/50" : "text-muted-foreground"}`}>
             <span className="flex items-center gap-1">
               {facilityLabel}
@@ -514,39 +495,19 @@ export function GeoCascadeFilter({
             </span>
             <span className="text-[9px] text-primary/70 font-mono">Facility</span>
           </label>
-          <Select
+          <SearchableSelect
             value={facilityId?.toString() ?? "all"}
             onValueChange={handleFacility}
+            options={facilityOptions}
             disabled={facilityLocked || filteredFacilities.length === 0}
-          >
-            <SelectTrigger
-              data-testid={`${testIdPrefix}-select-facility`}
-              className={facilityLocked ? "opacity-50 cursor-not-allowed" : ""}
-            >
-              <SelectValue
-                placeholder={
-                  facilityLocked
-                    ? `🔒 Select ${(usesDistrictLevel ? districtLabel : provinceLabel).toLowerCase()} first`
-                    : `All ${pluralize(facilityLabel).toLowerCase()}`
-                }
-              />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All {pluralize(facilityLabel).toLowerCase()}</SelectItem>
-              {filteredFacilities.map((f) => (
-                <SelectItem key={f.id} value={f.id.toString()}>
-                  <div className="flex items-center justify-between w-full gap-2">
-                    <span className="truncate">{f.name}</span>
-                    {f.facilityType && (
-                      <span className="text-[9px] px-1 py-0.2 bg-muted text-muted-foreground rounded uppercase shrink-0">
-                        {f.facilityType}
-                      </span>
-                    )}
-                  </div>
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+            placeholder={
+              facilityLocked
+                ? `🔒 Select ${(usesDistrictLevel ? districtLabel : provinceLabel).toLowerCase()} first`
+                : `All ${pluralize(facilityLabel)}`
+            }
+            searchPlaceholder={`Search ${facilityLabel.toLowerCase()}...`}
+            sortAlphabetical={false}
+          />
         </div>
       )}
 
@@ -557,6 +518,7 @@ export function GeoCascadeFilter({
           size="sm"
           onClick={clearAll}
           data-testid={`${testIdPrefix}-clear-filter`}
+          className="h-9 self-end"
         >
           <X className="h-4 w-4 mr-1" />
           Clear

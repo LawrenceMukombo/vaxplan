@@ -10832,6 +10832,7 @@ export async function registerRoutes(
         period: z.string().regex(/^\d{4}-?\d{2}$/).transform((p) => p.replace("-", "")),
         provinceId: z.coerce.number().int().positive().optional(),
         districtId: z.coerce.number().int().positive().optional(),
+        facilityId: z.coerce.number().int().positive().optional(),
       });
       const q = schema.parse(req.query);
       let results = await _coverageSvc.scoreMissedCommunities({
@@ -10840,6 +10841,7 @@ export async function registerRoutes(
         period: q.period,
         provinceId: q.provinceId,
         districtId: q.districtId,
+        facilityId: q.facilityId,
       });
       const scope = await getGeoScope(req.dbUser, req.tenantId);
       if (!scope.all) {
@@ -10847,7 +10849,16 @@ export async function registerRoutes(
           recordInGeoScope(scope, { facilityId: r.facilityId, districtId: r.districtId }),
         );
       }
-      res.json({ count: results.length, results });
+      res.json({
+        count: results.length,
+        results,
+        dataSource: "imported_coverage",
+        period: q.period,
+        hasEvidence: results.length > 0,
+        note: results.length > 0
+          ? "Calculated from non-demonstration imported coverage and registered population."
+          : "No non-demonstration imported coverage is available for this antigen, period, and location.",
+      });
     } catch (err: any) {
       if (err?.name === "ZodError") return res.status(400).json({ message: "Invalid query", errors: err.errors });
       console.error("GET /api/missed-communities failed:", err);
@@ -11529,6 +11540,9 @@ export async function registerRoutes(
             and(
               eq(clients.tenantId, tenantId),
               eq(clients.clientType, "child"),
+              eq(clients.isActive, true),
+              eq(clients.isArchived, false),
+              dsql`${clients.name} NOT ILIKE 'Demo %'`,
               lte(clients.dateOfBirth, twelveMonthsAgo),
               scopedFacilityIds
                 ? inArray(clients.facilityId, scopedFacilityIds)
@@ -11740,6 +11754,9 @@ export async function registerRoutes(
           },
           byDistrict,
           byVillage,
+          dataSource: "client_registry",
+          asOf: new Date().toISOString(),
+          note: "Calculated from active, non-demonstration child records and recorded routine vaccinations.",
         };
         cacheSetIndicator(cacheKey, payload);
         res.json(payload);

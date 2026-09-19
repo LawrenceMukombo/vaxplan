@@ -169,9 +169,18 @@ export default function CatalogueAdmin() {
 
   const renderSchedules = () => (
     <Card>
-      <CardHeader>
-        <CardTitle>Immunization Schedule Doses</CardTitle>
-        <CardDescription>Individual doses administered to patients (e.g. PENTA-1).</CardDescription>
+      <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <CardTitle>Immunization Schedule Doses</CardTitle>
+          <CardDescription>Individual doses administered to patients (e.g. PENTA-1).</CardDescription>
+        </div>
+        <Button
+          className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs"
+          onClick={() => window.location.href = "/immunization-schedule"}
+        >
+          <Plus className="w-3.5 h-3.5 mr-1.5" />
+          Interactive Schedule & Age Milestones
+        </Button>
       </CardHeader>
       <CardContent>
         {loadingSchedules ? <Skeleton className="h-20 w-full" /> : (

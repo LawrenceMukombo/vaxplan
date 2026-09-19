@@ -1,6 +1,6 @@
 import { db, pool } from "../db";
 import { facilities, villages, microplans, populationData } from "@shared/schema";
-import { eq, and } from "drizzle-orm";
+import { eq, and, or, inArray } from "drizzle-orm";
 
 export interface PopulationSourceData {
   source: string;
@@ -9,6 +9,11 @@ export interface PopulationSourceData {
   method: string;
   confidence: string;
   year: number;
+  communityName?: string;
+  communityCode?: string;
+  villageId?: number | null;
+  facilityId?: number | null;
+  entityType?: "community" | "facility" | "grid" | "estimate";
 }
 
 export interface IntelligenceResult {
@@ -160,10 +165,23 @@ export const PopulationIntelligenceService = {
     
     if (ownerType && ownerId) {
       let popDataQuery;
+      let entityName = "Catchment Entity";
+      let entityCode: string | undefined;
+
       if (ownerType === "facility") {
         popDataQuery = db.select().from(populationData).where(and(eq(populationData.facilityId, ownerId), eq(populationData.tenantId, tenantId)));
+        const [fac] = await db.select().from(facilities).where(and(eq(facilities.id, ownerId), eq(facilities.tenantId, tenantId))).limit(1);
+        if (fac) {
+          entityName = fac.name;
+          entityCode = fac.hmisCode || undefined;
+        }
       } else if (ownerType === "village") {
         popDataQuery = db.select().from(populationData).where(and(eq(populationData.villageId, ownerId), eq(populationData.tenantId, tenantId)));
+        const [vil] = await db.select().from(villages).where(and(eq(villages.id, ownerId), eq(villages.tenantId, tenantId))).limit(1);
+        if (vil) {
+          entityName = vil.name;
+          entityCode = vil.code || undefined;
+        }
       }
       
       if (popDataQuery) {
@@ -171,6 +189,11 @@ export const PopulationIntelligenceService = {
         for (const pd of popDataResult) {
           sources.push({
             source: pd.source.toUpperCase(),
+            communityName: entityName,
+            communityCode: entityCode,
+            villageId: pd.villageId || null,
+            facilityId: pd.facilityId || null,
+            entityType: ownerType === "village" ? "community" : "facility",
             totalPopulation: pd.totalPopulation,
             under5Population: pd.under5Population || Math.round(pd.totalPopulation * 0.17),
             method: pd.metadata ? (pd.metadata as any).method || "Administrative" : "Administrative",
@@ -206,6 +229,8 @@ export const PopulationIntelligenceService = {
       if (localTotal > 0) {
         sources.push({
           source: "Local Grid (Cached)",
+          communityName: "Polygon Area Grid",
+          entityType: "grid",
           totalPopulation: localTotal,
           under5Population: localResult.rows[0]?.under5 ?? 0,
           method: "ST_Intersects Polygon",
@@ -224,10 +249,6 @@ export const PopulationIntelligenceService = {
       console.warn("[PopIntel] local DB polygon query failed:", e);
     }
 
-    // Since WorldPop WOPR doesn't easily accept arbitrary polygons via simple GET without an API key or complex setup in their public hub,
-    // we use the local grid or synthetic fallback. If we wanted to hit WOPR for polygon, we'd do a POST to /v1/wopr/polygonestimate.
-    // For now we rely on Local Grid which represents GridPop / GRID3 data imported locally.
-
     // 2. Fallback to synthetic if nothing returned (offline/sandbox support)
     if (sources.length === 0) {
       const areaKm2 = Math.PI * radiusKm * radiusKm;
@@ -235,6 +256,8 @@ export const PopulationIntelligenceService = {
       const mockPop = Math.max(1, Math.round(150 * areaKm2));
       sources.push({
         source: "Synthetic Baseline",
+        communityName: "Polygon Synthetic Estimate",
+        entityType: "estimate",
         totalPopulation: mockPop,
         under5Population: Math.round(mockPop * 0.17),
         method: "Procedural Polygon",
@@ -247,24 +270,59 @@ export const PopulationIntelligenceService = {
   },
 
   /**
-   * Fetches populations for a specific facility, including its official stats
-   * and spatial catchment queries
+   * Fetches populations for a specific facility, including its official stats,
+   * its catchment communities' demographic figures, and spatial catchment queries
    */
   async fetchFacilityPopulation(tenantId: string, facilityId: number, radiusKm: number): Promise<IntelligenceResult> {
     const sources: PopulationSourceData[] = [];
     
-    // Get official populations assigned to this facility from the populationData table
+    // 1. Get facility
     const [facility] = await db.select().from(facilities).where(and(eq(facilities.id, facilityId), eq(facilities.tenantId, tenantId))).limit(1);
-    const popData = await db.select().from(populationData).where(and(eq(populationData.facilityId, facilityId), eq(populationData.tenantId, tenantId)));
+    
+    // 2. Load all catchment communities for this facility
+    const facilityVillages = await db.select().from(villages).where(and(eq(villages.assignedFacilityId, facilityId), eq(villages.tenantId, tenantId)));
+    const villageMap = new Map<number, { name: string; code?: string; pop?: number }>();
+    const villageIds: number[] = [];
+    facilityVillages.forEach(v => {
+      villageMap.set(v.id, { name: v.name, code: v.code || undefined, pop: v.griddedPopulation || undefined });
+      villageIds.push(v.id);
+    });
+
+    // 3. Query all populationData records for this facility or its catchment villages
+    const conditions = [eq(populationData.tenantId, tenantId)];
+    if (villageIds.length > 0) {
+      conditions.push(or(eq(populationData.facilityId, facilityId), inArray(populationData.villageId, villageIds))!);
+    } else {
+      conditions.push(eq(populationData.facilityId, facilityId));
+    }
+
+    const popData = await db.select().from(populationData).where(and(...conditions));
+    const processedVillageIds = new Set<number>();
     
     if (popData.length > 0) {
       for (const pd of popData) {
+        if (pd.villageId) processedVillageIds.add(Number(pd.villageId));
+        const vInfo = pd.villageId ? villageMap.get(Number(pd.villageId)) : null;
+        const metaVillageName = (pd.metadata as any)?.villageName || (pd.metadata as any)?.communityName || (pd.metadata as any)?.location;
+        
+        const communityName = vInfo
+          ? vInfo.name
+          : metaVillageName
+          ? metaVillageName
+          : (facility ? `${facility.name} (Whole Facility Catchment)` : "Whole Facility Catchment");
+        const communityCode = vInfo ? vInfo.code : (facility ? facility.hmisCode || undefined : undefined);
+
         sources.push({
           source: pd.source.toUpperCase(),
+          communityName,
+          communityCode,
+          villageId: pd.villageId || null,
+          facilityId: pd.facilityId || null,
+          entityType: pd.villageId ? "community" : "facility",
           totalPopulation: pd.totalPopulation,
           under5Population: pd.under5Population || Math.round(pd.totalPopulation * 0.17),
           method: pd.metadata ? (pd.metadata as any).method || "Administrative" : "Administrative",
-          confidence: pd.confidenceScore ? (Number(pd.confidenceScore) > 0.8 ? "High" : Number(pd.confidenceScore) > 0.5 ? "Moderate" : "Low") : "Moderate",
+          confidence: pd.confidenceScore ? (Number(pd.confidenceScore) > 0.8 ? "High" : Number(pd.confidenceScore) > 0.5 ? "Moderate" : "Low") : "High",
           year: pd.year || new Date().getFullYear()
         });
       }
@@ -272,8 +330,12 @@ export const PopulationIntelligenceService = {
       if (facility.catchmentGridPopulation && facility.catchmentGridPopulation > 0) {
         sources.push({
           source: "Official (HMIS/NSO)",
+          communityName: `${facility.name} (Whole Facility Catchment)`,
+          communityCode: facility.hmisCode || undefined,
+          facilityId: facility.id,
+          entityType: "facility",
           totalPopulation: facility.catchmentGridPopulation,
-          under5Population: Math.round(facility.catchmentGridPopulation * 0.17), // Fallback, could be fetched from DB specifically if added
+          under5Population: Math.round(facility.catchmentGridPopulation * 0.17),
           method: "Administrative",
           confidence: "High",
           year: new Date().getFullYear()
@@ -281,12 +343,41 @@ export const PopulationIntelligenceService = {
       }
     }
 
-    if (facility) {
+    // 4. Always include all catchment villages that are assigned to this facility
+    if (facilityVillages.length > 0) {
+      for (const v of facilityVillages) {
+        if (!processedVillageIds.has(v.id)) {
+          const popVal = v.griddedPopulation && v.griddedPopulation > 0 ? v.griddedPopulation : 0;
+          if (popVal > 0) {
+            sources.push({
+              source: v.populationSourceLabel ? v.populationSourceLabel.toUpperCase() : "COMMUNITY CENSUS",
+              communityName: v.name,
+              communityCode: v.code || undefined,
+              villageId: v.id,
+              facilityId,
+              entityType: "community",
+              totalPopulation: popVal,
+              under5Population: Math.round(popVal * 0.17),
+              method: "Local Community / Ward Census",
+              confidence: "High",
+              year: new Date().getFullYear()
+            });
+          }
+        }
+      }
+    }
 
+    if (facility) {
       // Add spatial estimates based on facility coordinates
       if (facility.latitude && facility.longitude) {
         const spatialRes = await this.fetchPointRadiusPopulation(tenantId, Number(facility.latitude), Number(facility.longitude), radiusKm);
-        sources.push(...spatialRes.sources);
+        for (const s of spatialRes.sources) {
+          sources.push({
+            ...s,
+            communityName: `${facility.name} (${radiusKm}km Spatial Grid Buffer)`,
+            entityType: "grid",
+          });
+        }
       }
     }
 

@@ -294,7 +294,7 @@ export default function ZeroDoseVillages() {
               setSelected(new Set());
             }}
             showFacility
-            strictCascade={false}
+            strictCascade
             testIdPrefix="zd-geo"
           />
           <div className="grid sm:grid-cols-3 gap-3">

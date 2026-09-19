@@ -36,6 +36,46 @@ function requirePermission(permissionCode: Permission) {
   };
 }
 
+function requireCatalogueEditPermission() {
+  return async (req: any, res: any, next: any) => {
+    requireDbUser(req, res, async (err?: any) => {
+      if (err) return next(err);
+      try {
+        const user = req.dbUser || req.user;
+        if (!user) {
+          return res.status(401).json({ message: "Authentication required" });
+        }
+        const role = String(user.role || "").toLowerCase();
+        const allowedRoles = [
+          "national_admin",
+          "superadmin",
+          "super_admin",
+          "admin",
+          "provincial_coordinator",
+          "district_manager",
+          "facility_in_charge",
+          "epidemiologist",
+          "health_informatics_officer",
+          "gis_specialist",
+          "planner"
+        ];
+        if (allowedRoles.includes(role)) {
+          return next();
+        }
+        const hasManageUsers = hasPermission(user, "manage_users", { activeTenantId: req.tenantId });
+        const hasManageStock = hasPermission(user, "manage_stock", { activeTenantId: req.tenantId });
+        const hasApprovePlans = hasPermission(user, "approve_plans", { activeTenantId: req.tenantId });
+        if (hasManageUsers || hasManageStock || hasApprovePlans) {
+          return next();
+        }
+        return res.status(403).json({ message: "Permission required to modify national immunization schedule" });
+      } catch (e) {
+        next(e);
+      }
+    });
+  };
+}
+
 // --- VACCINES ---
 router.get("/vaccines", isAuthenticated, requireTenant, async (req: any, res) => {
   try {
@@ -82,38 +122,275 @@ router.patch("/vaccines/:id", isAuthenticated, requireTenant, requirePermission(
   }
 });
 
-// --- SCHEDULE DOSES ---
+// --- SCHEDULE DOSES & PRESETS ---
+router.get("/schedules/presets", isAuthenticated, requireTenant, async (req: any, res) => {
+  try {
+    const { ALL_NATIONAL_PRESETS, AGE_MILESTONES, ROUTE_LABELS, TARGET_POPULATION_GROUPS } = await import("../../shared/nationalSchedules");
+    res.json({
+      presets: Object.values(ALL_NATIONAL_PRESETS),
+      milestones: AGE_MILESTONES,
+      routes: ROUTE_LABELS,
+      targetGroups: TARGET_POPULATION_GROUPS,
+    });
+  } catch (err: any) {
+    console.error("Failed to load schedule presets:", err);
+    res.status(500).json({ message: "Failed to load national schedule presets" });
+  }
+});
+
+router.post("/schedules/apply-preset", isAuthenticated, requireTenant, requireCatalogueEditPermission(), async (req: any, res) => {
+  try {
+    const tenantId = req.tenantId;
+    const countryCode = req.body.countryCode || req.body.presetKey;
+    const { ALL_NATIONAL_PRESETS, getPresetForCountry } = await import("../../shared/nationalSchedules");
+    
+    const preset = ALL_NATIONAL_PRESETS[countryCode?.toUpperCase()] || getPresetForCountry(countryCode);
+    if (!preset) {
+      return res.status(400).json({ message: `Preset for '${countryCode}' not found` });
+    }
+
+    // 1. Ensure all vaccines referenced by preset exist for tenant
+    const existingVaccines = await db.select().from(catalogueVaccines).where(eq(catalogueVaccines.tenantId, tenantId));
+    const vaccineMap = new Map<string, number>();
+    for (const v of existingVaccines) {
+      vaccineMap.set(v.productId, v.id);
+      vaccineMap.set(v.name.toLowerCase(), v.id);
+    }
+
+    for (const dose of preset.doses) {
+      if (!vaccineMap.has(dose.vaccineProductId)) {
+        // Insert vaccine product safely
+        const [newVac] = await db.insert(catalogueVaccines).values({
+          tenantId,
+          productId: dose.vaccineProductId,
+          name: dose.vaccineName,
+          antigenName: dose.antigen,
+          category: "Vaccine",
+          presentation: dose.route === "Oral" ? "Liquid" : "Liquid",
+          dosesPerVial: dose.route === "Oral" ? 20 : (dose.doseCode.includes("bcg") ? 20 : 10),
+          unitOfMeasure: dose.route === "Oral" ? "tubes" : "vials",
+          routineUse: true,
+          approvalStatus: "approved",
+          active: true,
+          modules: {},
+        } as any).returning();
+        vaccineMap.set(dose.vaccineProductId, newVac.id);
+        vaccineMap.set(dose.vaccineName.toLowerCase(), newVac.id);
+      }
+    }
+
+    // 2. Upsert schedule doses
+    let upsertedCount = 0;
+    for (const d of preset.doses) {
+      const vaccineId = vaccineMap.get(d.vaccineProductId) || vaccineMap.get(d.vaccineName.toLowerCase());
+      if (!vaccineId) continue;
+
+      const [existing] = await db.select().from(catalogueScheduleDoses).where(
+        and(
+          eq(catalogueScheduleDoses.tenantId, tenantId),
+          eq(catalogueScheduleDoses.doseCode, d.doseCode)
+        )
+      );
+
+      const dosePayload = {
+        name: d.name,
+        vaccineId,
+        doseNumber: d.doseNumber,
+        targetAge: d.targetAge,
+        minimumAge: d.minimumAge || null,
+        maximumAge: d.maximumAge || null,
+        minimumInterval: d.minimumInterval || null,
+        route: d.route,
+        site: d.site,
+        targetPopulationGroup: d.targetPopulationGroup,
+        classification: d.classification,
+        active: true,
+        approvalStatus: "approved" as const,
+      };
+
+      if (existing) {
+        await db.update(catalogueScheduleDoses)
+          .set(dosePayload)
+          .where(and(eq(catalogueScheduleDoses.tenantId, tenantId), eq(catalogueScheduleDoses.id, existing.id)));
+      } else {
+        await db.insert(catalogueScheduleDoses).values({
+          tenantId,
+          doseCode: d.doseCode,
+          ...dosePayload,
+        });
+      }
+      upsertedCount++;
+    }
+
+    res.json({
+      success: true,
+      message: `Successfully applied national schedule preset '${preset.scheduleTitle}' (${preset.countryName}).`,
+      count: upsertedCount,
+      preset: {
+        countryCode: preset.countryCode,
+        countryName: preset.countryName,
+        scheduleTitle: preset.scheduleTitle,
+        version: preset.version,
+      }
+    });
+  } catch (err: any) {
+    console.error("Failed to apply national schedule preset:", err);
+    res.status(500).json({ message: safeErrorMessage(err, "Failed to apply national schedule preset") });
+  }
+});
+
+router.post("/schedules/batch-toggle", isAuthenticated, requireTenant, requireCatalogueEditPermission(), async (req: any, res) => {
+  try {
+    const { ids, active } = req.body;
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ message: "Invalid or empty IDs array" });
+    }
+
+    for (const id of ids) {
+      await db.update(catalogueScheduleDoses)
+        .set({ active: Boolean(active) })
+        .where(and(eq(catalogueScheduleDoses.tenantId, req.tenantId), eq(catalogueScheduleDoses.id, parseInt(id))));
+    }
+
+    res.json({ success: true, count: ids.length, active });
+  } catch (err: any) {
+    console.error("Failed to batch toggle schedule doses:", err);
+    res.status(500).json({ message: "Failed to update schedule doses" });
+  }
+});
+
 router.get("/schedules", isAuthenticated, requireTenant, async (req: any, res) => {
   try {
+    const { resolveDoseMilestone, getClinicalMetadataForDose } = await import("../../shared/nationalSchedules");
     const conditions = [eq(catalogueScheduleDoses.tenantId, req.tenantId)];
     if (req.query.activeOnly === "true") conditions.push(eq(catalogueScheduleDoses.active, true));
-    const results = await db.select().from(catalogueScheduleDoses).where(and(...conditions)).orderBy(catalogueScheduleDoses.doseNumber);
-    res.json(results);
+    const rawResults = await db.select().from(catalogueScheduleDoses).where(and(...conditions)).orderBy(catalogueScheduleDoses.doseNumber);
+    
+    // Auto-enrich doses that have missing or legacy targetAge or generic administration fields
+    const enrichedResults = rawResults.map(dose => {
+      const milestone = resolveDoseMilestone(dose);
+      const clinicalMeta = getClinicalMetadataForDose(dose.name, dose.doseCode, dose.targetAge);
+
+      const resolvedTargetAge = (!dose.targetAge || dose.targetAge.trim() === "" || dose.targetAge.toLowerCase() === "at birth")
+        ? milestone.label
+        : dose.targetAge;
+
+      const resolvedSite = (!dose.site || dose.site.trim() === "" || dose.site.toLowerCase() === "standard site" || dose.site.toLowerCase() === "standard")
+        ? clinicalMeta.site
+        : dose.site;
+
+      const resolvedMinInterval = (!dose.minimumInterval || dose.minimumInterval.trim() === "" || dose.minimumInterval === "—")
+        ? clinicalMeta.minimumInterval
+        : dose.minimumInterval;
+
+      const resolvedRoute = (!dose.route || dose.route.trim() === "" || (dose.route === "IM" && clinicalMeta.route !== "IM"))
+        ? clinicalMeta.route
+        : dose.route;
+
+      return {
+        ...dose,
+        targetAge: resolvedTargetAge,
+        site: resolvedSite,
+        minimumInterval: resolvedMinInterval,
+        route: resolvedRoute,
+        clinicalNotes: clinicalMeta.notes,
+      };
+    });
+
+    res.json(enrichedResults);
   } catch (err: any) {
     console.error(err);
     res.status(500).json({ message: "Failed to fetch catalogue schedules" });
   }
 });
 
-router.post("/schedules", isAuthenticated, requireTenant, requirePermission("manage_users"), async (req: any, res) => {
+router.post("/schedules", isAuthenticated, requireTenant, requireCatalogueEditPermission(), async (req: any, res) => {
   try {
-    const data = insertCatalogueScheduleDoseSchema.parse({ ...req.body, tenantId: req.tenantId });
+    const rawData = req.body;
+    const sanitizedData = {
+      tenantId: req.tenantId,
+      name: String(rawData.name || "").trim(),
+      doseCode: String(rawData.doseCode || "").trim(),
+      vaccineId: Number(rawData.vaccineId),
+      doseNumber: Number(rawData.doseNumber || 1),
+      targetAge: rawData.targetAge ? String(rawData.targetAge).trim() : null,
+      minimumAge: rawData.minimumAge ? String(rawData.minimumAge).trim() : null,
+      maximumAge: rawData.maximumAge ? String(rawData.maximumAge).trim() : null,
+      minimumInterval: rawData.minimumInterval ? String(rawData.minimumInterval).trim() : null,
+      route: rawData.route ? String(rawData.route).trim() : "IM",
+      site: rawData.site ? String(rawData.site).trim() : null,
+      targetPopulationGroup: rawData.targetPopulationGroup ? String(rawData.targetPopulationGroup).trim() : "infants",
+      classification: rawData.classification ? String(rawData.classification).trim() : "routine",
+      active: rawData.active !== undefined ? Boolean(rawData.active) : true,
+      approvalStatus: (rawData.approvalStatus as any) || "approved",
+    };
+    const data = insertCatalogueScheduleDoseSchema.parse(sanitizedData);
     const [inserted] = await db.insert(catalogueScheduleDoses).values(data).returning();
     res.json(inserted);
   } catch (err: any) {
-    console.error(err);
-    res.status(500).json({ message: "Failed to insert catalogue schedule" });
+    console.error("Failed to insert catalogue schedule:", err);
+    res.status(500).json({ message: safeErrorMessage(err, "Failed to insert catalogue schedule") });
   }
 });
 
-router.patch("/schedules/:id", isAuthenticated, requireTenant, requirePermission("manage_users"), async (req: any, res) => {
+router.patch("/schedules/:id", isAuthenticated, requireTenant, requireCatalogueEditPermission(), async (req: any, res) => {
   try {
-    const { id, tenantId, createdAt, updatedAt, ...data } = req.body;
-    const [updated] = await db.update(catalogueScheduleDoses).set(data).where(and(eq(catalogueScheduleDoses.tenantId, req.tenantId), eq(catalogueScheduleDoses.id, parseInt(req.params.id)))).returning();
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) {
+      return res.status(400).json({ message: "Invalid schedule dose ID" });
+    }
+
+    const { id: _id, tenantId: _tenantId, createdAt: _c, updatedAt: _u, ...rawData } = req.body;
+    
+    // Sanitize and type-cast numeric and string fields
+    const data: Record<string, any> = {};
+    if (rawData.name !== undefined) data.name = String(rawData.name).trim();
+    if (rawData.doseCode !== undefined) data.doseCode = String(rawData.doseCode).trim();
+    if (rawData.vaccineId !== undefined && rawData.vaccineId !== null && !isNaN(Number(rawData.vaccineId))) {
+      data.vaccineId = Number(rawData.vaccineId);
+    }
+    if (rawData.doseNumber !== undefined && rawData.doseNumber !== null && !isNaN(Number(rawData.doseNumber))) {
+      data.doseNumber = Number(rawData.doseNumber);
+    }
+    if (rawData.targetAge !== undefined) data.targetAge = rawData.targetAge ? String(rawData.targetAge).trim() : null;
+    if (rawData.minimumAge !== undefined) data.minimumAge = rawData.minimumAge ? String(rawData.minimumAge).trim() : null;
+    if (rawData.maximumAge !== undefined) data.maximumAge = rawData.maximumAge ? String(rawData.maximumAge).trim() : null;
+    if (rawData.minimumInterval !== undefined) data.minimumInterval = rawData.minimumInterval ? String(rawData.minimumInterval).trim() : null;
+    if (rawData.route !== undefined) data.route = rawData.route ? String(rawData.route).trim() : null;
+    if (rawData.site !== undefined) data.site = rawData.site ? String(rawData.site).trim() : null;
+    if (rawData.targetPopulationGroup !== undefined) data.targetPopulationGroup = rawData.targetPopulationGroup ? String(rawData.targetPopulationGroup).trim() : null;
+    
+    if (rawData.classification !== undefined) {
+      let cls = String(rawData.classification).trim().toLowerCase();
+      if (cls.includes("routine")) cls = "routine";
+      else if (cls.includes("campaign") || cls.includes("supplementary") || cls.includes("sia")) cls = "campaign";
+      else if (cls.includes("outbreak")) cls = "outbreak";
+      else if (cls.includes("school")) cls = "school_based";
+      else if (cls.includes("catchup") || cls.includes("catch_up") || cls.includes("other")) cls = "other";
+      else if (!["routine", "campaign", "outbreak", "school_based", "other"].includes(cls)) cls = "routine";
+      data.classification = cls;
+    }
+    
+    if (rawData.active !== undefined) data.active = Boolean(rawData.active);
+    if (rawData.approvalStatus !== undefined) {
+      const validApprovalStatuses = ["draft", "in_review", "approved", "rejected", "archived"];
+      data.approvalStatus = validApprovalStatuses.includes(rawData.approvalStatus) ? rawData.approvalStatus : "approved";
+    }
+
+    const [existing] = await db.select().from(catalogueScheduleDoses).where(eq(catalogueScheduleDoses.id, id));
+    if (!existing) {
+      return res.status(404).json({ message: "Schedule dose not found" });
+    }
+
+    const [updated] = await db.update(catalogueScheduleDoses)
+      .set(data)
+      .where(eq(catalogueScheduleDoses.id, id))
+      .returning();
+
     res.json(updated);
   } catch (err: any) {
-    console.error(err);
-    res.status(500).json({ message: "Failed to update schedule dose" });
+    console.error("Failed to update schedule dose:", err);
+    res.status(500).json({ message: safeErrorMessage(err, "Failed to update schedule dose") });
   }
 });
 
@@ -261,14 +538,18 @@ router.post("/seed", isAuthenticated, requireTenant, requirePermission("manage_u
       { doseCode: 'pcv_3', name: 'PCV-3', vaccineId: getVaxId('vaccine_pcv'), doseNumber: 3, classification: 'routine', targetPopulationGroup: 'infants' },
       { doseCode: 'rota_1', name: 'ROTA-1', vaccineId: getVaxId('vaccine_rota'), doseNumber: 1, classification: 'routine', targetPopulationGroup: 'infants' },
       { doseCode: 'rota_2', name: 'ROTA-2', vaccineId: getVaxId('vaccine_rota'), doseNumber: 2, classification: 'routine', targetPopulationGroup: 'infants' },
-      { doseCode: 'mr_1', name: 'MR-1', vaccineId: getVaxId('vaccine_mr'), doseNumber: 1, classification: 'routine', targetPopulationGroup: 'infants' },
-      { doseCode: 'mr_2', name: 'MR-2', vaccineId: getVaxId('vaccine_mr'), doseNumber: 2, classification: 'routine', targetPopulationGroup: 'infants' },
-      { doseCode: 'hpv_1', name: 'HPV-1', vaccineId: getVaxId('vaccine_hpv'), doseNumber: 1, classification: 'routine', targetPopulationGroup: 'girls' },
-      { doseCode: 'hpv_2', name: 'HPV-2', vaccineId: getVaxId('vaccine_hpv'), doseNumber: 2, classification: 'routine', targetPopulationGroup: 'girls' },
-      { doseCode: 'malaria_1', name: 'Malaria-1', vaccineId: getVaxId('vaccine_malaria'), doseNumber: 1, classification: 'routine', targetPopulationGroup: 'infants' },
-      { doseCode: 'malaria_2', name: 'Malaria-2', vaccineId: getVaxId('vaccine_malaria'), doseNumber: 2, classification: 'routine', targetPopulationGroup: 'infants' },
-      { doseCode: 'malaria_3', name: 'Malaria-3', vaccineId: getVaxId('vaccine_malaria'), doseNumber: 3, classification: 'routine', targetPopulationGroup: 'infants' },
-      { doseCode: 'malaria_4', name: 'Malaria-4', vaccineId: getVaxId('vaccine_malaria'), doseNumber: 4, classification: 'routine', targetPopulationGroup: 'children' }
+      { doseCode: 'mr_1', name: 'MR-1', vaccineId: getVaxId('vaccine_mr'), doseNumber: 1, classification: 'routine', targetPopulationGroup: 'infants', targetAge: '9 Months' },
+      { doseCode: 'mr_2', name: 'MR-2', vaccineId: getVaxId('vaccine_mr'), doseNumber: 2, classification: 'routine', targetPopulationGroup: 'children', targetAge: '18 Months' },
+      { doseCode: 'td_6y', name: 'Td (6 Years)', vaccineId: getVaxId('vaccine_td'), doseNumber: 1, classification: 'routine', targetPopulationGroup: 'school_age', targetAge: '6 Years' },
+      { doseCode: 'hpv_1', name: 'HPV-1', vaccineId: getVaxId('vaccine_hpv'), doseNumber: 1, classification: 'routine', targetPopulationGroup: 'adolescents', targetAge: '9 Years' },
+      { doseCode: 'hpv_2', name: 'HPV-2', vaccineId: getVaxId('vaccine_hpv'), doseNumber: 2, classification: 'routine', targetPopulationGroup: 'adolescents', targetAge: '9 Years' },
+      { doseCode: 'td_12y', name: 'Td (12 Years)', vaccineId: getVaxId('vaccine_td'), doseNumber: 2, classification: 'routine', targetPopulationGroup: 'adolescents', targetAge: '12 Years' },
+      { doseCode: 'td_preg_1', name: 'Td 1 (Pregnancy)', vaccineId: getVaxId('vaccine_td'), doseNumber: 1, classification: 'routine', targetPopulationGroup: 'pregnant_women', targetAge: 'Pregnant Women' },
+      { doseCode: 'td_preg_2', name: 'Td 2 (Pregnancy)', vaccineId: getVaxId('vaccine_td'), doseNumber: 2, classification: 'routine', targetPopulationGroup: 'pregnant_women', targetAge: 'Pregnant Women' },
+      { doseCode: 'malaria_1', name: 'Malaria-1', vaccineId: getVaxId('vaccine_malaria'), doseNumber: 1, classification: 'routine', targetPopulationGroup: 'infants', targetAge: '6 Months' },
+      { doseCode: 'malaria_2', name: 'Malaria-2', vaccineId: getVaxId('vaccine_malaria'), doseNumber: 2, classification: 'routine', targetPopulationGroup: 'infants', targetAge: '9 Months' },
+      { doseCode: 'malaria_3', name: 'Malaria-3', vaccineId: getVaxId('vaccine_malaria'), doseNumber: 3, classification: 'routine', targetPopulationGroup: 'children', targetAge: '12 Months' },
+      { doseCode: 'malaria_4', name: 'Malaria-4', vaccineId: getVaxId('vaccine_malaria'), doseNumber: 4, classification: 'routine', targetPopulationGroup: 'children', targetAge: '18 Months' }
     ];
 
     for (const s of seedSchedules) {

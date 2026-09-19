@@ -6,10 +6,11 @@
  * villages and click "Create outreach sessions" to draft a routine microplan
  * with child outreach session-plans pre-populated.
  */
-import { useState, useMemo } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useLocation } from "wouter";
-import { MapContainer, CircleMarker, Popup } from "react-leaflet";
+import { MapContainer, CircleMarker, Popup, useMap } from "react-leaflet";
+import { latLngBounds } from "leaflet";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -51,6 +52,24 @@ interface MissedRow {
   components: { unserved: number; htr: number; distance: number; grid3: number };
 }
 
+function FitMissedCommunities({ rows }: { rows: MissedRow[] }) {
+  const map = useMap();
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      map.invalidateSize();
+      if (rows.length === 1) map.setView([rows[0].latitude!, rows[0].longitude!], 11);
+      else if (rows.length > 1) {
+        map.fitBounds(
+          latLngBounds(rows.map((row) => [row.latitude!, row.longitude!] as [number, number])),
+          { padding: [28, 28], maxZoom: 11 },
+        );
+      }
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [map, rows]);
+  return null;
+}
+
 const DEFAULT_ANTIGENS = ["BCG", "PENTA1", "PENTA3", "MEASLES1", "MEASLES2", "OPV1", "OPV3"];
 
 export default function MissedCommunities() {
@@ -73,11 +92,13 @@ export default function MissedCommunities() {
     queryKey: ["/api/me/tenant"],
   });
 
-  const { data, isLoading, refetch, isFetching } = useQuery<{ count: number; results: MissedRow[] }>({
-    queryKey: ["/api/missed-communities", antigen, period, districtId],
+  const { data, isLoading, refetch, isFetching } = useQuery<{ count: number; results: MissedRow[]; note?: string }>({
+    queryKey: ["/api/missed-communities", antigen, period, provinceId, districtId, facilityId],
     queryFn: async () => {
       const params = new URLSearchParams({ antigen, period });
+      if (provinceId) params.set("provinceId", String(provinceId));
       if (districtId) params.set("districtId", String(districtId));
+      if (facilityId) params.set("facilityId", String(facilityId));
       const r = await fetch(`/api/missed-communities?${params.toString()}`, { credentials: "include" });
       if (!r.ok) throw new Error(await r.text());
       return r.json();
@@ -85,11 +106,7 @@ export default function MissedCommunities() {
   });
 
   const allRows = data?.results ?? [];
-  // Apply client-side facility filter (server filters by district)
-  const rows = useMemo(
-    () => (facilityId ? allRows.filter((r) => r.facilityId === facilityId) : allRows),
-    [allRows, facilityId],
-  );
+  const rows = allRows;
 
   const mapped = rows.filter((r) => r.latitude != null && r.longitude != null);
 
@@ -185,6 +202,7 @@ export default function MissedCommunities() {
             }}
             onFacilityChange={setFacilityId}
             showFacility
+            strictCascade
             testIdPrefix="missed-geo"
           />
           <div className="grid sm:grid-cols-3 gap-3">
@@ -248,6 +266,7 @@ export default function MissedCommunities() {
                     maxBoundsViscosity={1.0}
                   >
                     <BasemapTileLayer basemap={basemap} />
+                    <FitMissedCommunities rows={mapped} />
                     {mapped.map((v) => (
                     <CircleMarker
                       key={v.villageId}
@@ -300,7 +319,7 @@ export default function MissedCommunities() {
                 </div>
               ) : rows.length === 0 ? (
                 <div className="h-full flex items-center justify-center text-muted-foreground text-sm p-4 text-center">
-                  No missed communities for this filter. Make sure imported coverage exists for this antigen + period.
+                  {data?.note ?? "No verified missed-community evidence is available for this filter."}
                 </div>
               ) : (
                 <table className="w-full text-xs">
