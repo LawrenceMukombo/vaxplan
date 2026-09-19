@@ -308,20 +308,20 @@ async function getOfflineData(url: string): Promise<any> {
     return getNationalCalendarEventsForCountry(countryCode);
   }
   if (pathname === "/api/catalogue/vaccines") {
-    return SOUTH_AFRICA_PRESET.vaccines.map((v, i) => ({
+    const products = Array.from(new Map(SOUTH_AFRICA_PRESET.doses.map((dose) => [
+      dose.vaccineProductId,
+      { productId: dose.vaccineProductId, name: dose.vaccineName, antigenName: dose.antigen },
+    ])).values());
+    return products.map((v, i) => ({
       id: i + 1,
       tenantId: _activeTenantId || "1",
       productId: v.productId,
       name: v.name,
       antigenName: v.antigenName,
-      category: v.category,
-      presentation: v.presentation,
-      dosesPerVial: v.dosesPerVial,
-      unitOfMeasure: v.unitOfMeasure,
-      routineUse: v.routineUse,
-      campaignUse: v.campaignUse,
-      outbreakUse: v.outbreakUse,
-      wastageThreshold: v.wastageThreshold,
+      category: "vaccine",
+      routineUse: true,
+      campaignUse: false,
+      outbreakUse: false,
       approvalStatus: "approved",
       active: true,
       modules: {},
@@ -488,6 +488,7 @@ async function writeToIndexedDB(method: string, url: string, data: any): Promise
       await table.delete(id);
     }
   }
+  return true;
 }
 
 async function handleOfflineMutation(method: string, url: string, data: any): Promise<any> {
@@ -500,8 +501,6 @@ async function handleOfflineMutation(method: string, url: string, data: any): Pr
   if (method === "POST" && /^\/api\/microplans\/[^/]+\/version-event\/?$/.test(pathname)) {
     return { success: true, skippedOfflineAuditEvent: true };
   }
-  return true;
-
   if (pathname === "/api/me/switch-tenant") {
     const targetId = String(data.tenantId);
     await offlineDb.syncMeta.put({ key: "tenantId", value: targetId });
@@ -518,7 +517,6 @@ async function handleOfflineMutation(method: string, url: string, data: any): Pr
     const items = Array.isArray((data as any)?.population) ? (data as any).population : [];
     const records = [];
 
-    if (!table) throw new Error(`This operation is not available offline yet: ${pathname}`);
     for (const item of items) {
       const itemData = { ...item };
       const metadata =

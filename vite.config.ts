@@ -75,7 +75,8 @@ export default defineConfig({
         ],
       },
       devOptions: {
-        enabled: false, // keep HMR clean in dev; SW only active in production build
+        enabled: true,
+        type: "classic",
       },
     }),
   ],
