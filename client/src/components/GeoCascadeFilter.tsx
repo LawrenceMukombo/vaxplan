@@ -339,8 +339,6 @@ export function GeoCascadeFilter({
 
   const handleDistrict = (val: string) => {
     const id = val === "all" ? null : Number(val);
-    onDistrictChange(id);
-    if (showFacility && onFacilityChange) onFacilityChange(null);
     if (id !== null) {
       const d = districts.find((dd) => Number(dd.id) === id || String(dd.id) === String(id));
       if (d) {
@@ -350,20 +348,21 @@ export function GeoCascadeFilter({
         }
       }
     }
+    // Parent callbacks commonly clear their descendants. Apply the selected
+    // district after synchronising its province so the requested value is not
+    // immediately reset by the parent change.
+    onDistrictChange(id);
+    if (showFacility && onFacilityChange) onFacilityChange(null);
   };
 
   const handleFacility = (val: string) => {
     if (!onFacilityChange) return;
     const id = val === "all" ? null : Number(val);
-    onFacilityChange(id);
     if (id !== null) {
       const fac = facilities.find((f) => Number(f.id) === id || String(f.id) === String(id));
       if (fac) {
         const facDistId = Number((fac as any).districtId);
         if (Number.isFinite(facDistId) && facDistId > 0) {
-          if (Number(districtId) !== facDistId) {
-            onDistrictChange(facDistId);
-          }
           const d = districts.find((dd) => Number(dd.id) === facDistId || String(dd.id) === String(facDistId));
           if (d) {
             const dProvId = Number((d as any).provinceId);
@@ -371,9 +370,14 @@ export function GeoCascadeFilter({
               onProvinceChange(dProvId);
             }
           }
+          if (Number(districtId) !== facDistId) {
+            onDistrictChange(facDistId);
+          }
         }
       }
     }
+    // Apply the leaf last because either parent callback may clear it.
+    onFacilityChange(id);
   };
 
   return (

@@ -263,6 +263,45 @@ export function OutreachPostsManager({
     return map;
   }, [districts]);
 
+  const provincesMap = useMemo(() => {
+    const map = new Map<number, Province>();
+    provinces.forEach((p) => map.set(p.id, p));
+    return map;
+  }, [provinces]);
+
+  const isVillageInSelectedScope = (v: Village) => {
+    if (selectedFacilityId && Number(v.assignedFacilityId) !== Number(selectedFacilityId)) return false;
+    if (selectedDistrictId && Number(v.districtId) !== Number(selectedDistrictId)) return false;
+
+    const district = districtsMap.get(Number(v.districtId));
+    if (selectedProvinceId && Number(district?.provinceId) !== Number(selectedProvinceId)) return false;
+
+    if (selectedRegionId) {
+      const province = district ? provincesMap.get(Number(district.provinceId)) : undefined;
+      if (Number((province as any)?.regionId) !== Number(selectedRegionId)) return false;
+    }
+    return true;
+  };
+
+  const geoScopedVillages = useMemo(
+    () => villages.filter(isVillageInSelectedScope),
+    [villages, selectedRegionId, selectedProvinceId, selectedDistrictId, selectedFacilityId, districtsMap, provincesMap],
+  );
+
+  const availableDistricts = useMemo(
+    () => selectedProvinceId
+      ? districts.filter((d) => Number(d.provinceId) === Number(selectedProvinceId))
+      : [],
+    [districts, selectedProvinceId],
+  );
+
+  const availableFacilities = useMemo(
+    () => districtFilter !== "all"
+      ? facilities.filter((f) => Number(f.districtId) === Number(districtFilter))
+      : [],
+    [facilities, districtFilter],
+  );
+
   // Communities available for creation in the selected facility
   const candidateVillages = useMemo(() => {
     if (!formFacilityId || formFacilityId === "all") return villages;
@@ -272,11 +311,7 @@ export function OutreachPostsManager({
 
   // Filtered dataset
   const filteredVillages = useMemo(() => {
-    return villages.filter((v) => {
-      // Scope filters
-      if (selectedFacilityId && v.assignedFacilityId !== selectedFacilityId) return false;
-      if (selectedDistrictId && v.districtId !== selectedDistrictId) return false;
-
+    return geoScopedVillages.filter((v) => {
       // Tab filters
       if (districtFilter !== "all" && v.districtId !== Number(districtFilter)) return false;
       if (facilityFilter !== "all" && v.assignedFacilityId !== Number(facilityFilter)) return false;
@@ -297,9 +332,7 @@ export function OutreachPostsManager({
       return true;
     });
   }, [
-    villages,
-    selectedFacilityId,
-    selectedDistrictId,
+    geoScopedVillages,
     districtFilter,
     facilityFilter,
     statusFilter,
@@ -310,8 +343,8 @@ export function OutreachPostsManager({
 
   // KPI Metrics
   const metrics = useMemo(() => {
-    const totalVillages = villages.length;
-    const configuredPosts = villages.filter((v) => v.outreachLatitude && v.outreachLongitude);
+    const totalVillages = geoScopedVillages.length;
+    const configuredPosts = geoScopedVillages.filter((v) => v.outreachLatitude && v.outreachLongitude);
     const configuredCount = configuredPosts.length;
     const coveragePercent = totalVillages > 0 ? ((configuredCount / totalVillages) * 100).toFixed(1) : "0";
 
@@ -334,7 +367,7 @@ export function OutreachPostsManager({
       totalPop,
       avgDist,
     };
-  }, [villages]);
+  }, [geoScopedVillages]);
 
   // Sorting
   const sortedVillages = useMemo(() => {
@@ -385,6 +418,12 @@ export function OutreachPostsManager({
   useEffect(() => {
     setPage(1);
   }, [searchQuery, statusFilter, districtFilter, facilityFilter, pageSize]);
+
+  useEffect(() => {
+    setDistrictFilter(selectedDistrictId ? String(selectedDistrictId) : "all");
+    setFacilityFilter(selectedFacilityId ? String(selectedFacilityId) : "all");
+    setPage(1);
+  }, [selectedDistrictId, selectedFacilityId]);
 
   // Open Modal for Create / Edit
   const handleOpenCreate = (targetVillage?: Village) => {
@@ -1108,13 +1147,20 @@ export function OutreachPostsManager({
               </SelectContent>
             </Select>
 
-            <Select value={districtFilter} onValueChange={setDistrictFilter}>
+            <Select
+              value={districtFilter}
+              onValueChange={(value) => {
+                setDistrictFilter(value);
+                setFacilityFilter("all");
+              }}
+              disabled={!selectedProvinceId}
+            >
               <SelectTrigger className="h-9 text-xs">
-                <SelectValue placeholder={`Filter ${adminLabels.level2 || "District"}`} />
+                <SelectValue placeholder={selectedProvinceId ? `Filter ${adminLabels.level2 || "District"}` : `Select ${adminLabels.level1 || "Province"} first`} />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All {adminLabels.level2 || "Districts"}</SelectItem>
-                {districts.map((d) => (
+                {availableDistricts.map((d) => (
                   <SelectItem key={d.id} value={String(d.id)}>
                     {d.name}
                   </SelectItem>
@@ -1128,9 +1174,7 @@ export function OutreachPostsManager({
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Facilities</SelectItem>
-                {facilities
-                  .filter((f) => districtFilter === "all" || f.districtId === Number(districtFilter))
-                  .map((f) => (
+                {availableFacilities.map((f) => (
                     <SelectItem key={f.id} value={String(f.id)}>
                       {f.name}
                     </SelectItem>

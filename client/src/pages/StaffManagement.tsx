@@ -610,6 +610,18 @@ export default function StaffManagement() {
   // ─── Filtered Staff ──────────────────────────────────────────────────────
   const filteredStaff = useMemo(() => {
     let result = staffList;
+
+    if (selectedFacilityId) {
+      result = result.filter((s) => s.facilityId?.toString() === selectedFacilityId);
+    } else if (selectedDistrictId) {
+      const distFacIds = new Set(allFacilities.filter((f) => f.districtId?.toString() === selectedDistrictId).map((f) => f.id));
+      result = result.filter((s) => distFacIds.has(s.facilityId));
+    } else if (selectedProvinceId) {
+      const provDistIds = new Set(allDistricts.filter((d) => d.provinceId?.toString() === selectedProvinceId).map((d) => d.id));
+      const provFacIds = new Set(allFacilities.filter((f) => provDistIds.has(f.districtId)).map((f) => f.id));
+      result = result.filter((s) => provFacIds.has(s.facilityId));
+    }
+
     if (searchTerm.trim()) {
       const term = searchTerm.toLowerCase();
       result = result.filter(
@@ -618,19 +630,20 @@ export default function StaffManagement() {
           (s.position && s.position.toLowerCase().includes(term)) ||
           (s.contactPhone && s.contactPhone.includes(term)) ||
           (s.role && s.role.toLowerCase().includes(term)) ||
+          (s.campaignRole && s.campaignRole.toLowerCase().includes(term)) ||
           (s.employeeId && s.employeeId.toLowerCase().includes(term)) ||
           (s.nrc && s.nrc.toLowerCase().includes(term)) ||
           (s.residenceVillage && s.residenceVillage.toLowerCase().includes(term))
       );
     }
     if (roleFilter !== "all") {
-      result = result.filter((s) => s.role === roleFilter);
+      result = result.filter((s) => s.role === roleFilter || s.campaignRole === roleFilter);
     }
     if (statusFilter === "active") result = result.filter((s) => s.isActive);
     if (statusFilter === "inactive") result = result.filter((s) => !s.isActive);
-    if (statusFilter === "volunteer") result = result.filter((s) => s.isVolunteer);
+    if (statusFilter === "volunteer") result = result.filter((s) => s.isVolunteer || s.role === "volunteer" || s.campaignRole === "volunteer");
     return result;
-  }, [staffList, searchTerm, roleFilter, statusFilter]);
+  }, [staffList, selectedFacilityId, selectedDistrictId, selectedProvinceId, allFacilities, allDistricts, searchTerm, roleFilter, statusFilter]);
 
   // ─── Sorting Logic ───────────────────────────────────────────────────────
   const sortedStaff = useMemo(() => {
@@ -686,14 +699,25 @@ export default function StaffManagement() {
 
   // ─── Stats ───────────────────────────────────────────────────────────────
   const stats = useMemo(() => {
-    const active = staffList.filter((s) => s.isActive).length;
-    const volunteers = staffList.filter((s) => s.isVolunteer).length;
-    const vaccinators = staffList.filter((s) => s.role === "vaccinator").length;
-    const supervisors = staffList.filter(
-      (s) => s.role === "supervisor" || s.role === "facility_in_charge"
+    let base = staffList;
+    if (selectedFacilityId) {
+      base = base.filter((s) => s.facilityId?.toString() === selectedFacilityId);
+    } else if (selectedDistrictId) {
+      const distFacIds = new Set(allFacilities.filter((f) => f.districtId?.toString() === selectedDistrictId).map((f) => f.id));
+      base = base.filter((s) => distFacIds.has(s.facilityId));
+    } else if (selectedProvinceId) {
+      const provDistIds = new Set(allDistricts.filter((d) => d.provinceId?.toString() === selectedProvinceId).map((d) => d.id));
+      const provFacIds = new Set(allFacilities.filter((f) => provDistIds.has(f.districtId)).map((f) => f.id));
+      base = base.filter((s) => provFacIds.has(s.facilityId));
+    }
+    const active = base.filter((s) => s.isActive).length;
+    const volunteers = base.filter((s) => s.isVolunteer || s.role === "volunteer" || s.campaignRole === "volunteer").length;
+    const vaccinators = base.filter((s) => s.role === "vaccinator" || s.campaignRole === "vaccinator").length;
+    const supervisors = base.filter(
+      (s) => s.role === "supervisor" || s.role === "facility_in_charge" || s.campaignRole === "supervisor"
     ).length;
-    return { total: staffList.length, active, volunteers, vaccinators, supervisors };
-  }, [staffList]);
+    return { total: base.length, active, volunteers, vaccinators, supervisors };
+  }, [staffList, selectedFacilityId, selectedDistrictId, selectedProvinceId, allFacilities, allDistricts]);
 
   // ─── Form Helpers ─────────────────────────────────────────────────────────
   const setField = useCallback(

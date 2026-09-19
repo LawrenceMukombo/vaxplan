@@ -11512,6 +11512,8 @@ export async function registerRoutes(
             facilityName: facilities.name,
             districtId: facilities.districtId,
             districtName: districts.name,
+            provinceId: districts.provinceId,
+            provinceName: provinces.name,
             villageId: clients.villageId,
             villageName: villages.name,
             villageLat: villages.latitude,
@@ -11521,6 +11523,7 @@ export async function registerRoutes(
           .from(clients)
           .innerJoin(facilities, eq(facilities.id, clients.facilityId))
           .innerJoin(districts, eq(districts.id, facilities.districtId))
+          .innerJoin(provinces, eq(provinces.id, districts.provinceId))
           .leftJoin(villages, eq(villages.id, clients.villageId))
           .where(
             and(
@@ -11572,6 +11575,8 @@ export async function registerRoutes(
         type DistAgg = {
           districtId: number;
           districtName: string;
+          provinceId: number;
+          provinceName: string;
           zeroDose: number;
           underImmunized: number;
           denominator: number;
@@ -11581,6 +11586,8 @@ export async function registerRoutes(
           villageName: string;
           districtId: number;
           districtName: string;
+          provinceId: number;
+          provinceName: string;
           facilityId: number;
           facilityName: string;
           latitude: number | null;
@@ -11600,6 +11607,8 @@ export async function registerRoutes(
             {
               districtId: c.districtId,
               districtName: c.districtName,
+              provinceId: c.provinceId,
+              provinceName: c.provinceName,
               zeroDose: 0,
               underImmunized: 0,
               denominator: 0,
@@ -11613,6 +11622,8 @@ export async function registerRoutes(
               villageName: c.villageName ?? `(Unmapped — ${c.facilityName})`,
               districtId: c.districtId,
               districtName: c.districtName,
+              provinceId: c.provinceId,
+              provinceName: c.provinceName,
               facilityId: c.facilityId,
               facilityName: c.facilityName,
               latitude: c.villageLat != null ? Number(c.villageLat) : null,
@@ -16121,7 +16132,25 @@ Instructions:
   app.get("/api/entity-history/:entityType/:entityId/history", ...auth, requireTenant, async (req: any, res) => {
     try {
       const { entityType, entityId } = req.params;
-      const history = await EntityHistoryService.getHistory(req.tenantId, entityType, entityId);
+      let history = await EntityHistoryService.getHistory(req.tenantId, entityType, entityId);
+      // Older operational records predate temporal versioning. Establish a
+      // current baseline the first time their history is opened so the drawer
+      // is immediately useful and all subsequent edits form a real timeline.
+      if (history.length === 0 && entityType === "facility") {
+        const current = await storage.getFacility(req.tenantId, Number(entityId));
+        if (current) {
+          await EntityHistoryService.recordAutoSnapshot(
+            req.tenantId,
+            entityType,
+            String(entityId),
+            current as Record<string, any>,
+            "baseline",
+            "Baseline captured from the current facility record",
+            req.dbUser?.id,
+          );
+          history = await EntityHistoryService.getHistory(req.tenantId, entityType, entityId);
+        }
+      }
       res.json(history);
     } catch (err: any) {
       res.status(500).json({ message: safeErrorMessage(err, "Failed to fetch history") });

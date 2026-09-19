@@ -22,6 +22,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Synchronization now supports offline authentication state, batch handlers, forced retry for stuck items, warning propagation, and tenant-local cache isolation.
 
 ### Fixed
+- Fixed global enterprise `DataTable` search filter to automatically derive search keys from table columns and row properties when `searchKeys` is not explicitly provided, restoring search across over 25 tables.
+- Connected `StaffManagement` province and district cascade dropdowns as well as interactive KPI cards ("Active Staff", "Vaccinators", "Supervisors", "Volunteers") to the filtered staff roster and statistics summary.
+- Connected the Zero-Dose Villages province, district, and facility cascade to the scoped indicator API so totals, ranked villages, selections, and map pins update together.
+- Corrected the Zero-Dose Villages sidebar link and added a compatibility redirect from `/zero-dose-villages` to `/indicators/zero-dose`.
 - Removed implicit DHIS2 demo fallback and placeholder production values when credentials, facility mappings, or data-element mappings are missing.
 - Corrected offline queue replay, identity sequence alignment, missing production columns, and resilient sync-pull behavior.
 - Corrected campaign, risk, surveillance, facility, settlement, population, map visibility, and tenant-geography edge cases.

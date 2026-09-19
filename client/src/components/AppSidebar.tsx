@@ -187,7 +187,7 @@ const clinicalNavItems: NavItem[] = [
     moduleKey: "dropout",
     permissionCheck: (u) => canAccessDropoutRates(u),
   },
-  { title: "Zero-Dose Villages", path: "/zero-dose-villages", icon: Target, moduleKey: "zeroDose" },
+  { title: "Zero-Dose Villages", path: "/indicators/zero-dose", icon: Target, moduleKey: "zeroDose" },
   { title: "Missed Communities", path: "/missed-communities", icon: AlertTriangle, moduleKey: "missedCommunities" },
   { title: "Recommendations", path: "/vgie/recommendations", icon: ClipboardCheck, moduleKey: "recommendations" },
   { title: "Alerts & Notices", path: "/vgie/alerts", icon: Bell, moduleKey: "recommendations" },

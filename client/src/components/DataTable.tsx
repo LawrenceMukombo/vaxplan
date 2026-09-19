@@ -156,20 +156,36 @@ export function DataTable<T extends { id?: number | string }>({
   };
 
   const filteredData = useMemo(() => {
-    if (!search || searchKeys.length === 0) return data;
+    if (!search) return data;
 
     const tokens = search.toLowerCase().split(/\s+/).filter(Boolean);
     if (tokens.length === 0) return data;
 
-    return data.filter((item) =>
-      tokens.every((token) =>
-        searchKeys.some((key) => {
-          const value = item[key];
-          return String(value || "").toLowerCase().includes(token);
-        })
-      )
+    const effectiveKeys: string[] =
+      searchKeys && searchKeys.length > 0
+        ? (searchKeys as string[])
+        : columns
+            .map((c) => String(c.key))
+            .filter((k) => k && !k.startsWith("_") && k !== "actions");
+
+    return data.filter((item: any) =>
+      tokens.every((token) => {
+        if (effectiveKeys.length > 0) {
+          const matchedKey = effectiveKeys.some((key) => {
+            const value = item[key];
+            return value != null && String(value).toLowerCase().includes(token);
+          });
+          if (matchedKey) return true;
+        }
+
+        // Fallback: check all own string/number values of the item
+        return Object.values(item).some((val) => {
+          if (val == null || typeof val === "object" || typeof val === "function") return false;
+          return String(val).toLowerCase().includes(token);
+        });
+      })
     );
-  }, [data, search, searchKeys]);
+  }, [data, search, searchKeys, columns]);
 
   const sortedData = useMemo(() => {
     if (!sortConfig) return filteredData;

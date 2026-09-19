@@ -399,6 +399,9 @@ function AuthenticatedRouter({ user }: { user: User }) {
       <Route path="/indicators/dropout">
         {modules.dropout !== false ? <DropoutRates /> : <ModuleDisabled moduleName="Dropout Rates" />}
       </Route>
+      <Route path="/zero-dose-villages">
+        <PreserveQueryRedirect to="/indicators/zero-dose" />
+      </Route>
       <Route path="/indicators/zero-dose">
         {modules.zeroDose !== false ? <ZeroDoseVillages /> : <ModuleDisabled moduleName="Zero-Dose Villages" />}
       </Route>

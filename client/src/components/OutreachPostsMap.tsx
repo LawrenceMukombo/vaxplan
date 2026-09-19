@@ -110,9 +110,9 @@ export function OutreachPostsMap({
   villages,
   facilities,
   districts,
-  provinces: _provinces,
-  selectedRegionId: _selectedRegionId,
-  selectedProvinceId: _selectedProvinceId,
+  provinces,
+  selectedRegionId,
+  selectedProvinceId,
   selectedDistrictId,
   selectedFacilityId,
   adminLabels = {},
@@ -150,14 +150,47 @@ export function OutreachPostsMap({
     return map;
   }, [districts]);
 
+  const provincesMap = useMemo(() => {
+    const map = new Map<number, Province>();
+    provinces.forEach((p) => map.set(p.id, p));
+    return map;
+  }, [provinces]);
+
+  const availableDistricts = useMemo(
+    () => selectedProvinceId
+      ? districts.filter((d) => Number(d.provinceId) === Number(selectedProvinceId))
+      : [],
+    [districts, selectedProvinceId],
+  );
+
+  const availableFacilities = useMemo(
+    () => districtFilter !== "all"
+      ? facilities.filter((f) => Number(f.districtId) === Number(districtFilter))
+      : [],
+    [facilities, districtFilter],
+  );
+
+  useEffect(() => {
+    setDistrictFilter(selectedDistrictId ? String(selectedDistrictId) : "all");
+    setFacilityFilter(selectedFacilityId ? String(selectedFacilityId) : "all");
+  }, [selectedDistrictId, selectedFacilityId]);
+
   // Extract all configured outreach posts
   const allConfiguredPosts = useMemo(() => {
     return villages.filter((v) => {
+      if (selectedFacilityId && Number(v.assignedFacilityId) !== Number(selectedFacilityId)) return false;
+      if (selectedDistrictId && Number(v.districtId) !== Number(selectedDistrictId)) return false;
+      const district = districtsMap.get(Number(v.districtId));
+      if (selectedProvinceId && Number(district?.provinceId) !== Number(selectedProvinceId)) return false;
+      if (selectedRegionId) {
+        const province = district ? provincesMap.get(Number(district.provinceId)) : undefined;
+        if (Number((province as any)?.regionId) !== Number(selectedRegionId)) return false;
+      }
       const lat = v.outreachLatitude ? parseFloat(String(v.outreachLatitude)) : NaN;
       const lng = v.outreachLongitude ? parseFloat(String(v.outreachLongitude)) : NaN;
       return !isNaN(lat) && !isNaN(lng) && lat !== 0 && lng !== 0;
     });
-  }, [villages]);
+  }, [villages, selectedRegionId, selectedProvinceId, selectedDistrictId, selectedFacilityId, districtsMap, provincesMap]);
 
   // Filtered outreach posts
   const filteredPosts = useMemo(() => {
@@ -343,13 +376,20 @@ export function OutreachPostsMap({
               </div>
 
               {/* District Filter */}
-              <Select value={districtFilter} onValueChange={setDistrictFilter}>
+              <Select
+                value={districtFilter}
+                onValueChange={(value) => {
+                  setDistrictFilter(value);
+                  setFacilityFilter("all");
+                }}
+                disabled={!selectedProvinceId}
+              >
                 <SelectTrigger className="w-[180px] h-8 text-xs bg-background">
                   <SelectValue placeholder={`All ${adminLabels.level2 || "Districts"}`} />
                 </SelectTrigger>
                 <SelectContent className="text-xs max-h-64">
                   <SelectItem value="all">All {adminLabels.level2 || "Districts"}</SelectItem>
-                  {districts.map((d) => (
+                  {availableDistricts.map((d) => (
                     <SelectItem key={d.id} value={String(d.id)}>
                       {d.name}
                     </SelectItem>
@@ -358,13 +398,13 @@ export function OutreachPostsMap({
               </Select>
 
               {/* Facility Filter */}
-              <Select value={facilityFilter} onValueChange={setFacilityFilter}>
+              <Select value={facilityFilter} onValueChange={setFacilityFilter} disabled={districtFilter === "all"}>
                 <SelectTrigger className="w-[200px] h-8 text-xs bg-background">
                   <SelectValue placeholder="All Facilities" />
                 </SelectTrigger>
                 <SelectContent className="text-xs max-h-64">
                   <SelectItem value="all">All Facilities</SelectItem>
-                  {facilities.map((f) => (
+                  {availableFacilities.map((f) => (
                     <SelectItem key={f.id} value={String(f.id)}>
                       {f.name}
                     </SelectItem>

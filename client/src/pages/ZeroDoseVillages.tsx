@@ -18,7 +18,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation } from "wouter";
-import { MapContainer, CircleMarker, Popup } from "react-leaflet";
+import { MapContainer, CircleMarker, Popup, useMap } from "react-leaflet";
+import { latLngBounds } from "leaflet";
 import { GeoCascadeFilter } from "@/components/GeoCascadeFilter";
 import {
   BasemapSwitcher,
@@ -47,6 +48,8 @@ interface VillageRow {
   villageName: string;
   districtId: number;
   districtName: string;
+  provinceId: number;
+  provinceName: string;
   facilityId: number;
   facilityName: string;
   latitude: number | null;
@@ -58,6 +61,27 @@ interface VillageRow {
   denominator: number;
   pct: number;
   underImmunizedPct: number;
+}
+
+function FitFilteredVillages({ rows }: { rows: VillageRow[] }) {
+  const map = useMap();
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      map.invalidateSize();
+      if (rows.length === 1) {
+        map.setView([rows[0].latitude!, rows[0].longitude!], 11);
+      } else if (rows.length > 1) {
+        map.fitBounds(
+          latLngBounds(rows.map((row) => [row.latitude!, row.longitude!] as [number, number])),
+          { padding: [28, 28], maxZoom: 11 },
+        );
+      }
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [map, rows]);
+
+  return null;
 }
 
 interface ZeroDoseSummary {
@@ -109,7 +133,21 @@ export default function ZeroDoseVillages() {
   });
 
   const { data, isLoading } = useQuery<ZeroDoseSummary>({
-    queryKey: ["/api/indicators/zero-dose"],
+    queryKey: ["/api/indicators/zero-dose", tenantInfo?.id, provinceId, districtId, facilityId],
+    queryFn: async () => {
+      const params = new URLSearchParams();
+      if (provinceId != null) params.set("provinceId", String(provinceId));
+      if (districtId != null) params.set("districtId", String(districtId));
+      if (facilityId != null) params.set("facilityId", String(facilityId));
+      const query = params.toString();
+      const suffix = query ? `?${query}` : "";
+      const response = await fetch(`/api/indicators/zero-dose${suffix}`, {
+        credentials: "include",
+        headers: tenantInfo?.id ? { "x-tenant-id": String(tenantInfo.id) } : undefined,
+      });
+      if (!response.ok) throw new Error("Failed to load the zero-dose indicator");
+      return response.json();
+    },
   });
 
   const rows = data?.byVillage ?? [];
@@ -244,13 +282,19 @@ export default function ZeroDoseVillages() {
               setProvinceId(id);
               setDistrictId(null);
               setFacilityId(null);
+              setSelected(new Set());
             }}
             onDistrictChange={(id) => {
               setDistrictId(id);
               setFacilityId(null);
+              setSelected(new Set());
             }}
-            onFacilityChange={setFacilityId}
+            onFacilityChange={(id) => {
+              setFacilityId(id);
+              setSelected(new Set());
+            }}
             showFacility
+            strictCascade={false}
             testIdPrefix="zd-geo"
           />
           <div className="grid sm:grid-cols-3 gap-3">
@@ -315,7 +359,7 @@ export default function ZeroDoseVillages() {
               ) : (
                 <>
                 <MapContainer
-                  key={`${mode}-${districtId ?? "all"}-${facilityId ?? "all"}`}
+                  key={`${mode}-${provinceId ?? "all"}-${districtId ?? "all"}-${facilityId ?? "all"}`}
                   center={mapCenter}
                   zoom={tenantMapDefaults.zoom}
                   className="h-full w-full"
@@ -324,6 +368,7 @@ export default function ZeroDoseVillages() {
                   maxBoundsViscosity={1.0}
                 >
                   <BasemapTileLayer basemap={basemap} />
+                  <FitFilteredVillages rows={mapped} />
                   {mapped.map((v) => {
                     const n = countFor(v);
                     const color = colorFor(n);
@@ -515,6 +560,11 @@ export default function ZeroDoseVillages() {
             <span className="text-sm font-medium" data-testid="text-selected-count">
               {selected.size} village{selected.size === 1 ? "" : "s"} selected
             </span>
+            {selected.size === 0 && (
+              <span className="text-xs text-muted-foreground">
+                Select a village row or map pin to enable outreach planning.
+              </span>
+            )}
             <div className="flex items-center gap-1.5">
               <Label className="text-[10px] uppercase text-muted-foreground">Antigen</Label>
               <Select

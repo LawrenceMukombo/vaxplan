@@ -2744,7 +2744,7 @@ export default function Facilities({ initialTab, initialView }: FacilitiesProps 
                 <Card className="mb-6 bg-card border-border/40 shadow-sm">
           <CardContent className="pt-4 pb-4">
             <GeoCascadeFilter
-              strictCascade={false}
+              strictCascade={true}
               showRegion={!skipRegionLevel}
               regionId={selectedRegionId}
               provinceId={selectedProvinceId}

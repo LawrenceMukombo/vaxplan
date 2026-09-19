@@ -40,6 +40,7 @@ import { safeErrorMessage } from '../errorUtils';
 import { getCountryFormat } from '@shared/countryFormats';
 import { normalizeStockVaccineName } from '@shared/vaccineSchedule';
 import { fetchOsrmRoute } from '../services/routing';
+import { EntityHistoryService } from '../services/entityHistoryService';
 import {
   requireGeoAccess,
   requirePermission,
@@ -544,6 +545,15 @@ export function registerFacilityRoutes(app: Express) {
 
       const facility = await storage.createFacility(req.tenantId, data);
       await logAudit(req, "create", "facility", facility.id, null, facility);
+      await EntityHistoryService.recordAutoSnapshot(
+        req.tenantId,
+        "facility",
+        String(facility.id),
+        facility as Record<string, any>,
+        "created",
+        "Facility created",
+        req.dbUser?.id,
+      );
       res.status(201).json(facility);
     } catch (error) {
       console.error("Error creating facility:", error);
@@ -581,6 +591,15 @@ export function registerFacilityRoutes(app: Express) {
 
       const facility = await storage.updateFacility(req.tenantId, entityId, updateBody);
       await logAudit(req, "update", "facility", entityId, oldFacility, facility);
+      await EntityHistoryService.recordAutoSnapshot(
+        req.tenantId,
+        "facility",
+        String(entityId),
+        facility as Record<string, any>,
+        "updated",
+        "Facility details updated",
+        req.dbUser?.id,
+      );
       res.json(facility);
     } catch (error) {
       console.error("Error updating facility:", error);
