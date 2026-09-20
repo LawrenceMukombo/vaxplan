@@ -1165,7 +1165,7 @@ function CaregiverRecallModal({
         antigen,
         dryRun,
       });
-      return await res.json();
+      return res;
     },
     onSuccess: (data) => {
       setResult(data);

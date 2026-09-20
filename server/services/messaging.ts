@@ -443,20 +443,24 @@ export async function broadcastSessionAlerts(
     : new Date().toISOString().slice(0, 10);
   const locationName = session.facility_name || "Community Outreach Post";
 
-  // 2. Fetch Caregivers in Target Catchment
+  // 2. Fetch Caregivers in Target Catchment & Tenant Config
+  const tenantRows = await db.execute(dsql`
+    SELECT settings FROM tenants WHERE id = ${tenantId} LIMIT 1
+  `);
+  const tenantSettings = (tenantRows as any).rows?.[0]?.settings || {};
+  const commConfig = tenantSettings?.communication || {};
+
   const clientRows = await db.execute(dsql`
     SELECT id, name, parent_name AS caregiver_name, contact_phone
     FROM clients
     WHERE tenant_id = ${tenantId}
-      AND contact_phone IS NOT NULL
-    LIMIT 200
   `);
 
   const caregivers = (clientRows as any).rows ?? [];
 
-  // 3. Localized Message Templates
+  // Fallback localized message templates
   const templates: Record<string, string> = {
-    en: `Dear caregiver, VaxPlan reminder: An immunization session is scheduled at ${locationName} on ${sessionDate}. Please bring your child's vaccination card.`,
+    en: `Dear caregiver, VaxPlan reminder: An outreach vaccination session will be held at ${locationName} on ${sessionDate}. Please bring your child's immunization card.`,
     fr: `Chère tutrice, rappel VaxPlan : Une séance de vaccination se tiendra à ${locationName} le ${sessionDate}. Veuillez apporter le carnet de vaccination de votre enfant.`,
     sw: `Mlezi mpendwa, ukumbusho wa VaxPlan: Huduma ya chanjo itatolewa ${locationName} tarehe ${sessionDate}. Tafadhali leta kadi ya chanjo ya mtoto wako.`,
     pt: `Prezada cuidadora, lembrete VaxPlan: A sessão de vacinação será realizada em ${locationName} no dia ${sessionDate}. Por favor traga o cartão de vacinação da criança.`,
@@ -483,27 +487,43 @@ export async function broadcastSessionAlerts(
     }
 
     try {
-      const res = await sendSms({
-        to: destination,
-        message: messageText,
-      });
-
-      if (res.success) {
-        sentCount++;
-        try {
-          await db.insert(communicationLogs).values({
-            tenantId,
-            channel: "sms",
-            destination,
-            status: "delivered",
-            providerResponse: res.messageId || "Delivered",
-            fallbackTriggered: false,
-          });
-        } catch (logErr: any) {
-          console.warn("[Messaging Service] Could not persist communication log:", logErr?.message || logErr);
+      if (commConfig.smartRouting === true) {
+        const dispatchRes = await dispatchWithFallback({
+          tenantId,
+          primaryChannel: 'sms',
+          destination,
+          message: messageText,
+          tenantSettings,
+        });
+        if (dispatchRes.success) {
+          sentCount++;
+        } else {
+          failedCount++;
         }
       } else {
-        failedCount++;
+        const res = await sendSms({
+          to: destination,
+          message: messageText,
+          config: commConfig.sms,
+        });
+
+        if (res.success) {
+          sentCount++;
+          try {
+            await db.insert(communicationLogs).values({
+              tenantId,
+              channel: "sms",
+              destination,
+              status: "delivered",
+              providerResponse: res.messageId || "Delivered",
+              fallbackTriggered: false,
+            });
+          } catch (logErr: any) {
+            console.warn("[Messaging Service] Could not persist communication log:", logErr?.message || logErr);
+          }
+        } else {
+          failedCount++;
+        }
       }
     } catch {
       failedCount++;
@@ -556,12 +576,17 @@ export async function scheduleDefaulterRecall(
   const { antigen = "PENTA-3", dryRun = false } = options;
   const { sql: dsql } = await import("drizzle-orm");
 
+  const tenantRows = await db.execute(dsql`
+    SELECT settings FROM tenants WHERE id = ${tenantId} LIMIT 1
+  `);
+  const tenantSettings = (tenantRows as any).rows?.[0]?.settings || {};
+  const commConfig = tenantSettings?.communication || {};
+
   const clientsQuery = await db.execute(dsql`
     SELECT id, name, parent_name AS caregiver_name, contact_phone
     FROM clients
     WHERE tenant_id = ${tenantId}
       AND contact_phone IS NOT NULL
-    LIMIT 50
   `);
 
   const clientList = (clientsQuery as any).rows ?? [];
@@ -578,22 +603,33 @@ export async function scheduleDefaulterRecall(
     if (!destination) continue;
 
     if (!dryRun) {
-      await sendSms({
-        to: destination,
-        message: `VaxPlan recall: ${client.name} is due for their ${antigen} vaccination dose. Please visit the health facility this week.`,
-      });
-
-      try {
-        await db.insert(communicationLogs).values({
+      if (commConfig.smartRouting === true) {
+        await dispatchWithFallback({
           tenantId,
-          channel: "sms",
+          primaryChannel: 'sms',
           destination,
-          status: "delivered",
-          providerResponse: "Defaulter Recall SMS",
-          fallbackTriggered: false,
+          message: `VaxPlan recall: ${client.name} is due for their ${antigen} vaccination dose. Please visit the health facility this week.`,
+          tenantSettings,
         });
-      } catch (logErr: any) {
-        console.warn("[Messaging Service] Could not persist communication log:", logErr?.message || logErr);
+      } else {
+        await sendSms({
+          to: destination,
+          message: `VaxPlan recall: ${client.name} is due for their ${antigen} vaccination dose. Please visit the health facility this week.`,
+          config: commConfig.sms,
+        });
+
+        try {
+          await db.insert(communicationLogs).values({
+            tenantId,
+            channel: "sms",
+            destination,
+            status: "delivered",
+            providerResponse: "Defaulter Recall SMS",
+            fallbackTriggered: false,
+          });
+        } catch (logErr: any) {
+          console.warn("[Messaging Service] Could not persist communication log:", logErr?.message || logErr);
+        }
       }
     }
 
@@ -608,4 +644,3 @@ export async function scheduleDefaulterRecall(
     dryRun,
   };
 }
-
