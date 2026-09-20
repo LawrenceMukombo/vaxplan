@@ -148,7 +148,7 @@ function parseBulkItems(body: any): { items: BulkItem[] } | null {
 }
 
 export function registerSessionRoutes(app: Express) {
-  app.get("/api/sessions", ...auth, async (req: any, res) => {
+  app.get(["/api/sessions", "/api/session-plans"], ...auth, async (req: any, res) => {
     try {
       const user = req.user as any;
       const dbUser = req.dbUser!;

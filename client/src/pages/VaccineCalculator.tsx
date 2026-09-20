@@ -84,6 +84,29 @@ const defaultDemographics = {
   schoolExit: 0.022,
 };
 
+const legacySummaryVariants: Record<string, string[]> = {
+  IPV: ["IPV-"],
+  MR: ["MR-"],
+  OPV: ["OPV-"],
+  PCV: ["PCV-"],
+  PENTA: ["PENTA-"],
+  ROTAVIRUS: ["ROTA-", "ROTAVIRUS-"],
+};
+
+function removeLegacySummaryDuplicates(configs: VaccineConfig[]): VaccineConfig[] {
+  const names = configs.map((config) => config.name.trim().toUpperCase());
+
+  return configs.filter((config) => {
+    const name = config.name.trim().toUpperCase();
+    const doseSpecificPrefixes = legacySummaryVariants[name];
+    if (!doseSpecificPrefixes) return true;
+
+    return !names.some((candidate) =>
+      doseSpecificPrefixes.some((prefix) => candidate.startsWith(prefix))
+    );
+  });
+}
+
 export default function VaccineCalculator() {
   const { user } = useAuth();
   const { toast } = useToast();
@@ -98,6 +121,15 @@ export default function VaccineCalculator() {
     Math.ceil((new Date().getMonth() + 1) / 3)
   );
   const [selectedPlanId, setSelectedPlanId] = useState<string>("auto");
+  const [selectedPopSource, setSelectedPopSource] = useState<string>("auto");
+  const [isPopDialogOpen, setIsPopDialogOpen] = useState(false);
+  const [customPop, setCustomPop] = useState({
+    total: "",
+    under1: "",
+    pregnant: "",
+    schoolEntry: "",
+  });
+  const [isManualPopActive, setIsManualPopActive] = useState(false);
   const [coverageTarget, setCoverageTarget] = useState(95);
 
   // Modal edit states
@@ -204,14 +236,14 @@ export default function VaccineCalculator() {
   });
 
   const { data: sessions = [] } = useQuery<any[]>({
-    queryKey: [`/api/session-plans?facilityId=${facilityId ?? ""}`],
+    queryKey: [`/api/sessions?facilityId=${facilityId ?? ""}`],
     enabled: !!facilityId,
     queryFn: async () => {
       if (!facilityId) return [];
       if (!navigator.onLine) {
         return (await offlineDb.sessionPlans.where("facilityId").equals(facilityId).toArray()) as any[];
       }
-      const res = await fetch(`/api/session-plans?facilityId=${facilityId}`);
+      const res = await fetch(`/api/sessions?facilityId=${facilityId}`);
       if (!res.ok) return [];
       return res.json();
     }
@@ -276,8 +308,10 @@ export default function VaccineCalculator() {
     if (!vaccineConfigs || vaccineConfigs.length === 0) {
       return fallbackVaccineSchedule;
     }
-    return vaccineConfigs
-      .filter((c) => c.isActive)
+    const activeConfigs = removeLegacySummaryDuplicates(
+      vaccineConfigs.filter((config) => config.isActive)
+    );
+    return activeConfigs
       .map((c) => ({
         id: c.id,
         name: c.name,
@@ -306,14 +340,72 @@ export default function VaccineCalculator() {
     return latest;
   }, [populationData, villages]);
 
+  const demographics = useMemo(() => {
+    const settings = (activeTenant?.settings || {}) as Record<string, any>;
+    return (settings.demographics || defaultDemographics) as typeof defaultDemographics;
+  }, [activeTenant]);
+
   const facilityPopulation = useMemo(() => {
     if (!selectedFacility) return null;
     const selectedFacilityId = Number(selectedFacility);
 
-    // Assigned communities are the calculator's operational unit. Sum the
-    // latest available record for each community even when their years differ.
-    // A facility aggregate is only a fallback when no community data exists.
-    if (latestCommunityPopulation.size > 0) {
+    // 1. Manual Custom Override
+    if (isManualPopActive && customPop.total && !isNaN(Number(customPop.total))) {
+      const total = Number(customPop.total);
+      const under1 = customPop.under1 && !isNaN(Number(customPop.under1))
+        ? Number(customPop.under1)
+        : Math.round(total * (demographics.under1 || 0.03));
+      const pregnant = customPop.pregnant && !isNaN(Number(customPop.pregnant))
+        ? Number(customPop.pregnant)
+        : Math.round(total * (demographics.pregnant || 0.032));
+      const schoolEntry = customPop.schoolEntry && !isNaN(Number(customPop.schoolEntry))
+        ? Number(customPop.schoolEntry)
+        : Math.round(total * (demographics.schoolEntry || 0.027));
+      const schoolExit = Math.round(total * (demographics.schoolExit || 0.022));
+
+      return {
+        facilityId: selectedFacilityId,
+        totalPopulation: total,
+        under1Population: under1,
+        pregnantWomen: pregnant,
+        schoolEntry,
+        schoolExit,
+        populationSource: "manual",
+        sourceLabel: "Manual Custom Entry",
+        year: currentYear,
+      };
+    }
+
+    // 2. Specific Data Source Selection
+    const allFacilityRows = (populationData || []).filter(
+      (p) => Number(p.facilityId) === selectedFacilityId
+    );
+
+    if (selectedPopSource !== "auto" && selectedPopSource !== "communities") {
+      const sourceRows = allFacilityRows.filter(
+        (p) => String(p.source || (p as any).populationSource || "").toLowerCase() === selectedPopSource.toLowerCase()
+      );
+      if (sourceRows.length > 0) {
+        const sorted = sourceRows.sort((a, b) => Number(b.year) - Number(a.year) || Number(b.id) - Number(a.id));
+        const row = sorted[0];
+        const sourceLabel =
+          selectedPopSource === "nso" ? `NSO Census Projections · ${row.year || currentYear}` :
+          selectedPopSource === "hmis" ? `HMIS Health Records · ${row.year || currentYear}` :
+          selectedPopSource === "worldpop" ? `WorldPop Satellite Estimate · ${row.year || currentYear}` :
+          selectedPopSource === "survey" ? `EPI Coverage Survey · ${row.year || currentYear}` :
+          `${selectedPopSource.toUpperCase()} Records · ${row.year || currentYear}`;
+
+        return {
+          ...row,
+          facilityId: selectedFacilityId,
+          populationSource: selectedPopSource,
+          sourceLabel,
+        };
+      }
+    }
+
+    // 3. Assigned communities aggregation (default bottom-up)
+    if (latestCommunityPopulation.size > 0 && selectedPopSource !== "facility_only") {
       return Array.from(latestCommunityPopulation.values()).reduce((total: any, row: any) => ({
         ...total,
         year: Math.max(Number(total.year || 0), Number(row.year || 0)),
@@ -322,49 +414,97 @@ export default function VaccineCalculator() {
         pregnantWomen: Number(total.pregnantWomen || 0) + Number(row.pregnantWomen || 0),
         schoolEntry: Number(total.schoolEntry || 0) + Number(row.schoolEntry || 0),
         schoolExit: Number(total.schoolExit || 0) + Number(row.schoolExit || 0),
-      }), { facilityId: selectedFacilityId, populationSource: "communities" });
+      }), {
+        facilityId: selectedFacilityId,
+        populationSource: "communities",
+        sourceLabel: `${latestCommunityPopulation.size} assigned communities · latest record each`,
+      });
     }
 
-    const facilityRows = (populationData || []).filter(
-      (p) => Number(p.facilityId) === selectedFacilityId && !p.villageId
-    );
-    if (!facilityRows.length) return null;
-    return facilityRows.sort((a, b) => Number(b.year) - Number(a.year) || Number(b.id) - Number(a.id))[0];
-  }, [selectedFacility, populationData, latestCommunityPopulation]);
+    // 4. Facility direct record fallback
+    const facilityDirectRows = allFacilityRows.filter((p) => !p.villageId);
+    if (!facilityDirectRows.length) return null;
+    const best = facilityDirectRows.sort((a, b) => Number(b.year) - Number(a.year) || Number(b.id) - Number(a.id))[0];
+    return {
+      ...best,
+      sourceLabel: `Facility direct population record · ${best.year || currentYear}`,
+    };
+  }, [selectedFacility, populationData, latestCommunityPopulation, selectedPopSource, isManualPopActive, customPop, demographics, currentYear]);
 
   const availablePlans = useMemo(() => microplans.filter((plan: any) =>
-    Number(plan.facilityId) === facilityId && Number(plan.quarter) === selectedQuarter
+    Number(plan.facilityId) === facilityId && (selectedQuarter ? Number(plan.quarter) === selectedQuarter : true)
   ).sort((a: any, b: any) => Number(b.year) - Number(a.year)), [microplans, facilityId, selectedQuarter]);
 
   const selectedPlan = useMemo(() => {
-    if (selectedPlanId !== "auto") return availablePlans.find((plan: any) => String(plan.id) === selectedPlanId) || null;
-    return availablePlans.find((plan: any) => Number(plan.year) === currentYear && plan.status !== "archived") || availablePlans[0] || null;
-  }, [availablePlans, selectedPlanId, currentYear]);
+    if (selectedPlanId === "none") return null;
+    if (selectedPlanId !== "auto") {
+      return availablePlans.find((plan: any) => String(plan.id) === selectedPlanId) ||
+             microplans.find((plan: any) => String(plan.id) === selectedPlanId && Number(plan.facilityId) === facilityId) ||
+             null;
+    }
+    return availablePlans.find((plan: any) => Number(plan.year) === currentYear && plan.status !== "archived") ||
+           availablePlans[0] ||
+           null;
+  }, [availablePlans, microplans, selectedPlanId, facilityId, currentYear]);
 
-  const planSessions = useMemo(() => sessions.filter((session: any) =>
-    Number(session.facilityId) === facilityId && Number(session.quarter) === selectedQuarter &&
-    (!selectedPlan || Number(session.microplanId) === Number(selectedPlan.id))
-  ), [sessions, facilityId, selectedQuarter, selectedPlan]);
-  const linkedPlanTarget = useMemo(() => {
-    const planTarget = Number(selectedPlan?.targetPopulation || 0);
-    if (planTarget > 0) return planTarget;
-    return planSessions.reduce((sum: number, session: any) => sum + Number(session.targetPopulation || 0), 0);
+  const planSessions = useMemo(() => {
+    if (!selectedPlan) return [];
+    return sessions.filter((session: any) => {
+      if (Number(session.facilityId) !== facilityId) return false;
+      if (Number(session.microplanId) === Number(selectedPlan.id)) return true;
+      return (
+        Number(session.quarter) === Number(selectedPlan.quarter) &&
+        Number(session.year) === Number(selectedPlan.year)
+      );
+    });
+  }, [sessions, facilityId, selectedPlan]);
+
+  const totalPlannedContacts = useMemo(() => {
+    if (!selectedPlan) return 0;
+    const directTarget = Number(selectedPlan.targetPopulation || 0);
+    const sessionTargetSum = planSessions.reduce(
+      (sum: number, s: any) => sum + Number(s.targetPopulation || s.effectiveTargetPopulation || s.target || 0),
+      0
+    );
+    return sessionTargetSum > 0 ? sessionTargetSum : directTarget;
   }, [selectedPlan, planSessions]);
 
-  const demographics = useMemo(() => {
-    const settings = (activeTenant?.settings || {}) as Record<string, any>;
-    return (settings.demographics || defaultDemographics) as typeof defaultDemographics;
-  }, [activeTenant]);
+  const linkedPlanTarget = useMemo(() => {
+    return totalPlannedContacts;
+  }, [totalPlannedContacts]);
 
   const communityRequirements = useMemo(() => {
     const linksByVillage = new Map<number, any[]>();
     const sessionById = new Map(planSessions.map((session: any) => [Number(session.id), session]));
+    
+    // Check junction records
     for (const link of sessionVillageLinks) {
       const session = sessionById.get(Number(link.sessionId));
       if (!session) continue;
       const id = Number(link.villageId);
       linksByVillage.set(id, [...(linksByVillage.get(id) || []), session]);
     }
+
+    // Check direct communities array on sessions
+    for (const session of planSessions) {
+      if (Array.isArray(session.communities)) {
+        for (const c of session.communities) {
+          const villageId = Number(c.id);
+          const existing = linksByVillage.get(villageId) || [];
+          if (!existing.some((s: any) => Number(s.id) === Number(session.id))) {
+            linksByVillage.set(villageId, [...existing, session]);
+          }
+        }
+      }
+    }
+
+    // Proportional fallback if sessions exist but no explicit village junction is mapped
+    if (planSessions.length > 0 && Array.from(linksByVillage.values()).every((arr) => arr.length === 0)) {
+      for (const village of villages) {
+        linksByVillage.set(Number(village.id), planSessions);
+      }
+    }
+
     const under1Weights = villages.map((village: any) => {
       const population = latestCommunityPopulation.get(Number(village.id));
       return Math.max(0, Number(population?.under1Population || population?.totalPopulation || village.population || 0));
@@ -386,8 +526,11 @@ export default function VaccineCalculator() {
     return villages.map((village: any, villageIndex: number) => {
       const population = latestCommunityPopulation.get(Number(village.id));
       const totalPopulation = Number(population?.totalPopulation || village.population || 0);
-      const linkedSessions = linksByVillage.get(Number(village.id)) || [];
-      const scheduledTarget = linkedSessions.reduce((sum, session) => sum + Number(session.targetPopulation || 0), 0);
+      const linkedSessions = selectedPlan ? (linksByVillage.get(Number(village.id)) || []) : [];
+      const scheduledTarget = selectedPlan
+        ? linkedSessions.reduce((sum, session) => sum + Number(session.targetPopulation || session.effectiveTargetPopulation || 0), 0)
+        : 0;
+
       const requirements = activeSchedule.map((vaccine) => {
         const explicit = vaccine.target === "under1" ? population?.under1Population
           : vaccine.target === "pregnant" ? population?.pregnantWomen
@@ -395,16 +538,32 @@ export default function VaccineCalculator() {
         const annualCohort = Number(explicit ?? Math.round(totalPopulation * (demographics[vaccine.target as keyof typeof demographics] || 0.03)));
         const usesPlanTarget = vaccine.target === "under1" && linkedPlanTarget > 0;
         const quarterlyCohort = usesPlanTarget ? planAllocations[villageIndex] : Math.ceil(annualCohort / 4);
-        const forecast = calculateLifeCourseForecast({ population: quarterlyCohort, coveragePercent: usesPlanTarget ? 100 : coverageTarget,
-          dosesPerPerson: vaccine.doses, dosesPerVial: vaccine.vialsPerDose,
-          wastagePercent: vaccine.wastage, peoplePerSession: 40 });
-        return { name: vaccine.name, vials: forecast.vials, doses: forecast.supplyDoses,
-          administrationDoses: forecast.administrationDoses, targetPop: forecast.peopleToReach };
+        const forecast = calculateLifeCourseForecast({
+          population: quarterlyCohort,
+          coveragePercent: usesPlanTarget ? 100 : coverageTarget,
+          dosesPerPerson: vaccine.doses,
+          dosesPerVial: vaccine.vialsPerDose,
+          wastagePercent: vaccine.wastage,
+          peoplePerSession: 40
+        });
+        return {
+          name: vaccine.name,
+          vials: forecast.vials,
+          doses: forecast.supplyDoses,
+          administrationDoses: forecast.administrationDoses,
+          targetPop: forecast.peopleToReach
+        };
       });
-      return { village, totalPopulation, linkedSessions, scheduledTarget, requirements,
-        totalVials: requirements.reduce((sum, req) => sum + req.vials, 0) };
+      return {
+        village,
+        totalPopulation,
+        linkedSessions,
+        scheduledTarget,
+        requirements,
+        totalVials: requirements.reduce((sum, req) => sum + req.vials, 0)
+      };
     }).sort((a: any, b: any) => b.totalVials - a.totalVials);
-  }, [villages, latestCommunityPopulation, planSessions, sessionVillageLinks, activeSchedule, demographics, coverageTarget, linkedPlanTarget]);
+  }, [villages, latestCommunityPopulation, planSessions, sessionVillageLinks, activeSchedule, demographics, coverageTarget, linkedPlanTarget, selectedPlan]);
 
   const calculations = useMemo(() => {
     if (!facilityPopulation) return [];
@@ -580,12 +739,12 @@ export default function VaccineCalculator() {
             Calculation Parameters
           </CardTitle>
           <CardDescription>
-            Select microplanning facility, quarter and coverage targets to run estimations.
+            Select microplanning facility, quarter, existing operational plan, and demographic data source.
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="grid md:grid-cols-4 gap-4">
-            <div className="space-y-2 md:col-span-2">
+          <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
+            <div className="space-y-2 md:col-span-4">
               <Label>Facility</Label>
               <FacilityCascadePicker
                 value={selectedFacility ? Number(selectedFacility) : null}
@@ -595,7 +754,7 @@ export default function VaccineCalculator() {
               />
             </div>
 
-            <div className="space-y-2">
+            <div className="space-y-2 md:col-span-2">
               <Label>Quarter</Label>
               <Select
                 value={selectedQuarter.toString()}
@@ -613,7 +772,7 @@ export default function VaccineCalculator() {
               </Select>
             </div>
 
-            <div className="space-y-2">
+            <div className="space-y-2 md:col-span-3">
               <Label className="flex items-center gap-1.5"><Link2 className="h-3.5 w-3.5" /> Existing plan</Label>
               <Select value={selectedPlanId} onValueChange={setSelectedPlanId} disabled={!facilityId}>
                 <SelectTrigger data-testid="select-calculator-plan">
@@ -626,32 +785,87 @@ export default function VaccineCalculator() {
                       {plan.name} · {plan.year} Q{plan.quarter}
                     </SelectItem>
                   ))}
+                  <SelectItem value="none">None: standalone calculation</SelectItem>
                 </SelectContent>
               </Select>
             </div>
 
-            <div className="space-y-2">
-              <Label>Coverage Target (%)</Label>
-              <div className="flex items-center gap-2">
+            <div className="space-y-2 md:col-span-3">
+              <Label className="flex items-center justify-between">
+                <span className="flex items-center gap-1.5"><Users className="h-3.5 w-3.5 text-primary" /> Population Source</span>
+                {isManualPopActive && (
+                  <Badge variant="outline" className="bg-amber-50 text-amber-800 border-amber-300 text-[10px] py-0 px-1.5">
+                    Manual Override
+                  </Badge>
+                )}
+              </Label>
+              <Select
+                value={isManualPopActive ? "manual" : selectedPopSource}
+                onValueChange={(v) => {
+                  if (v === "manual") {
+                    setIsManualPopActive(true);
+                    setIsPopDialogOpen(true);
+                  } else {
+                    setIsManualPopActive(false);
+                    setSelectedPopSource(v);
+                  }
+                }}
+                disabled={!facilityId}
+              >
+                <SelectTrigger data-testid="select-population-source">
+                  <SelectValue placeholder="Select Source" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="auto">Auto: Assigned Communities Sum</SelectItem>
+                  <SelectItem value="communities">Assigned Communities (Bottom-Up)</SelectItem>
+                  <SelectItem value="nso">NSO Census Projections</SelectItem>
+                  <SelectItem value="hmis">HMIS Health Facility Records</SelectItem>
+                  <SelectItem value="worldpop">WorldPop High-Resolution Satellite</SelectItem>
+                  <SelectItem value="survey">EPI Coverage Survey</SelectItem>
+                  <SelectItem value="manual">Manual Entry / Custom Override...</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2 md:col-span-12 lg:col-span-4">
+              <Label className="flex items-center justify-between">
+                <span>Coverage Target (%)</span>
+                <span className="font-semibold text-primary">{coverageTarget}%</span>
+              </Label>
+              <div className="flex items-center gap-3">
                 <Input
                   type="number"
                   min={50}
                   max={100}
                   value={coverageTarget}
                   onChange={(e) => setCoverageTarget(parseInt(e.target.value) || 95)}
-                  className="w-20"
+                  className="w-20 font-mono"
                   data-testid="input-coverage-target"
                 />
-                <Progress value={coverageTarget} className="flex-1 h-2" />
+                <Progress value={coverageTarget} className="flex-1 h-2.5" />
               </div>
             </div>
           </div>
-          {selectedPlan && (
-            <div className="mt-4 rounded-lg border border-primary/20 bg-primary/5 px-4 py-3 text-sm flex flex-wrap gap-x-6 gap-y-1">
-              <span className="font-medium flex items-center gap-1.5"><Link2 className="h-4 w-4 text-primary" /> Linked to {selectedPlan.name}</span>
-              <span>{planSessions.length} planned session{planSessions.length === 1 ? "" : "s"}</span>
-              <span>{planSessions.reduce((sum: number, session: any) => sum + Number(session.targetPopulation || 0), 0).toLocaleString()} planned contacts</span>
-              <Badge variant="outline" className="capitalize">{selectedPlan.status || "draft"}</Badge>
+
+          {selectedPlan ? (
+            <div className="mt-4 rounded-lg border border-primary/20 bg-primary/5 px-4 py-3 text-sm flex flex-wrap items-center justify-between gap-y-2">
+              <div className="flex flex-wrap items-center gap-x-6 gap-y-1">
+                <span className="font-medium flex items-center gap-1.5">
+                  <Link2 className="h-4 w-4 text-primary" /> Linked to {selectedPlan.name}
+                </span>
+                <span className="font-semibold text-foreground">
+                  {planSessions.length} planned session{planSessions.length === 1 ? "" : "s"}
+                </span>
+                <span className="font-semibold text-foreground">
+                  {totalPlannedContacts.toLocaleString()} planned contacts
+                </span>
+                <Badge variant="outline" className="capitalize">{selectedPlan.status || "draft"}</Badge>
+              </div>
+            </div>
+          ) : (
+            <div className="mt-4 rounded-lg border border-muted bg-muted/20 px-4 py-3 text-sm flex items-center gap-2 text-muted-foreground">
+              <Link2 className="h-4 w-4" />
+              <span>No plan selected — 0 planned sessions · 0 planned contacts</span>
             </div>
           )}
         </CardContent>
@@ -662,15 +876,33 @@ export default function VaccineCalculator() {
           <Card className="bg-gradient-to-br from-primary/5 to-primary/0 border-primary/20">
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-muted-foreground font-medium">Population Base</p>
-                  <p className="text-3xl font-bold font-mono tracking-tight mt-1">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <p className="text-sm text-muted-foreground font-medium">Population Base</p>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-6 px-1.5 text-xs text-primary hover:bg-primary/10 gap-1"
+                      onClick={() => {
+                        setCustomPop({
+                          total: String(facilityPopulation.totalPopulation || ""),
+                          under1: String(facilityPopulation.under1Population || ""),
+                          pregnant: String(facilityPopulation.pregnantWomen || ""),
+                          schoolEntry: String(facilityPopulation.schoolEntry || ""),
+                        });
+                        setIsPopDialogOpen(true);
+                      }}
+                      title="Adjust population or switch source"
+                    >
+                      <Edit2 className="h-3 w-3" />
+                      Adjust
+                    </Button>
+                  </div>
+                  <p className="text-3xl font-bold font-mono tracking-tight">
                     {facilityPopulation.totalPopulation?.toLocaleString()}
                   </p>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    {latestCommunityPopulation.size > 0
-                      ? `${latestCommunityPopulation.size} assigned communities · latest record each`
-                      : `Facility population record · ${facilityPopulation.year || "latest"}`}
+                  <p className="text-xs text-muted-foreground">
+                    {facilityPopulation.sourceLabel || "Standard population record"}
                   </p>
                 </div>
                 <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
@@ -1103,6 +1335,183 @@ export default function VaccineCalculator() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsAddDialogOpen(false)}>Cancel</Button>
             <Button onClick={handleAddConfig}>Create Config</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Population Source & Custom Override Dialog */}
+      <Dialog open={isPopDialogOpen} onOpenChange={setIsPopDialogOpen}>
+        <DialogContent className="max-w-xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Users className="h-5 w-5 text-primary" />
+              Population Source & Manual Cohorts
+            </DialogTitle>
+            <DialogDescription>
+              Select an official demographic data source or specify custom catchment population cohorts for vaccine requirement calculations.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            <div className="space-y-2">
+              <Label className="font-semibold">Demographic Data Source</Label>
+              <Select
+                value={isManualPopActive ? "manual" : selectedPopSource}
+                onValueChange={(val) => {
+                  if (val === "manual") {
+                    setIsManualPopActive(true);
+                  } else {
+                    setIsManualPopActive(false);
+                    setSelectedPopSource(val);
+                  }
+                }}
+              >
+                <SelectTrigger data-testid="select-modal-population-source">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="auto">Auto: Assigned Communities Sum</SelectItem>
+                  <SelectItem value="communities">Assigned Communities (Bottom-Up Sum)</SelectItem>
+                  <SelectItem value="nso">NSO Census Projections</SelectItem>
+                  <SelectItem value="hmis">HMIS Health Facility Records</SelectItem>
+                  <SelectItem value="worldpop">WorldPop High-Resolution Satellite Model</SelectItem>
+                  <SelectItem value="survey">EPI Cluster Coverage Survey</SelectItem>
+                  <SelectItem value="manual">Manual Entry / Custom Population Override</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="rounded-lg border p-4 bg-muted/20 space-y-4">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  {isManualPopActive ? "Custom Cohort Values" : "Active Cohort Projections"}
+                </span>
+                {isManualPopActive ? (
+                  <Badge variant="outline" className="bg-amber-50 text-amber-800 border-amber-300 text-[10px]">
+                    Custom Override Active
+                  </Badge>
+                ) : (
+                  <Badge variant="outline" className="bg-emerald-50 text-emerald-800 border-emerald-300 text-[10px]">
+                    Database Synced
+                  </Badge>
+                )}
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5 col-span-2">
+                  <Label className="text-xs">Total Catchment Population</Label>
+                  <Input
+                    type="number"
+                    placeholder="e.g. 6968"
+                    value={isManualPopActive ? customPop.total : (facilityPopulation?.totalPopulation ? String(facilityPopulation.totalPopulation) : "")}
+                    onChange={(e) => {
+                      setIsManualPopActive(true);
+                      const totalVal = e.target.value;
+                      const num = Number(totalVal) || 0;
+                      setCustomPop({
+                        total: totalVal,
+                        under1: customPop.under1 || String(Math.round(num * (demographics.under1 || 0.03))),
+                        pregnant: customPop.pregnant || String(Math.round(num * (demographics.pregnant || 0.032))),
+                        schoolEntry: customPop.schoolEntry || String(Math.round(num * (demographics.schoolEntry || 0.027))),
+                      });
+                    }}
+                    className="font-mono text-sm"
+                  />
+                  <p className="text-[11px] text-muted-foreground">
+                    Base denominator used across operational antigen allocations.
+                  </p>
+                </div>
+
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs">Under-1 Cohort (Infants)</Label>
+                    <span className="text-[10px] text-muted-foreground">{Math.round((demographics.under1 || 0.03) * 100)}%</span>
+                  </div>
+                  <Input
+                    type="number"
+                    placeholder="e.g. 209"
+                    value={isManualPopActive ? customPop.under1 : (facilityPopulation?.under1Population ? String(facilityPopulation.under1Population) : "")}
+                    onChange={(e) => {
+                      setIsManualPopActive(true);
+                      setCustomPop({ ...customPop, under1: e.target.value });
+                    }}
+                    className="font-mono text-xs"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs">Pregnant Women</Label>
+                    <span className="text-[10px] text-muted-foreground">{Math.round((demographics.pregnant || 0.032) * 100)}%</span>
+                  </div>
+                  <Input
+                    type="number"
+                    placeholder="e.g. 223"
+                    value={isManualPopActive ? customPop.pregnant : (facilityPopulation?.pregnantWomen ? String(facilityPopulation.pregnantWomen) : "")}
+                    onChange={(e) => {
+                      setIsManualPopActive(true);
+                      setCustomPop({ ...customPop, pregnant: e.target.value });
+                    }}
+                    className="font-mono text-xs"
+                  />
+                </div>
+
+                <div className="space-y-1.5 col-span-2 sm:col-span-1">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs">School Entry (4-5 yrs)</Label>
+                    <span className="text-[10px] text-muted-foreground">{Math.round((demographics.schoolEntry || 0.027) * 100)}%</span>
+                  </div>
+                  <Input
+                    type="number"
+                    placeholder="e.g. 188"
+                    value={isManualPopActive ? customPop.schoolEntry : (facilityPopulation?.schoolEntry ? String(facilityPopulation.schoolEntry) : "")}
+                    onChange={(e) => {
+                      setIsManualPopActive(true);
+                      setCustomPop({ ...customPop, schoolEntry: e.target.value });
+                    }}
+                    className="font-mono text-xs"
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter className="flex items-center justify-between sm:justify-between">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setIsManualPopActive(false);
+                setSelectedPopSource("auto");
+                setCustomPop({ total: "", under1: "", pregnant: "", schoolEntry: "" });
+                setIsPopDialogOpen(false);
+                toast({
+                  title: "Reset to Database Default",
+                  description: "Population calculation restored to official community and facility records.",
+                });
+              }}
+            >
+              Reset to Default Sources
+            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="default"
+                size="sm"
+                onClick={() => {
+                  setIsPopDialogOpen(false);
+                  toast({
+                    title: "Population Updated",
+                    description: isManualPopActive
+                      ? "Custom population cohorts applied to vaccine calculator."
+                      : `Population source updated to ${selectedPopSource.toUpperCase()}.`,
+                  });
+                }}
+              >
+                Apply
+              </Button>
+            </div>
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -1229,11 +1229,66 @@ export async function sendMobilizationSmsForSession(tenantId: string, sessionId:
   }
 }
 
-export async function sendApprovalSmsForMicroplan(tenantId: string, microplanId: number) {
+export async function sendApprovalSmsForMicroplan(tenantId: string, microplanId: number, options?: { action?: string; comments?: string; resolverId?: string }) {
   try {
     const mp = await storage.getMicroplan(tenantId, microplanId);
     if (!mp) return;
 
+    const facility = mp.facilityId ? await storage.getFacility(tenantId, mp.facilityId) : null;
+    const facilityName = facility?.name || "Health Facility";
+
+    // 1. Notify Plan Submitter / Facility In-Charge via Email, SMS, WhatsApp & In-App
+    if (mp.createdByUserId) {
+      const creator = await storage.getUser(mp.createdByUserId);
+      if (creator) {
+        const creatorName = [creator.firstName, creator.lastName].filter(Boolean).join(" ").trim() || creator.email || "Planner";
+        const emailSubject = `VaxPlan: Microplan "${mp.name}" Approved`;
+        const notificationText = `Good news! Your microplan "${mp.name}" for ${facilityName} (${mp.year} Q${mp.quarter}) has received final approval. Operational sessions are now activated.`;
+        
+        // In-App Notification
+        try {
+          await storage.createNotification({
+            tenantId,
+            userId: creator.id,
+            title: `Microplan Approved: ${mp.name}`,
+            message: notificationText,
+            type: "approval",
+            link: `/microplans/${mp.planType === "sia_campaign" ? "campaigns" : "routine"}/${mp.id}`,
+            read: false,
+          } as any);
+        } catch (notifErr) {
+          console.warn("[Notification Service] In-app notification creation failed:", notifErr);
+        }
+
+        // Email Notification
+        if (creator.email) {
+          try {
+            await sendMessagingEmail({
+              to: creator.email,
+              subject: emailSubject,
+              text: notificationText,
+              html: `<div style="font-family: Arial, sans-serif; max-width: 600px; padding: 20px; border: 1px solid #e2e8f0; border-radius: 8px;">
+                <h2 style="color: #059669; margin-top: 0;">Microplan Approved ✓</h2>
+                <p>Hello <strong>${creatorName}</strong>,</p>
+                <p>${notificationText}</p>
+                <div style="background-color: #f8fafc; padding: 12px; border-radius: 6px; margin: 15px 0;">
+                  <p style="margin: 4px 0; font-size: 14px;"><strong>Microplan:</strong> ${mp.name}</p>
+                  <p style="margin: 4px 0; font-size: 14px;"><strong>Facility:</strong> ${facilityName}</p>
+                  <p style="margin: 4px 0; font-size: 14px;"><strong>Cycle:</strong> ${mp.year} Q${mp.quarter}</p>
+                  <p style="margin: 4px 0; font-size: 14px;"><strong>Target Population:</strong> ${mp.targetPopulation ? Number(mp.targetPopulation).toLocaleString() : 'N/A'}</p>
+                </div>
+                <p style="color: #64748b; font-size: 12px; margin-top: 20px;">VaxPlan Immunisation Management Platform</p>
+              </div>`,
+            });
+            console.log(`[Approval Email] Sent immediate approval notice to ${creator.email}`);
+          } catch (emailErr) {
+            console.warn("[Approval Email] Failed to send email to creator:", emailErr);
+          }
+        }
+      }
+    }
+
+    // 2. Notify Community Focal Persons for Scheduled Sessions (SMS + WhatsApp)
     const sessions = await db
       .select()
       .from(sessionPlans)
@@ -1263,9 +1318,6 @@ export async function sendApprovalSmsForMicroplan(tenantId: string, microplanId:
           )
         );
 
-      const facility = await storage.getFacility(tenantId, session.facilityId);
-      const facilityName = facility?.name || "Health Facility";
-
       const formattedDate = new Date(session.scheduledDate).toLocaleDateString('en-US', {
         weekday: 'long',
         year: 'numeric',
@@ -1275,17 +1327,35 @@ export async function sendApprovalSmsForMicroplan(tenantId: string, microplanId:
 
       for (const vil of linkedVillages) {
         if (vil.focalPersonPhone && vil.focalPersonPhone.trim().length > 0) {
-          const message = `Hello ${vil.focalPersonName || 'Community Leader'}, the vaccination plan for "${vil.name}" scheduled on ${formattedDate} has been approved. Please prepare. - ${facilityName}`;
-          await sendSms({
-            to: vil.focalPersonPhone.trim(),
-            message
-          });
-          console.log(`[Focal Person SMS] Approved plan alert sent to ${vil.focalPersonPhone} for village ${vil.name}`);
+          const phone = vil.focalPersonPhone.trim();
+          const message = `Hello ${vil.focalPersonName || 'Community Leader'}, the vaccination plan for "${vil.name}" scheduled on ${formattedDate} has been approved. Please prepare your community. - ${facilityName}`;
+          
+          // Send SMS
+          try {
+            await sendSms({
+              to: phone,
+              message
+            });
+            console.log(`[Focal Person SMS] Approved plan alert sent to ${phone} for village ${vil.name}`);
+          } catch (smsErr) {
+            console.warn(`[Focal Person SMS] Failed to send SMS to ${phone}:`, smsErr);
+          }
+
+          // Send WhatsApp
+          try {
+            await sendWhatsApp({
+              to: phone,
+              message
+            });
+            console.log(`[Focal Person WhatsApp] Approved plan alert sent to ${phone} for village ${vil.name}`);
+          } catch (waErr) {
+            console.warn(`[Focal Person WhatsApp] Failed to send WhatsApp to ${phone}:`, waErr);
+          }
         }
       }
     }
   } catch (err) {
-    console.error("Failed to send approval SMS for microplan:", err);
+    console.error("Failed to send approval notifications for microplan:", err);
   }
 }
 
