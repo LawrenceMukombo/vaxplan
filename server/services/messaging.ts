@@ -204,60 +204,118 @@ export async function sendEmail(options: SendEmailOptions): Promise<{ success: b
     
     const host = String(config?.host || process.env.SMTP_HOST || 'smtp.gmail.com').trim();
     const port = Number(config?.port || process.env.SMTP_PORT || 465);
-    const user = String(config?.user || process.env.SMTP_USER || '').trim();
-    const rawPass = String(config?.pass || process.env.SMTP_PASS || process.env.SMTP_PASSWORD || '');
-    // Google App Passwords often contain spaced groupings (e.g. "xxxx xxxx xxxx xxxx") when copied; strip internal spaces
-    const pass = rawPass.trim().replace(/\s+/g, '');
+    const user = String(config?.user || process.env.SMTP_USER || '')
+      .trim()
+      .replace(/^['"]|['"]$/g, '')
+      .replace(/[\u200B-\u200D\uFEFF\u00A0]/g, '');
+    const rawPass = String(config?.pass || process.env.SMTP_PASS || process.env.SMTP_PASSWORD || '')
+      .trim()
+      .replace(/^['"]|['"]$/g, '');
+    // Google App Passwords often contain spaces (e.g. "xxxx xxxx xxxx xxxx"); strip all whitespace and zero-width chars
+    const pass = rawPass.replace(/[\s\u00A0\u200B-\u200D\uFEFF]/g, '');
 
     // Check if SMTP configs exist to avoid breaking if they are missing
     if (!user || !pass) {
-      console.log(`[Mock Email] SMTP config missing. Mocking email to: ${to} | Subject: ${subject}`);
+      console.log(`[Mock Email] SMTP config missing (user or pass empty). Mocking email to: ${to} | Subject: ${subject}`);
       return { success: true, messageId: `mock-email-${Date.now()}` };
     }
 
     // Ensure 'from' header adheres to RFC 5322 format.
-    // If the admin typed just a display name (e.g. "VaxPlan Notification"), wrap it with their authenticated user address.
-    let from = String(config?.from || process.env.SMTP_FROM || '').trim();
+    let from = String(config?.from || process.env.SMTP_FROM || '').trim().replace(/^['"]|['"]$/g, '');
     if (!from) {
       from = `"VaxPlan Notifications" <${user}>`;
     } else if (!from.includes('@')) {
       from = `"${from.replace(/"/g, '')}" <${user}>`;
     }
     
-    console.log(`[Messaging Service] Preparing to send Email to ${to} via Nodemailer (${host}:${port})`);
+    const isGmail = host.toLowerCase().includes('gmail') || user.toLowerCase().endsWith('@gmail.com');
+    console.log(`[Messaging Service] Preparing to send Email to ${to} via Nodemailer (${isGmail ? 'Gmail Service' : `${host}:${port}`})`);
 
-    const isSsl = port === 465;
+    let lastError: any = null;
 
-    const transporter = nodemailer.createTransport({
-      host: host,
-      port: port,
-      secure: isSsl, // true for 465 (SSL), false for 587 (STARTTLS)
-      auth: {
-        user: user,
-        pass: pass,
-      },
-      tls: {
-        rejectUnauthorized: false, // Prevents certificate handshake rejections on corporate/proxy setups
-      },
-      connectionTimeout: 15000,
-      greetingTimeout: 15000,
-      socketTimeout: 20000,
-    });
+    // Strategy 1: Try Gmail service or direct host:port
+    try {
+      const primaryTransporter = isGmail
+        ? nodemailer.createTransport({
+            service: 'gmail',
+            auth: { user, pass },
+            tls: { rejectUnauthorized: false },
+            connectionTimeout: 20000,
+            greetingTimeout: 20000,
+            socketTimeout: 30000,
+          })
+        : nodemailer.createTransport({
+            host,
+            port,
+            secure: port === 465,
+            auth: { user, pass },
+            tls: { rejectUnauthorized: false },
+            connectionTimeout: 20000,
+            greetingTimeout: 20000,
+            socketTimeout: 30000,
+          });
 
-    const info = await transporter.sendMail({
-      from: from,
-      to: to.trim(),
-      subject,
-      text,
-      html,
-      attachments,
-    });
+      const info = await primaryTransporter.sendMail({
+        from,
+        to: to.trim(),
+        subject,
+        text,
+        html,
+        attachments,
+      });
 
-    console.log(`[Messaging Service] Email sent to ${to}: ${info.messageId}`);
-    return { success: true, messageId: info.messageId };
+      console.log(`[Messaging Service] Email sent successfully to ${to}: ${info.messageId}`);
+      return { success: true, messageId: info.messageId };
+    } catch (primaryErr: any) {
+      lastError = primaryErr;
+      console.warn(`[Messaging Service] Primary transport attempt failed:`, primaryErr?.message);
+
+      // If it failed due to network/socket/timeout on port 465, try STARTTLS on port 587 as fallback
+      const isNetworkIssue = primaryErr.code === 'ETIMEDOUT' || primaryErr.code === 'ESOCKET' || primaryErr.code === 'ECONNREFUSED';
+      if (isGmail && isNetworkIssue) {
+        console.log(`[Messaging Service] Attempting fallback to smtp.gmail.com:587 with STARTTLS...`);
+        try {
+          const fallbackTransporter = nodemailer.createTransport({
+            host: 'smtp.gmail.com',
+            port: 587,
+            secure: false,
+            requireTLS: true,
+            auth: { user, pass },
+            tls: { rejectUnauthorized: false },
+            connectionTimeout: 20000,
+            greetingTimeout: 20000,
+            socketTimeout: 30000,
+          });
+
+          const info = await fallbackTransporter.sendMail({
+            from,
+            to: to.trim(),
+            subject,
+            text,
+            html,
+            attachments,
+          });
+
+          console.log(`[Messaging Service] Fallback email sent successfully to ${to}: ${info.messageId}`);
+          return { success: true, messageId: info.messageId };
+        } catch (fallbackErr: any) {
+          lastError = fallbackErr;
+          console.error(`[Messaging Service] Fallback transport also failed:`, fallbackErr?.message);
+        }
+      }
+    }
+
+    throw lastError;
   } catch (error: any) {
     console.error("[Messaging Service] Failed to send Email:", error);
-    return { success: false, error: error.message };
+    let errMsg = error.message || "Failed to dispatch email";
+    
+    if (errMsg.includes("535") || errMsg.includes("BadCredentials") || errMsg.includes("Username and Password not accepted") || error.code === "EAUTH") {
+      errMsg = "Authentication failed (Google 535 Bad Credentials). To resolve:\n1. Ensure 2-Step Verification is active on your Google Account (myaccount.google.com/security).\n2. Go to myaccount.google.com/apppasswords, generate a 16-character App Password (app: 'VaxPlan').\n3. Paste that 16-character App Password into the SMTP Password field (do not use your regular Gmail password).\n4. Ensure the SMTP User matches your Gmail address exactly.";
+    } else if (errMsg.includes("ETIMEDOUT") || errMsg.includes("ESOCKET") || errMsg.includes("ECONNREFUSED")) {
+      errMsg = `Connection timed out or refused (${error.code || 'Network Error'}). Outbound SMTP ports (465/587) might be filtered by local ISP or firewall.`;
+    }
+    return { success: false, error: errMsg };
   }
 }
 

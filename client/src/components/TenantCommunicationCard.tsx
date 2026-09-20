@@ -46,6 +46,9 @@ export function TenantCommunicationCard() {
   const [testSmsTo, setTestSmsTo] = useState("");
   const [testWaTo, setTestWaTo] = useState("");
   const [testingChannel, setTestingChannel] = useState<string | null>(null);
+  const [testFeedback, setTestFeedback] = useState<{
+    [channel: string]: { success: boolean; message: string; timestamp: Date };
+  }>({});
 
   // Innovation: Smart Routing
   const [smartRouting, setSmartRouting] = useState(false);
@@ -70,13 +73,19 @@ export function TenantCommunicationCard() {
         setWaSenderNumber(comm.whatsapp.senderNumber || "");
       }
       if (comm.email) {
-        setEmailHost(comm.email.host || "");
-        setEmailPort(String(comm.email.port || ""));
+        setEmailHost(comm.email.host || "smtp.gmail.com");
+        setEmailPort(String(comm.email.port || "465"));
         setEmailUser(comm.email.user || "");
         setEmailPass(comm.email.pass || "");
         setEmailFrom(comm.email.from || "");
+      } else {
+        setEmailHost("smtp.gmail.com");
+        setEmailPort("465");
       }
       setSmartRouting(comm.smartRouting === true);
+    } else {
+      setEmailHost("smtp.gmail.com");
+      setEmailPort("465");
     }
   }, [tenant]);
 
@@ -107,22 +116,22 @@ export function TenantCommunicationCard() {
         ...existingSettings.communication,
         sms: {
           provider: smsProvider,
-          accountSid: smsAccountSid,
-          authToken: smsAuthToken,
-          senderNumber: smsSenderNumber,
+          accountSid: smsAccountSid.trim(),
+          authToken: smsAuthToken.trim(),
+          senderNumber: smsSenderNumber.trim(),
         },
         whatsapp: {
           provider: waProvider,
-          accountSid: waAccountSid,
-          authToken: waAuthToken,
-          senderNumber: waSenderNumber,
+          accountSid: waAccountSid.trim(),
+          authToken: waAuthToken.trim(),
+          senderNumber: waSenderNumber.trim(),
         },
         email: {
-          host: emailHost,
-          port: emailPort ? Number(emailPort) : undefined,
-          user: emailUser,
-          pass: emailPass,
-          from: emailFrom,
+          host: emailHost.trim() || "smtp.gmail.com",
+          port: emailPort ? Number(emailPort) : 465,
+          user: emailUser.trim(),
+          pass: emailPass.trim(),
+          from: emailFrom.trim(),
         },
         smartRouting,
       },
@@ -143,24 +152,24 @@ export function TenantCommunicationCard() {
 
     const config = channel === "email"
       ? {
-          host: emailHost,
-          port: emailPort ? Number(emailPort) : undefined,
-          user: emailUser,
-          pass: emailPass,
-          from: emailFrom,
+          host: emailHost.trim() || "smtp.gmail.com",
+          port: emailPort ? Number(emailPort) : 465,
+          user: emailUser.trim(),
+          pass: emailPass.trim(),
+          from: emailFrom.trim(),
         }
       : channel === "sms"
         ? {
             provider: smsProvider,
-            accountSid: smsAccountSid,
-            authToken: smsAuthToken,
-            senderNumber: smsSenderNumber,
+            accountSid: smsAccountSid.trim(),
+            authToken: smsAuthToken.trim(),
+            senderNumber: smsSenderNumber.trim(),
           }
         : {
             provider: waProvider,
-            accountSid: waAccountSid,
-            authToken: waAuthToken,
-            senderNumber: waSenderNumber,
+            accountSid: waAccountSid.trim(),
+            authToken: waAuthToken.trim(),
+            senderNumber: waSenderNumber.trim(),
           };
 
     setTestingChannel(channel);
@@ -170,14 +179,24 @@ export function TenantCommunicationCard() {
         destination: destination.trim(),
         config,
       });
+      const msg = data.message || "Message successfully sent to gateway.";
+      setTestFeedback(prev => ({
+        ...prev,
+        [channel]: { success: true, message: msg, timestamp: new Date() }
+      }));
       toast({
         title: "Test Message Dispatched",
-        description: data.message || "Message successfully sent to gateway.",
+        description: msg,
       });
     } catch (err: any) {
+      const errMsg = err.message || "Failed to dispatch test message";
+      setTestFeedback(prev => ({
+        ...prev,
+        [channel]: { success: false, message: errMsg, timestamp: new Date() }
+      }));
       toast({
         title: "Test Failed",
-        description: err.message,
+        description: errMsg,
         variant: "destructive",
       });
     } finally {
@@ -217,7 +236,11 @@ export function TenantCommunicationCard() {
         
         {/* Email Section */}
         <div className="space-y-4">
-          <h3 className="text-sm font-semibold flex items-center gap-2"><Mail className="w-4 h-4" /> Email (SMTP)</h3>
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-semibold flex items-center gap-2"><Mail className="w-4 h-4" /> Email (SMTP)</h3>
+            <span className="text-[11px] text-muted-foreground">Supports Gmail, Office365, or Custom SMTP</span>
+          </div>
+
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label className="text-xs">SMTP Host</Label>
@@ -240,6 +263,17 @@ export function TenantCommunicationCard() {
               <Input placeholder="&quot;VaxPlan Notifications&quot; <no-reply@example.com>" value={emailFrom} onChange={e => setEmailFrom(e.target.value)} disabled={isLoading} />
             </div>
           </div>
+
+          <div className="bg-amber-50 dark:bg-amber-950/20 border border-amber-200/70 dark:border-amber-900/50 rounded-lg p-3 text-xs text-amber-900 dark:text-amber-300 space-y-1">
+            <p className="font-medium flex items-center gap-1.5">
+              <span>💡</span> Gmail Setup Guide:
+            </p>
+            <ol className="list-decimal list-inside space-y-0.5 text-[11px] text-amber-800/90 dark:text-amber-400/90 pl-1">
+              <li>Turn <strong>2-Step Verification ON</strong> in your Google Account (<a href="https://myaccount.google.com/security" target="_blank" rel="noopener noreferrer" className="underline font-medium">myaccount.google.com/security</a>).</li>
+              <li>Generate an App Password at <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener noreferrer" className="underline font-medium">myaccount.google.com/apppasswords</a> (App name: <em>VaxPlan</em>).</li>
+              <li>Paste the generated 16-character code directly into <strong>SMTP Password</strong>.</li>
+            </ol>
+          </div>
           
           <div className="flex items-end gap-2 mt-2 bg-muted/30 p-3 rounded-lg border border-border/50">
             <div className="space-y-1.5 flex-1">
@@ -251,6 +285,20 @@ export function TenantCommunicationCard() {
               Send Test
             </Button>
           </div>
+
+          {testFeedback['email'] && (
+            <div className={`p-3 rounded-lg border text-xs whitespace-pre-wrap ${
+              testFeedback['email'].success
+                ? 'bg-emerald-50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300'
+                : 'bg-rose-50 dark:bg-rose-950/20 border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-300'
+            }`}>
+              <div className="flex items-center gap-2 font-semibold mb-1">
+                {testFeedback['email'].success ? <CheckCircle2 className="w-4 h-4 text-emerald-600" /> : <ShieldAlert className="w-4 h-4 text-rose-600" />}
+                <span>{testFeedback['email'].success ? 'Gateway Verified Successfully' : 'Gateway Verification Failed'}</span>
+              </div>
+              <p className="leading-relaxed">{testFeedback['email'].message}</p>
+            </div>
+          )}
         </div>
 
         <Separator />
@@ -297,6 +345,20 @@ export function TenantCommunicationCard() {
               Send Test
             </Button>
           </div>
+
+          {testFeedback['sms'] && (
+            <div className={`p-3 rounded-lg border text-xs whitespace-pre-wrap ${
+              testFeedback['sms'].success
+                ? 'bg-emerald-50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300'
+                : 'bg-rose-50 dark:bg-rose-950/20 border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-300'
+            }`}>
+              <div className="flex items-center gap-2 font-semibold mb-1">
+                {testFeedback['sms'].success ? <CheckCircle2 className="w-4 h-4 text-emerald-600" /> : <ShieldAlert className="w-4 h-4 text-rose-600" />}
+                <span>{testFeedback['sms'].success ? 'SMS Gateway Verified' : 'SMS Gateway Failed'}</span>
+              </div>
+              <p className="leading-relaxed">{testFeedback['sms'].message}</p>
+            </div>
+          )}
         </div>
 
         <Separator />
@@ -342,6 +404,20 @@ export function TenantCommunicationCard() {
               Send Test
             </Button>
           </div>
+
+          {testFeedback['whatsapp'] && (
+            <div className={`p-3 rounded-lg border text-xs whitespace-pre-wrap ${
+              testFeedback['whatsapp'].success
+                ? 'bg-emerald-50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300'
+                : 'bg-rose-50 dark:bg-rose-950/20 border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-300'
+            }`}>
+              <div className="flex items-center gap-2 font-semibold mb-1">
+                {testFeedback['whatsapp'].success ? <CheckCircle2 className="w-4 h-4 text-emerald-600" /> : <ShieldAlert className="w-4 h-4 text-rose-600" />}
+                <span>{testFeedback['whatsapp'].success ? 'WhatsApp Gateway Verified' : 'WhatsApp Gateway Failed'}</span>
+              </div>
+              <p className="leading-relaxed">{testFeedback['whatsapp'].message}</p>
+            </div>
+          )}
         </div>
 
         <div className="flex justify-end pt-4">
