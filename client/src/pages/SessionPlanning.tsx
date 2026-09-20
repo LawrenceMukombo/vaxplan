@@ -2248,6 +2248,7 @@ export default function SessionPlanning({
           provinces={provinces ?? []}
           districts={districts ?? []}
           villages={villages ?? []}
+          sessionVillages={allSessionVillages ?? []}
           initialFacilityId={lockedParent?.facilityId ?? (filteredSessions[0]?.facilityId ? Number(filteredSessions[0].facilityId) : undefined)}
           onAddSession={() => setDialogOpen(true)}
           onEditSession={(s) => handleOpenEditModal(s)}
