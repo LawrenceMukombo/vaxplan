@@ -33,32 +33,10 @@ export async function runApprovalScheduler(): Promise<void> {
       if (!approvalEligibility(mp.submittedAt ?? mp.createdAt, tenant?.settings, now).allowed) continue;
       console.log(`[approval-scheduler] Auto-approving microplan ID: ${mp.id} (Tenant: ${mp.tenantId})`);
 
-      // Update microplan status to 'auto_approved'
-      await db
-        .update(microplans)
-        .set({
-          status: "auto_approved",
-          autoApprovedAt: now,
-          approvedAt: now,
-          updatedAt: now,
-        })
-        .where(and(eq(microplans.id, mp.id), eq(microplans.tenantId, mp.tenantId)));
-
-      // Resolve matching pending approval request
-      const matchingRequests = await db
-        .select()
-        .from(approvalRequests)
-        .where(
-          and(
-            eq(approvalRequests.tenantId, mp.tenantId),
-            eq(approvalRequests.entityType, "microplan"),
-            eq(approvalRequests.entityId, mp.id),
-            eq(approvalRequests.status, "pending")
-          )
-        );
-
-      for (const req of matchingRequests) {
-        await db
+      // Keep the plan and its approval request consistent. Automated decisions have
+      // no user resolver, so resolvedById must remain null (it is a users.id FK).
+      await db.transaction(async (tx) => {
+        await tx
           .update(approvalRequests)
           .set({
             status: "approved",
@@ -66,8 +44,25 @@ export async function runApprovalScheduler(): Promise<void> {
             resolvedAt: now,
             resolvedById: null,
           })
-          .where(and(eq(approvalRequests.id, req.id), eq(approvalRequests.tenantId, mp.tenantId)));
-      }
+          .where(
+            and(
+              eq(approvalRequests.tenantId, mp.tenantId),
+              eq(approvalRequests.entityType, "microplan"),
+              eq(approvalRequests.entityId, mp.id),
+              eq(approvalRequests.status, "pending")
+            )
+          );
+
+        await tx
+          .update(microplans)
+          .set({
+            status: "auto_approved",
+            autoApprovedAt: now,
+            approvedAt: now,
+            updatedAt: now,
+          })
+          .where(and(eq(microplans.id, mp.id), eq(microplans.tenantId, mp.tenantId)));
+      });
 
       // Seed quarterly supervisory visits for facilities in scope
       try {
@@ -84,6 +79,54 @@ export async function runApprovalScheduler(): Promise<void> {
       } catch (smsErr) {
         console.error(`[approval-scheduler] Failed to send approval SMS for microplan ${mp.id}:`, smsErr);
       }
+    }
+
+    // Reconcile records left split by older scheduler builds that updated the
+    // microplan before failing to resolve the request with resolvedById="system".
+    const orphanedPendingRequests = await db
+      .select({
+        requestId: approvalRequests.id,
+        tenantId: approvalRequests.tenantId,
+        autoApprovedAt: microplans.autoApprovedAt,
+        approvedAt: microplans.approvedAt,
+      })
+      .from(approvalRequests)
+      .innerJoin(
+        microplans,
+        and(
+          eq(approvalRequests.entityId, microplans.id),
+          eq(approvalRequests.tenantId, microplans.tenantId)
+        )
+      )
+      .where(
+        and(
+          eq(approvalRequests.entityType, "microplan"),
+          eq(approvalRequests.status, "pending"),
+          eq(microplans.status, "auto_approved")
+        )
+      );
+
+    for (const request of orphanedPendingRequests) {
+      if (!request.tenantId) continue;
+      await db
+        .update(approvalRequests)
+        .set({
+          status: "approved",
+          comments: "Auto-approved by system scheduler after 2 weeks of review window",
+          resolvedAt: request.autoApprovedAt ?? request.approvedAt ?? now,
+          resolvedById: null,
+        })
+        .where(
+          and(
+            eq(approvalRequests.id, request.requestId),
+            eq(approvalRequests.tenantId, request.tenantId),
+            eq(approvalRequests.status, "pending")
+          )
+        );
+    }
+
+    if (orphanedPendingRequests.length > 0) {
+      console.log(`[approval-scheduler] Reconciled ${orphanedPendingRequests.length} pending request(s) for already auto-approved microplans.`);
     }
 
     // 2. Process Reminders (Microplans pending for more than 7 days without reminder sent)
