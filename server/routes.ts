@@ -1238,52 +1238,102 @@ export async function sendApprovalSmsForMicroplan(tenantId: string, microplanId:
     const facilityName = facility?.name || "Health Facility";
 
     // 1. Notify Plan Submitter / Facility In-Charge via Email, SMS, WhatsApp & In-App
+    const recipientsToNotify: Array<{ id: string; email?: string | null; name: string; phone?: string | null }> = [];
+
     if (mp.createdByUserId) {
       const creator = await storage.getUser(mp.createdByUserId);
       if (creator) {
         const creatorName = [creator.firstName, creator.lastName].filter(Boolean).join(" ").trim() || creator.email || "Planner";
-        const emailSubject = `VaxPlan: Microplan "${mp.name}" Approved`;
-        const notificationText = `Good news! Your microplan "${mp.name}" for ${facilityName} (${mp.year} Q${mp.quarter}) has received final approval. Operational sessions are now activated.`;
-        
-        // In-App Notification
-        try {
-          await storage.createNotification({
-            tenantId,
-            userId: creator.id,
-            title: `Microplan Approved: ${mp.name}`,
-            message: notificationText,
-            type: "approval",
-            link: `/microplans/${mp.planType === "sia_campaign" ? "campaigns" : "routine"}/${mp.id}`,
-            read: false,
-          } as any);
-        } catch (notifErr) {
-          console.warn("[Notification Service] In-app notification creation failed:", notifErr);
-        }
+        recipientsToNotify.push({
+          id: creator.id,
+          email: creator.email,
+          name: creatorName,
+          phone: creator.phone,
+        });
+      }
+    }
 
-        // Email Notification
-        if (creator.email) {
-          try {
-            await sendMessagingEmail({
-              to: creator.email,
-              subject: emailSubject,
-              text: notificationText,
-              html: `<div style="font-family: Arial, sans-serif; max-width: 600px; padding: 20px; border: 1px solid #e2e8f0; border-radius: 8px;">
-                <h2 style="color: #059669; margin-top: 0;">Microplan Approved ✓</h2>
-                <p>Hello <strong>${creatorName}</strong>,</p>
-                <p>${notificationText}</p>
-                <div style="background-color: #f8fafc; padding: 12px; border-radius: 6px; margin: 15px 0;">
-                  <p style="margin: 4px 0; font-size: 14px;"><strong>Microplan:</strong> ${mp.name}</p>
-                  <p style="margin: 4px 0; font-size: 14px;"><strong>Facility:</strong> ${facilityName}</p>
-                  <p style="margin: 4px 0; font-size: 14px;"><strong>Cycle:</strong> ${mp.year} Q${mp.quarter}</p>
-                  <p style="margin: 4px 0; font-size: 14px;"><strong>Target Population:</strong> ${mp.targetPopulation ? Number(mp.targetPopulation).toLocaleString() : 'N/A'}</p>
-                </div>
-                <p style="color: #64748b; font-size: 12px; margin-top: 20px;">VaxPlan Immunisation Management Platform</p>
-              </div>`,
-            });
-            console.log(`[Approval Email] Sent immediate approval notice to ${creator.email}`);
-          } catch (emailErr) {
-            console.warn("[Approval Email] Failed to send email to creator:", emailErr);
-          }
+    // If creator is not specified, or to ensure facility staff is informed, find relevant tenant users
+    if (recipientsToNotify.length === 0 && tenantId) {
+      const tenantUsers = await db
+        .select()
+        .from(users)
+        .where(
+          and(
+            eq(users.tenantId, tenantId),
+            or(
+              mp.facilityId ? eq(users.facilityId, mp.facilityId) : undefined,
+              inArray(users.role, ["facility_in_charge", "facility_clerk", "district_manager", "provincial_coordinator", "national_admin"])
+            )
+          )
+        )
+        .limit(3);
+
+      for (const tu of tenantUsers) {
+        const uName = [tu.firstName, tu.lastName].filter(Boolean).join(" ").trim() || tu.email || "Public Health Officer";
+        recipientsToNotify.push({
+          id: tu.id,
+          email: tu.email,
+          name: uName,
+          phone: tu.phone,
+        });
+      }
+    }
+
+    for (const recipient of recipientsToNotify) {
+      const emailSubject = `VaxPlan: Microplan "${mp.name}" Approved`;
+      const notificationText = `Good news! Your microplan "${mp.name}" for ${facilityName} (${mp.year} Q${mp.quarter}) has received final approval. Operational sessions are now activated.`;
+
+      // In-App Notification
+      try {
+        await storage.createNotification({
+          tenantId,
+          userId: recipient.id,
+          title: `Microplan Approved: ${mp.name}`,
+          message: notificationText,
+          type: "approval",
+          link: `/microplans/${mp.planType === "sia_campaign" ? "campaigns" : "routine"}/${mp.id}`,
+          read: false,
+        } as any);
+      } catch (notifErr) {
+        console.warn("[Notification Service] In-app notification creation failed:", notifErr);
+      }
+
+      // Email Notification
+      if (recipient.email) {
+        try {
+          await sendMessagingEmail({
+            to: recipient.email,
+            subject: emailSubject,
+            text: notificationText,
+            html: `<div style="font-family: Arial, sans-serif; max-width: 600px; padding: 20px; border: 1px solid #e2e8f0; border-radius: 8px;">
+              <h2 style="color: #059669; margin-top: 0;">Microplan Approved ✓</h2>
+              <p>Hello <strong>${recipient.name}</strong>,</p>
+              <p>${notificationText}</p>
+              <div style="background-color: #f8fafc; padding: 12px; border-radius: 6px; margin: 15px 0;">
+                <p style="margin: 4px 0; font-size: 14px;"><strong>Microplan:</strong> ${mp.name}</p>
+                <p style="margin: 4px 0; font-size: 14px;"><strong>Facility:</strong> ${facilityName}</p>
+                <p style="margin: 4px 0; font-size: 14px;"><strong>Cycle:</strong> ${mp.year} Q${mp.quarter}</p>
+                <p style="margin: 4px 0; font-size: 14px;"><strong>Target Population:</strong> ${mp.targetPopulation ? Number(mp.targetPopulation).toLocaleString() : 'N/A'}</p>
+              </div>
+              <p style="color: #64748b; font-size: 12px; margin-top: 20px;">VaxPlan Immunisation Management Platform</p>
+            </div>`,
+          });
+          console.log(`[Approval Email] Sent immediate approval notice to ${recipient.email}`);
+        } catch (emailErr) {
+          console.warn("[Approval Email] Failed to send email to recipient:", emailErr);
+        }
+      }
+
+      // SMS to User if phone available
+      if (recipient.phone && recipient.phone.trim().length > 0) {
+        try {
+          await sendSms({
+            to: recipient.phone.trim(),
+            message: `VaxPlan: Microplan "${mp.name}" for ${facilityName} (${mp.year} Q${mp.quarter}) has been APPROVED. Sessions are active.`,
+          });
+        } catch (smsErr) {
+          console.warn("[Approval SMS] Failed to send SMS to user:", smsErr);
         }
       }
     }
