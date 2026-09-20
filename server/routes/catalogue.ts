@@ -1,7 +1,7 @@
 import { safeErrorMessage } from "../errorUtils";
 import { Router } from "express";
 import { db } from "../db";
-import { eq, and } from "drizzle-orm";
+import { eq, and, or } from "drizzle-orm";
 import {
   catalogueVaccines,
   catalogueScheduleDoses,
@@ -185,12 +185,22 @@ router.post("/schedules/apply-preset", isAuthenticated, requireTenant, requireCa
       const vaccineId = vaccineMap.get(d.vaccineProductId) || vaccineMap.get(d.vaccineName.toLowerCase());
       if (!vaccineId) continue;
 
-      const [existing] = await db.select().from(catalogueScheduleDoses).where(
+      // Normalize doseCode: treat penta-1 and penta_1 as equivalent to prevent duplicates
+      const altDoseCode = d.doseCode.includes("_")
+        ? d.doseCode.replace(/_/g, "-")
+        : d.doseCode.replace(/-/g, "_");
+
+      const existingRows = await db.select().from(catalogueScheduleDoses).where(
         and(
           eq(catalogueScheduleDoses.tenantId, tenantId),
-          eq(catalogueScheduleDoses.doseCode, d.doseCode)
+          or(
+            eq(catalogueScheduleDoses.doseCode, d.doseCode),
+            eq(catalogueScheduleDoses.doseCode, altDoseCode)
+          )
         )
       );
+      // If multiple rows (should not happen after cleanup), keep the canonical one
+      const existing = existingRows.find(r => r.doseCode === d.doseCode) || existingRows[0];
 
       const dosePayload = {
         name: d.name,
