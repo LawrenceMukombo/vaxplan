@@ -18,6 +18,7 @@ import {
 import { ChevronLeft, ChevronRight, ChevronDown, ChevronsLeft, ChevronsRight, Search, Download, SlidersHorizontal } from "lucide-react";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import React, { useState, useMemo } from "react";
+import { cn } from "@/lib/utils";
 // XLSX is loaded lazily on-demand (only when the user clicks Export) to keep
 // it out of the main JS bundle - the library is 424 kB raw / 142 kB gzipped.
 import { useToast } from "@/hooks/use-toast";
@@ -47,6 +48,8 @@ interface DataTableProps<T> {
   onSelectionChange?: (ids: (string | number)[]) => void;
   bulkActions?: React.ReactNode;
   renderExpandedRow?: (item: T) => React.ReactNode;
+  tableClassName?: string;
+  containerClassName?: string;
 }
 
 export function DataTable<T extends { id?: number | string }>({
@@ -65,6 +68,8 @@ export function DataTable<T extends { id?: number | string }>({
   onSelectionChange,
   bulkActions,
   renderExpandedRow,
+  tableClassName,
+  containerClassName,
 }: DataTableProps<T>) {
   const [search, setSearch] = useState("");
   const [limit, setLimit] = useState(pageSize);
@@ -353,8 +358,8 @@ export function DataTable<T extends { id?: number | string }>({
         </div>
       )}
 
-      <div className="rounded-md border overflow-auto sticky-table-container max-h-[600px] custom-scrollbar">
-        <Table>
+      <div className={cn("rounded-md border overflow-x-auto overflow-y-auto sticky-table-container max-h-[650px] custom-scrollbar w-full", containerClassName)}>
+        <Table className={cn("min-w-full", tableClassName)}>
           <TableHeader>
             <TableRow>
               {enableSelection && onSelectionChange && selectedIds && (

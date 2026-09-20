@@ -2802,6 +2802,7 @@ export default function ClientLogbook() {
                 searchable
                 searchKeys={["name", "parentName", "contactPhone"]}
                 searchPlaceholder="Search client name, parent, phone..."
+                tableClassName="min-w-[1100px]"
                 onRowClick={(item) => {
                   setSelectedClient(item);
                   setIsTimelineOpen(true);

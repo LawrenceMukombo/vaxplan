@@ -421,10 +421,29 @@ function requirePlatformAdminOnly(req: any, res: any, next: any) {
 }
 
 function blockDistrictStaffClientWorkspaces(req: any, res: any, next: any) {
-  if (isDistrictStaffRole(req.dbUser)) {
-    return res.status(403).json({ message: "Forbidden: district staff do not have access to the client logbook or defaulter list." });
+  const dbUser = req.dbUser;
+  if (!dbUser) {
+    return res.status(401).json({ message: "Authentication required" });
   }
-  next();
+  if (dbUser.isPlatformAdmin === true || req.user?.isPlatformAdmin === true) {
+    return next();
+  }
+  const roles = roleNamesForAccess(dbUser);
+  const isNationalAdminRole = roles.includes("national_admin");
+  const isFacilityStaff = roles.some((r) => r === "facility_clerk" || r === "facility_in_charge" || r === "facility_partner");
+
+  const rawPerms: string[] = Array.isArray(dbUser.permissions) ? dbUser.permissions.map(String) : [];
+  const effectivePerms: string[] = Array.isArray(dbUser.effectivePermissions) ? dbUser.effectivePermissions.map(String) : [];
+  const allPerms = new Set([...rawPerms, ...effectivePerms]);
+  const hasDelegatedClientPerm = allPerms.has("view_clients") || allPerms.has("client_logbook.view") || allPerms.has("create_client") || allPerms.has("edit_client") || allPerms.has("defaulter_list.view");
+
+  if (isNationalAdminRole || isFacilityStaff || hasDelegatedClientPerm) {
+    return next();
+  }
+
+  return res.status(403).json({
+    message: "Forbidden: Child records are restricted to Health Facility staff, National Administrators, or authorized delegated personnel.",
+  });
 }
 
 export async function userCanAccessGeo(

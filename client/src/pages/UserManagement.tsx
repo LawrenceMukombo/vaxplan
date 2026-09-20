@@ -514,13 +514,13 @@ const ALL_ROLES = [
   // Specialist & admin roles
   { value: "gis_specialist", label: "GIS Specialist" },
   { value: "national_admin", label: "National Admin" },
-  // Implementing partner roles (read-only by default)
+  // Implementing partner roles (read-only / collaborative by default)
   { value: "facility_partner", label: "Implementing Partner (Facility)" },
   { value: "district_partner", label: "Implementing Partner (District)" },
   { value: "provincial_partner", label: "Implementing Partner (Province)" },
   { value: "national_partner", label: "Implementing Partner (National)" },
-  // National programme management
-  { value: "national_manager", label: "National Manager" },
+  // National programme management / coordination
+  { value: "national_manager", label: "National Coordinator (Program Data & Features)" },
 ];
 
 const ALL_PERMISSIONS: { value: Permission; label: string; desc: string }[] = [
@@ -1290,12 +1290,26 @@ export default function UserManagement() {
     return Array.from(list);
   };
 
-  const activeRolesList = (dbRoles ? dbRoles.map((r: any) => ({ value: r.code, label: r.name })) : ALL_ROLES).filter((r: any) => {
-    if (currentUser?.role === "district_manager") {
-      return ["facility_clerk", "facility_in_charge", "facility_partner", "district_partner"].includes(r.value);
-    }
-    return true;
-  });
+  const activeRolesList = useMemo(() => {
+    const roleMap: Record<string, string> = {};
+    ALL_ROLES.forEach((r) => {
+      roleMap[r.value] = r.label;
+    });
+    (dbRoles || []).forEach((r: any) => {
+      if (r?.code && r?.name) {
+        roleMap[r.code] = r.name;
+      }
+    });
+
+    return Object.entries(roleMap)
+      .map(([value, label]) => ({ value, label }))
+      .filter((r) => {
+        if (currentUser?.role === "district_manager") {
+          return ["facility_clerk", "facility_in_charge", "facility_partner", "district_partner"].includes(r.value);
+        }
+        return true;
+      });
+  }, [dbRoles, currentUser]);
 
   const geoMaps = useMemo(
     () => buildGeoMaps({ provinces, districts, villages: [], facilities }),
