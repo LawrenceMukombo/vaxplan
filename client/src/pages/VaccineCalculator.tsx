@@ -43,6 +43,8 @@ import {
   Edit2,
   Check,
   AlertTriangle,
+  Link2,
+  MapPin,
 } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
@@ -50,19 +52,29 @@ import type { Facility, PopulationData, Tenant, VaccineConfig } from "@shared/sc
 import { apiRequest } from "@/lib/queryClient";
 import { FacilityCascadePicker } from "@/components/FacilityCascadePicker";
 import { offlineDb } from "../lib/offlineDb";
+import { calculateLifeCourseForecast } from "@shared/lifeCourseForecast";
 
 const fallbackVaccineSchedule = [
-  { id: 1, name: "BCG", target: "births", doses: 1, wastage: 40, vialsPerDose: 20, recommendedAge: "Birth" },
-  { id: 2, name: "OPV-0", target: "births", doses: 1, wastage: 25, vialsPerDose: 20, recommendedAge: "Birth" },
-  { id: 3, name: "OPV-1,2,3", target: "under1", doses: 3, wastage: 25, vialsPerDose: 20, recommendedAge: "6, 10, 14 weeks" },
-  { id: 4, name: "Penta-1,2,3", target: "under1", doses: 3, wastage: 11, vialsPerDose: 10, recommendedAge: "6, 10, 14 weeks" },
-  { id: 5, name: "PCV-1,2,3", target: "under1", doses: 3, wastage: 11, vialsPerDose: 4, recommendedAge: "6, 10, 14 weeks" },
-  { id: 6, name: "IPV-1,2", target: "under1", doses: 2, wastage: 5, vialsPerDose: 5, recommendedAge: "14 weeks, 9 months" },
+  { id: 1, name: "BCG", target: "births", doses: 1, wastage: 50, vialsPerDose: 20, recommendedAge: "Birth" },
+  { id: 2, name: "OPV-0", target: "births", doses: 1, wastage: 15, vialsPerDose: 20, recommendedAge: "Birth" },
+  { id: 3, name: "OPV-1,2,3", target: "under1", doses: 3, wastage: 15, vialsPerDose: 20, recommendedAge: "6, 10, 14 weeks" },
+  { id: 4, name: "Penta-1,2,3", target: "under1", doses: 3, wastage: 10, vialsPerDose: 10, recommendedAge: "6, 10, 14 weeks" },
+  { id: 5, name: "PCV-1,2,3", target: "under1", doses: 3, wastage: 5, vialsPerDose: 4, recommendedAge: "6, 10, 14 weeks" },
+  { id: 6, name: "IPV-1,2", target: "under1", doses: 2, wastage: 10, vialsPerDose: 10, recommendedAge: "14 weeks, 9 months" },
   { id: 7, name: "Rota-1,2", target: "under1", doses: 2, wastage: 5, vialsPerDose: 1, recommendedAge: "6, 10 weeks" },
-  { id: 8, name: "MR-1", target: "under1", doses: 1, wastage: 25, vialsPerDose: 10, recommendedAge: "9 months" },
-  { id: 9, name: "MR-2", target: "schoolEntry", doses: 1, wastage: 25, vialsPerDose: 10, recommendedAge: "18 months / 4-5 years" },
-  { id: 10, name: "TT-1,2+", target: "pregnant", doses: 2, wastage: 25, vialsPerDose: 10, recommendedAge: "Pregnancy / Childbearing age" },
+  { id: 8, name: "MR-1", target: "under1", doses: 1, wastage: 15, vialsPerDose: 10, recommendedAge: "9 months" },
+  { id: 9, name: "MR-2", target: "schoolEntry", doses: 1, wastage: 15, vialsPerDose: 10, recommendedAge: "18 months / 4-5 years" },
+  { id: 10, name: "Td-1,2+", target: "pregnant", doses: 2, wastage: 10, vialsPerDose: 20, recommendedAge: "Pregnancy / Childbearing age" },
 ];
+
+function wastagePercent(value: unknown): number {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric < 0) return 0;
+  // Legacy calculator rows stored factors such as 1.10; current schema and
+  // catalogue rows store percentages such as 10.00.
+  const percent = numeric > 1 && numeric < 2 ? (numeric - 1) * 100 : numeric;
+  return Math.max(0, Math.min(99, Math.round(percent * 100) / 100));
+}
 
 const defaultDemographics = {
   births: 0.032,
@@ -85,6 +97,7 @@ export default function VaccineCalculator() {
   const [selectedQuarter, setSelectedQuarter] = useState(
     Math.ceil((new Date().getMonth() + 1) / 3)
   );
+  const [selectedPlanId, setSelectedPlanId] = useState<string>("auto");
   const [coverageTarget, setCoverageTarget] = useState(95);
 
   // Modal edit states
@@ -99,38 +112,18 @@ export default function VaccineCalculator() {
     doses: 1,
     recommendedAge: "",
     recommendedAgeWeeks: 0,
-    wastageFactor: "1.10",
+    wastageFactor: "10.00",
     vialsPerDose: 1,
     isActive: true,
   });
 
   const [isCustomAntigen, setIsCustomAntigen] = useState(false);
 
-  /*
-  // Original queries (commented out to preserve working code while adding offline capabilities):
-  const { data: facilities, isLoading: loadingFacilities } = useQuery<Facility[]>({
-    queryKey: ["/api/facilities"],
-  });
-
-  const { data: populationData, isLoading: loadingPopulation } = useQuery<PopulationData[]>({
-    queryKey: ["/api/population"],
-  });
-
-  const { data: activeTenant, isLoading: loadingTenant } = useQuery<Tenant>({
-    queryKey: ["/api/me/tenant"],
-  });
-
-  const { data: vaccineConfigs, isLoading: loadingConfigs } = useQuery<VaccineConfig[]>({
-    queryKey: ["/api/vaccines/config"],
-  });
-  */
-
-  // Updated queries with robust Dexie.js offline fallbacks and localStorage caching:
   const { data: facilities, isLoading: loadingFacilities } = useQuery<Facility[]>({
     queryKey: ["/api/facilities"],
     queryFn: async () => {
       if (!navigator.onLine) {
-        return await offlineDb.facilities.toArray() as any[];
+        return (await offlineDb.facilities.toArray()) as any[];
       }
       const res = await fetch("/api/facilities");
       if (!res.ok) throw new Error("Failed to fetch facilities");
@@ -142,7 +135,7 @@ export default function VaccineCalculator() {
     queryKey: ["/api/population"],
     queryFn: async () => {
       if (!navigator.onLine) {
-        return await offlineDb.populationData.toArray() as any[];
+        return (await offlineDb.populationData.toArray()) as any[];
       }
       const res = await fetch("/api/population");
       if (!res.ok) throw new Error("Failed to fetch population data");
@@ -172,11 +165,67 @@ export default function VaccineCalculator() {
       if (!navigator.onLine) {
         const localConfigs = await offlineDb.vaccineConfigs.toArray();
         if (localConfigs.length > 0) return localConfigs as any[];
-        // Fallback schedule if no configs are synced yet
         return fallbackVaccineSchedule as any[];
       }
       const res = await fetch("/api/vaccines/config");
       if (!res.ok) throw new Error("Failed to fetch vaccine configurations");
+      return res.json();
+    }
+  });
+
+  const facilityId = selectedFacility ? Number(selectedFacility) : null;
+  const currentYear = new Date().getFullYear();
+
+  const { data: villages = [] } = useQuery<any[]>({
+    queryKey: [`/api/villages?facilityId=${facilityId ?? ""}`],
+    enabled: !!facilityId,
+    queryFn: async () => {
+      if (!facilityId) return [];
+      if (!navigator.onLine) {
+        return (await offlineDb.villages.where("assignedFacilityId").equals(facilityId).toArray()) as any[];
+      }
+      const res = await fetch(`/api/villages?facilityId=${facilityId}`);
+      if (!res.ok) return [];
+      return res.json();
+    }
+  });
+
+  const { data: microplans = [] } = useQuery<any[]>({
+    queryKey: ["/api/microplans"],
+    enabled: !!facilityId,
+    queryFn: async () => {
+      if (!navigator.onLine) {
+        return (await offlineDb.microplans.toArray()) as any[];
+      }
+      const res = await fetch("/api/microplans");
+      if (!res.ok) return [];
+      return res.json();
+    }
+  });
+
+  const { data: sessions = [] } = useQuery<any[]>({
+    queryKey: [`/api/session-plans?facilityId=${facilityId ?? ""}`],
+    enabled: !!facilityId,
+    queryFn: async () => {
+      if (!facilityId) return [];
+      if (!navigator.onLine) {
+        return (await offlineDb.sessionPlans.where("facilityId").equals(facilityId).toArray()) as any[];
+      }
+      const res = await fetch(`/api/session-plans?facilityId=${facilityId}`);
+      if (!res.ok) return [];
+      return res.json();
+    }
+  });
+
+  const { data: sessionVillageLinks = [] } = useQuery<any[]>({
+    queryKey: ["/api/sessions/villages"],
+    enabled: !!facilityId,
+    queryFn: async () => {
+      if (!navigator.onLine) {
+        return ((await offlineDb.sessionVillageLinks?.toArray().catch(() => [])) || []) as any[];
+      }
+      const res = await fetch("/api/sessions/villages");
+      if (!res.ok) return [];
       return res.json();
     }
   });
@@ -196,7 +245,7 @@ export default function VaccineCalculator() {
         doses: 1,
         recommendedAge: "",
         recommendedAgeWeeks: 0,
-        wastageFactor: "1.10",
+        wastageFactor: "10.00",
         vialsPerDose: 1,
         isActive: true,
       });
@@ -234,7 +283,7 @@ export default function VaccineCalculator() {
         name: c.name,
         target: c.targetGroup,
         doses: c.doses,
-        wastage: Math.round((parseFloat(c.wastageFactor as string) - 1.0) * 100),
+        wastage: wastagePercent(c.wastageFactor),
         vialsPerDose: c.vialsPerDose,
         recommendedAge: c.recommendedAge,
       }));
@@ -243,13 +292,45 @@ export default function VaccineCalculator() {
   const facilityPopulation = useMemo(() => {
     if (!selectedFacility) return null;
     const facilityId = parseInt(selectedFacility);
-    const popData = populationData?.filter((p) => p.facilityId === facilityId);
-    if (!popData?.length) return null;
-    
-    const latestYear = Math.max(...popData.map((p) => p.year));
-    const latest = popData.find((p) => p.year === latestYear);
-    return latest;
-  }, [selectedFacility, populationData]);
+    const popData = populationData?.filter((p) => p.facilityId === facilityId && !p.villageId);
+    if (popData?.length) {
+      const latestYear = Math.max(...popData.map((p) => p.year));
+      return popData.find((p) => p.year === latestYear) || null;
+    }
+
+    const villageIds = new Set(villages.map((v: any) => Number(v.id)));
+    const communityRows = populationData?.filter((p) => p.villageId && villageIds.has(Number(p.villageId))) || [];
+    if (!communityRows.length) return null;
+    const latestYear = Math.max(...communityRows.map((p) => p.year));
+    const latestRows = communityRows.filter((p) => p.year === latestYear);
+    return latestRows.reduce((total: any, row: any) => ({
+      ...total,
+      year: latestYear,
+      totalPopulation: (total.totalPopulation || 0) + (row.totalPopulation || 0),
+      under1Population: (total.under1Population || 0) + (row.under1Population || 0),
+      pregnantWomen: (total.pregnantWomen || 0) + (row.pregnantWomen || 0),
+      schoolEntry: (total.schoolEntry || 0) + (row.schoolEntry || 0),
+    }), { facilityId });
+  }, [selectedFacility, populationData, villages]);
+
+  const availablePlans = useMemo(() => microplans.filter((plan: any) =>
+    Number(plan.facilityId) === facilityId && Number(plan.quarter) === selectedQuarter
+  ).sort((a: any, b: any) => Number(b.year) - Number(a.year)), [microplans, facilityId, selectedQuarter]);
+
+  const selectedPlan = useMemo(() => {
+    if (selectedPlanId !== "auto") return availablePlans.find((plan: any) => String(plan.id) === selectedPlanId) || null;
+    return availablePlans.find((plan: any) => Number(plan.year) === currentYear && plan.status !== "archived") || availablePlans[0] || null;
+  }, [availablePlans, selectedPlanId, currentYear]);
+
+  const planSessions = useMemo(() => sessions.filter((session: any) =>
+    Number(session.facilityId) === facilityId && Number(session.quarter) === selectedQuarter &&
+    (!selectedPlan || Number(session.microplanId) === Number(selectedPlan.id))
+  ), [sessions, facilityId, selectedQuarter, selectedPlan]);
+  const linkedPlanTarget = useMemo(() => {
+    const planTarget = Number(selectedPlan?.targetPopulation || 0);
+    if (planTarget > 0) return planTarget;
+    return planSessions.reduce((sum: number, session: any) => sum + Number(session.targetPopulation || 0), 0);
+  }, [selectedPlan, planSessions]);
 
   const demographics = useMemo(() => {
     const settings = (activeTenant?.settings || {}) as Record<string, any>;
@@ -280,23 +361,64 @@ export default function VaccineCalculator() {
           targetPop = Math.round(totalPop * 0.03);
       }
 
-      const adjustedTarget = Math.round((targetPop * coverageTarget) / 100);
-      const dosesNeeded = adjustedTarget * vaccine.doses;
-      const wastageMultiplier = 1 + vaccine.wastage / 100;
-      const dosesWithWastage = Math.ceil(dosesNeeded * wastageMultiplier);
-      const vialsNeeded = Math.ceil(dosesWithWastage / vaccine.vialsPerDose);
-      const quarterlyVials = Math.ceil(vialsNeeded / 4);
+      // Demographic cohorts are annual estimates. Calculate the selected
+      // quarter directly so vial rounding and open-vial wastage are applied at
+      // the operational ordering period, not after an annual calculation.
+      const usesPlanTarget = vaccine.target === "under1" && linkedPlanTarget > 0;
+      const quarterlyCohort = usesPlanTarget ? linkedPlanTarget : Math.ceil(targetPop / 4);
+      const forecast = calculateLifeCourseForecast({
+        population: quarterlyCohort,
+        coveragePercent: usesPlanTarget ? 100 : coverageTarget,
+        dosesPerPerson: vaccine.doses,
+        dosesPerVial: vaccine.vialsPerDose,
+        wastagePercent: vaccine.wastage,
+        peoplePerSession: 40,
+      });
+      const dosesWithWastage = forecast.supplyDoses;
+      const vialsNeeded = forecast.vials;
+      const quarterlyVials = vialsNeeded;
 
       return {
         ...vaccine,
-        targetPop: adjustedTarget,
-        dosesNeeded,
+        targetPop: forecast.peopleToReach,
+        dosesNeeded: forecast.administrationDoses,
         dosesWithWastage,
         vialsNeeded,
         quarterlyVials,
       };
     });
-  }, [facilityPopulation, activeSchedule, coverageTarget, demographics]);
+  }, [facilityPopulation, activeSchedule, coverageTarget, demographics, linkedPlanTarget]);
+
+  const communityRequirements = useMemo(() => {
+    const linksByVillage = new Map<number, any[]>();
+    const sessionById = new Map(planSessions.map((session: any) => [Number(session.id), session]));
+    for (const link of sessionVillageLinks) {
+      const session = sessionById.get(Number(link.sessionId));
+      if (!session) continue;
+      const id = Number(link.villageId);
+      linksByVillage.set(id, [...(linksByVillage.get(id) || []), session]);
+    }
+    return villages.map((village: any) => {
+      const rows = (populationData || []).filter((row: any) => Number(row.villageId) === Number(village.id));
+      const year = rows.length ? Math.max(...rows.map((row: any) => Number(row.year))) : 0;
+      const population = rows.find((row: any) => Number(row.year) === year);
+      const totalPopulation = Number(population?.totalPopulation || village.population || 0);
+      const linkedSessions = linksByVillage.get(Number(village.id)) || [];
+      const scheduledTarget = linkedSessions.reduce((sum, session) => sum + Number(session.targetPopulation || 0), 0);
+      const requirements = activeSchedule.map((vaccine) => {
+        const explicit = vaccine.target === "under1" ? population?.under1Population
+          : vaccine.target === "pregnant" ? population?.pregnantWomen
+          : vaccine.target === "schoolEntry" ? population?.schoolEntry : null;
+        const cohort = Number(explicit ?? Math.round(totalPopulation * (demographics[vaccine.target as keyof typeof demographics] || 0.03)));
+        const forecast = calculateLifeCourseForecast({ population: Math.ceil(cohort / 4), coveragePercent: coverageTarget,
+          dosesPerPerson: vaccine.doses, dosesPerVial: vaccine.vialsPerDose,
+          wastagePercent: vaccine.wastage, peoplePerSession: 40 });
+        return { name: vaccine.name, vials: forecast.vials, doses: forecast.supplyDoses };
+      });
+      return { village, totalPopulation, linkedSessions, scheduledTarget, requirements,
+        totalVials: requirements.reduce((sum, req) => sum + req.vials, 0) };
+    }).sort((a: any, b: any) => b.totalVials - a.totalVials);
+  }, [villages, populationData, planSessions, sessionVillageLinks, activeSchedule, demographics, coverageTarget]);
 
   const totalVials = calculations.reduce((sum, c) => sum + c.quarterlyVials, 0);
   const totalDoses = calculations.reduce((sum, c) => sum + c.dosesWithWastage, 0);
@@ -315,7 +437,7 @@ export default function VaccineCalculator() {
         doses: config.doses,
         recommendedAge: config.recommendedAge,
         recommendedAgeWeeks: 0,
-        wastageFactor: (1 + config.wastage / 100).toFixed(2),
+        wastageFactor: config.wastage.toFixed(2),
         vialsPerDose: config.vialsPerDose,
         isActive: true,
       } as any);
@@ -349,7 +471,7 @@ export default function VaccineCalculator() {
             doses: antigen.doses,
             recommendedAge: antigen.recommendedAge,
             recommendedAgeWeeks: antigen.name === "BCG" || antigen.name === "OPV-0" ? 0 : 6,
-            wastageFactor: (1 + antigen.wastage / 100).toFixed(2),
+            wastageFactor: antigen.wastage.toFixed(2),
             vialsPerDose: antigen.vialsPerDose,
             isActive: true,
           });
@@ -439,7 +561,7 @@ export default function VaccineCalculator() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="grid md:grid-cols-3 gap-4">
+          <div className="grid md:grid-cols-4 gap-4">
             <div className="space-y-2 md:col-span-2">
               <Label>Facility</Label>
               <FacilityCascadePicker
@@ -469,6 +591,23 @@ export default function VaccineCalculator() {
             </div>
 
             <div className="space-y-2">
+              <Label className="flex items-center gap-1.5"><Link2 className="h-3.5 w-3.5" /> Existing plan</Label>
+              <Select value={selectedPlanId} onValueChange={setSelectedPlanId} disabled={!facilityId}>
+                <SelectTrigger data-testid="select-calculator-plan">
+                  <SelectValue placeholder="Use matching plan" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="auto">Auto: latest matching plan</SelectItem>
+                  {availablePlans.map((plan: any) => (
+                    <SelectItem key={plan.id} value={String(plan.id)}>
+                      {plan.name} · {plan.year} Q{plan.quarter}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
               <Label>Coverage Target (%)</Label>
               <div className="flex items-center gap-2">
                 <Input
@@ -484,6 +623,14 @@ export default function VaccineCalculator() {
               </div>
             </div>
           </div>
+          {selectedPlan && (
+            <div className="mt-4 rounded-lg border border-primary/20 bg-primary/5 px-4 py-3 text-sm flex flex-wrap gap-x-6 gap-y-1">
+              <span className="font-medium flex items-center gap-1.5"><Link2 className="h-4 w-4 text-primary" /> Linked to {selectedPlan.name}</span>
+              <span>{planSessions.length} planned session{planSessions.length === 1 ? "" : "s"}</span>
+              <span>{planSessions.reduce((sum: number, session: any) => sum + Number(session.targetPopulation || 0), 0).toLocaleString()} planned contacts</span>
+              <Badge variant="outline" className="capitalize">{selectedPlan.status || "draft"}</Badge>
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -537,6 +684,42 @@ export default function VaccineCalculator() {
             </CardContent>
           </Card>
         </div>
+      )}
+
+      {selectedFacility && communityRequirements.length > 0 && (
+        <Card className="border border-border/40 bg-card/50">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-lg flex items-center gap-2"><MapPin className="h-5 w-5 text-primary" /> Community Requirements</CardTitle>
+            <CardDescription>
+              Quarterly requirements for each community assigned to this health facility. Population comes from the latest community record; session targets come from the linked plan.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader><TableRow>
+                  <TableHead>Community</TableHead><TableHead className="text-right">Population</TableHead>
+                  <TableHead className="text-right">Plan sessions</TableHead><TableHead className="text-right">Planned contacts</TableHead>
+                  <TableHead>Quarterly antigen requirements</TableHead><TableHead className="text-right">Total vials</TableHead>
+                </TableRow></TableHeader>
+                <TableBody>
+                  {communityRequirements.map(({ village, totalPopulation, linkedSessions, scheduledTarget, requirements, totalVials }: any) => (
+                    <TableRow key={village.id}>
+                      <TableCell><div className="font-medium">{village.name}</div><div className="text-xs text-muted-foreground">{village.code || village.villageCode || "Assigned community"}</div></TableCell>
+                      <TableCell className="text-right font-mono">{totalPopulation ? totalPopulation.toLocaleString() : "—"}</TableCell>
+                      <TableCell className="text-right">{linkedSessions.length}</TableCell>
+                      <TableCell className="text-right font-mono">{scheduledTarget ? scheduledTarget.toLocaleString() : "—"}</TableCell>
+                      <TableCell><div className="flex flex-wrap gap-1">
+                        {requirements.map((req: any) => <Badge key={req.name} variant="secondary" className="font-normal">{req.name}: {req.vials} vials</Badge>)}
+                      </div></TableCell>
+                      <TableCell className="text-right font-mono font-semibold text-primary">{totalVials.toLocaleString()}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </CardContent>
+        </Card>
       )}
 
       <Card className="border border-border/40 bg-card/50">
@@ -648,7 +831,7 @@ export default function VaccineCalculator() {
                           targetGroup: standard.target,
                           doses: standard.doses,
                           recommendedAge: standard.recommendedAge,
-                          wastageFactor: (1 + standard.wastage / 100).toFixed(2),
+                          wastageFactor: standard.wastage.toFixed(2),
                           vialsPerDose: standard.vialsPerDose,
                         });
                       }
@@ -715,11 +898,13 @@ export default function VaccineCalculator() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label>Wastage Factor (e.g. 1.40 for 40%)</Label>
+                  <Label>Wastage Rate (%)</Label>
                   <Input
                     type="number"
-                    step="0.01"
-                    value={editingConfig.wastageFactor ? parseFloat(editingConfig.wastageFactor as string) : 1.10}
+                    step="0.1"
+                    min={0}
+                    max={99}
+                    value={wastagePercent(editingConfig.wastageFactor ?? 10)}
                     onChange={(e) => setEditingConfig({ ...editingConfig, wastageFactor: e.target.value })}
                   />
                 </div>
@@ -775,7 +960,7 @@ export default function VaccineCalculator() {
                       doses: 1,
                       recommendedAge: "",
                       recommendedAgeWeeks: 0,
-                      wastageFactor: "1.10",
+                      wastageFactor: "10.00",
                       vialsPerDose: 1,
                     });
                   } else {
@@ -788,7 +973,7 @@ export default function VaccineCalculator() {
                         doses: standard.doses,
                         recommendedAge: standard.recommendedAge,
                         recommendedAgeWeeks: standard.name === "BCG" || standard.name === "OPV-0" ? 0 : 6,
-                        wastageFactor: (1 + standard.wastage / 100).toFixed(2),
+                        wastageFactor: standard.wastage.toFixed(2),
                         vialsPerDose: standard.vialsPerDose,
                         isActive: true,
                       });
@@ -856,10 +1041,12 @@ export default function VaccineCalculator() {
                 />
               </div>
               <div className="space-y-2">
-                <Label>Wastage Factor (e.g. 1.25)</Label>
+                <Label>Wastage Rate (%)</Label>
                 <Input
                   type="number"
-                  step="0.01"
+                  step="0.1"
+                  min={0}
+                  max={99}
                   value={newConfig.wastageFactor}
                   onChange={(e) => setNewConfig({ ...newConfig, wastageFactor: e.target.value })}
                 />
