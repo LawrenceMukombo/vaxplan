@@ -13252,14 +13252,17 @@ export async function registerRoutes(
       try {
         const tenant = await storage.getTenant(req.tenantId!);
         const waConfig = (tenant?.settings as any)?.communication?.whatsapp || {};
+        const serverUrl = (req.query?.serverUrl as string)?.trim() || waConfig.serverUrl;
+        const session = (req.query?.session as string)?.trim() || waConfig.session;
+        const secretKey = (req.query?.secretKey as string)?.trim() || waConfig.secretKey;
         const status = await getWppconnectStatus({
-          serverUrl: waConfig.serverUrl,
-          session: waConfig.session,
-          secretKey: waConfig.secretKey,
+          serverUrl,
+          session,
+          secretKey,
         });
         res.json(status);
       } catch (err: any) {
-        res.status(500).json({ connected: false, status: "OFFLINE", message: err.message });
+        res.json({ connected: false, status: "OFFLINE", message: err.message });
       }
     }
   );

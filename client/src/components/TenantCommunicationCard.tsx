@@ -47,8 +47,9 @@ export function TenantCommunicationCard() {
   const [qrModalOpen, setQrModalOpen] = useState(false);
   const [isStartingSession, setIsStartingSession] = useState(false);
   const [currentQrCode, setCurrentQrCode] = useState<string | null>(null);
+  const [pairingError, setPairingError] = useState<string | null>(null);
 
-  // Live WPPConnect status query
+  // Live WPPConnect status query with smart polling & error immunity
   const { data: waStatus, refetch: refetchWaStatus, isFetching: isFetchingWaStatus } = useQuery<{
     connected: boolean;
     status: "CONNECTED" | "QRCODE" | "DISCONNECTED" | "OFFLINE" | "INITIALIZING" | "UNKNOWN";
@@ -56,18 +57,33 @@ export function TenantCommunicationCard() {
     message?: string;
     phone?: string | null;
   }>({
-    queryKey: ["/api/me/tenant/whatsapp/status"],
+    queryKey: ["/api/me/tenant/whatsapp/status", waServerUrl, waSession],
+    queryFn: async () => {
+      const url = `/api/me/tenant/whatsapp/status?serverUrl=${encodeURIComponent(waServerUrl)}&session=${encodeURIComponent(waSession)}`;
+      const res = await fetch(url, { headers: { Accept: "application/json" } });
+      if (!res.ok) {
+        return { connected: false, status: "OFFLINE", message: `HTTP ${res.status}` };
+      }
+      return res.json();
+    },
     enabled: waProvider === "wppconnect",
-    refetchInterval: qrModalOpen ? 4000 : false,
+    refetchInterval: (query) => {
+      if (!qrModalOpen) return false;
+      const st = (query as any)?.state?.data?.status;
+      if (st === "OFFLINE" || st === "CONNECTED") return false;
+      return 3500;
+    },
   });
 
   // Watch for QR code in status updates
   useEffect(() => {
     if (waStatus?.qrcode) {
       setCurrentQrCode(waStatus.qrcode);
+      setPairingError(null);
     }
     if (waStatus?.connected && qrModalOpen) {
       setQrModalOpen(false);
+      setPairingError(null);
       toast({
         title: "WhatsApp Connected! ✓",
         description: `Successfully linked with ${waStatus.phone || "your WhatsApp device"}.`,
@@ -257,23 +273,24 @@ export function TenantCommunicationCard() {
 
   const handleStartPairing = async () => {
     setIsStartingSession(true);
+    setPairingError(null);
+    setCurrentQrCode(null);
     try {
       const res: any = await apiRequest("POST", "/api/me/tenant/whatsapp/start-session", {
         serverUrl: waServerUrl.trim() || "http://localhost:21465",
         session: waSession.trim() || "vaxplan",
         secretKey: waSecretKey.trim(),
       });
-      if (res.qrcode) {
+      if (res.status === "OFFLINE" || (!res.connected && !res.qrcode && res.status !== "QRCODE")) {
+        setPairingError(res.message || `Unable to reach WPPConnect server at ${waServerUrl.trim() || "http://localhost:21465"}.`);
+      } else if (res.qrcode) {
         setCurrentQrCode(res.qrcode);
       }
       setQrModalOpen(true);
       refetchWaStatus();
     } catch (err: any) {
-      toast({
-        title: "Pairing Request Failed",
-        description: err.message,
-        variant: "destructive",
-      });
+      setPairingError(err.message || `Failed to start WhatsApp pairing session.`);
+      setQrModalOpen(true);
     } finally {
       setIsStartingSession(false);
     }
@@ -534,11 +551,17 @@ export function TenantCommunicationCard() {
                       </Badge>
                     ) : waStatus?.status === "OFFLINE" ? (
                       <Badge variant="destructive" className="flex items-center gap-1 font-semibold text-xs">
-                        Gateway Server Offline
+                        <AlertCircle className="h-3 w-3 mr-1" />
+                        Server Offline / Unreachable
+                      </Badge>
+                    ) : isFetchingWaStatus && !waStatus ? (
+                      <Badge variant="outline" className="text-xs flex items-center gap-1">
+                        <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                        Checking...
                       </Badge>
                     ) : (
                       <Badge variant="outline" className="text-xs">
-                        {waStatus?.status || "Checking..."}
+                        {waStatus?.status || "Disconnected"}
                       </Badge>
                     )}
                   </div>
@@ -570,7 +593,8 @@ export function TenantCommunicationCard() {
                       <Button
                         type="button"
                         size="sm"
-                        className="h-7 text-xs px-3 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold"
+                        variant="secondary"
+                        className="h-7 text-xs px-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-medium"
                         onClick={handleStartPairing}
                         disabled={isStartingSession}
                       >
@@ -585,8 +609,10 @@ export function TenantCommunicationCard() {
                   </div>
                 </div>
 
-                {waStatus?.message && (
-                  <p className="text-[11px] text-muted-foreground">{waStatus.message}</p>
+                {waStatus?.message && waStatus.status !== "CONNECTED" && (
+                  <p className={`text-[11px] leading-relaxed ${waStatus.status === "OFFLINE" ? "text-rose-600 dark:text-rose-400 font-medium" : "text-muted-foreground"}`}>
+                    {waStatus.message}
+                  </p>
                 )}
 
                 {waStatus?.status === "OFFLINE" && (
@@ -730,17 +756,45 @@ export function TenantCommunicationCard() {
           </DialogDescription>
         </DialogHeader>
 
-        <div className="p-4 bg-white rounded-xl border flex flex-col items-center justify-center min-h-[260px] shadow-inner">
+        <div className="p-4 bg-white dark:bg-slate-900 rounded-xl border flex flex-col items-center justify-center min-h-[260px] shadow-inner">
           {currentQrCode ? (
             <img
               src={currentQrCode.startsWith("data:") ? currentQrCode : `data:image/png;base64,${currentQrCode}`}
               alt="WhatsApp QR Code"
               className="w-56 h-56 object-contain rounded-lg shadow-xs"
             />
+          ) : pairingError || waStatus?.status === "OFFLINE" ? (
+            <div className="space-y-3 flex flex-col items-center text-center p-2 max-w-sm">
+              <div className="h-11 w-11 rounded-full bg-rose-100 dark:bg-rose-950/40 flex items-center justify-center text-rose-600">
+                <AlertCircle className="h-6 w-6" />
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-rose-700 dark:text-rose-400">Cannot Reach WPPConnect Gateway</p>
+                <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
+                  {pairingError || waStatus?.message || `Unable to reach ${waServerUrl}.`}
+                </p>
+              </div>
+              <div className="text-[11px] bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 text-amber-900 dark:text-amber-200 p-2.5 rounded-lg text-left space-y-1">
+                <p className="font-semibold text-amber-800 dark:text-amber-300">
+                  Testing on Localhost?
+                </p>
+                <p className="leading-normal text-[10.5px]">
+                  You are opening VaxPlan at <code>localhost:5000</code>. WPPConnect Docker is running on your <strong>Ubuntu VPS</strong>.
+                </p>
+                <ul className="list-disc pl-4 space-y-0.5 text-[10.5px]">
+                  <li>Open VaxPlan on your <strong>VPS domain/IP</strong> where WPPConnect is hosted locally.</li>
+                  <li>Or if testing locally on Windows, start WPPConnect on this PC with Docker Desktop.</li>
+                </ul>
+              </div>
+              <Button size="sm" variant="outline" className="text-xs h-7" onClick={() => handleStartPairing()}>
+                <RefreshCw className="h-3 w-3 mr-1.5" />
+                Retry Connection
+              </Button>
+            </div>
           ) : (
             <div className="space-y-2 flex flex-col items-center">
               <Loader2 className="h-8 w-8 text-emerald-600 animate-spin" />
-              <p className="text-xs text-muted-foreground">Generating QR Code from WPPConnect...</p>
+              <p className="text-xs text-muted-foreground">Connecting to WPPConnect server...</p>
             </div>
           )}
         </div>
