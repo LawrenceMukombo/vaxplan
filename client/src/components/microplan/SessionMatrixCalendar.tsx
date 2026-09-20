@@ -1,4 +1,5 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -41,12 +42,19 @@ import {
   Map as MapIcon,
   Snowflake,
   AlertOctagon,
+  Navigation,
+  Globe2,
+  Building2,
 } from "lucide-react";
-import type { SessionPlan, Facility, District, Village } from "@shared/schema";
+import { MapContainer, TileLayer, CircleMarker, Circle, Popup, Tooltip, useMap } from "react-leaflet";
+import L from "leaflet";
+import "leaflet/dist/leaflet.css";
+import type { SessionPlan, Facility, District, Village, Province } from "@shared/schema";
 
 interface SessionMatrixCalendarProps {
   sessions: SessionPlan[];
   facilities: Facility[];
+  provinces?: Province[];
   districts?: District[];
   villages?: Village[];
   onAddSession?: () => void;
@@ -59,9 +67,53 @@ interface SessionMatrixCalendarProps {
   isCreator?: boolean;
 }
 
+// ── Leaflet Helper Components ────────────────────────────────────────────────
+function InvalidateSize() {
+  const map = useMap();
+  useEffect(() => {
+    const fix = () => map.invalidateSize();
+    const t1 = setTimeout(fix, 100);
+    const t2 = setTimeout(fix, 400);
+    const ro = new ResizeObserver(fix);
+    ro.observe(map.getContainer());
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+      ro.disconnect();
+    };
+  }, [map]);
+  return null;
+}
+
+function MapBoundsAdjuster({ facilities }: { facilities: Facility[] }) {
+  const map = useMap();
+  useEffect(() => {
+    const valid = facilities.filter(
+      (f) =>
+        f.latitude &&
+        f.longitude &&
+        !isNaN(Number(f.latitude)) &&
+        !isNaN(Number(f.longitude)) &&
+        Number(f.latitude) !== 0 &&
+        Number(f.longitude) !== 0
+    );
+
+    if (valid.length > 0) {
+      const bounds = L.latLngBounds(
+        valid.map((f) => [Number(f.latitude), Number(f.longitude)] as [number, number])
+      );
+      if (bounds.isValid()) {
+        map.fitBounds(bounds, { padding: [40, 40], maxZoom: 14 });
+      }
+    }
+  }, [facilities, map]);
+  return null;
+}
+
 export function SessionMatrixCalendar({
   sessions,
   facilities,
+  provinces: propsProvinces = [],
   districts = [],
   villages = [],
   onAddSession,
@@ -73,19 +125,89 @@ export function SessionMatrixCalendar({
   onCadenceChange,
   isCreator = true,
 }: SessionMatrixCalendarProps) {
+  // Fetch provinces if not provided
+  const { data: fetchedProvinces = [] } = useQuery<Province[]>({
+    queryKey: ["/api/provinces"],
+    enabled: (!propsProvinces || propsProvinces.length === 0),
+  });
+  const allProvinces = propsProvinces?.length ? propsProvinces : fetchedProvinces;
+
   // --- States ---
   const [selectedMonth, setSelectedMonth] = useState<number>(new Date().getMonth()); // 0-indexed (e.g. 9 = October)
   const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear());
   const [viewMode, setViewMode] = useState<"calendar" | "map" | "coldchain">("calendar");
   const [searchQuery, setSearchQuery] = useState("");
+
+  // Smart Cascade Geographic Filters: Province -> District -> Facility
+  const [selectedProvince, setSelectedProvince] = useState<string>("all");
   const [selectedDistrict, setSelectedDistrict] = useState<string>("all");
+  const [selectedFacilityId, setSelectedFacilityId] = useState<string>("all");
+
   const [selectedTypes, setSelectedTypes] = useState<Record<string, boolean>>({
     Routine: true,
     PIRI: true,
     ORI: true,
     SIA: false,
   });
-  const [dateRangeOffset, setDateRangeOffset] = useState<number>(0); // 0 = first 4-5 days window, 1 = next window
+  const [dateRangeOffset, setDateRangeOffset] = useState<number>(0);
+
+  // Cascade 1: Available Districts based on selected Province
+  const availableDistricts = useMemo(() => {
+    if (selectedProvince === "all") return districts;
+    return districts.filter((d) => d.provinceId === Number(selectedProvince));
+  }, [districts, selectedProvince]);
+
+  // Cascade 2: Available Facilities based on selected District and Province
+  const availableFacilities = useMemo(() => {
+    if (selectedDistrict !== "all") {
+      return facilities.filter((f) => f.districtId === Number(selectedDistrict));
+    }
+    if (selectedProvince !== "all") {
+      const provDistrictIds = new Set(
+        districts
+          .filter((d) => d.provinceId === Number(selectedProvince))
+          .map((d) => d.id)
+      );
+      return facilities.filter((f) => f.districtId && provDistrictIds.has(f.districtId));
+    }
+    return facilities;
+  }, [facilities, districts, selectedProvince, selectedDistrict]);
+
+  // Filter facilities by cascade and search
+  const filteredFacilities = useMemo(() => {
+    return availableFacilities.filter((f) => {
+      if (selectedFacilityId !== "all" && f.id !== Number(selectedFacilityId)) {
+        return false;
+      }
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase();
+        return (
+          f.name.toLowerCase().includes(q) ||
+          (f.hmisCode && f.hmisCode.toLowerCase().includes(q))
+        );
+      }
+      return true;
+    });
+  }, [availableFacilities, selectedFacilityId, searchQuery]);
+
+  // Handle cascading resets
+  const handleProvinceChange = (newProv: string) => {
+    setSelectedProvince(newProv);
+    setSelectedDistrict("all");
+    setSelectedFacilityId("all");
+  };
+
+  const handleDistrictChange = (newDist: string) => {
+    setSelectedDistrict(newDist);
+    setSelectedFacilityId("all");
+  };
+
+  const handleClearFilters = () => {
+    setSelectedProvince("all");
+    setSelectedDistrict("all");
+    setSelectedFacilityId("all");
+    setSearchQuery("");
+  };
 
   // Month names
   const monthNames = [
@@ -107,23 +229,6 @@ export function SessionMatrixCalendar({
     }
     return days;
   }, [dateRangeOffset, totalDaysInMonth]);
-
-  // Filter facilities by district and search
-  const filteredFacilities = useMemo(() => {
-    return facilities.filter((f) => {
-      if (selectedDistrict !== "all" && f.districtId !== Number(selectedDistrict)) {
-        return false;
-      }
-      if (searchQuery.trim()) {
-        const q = searchQuery.toLowerCase();
-        return (
-          f.name.toLowerCase().includes(q) ||
-          (f.hmisCode && f.hmisCode.toLowerCase().includes(q))
-        );
-      }
-      return true;
-    });
-  }, [facilities, selectedDistrict, searchQuery]);
 
   // Conflict Detection Engine (5km & same-day check)
   const sessionConflicts = useMemo(() => {
@@ -209,9 +314,21 @@ export function SessionMatrixCalendar({
   // Helper to calculate cold chain liters for facility
   const getFacilityColdChainLiters = (facilityId: number) => {
     const quota = getFacilityQuota(facilityId);
-    // Standard estimation: ~1.2 Liters per 100 doses / infants
     return (Math.max(1.4, (quota / 100) * 1.2)).toFixed(1);
   };
+
+  // Default map center coordinates (calculated from facilities or default Southern Africa center)
+  const defaultCenter = useMemo<[number, number]>(() => {
+    const withCoords = facilities.filter((f) => f.latitude && f.longitude);
+    if (withCoords.length > 0) {
+      const avgLat = withCoords.reduce((acc, f) => acc + Number(f.latitude), 0) / withCoords.length;
+      const avgLng = withCoords.reduce((acc, f) => acc + Number(f.longitude), 0) / withCoords.length;
+      return [avgLat, avgLng];
+    }
+    return [-28.4793, 24.6727]; // South Africa / Regional default
+  }, [facilities]);
+
+  const hasActiveFilters = selectedProvince !== "all" || selectedDistrict !== "all" || selectedFacilityId !== "all" || searchQuery.trim() !== "";
 
   return (
     <div className="space-y-4">
@@ -259,15 +376,28 @@ export function SessionMatrixCalendar({
       {/* ── 2. Main 3-Column Layout ───────────────────────────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
         
-        {/* Left Column: Filter & Control Sidebar */}
+        {/* Left Column: Smart Cascade Filter & Control Sidebar */}
         <Card className="lg:col-span-3 space-y-4">
           <CardHeader className="pb-3 border-b">
-            <CardTitle className="text-sm font-bold flex items-center gap-2">
-              <Layers className="h-4 w-4 text-indigo-500" />
-              Session Parameters
-            </CardTitle>
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-sm font-bold flex items-center gap-2">
+                <Layers className="h-4 w-4 text-indigo-500" />
+                Session Parameters
+              </CardTitle>
+              {hasActiveFilters && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleClearFilters}
+                  className="h-6 text-[10px] px-1.5 text-muted-foreground hover:text-foreground"
+                >
+                  <X className="h-3 w-3 mr-1" /> Clear
+                </Button>
+              )}
+            </div>
           </CardHeader>
           <CardContent className="space-y-4 pt-4 text-xs">
+            
             {/* Session Types Filter */}
             <div className="space-y-2">
               <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
@@ -300,28 +430,81 @@ export function SessionMatrixCalendar({
               </div>
             </div>
 
-            {/* District Selector */}
-            <div className="space-y-1.5">
-              <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                District / Administrative Area
-              </Label>
-              <Select value={selectedDistrict} onValueChange={setSelectedDistrict}>
-                <SelectTrigger className="text-xs">
-                  <SelectValue placeholder="All Districts" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Districts</SelectItem>
-                  {districts.map((d) => (
-                    <SelectItem key={d.id} value={d.id.toString()}>
-                      {d.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+            {/* Smart Cascade Geographic Filters */}
+            <div className="space-y-3 pt-2 border-t">
+              <div className="flex items-center justify-between">
+                <Label className="text-xs font-bold text-foreground flex items-center gap-1.5">
+                  <Navigation className="h-3.5 w-3.5 text-indigo-600" />
+                  Smart Location Cascade
+                </Label>
+                <Badge variant="outline" className="text-[10px] px-1 py-0 h-4">
+                  {filteredFacilities.length} {filteredFacilities.length === 1 ? 'Facility' : 'Facilities'}
+                </Badge>
+              </div>
+
+              {/* Province / State Level */}
+              <div className="space-y-1.5">
+                <Label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+                  <Globe2 className="h-3 w-3" /> Province / Region
+                </Label>
+                <Select value={selectedProvince} onValueChange={handleProvinceChange}>
+                  <SelectTrigger className="text-xs h-8">
+                    <SelectValue placeholder="All Provinces" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Provinces</SelectItem>
+                    {allProvinces.map((p) => (
+                      <SelectItem key={p.id} value={p.id.toString()}>
+                        {p.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* District / Administrative Area Level */}
+              <div className="space-y-1.5">
+                <Label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+                  <MapPin className="h-3 w-3" /> District / Admin Area
+                </Label>
+                <Select value={selectedDistrict} onValueChange={handleDistrictChange}>
+                  <SelectTrigger className="text-xs h-8">
+                    <SelectValue placeholder="All Districts" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Districts ({availableDistricts.length})</SelectItem>
+                    {availableDistricts.map((d) => (
+                      <SelectItem key={d.id} value={d.id.toString()}>
+                        {d.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Facility / Health Center Level */}
+              <div className="space-y-1.5">
+                <Label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+                  <Building2 className="h-3 w-3" /> Health Facility
+                </Label>
+                <Select value={selectedFacilityId} onValueChange={setSelectedFacilityId}>
+                  <SelectTrigger className="text-xs h-8">
+                    <SelectValue placeholder="All Facilities" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Facilities ({availableFacilities.length})</SelectItem>
+                    {availableFacilities.map((f) => (
+                      <SelectItem key={f.id} value={f.id.toString()}>
+                        {f.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
 
             {/* Month & Year Selector */}
-            <div className="space-y-1.5">
+            <div className="space-y-1.5 pt-2 border-t">
               <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                 Planning Month
               </Label>
@@ -333,7 +516,7 @@ export function SessionMatrixCalendar({
                   setSelectedMonth(m);
                 }}
               >
-                <SelectTrigger className="text-xs">
+                <SelectTrigger className="text-xs h-8">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -357,7 +540,7 @@ export function SessionMatrixCalendar({
                 value={activeCadence}
                 onValueChange={(v) => onCadenceChange?.(v)}
               >
-                <SelectTrigger className="text-xs font-semibold">
+                <SelectTrigger className="text-xs font-semibold h-8">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -381,7 +564,7 @@ export function SessionMatrixCalendar({
           </CardContent>
         </Card>
 
-        {/* Center Column: Interactive Calendar Matrix Workspace */}
+        {/* Center Column: Interactive Calendar Matrix & GIS Clash Map Workspace */}
         <Card className="lg:col-span-6 space-y-4">
           <CardHeader className="pb-3 border-b">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -423,28 +606,30 @@ export function SessionMatrixCalendar({
                 <span className="font-bold text-sm text-foreground">
                   {monthNames[selectedMonth]} {selectedYear}
                 </span>
-                <div className="flex items-center ml-2 border rounded-md overflow-hidden bg-background">
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    className="h-7 w-7 rounded-none"
-                    onClick={() => {
-                      if (dateRangeOffset > 0) setDateRangeOffset(dateRangeOffset - 1);
-                    }}
-                    disabled={dateRangeOffset <= 0}
-                  >
-                    <ChevronLeft className="h-3.5 w-3.5" />
-                  </Button>
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    className="h-7 w-7 rounded-none"
-                    onClick={() => setDateRangeOffset(dateRangeOffset + 1)}
-                    disabled={(dateRangeOffset + 1) * 5 >= totalDaysInMonth}
-                  >
-                    <ChevronRight className="h-3.5 w-3.5" />
-                  </Button>
-                </div>
+                {viewMode === "calendar" && (
+                  <div className="flex items-center ml-2 border rounded-md overflow-hidden bg-background">
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="h-7 w-7 rounded-none"
+                      onClick={() => {
+                        if (dateRangeOffset > 0) setDateRangeOffset(dateRangeOffset - 1);
+                      }}
+                      disabled={dateRangeOffset <= 0}
+                    >
+                      <ChevronLeft className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="h-7 w-7 rounded-none"
+                      onClick={() => setDateRangeOffset(dateRangeOffset + 1)}
+                      disabled={(dateRangeOffset + 1) * 5 >= totalDaysInMonth}
+                    >
+                      <ChevronRight className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                )}
               </div>
 
               {/* View Switchers */}
@@ -502,7 +687,7 @@ export function SessionMatrixCalendar({
               </div>
             </div>
 
-            {/* ── Calendar Matrix Grid Table ── */}
+            {/* ── 1. Calendar Matrix Grid Table ── */}
             {viewMode === "calendar" && (
               <div className="rounded-xl border overflow-x-auto shadow-sm">
                 <table className="w-full text-left border-collapse min-w-[620px]">
@@ -520,11 +705,10 @@ export function SessionMatrixCalendar({
                     </tr>
                   </thead>
                   <tbody className="divide-y text-xs">
-                    {filteredFacilities.slice(0, 8).map((facility) => {
+                    {filteredFacilities.slice(0, 10).map((facility) => {
                       const facilityQuota = getFacilityQuota(facility.id);
                       const coldChainLiters = getFacilityColdChainLiters(facility.id);
                       
-                      // Check if any session for this facility has conflict
                       const facilitySessions = sessions.filter((s) => s.facilityId === facility.id);
                       const hasClash = facilitySessions.some((s) => sessionConflicts.get(s.id)?.hasConflict);
 
@@ -708,7 +892,142 @@ export function SessionMatrixCalendar({
               </div>
             )}
 
-            {/* View Mode: Cold Chain Storage Breakdown */}
+            {/* ── 2. Interactive GIS Clash & Route Map ── */}
+            {viewMode === "map" && (
+              <div className="space-y-3">
+                <div className="h-[460px] w-full rounded-xl overflow-hidden border shadow-sm relative">
+                  <MapContainer
+                    center={defaultCenter}
+                    zoom={9}
+                    style={{ height: "100%", width: "100%" }}
+                    scrollWheelZoom={true}
+                  >
+                    <InvalidateSize />
+                    <MapBoundsAdjuster facilities={filteredFacilities} />
+                    <TileLayer
+                      attribution='&copy; <a href="https://carto.com/">CARTO</a>'
+                      url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
+                    />
+
+                    {filteredFacilities.map((facility) => {
+                      if (!facility.latitude || !facility.longitude) return null;
+                      const lat = Number(facility.latitude);
+                      const lng = Number(facility.longitude);
+                      if (isNaN(lat) || isNaN(lng) || (lat === 0 && lng === 0)) return null;
+
+                      const facilitySessions = sessions.filter((s) => s.facilityId === facility.id);
+                      const hasClash = facilitySessions.some((s) => sessionConflicts.get(s.id)?.hasConflict);
+                      const hasScheduled = facilitySessions.length > 0;
+
+                      const markerColor = hasClash ? "#ef4444" : hasScheduled ? "#10b981" : "#6366f1";
+                      const markerRadius = hasClash ? 9 : hasScheduled ? 8 : 6;
+
+                      return (
+                        <React.Fragment key={facility.id}>
+                          {/* 5km Proximity Buffer Zone if Clashing */}
+                          {hasClash && (
+                            <Circle
+                              center={[lat, lng]}
+                              radius={5000} // 5km
+                              pathOptions={{
+                                color: "#ef4444",
+                                fillColor: "#ef4444",
+                                fillOpacity: 0.12,
+                                weight: 1.5,
+                                dashArray: "4, 6",
+                              }}
+                            />
+                          )}
+
+                          <CircleMarker
+                            center={[lat, lng]}
+                            radius={markerRadius}
+                            pathOptions={{
+                              color: "#ffffff",
+                              weight: 2,
+                              fillColor: markerColor,
+                              fillOpacity: 0.95,
+                            }}
+                          >
+                            <Tooltip direction="top" offset={[0, -6]}>
+                              <div className="font-semibold text-xs">{facility.name}</div>
+                              <div className="text-[10px] text-muted-foreground">
+                                {hasClash ? "⚠️ Proximity Clash Detected" : hasScheduled ? `✓ ${facilitySessions.length} Scheduled Sessions` : "No sessions scheduled"}
+                              </div>
+                            </Tooltip>
+                            <Popup className="text-xs">
+                              <div className="p-1 space-y-2 min-w-[200px]">
+                                <div className="border-b pb-1.5">
+                                  <h4 className="font-bold text-sm text-foreground">{facility.name}</h4>
+                                  <p className="text-[11px] text-muted-foreground">{facility.hmisCode || "Health Facility"}</p>
+                                </div>
+
+                                <div className="space-y-1 text-[11px]">
+                                  <div className="flex justify-between">
+                                    <span className="text-muted-foreground">Month Planned Sessions:</span>
+                                    <span className="font-semibold">{facilitySessions.length}</span>
+                                  </div>
+                                  <div className="flex justify-between">
+                                    <span className="text-muted-foreground">Target Quota:</span>
+                                    <span className="font-semibold">{getFacilityQuota(facility.id).toLocaleString()}</span>
+                                  </div>
+                                  <div className="flex justify-between">
+                                    <span className="text-muted-foreground">Cold Chain:</span>
+                                    <span className="font-semibold text-sky-700">{getFacilityColdChainLiters(facility.id)} L</span>
+                                  </div>
+                                </div>
+
+                                {hasClash && (
+                                  <div className="p-1.5 rounded bg-red-50 border border-red-200 text-red-800 text-[10px] font-medium">
+                                    ⚠️ 5km Proximity Clash on scheduled outreach dates.
+                                  </div>
+                                )}
+
+                                <div className="pt-1.5 border-t flex justify-end gap-1.5">
+                                  {isCreator && (
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      className="h-6 text-[10px] px-2"
+                                      onClick={onAddSession}
+                                    >
+                                      <Plus className="h-2.5 w-2.5 mr-1" /> Add Session
+                                    </Button>
+                                  )}
+                                </div>
+                              </div>
+                            </Popup>
+                          </CircleMarker>
+                        </React.Fragment>
+                      );
+                    })}
+                  </MapContainer>
+
+                  {/* Map Floating Legend */}
+                  <div className="absolute bottom-3 right-3 z-[1000] bg-background/90 backdrop-blur-md p-2.5 rounded-lg border shadow-md text-[11px] space-y-1.5 pointer-events-auto">
+                    <p className="font-bold text-xs">GIS Clash Legend</p>
+                    <div className="flex items-center gap-2">
+                      <span className="h-3 w-3 rounded-full bg-emerald-500 border border-white inline-block"></span>
+                      <span>Confirmed Sessions</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="h-3 w-3 rounded-full bg-red-500 border border-white inline-block"></span>
+                      <span>5km Clash Conflict</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="h-3 w-3 rounded-full bg-indigo-500 border border-white inline-block"></span>
+                      <span>Facility (Unscheduled)</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="h-3 w-3 rounded-full border border-dashed border-red-500 bg-red-100/50 inline-block"></span>
+                      <span>5km Proximity Buffer</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ── 3. View Mode: Cold Chain Storage Breakdown ── */}
             {viewMode === "coldchain" && (
               <div className="p-4 rounded-xl border bg-sky-50/40 dark:bg-sky-950/20 space-y-3 text-xs">
                 <div className="flex items-center justify-between">

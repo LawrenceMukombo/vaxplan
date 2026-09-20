@@ -2225,6 +2225,7 @@ export default function SessionPlanning({
         <SessionMatrixCalendar
           sessions={filteredSessions}
           facilities={facilities ?? []}
+          provinces={provinces ?? []}
           districts={districts ?? []}
           villages={villages ?? []}
           onAddSession={() => setDialogOpen(true)}
