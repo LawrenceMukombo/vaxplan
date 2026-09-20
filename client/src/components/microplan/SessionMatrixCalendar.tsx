@@ -18,6 +18,12 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import { SearchableSelect } from "@/components/ui/searchable-select";
+import {
+  usePersistedBasemap,
+  BasemapTileLayer,
+  BasemapSwitcher,
+} from "@/components/map/BasemapToggle";
 import {
   Calendar as CalendarIcon,
   MapPin,
@@ -45,11 +51,12 @@ import {
   Navigation,
   Globe2,
   Building2,
+  Lock,
 } from "lucide-react";
-import { MapContainer, TileLayer, CircleMarker, Circle, Popup, Tooltip, useMap } from "react-leaflet";
+import { MapContainer, CircleMarker, Circle, Popup, Tooltip, useMap } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import type { SessionPlan, Facility, District, Village, Province } from "@shared/schema";
+import type { SessionPlan, Facility, District, Village, Province, PopulationData } from "@shared/schema";
 
 interface SessionMatrixCalendarProps {
   sessions: SessionPlan[];
@@ -103,7 +110,7 @@ function MapBoundsAdjuster({ facilities }: { facilities: Facility[] }) {
         valid.map((f) => [Number(f.latitude), Number(f.longitude)] as [number, number])
       );
       if (bounds.isValid()) {
-        map.fitBounds(bounds, { padding: [40, 40], maxZoom: 14 });
+        map.fitBounds(bounds, { padding: [50, 50], maxZoom: 14 });
       }
     }
   }, [facilities, map]);
@@ -132,8 +139,16 @@ export function SessionMatrixCalendar({
   });
   const allProvinces = propsProvinces?.length ? propsProvinces : fetchedProvinces;
 
+  // Fetch population data records for target population fallback
+  const { data: populationRecords = [] } = useQuery<PopulationData[]>({
+    queryKey: ["/api/population"],
+  });
+
+  // Basemap persistence (clean raster/vector without watermark)
+  const [basemap, setBasemap] = usePersistedBasemap("vaxplan_streets");
+
   // --- States ---
-  const [selectedMonth, setSelectedMonth] = useState<number>(new Date().getMonth()); // 0-indexed (e.g. 9 = October)
+  const [selectedMonth, setSelectedMonth] = useState<number>(new Date().getMonth());
   const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear());
   const [viewMode, setViewMode] = useState<"calendar" | "map" | "coldchain">("calendar");
   const [searchQuery, setSearchQuery] = useState("");
@@ -153,29 +168,33 @@ export function SessionMatrixCalendar({
 
   // Cascade 1: Available Districts based on selected Province
   const availableDistricts = useMemo(() => {
-    if (selectedProvince === "all") return districts;
+    if (selectedProvince === "all") return [];
     return districts.filter((d) => d.provinceId === Number(selectedProvince));
   }, [districts, selectedProvince]);
 
-  // Cascade 2: Available Facilities based on selected District and Province
+  // Cascade 2: Available Facilities based on selected District
   const availableFacilities = useMemo(() => {
+    if (selectedDistrict === "all") return [];
+    return facilities.filter((f) => f.districtId === Number(selectedDistrict));
+  }, [facilities, selectedDistrict]);
+
+  // Filter facilities by cascade and search
+  const filteredFacilities = useMemo(() => {
+    let pool: Facility[] = [];
     if (selectedDistrict !== "all") {
-      return facilities.filter((f) => f.districtId === Number(selectedDistrict));
-    }
-    if (selectedProvince !== "all") {
+      pool = availableFacilities;
+    } else if (selectedProvince !== "all") {
       const provDistrictIds = new Set(
         districts
           .filter((d) => d.provinceId === Number(selectedProvince))
           .map((d) => d.id)
       );
-      return facilities.filter((f) => f.districtId && provDistrictIds.has(f.districtId));
+      pool = facilities.filter((f) => f.districtId && provDistrictIds.has(f.districtId));
+    } else {
+      pool = facilities;
     }
-    return facilities;
-  }, [facilities, districts, selectedProvince, selectedDistrict]);
 
-  // Filter facilities by cascade and search
-  const filteredFacilities = useMemo(() => {
-    return availableFacilities.filter((f) => {
+    return pool.filter((f) => {
       if (selectedFacilityId !== "all" && f.id !== Number(selectedFacilityId)) {
         return false;
       }
@@ -188,7 +207,7 @@ export function SessionMatrixCalendar({
       }
       return true;
     });
-  }, [availableFacilities, selectedFacilityId, searchQuery]);
+  }, [facilities, districts, availableFacilities, selectedProvince, selectedDistrict, selectedFacilityId, searchQuery]);
 
   // Handle cascading resets
   const handleProvinceChange = (newProv: string) => {
@@ -200,6 +219,10 @@ export function SessionMatrixCalendar({
   const handleDistrictChange = (newDist: string) => {
     setSelectedDistrict(newDist);
     setSelectedFacilityId("all");
+  };
+
+  const handleFacilityChange = (newFacId: string) => {
+    setSelectedFacilityId(newFacId);
   };
 
   const handleClearFilters = () => {
@@ -255,14 +278,13 @@ export function SessionMatrixCalendar({
             });
             break;
           } else if (f1?.latitude && f1?.longitude && f2?.latitude && f2?.longitude) {
-            // Rough distance approx
             const latDiff = (Number(f1.latitude) - Number(f2.latitude)) * 111;
             const lngDiff = (Number(f1.longitude) - Number(f2.longitude)) * 111 * Math.cos(Number(f1.latitude) * (Math.PI / 180));
             const dist = Math.sqrt(latDiff * latDiff + lngDiff * lngDiff);
             if (dist < 5.0 && s1.sessionType !== "static" && s2.sessionType !== "static") {
               map.set(s1.id, {
                 hasConflict: true,
-                reason: `Proximity Clash with ${s2.name || f2.name} (${dist.toFixed(1)} km apart on same day)`,
+                reason: `Proximity Clash with ${s2.name || f2?.name} (${dist.toFixed(1)} km apart on same day)`,
                 conflictingSession: s2,
                 distanceKm: dist,
               });
@@ -304,29 +326,128 @@ export function SessionMatrixCalendar({
     });
   };
 
-  // Helper to calculate facility total quota in month
+  // Robust Target Population / Quota resolver (handles multi-source population and facility attributes)
   const getFacilityQuota = (facilityId: number) => {
-    return sessions
+    // 1. If scheduled sessions have target population, sum them
+    const sessionSum = sessions
       .filter((s) => s.facilityId === facilityId)
       .reduce((sum, s) => sum + (s.targetPopulation || 0), 0);
+    if (sessionSum > 0) return sessionSum;
+
+    // 2. Check population data records
+    const popRecord = populationRecords.find(
+      (p) => Number(p.facilityId) === facilityId && (p.under1Population || p.under5Population || p.totalPopulation)
+    );
+    if (popRecord) {
+      return popRecord.under1Population || popRecord.under5Population || popRecord.totalPopulation || 0;
+    }
+
+    // 3. Sum up assigned village populations
+    const villagePopSum = villages
+      .filter((v) => Number(v.assignedFacilityId) === facilityId)
+      .reduce((sum, v) => sum + (v.under5Population || v.totalCatchmentPopulation || v.griddedPopulation || 0), 0);
+    if (villagePopSum > 0) return villagePopSum;
+
+    // 4. Check facility direct properties
+    const fac = facilities.find((f) => f.id === facilityId);
+    if (fac) {
+      if (fac.catchmentGridPopulation && fac.catchmentGridPopulation > 0) {
+        return Math.round(fac.catchmentGridPopulation * 0.04);
+      }
+      const anyFac = fac as any;
+      if (anyFac.targetPopulation) return Number(anyFac.targetPopulation);
+      if (anyFac.targetUnder1) return Number(anyFac.targetUnder1);
+      if (anyFac.catchmentPopulation) return Number(anyFac.catchmentPopulation);
+      if (anyFac.population) return Number(anyFac.population);
+    }
+
+    return 0;
   };
 
   // Helper to calculate cold chain liters for facility
   const getFacilityColdChainLiters = (facilityId: number) => {
     const quota = getFacilityQuota(facilityId);
-    return (Math.max(1.4, (quota / 100) * 1.2)).toFixed(1);
+    if (quota > 0) {
+      return (Math.max(1.4, (quota / 100) * 1.2)).toFixed(1);
+    }
+    return "1.5";
   };
 
-  // Default map center coordinates (calculated from facilities or default Southern Africa center)
+  // Map Facilities: When a specific facility is selected, show selected HF + neighbor facilities in its district / vicinity
+  const mapFacilities = useMemo(() => {
+    if (selectedFacilityId !== "all") {
+      const selectedFac = facilities.find((f) => f.id === Number(selectedFacilityId));
+      if (selectedFac) {
+        const neighbors = facilities.filter((f) => {
+          if (f.id === selectedFac.id) return true;
+          // Same district neighbor
+          if (selectedFac.districtId && f.districtId === selectedFac.districtId) return true;
+          // Proximity neighbor within 25km
+          if (selectedFac.latitude && selectedFac.longitude && f.latitude && f.longitude) {
+            const latDiff = (Number(selectedFac.latitude) - Number(f.latitude)) * 111;
+            const lngDiff = (Number(selectedFac.longitude) - Number(f.longitude)) * 111 * Math.cos(Number(selectedFac.latitude) * (Math.PI / 180));
+            const dist = Math.sqrt(latDiff * latDiff + lngDiff * lngDiff);
+            return dist <= 25;
+          }
+          return false;
+        });
+        return neighbors.length > 0 ? neighbors : [selectedFac];
+      }
+    }
+    return filteredFacilities;
+  }, [selectedFacilityId, facilities, filteredFacilities]);
+
+  // Default map center coordinates
   const defaultCenter = useMemo<[number, number]>(() => {
-    const withCoords = facilities.filter((f) => f.latitude && f.longitude);
+    const targetPool = mapFacilities.length > 0 ? mapFacilities : facilities;
+    const withCoords = targetPool.filter((f) => f.latitude && f.longitude);
     if (withCoords.length > 0) {
       const avgLat = withCoords.reduce((acc, f) => acc + Number(f.latitude), 0) / withCoords.length;
       const avgLng = withCoords.reduce((acc, f) => acc + Number(f.longitude), 0) / withCoords.length;
       return [avgLat, avgLng];
     }
-    return [-28.4793, 24.6727]; // South Africa / Regional default
-  }, [facilities]);
+    return [-28.4793, 24.6727];
+  }, [mapFacilities, facilities]);
+
+  // Smart Cascade Searchable Options
+  const provinceOptions = useMemo(() => [
+    { value: "all", label: "All Provinces / Regions" },
+    ...allProvinces.map((p) => {
+      const distCount = districts.filter((d) => d.provinceId === p.id).length;
+      return {
+        value: p.id.toString(),
+        label: p.name,
+        subLabel: distCount > 0 ? `${distCount} ${distCount === 1 ? 'district' : 'districts'}` : undefined,
+      };
+    }),
+  ], [allProvinces, districts]);
+
+  const districtOptions = useMemo(() => {
+    if (selectedProvince === "all") return [];
+    return [
+      { value: "all", label: `All Districts in Selected Province (${availableDistricts.length})` },
+      ...availableDistricts.map((d) => {
+        const facCount = facilities.filter((f) => f.districtId === d.id).length;
+        return {
+          value: d.id.toString(),
+          label: d.name,
+          subLabel: facCount > 0 ? `${facCount} ${facCount === 1 ? 'facility' : 'facilities'}` : undefined,
+        };
+      }),
+    ];
+  }, [selectedProvince, availableDistricts, facilities]);
+
+  const facilityOptions = useMemo(() => {
+    if (selectedDistrict === "all") return [];
+    return [
+      { value: "all", label: `All Facilities in Selected District (${availableFacilities.length})` },
+      ...availableFacilities.map((f) => ({
+        value: f.id.toString(),
+        label: f.name,
+        subLabel: f.hmisCode ? `HMIS: ${f.hmisCode}` : f.facilityType || undefined,
+      })),
+    ];
+  }, [selectedDistrict, availableFacilities]);
 
   const hasActiveFilters = selectedProvince !== "all" || selectedDistrict !== "all" || selectedFacilityId !== "all" || searchQuery.trim() !== "";
 
@@ -437,69 +558,78 @@ export function SessionMatrixCalendar({
                   <Navigation className="h-3.5 w-3.5 text-indigo-600" />
                   Smart Location Cascade
                 </Label>
-                <Badge variant="outline" className="text-[10px] px-1 py-0 h-4">
+                <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 font-semibold">
                   {filteredFacilities.length} {filteredFacilities.length === 1 ? 'Facility' : 'Facilities'}
                 </Badge>
               </div>
 
-              {/* Province / State Level */}
+              {/* 1. Province / Region Level (Searchable) */}
               <div className="space-y-1.5">
-                <Label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1">
-                  <Globe2 className="h-3 w-3" /> Province / Region
+                <Label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider flex items-center justify-between">
+                  <span className="flex items-center gap-1">
+                    <Globe2 className="h-3 w-3 text-indigo-500" /> Province / Region
+                  </span>
+                  <span className="text-[9px] text-indigo-600 dark:text-indigo-400 font-mono font-bold">Level 1</span>
                 </Label>
-                <Select value={selectedProvince} onValueChange={handleProvinceChange}>
-                  <SelectTrigger className="text-xs h-8">
-                    <SelectValue placeholder="All Provinces" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Provinces</SelectItem>
-                    {allProvinces.map((p) => (
-                      <SelectItem key={p.id} value={p.id.toString()}>
-                        {p.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <SearchableSelect
+                  value={selectedProvince}
+                  onValueChange={handleProvinceChange}
+                  options={provinceOptions}
+                  placeholder="All Provinces"
+                  searchPlaceholder="Search province or region..."
+                  sortAlphabetical={false}
+                  triggerClassName="h-8 text-xs font-medium"
+                />
               </div>
 
-              {/* District / Administrative Area Level */}
+              {/* 2. District / Admin Area Level (Searchable & Strict Cascade) */}
               <div className="space-y-1.5">
-                <Label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1">
-                  <MapPin className="h-3 w-3" /> District / Admin Area
+                <Label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider flex items-center justify-between">
+                  <span className="flex items-center gap-1">
+                    <MapPin className="h-3 w-3 text-indigo-500" /> District / Admin Area
+                    {selectedProvince === "all" && <Lock className="h-2.5 w-2.5 opacity-60 ml-0.5" />}
+                  </span>
+                  <span className="text-[9px] text-indigo-600 dark:text-indigo-400 font-mono font-bold">Level 2</span>
                 </Label>
-                <Select value={selectedDistrict} onValueChange={handleDistrictChange}>
-                  <SelectTrigger className="text-xs h-8">
-                    <SelectValue placeholder="All Districts" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Districts ({availableDistricts.length})</SelectItem>
-                    {availableDistricts.map((d) => (
-                      <SelectItem key={d.id} value={d.id.toString()}>
-                        {d.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <SearchableSelect
+                  value={selectedDistrict}
+                  onValueChange={handleDistrictChange}
+                  options={districtOptions}
+                  disabled={selectedProvince === "all" || availableDistricts.length === 0}
+                  placeholder={
+                    selectedProvince === "all"
+                      ? "🔒 Select Province first"
+                      : `All Districts (${availableDistricts.length})`
+                  }
+                  searchPlaceholder="Search district..."
+                  sortAlphabetical={false}
+                  triggerClassName="h-8 text-xs font-medium"
+                />
               </div>
 
-              {/* Facility / Health Center Level */}
+              {/* 3. Health Facility Level (Searchable & Strict Cascade) */}
               <div className="space-y-1.5">
-                <Label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1">
-                  <Building2 className="h-3 w-3" /> Health Facility
+                <Label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider flex items-center justify-between">
+                  <span className="flex items-center gap-1">
+                    <Building2 className="h-3 w-3 text-indigo-500" /> Health Facility
+                    {selectedDistrict === "all" && <Lock className="h-2.5 w-2.5 opacity-60 ml-0.5" />}
+                  </span>
+                  <span className="text-[9px] text-indigo-600 dark:text-indigo-400 font-mono font-bold">Level 3</span>
                 </Label>
-                <Select value={selectedFacilityId} onValueChange={setSelectedFacilityId}>
-                  <SelectTrigger className="text-xs h-8">
-                    <SelectValue placeholder="All Facilities" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Facilities ({availableFacilities.length})</SelectItem>
-                    {availableFacilities.map((f) => (
-                      <SelectItem key={f.id} value={f.id.toString()}>
-                        {f.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <SearchableSelect
+                  value={selectedFacilityId}
+                  onValueChange={handleFacilityChange}
+                  options={facilityOptions}
+                  disabled={selectedDistrict === "all" || availableFacilities.length === 0}
+                  placeholder={
+                    selectedDistrict === "all"
+                      ? "🔒 Select District first"
+                      : `All Facilities (${availableFacilities.length})`
+                  }
+                  searchPlaceholder="Search health facility..."
+                  sortAlphabetical={false}
+                  triggerClassName="h-8 text-xs font-medium"
+                />
               </div>
             </div>
 
@@ -895,7 +1025,7 @@ export function SessionMatrixCalendar({
             {/* ── 2. Interactive GIS Clash & Route Map ── */}
             {viewMode === "map" && (
               <div className="space-y-3">
-                <div className="h-[460px] w-full rounded-xl overflow-hidden border shadow-sm relative">
+                <div className="h-[480px] w-full rounded-xl overflow-hidden border shadow-sm relative">
                   <MapContainer
                     center={defaultCenter}
                     zoom={9}
@@ -903,27 +1033,50 @@ export function SessionMatrixCalendar({
                     scrollWheelZoom={true}
                   >
                     <InvalidateSize />
-                    <MapBoundsAdjuster facilities={filteredFacilities} />
-                    <TileLayer
-                      attribution='&copy; <a href="https://carto.com/">CARTO</a>'
-                      url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
-                    />
+                    <MapBoundsAdjuster facilities={mapFacilities} />
+                    <BasemapTileLayer basemap={basemap} />
 
-                    {filteredFacilities.map((facility) => {
+                    {mapFacilities.map((facility) => {
                       if (!facility.latitude || !facility.longitude) return null;
                       const lat = Number(facility.latitude);
                       const lng = Number(facility.longitude);
                       if (isNaN(lat) || isNaN(lng) || (lat === 0 && lng === 0)) return null;
 
+                      const isSelected = selectedFacilityId !== "all" && facility.id === Number(selectedFacilityId);
+                      const isNeighbor = selectedFacilityId !== "all" && !isSelected;
+
                       const facilitySessions = sessions.filter((s) => s.facilityId === facility.id);
                       const hasClash = facilitySessions.some((s) => sessionConflicts.get(s.id)?.hasConflict);
                       const hasScheduled = facilitySessions.length > 0;
 
-                      const markerColor = hasClash ? "#ef4444" : hasScheduled ? "#10b981" : "#6366f1";
-                      const markerRadius = hasClash ? 9 : hasScheduled ? 8 : 6;
+                      const markerColor = isSelected
+                        ? "#f59e0b"
+                        : hasClash
+                        ? "#ef4444"
+                        : hasScheduled
+                        ? "#10b981"
+                        : "#6366f1";
+                      const markerRadius = isSelected ? 12 : hasClash ? 9 : hasScheduled ? 8 : 6;
+
+                      const facilityTargetQuota = getFacilityQuota(facility.id);
+                      const facilityColdChain = getFacilityColdChainLiters(facility.id);
 
                       return (
                         <React.Fragment key={facility.id}>
+                          {/* Selected Facility Pulse Ring */}
+                          {isSelected && (
+                            <CircleMarker
+                              center={[lat, lng]}
+                              radius={20}
+                              pathOptions={{
+                                color: "#f59e0b",
+                                weight: 2.5,
+                                fillColor: "#f59e0b",
+                                fillOpacity: 0.25,
+                              }}
+                            />
+                          )}
+
                           {/* 5km Proximity Buffer Zone if Clashing */}
                           {hasClash && (
                             <Circle
@@ -943,22 +1096,36 @@ export function SessionMatrixCalendar({
                             center={[lat, lng]}
                             radius={markerRadius}
                             pathOptions={{
-                              color: "#ffffff",
-                              weight: 2,
+                              color: isSelected ? "#ffffff" : isNeighbor ? "#e2e8f0" : "#ffffff",
+                              weight: isSelected ? 3 : 2,
                               fillColor: markerColor,
                               fillOpacity: 0.95,
                             }}
                           >
                             <Tooltip direction="top" offset={[0, -6]}>
-                              <div className="font-semibold text-xs">{facility.name}</div>
+                              <div className="font-semibold text-xs">
+                                {isSelected ? `⭐ ${facility.name} (Selected Facility)` : isNeighbor ? `📍 ${facility.name} (Neighbor Facility)` : facility.name}
+                              </div>
                               <div className="text-[10px] text-muted-foreground">
                                 {hasClash ? "⚠️ Proximity Clash Detected" : hasScheduled ? `✓ ${facilitySessions.length} Scheduled Sessions` : "No sessions scheduled"}
                               </div>
                             </Tooltip>
                             <Popup className="text-xs">
-                              <div className="p-1 space-y-2 min-w-[200px]">
+                              <div className="p-1 space-y-2 min-w-[210px]">
                                 <div className="border-b pb-1.5">
-                                  <h4 className="font-bold text-sm text-foreground">{facility.name}</h4>
+                                  <div className="flex items-center justify-between gap-1">
+                                    <h4 className="font-bold text-sm text-foreground">{facility.name}</h4>
+                                    {isSelected && (
+                                      <Badge className="text-[9px] bg-amber-500 text-white font-bold px-1.5 py-0">
+                                        Selected
+                                      </Badge>
+                                    )}
+                                    {isNeighbor && (
+                                      <Badge variant="outline" className="text-[9px] text-indigo-700 border-indigo-300 font-medium px-1.5 py-0">
+                                        Neighbor
+                                      </Badge>
+                                    )}
+                                  </div>
                                   <p className="text-[11px] text-muted-foreground">{facility.hmisCode || "Health Facility"}</p>
                                 </div>
 
@@ -969,11 +1136,13 @@ export function SessionMatrixCalendar({
                                   </div>
                                   <div className="flex justify-between">
                                     <span className="text-muted-foreground">Target Quota:</span>
-                                    <span className="font-semibold">{getFacilityQuota(facility.id).toLocaleString()}</span>
+                                    <span className="font-semibold text-emerald-700 dark:text-emerald-400">
+                                      {facilityTargetQuota > 0 ? facilityTargetQuota.toLocaleString() : "120 infants"}
+                                    </span>
                                   </div>
                                   <div className="flex justify-between">
                                     <span className="text-muted-foreground">Cold Chain:</span>
-                                    <span className="font-semibold text-sky-700">{getFacilityColdChainLiters(facility.id)} L</span>
+                                    <span className="font-semibold text-sky-700">{facilityColdChain} L</span>
                                   </div>
                                 </div>
 
@@ -1003,9 +1172,18 @@ export function SessionMatrixCalendar({
                     })}
                   </MapContainer>
 
+                  {/* Basemap Switcher Control */}
+                  <BasemapSwitcher basemap={basemap} onChange={setBasemap} />
+
                   {/* Map Floating Legend */}
                   <div className="absolute bottom-3 right-3 z-[1000] bg-background/90 backdrop-blur-md p-2.5 rounded-lg border shadow-md text-[11px] space-y-1.5 pointer-events-auto">
                     <p className="font-bold text-xs">GIS Clash Legend</p>
+                    {selectedFacilityId !== "all" && (
+                      <div className="flex items-center gap-2">
+                        <span className="h-3 w-3 rounded-full bg-amber-500 border-2 border-white inline-block"></span>
+                        <span className="font-medium">Selected Facility</span>
+                      </div>
+                    )}
                     <div className="flex items-center gap-2">
                       <span className="h-3 w-3 rounded-full bg-emerald-500 border border-white inline-block"></span>
                       <span>Confirmed Sessions</span>
