@@ -37,7 +37,7 @@ import {
   notifyUserSignupDecision,
   notifyAdminNewCountryInterest,
 } from "./services/notificationService";
-import { sendSms, sendWhatsApp, sendEmail as sendMessagingEmail, dispatchWithFallback } from "./services/messaging";
+import { sendSms, sendWhatsApp, sendEmail as sendMessagingEmail } from "./services/messaging";
 import { dispatchNotification } from "./services/uce";
 import { surveillanceRouter } from "./routes/surveillance";
 import vgieRouter from "./routes/vgie";
@@ -13162,48 +13162,55 @@ export async function registerRoutes(
     requireAdmin,
     async (req: any, res) => {
       try {
-        const { channel, destination } = req.body;
+        const channel = String(req.body?.channel || "").toLowerCase();
+        const destination = String(req.body?.destination || "").trim();
         if (!channel || !destination) {
           return res.status(400).json({ message: "Missing channel or destination" });
+        }
+        if (!["email", "sms", "whatsapp"].includes(channel)) {
+          return res.status(400).json({ message: "Invalid communication channel" });
         }
         const tenant = await storage.getTenant(req.tenantId!);
         if (!tenant) return res.status(404).json({ message: "Tenant not found" });
 
-        const commConfig = ((tenant.settings as any)?.communication || {})[channel];
-        const isSmartRouting = (tenant.settings as any)?.communication?.smartRouting === true;
+        const savedConfig = ((tenant.settings as any)?.communication || {})[channel] || {};
+        const submittedConfig = req.body?.config && typeof req.body.config === "object"
+          ? req.body.config
+          : {};
+        const commConfig = { ...savedConfig, ...submittedConfig };
 
         let result;
         const msgText = `Test message from VaxPlan Unified Communication Engine via ${channel.toUpperCase()}!`;
 
-        if (isSmartRouting) {
-          result = await dispatchWithFallback({
-            tenantId: req.tenantId!,
-            primaryChannel: channel as any,
-            destination,
-            message: msgText,
-            subject: 'VaxPlan Test Message',
-            tenantSettings: tenant.settings,
-          });
+        // A gateway test must exercise only the selected channel. Applying the
+        // production fallback chain here can report a false positive and can
+        // send an email address to an SMS/WhatsApp provider (or vice versa).
+        if (channel === 'sms') {
+          result = await sendSms({ to: destination, message: msgText, config: commConfig });
+        } else if (channel === 'whatsapp') {
+          result = await sendWhatsApp({ to: destination, message: msgText, config: commConfig });
         } else {
-          if (channel === 'sms') {
-            result = await sendSms({ to: destination, message: msgText, config: commConfig });
-          } else if (channel === 'whatsapp') {
-            result = await sendWhatsApp({ to: destination, message: msgText, config: commConfig });
-          } else if (channel === 'email') {
-            result = await sendMessagingEmail({ to: destination, subject: 'VaxPlan Test Message', text: msgText, config: commConfig });
-          } else {
-            return res.status(400).json({ message: "Invalid channel" });
-          }
+          result = await sendMessagingEmail({ to: destination, subject: 'VaxPlan Test Message', text: msgText, config: commConfig });
         }
+
+        await db.insert(communicationLogs).values({
+          tenantId: req.tenantId!,
+          channel,
+          destination,
+          status: result.success ? 'delivered' : 'failed',
+          providerResponse: result.error || result.messageId || 'Success',
+          fallbackTriggered: false,
+        });
 
         if (result.success) {
           res.json({ message: "Message dispatched", details: result });
         } else {
-          res.status(500).json({ message: "Failed to send", error: result.error });
+          const providerError = result.error || "The provider rejected the request";
+          res.status(502).json({ message: `Failed to send via ${channel}: ${providerError}` });
         }
       } catch (err: any) {
         console.error("POST /api/me/tenant/test-communication failed:", err);
-        res.status(500).json({ message: "Internal server error" });
+        res.status(500).json({ message: safeErrorMessage(err, "Unable to test the communication gateway") });
       }
     }
   );

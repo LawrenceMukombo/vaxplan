@@ -141,9 +141,35 @@ export function TenantCommunicationCard() {
       return;
     }
 
+    const config = channel === "email"
+      ? {
+          host: emailHost,
+          port: emailPort ? Number(emailPort) : undefined,
+          user: emailUser,
+          pass: emailPass,
+          from: emailFrom,
+        }
+      : channel === "sms"
+        ? {
+            provider: smsProvider,
+            accountSid: smsAccountSid,
+            authToken: smsAuthToken,
+            senderNumber: smsSenderNumber,
+          }
+        : {
+            provider: waProvider,
+            accountSid: waAccountSid,
+            authToken: waAuthToken,
+            senderNumber: waSenderNumber,
+          };
+
     setTestingChannel(channel);
     try {
-      const data: any = await apiRequest("POST", "/api/me/tenant/test-communication", { channel, destination });
+      const data: any = await apiRequest("POST", "/api/me/tenant/test-communication", {
+        channel,
+        destination: destination.trim(),
+        config,
+      });
       toast({
         title: "Test Message Dispatched",
         description: data.message || "Message successfully sent to gateway.",

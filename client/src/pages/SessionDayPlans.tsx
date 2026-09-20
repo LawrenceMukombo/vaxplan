@@ -61,6 +61,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { offlineDb } from "@/lib/offlineDb";
+import { getCountryConfig } from "@/lib/countryConfig";
 import {
   Calendar as CalendarIcon,
   MapPin,
@@ -157,6 +158,8 @@ type FormValues = z.infer<typeof dayPlanFormSchema>;
 export default function SessionDayPlans() {
   const { id } = useParams<{ id: string }>();
   const { data: tenant } = useQuery<any>({ queryKey: ["/api/me/tenant"] });
+  const countryConfig = useMemo(() => getCountryConfig(tenant), [tenant]);
+  const cur = countryConfig.currencySymbol || "K";
   const { toast } = useToast();
   const populationOverlay = usePopulationOverlay();
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -836,7 +839,7 @@ export default function SessionDayPlans() {
       "Distance (km)",
       "Transport Type",
       "Fuel (liters)",
-      "Personnel Cost (K)",
+      `Personnel Cost (${cur})`,
     ];
 
     // Prepare rows
@@ -1122,7 +1125,7 @@ export default function SessionDayPlans() {
                   <th className="px-4 py-3 border-r border-border/40 text-center">Ice Packs</th>
                   <th className="px-4 py-3 border-r border-border/40 text-center">Distance</th>
                   <th className="px-4 py-3 border-r border-border/40 text-center">Fuel (L)</th>
-                  <th className="px-4 py-3 border-r border-border/40 text-center">Personnel Cost (K)</th>
+                  <th className="px-4 py-3 border-r border-border/40 text-center">Personnel Cost ({cur})</th>
                   {sessionPlan?.planType === "campaign" && (
                     <>
                       <th className="px-3 py-3 border-r border-border/40 text-center">Teams</th>
@@ -1202,7 +1205,7 @@ export default function SessionDayPlans() {
                       </td>
                       <td className="px-4 py-3 text-center border-r border-border/30 font-semibold text-purple-600 dark:text-purple-400">
                         {hasRosterRates
-                          ? `K ${personnelCostForDay(rosterRates, {
+                          ? `${cur} ${personnelCostForDay(rosterRates, {
                               vaccinatorsCount: plan.vaccinatorsCount,
                               volunteersCount: plan.volunteersCount,
                               supervisorsCount: plan.supervisorsCount,
@@ -1294,7 +1297,7 @@ export default function SessionDayPlans() {
                   </td>
                   <td className="px-4 py-3 text-center border-r border-border/30 text-purple-600 dark:text-purple-400">
                     {hasRosterRates
-                      ? `K ${(tableTotals?.totals.personnelCost ?? 0).toLocaleString()}`
+                      ? `${cur} ${(tableTotals?.totals.personnelCost ?? 0).toLocaleString()}`
                       : "—"}
                   </td>
                   {sessionPlan?.planType === "campaign" && (
@@ -2007,7 +2010,7 @@ export default function SessionDayPlans() {
                         Personnel cost (from microplan roster)
                       </div>
                       <div className="font-mono text-base font-extrabold text-emerald-700 dark:text-emerald-400">
-                        K{formPersonnelCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        {cur}{formPersonnelCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </div>
                     </div>
                     {!hasRosterRates ? (
@@ -2016,13 +2019,13 @@ export default function SessionDayPlans() {
                       </div>
                     ) : (
                       <div className="text-[10px] text-muted-foreground mt-1">
-                        {(watchedVaccinators ?? 0)} vacc × K{rosterRates.vaccinatorsCount || 0}
+                        {(watchedVaccinators ?? 0)} vacc × {cur}{rosterRates.vaccinatorsCount || 0}
                         {" · "}
-                        {(watchedVolunteers ?? 0)} vol × K{rosterRates.volunteersCount || 0}
+                        {(watchedVolunteers ?? 0)} vol × {cur}{rosterRates.volunteersCount || 0}
                         {" · "}
-                        {(watchedSupervisors ?? 0)} sup × K{rosterRates.supervisorsCount || 0}
+                        {(watchedSupervisors ?? 0)} sup × {cur}{rosterRates.supervisorsCount || 0}
                         {" · "}
-                        {(watchedRecorders ?? 0)} rec × K{rosterRates.recordersCount || 0}
+                        {(watchedRecorders ?? 0)} rec × {cur}{rosterRates.recordersCount || 0}
                       </div>
                     )}
                   </div>

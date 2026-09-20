@@ -59,9 +59,13 @@ import {
   Download,
   Trash2,
   AlertTriangle,
+  Check,
+  X,
+  Filter,
 } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { useAuth } from "@/hooks/useAuth";
+import { getCountryConfig } from "@/lib/countryConfig";
 import { canBulkClassifyBudget } from "@/lib/permissions";
 import {
   insertBudgetItemSchema,
@@ -413,6 +417,14 @@ export default function BudgetPlanning() {
     );
   };
 
+  const countryConfig = useMemo(() => getCountryConfig(tenant), [tenant]);
+  const cur = countryConfig.currencySymbol || "K";
+
+  // Interactive cross-filtering drilldown states
+  const [selectedFundingFilter, setSelectedFundingFilter] = useState<string | null>(null);
+  const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string | null>(null);
+  const [selectedStatusFilter, setSelectedStatusFilter] = useState<string | null>(null);
+
   const [rosterOnly, setRosterOnly] = useState(false);
 
   const quarterItems = useMemo(() => {
@@ -425,6 +437,25 @@ export default function BudgetPlanning() {
       return true;
     });
   }, [quarterItemsRaw, geoMaps, geoProvinceId, geoDistrictId, geoFacilityId, rosterOnly]);
+
+  const displayItems = useMemo(() => {
+    return quarterItems.filter((item) => {
+      if (selectedFundingFilter !== null) {
+        const fs = (item as any).fundingSource || "unspecified";
+        if (fs !== selectedFundingFilter) return false;
+      }
+      if (selectedCategoryFilter !== null && item.category !== selectedCategoryFilter) {
+        return false;
+      }
+      if (selectedStatusFilter !== null) {
+        const st = item.approvalStatus || "draft";
+        if (st !== selectedStatusFilter) return false;
+      }
+      return true;
+    });
+  }, [quarterItems, selectedFundingFilter, selectedCategoryFilter, selectedStatusFilter]);
+
+  const hasActiveCrossFilters = selectedFundingFilter !== null || selectedCategoryFilter !== null || selectedStatusFilter !== null;
 
   const rosterSourcedCount = useMemo(
     () =>
@@ -453,18 +484,23 @@ export default function BudgetPlanning() {
   const categoryTotals = budgetCategories.map((cat) => ({
     category: cat,
     total: quarterItems
-      .filter((b) => b.category === cat)
+      .filter((b) => {
+        if (b.category !== cat) return false;
+        if (selectedFundingFilter !== null && ((b as any).fundingSource || "unspecified") !== selectedFundingFilter) return false;
+        return true;
+      })
       .reduce((sum, item) => sum + parseFloat(item.totalCost || "0"), 0),
   })).filter((c) => c.total > 0);
 
   const fundingTotals = useMemo(() => {
     const groups: Record<string, number> = {};
     for (const item of quarterItems) {
+      if (selectedCategoryFilter !== null && item.category !== selectedCategoryFilter) continue;
       const fs = ((item as any).fundingSource as string) || "unspecified";
       groups[fs] = (groups[fs] || 0) + parseFloat(item.totalCost || "0");
     }
     return groups;
-  }, [quarterItems]);
+  }, [quarterItems, selectedCategoryFilter]);
 
   // Count in the currently visible slice (drives the "filtered" bulk scope).
   const unspecifiedCount = useMemo(
@@ -526,7 +562,7 @@ export default function BudgetPlanning() {
 
     // Section 1: Summary by funding source
     lines.push("Summary by Funding Source");
-    lines.push(["Funding Source", "Total (K)", "% of Total"].map(escapeCsv).join(","));
+    lines.push(["Funding Source", `Total (${cur})`, "% of Total"].map(escapeCsv).join(","));
     const sourceOrder = ["government", "gavi", "who", "unicef", "other"];
     for (const src of sourceOrder) {
       const amount = fundingTotals[src] || 0;
@@ -539,7 +575,7 @@ export default function BudgetPlanning() {
 
     // Section 2: Breakdown by funding source × category
     lines.push("Breakdown by Funding Source and Category");
-    lines.push(["Funding Source", "Category", "Total (K)"].map(escapeCsv).join(","));
+    lines.push(["Funding Source", "Category", `Total (${cur})`].map(escapeCsv).join(","));
     for (const src of sourceOrder) {
       const rows = quarterItems.filter(
         (i: any) => (i.fundingSource || "unspecified") === src,
@@ -568,8 +604,8 @@ export default function BudgetPlanning() {
       "Category",
       "Description",
       "Quantity",
-      "Unit Cost (K)",
-      "Total (K)",
+      `Unit Cost (${cur})`,
+      `Total (${cur})`,
       "Approval Status",
     ];
     lines.push(detailHeader.map(escapeCsv).join(","));
@@ -606,7 +642,7 @@ export default function BudgetPlanning() {
       0,
     );
     lines.push(
-      `Unspecified / Needs Classification (${unspecifiedItems.length} line${unspecifiedItems.length === 1 ? "" : "s"}, K${unspecifiedTotal.toFixed(2)})`,
+      `Unspecified / Needs Classification (${unspecifiedItems.length} line${unspecifiedItems.length === 1 ? "" : "s"}, ${cur}${unspecifiedTotal.toFixed(2)})`,
     );
     if (unspecifiedItems.length === 0) {
       lines.push("None — every line in scope has a funding source.");
@@ -727,7 +763,7 @@ export default function BudgetPlanning() {
       .map((src) => ({ src, amount: fundingTotals[src] || 0 }))
       .filter((r) => r.amount > 0)
       .map(
-        (r) => `<tr><td>${escapeHtml(fundingSourceLabel(r.src))}</td><td class="num">K${r.amount.toFixed(2)}</td><td class="num">${fundingGrandTotal > 0 ? ((r.amount / fundingGrandTotal) * 100).toFixed(1) : "0.0"}%</td></tr>`,
+        (r) => `<tr><td>${escapeHtml(fundingSourceLabel(r.src))}</td><td class="num">${cur}${r.amount.toFixed(2)}</td><td class="num">${fundingGrandTotal > 0 ? ((r.amount / fundingGrandTotal) * 100).toFixed(1) : "0.0"}%</td></tr>`,
       )
       .join("");
 
@@ -747,14 +783,14 @@ export default function BudgetPlanning() {
           .sort((a, b) => b[1] - a[1])
           .map(
             ([cat, total]) =>
-              `<tr><td>${escapeHtml(fundingSourceLabel(src))}</td><td>${escapeHtml(cat)}</td><td class="num">K${total.toFixed(2)}</td></tr>`,
+              `<tr><td>${escapeHtml(fundingSourceLabel(src))}</td><td>${escapeHtml(cat)}</td><td class="num">${cur}${total.toFixed(2)}</td></tr>`,
           )
           .join("");
       })
       .join("");
 
     // Section 3
-    const detailHeader = `<tr><th>Province</th><th>District</th><th>Facility</th><th>Funding Source</th><th>Category</th><th>Description</th><th class="num">Qty</th><th class="num">Unit (K)</th><th class="num">Total (K)</th><th>Status</th></tr>`;
+    const detailHeader = `<tr><th>Province</th><th>District</th><th>Facility</th><th>Funding Source</th><th>Category</th><th>Description</th><th class="num">Qty</th><th class="num">Unit (${cur})</th><th class="num">Total (${cur})</th><th>Status</th></tr>`;
     const renderDetailRow = (item: any, sourceLabel: string) => {
       const facName = facilities?.find((f) => f.id === item.facilityId)?.name || "";
       return `<tr>
@@ -838,16 +874,16 @@ export default function BudgetPlanning() {
 
   <h2>Summary by Funding Source</h2>
   <table>
-    <thead><tr><th>Funding Source</th><th class="num">Total (K)</th><th class="num">% of Total</th></tr></thead>
+    <thead><tr><th>Funding Source</th><th class="num">Total (${cur})</th><th class="num">% of Total</th></tr></thead>
     <tbody>
       ${summaryRows || `<tr><td colspan="3" class="muted">No classified funding in this quarter.</td></tr>`}
-      <tr class="total-row"><td>Total (classified)</td><td class="num">K${classifiedTotal.toFixed(2)}</td><td></td></tr>
+      <tr class="total-row"><td>Total (classified)</td><td class="num">${cur}${classifiedTotal.toFixed(2)}</td><td></td></tr>
     </tbody>
   </table>
 
   <h2>Breakdown by Funding Source and Category</h2>
   <table>
-    <thead><tr><th>Funding Source</th><th>Category</th><th class="num">Total (K)</th></tr></thead>
+    <thead><tr><th>Funding Source</th><th>Category</th><th class="num">Total (${cur})</th></tr></thead>
     <tbody>${breakdownRows || `<tr><td colspan="3" class="muted">No data.</td></tr>`}</tbody>
   </table>
 
@@ -858,7 +894,7 @@ export default function BudgetPlanning() {
       : `<table><thead>${detailHeader}</thead><tbody>${detailRows}</tbody></table>`
   }
 
-  <h2>Unspecified / Needs Classification (${unspecifiedItems.length} line${unspecifiedItems.length === 1 ? "" : "s"}, K${unspecifiedTotal.toFixed(2)})</h2>
+  <h2>Unspecified / Needs Classification (${unspecifiedItems.length} line${unspecifiedItems.length === 1 ? "" : "s"}, ${cur}${unspecifiedTotal.toFixed(2)})</h2>
   ${unspecifiedBody}
 
   <script>
@@ -956,21 +992,21 @@ export default function BudgetPlanning() {
     },
     {
       key: "unitCost",
-      header: "Unit Cost",
+      header: `Unit Cost (${cur})`,
       sortable: true,
       render: (item: BudgetItem) => (
         <span className="font-mono text-sm">
-          K{parseFloat(item.unitCost || "0").toLocaleString()}
+          {cur}{parseFloat(item.unitCost || "0").toLocaleString()}
         </span>
       ),
     },
     {
       key: "totalCost",
-      header: "Total",
+      header: `Total (${cur})`,
       sortable: true,
       render: (item: BudgetItem) => (
         <span className="font-mono text-sm font-medium">
-          K{parseFloat(item.totalCost || "0").toLocaleString()}
+          {cur}{parseFloat(item.totalCost || "0").toLocaleString()}
         </span>
       ),
     },
@@ -1520,12 +1556,18 @@ export default function BudgetPlanning() {
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <Card>
+        <Card 
+          className={`cursor-pointer transition-all hover:shadow-md ${
+            selectedStatusFilter === null ? "ring-2 ring-primary/40 bg-primary/5" : "hover:border-primary/50"
+          }`}
+          onClick={() => setSelectedStatusFilter(null)}
+          title="Click to show all budget items"
+        >
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-muted-foreground">Total Budget</p>
-                <p className="text-2xl font-bold">K{totalBudget.toLocaleString()}</p>
+                <p className="text-sm text-muted-foreground font-medium">Total Budget</p>
+                <p className="text-2xl font-bold">{cur}{totalBudget.toLocaleString()}</p>
               </div>
               <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
                 <Wallet className="h-5 w-5 text-primary" />
@@ -1534,13 +1576,19 @@ export default function BudgetPlanning() {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card 
+          className={`cursor-pointer transition-all hover:shadow-md ${
+            selectedStatusFilter === "approved" ? "ring-2 ring-green-500 bg-green-500/10" : "hover:border-green-500/50"
+          }`}
+          onClick={() => setSelectedStatusFilter(selectedStatusFilter === "approved" ? null : "approved")}
+          title="Click to filter by Approved budget items"
+        >
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-muted-foreground">Approved</p>
+                <p className="text-sm text-muted-foreground font-medium">Approved</p>
                 <p className="text-2xl font-bold text-green-600 dark:text-green-400">
-                  K{approvedBudget.toLocaleString()}
+                  {cur}{approvedBudget.toLocaleString()}
                 </p>
               </div>
               <div className="h-10 w-10 rounded-full bg-green-500/10 flex items-center justify-center">
@@ -1550,13 +1598,19 @@ export default function BudgetPlanning() {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card 
+          className={`cursor-pointer transition-all hover:shadow-md ${
+            selectedStatusFilter === "pending" ? "ring-2 ring-yellow-500 bg-yellow-500/10" : "hover:border-yellow-500/50"
+          }`}
+          onClick={() => setSelectedStatusFilter(selectedStatusFilter === "pending" ? null : "pending")}
+          title="Click to filter by Pending budget items"
+        >
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-muted-foreground">Pending</p>
+                <p className="text-sm text-muted-foreground font-medium">Pending</p>
                 <p className="text-2xl font-bold text-yellow-600 dark:text-yellow-400">
-                  K{pendingBudget.toLocaleString()}
+                  {cur}{pendingBudget.toLocaleString()}
                 </p>
               </div>
               <div className="h-10 w-10 rounded-full bg-yellow-500/10 flex items-center justify-center">
@@ -1570,7 +1624,56 @@ export default function BudgetPlanning() {
       <div className="grid lg:grid-cols-3 gap-6">
         <Card className="lg:col-span-2">
           <CardHeader className="pb-2">
-            <CardTitle className="text-lg">Budget Items</CardTitle>
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <CardTitle className="text-lg">Budget Items</CardTitle>
+              {hasActiveCrossFilters && (
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="text-xs text-muted-foreground font-medium">Active filters:</span>
+                  {selectedFundingFilter !== null && (
+                    <Badge 
+                      variant="secondary" 
+                      className="text-xs flex items-center gap-1 bg-primary/10 text-primary hover:bg-primary/20 cursor-pointer"
+                      onClick={() => setSelectedFundingFilter(null)}
+                    >
+                      Funder: {selectedFundingFilter === "unspecified" ? "Unspecified" : (fundingSourceOptions.find(o => o.value === selectedFundingFilter)?.label || selectedFundingFilter)}
+                      <span className="font-bold ml-1">×</span>
+                    </Badge>
+                  )}
+                  {selectedCategoryFilter !== null && (
+                    <Badge 
+                      variant="secondary" 
+                      className="text-xs flex items-center gap-1 bg-primary/10 text-primary hover:bg-primary/20 cursor-pointer"
+                      onClick={() => setSelectedCategoryFilter(null)}
+                    >
+                      Category: {selectedCategoryFilter}
+                      <span className="font-bold ml-1">×</span>
+                    </Badge>
+                  )}
+                  {selectedStatusFilter !== null && (
+                    <Badge 
+                      variant="secondary" 
+                      className="text-xs flex items-center gap-1 bg-primary/10 text-primary hover:bg-primary/20 cursor-pointer"
+                      onClick={() => setSelectedStatusFilter(null)}
+                    >
+                      Status: {selectedStatusFilter}
+                      <span className="font-bold ml-1">×</span>
+                    </Badge>
+                  )}
+                  <Button 
+                    variant="ghost" 
+                    size="sm" 
+                    className="h-6 px-2 text-xs text-muted-foreground hover:text-foreground"
+                    onClick={() => {
+                      setSelectedFundingFilter(null);
+                      setSelectedCategoryFilter(null);
+                      setSelectedStatusFilter(null);
+                    }}
+                  >
+                    Reset all
+                  </Button>
+                </div>
+              )}
+            </div>
           </CardHeader>
           <CardContent className="p-6 space-y-4">
             <GeoCascadeFilter
@@ -1611,14 +1714,16 @@ export default function BudgetPlanning() {
               </Button>
             </div>
             <DataTable
-              data={quarterItems}
+              data={displayItems}
               columns={columns}
               searchable
               searchKeys={["description", "category"]}
               emptyMessage={
                 rosterOnly
                   ? "No roster-sourced budget lines match the current filters."
-                  : "No budget items for this quarter."
+                  : hasActiveCrossFilters
+                    ? "No budget items match the selected cross-filters. Try resetting filters."
+                    : "No budget items for this quarter."
               }
             />
           </CardContent>
@@ -1626,27 +1731,46 @@ export default function BudgetPlanning() {
 
         <div className="space-y-6">
           <Card>
-            <CardHeader className="pb-2">
+            <CardHeader className="pb-2 flex flex-row items-center justify-between">
               <CardTitle className="text-lg">By Category</CardTitle>
+              {selectedCategoryFilter !== null && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 px-2 text-xs text-muted-foreground hover:text-foreground"
+                  onClick={() => setSelectedCategoryFilter(null)}
+                >
+                  Clear filter
+                </Button>
+              )}
             </CardHeader>
             <CardContent>
-              <div className="space-y-3">
+              <div className="space-y-2">
                 {categoryTotals.length === 0 ? (
                   <p className="text-sm text-muted-foreground text-center py-4">
                     No budget allocations yet
                   </p>
                 ) : (
-                  categoryTotals.map((cat) => (
-                    <div
-                      key={cat.category}
-                      className="flex items-center justify-between p-3 rounded-lg bg-muted/50"
-                    >
-                      <span className="text-sm font-medium">{cat.category}</span>
-                      <span className="font-mono text-sm">
-                        K{cat.total.toLocaleString()}
-                      </span>
-                    </div>
-                  ))
+                  categoryTotals.map((cat) => {
+                    const isSelected = selectedCategoryFilter === cat.category;
+                    return (
+                      <div
+                        key={cat.category}
+                        onClick={() => setSelectedCategoryFilter(isSelected ? null : cat.category)}
+                        className={`flex items-center justify-between p-3 rounded-lg cursor-pointer transition-all ${
+                          isSelected
+                            ? "bg-primary/15 border-2 border-primary shadow-sm font-semibold"
+                            : "bg-muted/50 hover:bg-muted/80 border border-transparent"
+                        }`}
+                        title={`Click to filter table by ${cat.category}`}
+                      >
+                        <span className="text-sm">{cat.category}</span>
+                        <span className="font-mono text-sm">
+                          {cur}{cat.total.toLocaleString()}
+                        </span>
+                      </div>
+                    );
+                  })
                 )}
               </div>
             </CardContent>
@@ -1656,11 +1780,23 @@ export default function BudgetPlanning() {
             <CardHeader className="pb-2">
               <CardTitle className="text-lg flex items-center justify-between">
                 <span>By Funding Source</span>
-                {unspecifiedCount > 0 && (
-                  <Badge variant="outline" className="text-[10px] bg-amber-500/10 border-amber-500/40 text-amber-700 dark:text-amber-400">
-                    {unspecifiedCount} unclassified
-                  </Badge>
-                )}
+                <div className="flex items-center gap-2">
+                  {selectedFundingFilter !== null && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 px-2 text-xs text-muted-foreground hover:text-foreground"
+                      onClick={() => setSelectedFundingFilter(null)}
+                    >
+                      Clear filter
+                    </Button>
+                  )}
+                  {unspecifiedCount > 0 && (
+                    <Badge variant="outline" className="text-[10px] bg-amber-500/10 border-amber-500/40 text-amber-700 dark:text-amber-400">
+                      {unspecifiedCount} unclassified
+                    </Badge>
+                  )}
+                </div>
               </CardTitle>
             </CardHeader>
             <CardContent>
@@ -1670,7 +1806,7 @@ export default function BudgetPlanning() {
                 </p>
               ) : (
                 <div className="space-y-3">
-                  <div className="flex h-3 w-full rounded-full overflow-hidden bg-muted">
+                  <div className="flex h-3.5 w-full rounded-full overflow-hidden bg-muted p-0.5 gap-0.5">
                     {[...fundingSourceOptions, { value: "unspecified", label: "Unspecified", color: "bg-amber-500/60" }].map((opt) => {
                       const amount = fundingTotals[opt.value] || 0;
                       if (amount <= 0) return null;
@@ -1682,12 +1818,14 @@ export default function BudgetPlanning() {
                         opt.value === "unicef" ? "bg-sky-500" :
                         opt.value === "other" ? "bg-slate-500" :
                         "bg-amber-500";
+                      const isSelected = selectedFundingFilter === opt.value;
                       return (
                         <div
                           key={opt.value}
-                          className={fillClass}
+                          className={`${fillClass} cursor-pointer transition-all hover:opacity-80 rounded-sm ${isSelected ? "ring-2 ring-foreground" : ""}`}
                           style={{ width: `${pct}%` }}
-                          title={`${opt.label}: K${amount.toLocaleString()}`}
+                          onClick={() => setSelectedFundingFilter(isSelected ? null : opt.value)}
+                          title={`${opt.label}: ${cur}${amount.toLocaleString()} (${pct.toFixed(1)}%) - Click to filter`}
                         />
                       );
                     })}
@@ -1696,8 +1834,18 @@ export default function BudgetPlanning() {
                     const amount = fundingTotals[opt.value] || 0;
                     if (amount <= 0) return null;
                     const pct = ((amount / fundingGrandTotal) * 100).toFixed(1);
+                    const isSelected = selectedFundingFilter === opt.value;
                     return (
-                      <div key={opt.value} className="flex items-center justify-between p-2.5 rounded-lg bg-muted/50">
+                      <div 
+                        key={opt.value} 
+                        onClick={() => setSelectedFundingFilter(isSelected ? null : opt.value)}
+                        className={`flex items-center justify-between p-2.5 rounded-lg cursor-pointer transition-all ${
+                          isSelected 
+                            ? "bg-primary/15 border-2 border-primary shadow-sm font-semibold" 
+                            : "bg-muted/50 hover:bg-muted/80 border border-transparent"
+                        }`}
+                        title={`Click to filter table by ${opt.label}`}
+                      >
                         <span className="text-sm font-medium flex items-center gap-2">
                           <span className={`inline-block h-2.5 w-2.5 rounded-full ${
                             opt.value === "government" ? "bg-blue-500" :
@@ -1710,7 +1858,7 @@ export default function BudgetPlanning() {
                           {opt.label}
                         </span>
                         <span className="font-mono text-sm">
-                          K{amount.toLocaleString()} <span className="text-muted-foreground text-xs">({pct}%)</span>
+                          {cur}{amount.toLocaleString()} <span className="text-muted-foreground text-xs font-normal">({pct}%)</span>
                         </span>
                       </div>
                     );

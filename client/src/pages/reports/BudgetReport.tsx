@@ -1,11 +1,13 @@
 /**
  * BudgetReport.tsx — R7 Budget & Resources
  */
+import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useLocation } from "wouter";
 import { DollarSign, CheckCircle, Layers, FileText } from "lucide-react";
-import ReportTable, { currencyFormat, defaultNumFormat } from "./ReportTable";
+import ReportTable, { formatCurrency, defaultNumFormat } from "./ReportTable";
+import { getCountryConfig } from "@/lib/countryConfig";
 import type { ReportFilters, ReportResponse } from "./types";
 import { buildReportQueryString, sanitizeReportRows } from "./types";
 import {
@@ -19,6 +21,10 @@ interface Props {
 
 export default function BudgetReport({ filters, setFilter }: Props) {
   const [, setLocation] = useLocation();
+  const { data: tenant } = useQuery<any>({ queryKey: ["/api/me/tenant"] });
+  const countryConfig = useMemo(() => getCountryConfig(tenant), [tenant]);
+  const cur = countryConfig.currencySymbol || "K";
+
   const qs = buildReportQueryString(filters);
   const { data, isLoading } = useQuery<ReportResponse>({
     queryKey: ["/api/reports/budget", qs],
@@ -48,21 +54,7 @@ export default function BudgetReport({ filters, setFilter }: Props) {
     chartLevel = "district";
   }
 
-  /* Original Code: static district level charting
-  const chartData = rows
-    .filter((r) => r.level === "district")
-    .slice(0, 12)
-    .map((r) => ({
-      name: (r.name as string).length > 12 ? (r.name as string).slice(0, 12) + "…" : r.name,
-      Government: Number(r.government_funding ?? 0),
-      Gavi:       Number(r.gavi_funding ?? 0),
-      UNICEF:     Number(r.unicef_funding ?? 0),
-      WHO:        Number(r.who_funding ?? 0),
-      Other:      Number(r.other_funding ?? 0),
-    }));
-  */
-
-  // Updated Code: Dynamic level aggregates with unique ID mappings for drilldowns
+  // Dynamic level aggregates with unique ID mappings for drilldowns
   const chartData = rows
     .filter((r) => r.level === chartLevel)
     .slice(0, 15)
@@ -77,23 +69,6 @@ export default function BudgetReport({ filters, setFilter }: Props) {
       Other:      Number(r.other_funding ?? 0),
     }));
 
-  /* Original Code: container level click handler
-  const handleChartClick = (state: any) => {
-    if (state && state.activePayload && state.activePayload.length > 0) {
-      const clickedData = state.activePayload[0].payload;
-      const clickedId = Number(clickedData.id);
-      if (chartLevel === "province") {
-        setFilter?.("provinceId", clickedId);
-      } else if (chartLevel === "district") {
-        setFilter?.("districtId", clickedId);
-      } else if (chartLevel === "facility") {
-        setFilter?.("facilityId", clickedId);
-      }
-    }
-  };
-  */
-
-  // Updated Code: bar-level click handler (Recharts bar-level onClick avoids event swallowing)
   const handleBarClick = (data: any) => {
     const clickedData = data?.payload || data;
     if (clickedData && clickedData.id) {
@@ -108,23 +83,23 @@ export default function BudgetReport({ filters, setFilter }: Props) {
     }
   };
 
-  const columns = [
-    { key: "total_budget",       label: "Total Budget",    format: currencyFormat,   align: "right" as const },
-    { key: "approved_budget",    label: "Approved",        format: currencyFormat,   align: "right" as const },
-    { key: "government_funding", label: "Government",      format: currencyFormat,   align: "right" as const },
-    { key: "gavi_funding",       label: "Gavi",            format: currencyFormat,   align: "right" as const },
-    { key: "unicef_funding",     label: "UNICEF",          format: currencyFormat,   align: "right" as const },
-    { key: "who_funding",        label: "WHO",             format: currencyFormat,   align: "right" as const },
+  const columns = useMemo(() => [
+    { key: "total_budget",       label: "Total Budget",    format: (v: unknown) => formatCurrency(v, cur),   align: "right" as const },
+    { key: "approved_budget",    label: "Approved",        format: (v: unknown) => formatCurrency(v, cur),   align: "right" as const },
+    { key: "government_funding", label: "Government",      format: (v: unknown) => formatCurrency(v, cur),   align: "right" as const },
+    { key: "gavi_funding",       label: "Gavi",            format: (v: unknown) => formatCurrency(v, cur),   align: "right" as const },
+    { key: "unicef_funding",     label: "UNICEF",          format: (v: unknown) => formatCurrency(v, cur),   align: "right" as const },
+    { key: "who_funding",        label: "WHO",             format: (v: unknown) => formatCurrency(v, cur),   align: "right" as const },
     { key: "budget_line_count",  label: "Lines",           format: defaultNumFormat, align: "right" as const },
-  ];
+  ], [cur]);
 
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         {[
-          { label: "Total Budget",   value: `K ${kpi.total.toLocaleString()}`,    icon: DollarSign,  color: "text-blue-500", path: "/microplans/routine" },
-          { label: "Approved",       value: `K ${kpi.approved.toLocaleString()}`,  icon: CheckCircle, color: "text-green-500", path: "/approvals" },
-          { label: "Gavi Funded",    value: `K ${kpi.gavi.toLocaleString()}`,      icon: Layers,      color: "text-purple-500", path: "/microplans/routine" },
+          { label: "Total Budget",   value: `${cur} ${kpi.total.toLocaleString()}`,    icon: DollarSign,  color: "text-blue-500", path: "/microplans/routine" },
+          { label: "Approved",       value: `${cur} ${kpi.approved.toLocaleString()}`,  icon: CheckCircle, color: "text-green-500", path: "/approvals" },
+          { label: "Gavi Funded",    value: `${cur} ${kpi.gavi.toLocaleString()}`,      icon: Layers,      color: "text-purple-500", path: "/microplans/routine" },
           { label: "Budget Lines",   value: kpi.lines.toLocaleString(),             icon: FileText,    color: "text-orange-500", path: "/microplans/routine" },
         ].map((item) => (
           <Card
@@ -152,32 +127,13 @@ export default function BudgetReport({ filters, setFilter }: Props) {
           </CardHeader>
           <CardContent>
             <ResponsiveContainer width="100%" height={260}>
-              {/* Original Code: standard static barchart
-              <BarChart data={chartData} margin={{ top: 0, right: 16, left: 0, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                <XAxis dataKey="name" tick={{ fontSize: 11 }} />
-                <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `K${(v/1000).toFixed(0)}k`} />
-                <Tooltip
-                  contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8 }}
-                  formatter={(v: number) => [`K ${v.toLocaleString()}`, ""]}
-                />
-                <Legend wrapperStyle={{ fontSize: 12 }} />
-                <Bar dataKey="Government" fill="#3b82f6" stackId="a" />
-                <Bar dataKey="Gavi"       fill="#8b5cf6" stackId="a" />
-                <Bar dataKey="UNICEF"     fill="#06b6d4" stackId="a" />
-                <Bar dataKey="WHO"        fill="#22c55e" stackId="a" />
-                <Bar dataKey="Other"      fill="#94a3b8" stackId="a" radius={[4,4,0,0]} />
-              </BarChart>
-              */}
-
-              {/* Updated Code: Interactive drill-down stacked BarChart with bar-level click handlers */}
               <BarChart data={chartData} margin={{ top: 0, right: 16, left: 0, bottom: 0 }} className="cursor-pointer">
                 <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                 <XAxis dataKey="name" tick={{ fontSize: 11 }} />
-                <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `K ${(v/1000).toFixed(0)}k`} />
+                <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `${cur} ${(v/1000).toFixed(0)}k`} />
                 <Tooltip
                   contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8 }}
-                  formatter={(v: number, name: any, props: any) => [`K ${v.toLocaleString()}`, `${name} (${props.payload.fullName})`]}
+                  formatter={(v: number, name: any, props: any) => [`${cur} ${v.toLocaleString()}`, `${name} (${props.payload.fullName})`]}
                 />
                 <Legend wrapperStyle={{ fontSize: 12 }} />
                 <Bar dataKey="Government" fill="#3b82f6" stackId="a">

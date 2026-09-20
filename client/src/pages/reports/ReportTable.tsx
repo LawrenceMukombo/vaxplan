@@ -52,10 +52,14 @@ export function pctFormat(v: unknown): string {
   return `${n.toFixed(1)}%`;
 }
 
-export function currencyFormat(v: unknown): string {
+export function formatCurrency(v: unknown, symbol = "K"): string {
   const n = parseFloat(String(v ?? 0));
   if (isNaN(n)) return "—";
-  return `K ${n.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+  return `${symbol} ${n.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+}
+
+export function currencyFormat(v: unknown): string {
+  return formatCurrency(v, "K");
 }
 
 // Helper function to reorder rows hierarchically (Pre-order DFS traversal of the location tree)

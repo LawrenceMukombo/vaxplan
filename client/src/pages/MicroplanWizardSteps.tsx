@@ -8294,6 +8294,10 @@ export function Step9({
     }
   }, [errorRowId]);
 
+  const { data: tenant } = useQuery<any>({ queryKey: ["/api/me/tenant"] });
+  const countryConfig = getCountryConfig(tenant);
+  const cur = countryConfig.currencySymbol || "K";
+
   const upd = (i: number, patch: any) => {
     const next = [...budget];
     next[i] = { ...next[i], ...patch };
@@ -8321,7 +8325,7 @@ export function Step9({
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <p className="text-sm font-medium">Total: {total.toLocaleString()}</p>
+        <p className="text-sm font-medium">Total: {cur}{total.toLocaleString()}</p>
         <Button size="sm" variant="outline" onClick={add} data-testid="button-add-budget">
           <Plus className="mr-1 h-4 w-4" /> Add line
         </Button>
@@ -8333,8 +8337,8 @@ export function Step9({
               <th className="p-2">Category</th>
               <th className="p-2">Description</th>
               <th className="p-2">Qty</th>
-              <th className="p-2">Unit</th>
-              <th className="p-2">Total</th>
+              <th className="p-2">Unit ({cur})</th>
+              <th className="p-2">Total ({cur})</th>
               <th className="p-2">Funding</th>
               <th className="p-2"></th>
             </tr>
@@ -8372,7 +8376,7 @@ export function Step9({
                 </td>
                 <td className="p-1"><Input type="number" value={b.quantity} onChange={(e) => upd(i, { quantity: e.target.value })} /></td>
                 <td className="p-1"><Input type="number" value={b.unitCost} onChange={(e) => upd(i, { unitCost: e.target.value })} /></td>
-                <td className="p-2">{(parseFloat(b.unitCost || "0") * parseInt(b.quantity || "0", 10)).toLocaleString()}</td>
+                <td className="p-2">{cur}{(parseFloat(b.unitCost || "0") * parseInt(b.quantity || "0", 10)).toLocaleString()}</td>
                 <td className="p-1">
                   <Select value={b.fundingSource} onValueChange={(v) => upd(i, { fundingSource: v })}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
@@ -9035,6 +9039,10 @@ export function Step11({
   validationErrors: Array<{ step: number; message: string; id: string }>;
   onEdit: (step: number) => void;
 }) {
+  const { data: tenant } = useQuery<any>({ queryKey: ["/api/me/tenant"] });
+  const countryConfig = getCountryConfig(tenant);
+  const cur = countryConfig.currencySymbol || "K";
+
   const status = microplan?.status ?? "draft";
   const audit = (microplan as any)?.approvalDetails;
 
@@ -9405,7 +9413,7 @@ export function Step11({
           {filledStep9 ? (
             <div className="space-y-2 text-sm">
               <div className="text-xs text-muted-foreground">
-                Grand total: <b>{budgetTotal.toLocaleString()}</b>
+                Grand total: <b>{cur}{budgetTotal.toLocaleString()}</b>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-xs">
