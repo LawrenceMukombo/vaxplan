@@ -596,7 +596,7 @@ export function TenantCommunicationCard() {
                       To run WPPConnect locally or on your Hostinger VPS:
                     </p>
                     <code className="block p-1.5 bg-black/5 dark:bg-white/5 rounded font-mono text-[10px] select-all">
-                      docker run -d --name wppconnect -p 21465:21465 wppconnect/server:latest
+                      docker run -d --name wppconnect --restart unless-stopped -p 21465:21465 -v wppconnect_tokens:/usr/src/wpp-server/tokens -v wppconnect_user_data:/usr/src/wpp-server/userDataDir wppconnect/wppconnect-server:latest
                     </code>
                   </div>
                 )}
