@@ -7150,6 +7150,356 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/approvals/bulk", ...auth, requirePermission("approve_plans"), async (req: any, res) => {
+    try {
+      const { requestIds, action, comments } = req.body;
+      if (!Array.isArray(requestIds) || requestIds.length === 0) {
+        return res.status(400).json({ message: "requestIds array is required and cannot be empty." });
+      }
+      const allowedActions = new Set(["approve", "return", "reject"]);
+      if (!allowedActions.has(action)) {
+        return res.status(400).json({ message: "Action must be approve, return, or reject." });
+      }
+      if ((action === "reject" || action === "return") && !String(comments || "").trim()) {
+        return res.status(400).json({ message: "A correction or rejection reason is required for bulk return/reject." });
+      }
+
+      const tenant = await storage.getTenant(req.tenantId);
+      const maxLevel = (tenant?.settings as any)?.maxApprovalLevel || "national";
+      const userRole = String(req.dbUser?.role || "");
+      const userRoles = new Set<string>([
+        userRole,
+        ...(Array.isArray(req.dbUser?.roles) ? req.dbUser.roles.map(String) : []),
+      ]);
+
+      const isNational = userRoles.has("national_admin") || userRoles.has("superuser") || (req.user as any)?.isPlatformAdmin;
+      const isProvincial = userRoles.has("provincial_coordinator") || isNational;
+      const isDistrict = userRoles.has("district_manager") || isNational;
+
+      const results: Array<{ id: number; entityId: number; success: boolean; stage: string; message: string; nextLevel?: string | null }> = [];
+      let approvedCount = 0;
+      let escalatedCount = 0;
+      let finalApprovedCount = 0;
+      let returnedCount = 0;
+      let rejectedCount = 0;
+      let skippedCount = 0;
+
+      for (const rawId of requestIds) {
+        const entityId = Number(rawId);
+        if (!Number.isInteger(entityId)) {
+          skippedCount++;
+          results.push({ id: rawId, entityId: 0, success: false, stage: "", message: "Invalid approval request ID." });
+          continue;
+        }
+
+        const oldRequest = await storage.getApprovalRequest(req.tenantId, entityId);
+        if (!oldRequest || oldRequest.status !== "pending") {
+          skippedCount++;
+          results.push({ id: entityId, entityId: oldRequest?.entityId ?? 0, success: false, stage: oldRequest?.currentLevel ?? "", message: "Request not found or not in pending status." });
+          continue;
+        }
+
+        // For microplans: verify geographic jurisdiction and preceding review stages
+        if (oldRequest.entityType === "microplan") {
+          const mp = await storage.getMicroplan(req.tenantId, oldRequest.entityId);
+          if (!mp) {
+            skippedCount++;
+            results.push({ id: entityId, entityId: oldRequest.entityId, success: false, stage: oldRequest.currentLevel, message: "Microplan not found." });
+            continue;
+          }
+
+          if (!(await userCanAccessGeo(req.dbUser, req.tenantId, { facilityId: mp.facilityId }))) {
+            skippedCount++;
+            results.push({ id: entityId, entityId: oldRequest.entityId, success: false, stage: oldRequest.currentLevel, message: "Microplan is outside your assigned geographic review area." });
+            continue;
+          }
+
+          const requestLevel = String(oldRequest.currentLevel).toLowerCase();
+
+          // Check Role Authorization for the current level
+          if (requestLevel === "district" && !isDistrict) {
+            skippedCount++;
+            results.push({ id: entityId, entityId: oldRequest.entityId, success: false, stage: requestLevel, message: "Only district managers or national administrators can review district stage." });
+            continue;
+          }
+          if (requestLevel === "provincial" && !isProvincial) {
+            skippedCount++;
+            results.push({ id: entityId, entityId: oldRequest.entityId, success: false, stage: requestLevel, message: "Only provincial coordinators or national administrators can review provincial stage." });
+            continue;
+          }
+          if (requestLevel === "national" && !isNational) {
+            skippedCount++;
+            results.push({ id: entityId, entityId: oldRequest.entityId, success: false, stage: requestLevel, message: "Only national administrators can review national stage." });
+            continue;
+          }
+
+          // PRECEDING LEVEL VALIDATION:
+          // If approving at Provincial level, verify District was approved
+          if (requestLevel === "provincial" && action === "approve") {
+            const prevDistrictReq = await db.select().from(approvalRequests).where(and(
+              eq(approvalRequests.tenantId, req.tenantId),
+              eq(approvalRequests.entityType, "microplan"),
+              eq(approvalRequests.entityId, oldRequest.entityId),
+              eq(approvalRequests.currentLevel, "district"),
+              eq(approvalRequests.status, "approved")
+            )).limit(1);
+
+            if (prevDistrictReq.length === 0) {
+              skippedCount++;
+              results.push({ id: entityId, entityId: oldRequest.entityId, success: false, stage: requestLevel, message: "Preceding District review has not yet been approved." });
+              continue;
+            }
+          }
+
+          // If approving at National level, verify District (and Provincial if present) was approved
+          if (requestLevel === "national" && action === "approve") {
+            const prevDistrictReq = await db.select().from(approvalRequests).where(and(
+              eq(approvalRequests.tenantId, req.tenantId),
+              eq(approvalRequests.entityType, "microplan"),
+              eq(approvalRequests.entityId, oldRequest.entityId),
+              eq(approvalRequests.currentLevel, "district"),
+              eq(approvalRequests.status, "approved")
+            )).limit(1);
+
+            if (prevDistrictReq.length === 0) {
+              skippedCount++;
+              results.push({ id: entityId, entityId: oldRequest.entityId, success: false, stage: requestLevel, message: "Preceding District review has not yet been approved." });
+              continue;
+            }
+
+            // Check if there was an intermediate provincial request that requires approval
+            const anyProvReq = await db.select().from(approvalRequests).where(and(
+              eq(approvalRequests.tenantId, req.tenantId),
+              eq(approvalRequests.entityType, "microplan"),
+              eq(approvalRequests.entityId, oldRequest.entityId),
+              eq(approvalRequests.currentLevel, "provincial")
+            )).limit(1);
+
+            if (anyProvReq.length > 0) {
+              const prevProvReq = await db.select().from(approvalRequests).where(and(
+                eq(approvalRequests.tenantId, req.tenantId),
+                eq(approvalRequests.entityType, "microplan"),
+                eq(approvalRequests.entityId, oldRequest.entityId),
+                eq(approvalRequests.currentLevel, "provincial"),
+                eq(approvalRequests.status, "approved")
+              )).limit(1);
+
+              if (prevProvReq.length === 0) {
+                skippedCount++;
+                results.push({ id: entityId, entityId: oldRequest.entityId, success: false, stage: requestLevel, message: "Preceding Provincial review has not yet been approved." });
+                continue;
+              }
+            }
+          }
+
+          if (isApprovedPlan(mp.status)) {
+            skippedCount++;
+            results.push({ id: entityId, entityId: oldRequest.entityId, success: false, stage: requestLevel, message: "Microplan is already fully approved." });
+            continue;
+          }
+
+          // If action is approve, log bulk step reviews so step audit trail is complete
+          if (action === "approve") {
+            const bulkStepComment = String(comments || `Bulk ${requestLevel} endorsement following verified preceding review.`).trim();
+            for (let step = 1; step <= 11; step++) {
+              await logAudit(req, "microplan_step_reviewed", "microplan_step_review", oldRequest.entityId, null, {
+                requestId: oldRequest.id,
+                level: requestLevel,
+                step,
+                reviewed: true,
+                comment: bulkStepComment,
+                bulk: true,
+              });
+            }
+          }
+        }
+
+        // Update approval request
+        const status = action === "approve" ? "approved" : action === "return" ? "returned" : "rejected";
+        const updateData: any = {
+          status,
+          comments: comments ? String(comments).trim() : (action === "approve" ? `Bulk approved at ${oldRequest.currentLevel} level.` : null),
+          resolvedAt: new Date(),
+          resolvedById: req.user.claims.sub,
+        };
+
+        const updatedRequest = await storage.updateApprovalRequest(req.tenantId, entityId, updateData);
+        if (!updatedRequest) {
+          skippedCount++;
+          results.push({ id: entityId, entityId: oldRequest.entityId, success: false, stage: oldRequest.currentLevel, message: "Failed to update record." });
+          continue;
+        }
+
+        let nextReqLevel: string | null = null;
+        if (action === "approve") {
+          approvedCount++;
+          const currentReqLevel = updatedRequest.currentLevel.toLowerCase();
+          const isChainComplete =
+            (maxLevel === "district" && currentReqLevel === "district") ||
+            (maxLevel === "provincial" && currentReqLevel === "provincial") ||
+            (maxLevel === "national" && currentReqLevel === "national") ||
+            (currentReqLevel === maxLevel.toLowerCase());
+
+          if (isChainComplete) {
+            finalApprovedCount++;
+            if (updatedRequest.entityType === "microplan") {
+              const oldMp = await storage.getMicroplan(req.tenantId, updatedRequest.entityId);
+              const updatedMp = await storage.updateMicroplan(req.tenantId, updatedRequest.entityId, {
+                status: "approved",
+                approvedByUserId: req.user.claims.sub,
+                approvedAt: new Date(),
+              } as any);
+
+              if (updatedMp && oldMp && oldMp.status !== "approved") {
+                await createMicroplanVersion(db as any, {
+                  tenantId: req.tenantId,
+                  microplanId: updatedMp.id,
+                  userId: req.user.claims.sub,
+                  eventType: "approved",
+                  status: "approved",
+                  reason: comments || `Bulk approved at ${currentReqLevel} level.`,
+                });
+
+                try {
+                  const seeded = await seedQuarterlySupervisionVisits(req.tenantId, updatedMp, req.user?.claims?.sub ?? null);
+                  if (seeded.length > 0) {
+                    await logAudit(req, "auto_seed_supervision_visits", "microplan", updatedMp.id, null, {
+                      microplanId: updatedMp.id,
+                      year: updatedMp.year,
+                      quarter: updatedMp.quarter,
+                      visitIds: seeded.map((v) => v.id),
+                      facilityIds: seeded.map((v) => v.facilityId),
+                      source: "bulk_approval_workflow",
+                    });
+                  }
+                } catch (e) {
+                  console.error("Failed to auto-seed supervision visits in bulk approval:", e);
+                }
+
+                try {
+                  await sendApprovalSmsForMicroplan(req.tenantId, updatedMp.id);
+                } catch (e) {
+                  console.error("Failed to send approval SMS in bulk approval:", e);
+                }
+              }
+            } else if (updatedRequest.entityType === "session" || updatedRequest.entityType === "session_plan") {
+              await storage.updateSessionPlan(req.tenantId, updatedRequest.entityId, { approvalStatus: "approved" });
+            } else if (updatedRequest.entityType === "budget" || updatedRequest.entityType === "budget_item") {
+              await storage.updateBudgetItem(req.tenantId, updatedRequest.entityId, { approvalStatus: "approved" });
+            } else if (updatedRequest.entityType === "population") {
+              await db.update(populationData)
+                .set({ approvalStatus: "approved", updatedAt: new Date() })
+                .where(eq(populationData.id, updatedRequest.entityId));
+            }
+          } else if (updatedRequest.entityType === "microplan") {
+            // Advance to next level
+            const order = ["district", "provincial", "national"];
+            const currentIndex = order.indexOf(currentReqLevel);
+            const nextLevel = order[currentIndex + 1];
+            if (nextLevel) {
+              nextReqLevel = nextLevel;
+              escalatedCount++;
+              const nextRequest = await storage.createApprovalRequest(req.tenantId, {
+                entityType: "microplan",
+                entityId: updatedRequest.entityId,
+                requestedById: updatedRequest.requestedById,
+                currentLevel: nextLevel,
+                status: "pending",
+                comments: `${currentReqLevel} review completed via bulk approval; forwarded to ${nextLevel}.`,
+              } as any);
+
+              await logAudit(req, "advance_approval_level", "approval_request", nextRequest.id, null, {
+                microplanId: updatedRequest.entityId,
+                previousRequestId: updatedRequest.id,
+                fromLevel: currentReqLevel,
+                toLevel: nextLevel,
+                bulk: true,
+                actor: {
+                  id: req.dbUser?.id ?? req.user.claims.sub,
+                  name: [req.dbUser?.firstName, req.dbUser?.lastName].filter(Boolean).join(" ").trim() || req.dbUser?.email || req.user.claims.sub,
+                  role: req.dbUser?.role ?? null,
+                },
+                actionAt: new Date().toISOString(),
+              });
+            }
+          }
+        } else if (action === "return" || action === "reject") {
+          if (action === "return") returnedCount++;
+          else rejectedCount++;
+
+          if (updatedRequest.entityType === "microplan") {
+            try {
+              const oldMp = await storage.getMicroplan(req.tenantId, updatedRequest.entityId);
+              await storage.updateMicroplan(req.tenantId, updatedRequest.entityId, {
+                status: "draft",
+                districtEditReason: String(comments || "").trim(),
+                submittedAt: null,
+                autoApproveAt: null,
+              } as any);
+
+              await createMicroplanVersion(db as any, {
+                tenantId: req.tenantId,
+                microplanId: updatedRequest.entityId,
+                userId: req.user.claims.sub,
+                eventType: action === "return" ? "returned" : "rejected",
+                status: "draft",
+                reason: comments || null,
+              });
+
+              if (oldMp?.status === "approved") {
+                await cancelSeededSupervisionVisitsForMicroplan(
+                  req.tenantId,
+                  updatedRequest.entityId,
+                  `Bulk approval returned/rejected microplan #${updatedRequest.entityId}; reverted to draft.`
+                );
+              }
+            } catch (e) {
+              console.warn("Failed to revert microplan in bulk return/reject:", e);
+            }
+          }
+        }
+
+        await logAudit(req, "bulk_update", "approval_request", entityId, oldRequest, {
+          ...updatedRequest,
+          decision: status,
+          bulk: true,
+          actor: {
+            id: req.dbUser?.id ?? req.user.claims.sub,
+            name: [req.dbUser?.firstName, req.dbUser?.lastName].filter(Boolean).join(" ").trim() || req.dbUser?.email || req.user.claims.sub,
+            role: req.dbUser?.role ?? null,
+          },
+          actionAt: new Date().toISOString(),
+        });
+
+        results.push({
+          id: entityId,
+          entityId: updatedRequest.entityId,
+          success: true,
+          stage: updatedRequest.currentLevel,
+          nextLevel: nextReqLevel,
+          message: action === "approve"
+            ? (nextReqLevel ? `Approved and escalated to ${nextReqLevel}` : "Fully approved")
+            : (action === "return" ? "Returned for correction" : "Rejected"),
+        });
+      }
+
+      res.json({
+        success: true,
+        totalRequested: requestIds.length,
+        approvedCount,
+        escalatedCount,
+        finalApprovedCount,
+        returnedCount,
+        rejectedCount,
+        skippedCount,
+        results,
+      });
+    } catch (error) {
+      console.error("Error in bulk approval:", error);
+      res.status(500).json({ message: "Failed to process bulk approvals." });
+    }
+  });
+
   // ─── HTR scores ───────────────────────────────────────
   app.get("/api/htr-scores", ...auth, async (req: any, res) => {
     try {

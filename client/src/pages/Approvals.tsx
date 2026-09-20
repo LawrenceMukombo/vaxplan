@@ -9,6 +9,7 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogFooter,
 } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -31,7 +32,17 @@ import {
   Eye,
   Check,
   ExternalLink,
+  CheckCheck,
+  Sparkles,
+  ShieldCheck,
+  Layers,
+  ListChecks,
+  Users,
+  Building2,
+  MapPin,
+  CheckCircle2,
 } from "lucide-react";
+import { useAuth } from "@/hooks/useAuth";
 import type {
   ApprovalRequest,
   Tenant,
@@ -71,6 +82,7 @@ const actorName = (actor: ApprovalActor | null | undefined, fallbackId?: string 
 
 export default function Approvals() {
   const { toast } = useToast();
+  const { user } = useAuth();
   const [, setLocation] = useLocation();
   const [selectedRequest, setSelectedRequest] = useState<EnrichedApprovalRequest | null>(null);
   const [detailRequest, setDetailRequest] = useState<EnrichedApprovalRequest | null>(null);
@@ -78,6 +90,12 @@ export default function Approvals() {
   const [historyMicroplanId, setHistoryMicroplanId] = useState<number | null>(null);
   const [comment, setComment] = useState("");
   const [selectedHierarchyMicroplanId, setSelectedHierarchyMicroplanId] = useState<number | null>(null);
+
+  // Bulk Approval state
+  const [selectedRequestIds, setSelectedRequestIds] = useState<(string | number)[]>([]);
+  const [isBulkDialogOpen, setIsBulkDialogOpen] = useState(false);
+  const [bulkAction, setBulkAction] = useState<"approve" | "return">("approve");
+  const [bulkComment, setBulkComment] = useState("");
 
   // Approval decisions must never be accepted locally and replayed later.
   // Clean up any stale approval outbox mutations on load.
@@ -294,6 +312,95 @@ export default function Approvals() {
     },
   });
 
+  const userRoles = useMemo(() => new Set<string>([
+    String(user?.role || ""),
+    ...(Array.isArray(user?.roles) ? user.roles.map(String) : []),
+  ]), [user]);
+
+  const isNationalAdmin = userRoles.has("national_admin") || userRoles.has("superuser") || Boolean((user as any)?.isPlatformAdmin);
+  const isProvincialCoordinator = userRoles.has("provincial_coordinator") || isNationalAdmin;
+  const isDistrictManager = userRoles.has("district_manager") || isNationalAdmin;
+  const canBulkApprove = isNationalAdmin || isProvincialCoordinator || isDistrictManager;
+
+  const getRequestEligibility = (item: EnrichedApprovalRequest) => {
+    if (item.status !== "pending") return { eligible: false, reason: "Resolved" };
+    const level = String(item.currentLevel).toLowerCase();
+
+    if (level === "district" && !isDistrictManager) {
+      return { eligible: false, reason: "Awaiting District Manager review" };
+    }
+    if (level === "provincial" && !isProvincialCoordinator) {
+      return { eligible: false, reason: "Awaiting Provincial Coordinator review" };
+    }
+    if (level === "national" && !isNationalAdmin) {
+      return { eligible: false, reason: "Awaiting National Admin review" };
+    }
+
+    if (item.entityType === "microplan") {
+      if (level === "provincial") {
+        const districtApproved = (requests ?? []).some(
+          (r) => r.entityType === "microplan" && r.entityId === item.entityId && r.currentLevel === "district" && r.status === "approved"
+        );
+        if (!districtApproved) {
+          return { eligible: false, reason: "Preceding District review not yet approved", precedingApproved: false };
+        }
+      }
+      if (level === "national") {
+        const districtApproved = (requests ?? []).some(
+          (r) => r.entityType === "microplan" && r.entityId === item.entityId && r.currentLevel === "district" && r.status === "approved"
+        );
+        if (!districtApproved) {
+          return { eligible: false, reason: "Preceding District review not yet approved", precedingApproved: false };
+        }
+      }
+    }
+
+    return { eligible: true, reason: "Ready for review & endorsement", precedingApproved: true };
+  };
+
+  const bulkActionMutation = useMutation({
+    mutationFn: async ({
+      requestIds,
+      action,
+      comments,
+    }: {
+      requestIds: (string | number)[];
+      action: "approve" | "return";
+      comments: string;
+    }) => {
+      return apiRequest("POST", "/api/approvals/bulk", {
+        requestIds,
+        action,
+        comments,
+      });
+    },
+    onSuccess: (data: any, variables) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/approvals"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/microplans"] });
+      setSelectedRequestIds([]);
+      setIsBulkDialogOpen(false);
+      setBulkComment("");
+      if (variables.action === "approve") {
+        toast({
+          title: "Bulk Approval Completed",
+          description: `Successfully processed ${data.approvedCount} plan(s). ${data.finalApprovedCount > 0 ? `${data.finalApprovedCount} marked fully approved.` : ""} ${data.escalatedCount > 0 ? `${data.escalatedCount} escalated to the next review level.` : ""}`,
+        });
+      } else {
+        toast({
+          title: "Bulk Return Completed",
+          description: `${data.returnedCount || variables.requestIds.length} microplan(s) returned to draft for corrections.`,
+        });
+      }
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Bulk Approval Failed",
+        description: error.message || "Failed to process bulk approvals.",
+        variant: "destructive",
+      });
+    },
+  });
+
   const enrichWithGeo = (list: EnrichedApprovalRequest[]) =>
     list.map((r) => {
       const g = resolveGeo(r);
@@ -325,6 +432,34 @@ export default function Approvals() {
   const rejectedRequests = enrichWithGeo(
     applyGeoFilter(requests?.filter((r) => r.status === "rejected") || []),
   );
+
+  const eligiblePendingRequests = useMemo(() => {
+    return pendingRequests.filter((r) => getRequestEligibility(r).eligible);
+  }, [pendingRequests, isDistrictManager, isProvincialCoordinator, isNationalAdmin, requests]);
+
+  const selectedRequests = useMemo(() => {
+    const set = new Set(selectedRequestIds.map(Number));
+    return pendingRequests.filter((r) => set.has(Number(r.id)));
+  }, [pendingRequests, selectedRequestIds]);
+
+  const selectedMicroplans = useMemo(() => {
+    return selectedRequests
+      .filter((r) => r.entityType === "microplan")
+      .map((r) => entityLookup.microplansById.get(r.entityId))
+      .filter(Boolean) as Microplan[];
+  }, [selectedRequests, entityLookup]);
+
+  const selectedFacilities = useMemo(() => {
+    const facIds = new Set(selectedMicroplans.map((m) => m.facilityId).filter(Boolean));
+    return Array.from(facIds).map((id) => geoMaps.facilityMap.get(id!)).filter(Boolean) as Facility[];
+  }, [selectedMicroplans, geoMaps]);
+
+  const totalTargetPop = useMemo(() => {
+    return selectedMicroplans.reduce((sum, mp) => {
+      const pop = populationData.find((p) => p.facilityId === mp.facilityId && (mp.year ? p.year === mp.year : true));
+      return sum + Number(pop?.under1Population || pop?.totalPopulation || 0);
+    }, 0);
+  }, [selectedMicroplans, populationData]);
 
   const getEntityIcon = (entityType: string) => {
     switch (entityType) {
@@ -376,11 +511,19 @@ export default function Approvals() {
       sortable: true,
       render: (item: EnrichedApprovalRequest) => {
         const { stageNumber, totalStages } = getStageInfo(item);
+        const eligibility = getRequestEligibility(item);
         return (
-          <div className="flex flex-col gap-0.5">
-            <Badge variant="outline" className="capitalize w-fit">
-              {item.currentLevel}
-            </Badge>
+          <div className="flex flex-col gap-1">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <Badge variant="outline" className="capitalize w-fit">
+                {item.currentLevel}
+              </Badge>
+              {item.entityType === "microplan" && eligibility.eligible && (
+                <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-300 text-[10px] py-0 px-1.5">
+                  Ready for Review ✓
+                </Badge>
+              )}
+            </div>
             {item.entityType === "microplan" && (
               <span className="text-[10px] text-muted-foreground font-medium">
                 Stage {stageNumber} of {totalStages}
@@ -397,7 +540,7 @@ export default function Approvals() {
       render: (item: EnrichedApprovalRequest) => {
         const g = resolveGeo(item);
         const name = g.provinceId !== null ? geoMaps.provinceMap.get(g.provinceId)?.name : null;
-        return <span className="text-sm">{name ?? "—"}</span>;
+        return <span className="text-sm font-medium">{name ?? "—"}</span>;
       },
     },
     {
@@ -426,16 +569,32 @@ export default function Approvals() {
     },
     {
       key: "status",
-      header: "Status",
+      header: "Status & Review Chain",
       render: (item: EnrichedApprovalRequest) => {
         const isPending = (item.status || "pending") === "pending";
+        const level = String(item.currentLevel).toLowerCase();
+
         return (
-          <div className="space-y-0.5">
+          <div className="space-y-1">
             <ApprovalBadge status={item.status || "pending"} />
             {isPending && item.entityType === "microplan" && (
-              <span className="block text-[11px] text-amber-700 dark:text-amber-400 font-medium">
-                Awaiting {item.currentLevel} decision
-              </span>
+              <div className="text-[11px] space-y-0.5">
+                {level === "provincial" ? (
+                  <span className="inline-flex items-center gap-1 text-emerald-700 dark:text-emerald-400 font-medium">
+                    <CheckCircle2 className="h-3 w-3 text-emerald-600" />
+                    District Approved · Awaiting Provincial
+                  </span>
+                ) : level === "national" ? (
+                  <span className="inline-flex items-center gap-1 text-blue-700 dark:text-blue-400 font-medium">
+                    <CheckCircle2 className="h-3 w-3 text-blue-600" />
+                    District/Prov. Verified · Awaiting National
+                  </span>
+                ) : (
+                  <span className="block text-amber-700 dark:text-amber-400 font-medium">
+                    Awaiting {item.currentLevel} decision
+                  </span>
+                )}
+              </div>
             )}
           </div>
         );
@@ -703,7 +862,72 @@ export default function Approvals() {
           <TabsTrigger value="rejected">Rejected</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="pending" className="mt-4">
+        <TabsContent value="pending" className="mt-4 space-y-4">
+          {canBulkApprove && (
+            <Card className="border-primary/20 bg-gradient-to-r from-primary/5 via-blue-50/40 to-background dark:from-primary/10 dark:via-background dark:to-background">
+              <CardContent className="p-4 flex flex-col md:flex-row md:items-center justify-between gap-3">
+                <div className="flex items-start gap-3">
+                  <div className="h-9 w-9 rounded-lg bg-primary/10 text-primary flex items-center justify-center shrink-0 mt-0.5">
+                    <Layers className="h-5 w-5" />
+                  </div>
+                  <div className="space-y-0.5">
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-bold text-foreground">
+                        {isNationalAdmin ? "National Coordinator Bulk Approval" : "Provincial Coordinator Bulk Approval"}
+                      </p>
+                      <Badge variant="outline" className="bg-primary/10 text-primary border-primary/20 text-[10px] py-0 px-2 font-semibold">
+                        <Sparkles className="h-3 w-3 mr-1" />
+                        Smart Batch Processing
+                      </Badge>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Bulk approve microplans across facilities once preceding review levels (District verification) have completed. Individual plans can still be inspected below anytime.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2 self-start md:self-auto shrink-0">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-8 text-xs gap-1.5 border-emerald-300 text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/30"
+                    onClick={() => {
+                      const readyIds = eligiblePendingRequests.map((r) => r.id);
+                      setSelectedRequestIds(readyIds);
+                    }}
+                    disabled={eligiblePendingRequests.length === 0}
+                  >
+                    <CheckCheck className="h-3.5 w-3.5" />
+                    Select Verified ({eligiblePendingRequests.length})
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-8 text-xs gap-1.5"
+                    onClick={() => {
+                      const allPendingIds = pendingRequests.map((r) => r.id);
+                      setSelectedRequestIds(allPendingIds);
+                    }}
+                    disabled={pendingRequests.length === 0}
+                  >
+                    <ListChecks className="h-3.5 w-3.5" />
+                    Select All ({pendingRequests.length})
+                  </Button>
+                  {selectedRequestIds.length > 0 && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-8 text-xs text-muted-foreground hover:text-foreground"
+                      onClick={() => setSelectedRequestIds([])}
+                    >
+                      Clear ({selectedRequestIds.length})
+                    </Button>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
           <Card>
             <CardContent className="p-6">
               <DataTable
@@ -711,8 +935,40 @@ export default function Approvals() {
                 columns={columns}
                 onRowClick={(item) => setDetailRequest(item)}
                 searchable
-                searchKeys={["entityType", "currentLevel"]}
+                searchKeys={["entityType", "currentLevel", "_geoDistrictName", "_geoProvinceName"]}
                 emptyMessage="No pending approval requests."
+                enableSelection={canBulkApprove}
+                selectedIds={selectedRequestIds}
+                onSelectionChange={setSelectedRequestIds}
+                bulkActions={
+                  canBulkApprove && selectedRequestIds.length > 0 ? (
+                    <div className="flex items-center gap-2">
+                      <Button
+                        size="sm"
+                        className="bg-emerald-600 hover:bg-emerald-700 text-white h-8 text-xs gap-1.5 shadow-sm"
+                        onClick={() => {
+                          setBulkAction("approve");
+                          setIsBulkDialogOpen(true);
+                        }}
+                      >
+                        <CheckCheck className="h-3.5 w-3.5" />
+                        Bulk Approve ({selectedRequestIds.length})
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-8 text-xs gap-1.5 border-amber-300 text-amber-800 hover:bg-amber-50 dark:hover:bg-amber-950/30"
+                        onClick={() => {
+                          setBulkAction("return");
+                          setIsBulkDialogOpen(true);
+                        }}
+                      >
+                        <Undo2 className="h-3.5 w-3.5" />
+                        Bulk Return ({selectedRequestIds.length})
+                      </Button>
+                    </div>
+                  ) : undefined
+                }
               />
             </CardContent>
           </Card>
@@ -908,6 +1164,187 @@ export default function Approvals() {
               </Button>
             </div>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Bulk Approval / Return Dialog for Provincial and National Coordinators */}
+      <Dialog
+        open={isBulkDialogOpen}
+        onOpenChange={(open) => {
+          if (!open) {
+            setIsBulkDialogOpen(false);
+            setBulkComment("");
+          }
+        }}
+      >
+        <DialogContent className="max-w-2xl max-h-[90vh] flex flex-col p-0 overflow-hidden sm:rounded-2xl">
+          <DialogHeader className="p-6 pb-4 border-b bg-muted/20 shrink-0">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <div className={`h-9 w-9 rounded-lg flex items-center justify-center ${bulkAction === "approve" ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40" : "bg-amber-100 text-amber-800 dark:bg-amber-950/40"}`}>
+                  {bulkAction === "approve" ? <CheckCheck className="h-5 w-5" /> : <Undo2 className="h-5 w-5" />}
+                </div>
+                <div>
+                  <DialogTitle className="text-lg font-bold">
+                    {bulkAction === "approve" ? "Bulk Microplan Approval" : "Bulk Return for Correction"}
+                  </DialogTitle>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    {bulkAction === "approve"
+                      ? "Fast-track batch approval across multiple facilities and districts"
+                      : "Return multiple microplans to drafts for revised planning"}
+                  </p>
+                </div>
+              </div>
+              <Badge variant="outline" className="capitalize text-xs font-semibold px-2.5 py-1">
+                {isNationalAdmin ? "National Authority" : isProvincialCoordinator ? "Provincial Authority" : "Coordinator Review"}
+              </Badge>
+            </div>
+          </DialogHeader>
+
+          <div className="p-6 space-y-5 overflow-y-auto min-h-0 flex-1">
+            {/* Batch Metrics Card */}
+            <div className="grid grid-cols-3 gap-3 p-3.5 rounded-xl border bg-muted/30">
+              <div className="space-y-0.5">
+                <span className="text-[11px] text-muted-foreground font-medium uppercase tracking-wider block">Selected Plans</span>
+                <span className="text-xl font-bold text-foreground">{selectedRequests.length}</span>
+              </div>
+              <div className="space-y-0.5">
+                <span className="text-[11px] text-muted-foreground font-medium uppercase tracking-wider block">Unique Facilities</span>
+                <span className="text-xl font-bold text-foreground">{selectedFacilities.length}</span>
+              </div>
+              <div className="space-y-0.5">
+                <span className="text-[11px] text-muted-foreground font-medium uppercase tracking-wider block">Target Population</span>
+                <span className="text-xl font-bold text-primary">
+                  {totalTargetPop > 0 ? totalTargetPop.toLocaleString() : "—"}
+                </span>
+              </div>
+            </div>
+
+            {/* Workflow Preceding Level Verification Banner */}
+            {bulkAction === "approve" ? (
+              <div className="p-3.5 rounded-xl border border-emerald-200 bg-emerald-50/70 text-emerald-950 dark:border-emerald-900/50 dark:bg-emerald-950/20 dark:text-emerald-200 space-y-1.5 text-xs">
+                <div className="flex items-center gap-1.5 font-bold text-emerald-800 dark:text-emerald-300">
+                  <ShieldCheck className="h-4 w-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                  <span>Preceding Review Level Verification Guaranteed</span>
+                </div>
+                <p className="leading-relaxed text-emerald-900/80 dark:text-emerald-300/80">
+                  The system validates each plan in the batch against the database. For Provincial approval, all plans must be District-approved. For National approval, all plans must be District and Provincial verified. Any unverified plans will be safely skipped.
+                </p>
+              </div>
+            ) : (
+              <div className="p-3.5 rounded-xl border border-amber-200 bg-amber-50/70 text-amber-950 dark:border-amber-900/50 dark:bg-amber-950/20 dark:text-amber-200 space-y-1.5 text-xs">
+                <div className="flex items-center gap-1.5 font-bold text-amber-800 dark:text-amber-300">
+                  <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0" />
+                  <span>Batch Reversion to Draft Status</span>
+                </div>
+                <p className="leading-relaxed text-amber-900/80 dark:text-amber-300/80">
+                  Returning {selectedRequests.length} microplan(s) will set their status back to draft, allowing facility and district teams to revise numbers and resubmit.
+                </p>
+              </div>
+            )}
+
+            {/* Selected Microplans List */}
+            <div className="space-y-2">
+              <label className="text-xs font-semibold text-foreground uppercase tracking-wider block">
+                Batch Included Microplans ({selectedRequests.length})
+              </label>
+              <div className="max-h-44 overflow-y-auto space-y-1.5 rounded-lg border p-2 bg-background">
+                {selectedRequests.map((req) => {
+                  const mp = entityLookup.microplansById.get(req.entityId);
+                  const fac = mp?.facilityId ? geoMaps.facilityMap.get(mp.facilityId) : null;
+                  const g = resolveGeo(req);
+                  const distName = g.districtId !== null ? geoMaps.districtMap.get(g.districtId)?.name : null;
+                  const provName = g.provinceId !== null ? geoMaps.provinceMap.get(g.provinceId)?.name : null;
+                  const eligibility = getRequestEligibility(req);
+
+                  return (
+                    <div
+                      key={req.id}
+                      className="flex items-center justify-between gap-3 p-2 rounded-md hover:bg-muted/40 text-xs border border-transparent hover:border-border transition-colors"
+                    >
+                      <div className="min-w-0">
+                        <p className="font-semibold text-foreground truncate">
+                          {fac?.name || mp?.name || `Microplan #${req.entityId}`}
+                        </p>
+                        <p className="text-[11px] text-muted-foreground truncate">
+                          {[distName, provName].filter(Boolean).join(", ") || "General Scope"} · Cycle {mp?.year || "—"}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {eligibility.eligible ? (
+                          <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-300 text-[10px] py-0 px-1.5 font-medium">
+                            ✓ Pre-Verified
+                          </Badge>
+                        ) : (
+                          <Badge variant="outline" className="bg-amber-50 text-amber-800 border-amber-300 text-[10px] py-0 px-1.5 font-medium">
+                            {eligibility.reason}
+                          </Badge>
+                        )}
+                        <Badge variant="outline" className="capitalize text-[10px] py-0 px-1.5">
+                          {req.currentLevel}
+                        </Badge>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Comments Field */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-foreground">
+                Batch Feedback / Comments {bulkAction === "return" ? "(Required for return)" : "(Optional)"}
+              </label>
+              <Textarea
+                placeholder={
+                  bulkAction === "approve"
+                    ? "Add coordinator review notes or approval remarks (applied to all selected plans)..."
+                    : "Specify the reasons and required corrections for the returning teams..."
+                }
+                value={bulkComment}
+                onChange={(e) => setBulkComment(e.target.value)}
+                rows={3}
+                className="text-xs"
+              />
+            </div>
+          </div>
+
+          <DialogFooter className="p-4 px-6 border-t bg-muted/20 shrink-0 flex items-center justify-between sm:justify-end gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setIsBulkDialogOpen(false);
+                setBulkComment("");
+              }}
+              disabled={bulkActionMutation.isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              className={bulkAction === "approve" ? "bg-emerald-600 hover:bg-emerald-700 text-white" : "bg-amber-600 hover:bg-amber-700 text-white"}
+              onClick={() => {
+                if (selectedRequestIds.length === 0) return;
+                bulkActionMutation.mutate({
+                  requestIds: selectedRequestIds.map(Number),
+                  action: bulkAction,
+                  comments: bulkComment,
+                });
+              }}
+              disabled={
+                bulkActionMutation.isPending ||
+                selectedRequestIds.length === 0 ||
+                (bulkAction === "return" && !bulkComment.trim())
+              }
+            >
+              {bulkActionMutation.isPending
+                ? "Processing Batch..."
+                : bulkAction === "approve"
+                ? `Confirm Bulk Approval (${selectedRequestIds.length})`
+                : `Confirm Bulk Return (${selectedRequestIds.length})`}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
