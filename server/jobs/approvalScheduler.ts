@@ -62,9 +62,9 @@ export async function runApprovalScheduler(): Promise<void> {
           .update(approvalRequests)
           .set({
             status: "approved",
-            comments: "Auto-approved after 2 weeks of inactivity",
+            comments: "Auto-approved by system scheduler after 2 weeks of review window",
             resolvedAt: now,
-            resolvedById: "system",
+            resolvedById: null,
           })
           .where(and(eq(approvalRequests.id, req.id), eq(approvalRequests.tenantId, mp.tenantId)));
       }
