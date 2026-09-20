@@ -340,6 +340,10 @@ export default function VaccineCalculator() {
     return latest;
   }, [populationData, villages]);
 
+  const selectedFacilityData = useMemo(() => {
+    return facilities?.find((f) => String(f.id) === String(selectedFacility)) || null;
+  }, [facilities, selectedFacility]);
+
   const demographics = useMemo(() => {
     const settings = (activeTenant?.settings || {}) as Record<string, any>;
     return (settings.demographics || defaultDemographics) as typeof defaultDemographics;
@@ -354,14 +358,14 @@ export default function VaccineCalculator() {
       const total = Number(customPop.total);
       const under1 = customPop.under1 && !isNaN(Number(customPop.under1))
         ? Number(customPop.under1)
-        : Math.round(total * (demographics.under1 || 0.03));
+        : Math.round(total * (demographics.under1 || 0.038));
       const pregnant = customPop.pregnant && !isNaN(Number(customPop.pregnant))
         ? Number(customPop.pregnant)
-        : Math.round(total * (demographics.pregnant || 0.032));
+        : Math.round(total * (demographics.pregnant || 0.041));
       const schoolEntry = customPop.schoolEntry && !isNaN(Number(customPop.schoolEntry))
         ? Number(customPop.schoolEntry)
-        : Math.round(total * (demographics.schoolEntry || 0.027));
-      const schoolExit = Math.round(total * (demographics.schoolExit || 0.022));
+        : Math.round(total * (demographics.schoolEntry || 0.032));
+      const schoolExit = Math.round(total * (demographics.schoolExit || 0.030));
 
       return {
         facilityId: selectedFacilityId,
@@ -388,6 +392,12 @@ export default function VaccineCalculator() {
       if (sourceRows.length > 0) {
         const sorted = sourceRows.sort((a, b) => Number(b.year) - Number(a.year) || Number(b.id) - Number(a.id));
         const row = sorted[0];
+        const total = Number(row.totalPopulation || 0);
+        const under1 = row.under1Population ?? Math.round(total * (demographics.under1 || 0.038));
+        const pregnant = row.pregnantWomen ?? Math.round(total * (demographics.pregnant || 0.041));
+        const schoolEntry = row.schoolEntry ?? Math.round(total * (demographics.schoolEntry || 0.032));
+        const schoolExit = row.schoolExit ?? Math.round(total * (demographics.schoolExit || 0.030));
+
         const sourceLabel =
           selectedPopSource === "nso" ? `NSO Census Projections · ${row.year || currentYear}` :
           selectedPopSource === "hmis" ? `HMIS Health Records · ${row.year || currentYear}` :
@@ -398,6 +408,11 @@ export default function VaccineCalculator() {
         return {
           ...row,
           facilityId: selectedFacilityId,
+          totalPopulation: total,
+          under1Population: under1,
+          pregnantWomen: pregnant,
+          schoolEntry,
+          schoolExit,
           populationSource: selectedPopSource,
           sourceLabel,
         };
@@ -410,10 +425,10 @@ export default function VaccineCalculator() {
         ...total,
         year: Math.max(Number(total.year || 0), Number(row.year || 0)),
         totalPopulation: Number(total.totalPopulation || 0) + Number(row.totalPopulation || 0),
-        under1Population: Number(total.under1Population || 0) + Number(row.under1Population || 0),
-        pregnantWomen: Number(total.pregnantWomen || 0) + Number(row.pregnantWomen || 0),
-        schoolEntry: Number(total.schoolEntry || 0) + Number(row.schoolEntry || 0),
-        schoolExit: Number(total.schoolExit || 0) + Number(row.schoolExit || 0),
+        under1Population: Number(total.under1Population || 0) + (row.under1Population ?? Math.round(Number(row.totalPopulation || 0) * (demographics.under1 || 0.038))),
+        pregnantWomen: Number(total.pregnantWomen || 0) + (row.pregnantWomen ?? Math.round(Number(row.totalPopulation || 0) * (demographics.pregnant || 0.041))),
+        schoolEntry: Number(total.schoolEntry || 0) + (row.schoolEntry ?? Math.round(Number(row.totalPopulation || 0) * (demographics.schoolEntry || 0.032))),
+        schoolExit: Number(total.schoolExit || 0) + (row.schoolExit ?? Math.round(Number(row.totalPopulation || 0) * (demographics.schoolExit || 0.030))),
       }), {
         facilityId: selectedFacilityId,
         populationSource: "communities",
@@ -423,13 +438,33 @@ export default function VaccineCalculator() {
 
     // 4. Facility direct record fallback
     const facilityDirectRows = allFacilityRows.filter((p) => !p.villageId);
-    if (!facilityDirectRows.length) return null;
-    const best = facilityDirectRows.sort((a, b) => Number(b.year) - Number(a.year) || Number(b.id) - Number(a.id))[0];
+    if (facilityDirectRows.length > 0) {
+      const best = facilityDirectRows.sort((a, b) => Number(b.year) - Number(a.year) || Number(b.id) - Number(a.id))[0];
+      const total = Number(best.totalPopulation || 0);
+      return {
+        ...best,
+        totalPopulation: total,
+        under1Population: best.under1Population ?? Math.round(total * (demographics.under1 || 0.038)),
+        pregnantWomen: best.pregnantWomen ?? Math.round(total * (demographics.pregnant || 0.041)),
+        schoolEntry: best.schoolEntry ?? Math.round(total * (demographics.schoolEntry || 0.032)),
+        schoolExit: best.schoolExit ?? Math.round(total * (demographics.schoolExit || 0.030)),
+        sourceLabel: `Facility direct population record · ${best.year || currentYear}`,
+      };
+    }
+
+    // 5. Catchment Grid Estimate fallback
+    const catchmentPop = Number(selectedFacilityData?.catchmentGridPopulation || 5000);
     return {
-      ...best,
-      sourceLabel: `Facility direct population record · ${best.year || currentYear}`,
+      facilityId: selectedFacilityId,
+      totalPopulation: catchmentPop,
+      under1Population: Math.round(catchmentPop * (demographics.under1 || 0.038)),
+      pregnantWomen: Math.round(catchmentPop * (demographics.pregnant || 0.041)),
+      schoolEntry: Math.round(catchmentPop * (demographics.schoolEntry || 0.032)),
+      schoolExit: Math.round(catchmentPop * (demographics.schoolExit || 0.030)),
+      populationSource: "catchment",
+      sourceLabel: `Catchment Grid Estimate · ${currentYear}`,
     };
-  }, [selectedFacility, populationData, latestCommunityPopulation, selectedPopSource, isManualPopActive, customPop, demographics, currentYear]);
+  }, [selectedFacility, selectedFacilityData, populationData, latestCommunityPopulation, selectedPopSource, isManualPopActive, customPop, demographics, currentYear]);
 
   const availablePlans = useMemo(() => microplans.filter((plan: any) =>
     Number(plan.facilityId) === facilityId && (selectedQuarter ? Number(plan.quarter) === selectedQuarter : true)
@@ -474,6 +509,13 @@ export default function VaccineCalculator() {
   }, [totalPlannedContacts]);
 
   const communityRequirements = useMemo(() => {
+    if (!facilityPopulation) return [];
+    const facilityTotalPop = Number(facilityPopulation.totalPopulation || 0);
+    const facilityUnder1 = Number(facilityPopulation.under1Population ?? Math.round(facilityTotalPop * (demographics.under1 || 0.038)));
+    const facilityPregnant = Number(facilityPopulation.pregnantWomen ?? Math.round(facilityTotalPop * (demographics.pregnant || 0.041)));
+    const facilitySchoolEntry = Number(facilityPopulation.schoolEntry ?? Math.round(facilityTotalPop * (demographics.schoolEntry || 0.032)));
+    const facilitySchoolExit = Number(facilityPopulation.schoolExit ?? Math.round(facilityTotalPop * (demographics.schoolExit || 0.030)));
+
     const linksByVillage = new Map<number, any[]>();
     const sessionById = new Map(planSessions.map((session: any) => [Number(session.id), session]));
     
@@ -505,65 +547,80 @@ export default function VaccineCalculator() {
       }
     }
 
-    const under1Weights = villages.map((village: any) => {
-      const population = latestCommunityPopulation.get(Number(village.id));
-      return Math.max(0, Number(population?.under1Population || population?.totalPopulation || village.population || 0));
+    const baselineVillageWeights = villages.map((village: any) => {
+      const popRecord = latestCommunityPopulation.get(Number(village.id));
+      return Math.max(1, Number(popRecord?.totalPopulation || village.population || 100));
     });
-    const totalUnder1Weight = under1Weights.reduce((sum, value) => sum + value, 0);
-    const rawPlanAllocations = under1Weights.map((weight) => totalUnder1Weight > 0 ? linkedPlanTarget * weight / totalUnder1Weight : 0);
-    const planAllocations = rawPlanAllocations.map(Math.floor);
-    let remainingPlanTarget = Math.max(0, linkedPlanTarget - planAllocations.reduce((sum, value) => sum + value, 0));
-    rawPlanAllocations
-      .map((value, index) => ({ index, remainder: value - Math.floor(value) }))
-      .sort((a, b) => b.remainder - a.remainder)
-      .forEach(({ index }) => {
-        if (remainingPlanTarget > 0) {
-          planAllocations[index] += 1;
-          remainingPlanTarget -= 1;
-        }
-      });
+    const totalBaselineWeight = baselineVillageWeights.reduce((sum, w) => sum + w, 0) || 1;
+
+    const isBottomUpCommunities = !selectedPopSource || selectedPopSource === "communities" || selectedPopSource === "auto";
 
     return villages.map((village: any, villageIndex: number) => {
-      const population = latestCommunityPopulation.get(Number(village.id));
-      const totalPopulation = Number(population?.totalPopulation || village.population || 0);
+      const popRecord = latestCommunityPopulation.get(Number(village.id));
+      const villageWeight = baselineVillageWeights[villageIndex] / totalBaselineWeight;
+
+      let villageTotalPop: number;
+      let villageUnder1: number;
+      let villagePregnant: number;
+      let villageSchoolEntry: number;
+      let villageSchoolExit: number;
+
+      if (isBottomUpCommunities && !isManualPopActive) {
+        villageTotalPop = Number(popRecord?.totalPopulation || village.population || 0);
+        villageUnder1 = Number(popRecord?.under1Population ?? Math.round(villageTotalPop * (demographics.under1 || 0.038)));
+        villagePregnant = Number(popRecord?.pregnantWomen ?? Math.round(villageTotalPop * (demographics.pregnant || 0.041)));
+        villageSchoolEntry = Number(popRecord?.schoolEntry ?? Math.round(villageTotalPop * (demographics.schoolEntry || 0.032)));
+        villageSchoolExit = Number(popRecord?.schoolExit ?? Math.round(villageTotalPop * (demographics.schoolExit || 0.030)));
+      } else {
+        // Dynamically scale each community's population and cohort targets to the selected facility demographic source or manual entry
+        villageTotalPop = Math.max(1, Math.round(facilityTotalPop * villageWeight));
+        villageUnder1 = Math.max(1, Math.round(facilityUnder1 * villageWeight));
+        villagePregnant = Math.max(1, Math.round(facilityPregnant * villageWeight));
+        villageSchoolEntry = Math.max(1, Math.round(facilitySchoolEntry * villageWeight));
+        villageSchoolExit = Math.max(1, Math.round(facilitySchoolExit * villageWeight));
+      }
+
       const linkedSessions = selectedPlan ? (linksByVillage.get(Number(village.id)) || []) : [];
       const scheduledTarget = selectedPlan
         ? linkedSessions.reduce((sum, session) => sum + Number(session.targetPopulation || session.effectiveTargetPopulation || 0), 0)
         : 0;
 
       const requirements = activeSchedule.map((vaccine) => {
-        const explicit = vaccine.target === "under1" ? population?.under1Population
-          : vaccine.target === "pregnant" ? population?.pregnantWomen
-          : vaccine.target === "schoolEntry" ? population?.schoolEntry : null;
-        const annualCohort = Number(explicit ?? Math.round(totalPopulation * (demographics[vaccine.target as keyof typeof demographics] || 0.03)));
-        const usesPlanTarget = vaccine.target === "under1" && linkedPlanTarget > 0;
-        const quarterlyCohort = usesPlanTarget ? planAllocations[villageIndex] : Math.ceil(annualCohort / 4);
+        const annualCohort =
+          vaccine.target === "under1" || vaccine.target === "birth" ? villageUnder1
+          : vaccine.target === "pregnant" ? villagePregnant
+          : vaccine.target === "schoolEntry" ? villageSchoolEntry
+          : vaccine.target === "schoolExit" ? villageSchoolExit
+          : Math.round(villageTotalPop * (demographics[vaccine.target as keyof typeof demographics] || 0.038));
+
+        const quarterlyCohort = Math.max(1, Math.ceil(annualCohort / 4));
         const forecast = calculateLifeCourseForecast({
           population: quarterlyCohort,
-          coveragePercent: usesPlanTarget ? 100 : coverageTarget,
+          coveragePercent: coverageTarget,
           dosesPerPerson: vaccine.doses,
           dosesPerVial: vaccine.vialsPerDose,
           wastagePercent: vaccine.wastage,
-          peoplePerSession: 40
+          peoplePerSession: 40,
         });
         return {
           name: vaccine.name,
           vials: forecast.vials,
           doses: forecast.supplyDoses,
           administrationDoses: forecast.administrationDoses,
-          targetPop: forecast.peopleToReach
+          targetPop: forecast.peopleToReach,
         };
       });
+
       return {
         village,
-        totalPopulation,
+        totalPopulation: villageTotalPop,
         linkedSessions,
         scheduledTarget,
         requirements,
-        totalVials: requirements.reduce((sum, req) => sum + req.vials, 0)
+        totalVials: requirements.reduce((sum, req) => sum + req.vials, 0),
       };
     }).sort((a: any, b: any) => b.totalVials - a.totalVials);
-  }, [villages, latestCommunityPopulation, planSessions, sessionVillageLinks, activeSchedule, demographics, coverageTarget, linkedPlanTarget, selectedPlan]);
+  }, [villages, latestCommunityPopulation, planSessions, sessionVillageLinks, activeSchedule, demographics, coverageTarget, selectedPlan, facilityPopulation, selectedPopSource, isManualPopActive]);
 
   const calculations = useMemo(() => {
     if (!facilityPopulation) return [];
@@ -573,6 +630,7 @@ export default function VaccineCalculator() {
       const communityForecasts = communityRequirements
         .map((community: any) => community.requirements.find((requirement: any) => requirement.name === vaccine.name))
         .filter(Boolean);
+
       if (communityForecasts.length > 0) {
         return {
           ...vaccine,
@@ -584,23 +642,33 @@ export default function VaccineCalculator() {
         };
       }
 
-      const explicitCohort = vaccine.target === "under1" ? facilityPopulation.under1Population
+      const explicitCohort =
+        vaccine.target === "under1" || vaccine.target === "birth" ? facilityPopulation.under1Population
         : vaccine.target === "pregnant" ? facilityPopulation.pregnantWomen
-        : vaccine.target === "schoolEntry" ? facilityPopulation.schoolEntry : null;
-      const annualCohort = Number(explicitCohort || Math.round(totalPop * (demographics[vaccine.target as keyof typeof demographics] || 0.03)));
-      const usesPlanTarget = vaccine.target === "under1" && linkedPlanTarget > 0;
+        : vaccine.target === "schoolEntry" ? facilityPopulation.schoolEntry
+        : vaccine.target === "schoolExit" ? facilityPopulation.schoolExit
+        : Math.round(totalPop * (demographics[vaccine.target as keyof typeof demographics] || 0.038));
+
+      const annualCohort = Number(explicitCohort || Math.round(totalPop * 0.038));
       const forecast = calculateLifeCourseForecast({
-        population: usesPlanTarget ? linkedPlanTarget : Math.ceil(annualCohort / 4),
-        coveragePercent: usesPlanTarget ? 100 : coverageTarget,
+        population: Math.max(1, Math.ceil(annualCohort / 4)),
+        coveragePercent: coverageTarget,
         dosesPerPerson: vaccine.doses,
         dosesPerVial: vaccine.vialsPerDose,
         wastagePercent: vaccine.wastage,
         peoplePerSession: 40,
       });
-      return { ...vaccine, targetPop: forecast.peopleToReach, dosesNeeded: forecast.administrationDoses,
-        dosesWithWastage: forecast.supplyDoses, vialsNeeded: forecast.vials, quarterlyVials: forecast.vials };
+
+      return {
+        ...vaccine,
+        targetPop: forecast.peopleToReach,
+        dosesNeeded: forecast.administrationDoses,
+        dosesWithWastage: forecast.supplyDoses,
+        vialsNeeded: forecast.vials,
+        quarterlyVials: forecast.vials,
+      };
     });
-  }, [facilityPopulation, activeSchedule, coverageTarget, demographics, linkedPlanTarget, communityRequirements]);
+  }, [facilityPopulation, activeSchedule, coverageTarget, demographics, communityRequirements]);
 
   const totalVials = calculations.reduce((sum, c) => sum + c.quarterlyVials, 0);
   const totalDoses = calculations.reduce((sum, c) => sum + c.dosesWithWastage, 0);

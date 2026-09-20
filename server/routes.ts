@@ -1248,7 +1248,7 @@ export async function sendApprovalSmsForMicroplan(tenantId: string, microplanId:
           id: creator.id,
           email: creator.email,
           name: creatorName,
-          phone: creator.phone,
+          phone: (creator as any).phone || (creator as any).contactPhone || null,
         });
       }
     }
@@ -1275,7 +1275,7 @@ export async function sendApprovalSmsForMicroplan(tenantId: string, microplanId:
           id: tu.id,
           email: tu.email,
           name: uName,
-          phone: tu.phone,
+          phone: (tu as any).phone || (tu as any).contactPhone || null,
         });
       }
     }
