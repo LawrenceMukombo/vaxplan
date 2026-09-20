@@ -29,7 +29,8 @@ export async function runApprovalScheduler(): Promise<void> {
 
     for (const mp of pendingToApprove) {
       if (!mp.tenantId) continue;
-      const tenant = await storage.getTenant(mp.tenantId);
+      const tenantId = mp.tenantId;
+      const tenant = await storage.getTenant(tenantId);
       if (!approvalEligibility(mp.submittedAt ?? mp.createdAt, tenant?.settings, now).allowed) continue;
       console.log(`[approval-scheduler] Auto-approving microplan ID: ${mp.id} (Tenant: ${mp.tenantId})`);
 
@@ -46,7 +47,7 @@ export async function runApprovalScheduler(): Promise<void> {
           })
           .where(
             and(
-              eq(approvalRequests.tenantId, mp.tenantId),
+              eq(approvalRequests.tenantId, tenantId),
               eq(approvalRequests.entityType, "microplan"),
               eq(approvalRequests.entityId, mp.id),
               eq(approvalRequests.status, "pending")
@@ -61,7 +62,7 @@ export async function runApprovalScheduler(): Promise<void> {
             approvedAt: now,
             updatedAt: now,
           })
-          .where(and(eq(microplans.id, mp.id), eq(microplans.tenantId, mp.tenantId)));
+          .where(and(eq(microplans.id, mp.id), eq(microplans.tenantId, tenantId)));
       });
 
       // Seed quarterly supervisory visits for facilities in scope

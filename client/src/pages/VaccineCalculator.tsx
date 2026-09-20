@@ -289,29 +289,48 @@ export default function VaccineCalculator() {
       }));
   }, [vaccineConfigs]);
 
-  const facilityPopulation = useMemo(() => {
-    if (!selectedFacility) return null;
-    const facilityId = parseInt(selectedFacility);
-    const popData = populationData?.filter((p) => p.facilityId === facilityId && !p.villageId);
-    if (popData?.length) {
-      const latestYear = Math.max(...popData.map((p) => p.year));
-      return popData.find((p) => p.year === latestYear) || null;
+  const latestCommunityPopulation = useMemo(() => {
+    const rowsByVillage = new Map<number, PopulationData[]>();
+    const assignedIds = new Set(villages.map((v: any) => Number(v.id)));
+    for (const row of populationData || []) {
+      const villageId = Number(row.villageId);
+      if (!row.villageId || !assignedIds.has(villageId)) continue;
+      rowsByVillage.set(villageId, [...(rowsByVillage.get(villageId) || []), row]);
     }
 
-    const villageIds = new Set(villages.map((v: any) => Number(v.id)));
-    const communityRows = populationData?.filter((p) => p.villageId && villageIds.has(Number(p.villageId))) || [];
-    if (!communityRows.length) return null;
-    const latestYear = Math.max(...communityRows.map((p) => p.year));
-    const latestRows = communityRows.filter((p) => p.year === latestYear);
-    return latestRows.reduce((total: any, row: any) => ({
-      ...total,
-      year: latestYear,
-      totalPopulation: (total.totalPopulation || 0) + (row.totalPopulation || 0),
-      under1Population: (total.under1Population || 0) + (row.under1Population || 0),
-      pregnantWomen: (total.pregnantWomen || 0) + (row.pregnantWomen || 0),
-      schoolEntry: (total.schoolEntry || 0) + (row.schoolEntry || 0),
-    }), { facilityId });
-  }, [selectedFacility, populationData, villages]);
+    const latest = new Map<number, PopulationData>();
+    rowsByVillage.forEach((rows: PopulationData[], villageId: number) => {
+      rows.sort((a: PopulationData, b: PopulationData) => Number(b.year) - Number(a.year) || Number(b.id) - Number(a.id));
+      latest.set(villageId, rows[0]);
+    });
+    return latest;
+  }, [populationData, villages]);
+
+  const facilityPopulation = useMemo(() => {
+    if (!selectedFacility) return null;
+    const selectedFacilityId = Number(selectedFacility);
+
+    // Assigned communities are the calculator's operational unit. Sum the
+    // latest available record for each community even when their years differ.
+    // A facility aggregate is only a fallback when no community data exists.
+    if (latestCommunityPopulation.size > 0) {
+      return Array.from(latestCommunityPopulation.values()).reduce((total: any, row: any) => ({
+        ...total,
+        year: Math.max(Number(total.year || 0), Number(row.year || 0)),
+        totalPopulation: Number(total.totalPopulation || 0) + Number(row.totalPopulation || 0),
+        under1Population: Number(total.under1Population || 0) + Number(row.under1Population || 0),
+        pregnantWomen: Number(total.pregnantWomen || 0) + Number(row.pregnantWomen || 0),
+        schoolEntry: Number(total.schoolEntry || 0) + Number(row.schoolEntry || 0),
+        schoolExit: Number(total.schoolExit || 0) + Number(row.schoolExit || 0),
+      }), { facilityId: selectedFacilityId, populationSource: "communities" });
+    }
+
+    const facilityRows = (populationData || []).filter(
+      (p) => Number(p.facilityId) === selectedFacilityId && !p.villageId
+    );
+    if (!facilityRows.length) return null;
+    return facilityRows.sort((a, b) => Number(b.year) - Number(a.year) || Number(b.id) - Number(a.id))[0];
+  }, [selectedFacility, populationData, latestCommunityPopulation]);
 
   const availablePlans = useMemo(() => microplans.filter((plan: any) =>
     Number(plan.facilityId) === facilityId && Number(plan.quarter) === selectedQuarter
@@ -337,58 +356,6 @@ export default function VaccineCalculator() {
     return (settings.demographics || defaultDemographics) as typeof defaultDemographics;
   }, [activeTenant]);
 
-  const calculations = useMemo(() => {
-    if (!facilityPopulation) return [];
-
-    const totalPop = facilityPopulation.totalPopulation || 10000;
-
-    return activeSchedule.map((vaccine) => {
-      let targetPop = 0;
-      switch (vaccine.target) {
-        case "births":
-          targetPop = Math.round(totalPop * demographics.births);
-          break;
-        case "under1":
-          targetPop = Math.round(totalPop * demographics.under1);
-          break;
-        case "pregnant":
-          targetPop = Math.round(totalPop * demographics.pregnant);
-          break;
-        case "schoolEntry":
-          targetPop = Math.round(totalPop * demographics.schoolEntry);
-          break;
-        default:
-          targetPop = Math.round(totalPop * 0.03);
-      }
-
-      // Demographic cohorts are annual estimates. Calculate the selected
-      // quarter directly so vial rounding and open-vial wastage are applied at
-      // the operational ordering period, not after an annual calculation.
-      const usesPlanTarget = vaccine.target === "under1" && linkedPlanTarget > 0;
-      const quarterlyCohort = usesPlanTarget ? linkedPlanTarget : Math.ceil(targetPop / 4);
-      const forecast = calculateLifeCourseForecast({
-        population: quarterlyCohort,
-        coveragePercent: usesPlanTarget ? 100 : coverageTarget,
-        dosesPerPerson: vaccine.doses,
-        dosesPerVial: vaccine.vialsPerDose,
-        wastagePercent: vaccine.wastage,
-        peoplePerSession: 40,
-      });
-      const dosesWithWastage = forecast.supplyDoses;
-      const vialsNeeded = forecast.vials;
-      const quarterlyVials = vialsNeeded;
-
-      return {
-        ...vaccine,
-        targetPop: forecast.peopleToReach,
-        dosesNeeded: forecast.administrationDoses,
-        dosesWithWastage,
-        vialsNeeded,
-        quarterlyVials,
-      };
-    });
-  }, [facilityPopulation, activeSchedule, coverageTarget, demographics, linkedPlanTarget]);
-
   const communityRequirements = useMemo(() => {
     const linksByVillage = new Map<number, any[]>();
     const sessionById = new Map(planSessions.map((session: any) => [Number(session.id), session]));
@@ -398,10 +365,26 @@ export default function VaccineCalculator() {
       const id = Number(link.villageId);
       linksByVillage.set(id, [...(linksByVillage.get(id) || []), session]);
     }
-    return villages.map((village: any) => {
-      const rows = (populationData || []).filter((row: any) => Number(row.villageId) === Number(village.id));
-      const year = rows.length ? Math.max(...rows.map((row: any) => Number(row.year))) : 0;
-      const population = rows.find((row: any) => Number(row.year) === year);
+    const under1Weights = villages.map((village: any) => {
+      const population = latestCommunityPopulation.get(Number(village.id));
+      return Math.max(0, Number(population?.under1Population || population?.totalPopulation || village.population || 0));
+    });
+    const totalUnder1Weight = under1Weights.reduce((sum, value) => sum + value, 0);
+    const rawPlanAllocations = under1Weights.map((weight) => totalUnder1Weight > 0 ? linkedPlanTarget * weight / totalUnder1Weight : 0);
+    const planAllocations = rawPlanAllocations.map(Math.floor);
+    let remainingPlanTarget = Math.max(0, linkedPlanTarget - planAllocations.reduce((sum, value) => sum + value, 0));
+    rawPlanAllocations
+      .map((value, index) => ({ index, remainder: value - Math.floor(value) }))
+      .sort((a, b) => b.remainder - a.remainder)
+      .forEach(({ index }) => {
+        if (remainingPlanTarget > 0) {
+          planAllocations[index] += 1;
+          remainingPlanTarget -= 1;
+        }
+      });
+
+    return villages.map((village: any, villageIndex: number) => {
+      const population = latestCommunityPopulation.get(Number(village.id));
       const totalPopulation = Number(population?.totalPopulation || village.population || 0);
       const linkedSessions = linksByVillage.get(Number(village.id)) || [];
       const scheduledTarget = linkedSessions.reduce((sum, session) => sum + Number(session.targetPopulation || 0), 0);
@@ -409,16 +392,56 @@ export default function VaccineCalculator() {
         const explicit = vaccine.target === "under1" ? population?.under1Population
           : vaccine.target === "pregnant" ? population?.pregnantWomen
           : vaccine.target === "schoolEntry" ? population?.schoolEntry : null;
-        const cohort = Number(explicit ?? Math.round(totalPopulation * (demographics[vaccine.target as keyof typeof demographics] || 0.03)));
-        const forecast = calculateLifeCourseForecast({ population: Math.ceil(cohort / 4), coveragePercent: coverageTarget,
+        const annualCohort = Number(explicit ?? Math.round(totalPopulation * (demographics[vaccine.target as keyof typeof demographics] || 0.03)));
+        const usesPlanTarget = vaccine.target === "under1" && linkedPlanTarget > 0;
+        const quarterlyCohort = usesPlanTarget ? planAllocations[villageIndex] : Math.ceil(annualCohort / 4);
+        const forecast = calculateLifeCourseForecast({ population: quarterlyCohort, coveragePercent: usesPlanTarget ? 100 : coverageTarget,
           dosesPerPerson: vaccine.doses, dosesPerVial: vaccine.vialsPerDose,
           wastagePercent: vaccine.wastage, peoplePerSession: 40 });
-        return { name: vaccine.name, vials: forecast.vials, doses: forecast.supplyDoses };
+        return { name: vaccine.name, vials: forecast.vials, doses: forecast.supplyDoses,
+          administrationDoses: forecast.administrationDoses, targetPop: forecast.peopleToReach };
       });
       return { village, totalPopulation, linkedSessions, scheduledTarget, requirements,
         totalVials: requirements.reduce((sum, req) => sum + req.vials, 0) };
     }).sort((a: any, b: any) => b.totalVials - a.totalVials);
-  }, [villages, populationData, planSessions, sessionVillageLinks, activeSchedule, demographics, coverageTarget]);
+  }, [villages, latestCommunityPopulation, planSessions, sessionVillageLinks, activeSchedule, demographics, coverageTarget, linkedPlanTarget]);
+
+  const calculations = useMemo(() => {
+    if (!facilityPopulation) return [];
+    const totalPop = Number(facilityPopulation.totalPopulation || 0);
+
+    return activeSchedule.map((vaccine) => {
+      const communityForecasts = communityRequirements
+        .map((community: any) => community.requirements.find((requirement: any) => requirement.name === vaccine.name))
+        .filter(Boolean);
+      if (communityForecasts.length > 0) {
+        return {
+          ...vaccine,
+          targetPop: communityForecasts.reduce((sum: number, item: any) => sum + item.targetPop, 0),
+          dosesNeeded: communityForecasts.reduce((sum: number, item: any) => sum + item.administrationDoses, 0),
+          dosesWithWastage: communityForecasts.reduce((sum: number, item: any) => sum + item.doses, 0),
+          vialsNeeded: communityForecasts.reduce((sum: number, item: any) => sum + item.vials, 0),
+          quarterlyVials: communityForecasts.reduce((sum: number, item: any) => sum + item.vials, 0),
+        };
+      }
+
+      const explicitCohort = vaccine.target === "under1" ? facilityPopulation.under1Population
+        : vaccine.target === "pregnant" ? facilityPopulation.pregnantWomen
+        : vaccine.target === "schoolEntry" ? facilityPopulation.schoolEntry : null;
+      const annualCohort = Number(explicitCohort || Math.round(totalPop * (demographics[vaccine.target as keyof typeof demographics] || 0.03)));
+      const usesPlanTarget = vaccine.target === "under1" && linkedPlanTarget > 0;
+      const forecast = calculateLifeCourseForecast({
+        population: usesPlanTarget ? linkedPlanTarget : Math.ceil(annualCohort / 4),
+        coveragePercent: usesPlanTarget ? 100 : coverageTarget,
+        dosesPerPerson: vaccine.doses,
+        dosesPerVial: vaccine.vialsPerDose,
+        wastagePercent: vaccine.wastage,
+        peoplePerSession: 40,
+      });
+      return { ...vaccine, targetPop: forecast.peopleToReach, dosesNeeded: forecast.administrationDoses,
+        dosesWithWastage: forecast.supplyDoses, vialsNeeded: forecast.vials, quarterlyVials: forecast.vials };
+    });
+  }, [facilityPopulation, activeSchedule, coverageTarget, demographics, linkedPlanTarget, communityRequirements]);
 
   const totalVials = calculations.reduce((sum, c) => sum + c.quarterlyVials, 0);
   const totalDoses = calculations.reduce((sum, c) => sum + c.dosesWithWastage, 0);
@@ -643,6 +666,11 @@ export default function VaccineCalculator() {
                   <p className="text-sm text-muted-foreground font-medium">Population Base</p>
                   <p className="text-3xl font-bold font-mono tracking-tight mt-1">
                     {facilityPopulation.totalPopulation?.toLocaleString()}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {latestCommunityPopulation.size > 0
+                      ? `${latestCommunityPopulation.size} assigned communities · latest record each`
+                      : `Facility population record · ${facilityPopulation.year || "latest"}`}
                   </p>
                 </div>
                 <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
