@@ -178,20 +178,36 @@ export function SessionMatrixCalendar({
     return facilities.filter((f) => f.districtId === Number(selectedDistrict));
   }, [facilities, selectedDistrict]);
 
-  // Filter facilities by cascade and search
+  // Facilities that have at least one session in this microplan/view
+  const facilitiesWithSessions = useMemo(() => {
+    const ids = new Set(sessions.map((s) => s.facilityId).filter(Boolean));
+    return facilities.filter((f) => ids.has(f.id));
+  }, [sessions, facilities]);
+
+  // Filter facilities by cascade and search.
+  // Default (no cascade active): show only facilities that have sessions so
+  // the matrix isn't swamped with 4000+ empty rows when the user first loads.
+  // When ANY cascade level is set, expand to that geographic pool.
   const filteredFacilities = useMemo(() => {
-    let pool: Facility[] = [];
+    let pool: Facility[];
+
     if (selectedDistrict !== "all") {
+      // Level 3: district chosen — show all facilities in that district
       pool = availableFacilities;
     } else if (selectedProvince !== "all") {
+      // Level 2: province chosen — show all facilities in province districts
       const provDistrictIds = new Set(
         districts
           .filter((d) => d.provinceId === Number(selectedProvince))
           .map((d) => d.id)
       );
       pool = facilities.filter((f) => f.districtId && provDistrictIds.has(f.districtId));
-    } else {
+    } else if (searchQuery.trim()) {
+      // Search override — scan all facilities
       pool = facilities;
+    } else {
+      // Default: show only facilities that have sessions
+      pool = facilitiesWithSessions.length > 0 ? facilitiesWithSessions : facilities;
     }
 
     return pool.filter((f) => {
@@ -207,7 +223,7 @@ export function SessionMatrixCalendar({
       }
       return true;
     });
-  }, [facilities, districts, availableFacilities, selectedProvince, selectedDistrict, selectedFacilityId, searchQuery]);
+  }, [facilities, districts, facilitiesWithSessions, availableFacilities, selectedProvince, selectedDistrict, selectedFacilityId, searchQuery]);
 
   // Handle cascading resets
   const handleProvinceChange = (newProv: string) => {
