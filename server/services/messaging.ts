@@ -202,33 +202,51 @@ export async function sendEmail(options: SendEmailOptions): Promise<{ success: b
   try {
     const { to, subject, text, html, attachments, config } = options;
     
-    const host = config?.host || process.env.SMTP_HOST || 'smtp.gmail.com';
-    const port = config?.port || Number(process.env.SMTP_PORT) || 465;
-    const user = config?.user || process.env.SMTP_USER;
-    const pass = config?.pass || process.env.SMTP_PASS || process.env.SMTP_PASSWORD;
-    const from = config?.from || process.env.SMTP_FROM || `"VaxPlan Notifications" <${user}>`;
+    const host = String(config?.host || process.env.SMTP_HOST || 'smtp.gmail.com').trim();
+    const port = Number(config?.port || process.env.SMTP_PORT || 465);
+    const user = String(config?.user || process.env.SMTP_USER || '').trim();
+    const rawPass = String(config?.pass || process.env.SMTP_PASS || process.env.SMTP_PASSWORD || '');
+    // Google App Passwords often contain spaced groupings (e.g. "xxxx xxxx xxxx xxxx") when copied; strip internal spaces
+    const pass = rawPass.trim().replace(/\s+/g, '');
 
     // Check if SMTP configs exist to avoid breaking if they are missing
     if (!user || !pass) {
       console.log(`[Mock Email] SMTP config missing. Mocking email to: ${to} | Subject: ${subject}`);
       return { success: true, messageId: `mock-email-${Date.now()}` };
     }
+
+    // Ensure 'from' header adheres to RFC 5322 format.
+    // If the admin typed just a display name (e.g. "VaxPlan Notification"), wrap it with their authenticated user address.
+    let from = String(config?.from || process.env.SMTP_FROM || '').trim();
+    if (!from) {
+      from = `"VaxPlan Notifications" <${user}>`;
+    } else if (!from.includes('@')) {
+      from = `"${from.replace(/"/g, '')}" <${user}>`;
+    }
     
-    console.log(`[Messaging Service] Preparing to send Email to ${to} via Nodemailer`);
+    console.log(`[Messaging Service] Preparing to send Email to ${to} via Nodemailer (${host}:${port})`);
+
+    const isSsl = port === 465;
 
     const transporter = nodemailer.createTransport({
       host: host,
-      port: Number(port),
-      secure: Number(port) === 465, // true for 465, false for other ports
+      port: port,
+      secure: isSsl, // true for 465 (SSL), false for 587 (STARTTLS)
       auth: {
         user: user,
         pass: pass,
       },
+      tls: {
+        rejectUnauthorized: false, // Prevents certificate handshake rejections on corporate/proxy setups
+      },
+      connectionTimeout: 15000,
+      greetingTimeout: 15000,
+      socketTimeout: 20000,
     });
 
     const info = await transporter.sendMail({
       from: from,
-      to,
+      to: to.trim(),
       subject,
       text,
       html,

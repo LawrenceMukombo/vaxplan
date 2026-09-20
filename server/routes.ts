@@ -13193,17 +13193,21 @@ export async function registerRoutes(
           result = await sendMessagingEmail({ to: destination, subject: 'VaxPlan Test Message', text: msgText, config: commConfig });
         }
 
-        await db.insert(communicationLogs).values({
-          tenantId: req.tenantId!,
-          channel,
-          destination,
-          status: result.success ? 'delivered' : 'failed',
-          providerResponse: result.error || result.messageId || 'Success',
-          fallbackTriggered: false,
-        });
+        try {
+          await db.insert(communicationLogs).values({
+            tenantId: req.tenantId!,
+            channel,
+            destination,
+            status: result.success ? 'delivered' : 'failed',
+            providerResponse: String(result.error || result.messageId || 'Success'),
+            fallbackTriggered: false,
+          });
+        } catch (dbErr: any) {
+          console.warn("[Communication Test] Non-fatal DB log insert warning:", dbErr?.message);
+        }
 
         if (result.success) {
-          res.json({ message: "Message dispatched", details: result });
+          res.json({ message: "Test message dispatched successfully", details: result });
         } else {
           const providerError = result.error || "The provider rejected the request";
           res.status(502).json({ message: `Failed to send via ${channel}: ${providerError}` });
