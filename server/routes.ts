@@ -38,6 +38,7 @@ import {
   notifyAdminNewCountryInterest,
 } from "./services/notificationService";
 import { sendSms, sendWhatsApp, sendEmail as sendMessagingEmail } from "./services/messaging";
+import { getWppconnectStatus, startWppconnectSession, closeWppconnectSession } from "./services/wppconnectService";
 import { dispatchNotification } from "./services/uce";
 import { surveillanceRouter } from "./routes/surveillance";
 import vgieRouter from "./routes/vgie";
@@ -13236,6 +13237,73 @@ export async function registerRoutes(
       } catch (err) {
         console.error("GET /api/me/tenant/communication-logs failed:", err);
         res.status(500).json({ message: "Failed to fetch logs" });
+      }
+    }
+  );
+
+  // ── WPPConnect WhatsApp Gateway Management Endpoints ──────────────────────
+  app.get(
+    "/api/me/tenant/whatsapp/status",
+    isAuthenticated,
+    requireTenant,
+    loadRole,
+    requireAdmin,
+    async (req: any, res) => {
+      try {
+        const tenant = await storage.getTenant(req.tenantId!);
+        const waConfig = (tenant?.settings as any)?.communication?.whatsapp || {};
+        const status = await getWppconnectStatus({
+          serverUrl: waConfig.serverUrl,
+          session: waConfig.session,
+          secretKey: waConfig.secretKey,
+        });
+        res.json(status);
+      } catch (err: any) {
+        res.status(500).json({ connected: false, status: "OFFLINE", message: err.message });
+      }
+    }
+  );
+
+  app.post(
+    "/api/me/tenant/whatsapp/start-session",
+    isAuthenticated,
+    requireTenant,
+    loadRole,
+    requireAdmin,
+    async (req: any, res) => {
+      try {
+        const tenant = await storage.getTenant(req.tenantId!);
+        const waConfig = (tenant?.settings as any)?.communication?.whatsapp || {};
+        const result = await startWppconnectSession({
+          serverUrl: req.body?.serverUrl || waConfig.serverUrl,
+          session: req.body?.session || waConfig.session,
+          secretKey: req.body?.secretKey || waConfig.secretKey,
+        });
+        res.json(result);
+      } catch (err: any) {
+        res.status(500).json({ success: false, message: err.message });
+      }
+    }
+  );
+
+  app.post(
+    "/api/me/tenant/whatsapp/close-session",
+    isAuthenticated,
+    requireTenant,
+    loadRole,
+    requireAdmin,
+    async (req: any, res) => {
+      try {
+        const tenant = await storage.getTenant(req.tenantId!);
+        const waConfig = (tenant?.settings as any)?.communication?.whatsapp || {};
+        const result = await closeWppconnectSession({
+          serverUrl: waConfig.serverUrl,
+          session: waConfig.session,
+          secretKey: waConfig.secretKey,
+        });
+        res.json(result);
+      } catch (err: any) {
+        res.status(500).json({ success: false, message: err.message });
       }
     }
   );

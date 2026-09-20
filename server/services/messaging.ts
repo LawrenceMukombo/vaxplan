@@ -2,6 +2,7 @@ import nodemailer from 'nodemailer';
 import { isRedisConfigured, redisConnection } from './uce/queue';
 import { db } from '../db';
 import { communicationLogs } from '../../shared/schema';
+import { sendWppconnectMessage } from './wppconnectService';
 
 /**
  * Modular Messaging Service
@@ -186,6 +187,13 @@ export async function sendWhatsApp(options: SendWhatsAppOptions): Promise<{ succ
         to: safeToPhone 
       });
       return { success: true, messageId: res.sid };
+    }
+
+    if (provider === 'wppconnect') {
+      const serverUrl = config?.serverUrl || process.env.WPPCONNECT_SERVER_URL;
+      const session = config?.session || process.env.WPPCONNECT_SESSION;
+      const secretKey = config?.secretKey || process.env.WPPCONNECT_SECRET_KEY;
+      return await sendWppconnectMessage(to, message, { serverUrl, session, secretKey });
     }
     
     return { success: false, error: "Unknown WhatsApp provider" };

@@ -9,8 +9,16 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
-import { Loader2, Activity, ShieldAlert, CheckCircle2 } from "lucide-react";
+import { Loader2, Activity, ShieldAlert, CheckCircle2, QrCode, RefreshCw, AlertCircle } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
+import { Badge } from "@/components/ui/badge";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { format } from "date-fns";
 
@@ -29,10 +37,43 @@ export function TenantCommunicationCard() {
   const [smsSenderNumber, setSmsSenderNumber] = useState("");
 
   // WhatsApp Settings
-  const [waProvider, setWaProvider] = useState("mock");
+  const [waProvider, setWaProvider] = useState("wppconnect");
   const [waAccountSid, setWaAccountSid] = useState("");
   const [waAuthToken, setWaAuthToken] = useState("");
   const [waSenderNumber, setWaSenderNumber] = useState("");
+  const [waServerUrl, setWaServerUrl] = useState("http://localhost:21465");
+  const [waSession, setWaSession] = useState("vaxplan");
+  const [waSecretKey, setWaSecretKey] = useState("");
+  const [qrModalOpen, setQrModalOpen] = useState(false);
+  const [isStartingSession, setIsStartingSession] = useState(false);
+  const [currentQrCode, setCurrentQrCode] = useState<string | null>(null);
+
+  // Live WPPConnect status query
+  const { data: waStatus, refetch: refetchWaStatus, isFetching: isFetchingWaStatus } = useQuery<{
+    connected: boolean;
+    status: "CONNECTED" | "QRCODE" | "DISCONNECTED" | "OFFLINE" | "INITIALIZING" | "UNKNOWN";
+    qrcode?: string | null;
+    message?: string;
+    phone?: string | null;
+  }>({
+    queryKey: ["/api/me/tenant/whatsapp/status"],
+    enabled: waProvider === "wppconnect",
+    refetchInterval: qrModalOpen ? 4000 : false,
+  });
+
+  // Watch for QR code in status updates
+  useEffect(() => {
+    if (waStatus?.qrcode) {
+      setCurrentQrCode(waStatus.qrcode);
+    }
+    if (waStatus?.connected && qrModalOpen) {
+      setQrModalOpen(false);
+      toast({
+        title: "WhatsApp Connected! ✓",
+        description: `Successfully linked with ${waStatus.phone || "your WhatsApp device"}.`,
+      });
+    }
+  }, [waStatus, qrModalOpen]);
 
   // Email Settings
   const [emailHost, setEmailHost] = useState("");
@@ -67,10 +108,13 @@ export function TenantCommunicationCard() {
         setSmsSenderNumber(comm.sms.senderNumber || "");
       }
       if (comm.whatsapp) {
-        setWaProvider(comm.whatsapp.provider || "mock");
+        setWaProvider(comm.whatsapp.provider || "wppconnect");
         setWaAccountSid(comm.whatsapp.accountSid || "");
         setWaAuthToken(comm.whatsapp.authToken || "");
         setWaSenderNumber(comm.whatsapp.senderNumber || "");
+        setWaServerUrl(comm.whatsapp.serverUrl || "http://localhost:21465");
+        setWaSession(comm.whatsapp.session || "vaxplan");
+        setWaSecretKey(comm.whatsapp.secretKey || "");
       }
       if (comm.email) {
         setEmailHost(comm.email.host || "smtp.gmail.com");
@@ -125,6 +169,9 @@ export function TenantCommunicationCard() {
           accountSid: waAccountSid.trim(),
           authToken: waAuthToken.trim(),
           senderNumber: waSenderNumber.trim(),
+          serverUrl: waServerUrl.trim() || "http://localhost:21465",
+          session: waSession.trim() || "vaxplan",
+          secretKey: waSecretKey.trim(),
         },
         email: {
           host: emailHost.trim() || "smtp.gmail.com",
@@ -170,6 +217,9 @@ export function TenantCommunicationCard() {
             accountSid: waAccountSid.trim(),
             authToken: waAuthToken.trim(),
             senderNumber: waSenderNumber.trim(),
+            serverUrl: waServerUrl.trim() || "http://localhost:21465",
+            session: waSession.trim() || "vaxplan",
+            secretKey: waSecretKey.trim(),
           };
 
     setTestingChannel(channel);
@@ -205,7 +255,49 @@ export function TenantCommunicationCard() {
     }
   };
 
+  const handleStartPairing = async () => {
+    setIsStartingSession(true);
+    try {
+      const res: any = await apiRequest("POST", "/api/me/tenant/whatsapp/start-session", {
+        serverUrl: waServerUrl.trim() || "http://localhost:21465",
+        session: waSession.trim() || "vaxplan",
+        secretKey: waSecretKey.trim(),
+      });
+      if (res.qrcode) {
+        setCurrentQrCode(res.qrcode);
+      }
+      setQrModalOpen(true);
+      refetchWaStatus();
+    } catch (err: any) {
+      toast({
+        title: "Pairing Request Failed",
+        description: err.message,
+        variant: "destructive",
+      });
+    } finally {
+      setIsStartingSession(false);
+    }
+  };
+
+  const handleCloseSession = async () => {
+    try {
+      await apiRequest("POST", "/api/me/tenant/whatsapp/close-session", {});
+      toast({
+        title: "Session Disconnected",
+        description: "WhatsApp session was disconnected. You can now pair a new device.",
+      });
+      refetchWaStatus();
+    } catch (err: any) {
+      toast({
+        title: "Disconnect Failed",
+        description: err.message,
+        variant: "destructive",
+      });
+    }
+  };
+
   return (
+    <>
     <Card data-testid="card-tenant-communication">
       <CardHeader>
         <div className="flex items-center gap-3">
@@ -365,19 +457,154 @@ export function TenantCommunicationCard() {
 
         {/* WhatsApp Section */}
         <div className="space-y-4">
-          <h3 className="text-sm font-semibold flex items-center gap-2"><MessageSquare className="w-4 h-4" /> WhatsApp Provider</h3>
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-semibold flex items-center gap-2">
+              <MessageSquare className="w-4 h-4 text-emerald-600" /> WhatsApp Gateway
+            </h3>
+            {waProvider === "wppconnect" && (
+              <Badge variant="outline" className="text-[10px] text-emerald-700 border-emerald-300 bg-emerald-50 dark:bg-emerald-950/30">
+                100% Free & Open-Source
+              </Badge>
+            )}
+          </div>
+
           <div className="space-y-2">
             <Label className="text-xs">Provider</Label>
             <Select value={waProvider} onValueChange={setWaProvider} disabled={isLoading}>
               <SelectTrigger><SelectValue placeholder="Select provider" /></SelectTrigger>
               <SelectContent>
+                <SelectItem value="wppconnect">WPPConnect Server (Open-Source, Self-Hosted / $0)</SelectItem>
                 <SelectItem value="mock">Mock / Console Logs</SelectItem>
                 <SelectItem value="redis">Redis Pub/Sub (External Worker)</SelectItem>
-                <SelectItem value="twilio">Twilio WhatsApp</SelectItem>
+                <SelectItem value="twilio">Twilio WhatsApp (Paid SaaS)</SelectItem>
               </SelectContent>
             </Select>
           </div>
-          {waProvider !== "mock" && (
+
+          {waProvider === "wppconnect" && (
+            <div className="space-y-4 pt-1">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="space-y-2">
+                  <Label className="text-xs">WPPConnect Server URL</Label>
+                  <Input
+                    placeholder="http://localhost:21465"
+                    value={waServerUrl}
+                    onChange={(e) => setWaServerUrl(e.target.value)}
+                    disabled={isLoading}
+                  />
+                  <p className="text-[10px] text-muted-foreground">Internal URL on your VPS or local machine</p>
+                </div>
+                <div className="space-y-2">
+                  <Label className="text-xs">Session Identifier</Label>
+                  <Input
+                    placeholder="vaxplan"
+                    value={waSession}
+                    onChange={(e) => setWaSession(e.target.value)}
+                    disabled={isLoading}
+                  />
+                  <p className="text-[10px] text-muted-foreground">Default session namespace</p>
+                </div>
+                <div className="space-y-2">
+                  <Label className="text-xs">Secret Key / Token (Optional)</Label>
+                  <Input
+                    type="password"
+                    placeholder="Optional bearer token"
+                    value={waSecretKey}
+                    onChange={(e) => setWaSecretKey(e.target.value)}
+                    disabled={isLoading}
+                  />
+                  <p className="text-[10px] text-muted-foreground">If configured in WPPConnect</p>
+                </div>
+              </div>
+
+              {/* Live Gateway Status & Pairing Bar */}
+              <div className="p-3.5 rounded-xl border bg-muted/30 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-semibold">Gateway Status:</span>
+                    {waStatus?.connected ? (
+                      <Badge variant="secondary" className="bg-emerald-100 text-emerald-800 border-0 flex items-center gap-1 font-semibold text-xs">
+                        <span className="h-2 w-2 rounded-full bg-emerald-600 animate-pulse inline-block" />
+                        Connected {waStatus.phone ? `(${waStatus.phone})` : ""}
+                      </Badge>
+                    ) : waStatus?.status === "QRCODE" ? (
+                      <Badge variant="secondary" className="bg-amber-100 text-amber-800 border-0 flex items-center gap-1 font-semibold text-xs">
+                        <span className="h-2 w-2 rounded-full bg-amber-500 animate-ping inline-block" />
+                        Pairing Required
+                      </Badge>
+                    ) : waStatus?.status === "OFFLINE" ? (
+                      <Badge variant="destructive" className="flex items-center gap-1 font-semibold text-xs">
+                        Gateway Server Offline
+                      </Badge>
+                    ) : (
+                      <Badge variant="outline" className="text-xs">
+                        {waStatus?.status || "Checking..."}
+                      </Badge>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-7 text-xs px-2.5"
+                      onClick={() => refetchWaStatus()}
+                      disabled={isFetchingWaStatus}
+                    >
+                      <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${isFetchingWaStatus ? "animate-spin" : ""}`} />
+                      Check Status
+                    </Button>
+
+                    {waStatus?.connected ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="destructive"
+                        className="h-7 text-xs px-2.5"
+                        onClick={handleCloseSession}
+                      >
+                        Disconnect Device
+                      </Button>
+                    ) : (
+                      <Button
+                        type="button"
+                        size="sm"
+                        className="h-7 text-xs px-3 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold"
+                        onClick={handleStartPairing}
+                        disabled={isStartingSession}
+                      >
+                        {isStartingSession ? (
+                          <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                        ) : (
+                          <QrCode className="h-3.5 w-3.5 mr-1.5" />
+                        )}
+                        Pair Device (Scan QR)
+                      </Button>
+                    )}
+                  </div>
+                </div>
+
+                {waStatus?.message && (
+                  <p className="text-[11px] text-muted-foreground">{waStatus.message}</p>
+                )}
+
+                {waStatus?.status === "OFFLINE" && (
+                  <div className="p-2.5 rounded-lg bg-amber-50 dark:bg-amber-950/20 border border-amber-200 text-[11px] text-amber-900 dark:text-amber-300 space-y-1">
+                    <p className="font-semibold flex items-center gap-1.5">
+                      <AlertCircle className="h-3.5 w-3.5 text-amber-600" />
+                      To run WPPConnect locally or on your Hostinger VPS:
+                    </p>
+                    <code className="block p-1.5 bg-black/5 dark:bg-white/5 rounded font-mono text-[10px] select-all">
+                      docker run -d --name wppconnect -p 21465:21465 wppconnect/server:latest
+                    </code>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {waProvider === "twilio" && (
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label className="text-xs">Account SID</Label>
@@ -489,5 +716,62 @@ export function TenantCommunicationCard() {
         </div>
       </CardContent>
     </Card>
+
+    {/* ── WPPConnect WhatsApp QR Code Pairing Modal ── */}
+    <Dialog open={qrModalOpen} onOpenChange={setQrModalOpen}>
+      <DialogContent className="max-w-md p-6 text-center space-y-4">
+        <DialogHeader className="space-y-1">
+          <DialogTitle className="text-base font-bold flex items-center justify-center gap-2">
+            <QrCode className="h-5 w-5 text-emerald-600" />
+            Scan QR Code with WhatsApp
+          </DialogTitle>
+          <DialogDescription className="text-xs">
+            Link your phone to enable 100% free automated WhatsApp notifications.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="p-4 bg-white rounded-xl border flex flex-col items-center justify-center min-h-[260px] shadow-inner">
+          {currentQrCode ? (
+            <img
+              src={currentQrCode.startsWith("data:") ? currentQrCode : `data:image/png;base64,${currentQrCode}`}
+              alt="WhatsApp QR Code"
+              className="w-56 h-56 object-contain rounded-lg shadow-xs"
+            />
+          ) : (
+            <div className="space-y-2 flex flex-col items-center">
+              <Loader2 className="h-8 w-8 text-emerald-600 animate-spin" />
+              <p className="text-xs text-muted-foreground">Generating QR Code from WPPConnect...</p>
+            </div>
+          )}
+        </div>
+
+        <div className="space-y-1.5 text-xs text-muted-foreground text-left bg-muted/40 p-3 rounded-lg border">
+          <p className="font-semibold text-foreground">How to pair:</p>
+          <ol className="list-decimal pl-4 space-y-1">
+            <li>Open WhatsApp on your mobile phone</li>
+            <li>Tap <strong>Settings</strong> (iOS) or <strong>Menu ⋮</strong> (Android) &gt; <strong>Linked Devices</strong></li>
+            <li>Tap <strong>Link a Device</strong> and point your camera at this QR code</li>
+          </ol>
+        </div>
+
+        <div className="flex items-center justify-between pt-1">
+          <span className="text-[11px] text-muted-foreground flex items-center gap-1">
+            <span className="h-2 w-2 rounded-full bg-amber-500 animate-pulse" />
+            Waiting for scan...
+          </span>
+          <Button
+            size="sm"
+            variant="outline"
+            className="text-xs h-8"
+            onClick={() => handleStartPairing()}
+            disabled={isStartingSession}
+          >
+            <RefreshCw className={`h-3 w-3 mr-1 ${isStartingSession ? "animate-spin" : ""}`} />
+            Refresh QR
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+    </>
   );
 }
