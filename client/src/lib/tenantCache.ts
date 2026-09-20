@@ -24,6 +24,16 @@ export interface CachedTenant {
   settings?: { isDemo?: boolean } | Record<string, unknown>;
 }
 
+export const DEFAULT_CANONICAL_TENANTS: CachedTenant[] = [
+  { id: "c43e2923-b2d9-4175-a1a8-ff6b0cd58810", code: "ZAF", name: "Republic of South Africa National Department of Health", countryCode: "ZAF" },
+  { id: "4bb7abba-11cd-4c99-96c2-eedc8a4dfd06", code: "ZMB", name: "Republic of Zambia Ministry of Health", countryCode: "ZMB" },
+  { id: "705728db-4892-49d7-9b67-35aa67c7574b", code: "SSD", name: "Republic of South Sudan Ministry of Health", countryCode: "SSD" },
+  { id: "8c2f81fb-06f3-4688-90ea-e9ae27d73191", code: "PNG", name: "Papua New Guinea National Department of Health", countryCode: "PNG" },
+  { id: "22571429-f7dd-4f1d-9dea-abdfbf4dc115", code: "BW", name: "Republic of Botswana Ministry of Health", countryCode: "BWA" },
+  { id: "08083581-cf5e-47d7-b3ed-a97b10be01ba", code: "KEN", name: "Republic of Kenya Ministry of Health", countryCode: "KEN" },
+  { id: "1a39bf12-bf10-4415-b2dd-96f1ece09b75", code: "VNM", name: "Republic of Vietnam Ministry of Health", countryCode: "VNM" },
+];
+
 const TENANTS_CACHE_KEY = "vaxplan_tenants_cache";
 const ACTIVE_TENANT_KEY = "vaxplan_active_tenant";
 
@@ -42,11 +52,11 @@ export function saveTenantsCache(list: CachedTenant[]): void {
 export function loadTenantsCache(): CachedTenant[] {
   try {
     const raw = localStorage.getItem(TENANTS_CACHE_KEY);
-    if (!raw) return [];
+    if (!raw) return DEFAULT_CANONICAL_TENANTS;
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? (parsed as CachedTenant[]) : [];
+    return Array.isArray(parsed) && parsed.length > 0 ? (parsed as CachedTenant[]) : DEFAULT_CANONICAL_TENANTS;
   } catch {
-    return [];
+    return DEFAULT_CANONICAL_TENANTS;
   }
 }
 

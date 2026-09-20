@@ -48,7 +48,7 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 import { PageHead } from "@/components/PageHead";
 import { versionLabel } from "@/lib/version";
 import { getDomainLinks } from "@/lib/navigation";
-import { saveTenantsCache, loadTenantsCache, saveActiveTenant } from "@/lib/tenantCache";
+import { saveTenantsCache, loadTenantsCache, saveActiveTenant, loadActiveTenant, DEFAULT_CANONICAL_TENANTS } from "@/lib/tenantCache";
 import { clearLogoutState, recordOnlineAuthSession } from "@/lib/authSession";
 import { queryClient } from "@/lib/queryClient";
 import { useAuth } from "@/hooks/useAuth";
@@ -98,15 +98,7 @@ interface PublicTenant {
   countryCode: string;
 }
 
-const DEFAULT_TENANTS: PublicTenant[] = [
-  { id: "8c2f81fb-06f3-4688-90ea-e9ae27d73191", code: "PNG", name: "Papua New Guinea National Department of Health", countryCode: "PNG" },
-  { id: "705728db-4892-49d7-9b67-35aa67c7574b", code: "SSD", name: "Republic of South Sudan Ministry of Health", countryCode: "SSD" },
-  { id: "4bb7abba-11cd-4c99-96c2-eedc8a4dfd06", code: "ZMB", name: "Republic of Zambia Ministry of Health", countryCode: "ZMB" },
-  { id: "22571429-f7dd-4f1d-9dea-abdfbf4dc115", code: "BW", name: "Republic of Botswana Ministry of Health", countryCode: "BWA" },
-  { id: "08083581-cf5e-47d7-b3ed-a97b10be01ba", code: "KEN", name: "Republic of Kenya Ministry of Health", countryCode: "KEN" },
-  { id: "1a39bf12-bf10-4415-b2dd-96f1ece09b75", code: "VNM", name: "Republic of Vietnam Ministry of Health", countryCode: "VNM" },
-  { id: "c43e2923-b2d9-4175-a1a8-ff6b0cd58810", code: "ZAF", name: "Republic of South Africa National Department of Health", countryCode: "ZAF" },
-];
+const DEFAULT_TENANTS: PublicTenant[] = DEFAULT_CANONICAL_TENANTS as PublicTenant[];
 
 
 const features = [
@@ -183,7 +175,13 @@ function PasswordLoginDialog({
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [selectedTenantId, setSelectedTenantId] = useState("");
+  const [selectedTenantId, setSelectedTenantId] = useState<string>(() => {
+    if (typeof window !== "undefined") {
+      const active = loadActiveTenant();
+      return active?.id ? String(active.id) : localStorage.getItem("vaxplan_last_tenant_id") || DEFAULT_TENANTS[0].id;
+    }
+    return DEFAULT_TENANTS[0].id;
+  });
   const [keepMeSignedIn, setKeepMeSignedIn] = useState(false);
 
   const { data: fetchedTenants } = useQuery<PublicTenant[]>({
@@ -226,13 +224,19 @@ function PasswordLoginDialog({
     setError(null);
     setNotice(null);
     setBusy(false);
-    setSelectedTenantId("");
+    const active = loadActiveTenant();
+    setSelectedTenantId(active?.id ? String(active.id) : localStorage.getItem("vaxplan_last_tenant_id") || DEFAULT_TENANTS[0].id);
     setKeepMeSignedIn(false);
   }
 
   useEffect(() => {
     if (open) {
       clearLogoutState();
+      const active = loadActiveTenant();
+      const lastTenantId = active?.id ? String(active.id) : localStorage.getItem("vaxplan_last_tenant_id") || DEFAULT_TENANTS[0].id;
+      if (lastTenantId && (!selectedTenantId || selectedTenantId === "")) {
+        setSelectedTenantId(lastTenantId);
+      }
     }
   }, [open]);
 
@@ -380,14 +384,18 @@ function PasswordLoginDialog({
                     <select
                       id="pw-tenant"
                       required
-                      value={selectedTenantId}
-                      onChange={(e) => setSelectedTenantId(e.target.value)}
+                      value={selectedTenantId || activeTenants[0]?.id || ""}
+                      onChange={(e) => {
+                        setSelectedTenantId(e.target.value);
+                        if (typeof window !== "undefined") {
+                          localStorage.setItem("vaxplan_last_tenant_id", e.target.value);
+                        }
+                      }}
                       className="flex h-10 w-full rounded-xl border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 text-foreground"
                       data-testid="select-tenant"
                     >
-                      <option value="">Select country...</option>
                       {activeTenants.map((t) => (
-                        <option key={t.id} value={t.id}>
+                        <option key={t.id} value={t.id} className="bg-background text-foreground py-1">
                           {t.name} ({t.code || t.countryCode})
                         </option>
                       ))}
@@ -545,23 +553,24 @@ function PasswordLoginDialog({
   );
 }
 
-function TenantCard({ tenant }: { tenant: PublicTenant }) {
+function TenantCard({ tenant, onSelect }: { tenant: PublicTenant; onSelect?: (tenantId: string) => void }) {
   return (
     <Card
-      className="hover-elevate"
+      className="hover-elevate cursor-pointer border hover:border-primary/50 transition-all group"
+      onClick={() => onSelect?.(tenant.id)}
       data-testid={`card-tenant-${tenant.code}`}
     >
       <CardContent className="p-5 flex items-start gap-4">
-        <div className="flex-shrink-0 h-12 w-12 rounded-md bg-primary/10 text-primary flex items-center justify-center font-bold text-sm tracking-wider">
+        <div className="flex-shrink-0 h-12 w-12 rounded-xl bg-primary/10 text-primary group-hover:bg-primary group-hover:text-primary-foreground transition-colors flex items-center justify-center font-bold text-sm tracking-wider">
           {tenant.countryCode}
         </div>
         <div className="flex-1 min-w-0">
-          <div className="font-semibold text-sm leading-tight" data-testid={`text-tenant-name-${tenant.code}`}>
+          <div className="font-semibold text-sm leading-tight group-hover:text-primary transition-colors" data-testid={`text-tenant-name-${tenant.code}`}>
             {tenant.name}
           </div>
           <div className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
-            <Globe className="h-3 w-3" />
-            Ministry of Health · live tenant
+            <Globe className="h-3 w-3 text-emerald-500" />
+            <span>Ministry of Health · Active Program</span>
           </div>
         </div>
       </CardContent>
@@ -1658,6 +1667,44 @@ export default function Landing() {
                   </div>
                 </div>
               ))}
+            </div>
+          </div>
+        </section>
+
+        {/* National Programs & Country Tenancies Section */}
+        <section id="countries" className="py-20 bg-background border-t">
+          <div className="container mx-auto px-4 max-w-6xl">
+            <div className="text-center mb-12">
+              <Badge className="mb-3 px-3 py-1 text-xs uppercase tracking-wider bg-primary/10 text-primary border-none">
+                National Health Systems
+              </Badge>
+              <h2 className="text-3xl md:text-4xl font-bold mb-4">
+                Supported National Immunization Programs
+              </h2>
+              <p className="text-lg text-muted-foreground max-w-3xl mx-auto">
+                VaxPlan provides sovereign, country-isolated workspaces configured with national EPI schedules, administrative boundaries, target population groups, and public health calendars.
+              </p>
+            </div>
+
+            <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {activeTenantsList.map((tenant) => (
+                <TenantCard
+                  key={tenant.id}
+                  tenant={tenant}
+                  onSelect={(tId) => {
+                    if (typeof window !== "undefined") {
+                      localStorage.setItem("vaxplan_last_tenant_id", tId);
+                    }
+                    setLoginOpen(true);
+                  }}
+                />
+              ))}
+            </div>
+
+            <div className="mt-8 text-center">
+              <p className="text-xs text-muted-foreground">
+                Click any country above to sign in directly with your national program credentials.
+              </p>
             </div>
           </div>
         </section>

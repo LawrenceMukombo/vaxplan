@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { PageHead } from "@/components/PageHead";
-import { saveTenantsCache, loadTenantsCache, saveActiveTenant, loadActiveTenant } from "@/lib/tenantCache";
+import { saveTenantsCache, loadTenantsCache, saveActiveTenant, loadActiveTenant, DEFAULT_CANONICAL_TENANTS } from "@/lib/tenantCache";
 import {
   clearLogoutState,
   recordOnlineAuthSession,
@@ -35,15 +35,7 @@ interface PublicTenant {
   countryCode: string;
 }
 
-const DEFAULT_TENANTS: PublicTenant[] = [
-  { id: "c43e2923-b2d9-4175-a1a8-ff6b0cd58810", code: "ZAF", name: "Republic of South Africa National Department of Health", countryCode: "ZAF" },
-  { id: "4bb7abba-11cd-4c99-96c2-eedc8a4dfd06", code: "ZMB", name: "Republic of Zambia Ministry of Health", countryCode: "ZMB" },
-  { id: "705728db-4892-49d7-9b67-35aa67c7574b", code: "SSD", name: "Republic of South Sudan Ministry of Health", countryCode: "SSD" },
-  { id: "8c2f81fb-06f3-4688-90ea-e9ae27d73191", code: "PNG", name: "Papua New Guinea National Department of Health", countryCode: "PNG" },
-  { id: "22571429-f7dd-4f1d-9dea-abdfbf4dc115", code: "BW", name: "Republic of Botswana Ministry of Health", countryCode: "BWA" },
-  { id: "08083581-cf5e-47d7-b3ed-a97b10be01ba", code: "KEN", name: "Republic of Kenya Ministry of Health", countryCode: "KEN" },
-  { id: "1a39bf12-bf10-4415-b2dd-96f1ece09b75", code: "VNM", name: "Republic of Vietnam Ministry of Health", countryCode: "VNM" },
-];
+const DEFAULT_TENANTS: PublicTenant[] = DEFAULT_CANONICAL_TENANTS as PublicTenant[];
 
 export default function LoginPage() {
   const [mode, setMode] = useState<"login" | "forgot">("login");
@@ -53,7 +45,13 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [selectedTenantId, setSelectedTenantId] = useState("");
+  const [selectedTenantId, setSelectedTenantId] = useState<string>(() => {
+    if (typeof window !== "undefined") {
+      const active = loadActiveTenant();
+      return active?.id ? String(active.id) : localStorage.getItem("vaxplan_last_tenant_id") || DEFAULT_TENANTS[0].id;
+    }
+    return DEFAULT_TENANTS[0].id;
+  });
   const [keepMeSignedIn, setKeepMeSignedIn] = useState(false);
   const [cachedAccounts, setCachedAccounts] = useState<{ email: string; name?: string; tenantId?: string | null }[]>([]);
   const isOffline = typeof navigator !== "undefined" && !navigator.onLine;
@@ -381,8 +379,13 @@ export default function LoginPage() {
                     </Label>
                     <select
                       id="login-tenant"
-                      value={selectedTenantId}
-                      onChange={(e) => setSelectedTenantId(e.target.value)}
+                      value={selectedTenantId || activeTenants[0]?.id || ""}
+                      onChange={(e) => {
+                        setSelectedTenantId(e.target.value);
+                        if (typeof window !== "undefined") {
+                          localStorage.setItem("vaxplan_last_tenant_id", e.target.value);
+                        }
+                      }}
                       className="flex h-10 w-full rounded-xl border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 text-foreground"
                       data-testid="select-tenant"
                     >

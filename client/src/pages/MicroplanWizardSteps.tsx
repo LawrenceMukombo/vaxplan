@@ -4168,17 +4168,9 @@ export function Step2Map({
     if (drawMode !== "facility") setDrawVertices([]);
   }, [drawMode]);
 
-  if (!leaflet) {
-    return (
-      <div className="h-[360px] w-full rounded-xl border border-dashed border-border bg-muted/30 flex items-center justify-center text-sm text-muted-foreground">
-        <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Loading map...
-      </div>
-    );
-  }
-
-  const { MapContainer, TileLayer, WMSTileLayer, Marker, Popup, Circle: LCircle, Rectangle: LRectangle, Tooltip: LTooltip, useMapEvents, useMap, Polygon: LPolygon, GeoJSON: LGeoJSON, Polyline: LPolyline } = leaflet.rl;
-
-  // Dynamic Catchment Polygon Area Calculations
+  // Keep this hook above the lazy-Leaflet early return. On the first render
+  // `leaflet` is null; on the next it is populated. Calling a hook only on the
+  // second render changes the hook count and crashes React.
   const polygonAreaStats = useMemo(() => {
     try {
       if (drawVertices.length >= 3) {
@@ -4196,6 +4188,16 @@ export function Step2Map({
     }
     return null;
   }, [drawVertices, facilityPolygon]);
+
+  if (!leaflet) {
+    return (
+      <div className="h-[360px] w-full rounded-xl border border-dashed border-border bg-muted/30 flex items-center justify-center text-sm text-muted-foreground">
+        <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Loading map...
+      </div>
+    );
+  }
+
+  const { MapContainer, TileLayer, WMSTileLayer, Marker, Popup, Circle: LCircle, Rectangle: LRectangle, Tooltip: LTooltip, useMapEvents, useMap, Polygon: LPolygon, GeoJSON: LGeoJSON, Polyline: LPolyline } = leaflet.rl;
 
   // 1-Click Catchment Presets
   const generateCircularBuffer = (radiusKm: number) => {
