@@ -1130,6 +1130,26 @@ export default function SessionPlanning({
     });
   }, [sessions, allMicroplans, geoMaps, geoFilterProvinceId, geoFilterDistrictId, geoFilterFacilityId, planTypeFilter, defaulterOnly]);
 
+  // Full session pool matching the active plan type (routine or campaign) across all facilities.
+  // Passed to SessionMatrixCalendar so users can view scheduled sessions for ANY facility
+  // chosen in the Smart Location Cascade and run live 5km proximity clash detection with neighbors.
+  const allMatrixSessions = useMemo(() => {
+    const microplanTypeById = new Map<number, string>();
+    (allMicroplans ?? []).forEach((m) => microplanTypeById.set(m.id, m.planType));
+
+    const enriched = withGeoColumns((sessions ?? []) as any[], geoMaps);
+    return enriched.filter((item) => {
+      const parentType = item.microplanId ? microplanTypeById.get(Number(item.microplanId)) : undefined;
+      const sessionPlanType: string =
+        parentType === "sia_campaign"
+          ? "campaign"
+          : parentType === "facility_routine"
+            ? "routine"
+            : (item as any).planType || "routine";
+      return sessionPlanType === planTypeFilter;
+    });
+  }, [sessions, allMicroplans, geoMaps, planTypeFilter]);
+
   // Task #197 — Count how many defaulter-follow-up sessions are visible under
   // the current geo filters (ignoring the defaulter-only chip itself) so the
   // chip can show a live count.
@@ -2223,11 +2243,12 @@ export default function SessionPlanning({
 
       {sessionLayoutMode === "calendar_matrix" ? (
         <SessionMatrixCalendar
-          sessions={filteredSessions}
+          sessions={allMatrixSessions}
           facilities={facilities ?? []}
           provinces={provinces ?? []}
           districts={districts ?? []}
           villages={villages ?? []}
+          initialFacilityId={lockedParent?.facilityId ?? (filteredSessions[0]?.facilityId ? Number(filteredSessions[0].facilityId) : undefined)}
           onAddSession={() => setDialogOpen(true)}
           onEditSession={(s) => handleOpenEditModal(s)}
           onValidatePlan={() => {

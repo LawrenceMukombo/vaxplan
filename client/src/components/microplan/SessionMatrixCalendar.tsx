@@ -64,6 +64,7 @@ interface SessionMatrixCalendarProps {
   provinces?: Province[];
   districts?: District[];
   villages?: Village[];
+  initialFacilityId?: number;
   onAddSession?: () => void;
   onEditSession?: (session: SessionPlan) => void;
   onValidatePlan?: () => void;
@@ -123,6 +124,7 @@ export function SessionMatrixCalendar({
   provinces: propsProvinces = [],
   districts = [],
   villages = [],
+  initialFacilityId,
   onAddSession,
   onEditSession,
   onValidatePlan,
@@ -147,10 +149,33 @@ export function SessionMatrixCalendar({
   // Basemap persistence (clean raster/vector without watermark)
   const [basemap, setBasemap] = usePersistedBasemap("vaxplan_streets");
 
+  // Helper to parse session scheduledDate safely without UTC day-shifting
+  const parseSessionDate = (scheduledDate: string | Date | null | undefined): { year: number; month: number; day: number; dateKey: string } | null => {
+    if (!scheduledDate) return null;
+    if (typeof scheduledDate === "string") {
+      const match = scheduledDate.match(/^(\d{4})-(\d{2})-(\d{2})/);
+      if (match) {
+        const year = parseInt(match[1], 10);
+        const month = parseInt(match[2], 10) - 1; // 0-indexed
+        const day = parseInt(match[3], 10);
+        const dateKey = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+        return { year, month, day, dateKey };
+      }
+    }
+    const d = new Date(scheduledDate);
+    if (isNaN(d.getTime())) return null;
+    const year = d.getFullYear();
+    const month = d.getMonth();
+    const day = d.getDate();
+    const dateKey = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    return { year, month, day, dateKey };
+  };
+
   // --- States ---
   const [selectedMonth, setSelectedMonth] = useState<number>(new Date().getMonth());
   const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear());
   const [viewMode, setViewMode] = useState<"calendar" | "map" | "coldchain">("calendar");
+  const [dayViewMode, setDayViewMode] = useState<"all" | "window">("all");
   const [searchQuery, setSearchQuery] = useState("");
 
   // Smart Cascade Geographic Filters: Province -> District -> Facility
@@ -165,6 +190,23 @@ export function SessionMatrixCalendar({
     SIA: false,
   });
   const [dateRangeOffset, setDateRangeOffset] = useState<number>(0);
+
+  // Auto-select initial facility from parent microplan on mount
+  useEffect(() => {
+    if (initialFacilityId && facilities.length > 0) {
+      const fac = facilities.find((f) => f.id === Number(initialFacilityId));
+      if (fac) {
+        setSelectedFacilityId(String(fac.id));
+        if (fac.districtId) {
+          setSelectedDistrict(String(fac.districtId));
+          const dist = districts.find((d) => d.id === fac.districtId);
+          if (dist?.provinceId) {
+            setSelectedProvince(String(dist.provinceId));
+          }
+        }
+      }
+    }
+  }, [initialFacilityId, facilities, districts]);
 
   // Cascade 1: Available Districts based on selected Province
   const availableDistricts = useMemo(() => {
@@ -259,29 +301,99 @@ export function SessionMatrixCalendar({
     return new Date(selectedYear, selectedMonth + 1, 0).getDate();
   }, [selectedYear, selectedMonth]);
 
-  // Display date columns (window of 5 days for crisp tabular view)
+  // Smart Session Summary for the currently active/selected facility
+  const facilitySessionsSummary = useMemo(() => {
+    const targetFacId = selectedFacilityId !== "all" 
+      ? Number(selectedFacilityId) 
+      : (initialFacilityId ? Number(initialFacilityId) : (facilitiesWithSessions[0]?.id ?? null));
+
+    if (!targetFacId) return { targetFacility: null, sessionsInMonth: [], sessionsInOtherMonths: [], allFacSessions: [] };
+
+    const targetFacility = facilities.find((f) => f.id === targetFacId) ?? null;
+    const facSessions = sessions.filter((s) => s.facilityId === targetFacId);
+
+    const sessionsInMonth: Array<{ session: SessionPlan; day: number; dateKey: string }> = [];
+    const sessionsInOtherMonths: Array<{ session: SessionPlan; year: number; month: number; day: number; dateKey: string }> = [];
+
+    facSessions.forEach((s) => {
+      const p = parseSessionDate(s.scheduledDate);
+      if (!p) return;
+      if (p.year === selectedYear && p.month === selectedMonth) {
+        sessionsInMonth.push({ session: s, day: p.day, dateKey: p.dateKey });
+      } else {
+        sessionsInOtherMonths.push({ session: s, year: p.year, month: p.month, day: p.day, dateKey: p.dateKey });
+      }
+    });
+
+    sessionsInMonth.sort((a, b) => a.day - b.day);
+    sessionsInOtherMonths.sort((a, b) => a.dateKey.localeCompare(b.dateKey));
+
+    return { targetFacility, sessionsInMonth, sessionsInOtherMonths, allFacSessions: facSessions };
+  }, [selectedFacilityId, initialFacilityId, facilitiesWithSessions, facilities, sessions, selectedYear, selectedMonth]);
+
+  // Auto-jump month when selecting a facility that has sessions in a different month
+  useEffect(() => {
+    const targetFacId = selectedFacilityId !== "all" 
+      ? Number(selectedFacilityId) 
+      : (initialFacilityId ? Number(initialFacilityId) : null);
+
+    if (!targetFacId) return;
+
+    const facSessions = sessions.filter((s) => s.facilityId === targetFacId);
+    if (facSessions.length === 0) return;
+
+    const currentHas = facSessions.some((s) => {
+      const p = parseSessionDate(s.scheduledDate);
+      return p && p.year === selectedYear && p.month === selectedMonth;
+    });
+
+    if (!currentHas) {
+      // Find first session date and switch to it automatically
+      for (const s of facSessions) {
+        const p = parseSessionDate(s.scheduledDate);
+        if (p) {
+          setSelectedYear(p.year);
+          setSelectedMonth(p.month);
+          setDateRangeOffset(Math.floor((p.day - 1) / 5));
+          break;
+        }
+      }
+    }
+  }, [selectedFacilityId, initialFacilityId, sessions]);
+
+  // Display date columns: either all days (1..totalDaysInMonth) with horizontal scroll, or 5-day window
   const visibleDays = useMemo(() => {
+    if (dayViewMode === "all") {
+      const days: number[] = [];
+      for (let i = 1; i <= totalDaysInMonth; i++) {
+        days.push(i);
+      }
+      return days;
+    }
     const days: number[] = [];
     const start = Math.min(Math.max(1, dateRangeOffset * 5 + 1), Math.max(1, totalDaysInMonth - 4));
     for (let i = 0; i < 5 && (start + i) <= totalDaysInMonth; i++) {
       days.push(start + i);
     }
     return days;
-  }, [dateRangeOffset, totalDaysInMonth]);
+  }, [dayViewMode, dateRangeOffset, totalDaysInMonth]);
 
   // Conflict Detection Engine (5km & same-day check)
   const sessionConflicts = useMemo(() => {
     const map = new Map<number, { hasConflict: boolean; reason?: string; conflictingSession?: SessionPlan; distanceKm?: number }>();
     
     sessions.forEach((s1) => {
-      if (!s1.scheduledDate) return;
-      const d1 = new Date(s1.scheduledDate).toISOString().split("T")[0];
+      const p1 = parseSessionDate(s1.scheduledDate);
+      if (!p1) return;
+      const d1 = p1.dateKey;
       const f1 = facilities.find((f) => f.id === s1.facilityId);
 
       // Check against other sessions
       for (const s2 of sessions) {
-        if (s1.id === s2.id || !s2.scheduledDate) continue;
-        const d2 = new Date(s2.scheduledDate).toISOString().split("T")[0];
+        if (s1.id === s2.id) continue;
+        const p2 = parseSessionDate(s2.scheduledDate);
+        if (!p2) continue;
+        const d2 = p2.dateKey;
         if (d1 === d2) {
           const f2 = facilities.find((f) => f.id === s2.facilityId);
           // If same facility or within close proximity (< 5km)
@@ -328,16 +440,16 @@ export function SessionMatrixCalendar({
     return sessions.filter((s) => s.sessionType?.toLowerCase().includes("piri") || s.name?.toLowerCase().includes("piri")).length;
   }, [sessions]);
 
-  // Helper to get sessions for a facility and day
+  // Helper to get sessions for a facility and day using parseSessionDate
   const getSessionsForFacilityDay = (facilityId: number, day: number) => {
     return sessions.filter((s) => {
       if (s.facilityId !== facilityId) return false;
-      if (!s.scheduledDate) return false;
-      const d = new Date(s.scheduledDate);
+      const p = parseSessionDate(s.scheduledDate);
+      if (!p) return false;
       return (
-        d.getFullYear() === selectedYear &&
-        d.getMonth() === selectedMonth &&
-        d.getDate() === day
+        p.year === selectedYear &&
+        p.month === selectedMonth &&
+        p.day === day
       );
     });
   };
@@ -748,32 +860,65 @@ export function SessionMatrixCalendar({
           <CardContent className="space-y-4 pt-4">
             {/* Toolbar: Month Navigation, View Switchers, Search */}
             <div className="flex flex-wrap items-center justify-between gap-2.5 pb-2 border-b">
-              <div className="flex items-center gap-1.5">
+              <div className="flex items-center gap-2 flex-wrap">
                 <span className="font-bold text-sm text-foreground">
                   {monthNames[selectedMonth]} {selectedYear}
                 </span>
+
                 {viewMode === "calendar" && (
-                  <div className="flex items-center ml-2 border rounded-md overflow-hidden bg-background">
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      className="h-7 w-7 rounded-none"
-                      onClick={() => {
-                        if (dateRangeOffset > 0) setDateRangeOffset(dateRangeOffset - 1);
-                      }}
-                      disabled={dateRangeOffset <= 0}
-                    >
-                      <ChevronLeft className="h-3.5 w-3.5" />
-                    </Button>
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      className="h-7 w-7 rounded-none"
-                      onClick={() => setDateRangeOffset(dateRangeOffset + 1)}
-                      disabled={(dateRangeOffset + 1) * 5 >= totalDaysInMonth}
-                    >
-                      <ChevronRight className="h-3.5 w-3.5" />
-                    </Button>
+                  <div className="flex items-center gap-1.5 ml-1">
+                    {/* Day View Mode Switcher: Full Month vs 5-Day Window */}
+                    <div className="flex items-center gap-1 bg-muted/60 p-0.5 rounded-lg border text-xs">
+                      <button
+                        type="button"
+                        onClick={() => setDayViewMode("all")}
+                        className={`px-2 py-0.5 rounded-md font-medium text-[11px] transition-all ${
+                          dayViewMode === "all"
+                            ? "bg-background shadow-xs text-foreground font-bold"
+                            : "text-muted-foreground hover:text-foreground"
+                        }`}
+                      >
+                        Full Month (1–{totalDaysInMonth})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setDayViewMode("window")}
+                        className={`px-2 py-0.5 rounded-md font-medium text-[11px] transition-all ${
+                          dayViewMode === "window"
+                            ? "bg-background shadow-xs text-foreground font-bold"
+                            : "text-muted-foreground hover:text-foreground"
+                        }`}
+                      >
+                        5-Day Window
+                      </button>
+                    </div>
+
+                    {dayViewMode === "window" && (
+                      <div className="flex items-center border rounded-md overflow-hidden bg-background">
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="h-7 w-7 rounded-none"
+                          onClick={() => {
+                            if (dateRangeOffset > 0) setDateRangeOffset(dateRangeOffset - 1);
+                          }}
+                          disabled={dateRangeOffset <= 0}
+                          title="Previous 5 days"
+                        >
+                          <ChevronLeft className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="h-7 w-7 rounded-none"
+                          onClick={() => setDateRangeOffset(dateRangeOffset + 1)}
+                          disabled={(dateRangeOffset + 1) * 5 >= totalDaysInMonth}
+                          title="Next 5 days"
+                        >
+                          <ChevronRight className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -833,18 +978,91 @@ export function SessionMatrixCalendar({
               </div>
             </div>
 
+            {/* Smart Session Alerts & Quick-Jump Pills */}
+            {viewMode === "calendar" && (
+              <div className="space-y-2">
+                {/* Other Month Notification */}
+                {facilitySessionsSummary.sessionsInOtherMonths.length > 0 && facilitySessionsSummary.sessionsInMonth.length === 0 && (
+                  <div className="flex items-center justify-between p-2.5 rounded-lg bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800 text-xs">
+                    <div className="flex items-center gap-2 text-indigo-900 dark:text-indigo-200">
+                      <Info className="h-4 w-4 shrink-0 text-indigo-600" />
+                      <span>
+                        <strong>{facilitySessionsSummary.targetFacility?.name || "Selected facility"}</strong> has <strong>{facilitySessionsSummary.sessionsInOtherMonths.length} planned session{facilitySessionsSummary.sessionsInOtherMonths.length === 1 ? "" : "s"}</strong> scheduled in <strong>{monthNames[facilitySessionsSummary.sessionsInOtherMonths[0].month]} {facilitySessionsSummary.sessionsInOtherMonths[0].year}</strong>.
+                      </span>
+                    </div>
+                    <Button
+                      size="sm"
+                      className="h-7 text-xs bg-indigo-600 text-white hover:bg-indigo-700 border-0"
+                      onClick={() => {
+                        setSelectedYear(facilitySessionsSummary.sessionsInOtherMonths[0].year);
+                        setSelectedMonth(facilitySessionsSummary.sessionsInOtherMonths[0].month);
+                        setDateRangeOffset(Math.floor((facilitySessionsSummary.sessionsInOtherMonths[0].day - 1) / 5));
+                      }}
+                    >
+                      View {monthNames[facilitySessionsSummary.sessionsInOtherMonths[0].month]} {facilitySessionsSummary.sessionsInOtherMonths[0].year} →
+                    </Button>
+                  </div>
+                )}
+
+                {/* Current Month Active Session Pills */}
+                {facilitySessionsSummary.sessionsInMonth.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-1.5 p-2 rounded-lg bg-emerald-50/70 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 text-xs">
+                    <span className="font-semibold text-emerald-900 dark:text-emerald-200 flex items-center gap-1">
+                      <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
+                      {facilitySessionsSummary.sessionsInMonth.length} Planned Session{facilitySessionsSummary.sessionsInMonth.length === 1 ? "" : "s"} in {monthNames[selectedMonth]}:
+                    </span>
+                    {facilitySessionsSummary.sessionsInMonth.map(({ session, day }) => (
+                      <button
+                        key={session.id}
+                        type="button"
+                        onClick={() => {
+                          if (dayViewMode === "window") {
+                            setDateRangeOffset(Math.floor((day - 1) / 5));
+                          }
+                        }}
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-white dark:bg-emerald-900 border border-emerald-300 dark:border-emerald-700 text-[11px] font-medium text-emerald-950 dark:text-emerald-100 hover:bg-emerald-100 transition-colors shadow-2xs"
+                      >
+                        <span className="font-bold text-emerald-700 dark:text-emerald-300">{monthNames[selectedMonth].slice(0, 3)} {day}:</span>
+                        <span className="truncate max-w-[130px]">{session.name}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* ── 1. Calendar Matrix Grid Table ── */}
             {viewMode === "calendar" && (
               <div className="rounded-xl border overflow-x-auto shadow-sm">
                 <table className="w-full text-left border-collapse min-w-[620px]">
                   <thead>
                     <tr className="bg-muted/80 text-[11px] font-bold uppercase tracking-wider text-muted-foreground border-b">
-                      <th className="p-2.5 min-w-[140px]">Facilities ⇅</th>
-                      {visibleDays.map((day) => (
-                        <th key={day} className="p-2.5 text-center min-w-[110px] border-l">
-                          {monthNames[selectedMonth].slice(0, 3)} {day}
-                        </th>
-                      ))}
+                      <th className="p-2.5 min-w-[150px] sticky left-0 bg-muted/95 z-10 border-r shadow-xs">Facilities ⇅</th>
+                      {visibleDays.map((day) => {
+                        const dayHasSession = filteredFacilities.slice(0, 10).some((f) => getSessionsForFacilityDay(f.id, day).length > 0);
+                        return (
+                          <th
+                            key={day}
+                            className={`p-2 text-center border-l transition-colors ${
+                              dayViewMode === "all" ? "min-w-[72px]" : "min-w-[110px]"
+                            } ${
+                              dayHasSession
+                                ? "bg-emerald-100/70 dark:bg-emerald-950/40 text-emerald-950 dark:text-emerald-200 font-bold border-emerald-300 dark:border-emerald-800"
+                                : ""
+                            }`}
+                          >
+                            <div className="flex items-center justify-center gap-1">
+                              <span>{monthNames[selectedMonth].slice(0, 3)} {day}</span>
+                              {dayHasSession && (
+                                <span
+                                  className="h-2 w-2 rounded-full bg-emerald-600 inline-block shrink-0"
+                                  title="Scheduled sessions on this day"
+                                />
+                              )}
+                            </div>
+                          </th>
+                        );
+                      })}
                       <th className="p-2.5 text-right min-w-[70px] border-l">Quota ⇅</th>
                       <th className="p-2.5 text-right min-w-[85px] border-l">Cold Chain ⇅</th>
                       <th className="p-2.5 text-center min-w-[70px] border-l">Conflicts</th>
@@ -860,7 +1078,7 @@ export function SessionMatrixCalendar({
 
                       return (
                         <tr key={facility.id} className="hover:bg-muted/30 transition-colors">
-                          <td className="p-2.5 font-semibold text-foreground align-top">
+                          <td className="p-2.5 font-semibold text-foreground align-top sticky left-0 bg-background/95 z-10 border-r shadow-xs">
                             <div className="flex items-center gap-1.5">
                               <MapPin className="h-3 w-3 text-muted-foreground shrink-0" />
                               <span className="truncate">{facility.name}</span>
@@ -876,7 +1094,7 @@ export function SessionMatrixCalendar({
                           {visibleDays.map((day) => {
                             const daySessions = getSessionsForFacilityDay(facility.id, day);
                             return (
-                              <td key={day} className="p-1.5 align-top border-l bg-background/50">
+                              <td key={day} className={`p-1.5 align-top border-l bg-background/50 ${dayViewMode === "all" ? "min-w-[72px]" : "min-w-[110px]"}`}>
                                 {daySessions.length === 0 ? (
                                   <div className="h-14 rounded-md border border-dashed border-muted flex items-center justify-center opacity-30 hover:opacity-100 hover:border-indigo-300 transition-opacity">
                                     <button
@@ -1033,6 +1251,19 @@ export function SessionMatrixCalendar({
                         </tr>
                       );
                     })}
+
+                    {filteredFacilities.length === 0 && (
+                      <tr>
+                        <td colSpan={visibleDays.length + 4} className="p-8 text-center text-muted-foreground">
+                          <Building2 className="h-8 w-8 mx-auto mb-2 opacity-40 text-muted-foreground" />
+                          <p className="font-semibold text-sm">No health facilities found</p>
+                          <p className="text-xs text-muted-foreground mt-1">Try selecting a different District or clearing filters.</p>
+                          <Button size="sm" variant="outline" className="mt-3 text-xs" onClick={handleClearFilters}>
+                            Clear Location Filters
+                          </Button>
+                        </td>
+                      </tr>
+                    )}
                   </tbody>
                 </table>
               </div>
