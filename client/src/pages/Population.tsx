@@ -1,4 +1,4 @@
-/* Original Code commented out to add useRef:
+﻿/* Original Code commented out to add useRef:
 import { useState, useMemo, useCallback, useEffect } from "react";
 */
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
@@ -1058,6 +1058,8 @@ export default function Population() {
     return { mapCenter: defaultCenterAndZoom.center, mapZoom: defaultCenterAndZoom.zoom };
   }, [selectedFacility, selectedDistrict, selectedProvince, heatmapPoints, districtMap, provinceMap, facilityMap, defaultCenterAndZoom]);
 
+  const ratios = useMemo(() => populationRatios(tenantInfo?.settings), [tenantInfo?.settings]);
+
   const comparisonSummary = useMemo(() => {
     if (activeTab !== "comparison" || !populationData) return null;
 
@@ -1562,8 +1564,6 @@ export default function Population() {
     }
     setSelectedYear(CURRENT_YEAR.toString());
   };
-
-  const ratios = useMemo(() => populationRatios(tenantInfo?.settings), [tenantInfo?.settings]);
 
   const cohortTotals = useMemo(() => {
     let total = 0;
