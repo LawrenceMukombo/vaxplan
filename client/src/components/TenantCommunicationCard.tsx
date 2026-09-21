@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+﻿import { useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -35,6 +35,13 @@ export function TenantCommunicationCard() {
   const [smsAccountSid, setSmsAccountSid] = useState("");
   const [smsAuthToken, setSmsAuthToken] = useState("");
   const [smsSenderNumber, setSmsSenderNumber] = useState("");
+
+  // Android SMS Gateway Settings
+  const [androidSmsServerUrl, setAndroidSmsServerUrl] = useState("http://192.168.1.1:8080");
+  const [androidSmsUsername, setAndroidSmsUsername] = useState("user");
+  const [androidSmsPassword, setAndroidSmsPassword] = useState("");
+  const [isCheckingAndroidStatus, setIsCheckingAndroidStatus] = useState(false);
+  const [androidSmsStatus, setAndroidSmsStatus] = useState<{ online: boolean; deviceName?: string; simSlots?: number; message?: string } | null>(null);
 
   // WhatsApp Settings
   const [waProvider, setWaProvider] = useState("wppconnect");
@@ -123,6 +130,12 @@ export function TenantCommunicationCard() {
         setSmsAuthToken(comm.sms.authToken || "");
         setSmsSenderNumber(comm.sms.senderNumber || "");
       }
+      if (comm.sms?.provider === "android_sms" || comm.androidSms) {
+        const asCfg = comm.androidSms || {};
+        setAndroidSmsServerUrl(asCfg.serverUrl || comm.sms?.serverUrl || "http://192.168.1.1:8080");
+        setAndroidSmsUsername(asCfg.username || comm.sms?.username || "user");
+        setAndroidSmsPassword(asCfg.password || comm.sms?.password || "");
+      }
       if (comm.whatsapp) {
         setWaProvider(comm.whatsapp.provider || "wppconnect");
         setWaAccountSid(comm.whatsapp.accountSid || "");
@@ -179,6 +192,10 @@ export function TenantCommunicationCard() {
           accountSid: smsAccountSid.trim(),
           authToken: smsAuthToken.trim(),
           senderNumber: smsSenderNumber.trim(),
+          // Android SMS Gateway fields (used when provider === "android_sms")
+          serverUrl: androidSmsServerUrl.trim() || "http://192.168.1.1:8080",
+          username: androidSmsUsername.trim() || "user",
+          password: androidSmsPassword.trim(),
         },
         whatsapp: {
           provider: waProvider,
@@ -313,6 +330,21 @@ export function TenantCommunicationCard() {
     }
   };
 
+  const handleCheckAndroidStatus = async () => {
+    setIsCheckingAndroidStatus(true);
+    setAndroidSmsStatus(null);
+    try {
+      const url = `/api/me/tenant/sms/android/status?serverUrl=${encodeURIComponent(androidSmsServerUrl.trim() || "http://192.168.1.1:8080")}&username=${encodeURIComponent(androidSmsUsername.trim() || "user")}&password=${encodeURIComponent(androidSmsPassword.trim())}`;
+      const res = await fetch(url, { headers: { Accept: "application/json" } });
+      const data: any = await res.json();
+      setAndroidSmsStatus(data);
+    } catch (err: any) {
+      setAndroidSmsStatus({ online: false, message: err.message });
+    } finally {
+      setIsCheckingAndroidStatus(false);
+    }
+  };
+
   return (
     <>
     <Card data-testid="card-tenant-communication">
@@ -424,10 +456,104 @@ export function TenantCommunicationCard() {
                 <SelectItem value="redis">Redis Pub/Sub (External Worker)</SelectItem>
                 <SelectItem value="twilio">Twilio</SelectItem>
                 <SelectItem value="africastalking">Africa's Talking</SelectItem>
+                <SelectItem value="android_sms">Android SMS Gateway (Open-Source, Self-Hosted / $0)</SelectItem>
               </SelectContent>
             </Select>
           </div>
-          {smsProvider !== "mock" && (
+          {smsProvider === "android_sms" && (
+            <div className="space-y-4 pt-1">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="space-y-2">
+                  <Label className="text-xs">Android Device URL</Label>
+                  <Input
+                    placeholder="http://192.168.1.1:8080"
+                    value={androidSmsServerUrl}
+                    onChange={(e) => setAndroidSmsServerUrl(e.target.value)}
+                    disabled={isLoading}
+                  />
+                  <p className="text-[10px] text-muted-foreground">Local URL shown in the SMS Gateway app</p>
+                </div>
+                <div className="space-y-2">
+                  <Label className="text-xs">Username</Label>
+                  <Input
+                    placeholder="user"
+                    value={androidSmsUsername}
+                    onChange={(e) => setAndroidSmsUsername(e.target.value)}
+                    disabled={isLoading}
+                  />
+                  <p className="text-[10px] text-muted-foreground">Default is &quot;user&quot;</p>
+                </div>
+                <div className="space-y-2">
+                  <Label className="text-xs">Password</Label>
+                  <Input
+                    type="password"
+                    placeholder="App password"
+                    value={androidSmsPassword}
+                    onChange={(e) => setAndroidSmsPassword(e.target.value)}
+                    disabled={isLoading}
+                  />
+                  <p className="text-[10px] text-muted-foreground">Set in the app settings</p>
+                </div>
+              </div>
+
+              {/* Live Device Status Bar */}
+              <div className="p-3.5 rounded-xl border bg-muted/30 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-semibold">Device Status:</span>
+                    {androidSmsStatus?.online ? (
+                      <Badge variant="secondary" className="bg-emerald-100 text-emerald-800 border-0 flex items-center gap-1 font-semibold text-xs">
+                        <span className="h-2 w-2 rounded-full bg-emerald-600 animate-pulse inline-block" />
+                        Online {androidSmsStatus.deviceName ? `(${androidSmsStatus.deviceName})` : ""}
+                        {androidSmsStatus.simSlots ? ` · ${androidSmsStatus.simSlots} SIM` : ""}
+                      </Badge>
+                    ) : androidSmsStatus && !androidSmsStatus.online ? (
+                      <Badge variant="destructive" className="flex items-center gap-1 font-semibold text-xs">
+                        <AlertCircle className="h-3 w-3 mr-1" />
+                        Unreachable
+                      </Badge>
+                    ) : (
+                      <Badge variant="outline" className="text-xs">Not Checked</Badge>
+                    )}
+                  </div>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="h-7 text-xs px-2.5"
+                    onClick={handleCheckAndroidStatus}
+                    disabled={isCheckingAndroidStatus}
+                  >
+                    <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${isCheckingAndroidStatus ? "animate-spin" : ""}`} />
+                    Check Device
+                  </Button>
+                </div>
+
+                {androidSmsStatus?.message && (
+                  <p className={`text-[11px] leading-relaxed ${androidSmsStatus.online ? "text-muted-foreground" : "text-rose-600 dark:text-rose-400 font-medium"}`}>
+                    {androidSmsStatus.message}
+                  </p>
+                )}
+
+                {androidSmsStatus && !androidSmsStatus.online && (
+                  <div className="p-2.5 rounded-lg bg-amber-50 dark:bg-amber-950/20 border border-amber-200 text-[11px] text-amber-900 dark:text-amber-300 space-y-1">
+                    <p className="font-semibold flex items-center gap-1.5">
+                      <AlertCircle className="h-3.5 w-3.5 text-amber-600" />
+                      Android SMS Gateway Setup:
+                    </p>
+                    <ol className="list-decimal list-inside space-y-0.5 pl-1 text-[10.5px]">
+                      <li>Install <strong>SMS Gateway for Android</strong> from <a href="https://sms-gate.app" target="_blank" rel="noopener noreferrer" className="underline font-medium">sms-gate.app</a>.</li>
+                      <li>Open the app → tap <strong>Local Server</strong> → enable it.</li>
+                      <li>Note the IP address and port shown (e.g. <code>http://192.168.1.x:8080</code>).</li>
+                      <li>Ensure your VPS/device is on the same local network, or use a tunnel.</li>
+                    </ol>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {smsProvider !== "mock" && smsProvider !== "android_sms" && (
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label className="text-xs">Account SID / API Key</Label>

@@ -1,4 +1,4 @@
-import { approvalEligibility, developmentDaysSchema, isApprovedPlan } from "@shared/microplanPolicy";
+﻿import { approvalEligibility, developmentDaysSchema, isApprovedPlan } from "@shared/microplanPolicy";
 import { buildMicroplanPrintHtml } from "./routes/microplanPrint";
 import { safeErrorMessage } from "./errorUtils";
 import { DenominatorHarmonisationService } from "./services/denominatorHarmonisationService.js";
@@ -39,6 +39,7 @@ import {
 } from "./services/notificationService";
 import { sendSms, sendWhatsApp, sendEmail as sendMessagingEmail } from "./services/messaging";
 import { getWppconnectStatus, startWppconnectSession, closeWppconnectSession } from "./services/wppconnectService";
+import { getAndroidSmsStatus } from "./services/androidSmsService";
 import { dispatchNotification } from "./services/uce";
 import { surveillanceRouter } from "./routes/surveillance";
 import vgieRouter from "./routes/vgie";
@@ -13307,6 +13308,28 @@ export async function registerRoutes(
         res.json(result);
       } catch (err: any) {
         res.status(500).json({ success: false, message: err.message });
+      }
+    }
+  );
+
+  // ── Android SMS Gateway Management Endpoints ───────────────────────────────
+  app.get(
+    "/api/me/tenant/sms/android/status",
+    isAuthenticated,
+    requireTenant,
+    loadRole,
+    requireAdmin,
+    async (req: any, res) => {
+      try {
+        const tenant = await storage.getTenant(req.tenantId!);
+        const smsConfig = (tenant?.settings as any)?.communication?.sms || {};
+        const serverUrl = (req.query?.serverUrl as string)?.trim() || smsConfig.serverUrl;
+        const username  = (req.query?.username  as string)?.trim() || smsConfig.username || "user";
+        const password  = (req.query?.password  as string)?.trim() || smsConfig.password || "";
+        const status = await getAndroidSmsStatus({ serverUrl, username, password });
+        res.json(status);
+      } catch (err: any) {
+        res.json({ online: false, message: err.message });
       }
     }
   );

@@ -3,6 +3,7 @@ import { isRedisConfigured, redisConnection } from './uce/queue';
 import { db } from '../db';
 import { communicationLogs } from '../../shared/schema';
 import { sendWppconnectMessage } from './wppconnectService';
+import { sendAndroidSms } from './androidSmsService';
 
 /**
  * Modular Messaging Service
@@ -128,6 +129,13 @@ export async function sendSms(options: SendSmsOptions): Promise<{ success: boole
       const messageId = first.messageId || `at-${Date.now()}`;
       console.log(`[Africa's Talking] SMS sent to ${to}: messageId=${messageId}, status=${first.status}`);
       return { success: true, messageId };
+    }
+
+    if (provider === 'android_sms') {
+      const serverUrl = config?.serverUrl || config?.accountSid || process.env.ANDROID_SMS_GATEWAY_URL;
+      const username  = config?.username  || config?.authToken   || process.env.ANDROID_SMS_GATEWAY_USER || 'user';
+      const password  = config?.password  || config?.senderNumber || process.env.ANDROID_SMS_GATEWAY_PASS || '';
+      return await sendAndroidSms(to, message, { serverUrl, username, password });
     }
     
     return { success: false, error: "Unknown SMS provider" };
