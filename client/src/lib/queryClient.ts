@@ -1,4 +1,4 @@
-import { QueryClient, QueryFunction } from "@tanstack/react-query";
+﻿import { QueryClient, QueryFunction } from "@tanstack/react-query";
 import { offlineDb, enqueueOutbox } from "./offlineDb";
 import { loadActiveTenant, loadTenantsCache } from "./tenantCache";
 import {
@@ -799,7 +799,12 @@ export const getQueryFn: <T>(options: {
 }) => QueryFunction<T> =
   ({ on401: unauthorizedBehavior }) =>
   async ({ queryKey }) => {
-    const url = queryKey.join("/") as string;
+    // Only the first element of queryKey is the URL.
+    // Additional elements (e.g. tenantId, role discriminators) are cache-busting
+    // keys only and must NOT be appended to the URL path. Joining them produced
+    // invalid endpoints like /api/regions/<uuid> when the tenant UUID was a
+    // secondary cache key, causing a flood of 400 errors on every page load.
+    const url = (Array.isArray(queryKey) ? queryKey[0] : queryKey) as string;
     const isOffline = !navigator.onLine;
     const pathname = url.split("?")[0];
     const isAuthUserQuery = pathname === "/api/auth/user";

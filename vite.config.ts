@@ -75,7 +75,12 @@ export default defineConfig({
         ],
       },
       devOptions: {
-        enabled: true,
+        // Disable the Service Worker in dev mode.
+        // When enabled:true the SW intercepts every HMR update, API call,
+        // and asset request — adding a full round-trip through the worker
+        // on every request and making the dev server feel extremely slow.
+        // Production builds are unaffected; the SW is always injected there.
+        enabled: false,
         type: "classic",
       },
     }),

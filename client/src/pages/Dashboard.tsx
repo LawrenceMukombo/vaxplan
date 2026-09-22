@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState, useEffect, useMemo, useRef } from "react";
+﻿import { lazy, Suspense, useState, useEffect, useMemo, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { StatsCard } from "@/components/StatsCard";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -1241,10 +1241,16 @@ export default function Dashboard() {
     return "Officer";
   }, [user]);
 
-  // Dynamic live date & time updating every second
+  // Tick once per minute — greeting/date only change hourly, so a 1-second
+  // interval was causing 60 full Dashboard re-renders per minute.
   useEffect(() => {
-    const timer = setInterval(() => setLiveTime(new Date()), 1000);
-    return () => clearInterval(timer);
+    const msToNext = 60_000 - (Date.now() % 60_000);
+    const t = setTimeout(() => {
+      setLiveTime(new Date());
+      const iv = setInterval(() => setLiveTime(new Date()), 60_000);
+      return () => clearInterval(iv);
+    }, msToNext);
+    return () => clearTimeout(t);
   }, []);
 
   const greeting = useMemo(() => {
@@ -1266,7 +1272,6 @@ export default function Dashboard() {
       liveTime.toLocaleTimeString("en-US", {
         hour: "numeric",
         minute: "2-digit",
-        second: "2-digit",
       })
     );
   }, [liveTime]);
